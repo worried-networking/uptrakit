@@ -853,6 +853,39 @@ pub async fn merge_service(
     build_service_response(tenant_db, updated_target).await
 }
 
+/// Look up the `is_embedded` flag for two services in a single round-trip.
+///
+/// Returns `(target_is_embedded, source_is_embedded)`. Missing rows fall back
+/// to `false` (the merge query will then surface the canonical `NotFound` /
+/// `SourceNotFound` error during its own lookup).
+///
+/// # Errors
+///
+/// Returns an error if the database query fails.
+pub async fn is_embedded_pair(
+    tenant_db: &TenantDb,
+    target_id: Uuid,
+    source_id: Uuid,
+) -> Result<(bool, bool)> {
+    let rows = tenant_db
+        .find::<service::Entity>()
+        .filter(service::Column::Id.is_in([target_id, source_id]))
+        .all(tenant_db.db())
+        .await
+        .context_to()?;
+    let target = rows
+        .iter()
+        .find(|r| r.id == target_id)
+        .map(|r| r.is_embedded)
+        .unwrap_or(false);
+    let source = rows
+        .iter()
+        .find(|r| r.id == source_id)
+        .map(|r| r.is_embedded)
+        .unwrap_or(false);
+    Ok((target, source))
+}
+
 // ---------------------------------------------------------------------------
 // Batch operations
 // ---------------------------------------------------------------------------

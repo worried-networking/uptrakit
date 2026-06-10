@@ -2,7 +2,7 @@ use crate::AppState;
 use crate::actions::services as svc_actions;
 use crate::api_error::ApiError;
 use crate::auth::permissions::Permission;
-use crate::error_response::error_response;
+use crate::error_response::{error_response, error_response_with_code};
 use crate::middleware::permission::{
     CanApproveServices, CanRejectServices, CanRemoveServices, CanUpdateServices, CanViewServices,
 };
@@ -1118,6 +1118,52 @@ pub async fn merge_service(
         return Ok(error_response(
             StatusCode::BAD_REQUEST,
             "Cannot merge service into itself",
+        ));
+    }
+
+    // Defence-in-depth: short-circuit with a clear 400 + audit before any
+    // session/state interaction. The query layer also rejects this (see
+    // ServiceQueryError::{Target,Source}Embedded) but the route layer owns
+    // the audit emission for ValidationFailed outcomes.
+    let (target_embedded, source_embedded) =
+        match svc_queries::is_embedded_pair(&tenant_db, target_uuid, source_uuid).await {
+            Ok(pair) => pair,
+            Err(err) => return Err(ApiError::from(err)),
+        };
+    if target_embedded {
+        emit_service_lifecycle_audit(
+            &audit_ctx,
+            uptrakit_audit_log::AuditActionType::SERVICE_MERGE,
+            target_uuid,
+            None,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            serde_json::json!({
+                "source_service_id": source_uuid,
+                "reason_code": "service.embedded_target",
+            }),
+        );
+        return Ok(error_response_with_code(
+            StatusCode::BAD_REQUEST,
+            "Cannot merge into an embedded service.",
+            "service.embedded_target",
+        ));
+    }
+    if source_embedded {
+        emit_service_lifecycle_audit(
+            &audit_ctx,
+            uptrakit_audit_log::AuditActionType::SERVICE_MERGE,
+            target_uuid,
+            None,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            serde_json::json!({
+                "source_service_id": source_uuid,
+                "reason_code": "service.embedded_source",
+            }),
+        );
+        return Ok(error_response_with_code(
+            StatusCode::BAD_REQUEST,
+            "Cannot merge from an embedded service.",
+            "service.embedded_source",
         ));
     }
 
@@ -2441,5 +2487,235 @@ mod tests {
             serde_json::json!("insufficient_permissions")
         );
         assert_eq!(details["batch"], serde_json::json!(true));
+    }
+
+    /// Seed a single embedded service for merge-guard tests.
+    async fn insert_service_embedded(
+        db: &DatabaseConnection,
+        tenant_id: uuid::Uuid,
+        service_id: uuid::Uuid,
+        status: uptrakit_shared_db::entity::service::ServiceStatus,
+    ) {
+        use uptrakit_wire::Capability;
+        use uptrakit_wire::service_profile::serialize_capabilities;
+        let now = OffsetDateTime::now_utc();
+        let caps = serialize_capabilities(&[Capability::SoftwareDiscovery].into_iter().collect());
+        uptrakit_shared_db::entity::service::ActiveModel {
+            id: Set(service_id),
+            tenant_id: Set(tenant_id),
+            capabilities: Set(caps),
+            hostname: Set(format!("embedded-svc-{service_id}")),
+            friendly_name: Set(format!("Embedded Service {service_id}")),
+            ip_address: Set(None),
+            status: Set(status),
+            enrollment_secret_hash: Set(format!("secret-{service_id}")),
+            client_version: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
+            enrollment_token_id: Set(None),
+            cert_lifetime_hours: Set(None),
+            service_app_name: Set(None),
+            is_embedded: Set(true),
+            embedded_owner_key: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert embedded service");
+    }
+
+    /// Merge into an embedded target must be rejected with 400 and a ValidationFailed audit.
+    #[tokio::test]
+    async fn merge_service_returns_400_when_target_embedded() {
+        let db = setup_test_db().await;
+        let tenant_id = uuid::Uuid::now_v7();
+        insert_tenant(&db, tenant_id).await;
+        let state = test_state(db.clone(), tenant_id).await;
+
+        let target_id = uuid::Uuid::now_v7();
+        let source_id = uuid::Uuid::now_v7();
+        insert_service_embedded(
+            &db,
+            tenant_id,
+            target_id,
+            uptrakit_shared_db::entity::service::ServiceStatus::Approved,
+        )
+        .await;
+        let (_source, _) = insert_target_and_source(&db, tenant_id).await;
+        // Re-use the approved non-embedded service from insert_target_and_source as source,
+        // but we need an independent source — insert one separately.
+        use uptrakit_wire::Capability;
+        use uptrakit_wire::service_profile::serialize_capabilities;
+        let now = OffsetDateTime::now_utc();
+        let caps = serialize_capabilities(&[Capability::SoftwareDiscovery].into_iter().collect());
+        uptrakit_shared_db::entity::service::ActiveModel {
+            id: Set(source_id),
+            tenant_id: Set(tenant_id),
+            capabilities: Set(caps),
+            hostname: Set(format!("svc-{source_id}")),
+            friendly_name: Set(format!("Service {source_id}")),
+            ip_address: Set(None),
+            status: Set(uptrakit_shared_db::entity::service::ServiceStatus::Pending),
+            enrollment_secret_hash: Set(format!("secret-{source_id}")),
+            client_version: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
+            enrollment_token_id: Set(None),
+            cert_lifetime_hours: Set(None),
+            service_app_name: Set(None),
+            is_embedded: Set(false),
+            embedded_owner_key: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert source service");
+
+        let auth_user = AuthenticatedUser::new(
+            uuid::Uuid::now_v7(),
+            AuthMethod::Password,
+            vec![Permission::UpdateServices],
+            None,
+        );
+        let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
+
+        let response = merge_service(
+            State(Arc::clone(&state)),
+            tenant_db,
+            CanUpdateServices::new(auth_user),
+            None,
+            Path(target_id),
+            Json(MergeAgentRequest { source_id }),
+        )
+        .await;
+
+        let response = match response {
+            Ok(r) => r.into_response(),
+            Err(e) => panic!("expected Ok but got Err: {}", e.into_response().status()),
+        };
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["code"].as_str(), Some("service.embedded_target"));
+
+        let row = latest_tenant_audit_row(&db).await;
+        assert_eq!(
+            uptrakit_audit_log::AuditActionType::SERVICE_MERGE,
+            row.action_type
+        );
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed.as_str()
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("service.embedded_target")
+        );
+        assert_eq!(details["source_service_id"], serde_json::json!(source_id));
+    }
+
+    /// Merge from an embedded source must be rejected with 400 and a ValidationFailed audit.
+    #[tokio::test]
+    async fn merge_service_returns_400_when_source_embedded() {
+        let db = setup_test_db().await;
+        let tenant_id = uuid::Uuid::now_v7();
+        insert_tenant(&db, tenant_id).await;
+        let state = test_state(db.clone(), tenant_id).await;
+
+        let target_id = uuid::Uuid::now_v7();
+        let source_id = uuid::Uuid::now_v7();
+
+        use uptrakit_wire::Capability;
+        use uptrakit_wire::service_profile::serialize_capabilities;
+        let now = OffsetDateTime::now_utc();
+        let caps = serialize_capabilities(&[Capability::SoftwareDiscovery].into_iter().collect());
+        // Insert a normal (non-embedded) approved target.
+        uptrakit_shared_db::entity::service::ActiveModel {
+            id: Set(target_id),
+            tenant_id: Set(tenant_id),
+            capabilities: Set(caps.clone()),
+            hostname: Set(format!("svc-{target_id}")),
+            friendly_name: Set(format!("Service {target_id}")),
+            ip_address: Set(None),
+            status: Set(uptrakit_shared_db::entity::service::ServiceStatus::Approved),
+            enrollment_secret_hash: Set(format!("secret-{target_id}")),
+            client_version: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
+            enrollment_token_id: Set(None),
+            cert_lifetime_hours: Set(None),
+            service_app_name: Set(None),
+            is_embedded: Set(false),
+            embedded_owner_key: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert target service");
+
+        // Insert an embedded source.
+        insert_service_embedded(
+            &db,
+            tenant_id,
+            source_id,
+            uptrakit_shared_db::entity::service::ServiceStatus::Pending,
+        )
+        .await;
+
+        let auth_user = AuthenticatedUser::new(
+            uuid::Uuid::now_v7(),
+            AuthMethod::Password,
+            vec![Permission::UpdateServices],
+            None,
+        );
+        let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
+
+        let response = merge_service(
+            State(Arc::clone(&state)),
+            tenant_db,
+            CanUpdateServices::new(auth_user),
+            None,
+            Path(target_id),
+            Json(MergeAgentRequest { source_id }),
+        )
+        .await;
+
+        let response = match response {
+            Ok(r) => r.into_response(),
+            Err(e) => panic!("expected Ok but got Err: {}", e.into_response().status()),
+        };
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["code"].as_str(), Some("service.embedded_source"));
+
+        let row = latest_tenant_audit_row(&db).await;
+        assert_eq!(
+            uptrakit_audit_log::AuditActionType::SERVICE_MERGE,
+            row.action_type
+        );
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed.as_str()
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("service.embedded_source")
+        );
+        assert_eq!(details["source_service_id"], serde_json::json!(source_id));
     }
 }
