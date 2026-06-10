@@ -14,4 +14,5 @@ mod system {
     mod full_system;
     mod mqtt_enrollment;
     mod scheduler_enrollment;
+    mod service_merge_rekey;
 }
