@@ -287,6 +287,52 @@ impl ServiceContainer {
         }
     }
 
+    /// Start an agent-ssh container **without** an enrollment token.
+    ///
+    /// The service enrolls but stays in `Pending` status — the controller has
+    /// no matching token to auto-approve it.  The container waits for the
+    /// "waiting for approval..." log line emitted by the service SDK, which
+    /// confirms that the enrollment request reached the controller and the
+    /// service is now visible in the services list with `Pending` status.
+    pub(crate) async fn start_agent_ssh_pending(network: &str, controller_name: &str) -> Self {
+        let container = GenericImage::new(TEST_IMAGE, TEST_IMAGE_TAG)
+            .with_wait_for(WaitFor::Log(
+                LogWaitStrategy::stdout_or_stderr("waiting for approval...").with_times(1),
+            ))
+            .with_cmd(vec![
+                "uptrakit-agent-ssh".to_string(),
+                "--url".to_string(),
+                format!("https://{controller_name}:{CONTROLLER_PORT}"),
+                "--tofu-insecure".to_string(),
+                "--allow-plaintext-secrets".to_string(),
+            ])
+            .with_network(network)
+            .start()
+            .await
+            .expect("start uptrakit-agent-ssh (pending) container");
+
+        Self {
+            _container: container,
+        }
+    }
+
+    /// Stop the container (SIGKILL) and then start it again.
+    ///
+    /// The container filesystem is preserved across stop/start, so any state
+    /// written during the first run (e.g. `service.json` for agent-ssh) persists
+    /// into the restarted process. Used by the merge re-key test to simulate an
+    /// agent restart after a merge redirect has been written.
+    pub(crate) async fn restart(&self) {
+        self._container
+            .stop_with_timeout(Some(0))
+            .await
+            .expect("stop container for restart");
+        self._container
+            .start()
+            .await
+            .expect("restart container after stop");
+    }
+
     /// Start a service container with the standard flags.
     ///
     /// All services (agent, scheduler, mqtt) use the same CLI pattern:

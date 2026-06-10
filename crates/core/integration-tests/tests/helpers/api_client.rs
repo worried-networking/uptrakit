@@ -11,12 +11,16 @@ use std::time::Duration;
 
 use uptrakit_openapi_client::UptrakitClient;
 use uptrakit_openapi_client::types::SecretString;
+use uptrakit_openapi_client::types::audit_logs::{AuditLogListParams, AuditLogResponse};
 use uptrakit_openapi_client::types::auth::{LoginRequest, RegisterRequest};
 use uptrakit_openapi_client::types::pagination::PaginatedResponse;
-use uptrakit_openapi_client::types::services::{ListServicesQuery, ServiceResponse};
+use uptrakit_openapi_client::types::services::{
+    ListServicesQuery, MergeAgentRequest, ServiceResponse,
+};
 use uptrakit_openapi_client::types::system_services::{
     ListSystemServicesQuery, SystemServiceResponse,
 };
+use uuid::Uuid;
 
 /// A thin wrapper around [`UptrakitClient`] with polling helpers for
 /// system integration tests.
@@ -433,6 +437,51 @@ impl ApiClient {
             "update_oauth_settings: expected 2xx, got {}",
             put_resp.status()
         );
+    }
+
+    /// Merge a pending source service into an approved target service.
+    ///
+    /// Wraps `POST /api/v1/services/{target_id}/merge`.
+    /// Panics if the request fails or the server returns a non-success status.
+    pub(crate) async fn merge_service(&self, target_id: Uuid, source_id: Uuid) -> ServiceResponse {
+        let req = MergeAgentRequest { source_id };
+        self.authenticated()
+            .merge_service(&target_id, &req)
+            .await
+            .expect("merge_service request")
+    }
+
+    /// Poll `GET /api/v1/audit-logs` until an entry with the given `action_type`
+    /// appears, or until `timeout` elapses.
+    ///
+    /// Returns the first matching [`AuditLogResponse`] once found.
+    /// Panics if no matching entry is found within the timeout.
+    pub(crate) async fn wait_for_audit_log_entry(
+        &self,
+        action_type: &str,
+        timeout: Duration,
+    ) -> AuditLogResponse {
+        let deadline = tokio::time::Instant::now() + timeout;
+
+        loop {
+            let mut params = AuditLogListParams::default();
+            params.action_type = Some(action_type.to_string());
+            params.per_page = Some(10);
+            if let Ok(resp) = self.authenticated().list_audit_logs(&params).await {
+                if let Some(entry) = resp.items.into_iter().next() {
+                    return entry;
+                }
+            }
+
+            if tokio::time::Instant::now() >= deadline {
+                panic!(
+                    "no audit log entry with action_type '{}' found within {}s",
+                    action_type,
+                    timeout.as_secs()
+                );
+            }
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
     }
 
     /// POST /oauth/test/auto-approve/{request_id}
