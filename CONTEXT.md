@@ -118,6 +118,12 @@ of the form `spiffe://<trust_domain>/service/<service_id>`. Replaces CN-only ide
 the natural cert renewal cycle.
 _Avoid_: service URI, workload ID (SPIFFE has a precise term).
 
+**Service Merge Redirect**:
+A persisted mapping from a deactivated Service UUID to the merge-target Service UUID, written
+by `merge_service` so that an Agent which enrolled against the deactivated row can reconnect,
+be re-keyed onto the target identity, and have its `service.json` rewritten without operator
+intervention.
+
 **Surface**:
 A named UI extension point in the Dashboard, declared at a specific Slot, that built-ins,
 Plugins, or Services can register content and interactions into.
