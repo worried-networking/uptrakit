@@ -414,6 +414,7 @@ service_ws = "full-state"
 lookup_by_secret = "ignore"
 handle_connection = "ignore"
 resolve_bearer_auth_target = "ignore"
+emit_rekey_resolved_audit = "ignore"
 emit_bearer_service_auth_failure_audit = "ignore"
 
 [routes."service_ws/protocol.rs"]
