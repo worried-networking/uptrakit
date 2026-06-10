@@ -12,7 +12,8 @@
 		mergeService,
 		updateService,
 		batchServices,
-		executeBatchChunked
+		executeBatchChunked,
+		ApiError
 	} from '$lib/api';
 	import type { ServiceResponse, BatchActionResponse } from '$lib/types';
 	import { Permission, hasAnyPermission } from '$lib/types';
@@ -121,7 +122,11 @@
 	const mergeTargetOptions = $derived(
 		services
 			.filter(
-				(s) => s.status === 'approved' && s.capabilities.includes('software_discovery') && s.id !== mergeSource?.id
+				(s) =>
+					s.status === 'approved' &&
+					s.capabilities.includes('software_discovery') &&
+					!s.is_embedded &&
+					s.id !== mergeSource?.id
 			)
 			.map((t) => ({
 				value: t.id,
@@ -244,7 +249,8 @@
 			const p = nextValidPage(currentPage, totalPages);
 			if (p !== null) await loadServices(p);
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to merge service';
+			const apiCode = e instanceof ApiError ? (e.errorCode ?? undefined) : undefined;
+			error = describeMergeError(apiCode) ?? (e instanceof Error ? e.message : 'Failed to merge service');
 		} finally {
 			submitting = false;
 		}
@@ -397,6 +403,19 @@
 	function handleWindowClick(event: MouseEvent) {
 		if (openMenuId && !(event.target as HTMLElement).closest('.actions-menu, [data-ui="context-menu-shell"]')) {
 			closeMenu();
+		}
+	}
+
+	function describeMergeError(code: string | undefined): string | undefined {
+		switch (code) {
+			case 'service.embedded_target':
+				return 'Cannot merge into an embedded service.';
+			case 'service.embedded_source':
+				return 'Cannot merge from an embedded service.';
+			case 'service.merge_invariant':
+				return 'Service merge state is inconsistent. Contact an administrator.';
+			default:
+				return undefined;
 		}
 	}
 
@@ -625,9 +644,11 @@
 		{#if service}
 			<ContextMenuShell anchorRect={menuAnchor} onclose={closeMenu}>
 				{#if service.status === 'pending'}
-					<li>
-						<ContextMenuItem label="Merge Into..." onclick={() => openMergeDialog(service)} />
-					</li>
+					{#if !service.is_embedded}
+						<li>
+							<ContextMenuItem label="Merge Into..." onclick={() => openMergeDialog(service)} />
+						</li>
+					{/if}
 					<li>
 						<ContextMenuItem
 							label="Approve"
