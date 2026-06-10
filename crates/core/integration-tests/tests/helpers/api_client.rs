@@ -467,10 +467,10 @@ impl ApiClient {
             let mut params = AuditLogListParams::default();
             params.action_type = Some(action_type.to_string());
             params.per_page = Some(10);
-            if let Ok(resp) = self.authenticated().list_audit_logs(&params).await {
-                if let Some(entry) = resp.items.into_iter().next() {
-                    return entry;
-                }
+            if let Ok(resp) = self.authenticated().list_audit_logs(&params).await
+                && let Some(entry) = resp.items.into_iter().next()
+            {
+                return entry;
             }
 
             if tokio::time::Instant::now() >= deadline {

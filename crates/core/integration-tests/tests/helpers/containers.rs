@@ -228,7 +228,7 @@ level = "info"{tls_section}
 /// A running service container (agent, scheduler, mqtt, or agent-ssh).
 pub(crate) struct ServiceContainer {
     /// The underlying testcontainers handle. Dropping this stops the container.
-    _container: testcontainers::ContainerAsync<GenericImage>,
+    container: testcontainers::ContainerAsync<GenericImage>,
 }
 
 impl ServiceContainer {
@@ -282,9 +282,7 @@ impl ServiceContainer {
             .await
             .expect("start uptrakit-agent-ssh container");
 
-        Self {
-            _container: container,
-        }
+        Self { container }
     }
 
     /// Start an agent-ssh container **without** an enrollment token.
@@ -311,9 +309,7 @@ impl ServiceContainer {
             .await
             .expect("start uptrakit-agent-ssh (pending) container");
 
-        Self {
-            _container: container,
-        }
+        Self { container }
     }
 
     /// Stop the container (SIGKILL) and then start it again.
@@ -323,11 +319,11 @@ impl ServiceContainer {
     /// into the restarted process. Used by the merge re-key test to simulate an
     /// agent restart after a merge redirect has been written.
     pub(crate) async fn restart(&self) {
-        self._container
+        self.container
             .stop_with_timeout(Some(0))
             .await
             .expect("stop container for restart");
-        self._container
+        self.container
             .start()
             .await
             .expect("restart container after stop");
@@ -364,9 +360,7 @@ impl ServiceContainer {
             .await
             .unwrap_or_else(|e| panic!("start {binary} container: {e}"));
 
-        Self {
-            _container: container,
-        }
+        Self { container }
     }
 }
 
