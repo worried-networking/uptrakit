@@ -541,7 +541,12 @@ async fn run_with_retry<'a, T>(
             Err(e) => {
                 let retryable = e.current_context().is_retryable() && attempt < max_retries;
                 if retryable {
-                    let delay = backoff.next_delay();
+                    let guard = backoff.attempt();
+                    let delay = guard.sample_delay();
+                    // escalate chosen: PluginError trait surface carries no
+                    // partial-progress signal; treat every retryable error as
+                    // an unhealthy cycle.
+                    guard.escalate();
                     tracing::debug!(
                         attempt = attempt + 1,
                         max_retries,

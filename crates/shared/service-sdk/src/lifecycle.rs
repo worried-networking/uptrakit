@@ -351,8 +351,39 @@ pub async fn run_service_lifecycle<H: ServiceHandler>(
                     tracing::info!(error = %e, "enrollment cancelled by signal");
                     return Ok(());
                 }
-                if is_receive_closed_report(&e) || is_transient_network_report(&e) {
-                    let delay = enrollment_backoff.next_delay();
+                if is_receive_closed_report(&e) {
+                    // Bug fix: post-WS-upgrade close → backoff cycle was healthy.
+                    // The WS upgrade succeeded and the controller closed the connection
+                    // (e.g. superseded by a new connection). Reset to base so the next
+                    // reconnect starts fresh, not inheriting a prior failure streak.
+                    let guard = enrollment_backoff.attempt();
+                    let delay = guard.sample_delay();
+                    // reset chosen: post-upgrade close signals a healthy cycle; the WS
+                    // connection was established before the server-initiated close.
+                    guard.reset();
+                    tracing::info!(
+                        error = %e,
+                        "post-upgrade enrollment close, reconnecting in {delay:?}"
+                    );
+                    // Interruptible sleep: a SIGTERM/SIGINT during enrollment
+                    // backoff exits cleanly instead of waiting up to 60 s.
+                    tokio::select! {
+                        () = tokio::time::sleep(delay) => {}
+                        signal = signals.recv() => {
+                            tracing::info!(%signal, "received signal during enrollment, exiting");
+                            return Ok(());
+                        }
+                    }
+                    // Reload identity in case enrollment partially completed.
+                    identity.load().await?;
+                    continue;
+                }
+                if is_transient_network_report(&e) {
+                    let guard = enrollment_backoff.attempt();
+                    let delay = guard.sample_delay();
+                    // escalate chosen: pre-upgrade transient failure (TCP refused, DNS
+                    // error, etc.); no meaningful milestone was reached this cycle.
+                    guard.escalate();
                     tracing::info!(
                         error = %e,
                         "transient enrollment error, reconnecting in {delay:?}"
@@ -566,15 +597,43 @@ async fn run_authenticated_with_reconnect(
                 // period.  Reset backoff so the next reconnect starts from
                 // the base delay instead of continuing to grow from a
                 // previous failure streak.
-                reconnect_backoff.reset();
+                // reset chosen: event loop ran successfully (Ok path).
+                reconnect_backoff.attempt().reset();
                 outcome
             }
             Err(e) => match e.current_context() {
+                // Post-WS-upgrade server-initiated close: the connection was
+                // established and healthy; treat as a healthy cycle (reset).
+                LoopError::ReceiveClosed => {
+                    let guard = reconnect_backoff.attempt();
+                    let delay = guard.sample_delay();
+                    // reset chosen: ReceiveClosed after a running event loop indicates
+                    // the connection was healthy; resetting avoids inflated delays.
+                    guard.reset();
+                    tracing::warn!(
+                        error = %e,
+                        "connection closed by server, reconnecting in {delay:?}"
+                    );
+                    // Interruptible sleep: a SIGTERM/SIGINT during the reconnect
+                    // backoff exits cleanly instead of waiting up to 60 s.
+                    tokio::select! {
+                        () = tokio::time::sleep(delay) => {}
+                        signal = signals.recv() => {
+                            tracing::info!(%signal, "received signal during reconnect delay, exiting");
+                            return Ok(());
+                        }
+                    }
+                    continue;
+                }
                 // Transient network errors (broken pipe, connection reset, DNS
                 // failure, send timeout, etc.) are recoverable — reconnect with
                 // exponential backoff instead of crashing the service.
-                LoopError::TransientNetwork(_) | LoopError::ReceiveClosed => {
-                    let delay = reconnect_backoff.next_delay();
+                LoopError::TransientNetwork(_) => {
+                    let guard = reconnect_backoff.attempt();
+                    let delay = guard.sample_delay();
+                    // escalate chosen: TransientNetwork indicates a pre-connection
+                    // or mid-connection failure with no meaningful milestone reached.
+                    guard.escalate();
                     tracing::warn!(
                         error = %e,
                         "connection lost, reconnecting in {delay:?}"
@@ -623,7 +682,10 @@ async fn run_authenticated_with_reconnect(
                 continue;
             }
             LoopOutcome::Disconnected => {
-                let delay = reconnect_backoff.next_delay();
+                // The Ok(outcome) arm already resolved its guard via reset(),
+                // so current == base. Use sample_base_jitter() to get a
+                // base+jitter delay without spinning a fake attempt() cycle.
+                let delay = reconnect_backoff.sample_base_jitter();
                 tracing::warn!("disconnected by controller, reconnecting in {delay:?}");
                 // Interruptible sleep: a SIGTERM/SIGINT during the reconnect
                 // backoff exits cleanly instead of waiting up to 60 s.
@@ -740,6 +802,113 @@ mod tests {
         let (reason, outcome) = default_resolve_shutdown(ShutdownCause::EmbeddedDrain);
         assert_eq!(reason, DisconnectReason::Shutdown);
         assert_eq!(outcome, LoopOutcome::Shutdown);
+    }
+
+    // ── Enrollment backoff verb-classification regression tests ──────────────
+    //
+    // These tests lock in the `is_receive_closed_report → reset` and
+    // `is_transient_network_report → escalate` verb choice made in the
+    // enrollment loop. They use the predicates directly rather than driving
+    // the full async loop, since the loop is hard to mock without a real WS
+    // server.
+
+    /// Regression: `ReceiveClosed` error must satisfy `is_receive_closed_report`
+    /// so the enrollment loop calls `reset()` (not `escalate()`).
+    ///
+    /// Before the fix, the collapsed `is_receive_closed || is_transient_network`
+    /// arm always called `next_delay()` (which internally advanced state), so a
+    /// post-WS-upgrade close would keep the 60-second cap from a prior failure
+    /// streak.
+    #[test]
+    fn enrollment_receive_closed_maps_to_reset_verb() {
+        let err = EnrollmentError::Protocol(ProtocolError::ReceiveClosed);
+        let report: Report<EnrollmentError> = report!(err);
+
+        // Predicate routing: is_receive_closed_report is true, transient is false.
+        assert!(
+            is_receive_closed_report(&report),
+            "ReceiveClosed must satisfy is_receive_closed_report"
+        );
+        assert!(
+            !is_transient_network_report(&report),
+            "ReceiveClosed must NOT satisfy is_transient_network_report"
+        );
+
+        // Exercise the verb: reset() must return backoff to base.
+        let mut backoff = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
+        // Simulate a prior failure streak at cap.
+        for _ in 0..10 {
+            backoff.attempt().escalate();
+        }
+        // sample_base_jitter() returns base+jitter regardless of current, so
+        // before reset it should still return base-range values (reads base, not current).
+        let base_sample = backoff.sample_base_jitter();
+        assert!(
+            base_sample >= Duration::from_secs(2) && base_sample <= Duration::from_millis(2500),
+            "sample_base_jitter should always reflect base (2s), got {base_sample:?}"
+        );
+
+        // Apply the enrollment loop's ReceiveClosed arm — reset.
+        let guard = backoff.attempt();
+        let delay = guard.sample_delay();
+        // sample_delay reflects current (60s) at call time — expected before reset.
+        assert!(
+            delay >= Duration::from_secs(60),
+            "sample_delay before reset should reflect current (cap 60s), got {delay:?}"
+        );
+        guard.reset();
+
+        // After reset, the NEXT attempt must sample from base range (the bug fix).
+        let guard2 = backoff.attempt();
+        let next_delay = guard2.sample_delay();
+        guard2.reset();
+        assert!(
+            next_delay >= Duration::from_secs(2),
+            "next attempt delay {next_delay:?} < base after reset"
+        );
+        assert!(
+            next_delay <= Duration::from_millis(2500),
+            "next attempt delay {next_delay:?} > base+jitter after reset"
+        );
+    }
+
+    /// `is_transient_network_report` matches transport errors and routes them
+    /// to `escalate()`. The backoff must grow, not reset.
+    #[test]
+    fn enrollment_transient_network_maps_to_escalate_verb() {
+        // A WebSocket connection refused is the canonical transient error.
+        let io_err = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "refused");
+        let err = EnrollmentError::WebSocket(tokio_tungstenite::tungstenite::Error::Io(io_err));
+        let report: Report<EnrollmentError> = report!(err);
+
+        assert!(
+            !is_receive_closed_report(&report),
+            "ConnectionRefused must NOT satisfy is_receive_closed_report"
+        );
+        assert!(
+            is_transient_network_report(&report),
+            "ConnectionRefused must satisfy is_transient_network_report"
+        );
+
+        // Exercise the verb: escalate() must move current away from base.
+        let mut backoff = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
+        // Before escalation: sample_base_jitter reflects base (2s).
+        let before_sample = backoff.sample_base_jitter();
+        assert!(
+            before_sample >= Duration::from_secs(2),
+            "base sample before escalate: {before_sample:?}"
+        );
+        let guard = backoff.attempt();
+        let _delay = guard.sample_delay();
+        guard.escalate();
+        // After escalation, sample_delay must reflect new (doubled) current.
+        let after_guard = backoff.attempt();
+        let after_delay = after_guard.sample_delay();
+        after_guard.escalate();
+        assert!(
+            after_delay >= Duration::from_secs(4),
+            "after escalate delay {after_delay:?} should be >= 4s (doubled from 2s)"
+        );
     }
 
     #[test]
