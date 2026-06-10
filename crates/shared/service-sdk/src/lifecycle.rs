@@ -330,9 +330,27 @@ pub async fn run_service_lifecycle<H: ServiceHandler>(
     // Enrollment with backoff loop.
     let mut enrollment_backoff = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
     loop {
-        match do_enrollment(args, &host, port, &mut identity, &tls_connector, handler).await {
+        match do_enrollment(
+            args,
+            &host,
+            port,
+            &mut identity,
+            &tls_connector,
+            handler,
+            &mut signals,
+        )
+        .await
+        {
             Ok(()) => break,
             Err(e) => {
+                // Cancellation short-circuit: a signal-driven enrollment exit
+                // is neither transient nor fatal. Return Ok(()) so the
+                // process terminates cleanly, mirroring the backoff-sleep
+                // signal arm below.
+                if is_cancelled_report(&e) {
+                    tracing::info!(error = %e, "enrollment cancelled by signal");
+                    return Ok(());
+                }
                 if is_receive_closed_report(&e) || is_transient_network_report(&e) {
                     let delay = enrollment_backoff.next_delay();
                     tracing::info!(
@@ -369,11 +387,12 @@ async fn do_enrollment<H: ServiceHandler>(
     identity: &mut ServiceIdentityState,
     tls_connector: &tokio_rustls::TlsConnector,
     handler: &mut H,
+    signals: &mut SignalWatcher,
 ) -> Result<()> {
     if identity.is_enrolled_only() {
         // Resume: reconnect with Bearer header (existing service.json).
         tracing::info!("reconnecting with enrollment secret");
-        crate::ws::resume_enrollment(identity, host, port, tls_connector).await?;
+        crate::ws::resume_enrollment(identity, host, port, tls_connector, signals).await?;
     } else {
         // Fresh enrollment.
         let hostname = args.hostname();
@@ -390,6 +409,7 @@ async fn do_enrollment<H: ServiceHandler>(
             enrollment_token: args.enrollment_token.as_deref(),
             capabilities: handler.capabilities(),
             service_app_name: H::SERVICE_APP_NAME,
+            signals,
         })
         .await?;
     }
@@ -632,6 +652,11 @@ fn is_cert_expired_report(report: &Report<EnrollmentError>) -> bool {
 /// Check if a `Report<EnrollmentError>` represents a receive-closed condition.
 fn is_receive_closed_report(report: &Report<EnrollmentError>) -> bool {
     report.current_context().is_receive_closed()
+}
+
+/// Check if a `Report<EnrollmentError>` represents a signal-driven cancellation.
+fn is_cancelled_report(report: &Report<EnrollmentError>) -> bool {
+    matches!(report.current_context(), EnrollmentError::Cancelled(_))
 }
 
 /// Check if a `Report<EnrollmentError>` represents a transient network error

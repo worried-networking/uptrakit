@@ -74,6 +74,7 @@ pub enum CaError {
 // ── Top-level error ───────────────────────────────────────────────────
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum EnrollmentError {
     #[error(transparent)]
     Tls(TlsError),
@@ -93,6 +94,8 @@ pub enum EnrollmentError {
     HttpUri(http::uri::InvalidUri),
     #[error("directory operation failed")]
     Directory(crate::dirs::DirectoryError),
+    #[error("enrollment cancelled by {0}")]
+    Cancelled(crate::signal::Signal),
 }
 
 pub type Result<T> = std::result::Result<T, Report<EnrollmentError>>;
@@ -414,5 +417,28 @@ mod tests {
         let io_err = std::io::Error::other(rustls_err);
         let err = EnrollmentError::Io(io_err);
         assert!(!err.is_transient_network());
+    }
+
+    #[test]
+    fn cancelled_is_not_transient_or_receive_closed() {
+        for signal in [
+            crate::signal::Signal::Interrupt,
+            crate::signal::Signal::Terminate,
+            crate::signal::Signal::Hangup,
+        ] {
+            let err = EnrollmentError::Cancelled(signal);
+            assert!(
+                !err.is_transient_network(),
+                "Cancelled({signal}) classified as transient"
+            );
+            assert!(
+                !err.is_receive_closed(),
+                "Cancelled({signal}) classified as receive_closed"
+            );
+            assert!(
+                !err.is_cert_expired(),
+                "Cancelled({signal}) classified as cert_expired"
+            );
+        }
     }
 }
