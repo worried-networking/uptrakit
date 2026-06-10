@@ -74,10 +74,6 @@ name = "uptrakit-audit-log-derive"
 release = false
 
 [[package]]
-name = "uptrakit-backoff"
-release = false
-
-[[package]]
 name = "uptrakit-command"
 release = false
 
@@ -189,6 +185,11 @@ publish = true
 
 [[package]]
 name = "uptrakit-build-info"
+git_release_enable = false
+publish = true
+
+[[package]]
+name = "uptrakit-backoff"
 git_release_enable = false
 publish = true
 
@@ -664,4 +665,5 @@ changelog_include = [
   "uptrakit-wire",
   "uptrakit-shared-types",
   "uptrakit-surfaces",
+  "uptrakit-backoff",
 ]
