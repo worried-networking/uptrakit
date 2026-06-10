@@ -1,25 +1,21 @@
 # Coding Standards
 
-For maintainability-focused Rust conventions beyond the hard rules in this file, see
-[Rust Idioms](rust-idioms.md).
+For maintainability-focused Rust conventions beyond the hard rules in this file, see [Rust Idioms](rust-idioms.md).
 
 ## Error Handling
 
-For comprehensive error handling patterns, conventions, and the full decision guide, see
-[Error Handling](error-handling.md). Key points:
+For comprehensive error handling patterns, conventions, and the full decision guide, see [Error Handling](error-handling.md). Key points:
 
 - Wrap errors in `rootcause::Report` and define a `Result<T>` alias per boundary.
 - Use `thiserror::Error` with `#[derive(Debug, Error)]` to describe failures.
 - Implement `ReportConversion` (via `impl_report_conversion!`) for all downstream errors and prefer `.context_to()?` to preserve the chain.
-- Use `report!(MyError::Variant(…))` for creating new error reports. Never call
-  `rootcause::Report::new(…)` directly — the macro additionally captures source location.
+- Use `report!(MyError::Variant(…))` for creating new error reports. Never call `rootcause::Report::new(…)` directly — the macro additionally captures
+  source location.
 - Use `bail!(MyError::Variant(…))` for early returns.
-- Avoid `Result<T, String>`; prefer typed enums. **Exception:** in `web-api` route
-  handlers and their private validation helpers, `Result<T, String>` is acceptable
-  when the string is a user-facing error message that the caller maps to an HTTP
-  error response (e.g., via `error_response(StatusCode::BAD_REQUEST, msg)`). This
-  avoids `clippy::result_large_err` from returning `Response` directly and keeps
-  validation helpers decoupled from HTTP types.
+- Avoid `Result<T, String>`; prefer typed enums. **Exception:** in `web-api` route handlers and their private validation helpers, `Result<T, String>`
+  is acceptable when the string is a user-facing error message that the caller maps to an HTTP error response (e.g., via
+  `error_response(StatusCode::BAD_REQUEST, msg)`). This avoids `clippy::result_large_err` from returning `Response` directly and keeps validation
+  helpers decoupled from HTTP types.
 - Logging should never expose secrets (tokens, passwords, keys).
 
 ## Panic Policy
@@ -43,12 +39,11 @@ https_addr: "[::]:8443".parse().unwrap(),
 
 ## Lint Suppression
 
-Lint suppression is a last resort. Fix the code first; suppress only when the lint is a false
-positive or the fix would genuinely worsen readability or correctness.
+Lint suppression is a last resort. Fix the code first; suppress only when the lint is a false positive or the fix would genuinely worsen readability
+or correctness.
 
-Use `#[expect(lint_name, reason = "...")]`, never `#[allow(lint_name)]`. The `reason` field is
-mandatory (`allow_attributes_without_reason = "deny"`). When the lint stops firing at a site,
-the `#[expect]` becomes a compile error via `unfulfilled_lint_expectations` (promoted to error by
+Use `#[expect(lint_name, reason = "...")]`, never `#[allow(lint_name)]`. The `reason` field is mandatory (`allow_attributes_without_reason = "deny"`).
+When the lint stops firing at a site, the `#[expect]` becomes a compile error via `unfulfilled_lint_expectations` (promoted to error by
 `warnings = "deny"`), so stale suppressions are caught automatically.
 
 ```rust
@@ -68,8 +63,8 @@ When two lints fire on the same expression, list both in one attribute:
 let re = Regex::new(PATTERN).unwrap();
 ```
 
-**Feature-gated items** (struct fields, modules, `let` bindings that are unused when a feature is
-disabled) use `#[cfg_attr]` so the suppression only applies in the affected build variant:
+**Feature-gated items** (struct fields, modules, `let` bindings that are unused when a feature is disabled) use `#[cfg_attr]` so the suppression only
+applies in the affected build variant:
 
 ```rust
 pub(crate) struct Foo {
@@ -81,9 +76,8 @@ pub(crate) struct Foo {
 }
 ```
 
-**Feature-conditional expression sites** (where a `let` binding is only mutated under a
-`#[cfg(feature = "...")]` block) are also handled by `#[cfg_attr]`. The suppression only exists
-in the build variant where the lint fires:
+**Feature-conditional expression sites** (where a `let` binding is only mutated under a `#[cfg(feature = "...")]` block) are also handled by
+`#[cfg_attr]`. The suppression only exists in the build variant where the lint fires:
 
 ```rust
 #[cfg_attr(
@@ -93,57 +87,50 @@ in the build variant where the lint fires:
 let mut handle = start(…);
 ```
 
-`clippy::allow_attributes` and `clippy::allow_attributes_without_reason` must **never** be
-suppressed. They exist specifically to catch bare `#[allow]` attributes — suppressing the
-watchdog defeats the whole mechanism. If you believe you need a bare `#[allow]`, the correct
-fix is always `#[cfg_attr(..., expect(...))]` or `#[expect(..., reason = "...")]`.
+`clippy::allow_attributes` and `clippy::allow_attributes_without_reason` must **never** be suppressed. They exist specifically to catch bare
+`#[allow]` attributes — suppressing the watchdog defeats the whole mechanism. If you believe you need a bare `#[allow]`, the correct fix is always
+`#[cfg_attr(..., expect(...))]` or `#[expect(..., reason = "...")]`.
 
 ### Test-mode exemptions
 
-`clippy.toml` enables `allow-unwrap-in-tests`, `allow-expect-in-tests`, `allow-panic-in-tests`,
-`allow-dbg-in-tests`, and `allow-indexing-slicing-in-tests`. These exemptions cover **only
-functions annotated with `#[test]`** (or `#[tokio::test]`, etc.). Helper functions inside
-`mod tests {}` blocks and integration-test helpers driven by macros like `db_test!` are **not**
-covered — they need an explicit `#![expect(...)]` at the module top with a specific reason.
+`clippy.toml` enables `allow-unwrap-in-tests`, `allow-expect-in-tests`, `allow-panic-in-tests`, `allow-dbg-in-tests`, and
+`allow-indexing-slicing-in-tests`. These exemptions cover **only functions annotated with `#[test]`** (or `#[tokio::test]`, etc.). Helper functions
+inside `mod tests {}` blocks and integration-test helpers driven by macros like `db_test!` are **not** covered — they need an explicit
+`#![expect(...)]` at the module top with a specific reason.
 
 ### Prefer refactor over suppression
 
-Many suppressions can be eliminated by changing the code rather than annotating it. A few
-recurring substitutions:
+Many suppressions can be eliminated by changing the code rather than annotating it. A few recurring substitutions:
 
 - `args[0]` after a length check → `args.first()` with `let-else`
 - `Vec<T>` plus `vec[..n]` slices when the length is fixed → `[T; N]` plus `split_at(n)`
-- `let _ = result_expr` to discard a `Result` you knowingly ignore → `let _ignored = result_expr`
-  (named bindings prefixed with `_` do not trigger `let_underscore_must_use` and convey intent)
+- `let _ = result_expr` to discard a `Result` you knowingly ignore → `let _ignored = result_expr` (named bindings prefixed with `_` do not trigger
+  `let_underscore_must_use` and convey intent)
 - `Some(row).unwrap()` after a `.get()` guard → consume the guard's binding directly
 
-When a suppression is the right call, write a **specific** reason: name the invariant
-("`pos` from `str::find` is on a char boundary") or the guard ("idx came from
-`lines.iter().rposition(...)`"). Avoid generic placeholders like "in bounds" or
-"checked above" — they rot the moment surrounding code shifts.
+When a suppression is the right call, write a **specific** reason: name the invariant ("`pos` from `str::find` is on a char boundary") or the guard
+("idx came from `lines.iter().rposition(...)`"). Avoid generic placeholders like "in bounds" or "checked above" — they rot the moment surrounding code
+shifts.
 
 ## Shared Contract Crates
 
 - Public fallible APIs in shared or reusable contract crates should document a `# Errors` section.
-- When practical, touched shared or reusable crates should run
-  `cargo clippy -p <crate> --all-targets -- -D clippy::missing_errors_doc`
-  to keep that contract enforced.
+- When practical, touched shared or reusable crates should run `cargo clippy -p <crate> --all-targets -- -D clippy::missing_errors_doc` to keep that
+  contract enforced.
 
 ## Error Masking Anti-Patterns
 
-Never use `.unwrap_or(N)` or `.unwrap_or_default()` as a silent fallback for database errors.
-When the database is unavailable a fallback value produces incorrect program behavior:
+Never use `.unwrap_or(N)` or `.unwrap_or_default()` as a silent fallback for database errors. When the database is unavailable a fallback value
+produces incorrect program behavior:
 
-- **Security paths:** `count(db).await.unwrap_or(1) > 0` in a registration check treats a DB
-  error as "user exists", silently blocking legitimate registrations or skipping the
-  registration-token-required path.
-- **Data-integrity guards:** `count_linked_hosts(db).await.unwrap_or(0)` treats a DB error as
-  "no linked hosts", potentially allowing a soft-delete that would orphan active records.
+- **Security paths:** `count(db).await.unwrap_or(1) > 0` in a registration check treats a DB error as "user exists", silently blocking legitimate
+  registrations or skipping the registration-token-required path.
+- **Data-integrity guards:** `count_linked_hosts(db).await.unwrap_or(0)` treats a DB error as "no linked hosts", potentially allowing a soft-delete
+  that would orphan active records.
 
 ### Required pattern — route handlers
 
-Use a `match` and return `StatusCode::INTERNAL_SERVER_ERROR` on `Err`, logging the error at the
-`error` level:
+Use a `match` and return `StatusCode::INTERNAL_SERVER_ERROR` on `Err`, logging the error at the `error` level:
 
 ```rust
 // Handlers use focused sub-states (State<DbState>) rather than the full State<Arc<AppState>>.
@@ -161,13 +148,11 @@ let has_user = match User::find()
 };
 ```
 
-See [AppState Architecture](app-state.md) for the full sub-state pattern, service extractors,
-and `db_access_policy.toml` classification rules.
+See [AppState Architecture](app-state.md) for the full sub-state pattern, service extractors, and `db_access_policy.toml` classification rules.
 
 ### Required pattern — query functions
 
-Return `Result<T, DbErr>` (or a crate-local `Result`) and propagate errors with `?` at the call
-site. Never collapse errors into a default value:
+Return `Result<T, DbErr>` (or a crate-local `Result`) and propagate errors with `?` at the call site. Never collapse errors into a default value:
 
 ```rust
 // ✓ Correct — DB error is surfaced to the caller
@@ -191,9 +176,8 @@ async fn count_linked_hosts(db: &DatabaseConnection, item_id: Uuid) -> u64 {
 }
 ```
 
-The narrower `unwrap_or(0)` rule for count queries in paginated list endpoints is documented in
-[Database Query Patterns](#database-query-patterns). This section covers the broader class of
-`.unwrap_or(N)` misuse in security and data-integrity code paths.
+The narrower `unwrap_or(0)` rule for count queries in paginated list endpoints is documented in [Database Query Patterns](#database-query-patterns).
+This section covers the broader class of `.unwrap_or(N)` misuse in security and data-integrity code paths.
 
 See also: [Error Handling](error-handling.md).
 
@@ -245,8 +229,8 @@ boolean-like enum).
 
 ## Exhaustive Enum Test Coverage
 
-Enum tests (serde round-trips, `Display`/`FromStr` checks, `as_str()` invariants) must automatically cover every
-variant. A manually maintained array like `const ALL_VARIANTS: [T; 4]` silently skips any new variant added later.
+Enum tests (serde round-trips, `Display`/`FromStr` checks, `as_str()` invariants) must automatically cover every variant. A manually maintained array
+like `const ALL_VARIANTS: [T; 4]` silently skips any new variant added later.
 
 ### Required pattern — `strum::EnumIter`
 
@@ -277,9 +261,9 @@ mod tests {
 
 ### cfg guards for sea-orm enums
 
-Enums with `#[cfg_attr(feature = "sea-orm", derive(strum::EnumIter, ...))]` already derive `EnumIter` when the
-`sea-orm` feature is active. Adding `#[cfg_attr(test, derive(strum::EnumIter))]` on top causes a duplicate
-implementation when both `cfg(test)` and `feature = "sea-orm"` are active simultaneously. Use the combined guard:
+Enums with `#[cfg_attr(feature = "sea-orm", derive(strum::EnumIter, ...))]` already derive `EnumIter` when the `sea-orm` feature is active. Adding
+`#[cfg_attr(test, derive(strum::EnumIter))]` on top causes a duplicate implementation when both `cfg(test)` and `feature = "sea-orm"` are active
+simultaneously. Use the combined guard:
 
 ```rust
 #[cfg_attr(all(test, not(feature = "sea-orm")), derive(strum::EnumIter))]
@@ -292,10 +276,9 @@ This ensures:
 
 ### cfg propagation caveat
 
-`#[cfg(test)]` is **not** propagated to dependency crates. If crate B depends on crate A, the
-`#[cfg_attr(test, derive(strum::EnumIter))]` on an enum in crate A will not make `EnumIter` available in crate
-B's test code. For enums in external crates, use inline arrays in tests (keeping them complete by always listing
-all known variants explicitly).
+`#[cfg(test)]` is **not** propagated to dependency crates. If crate B depends on crate A, the `#[cfg_attr(test, derive(strum::EnumIter))]` on an enum
+in crate A will not make `EnumIter` available in crate B's test code. For enums in external crates, use inline arrays in tests (keeping them complete
+by always listing all known variants explicitly).
 
 ### Anti-pattern — hardcoded const array
 
@@ -310,9 +293,9 @@ for status in MyStatus::iter() { ... }
 
 ### `strum::EnumIter` incompatibility with `Other(String)` variants
 
-`strum::EnumIter` cannot be derived on enums that contain an `Other(String)` catch-all variant
-(see [Wire-Safe `Other(String)` Catch-All](#wire-safe-otherstring-catch-all-for-enums) below).
-Instead, enumerate known variants explicitly in a `const` array inside the test:
+`strum::EnumIter` cannot be derived on enums that contain an `Other(String)` catch-all variant (see
+[Wire-Safe `Other(String)` Catch-All](#wire-safe-otherstring-catch-all-for-enums) below). Instead, enumerate known variants explicitly in a `const`
+array inside the test:
 
 ```rust
 #[cfg(test)]
@@ -342,11 +325,9 @@ mod tests {
 
 ## Wire-Safe `Other(String)` Catch-All for Enums
 
-Any enum serialised over the wire (WebSocket, NATS, REST body) that may gain new variants in
-future releases **must** include an `Other(String)` catch-all variant. This ensures rolling upgrades
-are safe: an older peer receiving an unknown variant from a newer peer deserialises it as
-`Other("future_variant")` and handles it gracefully instead of returning a
-deserialization error.
+Any enum serialised over the wire (WebSocket, NATS, REST body) that may gain new variants in future releases **must** include an `Other(String)`
+catch-all variant. This ensures rolling upgrades are safe: an older peer receiving an unknown variant from a newer peer deserialises it as
+`Other("future_variant")` and handles it gracefully instead of returning a deserialization error.
 
 ### When to use
 
@@ -358,9 +339,8 @@ Apply this pattern to every `#[non_exhaustive]` enum that:
 
 ### Required implementation — use `wire_safe_enum!`
 
-Use the `wire_safe_enum!` macro from `uptrakit-shared-macros` to generate all required boilerplate.
-The macro emits: `#[non_exhaustive]` + `Other(String)`, `as_str()`, `Display`, `From<String>`
-(infallible with `tracing::debug!` on unknown), `Serialize`, `Deserialize`, a named parse-error
+Use the `wire_safe_enum!` macro from `uptrakit-shared-macros` to generate all required boilerplate. The macro emits: `#[non_exhaustive]` +
+`Other(String)`, `as_str()`, `Display`, `From<String>` (infallible with `tracing::debug!` on unknown), `Serialize`, `Deserialize`, a named parse-error
 type, and strict `FromStr`.
 
 ```rust
@@ -392,28 +372,24 @@ pub enum MyStatus {
 // + ParseMyStatusError, FromStr
 ```
 
-For enums whose `From<String>` or `FromStr` impls require custom logic not expressible as a simple
-string table (e.g. infallible `FromStr` that maps unknowns to a sentinel rather than `Err`), write
-the impls by hand following the pattern in `crates/shared/wire/src/lib.rs`.
+For enums whose `From<String>` or `FromStr` impls require custom logic not expressible as a simple string table (e.g. infallible `FromStr` that maps
+unknowns to a sentinel rather than `Err`), write the impls by hand following the pattern in `crates/shared/wire/src/lib.rs`.
 
 ### Consequences
 
-- The enum **loses `Copy`** (because `String` is not `Copy`). Any call-site that relied on
-  copy semantics must be updated to `.clone()`.
-- `strum::EnumIter` cannot be derived. See the
-  [test coverage section above](#strumenumiter-incompatibility-with-otherstring-variants).
+- The enum **loses `Copy`** (because `String` is not `Copy`). Any call-site that relied on copy semantics must be updated to `.clone()`.
+- `strum::EnumIter` cannot be derived. See the [test coverage section above](#strumenumiter-incompatibility-with-otherstring-variants).
 
 ## `#[non_exhaustive]` on Public Structs
 
-`#[non_exhaustive]` applies to structs as well as enums. Add it to any public struct defined in a
-shared crate (`wire`, `shared-types`, `web-api-types`, etc.) that may gain new fields in the future.
-This prevents external crates from using struct-literal syntax and breaks at compile time if they try
-to match exhaustively.
+`#[non_exhaustive]` applies to structs as well as enums. Add it to any public struct defined in a shared crate (`wire`, `shared-types`,
+`web-api-types`, etc.) that may gain new fields in the future. This prevents external crates from using struct-literal syntax and breaks at compile
+time if they try to match exhaustively.
 
 ### Required constructor
 
-Because `#[non_exhaustive]` prevents external callers from constructing the struct with a literal,
-every `#[non_exhaustive]` struct **must** expose a constructor or implement `Default`:
+Because `#[non_exhaustive]` prevents external callers from constructing the struct with a literal, every `#[non_exhaustive]` struct **must** expose a
+constructor or implement `Default`:
 
 ```rust
 // In the shared crate (defining crate — struct literal is allowed here):
@@ -459,10 +435,8 @@ ServiceMessage::Ping(PingPayload { service_ts }) => { ... }
 
 ## Typed Enum Parameters for Internal Write APIs
 
-Internal query functions that write to the database should use typed enums instead of bare `&str`
-parameters for discriminator values such as actor type, batch type, and similar classification
-fields. Bare strings produce no compile-time guarantees and make it trivial to introduce silent
-typos.
+Internal query functions that write to the database should use typed enums instead of bare `&str` parameters for discriminator values such as actor
+type, batch type, and similar classification fields. Bare strings produce no compile-time guarantees and make it trivial to introduce silent typos.
 
 Define the typed enum in the relevant `queries` module and implement `as_str()` + `Display`:
 
@@ -505,24 +479,21 @@ These enums are **internal** (not wire-protocol types) and therefore:
 
 ### Legacy on-disk spellings
 
-`ActorType::Mqtt` returns `"uptrakit-mqtt"` (not `"mqtt"`) from `as_str()` for backwards
-compatibility with rows written by the MQTT Service before the typed enum landed.
+`ActorType::Mqtt` returns `"uptrakit-mqtt"` (not `"mqtt"`) from `as_str()` for backwards compatibility with rows written by the MQTT Service before
+the typed enum landed.
 
-New code paths that classify Service-originated writes use
-`ActorType::from_service_app_name(...)`, which collapses every non-MQTT Service binary
-(including `"uptrakit-agent-ssh"` and the registration fallback `"unknown"`) to
-`ActorType::Service` (`"service"`). The granular Service identity is recoverable via the row's
-`actor_id` (the Service UUID) joined to `service.service_app_name`.
+New code paths that classify Service-originated writes use `ActorType::from_service_app_name(...)`, which collapses every non-MQTT Service binary
+(including `"uptrakit-agent-ssh"` and the registration fallback `"unknown"`) to `ActorType::Service` (`"service"`). The granular Service identity is
+recoverable via the row's `actor_id` (the Service UUID) joined to `service.service_app_name`.
 
 ## Credential-Holding Types and Debug
 
-Any internal struct that contains a credential (password, token, secret key, etc.) **must** store
-it as `SecretString` (not `String`). This enforces the masking guarantee at the type level:
+Any internal struct that contains a credential (password, token, secret key, etc.) **must** store it as `SecretString` (not `String`). This enforces
+the masking guarantee at the type level:
 
 - `SecretString`'s `Debug` impl emits `"***"` automatically — no hand-written `Debug` needed.
 - The value is zeroed from memory on drop (`ZeroizeOnDrop`).
-- `.expose_secret()` is the only way to access the inner value, making every access site explicit
-  and auditable.
+- `.expose_secret()` is the only way to access the inner value, making every access site explicit and auditable.
 
 ```rust
 // ✓ Correct — Debug is auto-derived; password never appears in logs
@@ -554,14 +525,13 @@ See also: [Secrets Handling and Encryption at Rest](../security/secrets-and-encr
 
 ## Feature Flags
 
-All feature flags in this workspace are **additive** — enabling a feature adds functionality;
-it never removes or restricts code compiled without the feature.
+All feature flags in this workspace are **additive** — enabling a feature adds functionality; it never removes or restricts code compiled without the
+feature.
 
 ### Additive-only rule
 
-**Never** use `#[cfg(not(feature = "X"))]` attribute-style conditionals. This syntax makes
-feature `X` subtract from the binary, which violates the additive model and can cause
-incorrect builds when features are combined.
+**Never** use `#[cfg(not(feature = "X"))]` attribute-style conditionals. This syntax makes feature `X` subtract from the binary, which violates the
+additive model and can cause incorrect builds when features are combined.
 
 Instead, use the `cfg!()` macro in expression position:
 
@@ -577,13 +547,11 @@ if !cfg!(feature = "embed-frontend") {
 fn resolve_static_dir(...) -> Result<Option<PathBuf>> { ... }
 ```
 
-The expression form `cfg!(feature = "X")` evaluates to a `bool` at compile time (the dead
-branch is eliminated by the optimizer), but every code path still compiles under every
-feature combination — which is what "additive" means.
+The expression form `cfg!(feature = "X")` evaluates to a `bool` at compile time (the dead branch is eliminated by the optimizer), but every code path
+still compiles under every feature combination — which is what "additive" means.
 
-**Exception:** `#[cfg(feature = "X")]` (without `not`) is allowed for blocks that are
-_purely additive_ — they add code only when the feature is enabled and are never present
-in the base build. Only `#[cfg(not(feature = "X"))]` is prohibited.
+**Exception:** `#[cfg(feature = "X")]` (without `not`) is allowed for blocks that are _purely additive_ — they add code only when the feature is
+enabled and are never present in the base build. Only `#[cfg(not(feature = "X"))]` is prohibited.
 
 ### Additive patterns in tests
 
@@ -600,9 +568,8 @@ This keeps a single test that compiles and runs correctly under every feature co
 
 ### Additive route registration
 
-When a route is only meaningful with a specific feature (e.g. Swagger UI), use
-`#[cfg(feature = "swagger-ui")]` on the _additive_ registration block only — never to
-remove an existing route:
+When a route is only meaningful with a specific feature (e.g. Swagger UI), use `#[cfg(feature = "swagger-ui")]` on the _additive_ registration block
+only — never to remove an existing route:
 
 ```rust
 // Always present — raw JSON route is always available
@@ -620,17 +587,15 @@ See also: [Embedded Frontend](embedded-frontend.md) for the `embed-frontend` fea
 
 ### Feature-gated external APIs
 
-When an external crate API (e.g. `bollard::Docker::connect_with_ssh`) is only available under a
-specific feature, the `#[cfg(feature = "X")] return ...; <fallback>` idiom **cannot** be used
-because the fallback code after an unconditional `return` becomes unreachable when the feature is
-on — triggering the `unreachable_code` lint that is denied workspace-wide.
+When an external crate API (e.g. `bollard::Docker::connect_with_ssh`) is only available under a specific feature, the
+`#[cfg(feature = "X")] return ...; <fallback>` idiom **cannot** be used because the fallback code after an unconditional `return` becomes unreachable
+when the feature is on — triggering the `unreachable_code` lint that is denied workspace-wide.
 
 Use one of the following approved patterns instead.
 
 #### Pattern A — gate the entire match arm
 
-Move the feature-specific arm behind `#[cfg(feature = "X")]` and handle the disabled case in the
-default arm with a runtime check:
+Move the feature-specific arm behind `#[cfg(feature = "X")]` and handle the disabled case in the default arm with a runtime check:
 
 ```rust
 // ✓ Correct — the default arm handles the disabled case at runtime; no #[cfg(not)] needed
@@ -660,8 +625,7 @@ fn connect(docker_host: Option<&str>, ssh_key_path: Option<&str>) -> Result<boll
 
 #### Pattern B — stub + upgrade helper
 
-Initialize with an always-available stub, then override in a `#[cfg(feature = "X")]` block by
-calling a helper that accepts and discards the stub:
+Initialize with an always-available stub, then override in a `#[cfg(feature = "X")]` block by calling a helper that accepts and discards the stub:
 
 ```rust
 // ✓ Correct — stub is passed as an argument (counts as "read"), suppressing unused_assignments
@@ -683,8 +647,7 @@ fn upgrade_to_daemon_client(
 
 #### Pattern C — always-present tracking field
 
-When a struct field only exists under a feature but you need a cfg-free accessor method, add an
-always-present `bool` that mirrors its presence:
+When a struct field only exists under a feature but you need a cfg-free accessor method, add an always-present `bool` that mirrors its presence:
 
 ```rust
 struct NotificationService {
@@ -711,9 +674,8 @@ impl NotificationService {
 
 #### Pattern D — conditional early-return inside a guard
 
-When the feature-gated code path is guarded by a runtime condition (`if let`, `if`, etc.), the
-`return` is conditional rather than unconditional, so the fallback code remains reachable in all
-builds:
+When the feature-gated code path is guarded by a runtime condition (`if let`, `if`, etc.), the `return` is conditional rather than unconditional, so
+the fallback code remains reachable in all builds:
 
 ```rust
 // ✓ Correct — `return` is inside `if let Some(...)`, not at the top level
@@ -749,11 +711,9 @@ See also: [Security — Secure Development](../security/secure-development.md).
 
 ### Lint suppressions for feature-gated items
 
-When a function, type, field, or constant is _only reachable_ via a `#[cfg(feature = "X")]`
-additive block, the compiler may emit `dead_code` (or a related lint) when that feature is
-disabled. Because `#[cfg(not(feature = "X"))]` is prohibited and the item is genuinely needed
-under the feature, suppressing the lint with `#[expect(dead_code, reason = "...")]` is the
-approved solution.
+When a function, type, field, or constant is _only reachable_ via a `#[cfg(feature = "X")]` additive block, the compiler may emit `dead_code` (or a
+related lint) when that feature is disabled. Because `#[cfg(not(feature = "X"))]` is prohibited and the item is genuinely needed under the feature,
+suppressing the lint with `#[expect(dead_code, reason = "...")]` is the approved solution.
 
 **Requirement:** every such suppression must carry a detailed inline comment that:
 
@@ -779,21 +739,17 @@ fn upgrade_to_daemon_client(
 fn upgrade_to_daemon_client(...) { ... }
 ```
 
-Note: when the item is already behind `#[cfg(feature = "X")]`, the dead-code lint only fires
-under a build that enables `X` but not the specific caller — which is rare. If the item and
-its sole caller are both inside the same `#[cfg(feature = "X")]` block, no suppression is
-needed (the compiler sees them together). Use `#[expect(dead_code, reason = "...")]` only after
-confirming the lint is genuine.
+Note: when the item is already behind `#[cfg(feature = "X")]`, the dead-code lint only fires under a build that enables `X` but not the specific
+caller — which is rare. If the item and its sole caller are both inside the same `#[cfg(feature = "X")]` block, no suppression is needed (the compiler
+sees them together). Use `#[expect(dead_code, reason = "...")]` only after confirming the lint is genuine.
 
 No other `#[allow()]` suppressions are permitted without explicit approval.
 
 ## Atomic Ordering Requirements
 
-Security-critical `AtomicBool` flags (such as `PLAINTEXT_MODE` in `uptrakit-crypto`) must use
-`Ordering::Release` for stores and `Ordering::Acquire` for loads. `Ordering::Relaxed` is
-incorrect for flags that gate security behavior — on weakly-ordered architectures (ARM), a
-thread could see a stale value and either skip encryption or encrypt when plaintext mode was
-intended.
+Security-critical `AtomicBool` flags (such as `PLAINTEXT_MODE` in `uptrakit-crypto`) must use `Ordering::Release` for stores and `Ordering::Acquire`
+for loads. `Ordering::Relaxed` is incorrect for flags that gate security behavior — on weakly-ordered architectures (ARM), a thread could see a stale
+value and either skip encryption or encrypt when plaintext mode was intended.
 
 ```rust
 // ✓ Correct — Release/Acquire guarantees cross-thread visibility
@@ -812,25 +768,20 @@ PLAINTEXT_MODE.store(true, Ordering::Relaxed);
 PLAINTEXT_MODE.load(Ordering::Relaxed);
 ```
 
-**Rule:** Any `AtomicBool` or `AtomicU*` that controls a security-sensitive code path must use
-at minimum `Release`/`Acquire` ordering. `Relaxed` is only acceptable for pure counters or
-statistics where stale reads have no correctness impact.
+**Rule:** Any `AtomicBool` or `AtomicU*` that controls a security-sensitive code path must use at minimum `Release`/`Acquire` ordering. `Relaxed` is
+only acceptable for pure counters or statistics where stale reads have no correctness impact.
 
 ## Synchronous Locks in Async Code
 
-When a synchronous lock is required anywhere in async code, use `parking_lot::Mutex` or
-`parking_lot::RwLock`. **Never use `std::sync::Mutex`, `std::sync::RwLock`,
-`tokio::sync::Mutex`, or `tokio::sync::RwLock`.**
+When a synchronous lock is required anywhere in async code, use `parking_lot::Mutex` or `parking_lot::RwLock`. **Never use `std::sync::Mutex`,
+`std::sync::RwLock`, `tokio::sync::Mutex`, or `tokio::sync::RwLock`.**
 
-- **Sub-microsecond critical sections** with no `.await` across the lock make a sync lock
-  correct (no risk of holding across a yield point).
-- `parking_lot` primitives are faster under contention and return the guard directly — no
-  `Result`/`.unwrap()` needed, which aligns with the workspace panic policy.
-- `tokio::sync::Mutex`/`RwLock` are unnecessary overhead for critical sections that do not
-  span `.await` points, and their guards are not `Send`, preventing use in `tokio::spawn`
-  closures unless the guard is dropped before the first `.await`.
-- **Always drop `parking_lot` guards before any `.await` point.** Clone or copy the
-  protected value out of the guard, drop the guard, then `.await`.
+- **Sub-microsecond critical sections** with no `.await` across the lock make a sync lock correct (no risk of holding across a yield point).
+- `parking_lot` primitives are faster under contention and return the guard directly — no `Result`/`.unwrap()` needed, which aligns with the workspace
+  panic policy.
+- `tokio::sync::Mutex`/`RwLock` are unnecessary overhead for critical sections that do not span `.await` points, and their guards are not `Send`,
+  preventing use in `tokio::spawn` closures unless the guard is dropped before the first `.await`.
+- **Always drop `parking_lot` guards before any `.await` point.** Clone or copy the protected value out of the guard, drop the guard, then `.await`.
 
 ```rust
 use parking_lot::{Mutex, RwLock};
@@ -855,9 +806,8 @@ let mut guard = FALLBACK.lock().unwrap();
 let guard = self.inner.read().await;
 ```
 
-**Amortize expensive operations under the lock.** If the critical section includes cleanup
-(e.g., `HashMap::retain()`), do not run it on every call. Use an `AtomicU64` counter to run
-cleanup every N calls, keeping per-request lock hold time O(1):
+**Amortize expensive operations under the lock.** If the critical section includes cleanup (e.g., `HashMap::retain()`), do not run it on every call.
+Use an `AtomicU64` counter to run cleanup every N calls, keeping per-request lock hold time O(1):
 
 ```rust
 static CALL_COUNT: AtomicU64 = AtomicU64::new(0);
@@ -871,42 +821,28 @@ if call_count.is_multiple_of(CLEANUP_INTERVAL) {
 
 ## TLS Session Resumption with mTLS Cert Rotation
 
-**Scope.** Applies only to rustls `ClientConfig` builders that use a swappable
-`ResolvesClientCert` — i.e. the agent's mTLS connector built via
-`uptrakit_service_sdk::tls::build_client_config_with_resolver` /
-`build_system_trust_client_config_with_resolver`. Static-cert builders
-(`build_pinned_ca_client_config`, `build_mtls_client_config`,
-`build_system_roots_client_config`, `build_tofu_client_config`) cannot rotate identity
+**Scope.** Applies only to rustls `ClientConfig` builders that use a swappable `ResolvesClientCert` — i.e. the agent's mTLS connector built via
+`uptrakit_service_sdk::tls::build_client_config_with_resolver` / `build_system_trust_client_config_with_resolver`. Static-cert builders
+(`build_pinned_ca_client_config`, `build_mtls_client_config`, `build_system_roots_client_config`, `build_tofu_client_config`) cannot rotate identity
 at runtime and intentionally configure no resumption.
 
 **Invariant.** Every resolver-based mTLS `ClientConfig` MUST register a
-[`CertScopedClientSessionStore`](../../crates/shared/service-sdk/src/session_store.rs) as
-its resumption store, and the same `Arc` instance MUST be the one attached to the
-matching `AgentClientCertResolver` via `AgentClientCertResolver::new(initial,
-session_store)`. `AgentClientCertResolver::swap` publishes the new
-`CertifiedKey` and then atomically flushes the store. When a CA-rebuild
-or any other event reconstructs the `ClientConfig`, thread the _same_
-`Arc<CertScopedClientSessionStore>` through to it — building a fresh store
-silently re-introduces the resumption-after-revocation bug because the
-resolver's `swap()` would reset an orphan cache while rustls keeps
-replaying tickets in the live config. `clippy.toml` bans
-`rustls::client::Resumption::in_memory_sessions` (and the crate-root
-re-export) via `disallowed-methods` to enforce this at compile time.
+[`CertScopedClientSessionStore`](../../crates/shared/service-sdk/src/session_store.rs) as its resumption store, and the same `Arc` instance MUST be
+the one attached to the matching `AgentClientCertResolver` via `AgentClientCertResolver::new(initial, session_store)`. `AgentClientCertResolver::swap`
+publishes the new `CertifiedKey` and then atomically flushes the store. When a CA-rebuild or any other event reconstructs the `ClientConfig`, thread
+the _same_ `Arc<CertScopedClientSessionStore>` through to it — building a fresh store silently re-introduces the resumption-after-revocation bug
+because the resolver's `swap()` would reset an orphan cache while rustls keeps replaying tickets in the live config. `clippy.toml` bans
+`rustls::client::Resumption::in_memory_sessions` (and the crate-root re-export) via `disallowed-methods` to enforce this at compile time.
 
-**Why.** TLS 1.3 PSK resumption (RFC 8446 §2.2) skips
-`Certificate`/`CertificateVerify`, so on every resumed handshake the
-server reads back the _original_ session's client cert via
-`peer_certificates()`. Without per-rotation invalidation, a rotated agent
-keeps re-presenting the old (now-revoked) cert through cached tickets;
-the server rejects every reconnect as `CertificateRevoked` and the
-process loops until the in-memory ticket cache is wiped by a restart.
-Observed in production on 2026-05-14.
+**Why.** TLS 1.3 PSK resumption (RFC 8446 §2.2) skips `Certificate`/`CertificateVerify`, so on every resumed handshake the server reads back the
+_original_ session's client cert via `peer_certificates()`. Without per-rotation invalidation, a rotated agent keeps re-presenting the old
+(now-revoked) cert through cached tickets; the server rejects every reconnect as `CertificateRevoked` and the process loops until the in-memory ticket
+cache is wiped by a restart. Observed in production on 2026-05-14.
 
 ## Parallel Broadcast Pattern
 
-When broadcasting messages to multiple consumers via `mpsc::Sender`, use parallel sends with
-a per-send timeout. Sequential sends allow a single slow consumer (full channel buffer) to
-block all other recipients.
+When broadcasting messages to multiple consumers via `mpsc::Sender`, use parallel sends with a per-send timeout. Sequential sends allow a single slow
+consumer (full channel buffer) to block all other recipients.
 
 ```rust
 use futures_util::future::join_all;
@@ -958,24 +894,32 @@ security.
 
 ## Service Reconnect Backoff
 
-All reconnect loops in service binaries must use `uptrakit_service_sdk::Backoff` — not a fixed
-sleep. Fixed delays hammer a recovering broker or controller and produce bursty log storms.
+All reconnect loops in service binaries must use `uptrakit_backoff::Backoff` with the guard pattern — not a fixed sleep. Fixed delays hammer a
+recovering broker or controller and produce bursty log storms. The guard pattern ensures that every attempt cycle is explicitly resolved, preventing
+partial-success bugs where a healthy milestone is accidentally escalated as a failure.
+
+### Reset on Success
+
+When the connection succeeds or the cycle completes with a meaningful milestone (e.g., WebSocket upgrade succeeds), call `guard.reset()` so that
+`current` returns to `base` and the next attempt starts fresh:
 
 ```rust
-use uptrakit_service_sdk::Backoff;
+use uptrakit_backoff::Backoff;
 use std::time::Duration;
 
-// Construct once per connection attempt sequence
 let mut backoff = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
 
 loop {
+    let guard = backoff.attempt();
+    let delay = guard.sample_delay();
+
     match connect().await {
         Ok(conn) => {
-            backoff.reset();   // Reset on successful connection
+            guard.reset();  // Healthy cycle; reset to base for next attempt
             handle(conn).await;
         }
         Err(e) => {
-            let delay = backoff.next_delay();
+            guard.escalate();  // Unhealthy cycle; double current (up to cap)
             tracing::warn!(error = %e, delay = ?delay, "connection failed; retrying");
             tokio::select! {
                 _ = shutdown_token.cancelled() => break,
@@ -986,9 +930,90 @@ loop {
 }
 ```
 
-Standard parameters: **base 2 s, cap 60 s** with ~25 % jitter (the `Backoff` default). The
-`tokio::select!` on `shutdown_token` ensures the loop exits promptly on SIGTERM even when the
-delay is long.
+### Partial-Progress: Distinguishing Post-Upgrade Close from Transient Failure
+
+The key insight is that a closed WebSocket **after upgrade** signals a healthy connection cycle (the TCP handshake and TLS negotiation succeeded; the
+application-level protocol was established). By contrast, a TCP refusal or DNS error before upgrade indicates no progress was made.
+
+Use `guard.reset()` for post-upgrade close and `guard.escalate()` for pre-upgrade transient failure. The canonical example from
+`crates/shared/service-sdk/src/lifecycle.rs:354` shows this split:
+
+```rust
+if is_receive_closed_report(&e) {
+    // Bug fix: post-WS-upgrade close → backoff cycle was healthy.
+    // The WebSocket upgrade succeeded and the controller closed the connection
+    // (e.g. superseded by a new connection). Reset to base so the next
+    // reconnect starts fresh, not inheriting a prior failure streak.
+    let guard = enrollment_backoff.attempt();
+    let delay = guard.sample_delay();
+    guard.reset();  // Healthy cycle; infrastructure milestone reached
+    tracing::info!(error = %e, "post-upgrade enrollment close, reconnecting in {delay:?}");
+    tokio::select! {
+        () = tokio::time::sleep(delay) => {}
+        signal = signals.recv() => {
+            tracing::info!(%signal, "received signal during enrollment, exiting");
+            return Ok(());
+        }
+    }
+    continue;
+}
+if is_transient_network_report(&e) {
+    let guard = enrollment_backoff.attempt();
+    let delay = guard.sample_delay();
+    guard.escalate();  // Unhealthy cycle; no milestone reached (TCP/DNS/pre-upgrade)
+    tracing::info!(error = %e, "transient enrollment error, reconnecting in {delay:?}");
+    tokio::select! {
+        () = tokio::time::sleep(delay) => {}
+        signal = signals.recv() => {
+            tracing::info!(%signal, "received signal during enrollment, exiting");
+            return Ok(());
+        }
+    }
+    continue;
+}
+```
+
+### LoopOutcome::Disconnected Pattern
+
+When an `attempt()` cycle has already been resolved via `reset()` (so `current == base`), use `sample_base_jitter()` to get the base-plus-jitter delay
+without spinning a fake attempt:
+
+```rust
+match loop_outcome {
+    LoopOutcome::Disconnected => {
+        // The prior cycle has already resolved its guard via reset(),
+        // so current == base. Use sample_base_jitter() to get base+jitter
+        // without advancing state:
+        let delay = reconnect_backoff.sample_base_jitter();
+        tracing::warn!("disconnected by controller, reconnecting in {delay:?}");
+        tokio::select! {
+            () = tokio::time::sleep(delay) => {}
+            _ = shutdown_token.cancelled() => break,
+        }
+    }
+    // ... other branches
+}
+```
+
+### Enforcement: Compile-Time + Workspace Test + Runtime
+
+Forgetting to resolve a guard is caught by three layers:
+
+1. **Compile-time `#[must_use]`**: The `AttemptGuard` type has `#[must_use]` attribute. Binding the guard to a variable without calling `.reset()` or
+   `.escalate()` produces a compiler warning. Binding to underscore (e.g., `let _ = backoff.attempt()`) triggers
+   `clippy::let_underscore_must_use = "deny"` in the workspace lint config, becoming a hard error.
+
+2. **Workspace functional test**: The file `crates/core/functional-tests/tests/backoff_guard_no_question_in_attempt_scope.rs` uses a procedural macro
+   to scan source code at compile time, rejecting any `?` operator that appears between an `attempt()` call and its corresponding `reset()` /
+   `escalate()` call. This catches the case where early-exit via `?` leaves the guard unresolved. Escape hatch: add a comment
+   `// uptrakit-backoff: allow ? in attempt scope — <reason>` on the offending or preceding line to opt-out for documented exceptions.
+
+3. **Runtime `Drop` warning**: If a guard is dropped without explicit resolution, the `Drop` impl emits `tracing::warn!()` with the backoff state.
+   This is the final backstop for bugs that slip past compile-time checks (e.g., panics, manual drops).
+
+### API Reference
+
+Standard parameters: **base 2 s, cap 60 s** with ~25 % jitter. For full API documentation, see <https://docs.rs/uptrakit-backoff>.
 
 **Never** replace this with `tokio::time::sleep(Duration::from_secs(5))`. A fixed delay:
 
@@ -1000,13 +1025,11 @@ See also: [Service Lifecycle](service-lifecycle.md) for the full reconnect and e
 
 ## `ServiceHandler` Transport Contract
 
-`ServiceHandler` implementations must not import or depend on `ControllerConnection`. All
-handler method signatures use `&mut dyn ServiceTransport` (from `uptrakit-wire`). A handler
-impl that compiles against `uptrakit-wire` types only is transport-agnostic by construction
-and can run in both standalone (WebSocket) and embedded (in-process) modes.
+`ServiceHandler` implementations must not import or depend on `ControllerConnection`. All handler method signatures use `&mut dyn ServiceTransport`
+(from `uptrakit-wire`). A handler impl that compiles against `uptrakit-wire` types only is transport-agnostic by construction and can run in both
+standalone (WebSocket) and embedded (in-process) modes.
 
-`agreed_capabilities` for capability-dependent initialization must be read from the
-`on_settings` parameter, not from a connection method.
+`agreed_capabilities` for capability-dependent initialization must be read from the `on_settings` parameter, not from a connection method.
 
 ## String-to-Type Conversions
 
@@ -1048,8 +1071,8 @@ impl FromStr for MyType {
 
 - **Ad-hoc `parse(&str)` methods** returning `Option<Self>` or `Result<Self, String>` -- always implement `FromStr` instead.
 
-The full error handling reference (20 patterns, anti-patterns, decision table, approved exceptions, and rules summary)
-is in [Error Handling](error-handling.md).
+The full error handling reference (20 patterns, anti-patterns, decision table, approved exceptions, and rules summary) is in
+[Error Handling](error-handling.md).
 
 ## Request Type Validation
 
@@ -1112,8 +1135,7 @@ See also: the `update_hooks.rs` module provides a similar validation pattern (`H
 
 ## Route Authorization Pattern
 
-All protected web-API route handlers enforce authorization via typed Axum extractors. Never call
-`user.has_permission(...)` inline in a handler body.
+All protected web-API route handlers enforce authorization via typed Axum extractors. Never call `user.has_permission(...)` inline in a handler body.
 
 ### Required pattern
 
@@ -1128,13 +1150,11 @@ pub async fn list_hosts(
 }
 ```
 
-Use the bound variable name `_user` when the `AuthenticatedUser` value is not used in the body, and `user`
-when it is (e.g. `user.user_id` for an `actor_id` field).
+Use the bound variable name `_user` when the `AuthenticatedUser` value is not used in the body, and `user` when it is (e.g. `user.user_id` for an
+`actor_id` field).
 
-There are 32 granular permission extractors (e.g. `CanViewServices`, `CanApproveServices`,
-`CanCreateSoftware`, `CanTriggerUpdates`, `CanManageUsers`). See
-[Authentication and Authorization](../security/auth-and-authorization.md#permission-extractor-reference)
-for the full list.
+There are 32 granular permission extractors (e.g. `CanViewServices`, `CanApproveServices`, `CanCreateSoftware`, `CanTriggerUpdates`,
+`CanManageUsers`). See [Authentication and Authorization](../security/auth-and-authorization.md#permission-extractor-reference) for the full list.
 
 ### Required utoipa extension
 
@@ -1154,8 +1174,7 @@ The `json!` value must match the `as_str()` serialization of the corresponding `
 
 ### Adding a new extractor
 
-Add one line to the `permission_extractor!` macro call in
-`crates/ui/web-api/src/middleware/permission.rs`:
+Add one line to the `permission_extractor!` macro call in `crates/ui/web-api/src/middleware/permission.rs`:
 
 ```rust
 permission_extractor! {
@@ -1164,8 +1183,8 @@ permission_extractor! {
 }
 ```
 
-The macro generates a `#[derive(Debug)]` struct `CanNewThing(pub AuthenticatedUser)` with a `FromRequestParts`
-impl and a `::new(user)` test constructor.
+The macro generates a `#[derive(Debug)]` struct `CanNewThing(pub AuthenticatedUser)` with a `FromRequestParts` impl and a `::new(user)` test
+constructor.
 
 ### Anti-pattern
 
@@ -1183,52 +1202,43 @@ pub async fn list_hosts(
 
 ### Approved exception: custom authentication paths
 
-Handlers that perform their own token extraction (e.g., reading a `token` query parameter or
-`Authorization` header because browser WebSocket connections cannot set custom headers) cannot
-use Axum extractors for authentication. In these handlers, `auth_user.has_permission(perm)` is
+Handlers that perform their own token extraction (e.g., reading a `token` query parameter or `Authorization` header because browser WebSocket
+connections cannot set custom headers) cannot use Axum extractors for authentication. In these handlers, `auth_user.has_permission(perm)` is
 acceptable **only** when:
 
-1. The token validation is already done manually (JWT or API token, same logic as the standard
-   middleware), **and**
+1. The token validation is already done manually (JWT or API token, same logic as the standard middleware), **and**
 2. No typed extractor exists that covers the custom auth path.
 
-Any such handler must include a `// APPROVED: custom auth path — extractor not applicable`
-comment alongside the `has_permission` call. The `interactive_ws` WebSocket endpoint is the
-canonical example.
+Any such handler must include a `// APPROVED: custom auth path — extractor not applicable` comment alongside the `has_permission` call. The
+`interactive_ws` WebSocket endpoint is the canonical example.
 
 See also: [Authentication and Authorization](../security/auth-and-authorization.md).
 
 ## ETag Route-Layer Pattern
 
-Settings endpoints use route-level ETag middleware rather than per-handler extractors
-(see [ADR-0017](../adr/0017-etag-route-layer-middleware.md)). New settings routes **must** be
-covered by `etag_middleware`.
+Settings endpoints use route-level ETag middleware rather than per-handler extractors (see [ADR-0017](../adr/0017-etag-route-layer-middleware.md)).
+New settings routes **must** be covered by `etag_middleware`.
 
 ### How to add a new settings route
 
-1. Decide scope: `SettingsVersion` for `/api/v1/settings/*`, `GlobalSettingsVersion` for
-   `/api/v1/global-settings/*`.
-2. In `router.rs`, add the route to the appropriate sub-router (`tenant_settings` or
-   `global_settings`). Do not add it to the outer `auth_routes` chain.
-3. Handler bodies contain no ETag code — no `If-Match` parameter, no `settings_version_cache`
-   lookup, no ETag header construction.
+1. Decide scope: `SettingsVersion` for `/api/v1/settings/*`, `GlobalSettingsVersion` for `/api/v1/global-settings/*`.
+2. In `router.rs`, add the route to the appropriate sub-router (`tenant_settings` or `global_settings`). Do not add it to the outer `auth_routes`
+   chain.
+3. Handler bodies contain no ETag code — no `If-Match` parameter, no `settings_version_cache` lookup, no ETag header construction.
 
 ### POST endpoints
 
-POST routes included in an ETag sub-router receive an ETag on success if they mutate state.
-POST endpoints that are destructive teardowns (e.g. `POST /settings/reset-data`) must **not** be
-included in any ETag sub-router.
+POST routes included in an ETag sub-router receive an ETag on success if they mutate state. POST endpoints that are destructive teardowns (e.g.
+`POST /settings/reset-data`) must **not** be included in any ETag sub-router.
 
 ### `IfMatch<S>` extractor
 
-Retained for `plugin_configs.rs` handlers that use it directly. Do not add it to new handlers —
-use the layer pattern instead.
+Retained for `plugin_configs.rs` handlers that use it directly. Do not add it to new handlers — use the layer pattern instead.
 
 ## Typed Path Extractors
 
-Route handlers that accept UUID path parameters must use `Path<Uuid>` (or `Path<(Uuid, Uuid)>` for
-multi-param routes) instead of `Path<String>` with manual `Uuid::parse_str`. Axum returns a typed
-422 response automatically on malformed input.
+Route handlers that accept UUID path parameters must use `Path<Uuid>` (or `Path<(Uuid, Uuid)>` for multi-param routes) instead of `Path<String>` with
+manual `Uuid::parse_str`. Axum returns a typed 422 response automatically on malformed input.
 
 ### Required pattern
 
@@ -1278,15 +1288,13 @@ let host_id = match uuid::Uuid::parse_str(&id) {
 };
 ```
 
-**Exception:** `Path<String>` is correct for non-UUID path parameters (e.g., base64-encoded OCSP
-requests in `ocsp.rs`).
+**Exception:** `Path<String>` is correct for non-UUID path parameters (e.g., base64-encoded OCSP requests in `ocsp.rs`).
 
 ## UUID Query Parameters
 
-Use `Option<Uuid>` (not `Option<String>`) for UUID-typed query parameters. Axum's serde
-deserialization automatically rejects malformed UUIDs with `422 Unprocessable Entity`. Manual
-`.and_then(|s| Uuid::parse_str(s).ok())` silently swallows invalid values, returning the
-"no filter" behaviour instead of an error.
+Use `Option<Uuid>` (not `Option<String>`) for UUID-typed query parameters. Axum's serde deserialization automatically rejects malformed UUIDs with
+`422 Unprocessable Entity`. Manual `.and_then(|s| Uuid::parse_str(s).ok())` silently swallows invalid values, returning the "no filter" behaviour
+instead of an error.
 
 ### Required pattern
 
@@ -1331,25 +1339,24 @@ struct MyQuery {
 let id = params.plugin_config_id.as_deref().and_then(|s| Uuid::parse_str(s).ok());
 ```
 
-See also: [Typed Path Extractors](#typed-path-extractors) for the equivalent rule on path
-parameters.
+See also: [Typed Path Extractors](#typed-path-extractors) for the equivalent rule on path parameters.
 
 ## Tenant-Safe Database Queries
 
-All database queries in route handlers and query helpers **must** enforce tenant isolation. Failure to do so can leak
-data across tenants (a high-severity security issue).
+All database queries in route handlers and query helpers **must** enforce tenant isolation. Failure to do so can leak data across tenants (a
+high-severity security issue).
 
 ### Rules
 
 **Rule 1 — Always use `TenantDb` helpers for `TenantScoped` entities.**
 
-Use `TenantDb.find::<E>()`, `.find_by_id::<E>(id)`, `.update_many::<E>()`, or `.delete_many::<E>()` for any entity
-that implements `TenantScoped`. These methods automatically inject `WHERE tenant_id = ?`.
+Use `TenantDb.find::<E>()`, `.find_by_id::<E>(id)`, `.update_many::<E>()`, or `.delete_many::<E>()` for any entity that implements `TenantScoped`.
+These methods automatically inject `WHERE tenant_id = ?`.
 
 **Rule 2 — Use `find_via_tenant_join` for join-table entities without `tenant_id`.**
 
-Some entities (e.g. `service_host`) are join tables that have no `tenant_id` column of their own. Enforce tenant
-isolation by joining through a `TenantScoped` entity with `TenantDb.find_via_tenant_join::<Target, Scoped>(relation)`.
+Some entities (e.g. `service_host`) are join tables that have no `tenant_id` column of their own. Enforce tenant isolation by joining through a
+`TenantScoped` entity with `TenantDb.find_via_tenant_join::<Target, Scoped>(relation)`.
 
 ```rust
 // service_host has no tenant_id — scope it via service (TenantScoped)
@@ -1364,8 +1371,8 @@ tenant_db
 
 **Rule 3 — Never call `Entity::find().all(tenant_db.db())` on a `TenantScoped` entity.**
 
-`tenant_db.db()` is the raw `DatabaseConnection`; it carries no tenant filter. Calling
-`Entity::find().all(tenant_db.db())` on a `TenantScoped` entity loads **all** rows from all tenants.
+`tenant_db.db()` is the raw `DatabaseConnection`; it carries no tenant filter. Calling `Entity::find().all(tenant_db.db())` on a `TenantScoped` entity
+loads **all** rows from all tenants.
 
 **Rule 4 — Prefer batch queries over per-item query loops (N+1 prevention).**
 
@@ -1392,8 +1399,7 @@ let Some(h) = hosts.get(&link.host_id) else { continue; };
 | Per-item `Host::find_by_id(id).one(db)` inside a loop | Batch `find().filter(id.is_in(ids))` then in-memory lookup                     | N+1 queries              |
 | `Entity::update_many().col_expr(...)` loop            | `Entity::update_many().filter(id.is_in(ids)).col_expr(...).exec(db)`           | N+1 updates              |
 
-See also: [Architecture — Multi-Tenancy](../architecture/multi-tenancy.md) and
-[Security — Secure Development](../security/secure-development.md).
+See also: [Architecture — Multi-Tenancy](../architecture/multi-tenancy.md) and [Security — Secure Development](../security/secure-development.md).
 
 ## HTTP Status Codes
 
@@ -1408,8 +1414,7 @@ Always use `reqwest::StatusCode` (re-exported as `uptrakit_openapi_client::Statu
 
 ## Tracing Status Codes
 
-When logging HTTP status codes in `tracing!` macros, use the `%` display format rather than
-`.as_u16()`:
+When logging HTTP status codes in `tracing!` macros, use the `%` display format rather than `.as_u16()`:
 
 ```rust
 // Correct — uses Display impl, emits "200 OK" or "404 Not Found"
@@ -1419,48 +1424,41 @@ tracing::debug!(status = %response.status(), "request complete");
 tracing::debug!(status = response.status().as_u16(), "request complete");
 ```
 
-The `StatusCode` type's `Display` implementation produces `"<code> <reason>"` (e.g., `"429 Too
-Many Requests"`), which is more informative in logs than a bare integer. The `.as_u16()` method
-is approved only inside serde serialization helpers where JSON wire compatibility requires a
-numeric value.
+The `StatusCode` type's `Display` implementation produces `"<code> <reason>"` (e.g., `"429 Too Many Requests"`), which is more informative in logs
+than a bare integer. The `.as_u16()` method is approved only inside serde serialization helpers where JSON wire compatibility requires a numeric
+value.
 
 ## Pinned-CA-only reqwest clients
 
-When building a reqwest client that must use a custom CA and exclude system roots, use
-`tls_certs_only`. Example:
+When building a reqwest client that must use a custom CA and exclude system roots, use `tls_certs_only`. Example:
 
 ```rust
 let cert = reqwest::Certificate::from_pem(pem.as_bytes())?;
 builder = builder.tls_certs_only(std::iter::once(cert));
 ```
 
-Do **not** use `add_root_certificate` — deprecated in reqwest 0.13 because it appends
-to system roots rather than replacing them.
+Do **not** use `add_root_certificate` — deprecated in reqwest 0.13 because it appends to system roots rather than replacing them.
 
 ## CLI CA fingerprint helpers
 
-`parse_fingerprint(s: &str) -> Result<String>` — normalize a `--tofu` flag value to
-64-char lowercase hex. Located in `crates/ui/cli/src/commands/auth.rs`.
-
-`establish_ca_trust(server, fingerprint_hint, allow_rotation, config) -> Result<()>` —
-shared bootstrap function used by `auth login --tofu` and `auth ca trust`. Fetches
-`GET /api/v1/pki/ca.crt`, verifies SHA-256 fingerprint, persists PEM. Located in
+`parse_fingerprint(s: &str) -> Result<String>` — normalize a `--tofu` flag value to 64-char lowercase hex. Located in
 `crates/ui/cli/src/commands/auth.rs`.
+
+`establish_ca_trust(server, fingerprint_hint, allow_rotation, config) -> Result<()>` — shared bootstrap function used by `auth login --tofu` and
+`auth ca trust`. Fetches `GET /api/v1/pki/ca.crt`, verifies SHA-256 fingerprint, persists PEM. Located in `crates/ui/cli/src/commands/auth.rs`.
 
 ## Constant-Time Secret Comparison
 
-Externally-provided secrets (webhook tokens, API keys, and similar short-lived credentials) must
-**never** be compared using `==` or `!=`. Rust's default `PartialEq` on `&str` short-circuits on
-the first differing byte, leaking timing information that an attacker can exploit to infer the
-secret one byte at a time.
+Externally-provided secrets (webhook tokens, API keys, and similar short-lived credentials) must **never** be compared using `==` or `!=`. Rust's
+default `PartialEq` on `&str` short-circuits on the first differing byte, leaking timing information that an attacker can exploit to infer the secret
+one byte at a time.
 
-**Rule:** Whenever code validates a caller-supplied secret against an expected value, use
-`subtle::ConstantTimeEq` after normalising both sides to a fixed-length representation.
+**Rule:** Whenever code validates a caller-supplied secret against an expected value, use `subtle::ConstantTimeEq` after normalising both sides to a
+fixed-length representation.
 
 ### Required pattern
 
-Add `subtle = { workspace = true }` to the crate's `Cargo.toml` and use the SHA-256 + `ct_eq`
-idiom:
+Add `subtle = { workspace = true }` to the crate's `Cargo.toml` and use the SHA-256 + `ct_eq` idiom:
 
 ```rust
 use sha2::{Digest, Sha256};
@@ -1478,8 +1476,8 @@ if expected_secret.is_empty() || !secrets_match {
 }
 ```
 
-Hashing first ensures both inputs are exactly 32 bytes before calling `ct_eq`, making the
-comparison unconditionally constant-time regardless of input length differences.
+Hashing first ensures both inputs are exactly 32 bytes before calling `ct_eq`, making the comparison unconditionally constant-time regardless of input
+length differences.
 
 ### Anti-pattern table
 
@@ -1526,11 +1524,10 @@ pub struct Model {
 
 | Entity | Column | Enum | | --- | --- | --- | | `mqtt_client` | `transport` | `MqttTransport` | | `mqtt_client` | `connection_status` |
 `MqttClientConnectionStatus` | | `session` | `token_type` | `SessionTokenType` | | `update_output_line` | `stream` | `OutputStreamType` | |
-`pending_device_flow` | `status` | `DeviceAuthStatus` | | `service` | `status` | `ServiceStatus` | |
-`update_history` | `status` | `UpdateStatus` |
+`pending_device_flow` | `status` | `DeviceAuthStatus` | | `service` | `status` | `ServiceStatus` | | `update_history` | `status` | `UpdateStatus` |
 
-Note: the `service` entity stores capabilities as a JSON text column (`services.capabilities`) rather
-than a typed enum column. The capability set is parsed into `BTreeSet<Capability>` at read time. See
+Note: the `service` entity stores capabilities as a JSON text column (`services.capabilities`) rather than a typed enum column. The capability set is
+parsed into `BTreeSet<Capability>` at read time. See
 [Service Lifecycle -- Capability-based enrollment](service-lifecycle.md#capability-based-enrollment).
 
 ### Re-exports
@@ -1541,8 +1538,8 @@ than a typed enum column. The capability set is parsed into `BTreeSet<Capability
 
 ## SeaORM Integration for Custom Types
 
-When creating new wrapper types (newtypes) for use in SeaORM entity models, implement the following four traits behind the `sea-orm` feature flag
-in `uptrakit-shared-types`. Both `SecretString` and `MaskedEmail` follow this pattern.
+When creating new wrapper types (newtypes) for use in SeaORM entity models, implement the following four traits behind the `sea-orm` feature flag in
+`uptrakit-shared-types`. Both `SecretString` and `MaskedEmail` follow this pattern.
 
 ### Required trait implementations
 
@@ -1628,14 +1625,13 @@ See also: [Secrets Handling and Encryption](../security/secrets-and-encryption.m
 
 ## Database Query Patterns
 
-Paginated list endpoints must never issue per-record queries. Violating this rule produces O(N) database round-trips
-that make the API unusable at scale.
+Paginated list endpoints must never issue per-record queries. Violating this rule produces O(N) database round-trips that make the API unusable at
+scale.
 
 ### Batch loading rule
 
-After fetching a page of N records, collect all unique foreign-key IDs from the page and load related entities in a
-single `is_in(ids)` query. Build a `HashMap<Uuid, …>` for O(1) lookup during response construction. Never call
-`find_by_id` inside a loop.
+After fetching a page of N records, collect all unique foreign-key IDs from the page and load related entities in a single `is_in(ids)` query. Build a
+`HashMap<Uuid, …>` for O(1) lookup during response construction. Never call `find_by_id` inside a loop.
 
 ```rust
 // ✓ Correct — two queries regardless of page size
@@ -1653,9 +1649,9 @@ for record in &records {
 
 ### Tenant-scoped subquery
 
-Use `Expr::in_subquery(…)` or a JOIN for tenant-scoping tables that reference `host_id` (e.g. `update_history`).
-Loading all host IDs into application memory and passing them to `is_in(Vec<Uuid>)` is only acceptable when the
-tenant is guaranteed to have fewer than ~100 rows; for unbounded collections use a subquery:
+Use `Expr::in_subquery(…)` or a JOIN for tenant-scoping tables that reference `host_id` (e.g. `update_history`). Loading all host IDs into application
+memory and passing them to `is_in(Vec<Uuid>)` is only acceptable when the tenant is guaranteed to have fewer than ~100 rows; for unbounded collections
+use a subquery:
 
 ```rust
 let host_subquery = Query::select()
@@ -1668,15 +1664,14 @@ Entity::find().filter(Column::HostId.in_subquery(host_subquery))
 
 ### Scope pre-loaded sets tightly
 
-When pre-loading a lookup set to avoid per-item queries, scope it to the narrowest key available. For example,
-pre-load software ignore rules per `(tenant_id, plugin_config_id)`, not per `tenant_id` alone — the
-per-config set is bounded to what a user has explicitly configured for that one plugin, while the per-tenant set
-can be unbounded.
+When pre-loading a lookup set to avoid per-item queries, scope it to the narrowest key available. For example, pre-load software ignore rules per
+`(tenant_id, plugin_config_id)`, not per `tenant_id` alone — the per-config set is bounded to what a user has explicitly configured for that one
+plugin, while the per-tenant set can be unbounded.
 
 ### Avoid `unwrap_or(0)` on count queries
 
-A silently-zero count on DB failure hides errors. Propagate DB errors with `?` or log and return an explicit error
-response. Do not use `count.unwrap_or(0)` as a silent default.
+A silently-zero count on DB failure hides errors. Propagate DB errors with `?` or log and return an explicit error response. Do not use
+`count.unwrap_or(0)` as a silent default.
 
 ### SQLite transactions that read before writing must use `BEGIN IMMEDIATE`
 
@@ -1688,13 +1683,11 @@ tries to write, SQLite detects that the snapshot is stale and returns `SQLITE_BU
 5) **immediately** — it bypasses `busy_timeout` entirely because retrying cannot help: the
 snapshot can never become current without restarting the transaction.
 
-The symptom is a `database is locked` error with a 2–5 ms latency on an operation that is
-supposed to wait up to 5 seconds. It is easy to miss in testing because it only triggers under
-concurrent load.
+The symptom is a `database is locked` error with a 2–5 ms latency on an operation that is supposed to wait up to 5 seconds. It is easy to miss in
+testing because it only triggers under concurrent load.
 
-**Rule:** Any transaction that **reads rows first and then writes** must be started with
-`BEGIN IMMEDIATE`. This acquires the write lock at `BEGIN` time, before any reads establish a
-snapshot, so the snapshot-staleness race cannot occur.
+**Rule:** Any transaction that **reads rows first and then writes** must be started with `BEGIN IMMEDIATE`. This acquires the write lock at `BEGIN`
+time, before any reads establish a snapshot, so the snapshot-staleness race cannot occur.
 
 ```rust
 use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
@@ -1719,17 +1712,16 @@ let row = Entity::find().one(&txn).await?;
 active_model.update(&txn).await?;  // may fail instantly
 ```
 
-`SqliteTransactionMode::Immediate` is **ignored on Postgres** connections — it is a SQLite-only
-hint, so it is safe to pass unconditionally regardless of which backend is active.
+`SqliteTransactionMode::Immediate` is **ignored on Postgres** connections — it is a SQLite-only hint, so it is safe to pass unconditionally regardless
+of which backend is active.
 
-**Write-only transactions** (DELETE/UPDATE with no prior SELECT inside the same transaction) do
-not need `BEGIN IMMEDIATE`; `busy_timeout` handles the ordinary writer-writer lock contention
-for those.
+**Write-only transactions** (DELETE/UPDATE with no prior SELECT inside the same transaction) do not need `BEGIN IMMEDIATE`; `busy_timeout` handles the
+ordinary writer-writer lock contention for those.
 
 ### Database Pool Migration
 
-`DbPoolReloadable` owns a `tokio::sync::watch` channel that publishes replacement
-`Arc<DbConnHandle>` values when the pool is reloaded. Two patterns apply:
+`DbPoolReloadable` owns a `tokio::sync::watch` channel that publishes replacement `Arc<DbConnHandle>` values when the pool is reloaded. Two patterns
+apply:
 
 **Watch-driven re-read** (for long-lived polling consumers):
 
@@ -1749,18 +1741,16 @@ let rows = MyEntity::find().all(handle.conn()).await?;
 let db = db_rx.borrow().conn().clone();
 ```
 
-Never hold `db_rx.borrow()` across an `.await` point — the read lock blocks
-`watch::Sender::send()`. Clone the `Arc<DbConnHandle>` first, then drop the borrow.
+Never hold `db_rx.borrow()` across an `.await` point — the read lock blocks `watch::Sender::send()`. Clone the `Arc<DbConnHandle>` first, then drop
+the borrow.
 
 ### UpdateStatus grouping helpers
 
-Use `UpdateStatus::unfinished()` and `UpdateStatus::host_blocking()` for status filters — do not
-inline the status arrays at call sites.
+Use `UpdateStatus::unfinished()` and `UpdateStatus::host_blocking()` for status filters — do not inline the status arrays at call sites.
 
-- `unfinished()` — all four non-terminal statuses (Queued, Pending, InProgress, AwaitingRestart).
-  Use for: "does an active row exist for this (host, item)?", state reporting queries.
-- `host_blocking()` — excludes Queued. Use for: "is this host currently occupied by an in-flight
-  update?", host-level serialisation checks.
+- `unfinished()` — all four non-terminal statuses (Queued, Pending, InProgress, AwaitingRestart). Use for: "does an active row exist for this (host,
+  item)?", state reporting queries.
+- `host_blocking()` — excludes Queued. Use for: "is this host currently occupied by an in-flight update?", host-level serialisation checks.
 
 ### Per-item policy override pattern
 
@@ -1772,30 +1762,25 @@ Use the **three-state override** model for per-item policy configuration:
 
 Row-level inheritance is signalled by the absence of a row, not by null field values.
 
-Within a configured override row, a null dimension value inherits the global default for that
-dimension (per-field cascade). For example: an item override with `scaling_mode = delta`,
-`delta_cores = 2`, and `delta_memory_mb = NULL` will use the global default's `delta_memory_mb`
-at runtime. The UI should communicate this by labeling null/empty fields "inherit from global".
+Within a configured override row, a null dimension value inherits the global default for that dimension (per-field cascade). For example: an item
+override with `scaling_mode = delta`, `delta_cores = 2`, and `delta_memory_mb = NULL` will use the global default's `delta_memory_mb` at runtime. The
+UI should communicate this by labeling null/empty fields "inherit from global".
 
-When implementing surfaces for three-state policies: use a 4-value `scaling_mode` selector
-(`inherit` / `none` / mode-specific values) so `FormVisibleWhen`'s single-field condition can
-gate dimension fields without compound logic. Cross-mode field inheritance is forbidden: if the
-effective mode is `delta`, only `delta_*` dimensions cascade from global; `absolute_*` dimensions
-are cleared even if the global has them set.
+When implementing surfaces for three-state policies: use a 4-value `scaling_mode` selector (`inherit` / `none` / mode-specific values) so
+`FormVisibleWhen`'s single-field condition can gate dimension fields without compound logic. Cross-mode field inheritance is forbidden: if the
+effective mode is `delta`, only `delta_*` dimensions cascade from global; `absolute_*` dimensions are cleared even if the global has them set.
 
 ## Exhaustive Enum Dispatch
 
-Wildcard arms in dispatch functions are forbidden. A function that maps enum variants to domain values (timeout,
-routing key, HTTP status code) must enumerate every known variant explicitly — a new variant must not silently
-inherit an arbitrary default.
+Wildcard arms in dispatch functions are forbidden. A function that maps enum variants to domain values (timeout, routing key, HTTP status code) must
+enumerate every known variant explicitly — a new variant must not silently inherit an arbitrary default.
 
 Extend the `#[non_exhaustive]` rule from the "Public Enum Extensibility" section:
 
 - **Closed enum**: remove the wildcard entirely. The compiler enforces exhaustiveness at compile time.
-- **`#[non_exhaustive]` enum** (e.g., `Capability`, `UpdateFinalStatus`): a wildcard is required in external
-  crates, but it must never be silent. Replace `_ => some_default` with a `tracing::warn!` + a documented safe
-  fallback, and replace `_ => unreachable!()` with `tracing::warn!` + early return. Never use `unreachable!()` on
-  values that come from wire or database state.
+- **`#[non_exhaustive]` enum** (e.g., `Capability`, `UpdateFinalStatus`): a wildcard is required in external crates, but it must never be silent.
+  Replace `_ => some_default` with a `tracing::warn!` + a documented safe fallback, and replace `_ => unreachable!()` with `tracing::warn!` + early
+  return. Never use `unreachable!()` on values that come from wire or database state.
 
 ```rust
 // ✓ Correct — unknown profile logged; safe fallback chosen explicitly
@@ -1818,9 +1803,9 @@ _ => unreachable!("unknown ServiceProfile variant"),
 
 ## Parameter Struct Pattern
 
-Functions must not require `#[allow(clippy::too_many_arguments)]`. No Clippy suppression is approved in this
-codebase (AGENTS.md invariant 13). When a function's non-`self` parameter count exceeds Clippy's threshold (7),
-introduce a named grouped struct to batch related scalar or reference parameters:
+Functions must not require `#[allow(clippy::too_many_arguments)]`. No Clippy suppression is approved in this codebase (AGENTS.md invariant 13). When a
+function's non-`self` parameter count exceeds Clippy's threshold (7), introduce a named grouped struct to batch related scalar or reference
+parameters:
 
 ```rust
 struct ProcessDiscoveryArgs<'a> {
@@ -1841,23 +1826,22 @@ async fn process_one_discovery(
 ) -> Result<()> { ... }
 ```
 
-Name the struct after its semantic role (`ProcessDiscoveryArgs`, `CreateServiceArgs`), not a generic label like
-`Params`. The struct should be private to the module unless it is part of a public API.
+Name the struct after its semantic role (`ProcessDiscoveryArgs`, `CreateServiceArgs`), not a generic label like `Params`. The struct should be private
+to the module unless it is part of a public API.
 
 ## Security Audit Logging
 
-Security-relevant mutations must emit semantic audit entries through
-`uptrakit-audit-log` APIs. Do not add new `target: "security_audit"` tracing producers.
+Security-relevant mutations must emit semantic audit entries through `uptrakit-audit-log` APIs. Do not add new `target: "security_audit"` tracing
+producers.
 
-See [Logging — `security_audit` Target](logging.md#security_audit-target) for legacy/deprecation
-notes and runtime filtering guidance.
+See [Logging — `security_audit` Target](logging.md#security_audit-target) for legacy/deprecation notes and runtime filtering guidance.
 
 ### When to use
 
 Emit semantic audit entries for operations that:
 
-- Creates, modifies, or deletes plugin configs containing command-bearing fields
-  (`version_command`, `update_command`, `post_pull_command`, hook `commands`)
+- Creates, modifies, or deletes plugin configs containing command-bearing fields (`version_command`, `update_command`, `post_pull_command`, hook
+  `commands`)
 - Modifies RBAC permissions or role assignments
 - Changes credential-bearing settings (SMTP passwords, OIDC secrets, NATS URLs)
 - Approves or revokes services with credential capabilities
@@ -1894,20 +1878,19 @@ state.audit_emitter.emit_best_effort(entry);
 
 ### Log level rationale
 
-Severity is modeled in `AuditOutcome` and action semantics, not by forcing a dedicated tracing
-target/level convention. `JournaldBackend` emits structured audit events to `uptrakit_audit`.
+Severity is modeled in `AuditOutcome` and action semantics, not by forcing a dedicated tracing target/level convention. `JournaldBackend` emits
+structured audit events to `uptrakit_audit`.
 
 ### V2 deferrals
 
-- `audit_log.filter` and `audit_log.retention_days` remain configuration keys but are not yet a
-  complete per-tenant enforcement surface for semantic producers.
+- `audit_log.filter` and `audit_log.retention_days` remain configuration keys but are not yet a complete per-tenant enforcement surface for semantic
+  producers.
 
 ---
 
 ## Visibility and Module Boundaries
 
-Rust provides four visibility levels. Use the narrowest level that satisfies the actual
-call-site requirements:
+Rust provides four visibility levels. Use the narrowest level that satisfies the actual call-site requirements:
 
 | Scope             | Keyword      | Use when                                                    |
 | ----------------- | ------------ | ----------------------------------------------------------- |
@@ -1918,25 +1901,20 @@ call-site requirements:
 
 ### The `unreachable_pub` lint
 
-The workspace enforces this table via the `unreachable_pub` lint (set to `deny` in
-`[workspace.lints.rust]`). The lint fires whenever a `pub` item is **not reachable**
-through the crate's public module chain. It is self-selecting:
+The workspace enforces this table via the `unreachable_pub` lint (set to `deny` in `[workspace.lints.rust]`). The lint fires whenever a `pub` item is
+**not reachable** through the crate's public module chain. It is self-selecting:
 
-- `pub fn foo()` inside a `mod bar { … }` where `bar` is not re-exported → **fires**
-  (downgrade to `pub(crate)` or `pub(super)`)
-- `pub fn foo()` inside a `pub mod bar { … }` that is re-exported from `lib.rs` → **does not fire**
-  (the item is genuinely reachable from outside the crate)
+- `pub fn foo()` inside a `mod bar { … }` where `bar` is not re-exported → **fires** (downgrade to `pub(crate)` or `pub(super)`)
+- `pub fn foo()` inside a `pub mod bar { … }` that is re-exported from `lib.rs` → **does not fire** (the item is genuinely reachable from outside the
+  crate)
 
-No `#![allow(unreachable_pub)]` (or any other crate-wide or module-wide `#![allow(...)]`)
-should appear anywhere in the workspace.
+No `#![allow(unreachable_pub)]` (or any other crate-wide or module-wide `#![allow(...)]`) should appear anywhere in the workspace.
 
 #### Using `#[allow(...)]` — policy and requirements
 
-Item-level `#[allow(...)]` is permitted **only** when a lint produces a false positive that
-cannot be resolved structurally. The one approved cause in this codebase is **feature-gating**:
-an item that is used only when a specific Cargo feature is enabled will appear unused or
-unreachable in builds that omit that feature, even though it is correctly public/used in the
-intended build.
+Item-level `#[allow(...)]` is permitted **only** when a lint produces a false positive that cannot be resolved structurally. The one approved cause in
+this codebase is **feature-gating**: an item that is used only when a specific Cargo feature is enabled will appear unused or unreachable in builds
+that omit that feature, even though it is correctly public/used in the intended build.
 
 ```rust
 // ✅ Approved — the field is only read when the "metrics" feature is compiled in.
@@ -1945,13 +1923,11 @@ intended build.
 pub counter: u64,
 ```
 
-**Every `#[allow(...)]` must be accompanied by a comment** on the same line or the line
-immediately above it explaining precisely why the suppression is necessary. A bare
-`#[allow(...)]` with no explanation is not permitted and will be rejected in review.
+**Every `#[allow(...)]` must be accompanied by a comment** on the same line or the line immediately above it explaining precisely why the suppression
+is necessary. A bare `#[allow(...)]` with no explanation is not permitted and will be rejected in review.
 
-**`#[allow(...)]` must be placed at the smallest possible scope.** Do not suppress a lint on a
-function, struct, or module when only a single field, binding, or expression triggers it. Place
-the attribute on that specific item instead:
+**`#[allow(...)]` must be placed at the smallest possible scope.** Do not suppress a lint on a function, struct, or module when only a single field,
+binding, or expression triggers it. Place the attribute on that specific item instead:
 
 ```rust
 // ❌ Suppresses the lint for the entire function
@@ -2003,9 +1979,8 @@ fn build_filter(id: Uuid) -> Condition { … }   // or pub(crate) if used in a s
 
 ### Plugin crate rule
 
-Trait implementation methods are implicitly `pub` when required by the trait — do not
-annotate them with an explicit `pub`. Only freestanding helper functions in plugin
-submodules need visibility tightening:
+Trait implementation methods are implicitly `pub` when required by the trait — do not annotate them with an explicit `pub`. Only freestanding helper
+functions in plugin submodules need visibility tightening:
 
 ```rust
 // ✅ Trait impl — no explicit pub needed
@@ -2019,16 +1994,13 @@ pub(crate) fn parse_semver_tag(tag: &str) -> Option<semver::Version> { … }
 
 ### Cross-reference
 
-- [Error Handling](error-handling.md) — public error types follow the same rule: use
-  `pub(crate)` for errors that never cross a crate boundary.
-- [Security](../../security/README.md) — avoid leaking internal types through `pub` that
-  could expose security-sensitive implementation details.
+- [Error Handling](error-handling.md) — public error types follow the same rule: use `pub(crate)` for errors that never cross a crate boundary.
+- [Security](../../security/README.md) — avoid leaking internal types through `pub` that could expose security-sensitive implementation details.
 
 ## Reloadable Trait
 
-Every long-lived subsystem that participates in config reload must implement `Reloadable` (in
-`uptrakit_config_reload::reloadable`). Use the `reloadable_erased_impl!` macro to generate the `ReloadableErased`
-adapter for dynamic dispatch:
+Every long-lived subsystem that participates in config reload must implement `Reloadable` (in `uptrakit_config_reload::reloadable`). Use the
+`reloadable_erased_impl!` macro to generate the `ReloadableErased` adapter for dynamic dispatch:
 
 ```rust
 uptrakit_config_reload::reloadable_erased_impl!(MyReloadable, RuntimeConfigDelta::MySection);
@@ -2044,32 +2016,25 @@ Rules:
 
 ## Reexec Hook Pattern
 
-When a config reload detects an irreversibly-bound key change (e.g. `db.url`, `master_key`,
-`log.path`, embedded-service topology), the coordinator delegates the decision to a `ReexecHook`
-implementation registered at startup.
+When a config reload detects an irreversibly-bound key change (e.g. `db.url`, `master_key`, `log.path`, embedded-service topology), the coordinator
+delegates the decision to a `ReexecHook` implementation registered at startup.
 
 **Rules:**
 
-- The `uptrakit-config-reload` crate defines `ReexecHook` and `ReexecOutcome`; it must not import
-  `triage::decide` or `perform_reexec` from `controller-runtime`. This boundary keeps the shared
-  crate ignorant of process-exec internals.
-- The `controller-runtime` crate implements `ControllerReexecHook` (which calls `triage::decide`
-  and `perform_reexec`) and registers it via `coordinator.set_reexec_hook(...)` before spawning
-  `coordinator.run()`.
-- Capture `current_exe` via `std::env::current_exe()` at startup (before the hook is
-  constructed) and propagate any error through `run_server()`'s `Result` return. Never call
-  `current_exe()` inside the hook — it may fail after a process name change.
-- Listener FDs for `perform_reexec` are captured by pre-binding HTTPS (and PKI when
-  configured) sockets in `run_server()` before spawning server tasks. The raw FD integer is
-  valid after the socket is moved into the server task; `clear_cloexec_raw` uses the integer,
-  not the Rust wrapper.
-- When no `ReexecHook` is registered (e.g. in tests), the coordinator skips the reexec check
-  and proceeds with in-process apply.
+- The `uptrakit-config-reload` crate defines `ReexecHook` and `ReexecOutcome`; it must not import `triage::decide` or `perform_reexec` from
+  `controller-runtime`. This boundary keeps the shared crate ignorant of process-exec internals.
+- The `controller-runtime` crate implements `ControllerReexecHook` (which calls `triage::decide` and `perform_reexec`) and registers it via
+  `coordinator.set_reexec_hook(...)` before spawning `coordinator.run()`.
+- Capture `current_exe` via `std::env::current_exe()` at startup (before the hook is constructed) and propagate any error through `run_server()`'s
+  `Result` return. Never call `current_exe()` inside the hook — it may fail after a process name change.
+- Listener FDs for `perform_reexec` are captured by pre-binding HTTPS (and PKI when configured) sockets in `run_server()` before spawning server
+  tasks. The raw FD integer is valid after the socket is moved into the server task; `clear_cloexec_raw` uses the integer, not the Rust wrapper.
+- When no `ReexecHook` is registered (e.g. in tests), the coordinator skips the reexec check and proceeds with in-process apply.
 
 ## Per-Section Watch Pattern
 
-Config changes flow through `tokio::sync::watch<Arc<SectionConfig>>` channels. Inject receivers at
-construction time; never pass config values directly through function arguments for long-lived subsystems:
+Config changes flow through `tokio::sync::watch<Arc<SectionConfig>>` channels. Inject receivers at construction time; never pass config values
+directly through function arguments for long-lived subsystems:
 
 ```rust
 // In constructor:
@@ -2082,32 +2047,28 @@ Consumers that react to changes (instead of reading on each request) use `rx.cha
 
 ## No Static-Init Config
 
-Do **not** use `lazy_static!` or `OnceLock`/`OnceCell` for configuration values. All config that can
-change at runtime must flow through watch channels. Static init for config creates a stale snapshot that
-bypasses the reload path.
+Do **not** use `lazy_static!` or `OnceLock`/`OnceCell` for configuration values. All config that can change at runtime must flow through watch
+channels. Static init for config creates a stale snapshot that bypasses the reload path.
 
 ## Plugin Constructor Budget
 
-Plugin `from_config()` constructors are called every time the plugin's config changes
-(drop-and-recreate model). Constructors must be O(small):
+Plugin `from_config()` constructors are called every time the plugin's config changes (drop-and-recreate model). Constructors must be O(small):
 
 - Allocate only cheap state (`String`, `Vec<String>`, parsed scalar values).
-- Move expensive resources (`reqwest::Client`, SMTP sessions, compiled regexes) into `Arc`/`OnceLock`
-  outside the plugin struct so they survive plugin replacement.
+- Move expensive resources (`reqwest::Client`, SMTP sessions, compiled regexes) into `Arc`/`OnceLock` outside the plugin struct so they survive plugin
+  replacement.
 - See `crates/plugins/notifications/email/src/plugin.rs` for the reference implementation.
 
 ## File vs. DB Section Assignment
 
-Config key ownership: TOML file owns structural config (listen addresses, DB pool URL, TLS, NATS, zeroconf).
-The `global_settings` DB table owns runtime-tuneable values (audit filter, retention). Per-tenant settings
-remain in the `settings` DB table. The migration `m20260512_000001_drop_file_keys` removes the DB rows that
-moved to TOML.
+Config key ownership: TOML file owns structural config (listen addresses, DB pool URL, TLS, NATS, zeroconf). The `global_settings` DB table owns
+runtime-tuneable values (audit filter, retention). Per-tenant settings remain in the `settings` DB table. The migration
+`m20260512_000001_drop_file_keys` removes the DB rows that moved to TOML.
 
 ## Service Binary/Runtime Boundary
 
-Every Service binary crate (`agent-ssh`, `mqtt`, `scheduler`, …) is a **thin launch shell**.
-All business logic, DB entities, migrations, protocol handling, and crypto helpers live in the
-corresponding `-runtime` crate. See [ADR-0005](../adr/0005-service-binary-runtime-boundary.md).
+Every Service binary crate (`agent-ssh`, `mqtt`, `scheduler`, …) is a **thin launch shell**. All business logic, DB entities, migrations, protocol
+handling, and crypto helpers live in the corresponding `-runtime` crate. See [ADR-0005](../adr/0005-service-binary-runtime-boundary.md).
 
 ### What belongs where
 
@@ -2120,9 +2081,8 @@ corresponding `-runtime` crate. See [ADR-0005](../adr/0005-service-binary-runtim
 
 ### service_migrations()
 
-Runtime crates that own a local DB override `ServiceHandler::service_migrations()`
-(feature-gated via `uptrakit-service-sdk/service-migrations`) to return their migration list.
-The controller calls it as a static method on the concrete handler type at startup:
+Runtime crates that own a local DB override `ServiceHandler::service_migrations()` (feature-gated via `uptrakit-service-sdk/service-migrations`) to
+return their migration list. The controller calls it as a static method on the concrete handler type at startup:
 
 ```rust
 let migrations = AgentSshHandler::service_migrations();
@@ -2133,9 +2093,8 @@ Services without a DB rely on the default `vec![]`.
 
 ### Embedded service construction
 
-The controller constructs the handler with controller-sourced deps (shared DB, state dir,
-pre-generated ECIES keypair), then passes it to `run_embedded_service::<H>`. The handler's
-constructor must not open its own DB connections or read paths from the environment.
+The controller constructs the handler with controller-sourced deps (shared DB, state dir, pre-generated ECIES keypair), then passes it to
+`run_embedded_service::<H>`. The handler's constructor must not open its own DB connections or read paths from the environment.
 
 ```rust
 let handler = AgentSshHandler::new(shared_db, state_dir, AgentSshMode::Embedded, Some(keypair));
@@ -2151,8 +2110,7 @@ Two crates in this workspace are published to crates.io:
 - `uptrakit-service-sdk`
 - `uptrakit-openapi-client`
 
-Their transitive dep trees (including `[dev-dependencies]` of any crate they
-reach) must NOT contain any of:
+Their transitive dep trees (including `[dev-dependencies]` of any crate they reach) must NOT contain any of:
 
 - `uptrakit-audit-log`
 - `uptrakit-audit-log-derive`
@@ -2160,18 +2118,14 @@ reach) must NOT contain any of:
 - `uptrakit-tenant-db`
 - `uptrakit-crypto`
 
-These five crates are workspace-internal database and encryption plumbing. They
-have no external consumers and must not be republished to crates.io.
+These five crates are workspace-internal database and encryption plumbing. They have no external consumers and must not be republished to crates.io.
 
 ### Why this matters
 
-`cargo publish` (and crates.io's manifest validator) check every named dep entry
-in the published manifest — including `[dev-dependencies]` that carry a `version`
-field, and optional deps — against the registry. A dev-dep on `uptrakit-audit-log`
-from any crate that the publishable crates transitively reach is enough to force
-`audit-log` onto crates.io, and `audit-log` in turn forces `shared-db`, which
-forces `crypto` and `tenant-db`. The chain is load-bearing on every edge: cutting
-any link breaks all of it.
+`cargo publish` (and crates.io's manifest validator) check every named dep entry in the published manifest — including `[dev-dependencies]` that carry
+a `version` field, and optional deps — against the registry. A dev-dep on `uptrakit-audit-log` from any crate that the publishable crates transitively
+reach is enough to force `audit-log` onto crates.io, and `audit-log` in turn forces `shared-db`, which forces `crypto` and `tenant-db`. The chain is
+load-bearing on every edge: cutting any link breaks all of it.
 
 ### Enforcement
 
@@ -2180,26 +2134,18 @@ Two integration tests guard this rule:
 - `crates/shared/service-sdk/tests/no_workspace_db_deps.rs`
 - `crates/shared/openapi-client/tests/no_workspace_db_deps.rs`
 
-Each test walks the resolved cargo metadata graph (default features and
-`--all-features`) and panics if any banned name appears, naming the dep chain
+Each test walks the resolved cargo metadata graph (default features and `--all-features`) and panics if any banned name appears, naming the dep chain
 back to the publishable crate.
 
 ### Why these five and not other internal crates?
 
-Most workspace-internal crates (`uptrakit-build-info`, every plugin, every
-runtime, etc.) inherit `publish = true` from Cargo's defaults but are kept off
-crates.io by `release-plz.toml` declaring `release = false`. That is sufficient
-because release-plz is the only mechanism that publishes from this workspace.
-These five crates additionally carry the belt-and-suspenders `publish = false`
-in their own `Cargo.toml` because they are the unique failure case where the
-squat chain demonstrably reformed once before; locking them in their manifests
-defends against a contributor running `cargo publish -p uptrakit-shared-db`
-directly (bypassing release-plz) and resurrecting the chain.
+Most workspace-internal crates (`uptrakit-build-info`, every plugin, every runtime, etc.) inherit `publish = true` from Cargo's defaults but are kept
+off crates.io by `release-plz.toml` declaring `release = false`. That is sufficient because release-plz is the only mechanism that publishes from this
+workspace. These five crates additionally carry the belt-and-suspenders `publish = false` in their own `Cargo.toml` because they are the unique
+failure case where the squat chain demonstrably reformed once before; locking them in their manifests defends against a contributor running
+`cargo publish -p uptrakit-shared-db` directly (bypassing release-plz) and resurrecting the chain.
 
-If you find yourself wanting to add one of these crates to anything in the
-service-sdk or openapi-client subtree (including dev-deps), stop and think about
-what you're actually testing. The wire-side fix for the historical version of
-this rule replaced two `AuditActionType::*` constants with a synthetic
-`TEST_ACTION_TYPE` constant in `crates/shared/wire/src/tests.rs` — the test was
-asserting serde round-trip shape, not catalog correctness, so the constant
-binding added no coverage.
+If you find yourself wanting to add one of these crates to anything in the service-sdk or openapi-client subtree (including dev-deps), stop and think
+about what you're actually testing. The wire-side fix for the historical version of this rule replaced two `AuditActionType::*` constants with a
+synthetic `TEST_ACTION_TYPE` constant in `crates/shared/wire/src/tests.rs` — the test was asserting serde round-trip shape, not catalog correctness,
+so the constant binding added no coverage.
