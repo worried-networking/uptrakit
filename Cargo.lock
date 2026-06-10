@@ -7539,12 +7539,15 @@ name = "uptrakit-functional-tests"
 version = "0.0.1"
 dependencies = [
  "async-trait",
+ "cargo_metadata",
  "httpmock",
+ "proc-macro2",
  "rootcause",
  "sea-orm",
  "sea-orm-migration",
  "serde",
  "serde_json",
+ "syn 2.0.117",
  "time",
  "tokio",
  "toml",
