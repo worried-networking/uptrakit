@@ -283,8 +283,9 @@ impl Drop for AttemptGuard<'_> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
 
+    use parking_lot::Mutex;
     use tracing_subscriber::layer::SubscriberExt;
 
     use super::*;
@@ -298,19 +299,10 @@ mod tests {
     impl std::io::Write for ChannelWriter {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
             let s = String::from_utf8_lossy(buf).into_owned();
-            #[expect(
-                clippy::io_other_error,
-                reason = "PoisonError doesn't implement Send+Sync for Error::other()"
-            )]
-            {
-                self.0
-                    .lock()
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?
-                    .send(s)
-                    .map_err(|_e| {
-                        std::io::Error::new(std::io::ErrorKind::BrokenPipe, "receiver dropped")
-                    })?;
-            }
+            self.0
+                .lock()
+                .send(s)
+                .map_err(|_e| std::io::Error::other("receiver dropped"))?;
             Ok(buf.len())
         }
         fn flush(&mut self) -> std::io::Result<()> {
