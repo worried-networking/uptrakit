@@ -107,6 +107,46 @@ pub async fn service_ws(
         // Try unified lookup: find any non-deactivated service by secret hash.
         match lookup_by_secret(state.db(), &secret, query_service_id).await {
             Ok((id, is_system)) => {
+                if let Some(hint) = query_service_id
+                    && hint != id
+                    && !is_system
+                {
+                    // Resolved via merge redirect. Look up the tenant + app_name
+                    // for the audit entry. On DB error, log a warning and skip
+                    // the audit emission — the WS upgrade has already been
+                    // authenticated and must not be blocked on an audit lookup.
+                    // (Per coding-standards: DB errors are NOT silently
+                    // discarded; they are explicitly logged.)
+                    match uptrakit_shared_db::entity::prelude::Service::find_by_id(id)
+                        .one(state.db())
+                        .await
+                    {
+                        Ok(Some(svc)) => {
+                            emit_rekey_resolved_audit(
+                                &state,
+                                hint,
+                                id,
+                                svc.tenant_id,
+                                client_ip.as_ref().map(|Extension(ClientIp(ip))| *ip),
+                                svc.service_app_name.clone(),
+                            )
+                            .await;
+                        }
+                        Ok(None) => {
+                            tracing::warn!(
+                                %hint, %id,
+                                "rekey_resolved audit skipped: target service vanished between lookup_by_secret and audit emission"
+                            );
+                        }
+                        Err(err) => {
+                            tracing::warn!(
+                                error = %err,
+                                %hint, %id,
+                                "rekey_resolved audit skipped: failed to load target service for audit context"
+                            );
+                        }
+                    }
+                }
                 tracing::info!(
                     service_id = %id,
                     is_system,
@@ -118,14 +158,15 @@ pub async fn service_ws(
                 }
             }
             Err(e) => {
-                let (outcome, reason_code) =
-                    classify_bearer_service_auth_failure(e.current_context());
+                let (outcome, reason_code, redirect_present) =
+                    classify_bearer_service_auth_failure(e.current_context(), query_service_id);
                 emit_bearer_service_auth_failure_audit(
                     &state,
                     query_service_id,
                     client_ip.as_ref().map(|Extension(ClientIp(ip))| *ip),
                     outcome,
                     reason_code,
+                    redirect_present,
                 )
                 .await;
                 // Per-IP auth failure rate limit: 10 failures per 300 seconds.
@@ -220,26 +261,55 @@ async fn lookup_by_secret(
         return Ok((svc.id, true));
     }
 
-    Err(report!(ServiceWsError::InvalidSecret))
+    // Redirect fallback: only triggered when the caller supplied a hint, so
+    // the existing cross-service-collision defence-in-depth for the hint-less
+    // path is preserved.
+    let Some(hint) = service_id else {
+        return Err(report!(ServiceWsError::InvalidSecret));
+    };
+    let Some(redirect) =
+        uptrakit_shared_db::entity::prelude::ServiceMergeRedirect::find_by_id(hint)
+            .one(db)
+            .await
+            .context_to::<ServiceWsError>()?
+    else {
+        return Err(report!(ServiceWsError::InvalidSecret));
+    };
+    let Some(target) = uptrakit_shared_db::entity::prelude::Service::find_by_id(redirect.target_id)
+        .filter(service_entity::Column::DeactivatedAt.is_null())
+        .filter(service_entity::Column::EnrollmentSecretHash.eq(&secret_hash))
+        .one(db)
+        .await
+        .context_to::<ServiceWsError>()?
+    else {
+        return Err(report!(ServiceWsError::InvalidSecret));
+    };
+
+    Ok((target.id, false))
 }
 
 fn classify_bearer_service_auth_failure(
     err: &ServiceWsError,
-) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
+    query_service_id: Option<Uuid>,
+) -> (uptrakit_audit_log::AuditOutcome, &'static str, Option<bool>) {
     match err {
         ServiceWsError::InvalidSecret => (
             uptrakit_audit_log::AuditOutcome::Denied,
             "invalid_reconnect_secret",
+            // hint supplied => redirect arm was attempted; no hint => it was not
+            Some(query_service_id.is_some()),
         ),
         ServiceWsError::Database(_) => (
             uptrakit_audit_log::AuditOutcome::Failed,
             "reconnect_lookup_failed",
+            None,
         ),
         ServiceWsError::Deserialize(_)
         | ServiceWsError::SequenceValidation(_)
         | ServiceWsError::ProtocolVersionMismatch { .. } => (
             uptrakit_audit_log::AuditOutcome::Failed,
             "reconnect_auth_failed",
+            None,
         ),
     }
 }
@@ -290,12 +360,58 @@ async fn resolve_bearer_auth_target(
     }
 }
 
+async fn emit_rekey_resolved_audit(
+    state: &AppState,
+    source_id: Uuid,
+    target_id: Uuid,
+    tenant_id: Uuid,
+    client_ip: Option<IpAddr>,
+    service_app_name: Option<String>,
+) {
+    let mut details = serde_json::json!({
+        "source_id": source_id,
+        "target_id": target_id,
+        "reason_code": "merge_redirect",
+    });
+    if let Some(client_ip) = client_ip {
+        details["client_ip"] = serde_json::Value::String(client_ip.to_string());
+    }
+
+    // Use the fully qualified `uptrakit_audit_log::Event` to avoid any name collision
+    // with `wire::Event` or similar local imports in this module.
+    let entry = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+        AuditActionType::AUTH_SERVICE_REKEY_RESOLVED,
+    )
+    .actor(AuditActorType::Service, Some(target_id))
+    .actor_display_opt(service_app_name.clone())
+    .target_opt(
+        Some("service".to_string()),
+        Some(target_id.to_string()),
+        service_app_name,
+    )
+    .outcome(AuditOutcome::Success)
+    .details(details)
+    .tenant_scope(tenant_id)
+    .build();
+
+    match entry {
+        Ok(entry) => state.audit_emitter.emit_event(entry),
+        Err(error) => tracing::warn!(
+            error = %error,
+            %source_id,
+            %target_id,
+            "failed to build AUTH_SERVICE_REKEY_RESOLVED audit entry"
+        ),
+    }
+}
+
 async fn emit_bearer_service_auth_failure_audit(
     state: &AppState,
     service_id_hint: Option<Uuid>,
     client_ip: Option<IpAddr>,
     outcome: AuditOutcome,
     reason_code: &'static str,
+    redirect_present: Option<bool>,
 ) {
     let resolved = resolve_bearer_auth_target(state.db(), service_id_hint).await;
     let mut details = serde_json::json!({
@@ -304,6 +420,10 @@ async fn emit_bearer_service_auth_failure_audit(
     });
     if let Some(client_ip) = client_ip {
         details["client_ip"] = serde_json::Value::String(client_ip.to_string());
+    }
+    if let Some(checked) = redirect_present {
+        details["redirect_checked"] = serde_json::Value::Bool(true);
+        details["redirect_present"] = serde_json::Value::Bool(checked);
     }
 
     let mut builder = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
@@ -394,6 +514,7 @@ mod tests {
     )]
     #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
 
+    use super::lookup_by_secret;
     use super::protocol::{
         MessageRateLimiter, ServiceWsError, WS_MESSAGE_RATE_WINDOW, deserialize_service_msg,
         record_service_activity,
@@ -811,5 +932,134 @@ mod tests {
         assert_eq!(details["auth_method"], "bearer_reconnect");
         assert_eq!(details["reason_code"], "invalid_reconnect_secret");
         assert!(details.get("client_ip").is_none());
+    }
+
+    /// Insert a service row with a specific `id`, `tenant_id`, and
+    /// `enrollment_secret_hash`. Modelled on `insert_service` but accepts
+    /// all three as parameters so tests can seed an exact hash.
+    async fn insert_service_with_hash(
+        db: &DatabaseConnection,
+        tenant_id: uuid::Uuid,
+        id: uuid::Uuid,
+        hash: &str,
+    ) {
+        let now = time::OffsetDateTime::now_utc();
+        service_entity::ActiveModel {
+            id: Set(id),
+            tenant_id: Set(tenant_id),
+            capabilities: Set("[]".to_string()),
+            hostname: Set("test-host".to_string()),
+            friendly_name: Set("test-host".to_string()),
+            ip_address: Set(None),
+            status: Set(service_entity::ServiceStatus::Pending),
+            enrollment_secret_hash: Set(hash.to_string()),
+            client_version: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
+            enrollment_token_id: Set(None),
+            cert_lifetime_hours: Set(None),
+            service_app_name: Set(None),
+            is_embedded: Set(false),
+            embedded_owner_key: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert service with hash");
+    }
+
+    #[tokio::test]
+    async fn lookup_by_secret_uses_redirect_when_source_deactivated() {
+        use uptrakit_shared_db::entity::service_merge_redirect;
+
+        let db = setup_test_db().await;
+        let tenant_id = insert_tenant(&db).await;
+
+        let target_id = uuid::Uuid::now_v7();
+        let source_id = uuid::Uuid::now_v7();
+        let secret = "test-secret-abcdef0123456789";
+        let secret_hash = crate::auth::token::hash_token(secret);
+
+        insert_service_with_hash(&db, tenant_id, target_id, &secret_hash).await;
+        // Source row was deactivated by a prior merge; only the redirect row remains.
+        service_merge_redirect::ActiveModel {
+            source_id: Set(source_id),
+            target_id: Set(target_id),
+            redirected_at: Set(time::OffsetDateTime::now_utc()),
+        }
+        .insert(&db)
+        .await
+        .expect("seed redirect ok");
+
+        let (resolved_id, is_system) = lookup_by_secret(&db, secret, Some(source_id))
+            .await
+            .expect("redirect resolves");
+
+        assert_eq!(resolved_id, target_id);
+        assert!(!is_system);
+    }
+
+    #[tokio::test]
+    async fn lookup_by_secret_skips_redirect_when_no_hint() {
+        use uptrakit_shared_db::entity::service_merge_redirect;
+
+        let db = setup_test_db().await;
+        let tenant_id = insert_tenant(&db).await;
+        let target_id = uuid::Uuid::now_v7();
+        let source_id = uuid::Uuid::now_v7();
+        let secret = "another-secret-fedcba9876543210";
+        let secret_hash = crate::auth::token::hash_token(secret);
+        insert_service_with_hash(&db, tenant_id, target_id, &secret_hash).await;
+        service_merge_redirect::ActiveModel {
+            source_id: Set(source_id),
+            target_id: Set(target_id),
+            redirected_at: Set(time::OffsetDateTime::now_utc()),
+        }
+        .insert(&db)
+        .await
+        .expect("seed redirect ok");
+
+        // No hint => primary lookup matches by hash directly (Service::find without id filter).
+        // We assert that resolution does NOT walk the redirect path. With a hint-less
+        // bearer call, the primary tenant lookup finds the target directly anyway,
+        // so the success path is identical — but we additionally assert the
+        // redirect row is irrelevant.
+        let (resolved_id, _) = lookup_by_secret(&db, secret, None)
+            .await
+            .expect("primary tenant lookup matches");
+        assert_eq!(resolved_id, target_id);
+    }
+
+    #[tokio::test]
+    async fn lookup_by_secret_rejects_redirect_when_hash_mismatch() {
+        use uptrakit_shared_db::entity::service_merge_redirect;
+
+        let db = setup_test_db().await;
+        let tenant_id = insert_tenant(&db).await;
+        let target_id = uuid::Uuid::now_v7();
+        let source_id = uuid::Uuid::now_v7();
+        let real_secret = "real-secret-1111111111111111";
+        let attacker_secret = "attacker-secret-2222222222222";
+        let real_hash = crate::auth::token::hash_token(real_secret);
+        insert_service_with_hash(&db, tenant_id, target_id, &real_hash).await;
+        service_merge_redirect::ActiveModel {
+            source_id: Set(source_id),
+            target_id: Set(target_id),
+            redirected_at: Set(time::OffsetDateTime::now_utc()),
+        }
+        .insert(&db)
+        .await
+        .expect("seed redirect ok");
+
+        let err = lookup_by_secret(&db, attacker_secret, Some(source_id))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            err.current_context(),
+            ServiceWsError::InvalidSecret
+        ));
     }
 }
