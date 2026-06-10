@@ -83,6 +83,13 @@ impl Backoff {
     /// via `reset` or `escalate` before drop. Drop of an unresolved guard
     /// emits a `warn!` log; state is not mutated.
     pub fn attempt(&mut self) -> AttemptGuard<'_>;
+
+    /// Sample a `base + jitter` delay **independent of `current`** —
+    /// returns a value in `[base, base + base/4]` regardless of how
+    /// escalated the backoff state is. Use when a caller has just resolved
+    /// a guard via `reset()` (so `current == base`) and needs the post-reset
+    /// delay without spinning a fake `attempt()`. Re-samples jitter per call.
+    pub fn sample_base_jitter(&self) -> Duration;
 }
 
 #[must_use = "AttemptGuard must be resolved via .reset() or .escalate()"]
@@ -144,13 +151,13 @@ The library leans on two layers — compile-time first, runtime as a safety net.
 
 2. **Runtime** — `Drop` triggers when a caller exits a scope without resolving the guard via a path the compile-time lints can't see: `?` propagation
    between `attempt()` and resolution, panic-driven unwind, or any future site where the borrow checker permits a drop the lints didn't catch.
-   - `debug_assert!(false, ...)` panics in `cargo test` and debug builds. CI runs catch refactors that move a fallible call between `attempt()` and
-     the resolution verbs.
-   - Release builds skip the assert and **do not mutate state** — `current` is unchanged on unresolved drop. This is deliberate: silently escalating
-     on every `?`-driven early-return would recreate the exact symptom this spec fixes (inflated delay after a healthy cycle, source unclear to the
-     operator).
-   - `tracing::warn!` always fires (debug and release) so a production incident at least leaves a breadcrumb in logs.
-   - `!std::thread::panicking()` short-circuits during unwind to avoid double-panic.
+   - **No state mutation** — `current` is unchanged on unresolved drop. Silently escalating on every `?`-driven early-return would recreate the exact
+     symptom this spec fixes (inflated delay after a healthy cycle, source unclear to the operator).
+   - `tracing::warn!` is the runtime backstop, always emitted (debug and release), so a production incident leaves a breadcrumb in logs.
+   - `!std::thread::panicking()` short-circuits during unwind to avoid noisy logging mid-panic.
+   - The plan implementing this spec adds a workspace syn-AST test (functional-tests) that statically forbids `?` between `attempt()` and resolution —
+     compile-time enforcement of the case the lints miss. No runtime `debug_assert!` is needed because the syn-AST test catches the same pattern
+     before the build ships.
    - Test-subscriber note: the unit test that captures the `Drop` `warn!` record must use a non-reentrant `tracing` subscriber (e.g. the
      `tracing-subscriber` `fmt` layer in unbuffered mode, or a channel-based subscriber with `try_send`). A subscriber that holds a `Mutex` across the
      event handler can deadlock if a future code path drops an `AttemptGuard` from inside a `tracing` event.
@@ -196,27 +203,26 @@ never see a live guard, so no `Drop` warn fires on clean exit, and no `cancel()`
 Common shape: construct the guard at the point of decision; resolve before sleeping; rely on existing error predicates / outcome match arms to choose
 the verb.
 
-| Site                                             | Verb mapping                                                                                                                                                                         |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `lifecycle.rs:331` enrollment                    | `reset` on `Ok(())`; `reset` on `is_receive_closed_report`; `escalate` on `is_transient_network_report`; uncategorized Err returns without taking the backoff path                   |
-| `lifecycle.rs:481` reconnect (transient Err arm) | `reset` on `LoopError::ReceiveClosed`; `escalate` on `LoopError::TransientNetwork`                                                                                                   |
-| `lifecycle.rs:481` reconnect (`Ok(outcome)` arm) | `backoff.attempt().reset()` one-liner replaces today's `reset()`                                                                                                                     |
-| `lifecycle.rs:481` `LoopOutcome::Disconnected`   | Two-guard: first `attempt().reset()` (rewinds prior cycle), then `let g = attempt(); let d = g.sample_delay(); g.reset(); sleep(d).await` to preserve today's `base + jitter` timing |
-| `mqtt_client.rs:439` ConnAck                     | `backoff.attempt().reset()` one-liner replaces today's `reset()`                                                                                                                     |
-| `mqtt_client.rs:478` poll Err                    | `escalate()` (poll Err is always fast-fail in the rumqttc model)                                                                                                                     |
-| `nats_transport.rs:201` Ok fetch                 | `backoff.attempt().reset()` one-liner                                                                                                                                                |
-| `nats_transport.rs:205` Err fetch                | `escalate()`                                                                                                                                                                         |
-| `nats/connection.rs:54` startup connect          | `reset` on connect Ok (returns from fn); `escalate` per attempt                                                                                                                      |
-| `npm/releases.rs:18` fetch retry                 | `reset` on terminal Ok / 404; `escalate` on retryable Err                                                                                                                            |
-| `version_check.rs:535` retry helper              | `reset` on `Ok(v)`; `escalate` on retryable Err                                                                                                                                      |
+| Site                                             | Verb mapping                                                                                                                                                                                      |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lifecycle.rs:331` enrollment                    | `reset` on `Ok(())`; `reset` on `is_receive_closed_report`; `escalate` on `is_transient_network_report`; uncategorized Err returns without taking the backoff path                                |
+| `lifecycle.rs:481` reconnect (transient Err arm) | `reset` on `LoopError::ReceiveClosed`; `escalate` on `LoopError::TransientNetwork`                                                                                                                |
+| `lifecycle.rs:481` reconnect (`Ok(outcome)` arm) | `backoff.attempt().reset()` one-liner replaces today's `reset()`                                                                                                                                  |
+| `lifecycle.rs:481` `LoopOutcome::Disconnected`   | After the upstream `Ok(outcome)` arm has resolved its guard via `reset()`, sleep `backoff.sample_base_jitter()` to preserve today's `base + jitter` timing without spinning up a fake `attempt()` |
+| `mqtt_client.rs:439` ConnAck                     | `backoff.attempt().reset()` one-liner replaces today's `reset()`                                                                                                                                  |
+| `mqtt_client.rs:478` poll Err                    | `escalate()` (poll Err is always fast-fail in the rumqttc model)                                                                                                                                  |
+| `nats_transport.rs:201` Ok fetch                 | `backoff.attempt().reset()` one-liner                                                                                                                                                             |
+| `nats_transport.rs:205` Err fetch                | `escalate()`                                                                                                                                                                                      |
+| `nats/connection.rs:54` startup connect          | `reset` on connect Ok (returns from fn); `escalate` per attempt                                                                                                                                   |
+| `npm/releases.rs:18` fetch retry                 | Success / 404 paths `return` from inside the loop with no guard (fresh `Backoff` per call); `escalate` per retryable Err branch                                                                   |
+| `version_check.rs:535` retry helper              | Success path `return Ok(v)` with no guard (fresh `Backoff` per call); `escalate` per retryable Err                                                                                                |
 
 Notes on table entries that have surprises in the existing code:
 
 - `lifecycle.rs:481` reconnect loop wraps its `match` over `run_event_loop` result with `reconnect_backoff.reset()` on the `Ok(outcome)` arm _before_
-  matching on `outcome`. That is why `LoopOutcome::Disconnected` in the table reads "sleep `backoff.base()`" rather than "sleep the prior cap" — the
-  upstream reset has already fired by the time the inner match reaches `Disconnected`. With the guard pattern, replace the upstream reset with
-  `backoff.attempt().reset()` immediately on entering the `Ok(outcome)` arm; the inner `Disconnected` arm then explicitly sleeps `backoff.base()` to
-  preserve today's timing.
+  matching on `outcome`. With the guard pattern, replace the upstream reset with `backoff.attempt().reset()` immediately on entering the `Ok(outcome)`
+  arm; the inner `Disconnected` arm then sleeps `backoff.sample_base_jitter()` (which samples `base + jitter` without changing state) to preserve
+  today's `next_delay()`-after-reset timing without spinning a fake `attempt()` cycle.
 - `nats/connection.rs:54` uses a labeled `break 'connect c` on success from inside a `for attempt in 1..=MAX_ATTEMPTS` loop. The guard for the
   successful attempt must be resolved via `reset()` **before** the labeled break, otherwise the guard's `Drop` fires en route to the break and
   escalates a successful connect.
@@ -286,6 +292,8 @@ In `crates/shared/backoff/src/lib.rs`:
 - `dropping_unresolved_guard_during_panic_does_not_warn` — wrap in `std::panic::catch_unwind`; verify the `!std::thread::panicking()` guard suppresses
   the warn during unwind.
 - `sample_delay_does_not_advance_state` — multiple peeks return values in the expected range; state unchanged.
+- `sample_base_jitter_samples_base_plus_jitter_without_state_change` — confirms `Backoff::sample_base_jitter()` returns a value in
+  `[base, base + base/4]`, state unchanged after, consecutive calls return different values (jitter re-sampled).
 - `bug_regression_reset_at_cap_returns_base` — escalate via repeated `escalate()` until cap, then `reset()`, then `sample_delay()` returns base. Locks
   in the user's reported scenario.
 

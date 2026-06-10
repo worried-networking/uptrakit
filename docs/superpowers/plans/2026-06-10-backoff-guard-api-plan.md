@@ -33,14 +33,19 @@ state in lockstep — landing them as separate commits leaves intermediate non-c
 
 - [ ] Open `crates/shared/backoff/src/lib.rs`.
 - [ ] Add `#![warn(missing_docs)]` at the crate root (per snapshot rule: published crate must expose rustdoc).
+- [ ] Add a `//!` module-level doc block at the crate root explaining the `reset`/`escalate` verb naming and the rename from the prior
+      `Backoff::reset()` free method. Cite the spec date (`2026-06-10-backoff-guard-api-design.md`). Six-month-out reviewers reading `grep reset`
+      results across the workspace will see the guard method and the (now-deleted) free method's history together; the module doc points them at the
+      design rationale instead of leaving them to reconstruct it.
 - [ ] Add `#[non_exhaustive]` to the `Backoff` struct (snapshot Binding Rule: extensible public structs in shared crates).
 - [ ] Rewrite `impl Backoff`:
   - Keep `pub fn new(base: Duration, max: Duration) -> Self`.
   - Add `pub fn attempt(&mut self) -> AttemptGuard<'_>`.
+  - Add `pub fn sample_base_jitter(&self) -> Duration` — read-only sampler returning `base + jitter`. Used by `LoopOutcome::Disconnected` to preserve
+    today's `reset()` + `next_delay()` timing without spinning a no-op `attempt()` cycle just to read the delay. Re-samples jitter per call (document
+    this).
   - **Delete** `pub fn next_delay(&mut self) -> Duration`.
-  - **Delete** `pub fn reset(&mut self)`.
-  - **Do NOT add `Backoff::base()` accessor** (earlier draft proposed it; YAGNI — see Task 4.2 for the two-guard pattern that preserves jitter on
-    `LoopOutcome::Disconnected` without needing a base getter).
+  - **Delete** `pub fn reset(&mut self)` (the free method; the guard's `reset(self)` replaces it).
 - [ ] Add the `AttemptGuard<'a>` type:
 
   ```rust
@@ -73,10 +78,10 @@ state in lockstep — landing them as separate commits leaves intermediate non-c
   **No state mutation in release** — deliberate. Escalating on every unresolved drop would recreate the user-visible symptom (inflated delay after a
   healthy cycle) under any `?`-driven early-return that the lints miss.
 
-  **No `debug_assert!` either** — the workspace no-`panic!` Binding Rule doesn't carve out for `debug_assert!`; even if it did, the assertion is
-  redundant with Task 4.8's compile-time lint that catches the same pattern statically. Loudness lives in three places: (a) compile-time lints
-  (`unused_must_use`, `let_underscore_must_use`); (b) Task 4.8 syn-AST test; (c) the dedicated unit test
-  `dropping_unresolved_guard_warns_and_does_not_mutate_state` that asserts both the warn record and the no-mutation invariant.
+  **No `debug_assert!` either** — workspace no-`panic!` Binding Rule doesn't carve out for `debug_assert!`, and Task 4.8's compile-time lint catches
+  the same pattern statically. Loudness lives in three places: (a) compile-time lints (`unused_must_use`, `let_underscore_must_use`); (b) Task 4.8
+  syn-AST test; (c) the dedicated unit test `dropping_unresolved_guard_warns_and_does_not_mutate_state` that asserts both the warn record and the
+  no-mutation invariant.
 
 ### Task 1.2 — Rustdoc on every public item
 
@@ -102,6 +107,8 @@ state in lockstep — landing them as separate commits leaves intermediate non-c
   - `dropping_unresolved_guard_during_panic_does_not_warn` — `std::panic::catch_unwind(|| { let g = b.attempt(); panic!("inner"); });` — verify outer
     catch_unwind returns Err AND no `warn` record was emitted (the `!std::thread::panicking()` guard suppresses logging during unwind).
   - `sample_delay_does_not_advance_state` — call multiple times, observe values in expected range, state unchanged after.
+  - `sample_base_jitter_samples_base_plus_jitter_without_state_change` — `Backoff::sample_base_jitter` returns a value in `[base, base + base/4]`;
+    state unchanged after; consecutive calls return different values (jitter re-sampled).
   - `bug_regression_reset_at_cap_returns_base` — repeated `escalate()` until `current == max`; then `reset()`; then a fresh `attempt().sample_delay()`
     returns in the base+jitter range.
   - `borrow_checker_prevents_concurrent_guards` — `compile_fail` doc test holding two `attempt()` guards simultaneously.
@@ -202,16 +209,31 @@ state in lockstep — landing them as separate commits leaves intermediate non-c
   - `is_cancelled_report(&e)` arm: `return Ok(())` — no guard constructed.
   - Catch-all `Err(e)` arm (fatal): `return Err(e)` — no guard constructed.
 - [ ] Verify with `cargo check -p uptrakit-service-sdk`.
-- [ ] Add classification test. **Location rule** (applies to every Phase 4 classification test): if the target file already has an inline
-      `#[cfg(test)] mod tests { ... }` block, add the test there. If not, create a sibling integration-test file under the crate's `tests/` directory
-      following the existing `crates/shared/service-sdk/tests/no_workspace_db_deps.rs` pattern. Do not introduce a third pattern. For `lifecycle.rs`:
-      inspect the file first; today it has an inline `#[cfg(test)] mod tests` block at the bottom — add the test there.
-  - Construct an `EnrollmentError` of each relevant variant.
-  - Assert that for `ReceiveClosed` the loop calls `reset` (observable via `enrollment_backoff.attempt().sample_delay()` returning base-range value).
-  - Assert that for a pre-upgrade `TransientNetwork` variant the loop calls `escalate` (observable via cap-range value after escalation).
-  - Note: if `do_enrollment` is hard to mock, factor the classification into a small
-    `classify_enrollment_error(&Report<EnrollmentError>) -> EnrollmentOutcome` helper enum (`Succeeded` / `PartialProgress` / `Failed` / `Fatal`) and
-    unit-test the helper. The loop body is then `match classify(...) { ... }`.
+- [ ] **Mandatory classifier-fn extraction** (applies to all Phase 4 sites; supersedes earlier "just write a test" guidance): for every migrated site,
+      extract the error-to-verb mapping into a small named helper function. Concrete shape:
+
+  ```rust
+  /// audit decision documented here, not in inline comments
+  fn classify_enrollment_error(e: &Report<EnrollmentError>) -> EnrollmentOutcome { ... }
+
+  #[derive(Debug, PartialEq)]
+  enum EnrollmentOutcome { Ok, Healthy, Unhealthy, Cancelled, Fatal }
+  // Healthy → guard.reset() ; Unhealthy → guard.escalate()
+  ```
+
+  The migration body calls `match classify(...) { ... }` instead of inline `if … else if … else`. The audit rationale lives in `///` doc on the
+  helper, not in `//` inline comments. **Why this matters**: inline comments rot; future maintainers add new error variants and the existing
+  single-branch test still passes. With the helper extracted, the test must be **exhaustive** — every variant of the source enum must produce a
+  defined `EnrollmentOutcome`, and the test asserts the verb mapping per variant.
+
+- [ ] Add classification test for the helper:
+  - **Test location rule**: if the target file already has an inline `#[cfg(test)] mod tests { ... }` block, add the test there. Otherwise create a
+    sibling integration-test file under the crate's `tests/` directory following the existing
+    `crates/shared/service-sdk/tests/no_workspace_db_deps.rs` pattern.
+  - Construct each variant of the input error enum (or each branch case) and assert the helper returns the expected `Outcome`. Match must be
+    exhaustive — new variants force a new test case.
+  - Verify: `ReceiveClosed` → `Healthy` (mapping to `reset`); `TransientNetwork` → `Unhealthy` (mapping to `escalate`); cancellation predicate →
+    `Cancelled`; uncategorized → `Fatal`.
 
 ### Task 4.2 — Migrate `lifecycle.rs:481` reconnect loop
 
@@ -220,21 +242,21 @@ state in lockstep — landing them as separate commits leaves intermediate non-c
   - **`Err(e)` arm:** split `LoopError::TransientNetwork(_) | LoopError::ReceiveClosed` into two arms:
     - `LoopError::ReceiveClosed` → guard + `reset()`.
     - `LoopError::TransientNetwork(_)` → guard + `escalate()`.
-  - **`LoopOutcome::Disconnected` arm** (line 625): replace `let delay = reconnect_backoff.next_delay();` with a two-guard pattern that preserves
-    today's `base + jitter` semantics (today's `next_delay()` after `reset()` returns `base + jitter`; a bare `Backoff::base()` accessor would drop
-    the jitter):
+  - **`LoopOutcome::Disconnected` arm** (line 625): replace `let delay = reconnect_backoff.next_delay();` with
+    `let delay = reconnect_backoff.sample_base_jitter();` — `sample_base_jitter()` samples `base + jitter` with no state change. The `Ok(outcome)` arm
+    above already resolved its guard via `reset()`, so `current` is at `base`; calling `sample_base_jitter()` here preserves today's
+    `next_delay()`-after-`reset()` timing without spinning a fake `attempt()`.
 
     ```rust
-    let guard = reconnect_backoff.attempt();
-    let delay = guard.sample_delay(); // base + jitter (current was reset above)
-    guard.reset();                // keep state at base — no escalation for clean disconnect
+    let delay = reconnect_backoff.sample_base_jitter();
     tokio::select! { … sleep(delay) … signal … }
     ```
 
   - **`LoopOutcome::Reconnect` and `LoopOutcome::Shutdown` and `LoopOutcome::Restart` arms:** unchanged (no backoff usage).
 
 - [ ] Verify `cargo check -p uptrakit-service-sdk`.
-- [ ] Add classification test (same helper-enum trick if needed) for `LoopError::ReceiveClosed` → `reset`; `LoopError::TransientNetwork` → failed.
+- [ ] Apply the classifier-fn extraction rule (Task 4.1): extract `fn classify_loop_error(e: &LoopError) -> BackoffVerb` returning `Reset` for
+      `ReceiveClosed`, `Escalate` for `TransientNetwork`. Exhaustive unit test covers each `LoopError` variant.
 
 ### Task 4.3 — Migrate `mqtt_client.rs:439, 478`
 
@@ -261,7 +283,9 @@ Tasks:
   ```
 
 - [ ] Verify `cargo check -p uptrakit-mqtt-runtime`.
-- [ ] Add classification test in the mqtt-runtime test module asserting `escalate()` is the verb called on the poll-Err arm.
+- [ ] Apply the classifier-fn extraction rule: extract a small `fn classify_mqtt_poll_err(e: &rumqttc::ConnectionError) -> BackoffVerb` returning
+      `Escalate` for every variant. Audit rationale (rumqttc internal-retry-already-exhausted) lives in `///` doc on the helper. Exhaustive unit test
+      covers every reachable rumqttc Err variant.
 
 ### Task 4.4 — Migrate `nats_transport.rs:201, 205`
 
@@ -286,7 +310,8 @@ Tasks:
   ```
 
 - [ ] Verify `cargo check -p uptrakit-web-api`.
-- [ ] Add classification test asserting `escalate()` is called on the Err branch.
+- [ ] Apply the classifier-fn extraction rule: extract `fn classify_nats_fetch_err(e: &async_nats::Error) -> BackoffVerb` returning `Escalate` for
+      every variant. Audit rationale lives in `///` doc on the helper. Exhaustive test per variant.
 
 ### Task 4.5 — Migrate `nats/connection.rs:54`
 
@@ -295,8 +320,9 @@ Tasks:
 - Bounded `MAX_ATTEMPTS = 10` startup loop. Each `async_nats::connect` either returns a `Client` or errors. Possible failure modes: DNS/TCP refused
   (pre-connection), TLS handshake fail (mid-connection), auth fail (post-connection). None of these distinctions matter behaviorally — the function
   exits after `MAX_ATTEMPTS` regardless of verb choice, and the next caller restart begins a fresh bounded loop. Within a 10-attempt window the
-  partial-progress reset is academic.
-- Use `escalate()` for every attempt. Single verb keeps the bounded loop's intent obvious.
+  reset-vs-escalate distinction for Err is academic.
+- On Err: `escalate()` per attempt (natural mapping; the attempt failed). On Ok: `reset()` before the labeled break (natural mapping; the attempt
+  succeeded). The "single verb" angle applies to the Err path only — the Ok path resolves via the natural success verb.
 
 Tasks:
 
@@ -325,7 +351,8 @@ Tasks:
 
 - [ ] Add a `// escalate chosen: bounded MAX_ATTEMPTS=10 retry; reset vs escalate has no behavioral difference here` comment.
 - [ ] Verify `cargo check -p uptrakit-nats`.
-- [ ] Add classification test asserting `escalate()` is the verb called on the error branch.
+- [ ] Apply the classifier-fn extraction rule: extract `fn classify_nats_connect_err(e: &async_nats::ConnectError) -> BackoffVerb` returning
+      `Escalate` for every variant. Doc on helper carries the bounded-loop rationale. Exhaustive test per variant.
 
 ### Task 4.6 — Migrate `npm/releases.rs:18`
 
@@ -348,7 +375,8 @@ Tasks:
   - Success path (`return Ok(...)` on parsed response and `return Ok(vec![])` on 404): no guard touched. The function exits without resolving any
     backoff state — fresh `Backoff` per call so no held state escapes.
 - [ ] Verify `cargo check -p uptrakit-plugin-package-manager-npm`.
-- [ ] Add classification test asserting both branches call `escalate()`.
+- [ ] Apply the classifier-fn extraction rule: extract `fn classify_npm_retry(branch: NpmRetryBranch) -> BackoffVerb` returning `Escalate` for each
+      branch (`RequestFailed`, `ServerError5xx`). Doc on helper carries the registry-overload rationale. Exhaustive test per branch.
 
 ### Task 4.7 — Migrate `version_check.rs:535`
 
@@ -369,7 +397,8 @@ Tasks:
   - Non-retryable Err path (`return Err(format!(...))`) unchanged — no guard.
 - [ ] Add `// escalate chosen: PluginError trait surface carries no partial-progress signal` comment.
 - [ ] Verify `cargo check -p uptrakit-agent-core`.
-- [ ] Add classification test asserting `escalate()` is called on a retryable `PluginError`.
+- [ ] Apply the classifier-fn extraction rule: extract `fn classify_plugin_retry(e: &PluginError) -> BackoffVerb` returning `Escalate` for every
+      `is_retryable()` case. Doc on helper carries the "no partial-progress signal in PluginError trait" rationale. Test per variant.
 
 ### Task 4.8 — Custom lint: forbid `?` between `attempt()` and resolution
 
@@ -447,7 +476,7 @@ Tasks:
   - One-paragraph note: "Forgetting to resolve a guard is caught by workspace `unused_must_use` + `clippy::let_underscore_must_use = "deny"` for the
     common cases; held-across-`?` is forbidden by the workspace test
     `crates/core/functional-tests/tests/backoff_guard_no_question_in_attempt_scope.rs` (escape hatch:
-    `// uptrakit-backoff: allow ? in attempt scope — <reason>` comment); the `Drop` impl's `debug_assert!` is a final test-time loudness backstop."
+    `// uptrakit-backoff: allow ? in attempt scope — <reason>` comment)."
 
 - [ ] Reference `https://docs.rs/uptrakit-backoff` for the full API.
 - [ ] Run `npx prettier --write docs/development/coding-standards.md && markdownlint --config .markdownlint.json docs/development/coding-standards.md`
@@ -496,8 +525,14 @@ Tasks:
 ### Task 6.3 — Commit conventions for release-plz
 
 - [ ] Squash or organize commits so the version-bumping change carries a Conventional-Commit subject like
-      `feat(backoff)!: rewrite API with consuming guard pattern` and a `BREAKING CHANGE:` footer in the body. This tells release-plz to bump minor on
-      the next automated release (matching the manual `0.0.1 → 0.1.0` jump).
+      `feat(backoff)!: rewrite API with consuming guard pattern` and a `BREAKING CHANGE:` footer in the body. The `!` bang + `BREAKING CHANGE:` footer
+      record the breaking nature in the changelog. For pre-1.0 (`0.x`) crates release-plz bumps `0.x → 0.(x+1)` on any `feat:` commit regardless of
+      the `!` — the `!` does not force a `1.0.0` jump. So this commit-message shape annotates the breaking-ness without changing the version-bump
+      math; the `0.0.1 → 0.1.0` manual edit (Task 1.4) is independent.
+- [ ] Write the PR description as a per-file walkthrough: one bullet per migrated file naming the verb chosen and linking to the classifier-fn doc
+      comment. Phase 1+3+4 lands as one atomic commit per the Commit Invariant; a 1000+ line diff in one PR will get rubber-stamped unless the
+      description gives reviewers a reading order. Pre-writing the walkthrough is free and turns the atomic commit from a review liability into a
+      navigable diff.
 - [ ] `git push` after all gates green.
 
 ## Self-review (run before declaring done)
@@ -517,7 +552,8 @@ Tasks:
 - [ ] Root `Cargo.toml` workspace `syn` entry has `"visit"` feature (verify line in `[workspace.dependencies]`).
 - [ ] `crates/core/functional-tests/Cargo.toml` `[dev-dependencies]` includes both `syn = { workspace = true }` and
       `cargo_metadata = { workspace = true }`.
-- [ ] `Backoff::base()` accessor was NOT added (per YAGNI; jitter preserved via two-guard pattern at `LoopOutcome::Disconnected`).
+- [ ] `Backoff::sample_base_jitter()` accessor IS present (returns `base + jitter`, no state change; used by `LoopOutcome::Disconnected` to preserve
+      today's timing without spinning a fake `attempt()`).
 - [ ] `debug_assert!` is NOT present in the production `Drop` impl (snapshot Binding Rule: no `panic!()` in production code; loudness lives at
       compile-time lints, Task 4.8 lint test, and unit tests).
 - [ ] `release-plz.toml` no longer lists `uptrakit-backoff` under `release = false`; new entry in the publishable section is present;
@@ -528,7 +564,7 @@ Tasks:
 - [ ] All quality gates from Task 6.1 green.
 - [ ] Snapshot Binding Rules check:
   - `#[non_exhaustive]` on `Backoff` struct ✓
-  - No `unwrap()` / `expect()` / `panic!()` in production paths (`debug_assert!` is dev-only) ✓
+  - No `unwrap()` / `expect()` / `panic!()` in production paths (no `debug_assert!` either) ✓
   - Workspace deps used (`rand`, `tracing` via workspace) ✓
   - `tracing` (not `log`) for the warn record ✓
   - Quality gates run ✓
