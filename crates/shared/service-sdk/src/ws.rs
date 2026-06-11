@@ -707,6 +707,14 @@ mod tests {
         use tokio_tungstenite::tungstenite::Message;
         use uuid::Uuid;
 
+        // Serialise vs. signal-sending tests in this crate: tokio's UNIX signal
+        // driver is process-global and broadcasts kills to every SignalWatcher.
+        #[cfg(unix)]
+        let _permit = crate::signal::UNIX_SIGNAL_TEST_SEM
+            .acquire()
+            .await
+            .expect("semaphore not closed");
+
         let target_id = Uuid::now_v7();
         // Wire format: ControllerEnvelope flattens ControllerMessage fields.
         // ControllerMessage uses serde(tag = "type", rename_all = "snake_case"),
@@ -737,6 +745,14 @@ mod tests {
         use crate::test_support::{mock_certificate_envelope, serve_mock_controller};
         use tokio_tungstenite::tungstenite::Message;
         use uuid::Uuid;
+
+        // Serialise vs. signal-sending tests in this crate: tokio's UNIX signal
+        // driver is process-global and broadcasts kills to every SignalWatcher.
+        #[cfg(unix)]
+        let _permit = crate::signal::UNIX_SIGNAL_TEST_SEM
+            .acquire()
+            .await
+            .expect("semaphore not closed");
 
         let tmp = tempfile::TempDir::new().expect("tmpdir");
         let mut identity = ServiceIdentityState::new_single_dir(tmp.path());
@@ -793,6 +809,14 @@ mod tests {
         use tokio_tungstenite::tungstenite::Message;
         use uuid::Uuid;
 
+        // Serialise vs. signal-sending tests in this crate: tokio's UNIX signal
+        // driver is process-global and broadcasts kills to every SignalWatcher.
+        #[cfg(unix)]
+        let _permit = crate::signal::UNIX_SIGNAL_TEST_SEM
+            .acquire()
+            .await
+            .expect("semaphore not closed");
+
         let tmp = tempfile::TempDir::new().expect("tmpdir");
         let mut identity = ServiceIdentityState::new_single_dir(tmp.path());
         let service_id = Uuid::now_v7();
@@ -844,6 +868,14 @@ mod tests {
         use crate::test_support::serve_mock_controller;
         use tokio_tungstenite::tungstenite::Message;
         use uuid::Uuid;
+
+        // Serialise vs. signal-sending tests in this crate: tokio's UNIX signal
+        // driver is process-global and broadcasts kills to every SignalWatcher.
+        #[cfg(unix)]
+        let _permit = crate::signal::UNIX_SIGNAL_TEST_SEM
+            .acquire()
+            .await
+            .expect("semaphore not closed");
 
         let tmp = tempfile::TempDir::new().expect("tmpdir");
         let mut identity = ServiceIdentityState::new_single_dir(tmp.path());
