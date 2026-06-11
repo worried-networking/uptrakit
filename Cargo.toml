@@ -79,10 +79,9 @@ x509-cert = { version = "0.2", default-features = false, features = ["pem"] }
 const-oid = { version = "0.9", features = ["db"] }
 aws-lc-rs = "1"
 strum = { version = "0.28", features = ["derive"] }
-syn = { version = "2", features = ["full", "extra-traits", "visit"] }
+syn = { version = "2", features = ["full", "extra-traits"] }
 quote = "1"
-# span-locations required by uptrakit-functional-tests' syn-AST visitor (Span::start().line outside proc-macro context)
-proc-macro2 = { version = "1", features = ["span-locations"] }
+proc-macro2 = { version = "1" }
 regex = "1"
 semver = "1"
 tokio-stream = "0.1"
@@ -102,7 +101,7 @@ libc = "0.2"
 rumqttc = { version = "0.25.1", default-features = false, features = ["use-rustls-no-provider"] }
 serde_yaml_ng = "0.10"
 uptrakit-frontend = { path = "frontend", version = "0.0.4" }
-uptrakit-backoff = { path = "crates/shared/backoff", version = "0.1.0" }
+uptrakit-backoff = { path = "crates/shared/backoff", version = "0.0.1" }
 uptrakit-shared-macros = { path = "crates/shared/macros", version = "0.0.1" }
 uptrakit-shared-types = { path = "crates/shared/types", version = "0.0.2" }
 uptrakit-openapi-client = { path = "crates/shared/openapi-client", version = "0.0.2" }

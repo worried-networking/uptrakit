@@ -1,29 +1,14 @@
 //! Exponential backoff with jitter for reconnect loops.
 //!
-//! The guard pattern forces explicit resolution of each attempt cycle so
-//! partial-success bugs — where a healthy cycle erroneously escalates the
-//! backoff — become loud at compile time (via `#[must_use]`) and at runtime
-//! (via `Drop` warning) rather than silently inflating delays.
+//! API surface: 4 methods on [`Backoff`]: [`new`](Backoff::new),
+//! [`reset`](Backoff::reset), [`escalate`](Backoff::escalate),
+//! [`sample_base_jitter`](Backoff::sample_base_jitter).
 //!
-//! # Quick start
-//!
-//! ```rust
-//! use std::time::Duration;
-//! use uptrakit_backoff::Backoff;
-//!
-//! let mut backoff = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
-//!
-//! // Healthy cycle — reset so next attempt starts from base:
-//! let guard = backoff.attempt();
-//! guard.reset();
-//!
-//! // Unhealthy cycle — escalate so next attempt waits longer:
-//! let guard = backoff.attempt();
-//! let delay = guard.sample_delay();
-//! guard.escalate();
-//! // sleep(delay) here in a real loop
-//! let _ = delay;
-//! ```
+//! The plain-method API avoids guard ceremony. Every call site explicitly
+//! chooses the verb (`reset` on healthy cycles, `escalate` on unhealthy ones)
+//! with an inline `// reset chosen: <reason>` / `// escalate chosen: <reason>`
+//! comment as the audit log. Verb choice is a call-site responsibility;
+//! `#[must_use]` on `escalate`'s return ensures the caller uses the delay.
 
 #![warn(missing_docs)]
 
@@ -38,10 +23,6 @@ use rand::Rng;
 /// `[0, current/4]` is added to every sampled delay to prevent thundering
 /// herd.
 ///
-/// Use [`attempt`](Backoff::attempt) to begin a tracked cycle.  The returned
-/// [`AttemptGuard`] **must** be resolved via [`reset`](AttemptGuard::reset) or
-/// [`escalate`](AttemptGuard::escalate) before it is dropped.
-///
 /// # Example
 ///
 /// ```rust
@@ -49,13 +30,11 @@ use rand::Rng;
 /// use uptrakit_backoff::Backoff;
 ///
 /// let mut backoff = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
-/// let guard = backoff.attempt();
-/// let delay = guard.sample_delay();
-/// // work succeeded
-/// guard.reset();
-/// // delay is in [2s, 2.5s]
+/// // Healthy cycle:
+/// backoff.reset();
+/// // Unhealthy cycle:
+/// let delay = backoff.escalate();
 /// assert!(delay >= Duration::from_secs(2));
-/// assert!(delay <= Duration::from_millis(2500));
 /// ```
 #[non_exhaustive]
 pub struct Backoff {
@@ -86,14 +65,13 @@ impl Backoff {
         }
     }
 
-    /// Begin a tracked attempt cycle.
+    /// Set `current` to `base`. Call when the backoff cycle was healthy —
+    /// work returned `Ok`, or work returned `Err` after reaching a meaningful
+    /// application-level milestone (e.g. WebSocket upgrade completed before a
+    /// server-initiated close).
     ///
-    /// Returns an [`AttemptGuard`] that **must** be resolved via
-    /// [`reset`](AttemptGuard::reset) or [`escalate`](AttemptGuard::escalate)
-    /// before it is dropped. Dropping an unresolved guard emits a `warn!` log
-    /// record; state is **not mutated** on unresolved drop.
-    ///
-    /// Only one guard can be live at a time — the borrow checker enforces this.
+    /// Returns `()` — most success paths break out of the loop without
+    /// sleeping, so a `Duration` return would be discarded.
     ///
     /// # Example
     ///
@@ -102,22 +80,70 @@ impl Backoff {
     /// use uptrakit_backoff::Backoff;
     ///
     /// let mut backoff = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
-    /// let guard = backoff.attempt();
-    /// guard.reset();
+    /// // Simulate prior escalation, then reset on healthy cycle:
+    /// let _advance = backoff.escalate(); // advance to 4s
+    /// backoff.reset();
+    /// // current is now base (2s).
+    /// let delay = backoff.sample_base_jitter();
+    /// assert!(delay >= Duration::from_secs(2));
+    /// assert!(delay <= Duration::from_millis(2500));
     /// ```
-    pub fn attempt(&mut self) -> AttemptGuard<'_> {
-        AttemptGuard {
-            backoff: self,
-            resolved: false,
-        }
+    pub fn reset(&mut self) {
+        tracing::trace!(base_ms = self.base.as_millis() as u64, "backoff reset");
+        self.current = self.base;
+    }
+
+    /// Sample a delay from the **pre-escalation** `current + jitter`, then
+    /// advance `current` to `min(current * 2, max)`. Returns the sampled
+    /// delay — the caller should `sleep(delay).await` before the next attempt.
+    ///
+    /// Call when the backoff cycle was unhealthy — fast-fail, no meaningful
+    /// milestone reached (TCP refused, DNS error, pre-upgrade transient).
+    ///
+    /// The order is: **sample pre-escalation `current + jitter`**, then
+    /// **advance `current`**, then **return the sample**. This means the
+    /// returned delay reflects the current window, not the next one.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use std::time::Duration;
+    /// let mut b = uptrakit_backoff::Backoff::new(Duration::from_secs(1), Duration::from_secs(60));
+    /// let delay = b.escalate();  // bound; compiles fine
+    /// assert!(delay >= Duration::from_secs(1));
+    /// ```
+    ///
+    /// Dropping the return is a compile error with `#[deny(unused_must_use)]`:
+    ///
+    /// ```compile_fail
+    /// #![deny(unused_must_use)]
+    /// use std::time::Duration;
+    /// let mut b = uptrakit_backoff::Backoff::new(Duration::from_secs(1), Duration::from_secs(60));
+    /// b.escalate(); // ERROR: unused `Duration` that must be used
+    /// ```
+    #[must_use = "the returned Duration is the delay to sleep before the next attempt"]
+    pub fn escalate(&mut self) -> Duration {
+        let delay = sample_jitter(self.current);
+        self.current = (self.current * 2).min(self.max);
+        tracing::trace!(
+            next_ms = self.current.as_millis() as u64,
+            "backoff escalated"
+        );
+        delay
     }
 
     /// Sample a `base + jitter` delay **independent of `current`**.
     ///
     /// Returns a value in `[base, base + base/4]` regardless of how escalated
-    /// the backoff state is.  Use this when a caller has already resolved a
-    /// guard via [`reset`](AttemptGuard::reset) (so `current == base`) and
-    /// needs the post-reset delay without spinning a fake `attempt()` cycle.
+    /// the backoff state is. Use this when a caller has already called
+    /// [`reset`](Self::reset) (so `current == base`) and needs the post-reset
+    /// delay without further state mutation.
+    ///
+    /// Use this from any arm that just called `reset()` and needs the
+    /// post-reset delay without spinning a second mutation. Today's consumers
+    /// are the enrollment / reconnect partial-progress arms and the reconnect
+    /// `LoopOutcome::Disconnected` arm (where the upstream `Ok` arm already
+    /// called `reset()`).
     ///
     /// Jitter is re-sampled on every call — two consecutive calls return
     /// different values; the `sample_` prefix is deliberate.
@@ -129,8 +155,7 @@ impl Backoff {
     /// use uptrakit_backoff::Backoff;
     ///
     /// let mut backoff = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
-    /// let guard = backoff.attempt();
-    /// guard.reset(); // current is now base (2s)
+    /// backoff.reset(); // current is now base (2s)
     ///
     /// // Sample base+jitter without advancing state:
     /// let delay = backoff.sample_base_jitter();
@@ -154,327 +179,118 @@ fn sample_jitter(delay: Duration) -> Duration {
     delay + jitter
 }
 
-/// A tracked attempt cycle guard for [`Backoff`].
-///
-/// Returned by [`Backoff::attempt`]. **Must** be resolved via
-/// [`reset`](Self::reset) or [`escalate`](Self::escalate) before it is
-/// dropped. Dropping an unresolved guard emits a `warn!` log record; the
-/// backoff state is **not mutated** so the delay is preserved for the next
-/// attempt — this avoids silently inflating delays after a `?`-driven early
-/// exit.
-///
-/// # Verb semantics
-///
-/// - [`reset`](Self::reset): the cycle was **healthy**. Call when the work
-///   returned `Ok`, or when the work returned `Err` but the cycle reached a
-///   meaningful application-level milestone (e.g. the WebSocket upgrade
-///   completed before a server-initiated close).  Sets `current` back to
-///   `base`.
-///
-/// - [`escalate`](Self::escalate): the cycle was **unhealthy**. Call when the
-///   attempt failed without reaching a meaningful milestone (e.g. TCP refused,
-///   DNS error, pre-upgrade transient).  Doubles `current` up to `max`.
-///
-/// # One live guard at a time
-///
-/// Because `attempt` borrows `&mut Backoff`, the borrow checker statically
-/// prevents two `AttemptGuard`s from coexisting:
-///
-/// ```compile_fail
-/// use std::time::Duration;
-/// use uptrakit_backoff::Backoff;
-///
-/// let mut backoff = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
-/// let g1 = backoff.attempt();
-/// let g2 = backoff.attempt(); // error[E0499]: cannot borrow `backoff` as mutable more than once
-/// g1.reset();
-/// g2.reset();
-/// ```
-#[must_use = "AttemptGuard must be resolved via .reset() or .escalate()"]
-pub struct AttemptGuard<'a> {
-    backoff: &'a mut Backoff,
-    resolved: bool,
-}
-
-impl<'a> AttemptGuard<'a> {
-    /// Sample a delay for this attempt cycle (`current + jitter`).
-    ///
-    /// Does **not** advance backoff state. Jitter is re-sampled on every call —
-    /// two consecutive calls return different values; the `sample_` prefix is
-    /// deliberate. Store the result **before** resolving the guard:
-    ///
-    /// ```rust
-    /// use std::time::Duration;
-    /// use uptrakit_backoff::Backoff;
-    ///
-    /// let mut backoff = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
-    /// let guard = backoff.attempt();
-    /// let delay = guard.sample_delay(); // store before consuming the guard
-    /// guard.escalate();
-    /// // now sleep `delay`
-    /// ```
-    pub fn sample_delay(&self) -> Duration {
-        sample_jitter(self.backoff.current)
-    }
-
-    /// Resolve the cycle as healthy: set `current` to `base`.
-    ///
-    /// Call when the work returned `Ok`, or when the work returned `Err` but
-    /// the cycle reached a meaningful application-level milestone (e.g. the
-    /// WebSocket upgrade completed before a server-initiated close).
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use std::time::Duration;
-    /// use uptrakit_backoff::Backoff;
-    ///
-    /// let mut backoff = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
-    /// // Simulate a healthy cycle:
-    /// backoff.attempt().reset();
-    /// // current is now base (2s) regardless of prior escalation.
-    /// ```
-    pub fn reset(mut self) {
-        self.resolved = true;
-        tracing::trace!(
-            base_ms = self.backoff.base.as_millis() as u64,
-            "backoff reset"
-        );
-        self.backoff.current = self.backoff.base;
-    }
-
-    /// Resolve the cycle as unhealthy: double `current`, capped at `max`.
-    ///
-    /// Call when the attempt failed without reaching a meaningful milestone
-    /// (e.g. TCP refused, DNS error, pre-upgrade transient failure).
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use std::time::Duration;
-    /// use uptrakit_backoff::Backoff;
-    ///
-    /// let mut backoff = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
-    /// let guard = backoff.attempt();
-    /// let delay = guard.sample_delay();
-    /// guard.escalate();
-    /// // current is now 4s (doubled from 2s)
-    /// ```
-    pub fn escalate(mut self) {
-        self.resolved = true;
-        self.backoff.current = (self.backoff.current * 2).min(self.backoff.max);
-        tracing::trace!(
-            next_ms = self.backoff.current.as_millis() as u64,
-            "backoff escalated"
-        );
-    }
-}
-
-impl Drop for AttemptGuard<'_> {
-    fn drop(&mut self) {
-        if !self.resolved && !std::thread::panicking() {
-            tracing::warn!(
-                "backoff guard dropped unresolved (state unchanged); \
-                 resolve before any ? or early-return between attempt() and resolution"
-            );
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use parking_lot::Mutex;
-    use tracing_subscriber::layer::SubscriberExt;
-
     use super::*;
 
-    /// Newtype wrapping a channel sender, implementing `MakeWriter` for
-    /// `tracing_subscriber::fmt::Layer`. Avoids orphan-rule violation.
-    struct ChannelMakeWriter(Arc<Mutex<std::sync::mpsc::Sender<String>>>);
-
-    struct ChannelWriter(Arc<Mutex<std::sync::mpsc::Sender<String>>>);
-
-    impl std::io::Write for ChannelWriter {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            let s = String::from_utf8_lossy(buf).into_owned();
-            self.0
-                .lock()
-                .send(s)
-                .map_err(|_e| std::io::Error::other("receiver dropped"))?;
-            Ok(buf.len())
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for ChannelMakeWriter {
-        type Writer = ChannelWriter;
-        fn make_writer(&'a self) -> Self::Writer {
-            ChannelWriter(Arc::clone(&self.0))
-        }
-    }
-
-    fn make_channel_subscriber() -> (std::sync::mpsc::Receiver<String>, impl tracing::Subscriber) {
-        let (tx, rx) = std::sync::mpsc::channel::<String>();
-        let writer = ChannelMakeWriter(Arc::new(Mutex::new(tx)));
-        let fmt_layer = tracing_subscriber::fmt::Layer::new()
-            .with_writer(writer)
-            .with_ansi(false);
-        let subscriber = tracing_subscriber::Registry::default().with(fmt_layer);
-        (rx, subscriber)
-    }
-
     #[test]
-    fn attempt_reset_sets_current_to_base() {
+    fn reset_sets_current_to_base() {
         let mut b = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
-        // Escalate to move current away from base.
-        b.attempt().escalate(); // current = 4s
-        b.attempt().escalate(); // current = 8s
-        // Now reset via a guard — current returns to base.
-        b.attempt().reset();
-        // After reset, sample_delay should return base+jitter.
-        let guard = b.attempt();
-        let delay = guard.sample_delay();
-        guard.reset();
+        // Advance past base.
+        let _walk = b.escalate(); // current = 4s
+        let _walk = b.escalate(); // current = 8s
+        assert_eq!(b.current, Duration::from_secs(8));
+        b.reset();
+        // After reset, sample_base_jitter should return base+jitter.
+        let delay = b.sample_base_jitter();
         assert!(delay >= Duration::from_secs(2), "delay {delay:?} < base 2s");
         assert!(
             delay <= Duration::from_millis(2500),
             "delay {delay:?} > base+jitter 2.5s"
         );
+        assert_eq!(
+            b.current,
+            Duration::from_secs(2),
+            "current must equal base after reset"
+        );
     }
 
     #[test]
-    fn attempt_escalate_doubles_with_cap() {
+    fn escalate_returns_current_plus_jitter_and_doubles_state() {
         let mut b = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
-        for _ in 0..6 {
-            b.attempt().escalate();
-        }
-        // After 6 doublings: 2→4→8→16→32→60(cap)→60(cap). current = 60s.
-        let guard = b.attempt();
-        let delay = guard.sample_delay();
-        guard.escalate(); // resolve
-        assert!(
-            delay >= Duration::from_secs(60),
-            "delay {delay:?} should be >= 60s (cap)"
+
+        // First escalate: current=2s → returned delay in [2s, 2.5s], then current=4s.
+        let d1 = b.escalate();
+        assert!(d1 >= Duration::from_secs(2), "d1 {d1:?} < 2s");
+        assert!(d1 <= Duration::from_millis(2500), "d1 {d1:?} > 2.5s");
+        assert_eq!(
+            b.current,
+            Duration::from_secs(4),
+            "current should be 4s after first escalate"
         );
-        assert!(
-            delay <= Duration::from_millis(75_000),
-            "delay {delay:?} exceeds cap+jitter"
-        );
-    }
 
-    #[test]
-    fn dropping_unresolved_guard_warns_and_does_not_mutate_state() {
-        let (rx, subscriber) = make_channel_subscriber();
-        {
-            let _guard = tracing::subscriber::set_default(subscriber);
-
-            let mut b = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
-            // Escalate once so current != base, to prove state is not mutated.
-            b.attempt().escalate(); // current = 4s
-            let current_before = b.current;
-
-            {
-                // Drop without resolving.
-                let _unresolved = b.attempt();
-            }
-
-            // State must be unchanged.
-            assert_eq!(
-                b.current, current_before,
-                "state must not mutate on unresolved drop"
-            );
-        }
-        // _guard drops here automatically, flushing subscriber
-
-        let output: String = rx.try_iter().collect();
-        assert!(
-            output.contains("backoff guard dropped unresolved"),
-            "expected warn log, got: {output:?}"
+        // Second escalate: current=4s → returned delay in [4s, 5s], then current=8s.
+        let d2 = b.escalate();
+        assert!(d2 >= Duration::from_secs(4), "d2 {d2:?} < 4s");
+        assert!(d2 <= Duration::from_millis(5000), "d2 {d2:?} > 5s");
+        assert_eq!(
+            b.current,
+            Duration::from_secs(8),
+            "current should be 8s after second escalate"
         );
     }
 
     #[test]
-    fn dropping_unresolved_guard_during_panic_does_not_warn() {
-        let (rx, subscriber) = make_channel_subscriber();
-        {
-            let _default_guard = tracing::subscriber::set_default(subscriber);
-
-            let result = std::panic::catch_unwind(|| {
-                let mut b = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
-                let _unresolved = b.attempt();
-                panic!("inner panic");
-            });
-
-            assert!(result.is_err(), "catch_unwind must return Err");
+    fn escalate_caps_at_max() {
+        let mut b = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
+        // Escalate: 2→4→8→16→32→60(cap).
+        // After 5 escalations: current = 64s clamped to 60s.
+        for _ in 0..5 {
+            let _walk = b.escalate();
         }
-        // _default_guard drops here automatically, flushing subscriber
-
-        let output: String = rx.try_iter().collect();
-        assert!(
-            !output.contains("backoff guard dropped unresolved"),
-            "warn must NOT fire during panic unwind, got: {output:?}"
+        assert_eq!(
+            b.current,
+            Duration::from_secs(60),
+            "current must be capped at 60s"
         );
-    }
 
-    #[test]
-    fn sample_delay_does_not_advance_state() {
-        let mut b = Backoff::new(Duration::from_secs(4), Duration::from_secs(60));
-        let guard = b.attempt();
-        // Call sample_delay multiple times — state must not change.
-        let d1 = guard.sample_delay();
-        let d2 = guard.sample_delay();
-        let d3 = guard.sample_delay();
-        // Each must be in [4s, 5s]
-        for d in [d1, d2, d3] {
-            assert!(d >= Duration::from_secs(4), "delay {d:?} < base");
+        // Subsequent escalates: returned delay must be in [60s, 75s]; current stays at cap.
+        for _ in 0..3 {
+            let delay = b.escalate();
             assert!(
-                d <= Duration::from_millis(5000),
-                "delay {d:?} > base+jitter"
+                delay >= Duration::from_secs(60),
+                "at-cap delay {delay:?} should be >= 60s"
+            );
+            assert!(
+                delay <= Duration::from_millis(75_000),
+                "at-cap delay {delay:?} exceeds cap+jitter 75s"
+            );
+            assert_eq!(
+                b.current,
+                Duration::from_secs(60),
+                "current must remain at cap"
             );
         }
-        guard.reset(); // resolve
-        // After reset, current = base = 4s still. Sample again.
-        let g2 = b.attempt();
-        let after = g2.sample_delay();
-        g2.reset();
-        assert!(
-            after >= Duration::from_secs(4),
-            "state advanced unexpectedly: {after:?}"
-        );
     }
 
     #[test]
     fn sample_base_jitter_samples_base_plus_jitter_without_state_change() {
         let mut b = Backoff::new(Duration::from_secs(8), Duration::from_secs(60));
-        // Escalate so current != base
-        b.attempt().escalate(); // current = 16s
+        // Advance current away from base.
+        let _walk = b.escalate(); // current = 16s
         let current_before = b.current;
 
-        // Sample N=20 times and verify jitter is re-sampled (not all equal).
+        // N=20 calls; verify range and that jitter is re-sampled.
         let mut samples = Vec::new();
         for _ in 0..20 {
             let d = b.sample_base_jitter();
-            assert!(d >= Duration::from_secs(8), "sample {d:?} < base");
+            assert!(d >= Duration::from_secs(8), "sample {d:?} < base 8s");
             assert!(
                 d <= Duration::from_millis(10_000),
-                "sample {d:?} > base+jitter"
+                "sample {d:?} > base+jitter 10s"
             );
             samples.push(d);
         }
 
-        // Assert not all samples are equal (jitter is re-sampled on each call).
+        // Not all equal (jitter re-samples).
         let all_equal = samples.iter().all(|d| d == &samples[0]);
         assert!(
             !all_equal,
-            "consecutive calls must return different values due to jitter; all samples: {:?}",
+            "consecutive calls must return different values due to jitter; got: {:?}",
             samples
         );
 
-        // State unchanged
+        // State unchanged.
         assert_eq!(
             b.current, current_before,
             "sample_base_jitter must not mutate state"
@@ -484,27 +300,24 @@ mod tests {
     #[test]
     fn bug_regression_reset_at_cap_returns_base() {
         // Reproduces the user-reported bug: after escalating to cap,
-        // a reset() must return current to base, not inherit the cap.
+        // reset() must return current to base, not inherit the cap.
         let mut b = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
 
-        // Escalate until capped.
+        // Escalate to cap.
         for _ in 0..10 {
-            b.attempt().escalate();
+            let _walk = b.escalate();
         }
         assert_eq!(b.current, Duration::from_secs(60), "expected cap");
 
-        // Reset via guard.
-        b.attempt().reset();
+        b.reset();
         assert_eq!(
             b.current,
             Duration::from_secs(2),
             "expected base after reset"
         );
 
-        // sample_delay after reset must be in base range.
-        let guard = b.attempt();
-        let delay = guard.sample_delay();
-        guard.reset();
+        // sample_base_jitter after reset must return base range.
+        let delay = b.sample_base_jitter();
         assert!(
             delay >= Duration::from_secs(2),
             "delay {delay:?} < base after reset"

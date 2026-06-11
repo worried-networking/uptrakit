@@ -437,7 +437,7 @@ async fn run_event_loop(
                 match poll {
                     Ok(rumqttc::Event::Incoming(Packet::ConnAck(_))) => {
                         // reset chosen: ConnAck is the clean success signal.
-                        reconnect_backoff.attempt().reset();
+                        reconnect_backoff.reset();
                         tracing::info!("MQTT connected");
                         if let Some(ref r) = reporter {
                             r.report_status(MqttClientConnectionStatus::Online);
@@ -476,12 +476,10 @@ async fn run_event_loop(
                         // gate, blocking all channel reads until CollisionTimeout fires 60 s
                         // later.  Clear it here so the next session starts clean.
                         event_loop.state.collision = None;
-                        let guard = reconnect_backoff.attempt();
-                        let delay = guard.sample_delay();
                         // escalate chosen: rumqttc retries connect internally; a surfaced
                         // Err means it gave up. Resetting backoff would stampede a
                         // recovering broker; preserve the accumulated escalation.
-                        guard.escalate();
+                        let delay = reconnect_backoff.escalate();
                         tracing::warn!("MQTT error: {e}; retrying in {delay:?}");
                         if let Some(ref r) = reporter {
                             r.report_status(MqttClientConnectionStatus::Offline);
