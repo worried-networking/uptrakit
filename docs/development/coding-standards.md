@@ -894,14 +894,14 @@ security.
 
 ## Service Reconnect Backoff
 
-All reconnect loops in service binaries must use `uptrakit_backoff::Backoff` with the guard pattern — not a fixed sleep. Fixed delays hammer a
-recovering broker or controller and produce bursty log storms. The guard pattern ensures that every attempt cycle is explicitly resolved, preventing
-partial-success bugs where a healthy milestone is accidentally escalated as a failure.
+All reconnect loops in service binaries must use `uptrakit_backoff::Backoff` — not a fixed sleep. Fixed delays hammer a recovering broker or
+controller and produce bursty log storms. The API is four plain methods: `new`, `reset`, `escalate`, `sample_base_jitter`. Every call site explicitly
+chooses the verb with an inline `// reset chosen: <reason>` / `// escalate chosen: <reason>` comment as the audit log.
 
 ### Reset on Success
 
-When the connection succeeds or the cycle completes with a meaningful milestone (e.g., WebSocket upgrade succeeds), call `guard.reset()` so that
-`current` returns to `base` and the next attempt starts fresh:
+When the connection succeeds or the cycle completes with a meaningful milestone (WebSocket upgrade succeeds), call `backoff.reset()` so that `current`
+returns to `base` and the next attempt starts fresh:
 
 ```rust
 use uptrakit_backoff::Backoff;
@@ -910,17 +910,16 @@ use std::time::Duration;
 let mut backoff = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
 
 loop {
-    let guard = backoff.attempt();
-    let delay = guard.sample_delay();
-
     match connect().await {
         Ok(conn) => {
-            guard.reset();  // Healthy cycle; reset to base for next attempt
+            // reset chosen: connection succeeded.
+            backoff.reset();
             handle(conn).await;
         }
         Err(e) => {
-            guard.escalate();  // Unhealthy cycle; double current (up to cap)
-            tracing::warn!(error = %e, delay = ?delay, "connection failed; retrying");
+            // escalate chosen: pre-connection failure; no milestone reached.
+            let delay = backoff.escalate();
+            tracing::warn!(error = %e, ?delay, "connection failed; retrying");
             tokio::select! {
                 _ = shutdown_token.cancelled() => break,
                 _ = tokio::time::sleep(delay) => {}
@@ -932,22 +931,16 @@ loop {
 
 ### Partial-Progress: Distinguishing Post-Upgrade Close from Transient Failure
 
-The key insight is that a closed WebSocket **after upgrade** signals a healthy connection cycle (the TCP handshake and TLS negotiation succeeded; the
-application-level protocol was established). By contrast, a TCP refusal or DNS error before upgrade indicates no progress was made.
-
-Use `guard.reset()` for post-upgrade close and `guard.escalate()` for pre-upgrade transient failure. The canonical example from
-`crates/shared/service-sdk/src/lifecycle.rs:354` shows this split:
+A closed WebSocket **after upgrade** signals a healthy cycle (TCP + TLS + application-level protocol established). A TCP refusal or DNS error **before
+upgrade** means no progress was made. Split error classification explicitly and annotate each arm:
 
 ```rust
 if is_receive_closed_report(&e) {
-    // Bug fix: post-WS-upgrade close → backoff cycle was healthy.
-    // The WebSocket upgrade succeeded and the controller closed the connection
-    // (e.g. superseded by a new connection). Reset to base so the next
-    // reconnect starts fresh, not inheriting a prior failure streak.
-    let guard = enrollment_backoff.attempt();
-    let delay = guard.sample_delay();
-    guard.reset();  // Healthy cycle; infrastructure milestone reached
-    tracing::info!(error = %e, "post-upgrade enrollment close, reconnecting in {delay:?}");
+    // reset chosen: post-WS-upgrade close — connection was healthy; reset so
+    // the next reconnect starts from base rather than inheriting a prior streak.
+    enrollment_backoff.reset();
+    let delay = enrollment_backoff.sample_base_jitter();
+    tracing::info!(error = %e, ?delay, "post-upgrade enrollment close, reconnecting");
     tokio::select! {
         () = tokio::time::sleep(delay) => {}
         signal = signals.recv() => {
@@ -958,10 +951,9 @@ if is_receive_closed_report(&e) {
     continue;
 }
 if is_transient_network_report(&e) {
-    let guard = enrollment_backoff.attempt();
-    let delay = guard.sample_delay();
-    guard.escalate();  // Unhealthy cycle; no milestone reached (TCP/DNS/pre-upgrade)
-    tracing::info!(error = %e, "transient enrollment error, reconnecting in {delay:?}");
+    // escalate chosen: pre-upgrade transient failure (TCP/DNS); no milestone reached.
+    let delay = enrollment_backoff.escalate();
+    tracing::info!(error = %e, ?delay, "transient enrollment error, reconnecting");
     tokio::select! {
         () = tokio::time::sleep(delay) => {}
         signal = signals.recv() => {
@@ -975,17 +967,16 @@ if is_transient_network_report(&e) {
 
 ### LoopOutcome::Disconnected Pattern
 
-When an `attempt()` cycle has already been resolved via `reset()` (so `current == base`), use `sample_base_jitter()` to get the base-plus-jitter delay
-without spinning a fake attempt:
+When an upstream `Ok` arm already called `reset()` (so `current == base`), use `sample_base_jitter()` to read the post-reset delay without further
+state mutation — do **not** call `reset()` again:
 
 ```rust
 match loop_outcome {
     LoopOutcome::Disconnected => {
-        // The prior cycle has already resolved its guard via reset(),
-        // so current == base. Use sample_base_jitter() to get base+jitter
-        // without advancing state:
+        // reset() was called in the Ok(outcome) arm above; current == base.
+        // Use sample_base_jitter() for the post-reset delay without state mutation.
         let delay = reconnect_backoff.sample_base_jitter();
-        tracing::warn!("disconnected by controller, reconnecting in {delay:?}");
+        tracing::warn!(?delay, "disconnected by controller, reconnecting");
         tokio::select! {
             () = tokio::time::sleep(delay) => {}
             _ = shutdown_token.cancelled() => break,
@@ -995,21 +986,12 @@ match loop_outcome {
 }
 ```
 
-### Enforcement: Compile-Time + Workspace Test + Runtime
+### Safety Property
 
-Forgetting to resolve a guard is caught by three layers:
-
-1. **Compile-time `#[must_use]`**: The `AttemptGuard` type has `#[must_use]` attribute. Binding the guard to a variable without calling `.reset()` or
-   `.escalate()` produces a compiler warning. Binding to underscore (e.g., `let _ = backoff.attempt()`) triggers
-   `clippy::let_underscore_must_use = "deny"` in the workspace lint config, becoming a hard error.
-
-2. **Workspace functional test**: The file `crates/core/functional-tests/tests/backoff_guard_no_question_in_attempt_scope.rs` uses a procedural macro
-   to scan source code at compile time, rejecting any `?` operator that appears between an `attempt()` call and its corresponding `reset()` /
-   `escalate()` call. This catches the case where early-exit via `?` leaves the guard unresolved. Escape hatch: add a comment
-   `// uptrakit-backoff: allow ? in attempt scope — <reason>` on the offending or preceding line to opt-out for documented exceptions.
-
-3. **Runtime `Drop` warning**: If a guard is dropped without explicit resolution, the `Drop` impl emits `tracing::warn!()` with the backoff state.
-   This is the final backstop for bugs that slip past compile-time checks (e.g., panics, manual drops).
+`Backoff::escalate()` is `#[must_use]` on its `Duration` return — the caller must bind and use the delay. Workspace lint
+`clippy::let_underscore_must_use = "deny"` closes the `let _ = backoff.escalate();` escape, making a bare escalate-without-sleep a hard compile error.
+This is belt-and-suspenders ergonomics; the load-bearing correctness property is the inline verb annotation + the enrollment regression test in
+`crates/shared/service-sdk/src/lifecycle.rs`.
 
 ### API Reference
 

@@ -31,11 +31,9 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for NpmPlugin {
                     );
                     last_err = Some(msg);
                     if attempt < FETCH_MAX_RETRIES {
-                        let guard = backoff.attempt();
-                        let delay = guard.sample_delay();
                         // escalate chosen: pre-HTTP transport error (TCP/TLS/DNS);
                         // fast-fail with no partial progress reached this cycle.
-                        guard.escalate();
+                        let delay = backoff.escalate();
                         tokio::time::sleep(delay).await;
                     }
                     continue;
@@ -61,12 +59,10 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for NpmPlugin {
                 );
                 last_err = Some(msg);
                 if attempt < FETCH_MAX_RETRIES {
-                    let guard = backoff.attempt();
-                    let delay = guard.sample_delay();
                     // escalate chosen: 5xx burst signals registry overload/rate-limit;
                     // resetting backoff would defeat the rate-limiting signal and
                     // hammer a recovering registry.
-                    guard.escalate();
+                    let delay = backoff.escalate();
                     tokio::time::sleep(delay).await;
                 }
                 continue;

@@ -114,4 +114,4 @@ pub use shared_types::{
 pub use shutdown::{ShutdownSignal, SignalShutdown, TokenShutdown};
 pub use signal::{Signal, SignalWatcher};
 pub use surface_proxy::{PendingSurfaceRequest, ServiceSurfaceProxy, ServiceSurfaceProxyError};
-pub use uptrakit_backoff::{AttemptGuard, Backoff};
+pub use uptrakit_backoff::Backoff;

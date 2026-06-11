@@ -54,20 +54,16 @@ impl NatsConnection {
             let mut backoff = Backoff::new(Duration::from_secs(1), Duration::from_secs(30));
             let mut last_err = None;
             for attempt in 1..=MAX_ATTEMPTS {
-                let guard = backoff.attempt();
                 match async_nats::connect(url).await {
                     Ok(c) => {
-                        // reset chosen: successful connect — guard resolved before
-                        // the labeled break (footgun: break would drop it unresolved).
-                        guard.reset();
+                        // no reset: backoff is locally scoped; bounded loop exits on success
                         break 'connect c;
                     }
                     Err(e) => {
-                        let delay = guard.sample_delay();
                         // escalate chosen: bounded MAX_ATTEMPTS=10 retry; each
                         // attempt either connects or fails with no partial-progress
                         // distinction. Escalate naturally to spread retries.
-                        guard.escalate();
+                        let delay = backoff.escalate();
                         tracing::warn!(
                             url,
                             attempt,

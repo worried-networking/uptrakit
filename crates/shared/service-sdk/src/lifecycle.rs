@@ -356,11 +356,10 @@ pub async fn run_service_lifecycle<H: ServiceHandler>(
                     // The WS upgrade succeeded and the controller closed the connection
                     // (e.g. superseded by a new connection). Reset to base so the next
                     // reconnect starts fresh, not inheriting a prior failure streak.
-                    let guard = enrollment_backoff.attempt();
-                    let delay = guard.sample_delay();
                     // reset chosen: post-upgrade close signals a healthy cycle; the WS
                     // connection was established before the server-initiated close.
-                    guard.reset();
+                    enrollment_backoff.reset();
+                    let delay = enrollment_backoff.sample_base_jitter();
                     tracing::info!(
                         error = %e,
                         "post-upgrade enrollment close, reconnecting in {delay:?}"
@@ -379,11 +378,9 @@ pub async fn run_service_lifecycle<H: ServiceHandler>(
                     continue;
                 }
                 if is_transient_network_report(&e) {
-                    let guard = enrollment_backoff.attempt();
-                    let delay = guard.sample_delay();
                     // escalate chosen: pre-upgrade transient failure (TCP refused, DNS
                     // error, etc.); no meaningful milestone was reached this cycle.
-                    guard.escalate();
+                    let delay = enrollment_backoff.escalate();
                     tracing::info!(
                         error = %e,
                         "transient enrollment error, reconnecting in {delay:?}"
@@ -598,18 +595,17 @@ async fn run_authenticated_with_reconnect(
                 // the base delay instead of continuing to grow from a
                 // previous failure streak.
                 // reset chosen: event loop ran successfully (Ok path).
-                reconnect_backoff.attempt().reset();
+                reconnect_backoff.reset();
                 outcome
             }
             Err(e) => match e.current_context() {
                 // Post-WS-upgrade server-initiated close: the connection was
                 // established and healthy; treat as a healthy cycle (reset).
                 LoopError::ReceiveClosed => {
-                    let guard = reconnect_backoff.attempt();
-                    let delay = guard.sample_delay();
                     // reset chosen: ReceiveClosed after a running event loop indicates
                     // the connection was healthy; resetting avoids inflated delays.
-                    guard.reset();
+                    reconnect_backoff.reset();
+                    let delay = reconnect_backoff.sample_base_jitter();
                     tracing::warn!(
                         error = %e,
                         "connection closed by server, reconnecting in {delay:?}"
@@ -629,11 +625,9 @@ async fn run_authenticated_with_reconnect(
                 // failure, send timeout, etc.) are recoverable — reconnect with
                 // exponential backoff instead of crashing the service.
                 LoopError::TransientNetwork(_) => {
-                    let guard = reconnect_backoff.attempt();
-                    let delay = guard.sample_delay();
                     // escalate chosen: TransientNetwork indicates a pre-connection
                     // or mid-connection failure with no meaningful milestone reached.
-                    guard.escalate();
+                    let delay = reconnect_backoff.escalate();
                     tracing::warn!(
                         error = %e,
                         "connection lost, reconnecting in {delay:?}"
@@ -682,9 +676,9 @@ async fn run_authenticated_with_reconnect(
                 continue;
             }
             LoopOutcome::Disconnected => {
-                // The Ok(outcome) arm already resolved its guard via reset(),
-                // so current == base. Use sample_base_jitter() to get a
-                // base+jitter delay without spinning a fake attempt() cycle.
+                // The Ok(outcome) arm already called reset(), so current == base.
+                // Use sample_base_jitter() to get a base+jitter delay without
+                // further state mutation.
                 let delay = reconnect_backoff.sample_base_jitter();
                 tracing::warn!("disconnected by controller, reconnecting in {delay:?}");
                 // Interruptible sleep: a SIGTERM/SIGINT during the reconnect
@@ -816,9 +810,9 @@ mod tests {
     /// so the enrollment loop calls `reset()` (not `escalate()`).
     ///
     /// Before the fix, the collapsed `is_receive_closed || is_transient_network`
-    /// arm always called `next_delay()` (which internally advanced state), so a
-    /// post-WS-upgrade close would keep the 60-second cap from a prior failure
-    /// streak.
+    /// arm always escalated, so a post-WS-upgrade close would keep the 60-second
+    /// cap from a prior failure streak. This test is the permanent canary on that
+    /// misclassification.
     #[test]
     fn enrollment_receive_closed_maps_to_reset_verb() {
         let err = EnrollmentError::Protocol(ProtocolError::ReceiveClosed);
@@ -834,41 +828,39 @@ mod tests {
             "ReceiveClosed must NOT satisfy is_transient_network_report"
         );
 
-        // Exercise the verb: reset() must return backoff to base.
-        let mut backoff = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
-        // Simulate a prior failure streak at cap.
+        // Exercise the verb: escalate to cap, assert the at-cap delay (canary),
+        // then reset and verify post-reset base range.
+        let mut enrollment_backoff = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
+
+        // Escalate to cap via repeated escalate() calls.
+        let mut at_cap_delay = Duration::ZERO;
         for _ in 0..10 {
-            backoff.attempt().escalate();
+            at_cap_delay = enrollment_backoff.escalate();
         }
-        // sample_base_jitter() returns base+jitter regardless of current, so
-        // before reset it should still return base-range values (reads base, not current).
-        let base_sample = backoff.sample_base_jitter();
+        // CANARY: the at-cap escalate() call returns a delay in [60s, 75s].
+        // If ReceiveClosed were routed to escalate() instead of reset(), the
+        // next reconnect would sleep ~60–75 s rather than ~2 s — the original bug.
         assert!(
-            base_sample >= Duration::from_secs(2) && base_sample <= Duration::from_millis(2500),
-            "sample_base_jitter should always reflect base (2s), got {base_sample:?}"
+            at_cap_delay >= Duration::from_secs(60),
+            "at-cap escalate delay {at_cap_delay:?} must be >= 60s (canary: misclassification check)"
+        );
+        assert!(
+            at_cap_delay <= Duration::from_millis(75_000),
+            "at-cap escalate delay {at_cap_delay:?} must be <= 75s (cap + max jitter)"
         );
 
         // Apply the enrollment loop's ReceiveClosed arm — reset.
-        let guard = backoff.attempt();
-        let delay = guard.sample_delay();
-        // sample_delay reflects current (60s) at call time — expected before reset.
-        assert!(
-            delay >= Duration::from_secs(60),
-            "sample_delay before reset should reflect current (cap 60s), got {delay:?}"
-        );
-        guard.reset();
+        enrollment_backoff.reset();
 
-        // After reset, the NEXT attempt must sample from base range (the bug fix).
-        let guard2 = backoff.attempt();
-        let next_delay = guard2.sample_delay();
-        guard2.reset();
+        // After reset, sample_base_jitter must return base range (the bug fix).
+        let post_reset_delay = enrollment_backoff.sample_base_jitter();
         assert!(
-            next_delay >= Duration::from_secs(2),
-            "next attempt delay {next_delay:?} < base after reset"
+            post_reset_delay >= Duration::from_secs(2),
+            "post-reset delay {post_reset_delay:?} < base 2s"
         );
         assert!(
-            next_delay <= Duration::from_millis(2500),
-            "next attempt delay {next_delay:?} > base+jitter after reset"
+            post_reset_delay <= Duration::from_millis(2500),
+            "post-reset delay {post_reset_delay:?} > base+jitter 2.5s"
         );
     }
 
@@ -890,7 +882,7 @@ mod tests {
             "ConnectionRefused must satisfy is_transient_network_report"
         );
 
-        // Exercise the verb: escalate() must move current away from base.
+        // Exercise the verb: escalate() must advance current away from base.
         let mut backoff = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
         // Before escalation: sample_base_jitter reflects base (2s).
         let before_sample = backoff.sample_base_jitter();
@@ -898,13 +890,15 @@ mod tests {
             before_sample >= Duration::from_secs(2),
             "base sample before escalate: {before_sample:?}"
         );
-        let guard = backoff.attempt();
-        let _delay = guard.sample_delay();
-        guard.escalate();
-        // After escalation, sample_delay must reflect new (doubled) current.
-        let after_guard = backoff.attempt();
-        let after_delay = after_guard.sample_delay();
-        after_guard.escalate();
+
+        // First escalate: returned delay in [2s, 2.5s], current advances to 4s.
+        let delay = backoff.escalate();
+        assert!(
+            delay >= Duration::from_secs(2),
+            "first escalate delay {delay:?} < 2s"
+        );
+        // Second escalate: returned delay in [4s, 5s], current advances to 8s.
+        let after_delay = backoff.escalate();
         assert!(
             after_delay >= Duration::from_secs(4),
             "after escalate delay {after_delay:?} should be >= 4s (doubled from 2s)"

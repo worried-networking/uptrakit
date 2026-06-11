@@ -7289,12 +7289,10 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-backoff"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
- "parking_lot",
  "rand 0.9.4",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -7540,15 +7538,12 @@ name = "uptrakit-functional-tests"
 version = "0.0.1"
 dependencies = [
  "async-trait",
- "cargo_metadata",
  "httpmock",
- "proc-macro2",
  "rootcause",
  "sea-orm",
  "sea-orm-migration",
  "serde",
  "serde_json",
- "syn 2.0.117",
  "time",
  "tokio",
  "toml",
