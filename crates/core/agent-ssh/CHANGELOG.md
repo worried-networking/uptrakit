@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.6](https://github.com/worried-networking/uptrakit/compare/uptrakit-agent-ssh-v0.0.5...uptrakit-agent-ssh-v0.0.6) - 2026-06-11
+
+### Added
+
+- *(backoff)* [**breaking**] rewrite API with consuming guard pattern
+
+### Fixed
+
+- *(build-info)* align --version with binary crate via build_info! macro
+
+### Other
+
+- *(backoff)* [**breaking**] drop AttemptGuard, ship plain methods
+
 ## [0.0.5](https://github.com/worried-networking/uptrakit/compare/uptrakit-agent-ssh-v0.0.4...uptrakit-agent-ssh-v0.0.5) - 2026-06-05
 
 ### Fixed
