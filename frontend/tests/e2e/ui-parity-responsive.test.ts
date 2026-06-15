@@ -114,7 +114,9 @@ function buildSoftwareDetailItem(activeUpdateHistoryId: string | null) {
 				latest_release_metadata: { display_version: '1.27.0' },
 				installed_version_detected_at: '2024-06-01T10:00:00Z',
 				update_available: true,
-				active_update_history_id: activeUpdateHistoryId
+				active_update_history_id: activeUpdateHistoryId,
+				// Status drives the in-progress branch that renders the live terminal trigger.
+				active_update_status: activeUpdateHistoryId ? 'in_progress' : null
 			}
 		]
 	};

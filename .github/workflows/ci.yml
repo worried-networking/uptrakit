@@ -181,3 +181,103 @@ jobs:
       - run: npm run check
       - run: npm run test
       - run: npm run build
+
+  frontend-e2e-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      frontend_changed: ${{ steps.changes.outputs.frontend }}
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            frontend:
+              - 'frontend/**'
+              - '.github/workflows/ci.yml'
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm run test:e2e:check-buckets
+
+  frontend-e2e-behavior:
+    needs: frontend-e2e-preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Resolve Playwright version
+        id: pw
+        run: echo "version=$(jq -r .version node_modules/@playwright/test/package.json)" >> "$GITHUB_OUTPUT"
+      - name: Cache Playwright browsers
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.pw.outputs.version }}
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e:behavior
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report-behavior
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          retention-days: 7
+
+  frontend-e2e-parity:
+    needs: frontend-e2e-preflight
+    # macOS minutes are ~10x ubuntu — skip when no frontend/CI files changed,
+    # but always run on pushes to main as a post-merge canary to catch the
+    # rare case where a backend change indirectly broke parity (shared asset,
+    # generated API client) without touching frontend/**.
+    if: |
+      github.ref == 'refs/heads/main' ||
+      needs.frontend-e2e-preflight.outputs.frontend_changed == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Resolve Playwright version
+        id: pw
+        run: echo "version=$(jq -r .version node_modules/@playwright/test/package.json)" >> "$GITHUB_OUTPUT"
+      - name: Cache Playwright browsers
+        uses: actions/cache@v5
+        with:
+          path: ~/Library/Caches/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.pw.outputs.version }}
+      - run: npx playwright install chromium
+      - run: npm run test:e2e:parity
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report-parity
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          retention-days: 7

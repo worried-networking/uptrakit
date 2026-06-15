@@ -143,7 +143,9 @@ function buildSoftwareDetailItem(activeUpdateHistoryId: string | null) {
 				latest_release_metadata: { display_version: '1.27.0' },
 				installed_version_detected_at: '2024-06-01T10:00:00Z',
 				update_available: true,
-				active_update_history_id: activeUpdateHistoryId
+				active_update_history_id: activeUpdateHistoryId,
+				// Status drives the in-progress branch that renders the live terminal trigger.
+				active_update_status: activeUpdateHistoryId ? 'in_progress' : null
 			}
 		]
 	};
@@ -690,7 +692,9 @@ test('software tabs ui parity: built-in software tab vs software.tabs', async ({
 
 	const tabStrip = page.locator('[data-ui="tab-strip"]');
 	await expect(tabStrip).toBeVisible();
-	await expect(page.getByRole('tab', { name: /^Featured$/ })).toBeVisible();
+	// Built-in Featured/Unfeatured filtering moved to a Select combobox on the FilterBar; only
+	// surface-contributed tabs render in the TabStrip now.
+	await expect(page.getByRole('combobox', { name: 'Filter by featured status' })).toBeVisible();
 	await expect(page.getByRole('tab', { name: 'Plugin Category' })).toBeVisible();
 
 	await captureParityScreenshot(page, tabStrip, 'ui-parity-software-tabs.png');
@@ -739,7 +743,9 @@ test('navigation ui parity: built-in nav item vs surface.page', async ({ page })
 
 	const nav = page.locator('[data-ui="app-shell-nav"]');
 	await expect(nav).toBeVisible();
-	await expect(nav.getByRole('link', { name: 'Software' })).toBeVisible();
+	// Software now renders two nav anchors (main link + an "updates available" badge link); match the
+	// primary one exactly so we don't collide with the badge.
+	await expect(nav.getByRole('link', { name: 'Software', exact: true })).toBeVisible();
 	await expect(nav.getByRole('link', { name: 'Surface One' })).toBeVisible();
 
 	await captureParityScreenshot(page, nav, 'ui-parity-app-nav-built-in-vs-surface-page.png');
