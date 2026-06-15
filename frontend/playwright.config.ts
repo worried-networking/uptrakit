@@ -24,6 +24,12 @@ export const baseConfig = {
 	retries: process.env.CI ? 2 : 0,
 	workers: process.env.CI ? 1 : undefined,
 	reporter: [['html', { open: 'never' }]] as const,
+	// Cross-host pixel jitter: dev macOS vs `macos-latest` CI runner have minor
+	// font-rendering drift (~1–2 px). 2% absorbs the noise without hiding real
+	// regressions. Per-test stricter ratios still win via local override.
+	expect: {
+		toHaveScreenshot: { maxDiffPixelRatio: 0.02 }
+	},
 	// Keep snapshot names OS-agnostic; the ui-parity screenshot suite enforces a
 	// canonical macOS Chromium execution guard to avoid cross-OS render drift.
 	snapshotPathTemplate: '{testDir}/{testFilePath}-snapshots/{arg}-{projectName}{ext}',
