@@ -67,9 +67,10 @@ test.describe('Authentication', () => {
 	test('login page renders with a password form', async ({ page }) => {
 		await mockUnauthenticated(page);
 		await page.goto('/login');
-		await expect(page.getByRole('textbox', { name: /email/i })).toBeVisible();
-		await expect(page.locator('input[type="password"]')).toBeVisible();
-		await expect(page.getByRole('button', { name: /^login$/i })).toBeVisible();
+		const form = page.locator('form');
+		await expect(form.getByRole('textbox', { name: /email/i })).toBeVisible();
+		await expect(form.locator('input[type="password"]')).toBeVisible();
+		await expect(form.getByRole('button', { name: /^login$/i })).toBeVisible();
 	});
 
 	test('successful login navigates away from /login', async ({ page }) => {
@@ -80,9 +81,10 @@ test.describe('Authentication', () => {
 		await page.route('**/api/v1/system/alerts', (route) => route.fulfill({ json: { alerts: [] } }));
 
 		await page.goto('/login');
-		await page.getByRole('textbox', { name: /email/i }).fill('admin@example.com');
-		await page.locator('input[type="password"]').fill('correct-password');
-		await page.getByRole('button', { name: /^login$/i }).click();
+		const form = page.locator('form');
+		await form.getByRole('textbox', { name: /email/i }).fill('admin@example.com');
+		await form.locator('input[type="password"]').fill('correct-password');
+		await form.getByRole('button', { name: /^login$/i }).click();
 
 		await expect(page).not.toHaveURL(/\/login/);
 	});
@@ -94,9 +96,10 @@ test.describe('Authentication', () => {
 		);
 
 		await page.goto('/login');
-		await page.getByRole('textbox', { name: /email/i }).fill('bad@example.com');
-		await page.locator('input[type="password"]').fill('wrong');
-		await page.getByRole('button', { name: /^login$/i }).click();
+		const form = page.locator('form');
+		await form.getByRole('textbox', { name: /email/i }).fill('bad@example.com');
+		await form.locator('input[type="password"]').fill('wrong');
+		await form.getByRole('button', { name: /^login$/i }).click();
 
 		await expect(page.getByText('Invalid email or password')).toBeVisible();
 	});
