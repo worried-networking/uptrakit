@@ -1,6 +1,6 @@
 <script lang="ts">
-	import type { ComponentType, SvelteComponent } from 'svelte';
 	import type { Snippet } from 'svelte';
+	import type { LucideIcon } from '@lucide/svelte';
 
 	let {
 		title,
@@ -11,7 +11,7 @@
 		title: string;
 		description?: string;
 		actions?: Snippet;
-		icon?: ComponentType<SvelteComponent>;
+		icon?: LucideIcon;
 	} = $props();
 </script>
 

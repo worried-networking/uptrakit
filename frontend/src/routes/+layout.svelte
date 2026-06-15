@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import type { ComponentType, Snippet, SvelteComponent } from 'svelte';
+	import type { Snippet } from 'svelte';
+	import type { LucideIcon } from '@lucide/svelte';
 	import type { SystemAlert } from '$lib/types';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
@@ -44,7 +45,7 @@
 		Settings,
 		Sun,
 		Tags
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import { resolveIcon } from '$lib/icons';
 	import '../app.css';
 
@@ -86,7 +87,7 @@
 		origin: NavItemOrigin;
 		stableId: string;
 		badge?: string;
-		icon?: ComponentType<SvelteComponent>;
+		icon?: LucideIcon;
 	} & ({ badgeHref?: undefined; badgeAriaLabel?: undefined } | { badgeHref: string; badgeAriaLabel: string });
 
 	function formatBadge(count: number | null): string | undefined {
@@ -177,7 +178,7 @@
 		href: string;
 		label: string;
 		priority: number;
-		icon: ComponentType<SvelteComponent>;
+		icon: LucideIcon;
 		permission?: Permission | Permission[];
 	}[] = [
 		{ href: '/', label: 'Home', priority: 100, icon: House },

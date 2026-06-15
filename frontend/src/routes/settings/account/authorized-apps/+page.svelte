@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { ShieldCheck } from 'lucide-svelte';
+	import { ShieldCheck } from '@lucide/svelte';
 	import { listMyConsents, revokeMyConsent } from '$lib/api/oauth';
 	import type { OAuthConsent } from '$lib/api/oauth';
 	import { Callout, DataTable, EmptyState, PageShell, SectionCard, type DataTableColumn } from '$lib/components/ui';

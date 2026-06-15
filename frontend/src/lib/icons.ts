@@ -1,4 +1,4 @@
-import type { ComponentType, SvelteComponent } from 'svelte';
+import type { LucideIcon } from '@lucide/svelte';
 import {
 	Box,
 	Boxes,
@@ -26,9 +26,9 @@ import {
 	Trash2,
 	Unlink,
 	Wrench
-} from 'lucide-svelte';
+} from '@lucide/svelte';
 
-export type IconComponent = ComponentType<SvelteComponent>;
+export type IconComponent = LucideIcon;
 
 export const ICONS: Record<string, IconComponent> = {
 	box: Box,

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { KeyRound } from 'lucide-svelte';
+	import { KeyRound } from '@lucide/svelte';
 	import {
 		listOAuthClients,
 		revokeOAuthClient,
