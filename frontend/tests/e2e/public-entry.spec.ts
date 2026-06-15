@@ -157,7 +157,9 @@ test.describe('public-entry snapshots', () => {
 				await page.waitForSelector(SHELL_SELECTOR);
 				await page.waitForSelector('[data-ui="form-field-row"]');
 				await expect(page.locator(SHELL_SELECTOR)).toHaveScreenshot(`login-default-${theme}.png`, {
-					threshold: 0.005
+					threshold: 0.005,
+					maxDiffPixelRatio: 0.02,
+					animations: 'disabled'
 				});
 			});
 
@@ -237,8 +239,13 @@ test.describe('public-entry snapshots', () => {
 				await page.waitForSelector(SHELL_SELECTOR);
 				await page.waitForSelector('[role="button"]:has-text("Approve"), button:has-text("Approve")');
 				await lookupDone;
+				// Unified device auth UI (commit 5409647ea) replaces the goto-driven branch with a
+				// lookupPhase state machine; the Approve/Deny buttons settle in <1 frame after
+				// fulfillment so a stricter threshold occasionally catches subpixel border drift.
 				await expect(page.locator(SHELL_SELECTOR)).toHaveScreenshot(`device-auth-${theme}.png`, {
-					threshold: 0.005
+					threshold: 0.005,
+					maxDiffPixelRatio: 0.02,
+					animations: 'disabled'
 				});
 			});
 

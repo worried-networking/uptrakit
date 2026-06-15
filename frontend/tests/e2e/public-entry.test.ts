@@ -38,9 +38,12 @@ test.describe('Public entry shell', () => {
 			'/register'
 		);
 		await expect(page.getByRole('textbox', { name: 'Email' })).toHaveClass(/focus-visible:/);
-		await expect(page.getByRole('button', { name: 'Login' })).toHaveClass(/focus-visible:/);
+		// Header also renders a "Login" anchor for unauthenticated users; scope
+		// to the main content's submit button so the locator stays unique.
+		const loginSubmit = page.locator('#main-content').getByRole('button', { name: 'Login' });
+		await expect(loginSubmit).toHaveClass(/focus-visible:/);
 
-		await page.getByRole('button', { name: 'Login' }).click();
+		await loginSubmit.click();
 
 		await expect(page.getByText('Email is required.')).toBeVisible();
 		await expect(page.getByText('Password is required.')).toBeVisible();
@@ -55,9 +58,11 @@ test.describe('Public entry shell', () => {
 		await expect(page.locator('[data-ui="form-field-row"]')).toHaveCount(4);
 		await expect(page.locator('#main-content a[href="/login"]')).toBeVisible();
 		await expect(page.getByRole('textbox', { name: 'Email' })).toHaveClass(/focus-visible:/);
-		await expect(page.getByRole('button', { name: 'Register' })).toHaveClass(/focus-visible:/);
+		// Header also renders a "Register" anchor for unauthenticated users.
+		const registerSubmit = page.locator('#main-content').getByRole('button', { name: 'Register' });
+		await expect(registerSubmit).toHaveClass(/focus-visible:/);
 
-		await page.getByRole('button', { name: 'Register' }).click();
+		await registerSubmit.click();
 
 		await expect(page.getByText('Email is required.')).toBeVisible();
 		await expect(page.getByText('First name is required.')).toBeVisible();
@@ -66,12 +71,17 @@ test.describe('Public entry shell', () => {
 	});
 
 	test('device uses semantic callouts in the shared shell', async ({ page }) => {
-		await page.goto('/device?user_code=AB12-1BAD');
+		// Anonymous users land on /device with a fully populated, well-formed
+		// code (all letters from the device alphabet) and see the "log in
+		// first" info callout — proves callouts render inside the shared shell.
+		await page.goto('/device?user_code=BCDF-GHJK');
 
 		await expect(page.locator('[data-ui="public-entry-shell"]')).toBeVisible();
 		await expect(page.getByRole('heading', { name: 'Authorize Device' })).toBeVisible();
 		await expect(page.getByText('Confirm the code shown in your CLI to finish signing in.')).toBeVisible();
-		await expect(page.locator('[data-ui="callout"][data-tone="danger"]')).toContainText('Invalid device code format');
+		await expect(page.locator('[data-ui="callout"][data-tone="info"]')).toContainText(
+			'You need to log in before you can authorize this device.'
+		);
 	});
 
 	test('public errors use the shared shell framing', async ({ page }) => {
@@ -84,7 +94,12 @@ test.describe('Public entry shell', () => {
 		await expect(page.getByRole('button', { name: 'Go to Home' })).toBeVisible();
 	});
 
-	test('device shows client name when lookup succeeds', async ({ page }) => {
+	test('device renders consent prompt when lookup succeeds', async ({ page }) => {
+		// ConsentPrompt no longer surfaces the client name (commit adb2026da
+		// dropped the clientName prop entirely — the page title already shows
+		// it for OAuth, and device flow shows the CLI). The remaining contract
+		// is: after a successful lookup, the consent prompt with Approve/Deny
+		// is rendered and the surface registry mock keeps the layout quiet.
 		await page.route('**/api/v1/auth/refresh', (route) =>
 			route.fulfill({
 				status: 200,
@@ -104,6 +119,7 @@ test.describe('Public entry shell', () => {
 			})
 		);
 		await page.route('**/api/v1/system/alerts', (route) => route.fulfill({ json: { alerts: [] } }));
+		await page.route('**/api/v1/surfaces', (route) => route.fulfill({ status: 200, json: [] }));
 		await page.route('**/api/v1/auth/device/lookup*', (route) =>
 			route.fulfill({
 				json: { client_name: 'cli-laptop-2026-05-12', expires_at: '2026-05-12T12:00:00Z' }
@@ -111,7 +127,10 @@ test.describe('Public entry shell', () => {
 		);
 
 		await page.goto('/device?user_code=BCDF-GHJK');
-		await expect(page.locator('[data-ui="consent-prompt"]')).toContainText('cli-laptop-2026-05-12');
+		const consent = page.locator('[data-ui="consent-prompt"]');
+		await expect(consent).toBeVisible();
+		await expect(consent.getByRole('button', { name: 'Approve' })).toBeVisible();
+		await expect(consent.getByRole('button', { name: 'Deny' })).toBeVisible();
 	});
 
 	test('device approve succeeds', async ({ page }) => {

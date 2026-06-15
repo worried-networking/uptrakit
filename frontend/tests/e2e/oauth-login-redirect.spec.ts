@@ -38,6 +38,9 @@ async function mockAuthenticatedSession(page: Page) {
 		})
 	);
 	await page.route('**/api/v1/system/alerts', (route) => route.fulfill({ json: { alerts: [] } }));
+	// Layout calls loadSurfaceRegistry() once user is authenticated; mock to
+	// keep the dev server proxy out of the test path.
+	await page.route('**/api/v1/surfaces', (route) => route.fulfill({ status: 200, json: [] }));
 }
 
 // ---------------------------------------------------------------------------
@@ -123,12 +126,17 @@ test.describe('login page OAuth redirect', () => {
 	}
 
 	test('navigates to consent page without looping when user is authenticated', async ({ page }) => {
-		// Track every time /login is navigated to — more than 1 means the loop occurred.
+		// Track distinct visits to /login — more than 1 distinct landing means
+		// the loop occurred. `framenavigated` can fire multiple times for the
+		// same URL when SvelteKit replays its router effects on the same path
+		// (e.g. effect re-runs, OIDC code clearing), so consecutive duplicates
+		// of the same URL are coalesced.
 		const loginVisits: string[] = [];
 		page.on('framenavigated', (frame) => {
-			if (frame === page.mainFrame() && new URL(frame.url()).pathname === '/login') {
-				loginVisits.push(frame.url());
-			}
+			if (frame !== page.mainFrame()) return;
+			if (new URL(frame.url()).pathname !== '/login') return;
+			if (loginVisits[loginVisits.length - 1] === frame.url()) return;
+			loginVisits.push(frame.url());
 		});
 
 		await mockAuthenticatedSession(page);
@@ -141,7 +149,9 @@ test.describe('login page OAuth redirect', () => {
 
 		// Must reach the consent page within 5 s — a timeout here means the loop fired.
 		await page.waitForURL(`**/oauth/consent/${REQUEST_ID}`, { timeout: 5_000 });
-		await page.waitForSelector('button:has-text("Allow access")');
+		// ConsentPrompt renames the primary action from "Allow access" → "Approve"
+		// after commit 9df993227 (redesign with ConsentPrompt component).
+		await page.waitForSelector('button:has-text("Approve")');
 
 		// /login should have been visited exactly once — the initial goto above.
 		// More visits = the loop reproduced = the fix is broken.

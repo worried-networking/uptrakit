@@ -79,20 +79,25 @@ test.describe('Services page', () => {
 		await expect(page.getByText(/No services registered yet/)).toBeVisible();
 	});
 
-	test('shows the Agents filter button and clicking it reloads with type=agent', async ({ page }) => {
+	test('shows the capability filter and changing it reloads with the capability query param', async ({ page }) => {
+		// The original "Agents" toggle was replaced with a capability Select
+		// (commit history under src/routes/services/+page.svelte). The filter
+		// now scopes by capability (software_discovery / ssh_remote / all) and
+		// the page re-fetches `/services?capability=…` on change.
 		await mockSession(page);
-		let callCount = 0;
+		const capabilityParams: (string | null)[] = [];
 		await page.route('**/api/v1/services**', (route) => {
-			callCount++;
+			const url = new URL(route.request().url());
+			capabilityParams.push(url.searchParams.get('capability'));
 			route.fulfill({ json: { items: [], total: 0, page: 1, per_page: 25, total_pages: 1 } });
 		});
 
 		await page.goto('/services');
-		await expect(page.getByRole('button', { name: 'Agents', exact: true })).toBeVisible();
-		await page.getByRole('button', { name: 'Agents', exact: true }).click();
+		const filter = page.getByLabel('Filter by capability');
+		await expect(filter).toBeVisible();
+		await filter.selectOption('software_discovery');
 
-		// The filter click should trigger a second API call
-		await page.waitForFunction(() => true); // flush microtasks
-		expect(callCount).toBeGreaterThanOrEqual(2);
+		// The filter change should trigger a second API call with the new query.
+		await expect.poll(() => capabilityParams).toContain('software_discovery');
 	});
 });

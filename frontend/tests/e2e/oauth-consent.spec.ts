@@ -26,6 +26,9 @@ async function mockAuthenticatedSession(page: Page) {
 		})
 	);
 	await page.route('**/api/v1/system/alerts', (route) => route.fulfill({ json: { alerts: [] } }));
+	// Layout loads surface registry on auth; return empty to avoid backend proxy.
+	await page.route('**/api/v1/surfaces', (route) => route.fulfill({ status: 200, json: [] }));
+	await page.route('**/api/v1/surfaces?**', (route) => route.fulfill({ status: 200, json: [] }));
 }
 
 // ---------------------------------------------------------------------------
@@ -49,11 +52,15 @@ const BASE_CONSENT: ConsentDetails = {
 async function mockConsentGet(page: Page, requestId: string, overrides: Partial<ConsentDetails>) {
 	const payload: ConsentDetails = { ...BASE_CONSENT, ...overrides };
 	await page.route(`**/oauth/consent/${requestId}`, (route) => {
-		if (route.request().method() === 'GET') {
-			route.fulfill({ status: 200, json: payload });
-		} else {
+		const req = route.request();
+		// Only intercept fetch/XHR for the consent details. The document request
+		// for the same URL must be handled by SvelteKit's client-side router (see
+		// navigateToConsent), so fallback() here would hit Vite's `/oauth` proxy.
+		if (req.method() !== 'GET' || req.resourceType() === 'document') {
 			route.fallback();
+			return;
 		}
+		route.fulfill({ status: 200, json: payload });
 	});
 }
 
@@ -80,7 +87,21 @@ const DANGER_CALLOUT = '[data-ui="callout"][data-tone="danger"]';
 const WARNING_CALLOUT = '[data-ui="callout"][data-tone="warning"]';
 
 async function navigateToConsent(page: Page, requestId: string) {
-	await page.goto(`/oauth/consent/${requestId}`);
+	// Vite dev server proxies `/oauth/*` to the real backend, so a direct
+	// document navigation to `/oauth/consent/{id}` never reaches SvelteKit.
+	// Land on a non-proxied route first and trigger a SvelteKit client-side
+	// navigation by clicking a synthesized anchor, so the consent page module
+	// is fetched via the SvelteKit data loader (which is not proxied).
+	await page.goto('/');
+	await page.waitForLoadState('networkidle');
+	await page.evaluate((id) => {
+		const a = document.createElement('a');
+		a.href = `/oauth/consent/${id}`;
+		a.textContent = 'go';
+		a.setAttribute('data-testid', '__nav_to_consent__');
+		document.body.appendChild(a);
+	}, requestId);
+	await page.locator('[data-testid="__nav_to_consent__"]').click();
 	await page.waitForSelector(APPROVE_BUTTON);
 }
 

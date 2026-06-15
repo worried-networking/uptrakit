@@ -12,6 +12,9 @@
 		"test": "vitest run",
 		"test:coverage": "vitest run --coverage",
 		"test:e2e": "playwright test",
+		"test:e2e:behavior": "playwright test --config=playwright.behavior.config.ts",
+		"test:e2e:parity": "playwright test --config=playwright.parity.config.ts",
+		"test:e2e:check-buckets": "node scripts/check-e2e-buckets.mjs",
 		"lint": "eslint .",
 		"format": "prettier --write .",
 		"format:check": "prettier --check ."

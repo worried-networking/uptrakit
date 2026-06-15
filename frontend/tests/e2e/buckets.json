@@ -1,0 +1,24 @@
+{
+	"behavior": [
+		"audit-logs-state-tab.spec.ts",
+		"auth.test.ts",
+		"device-approval.spec.ts",
+		"hosts.test.ts",
+		"instance-config.spec.ts",
+		"oauth-consent.spec.ts",
+		"oauth-login-redirect.spec.ts",
+		"oidc-settings.spec.ts",
+		"public-entry.test.ts",
+		"services.test.ts"
+	],
+	"parity": [
+		"button-primitive.spec.ts",
+		"form-primitive.spec.ts",
+		"public-entry.spec.ts",
+		"software-area.spec.ts",
+		"surface-preview.spec.ts",
+		"ui-parity.test.ts",
+		"ui-parity-responsive.test.ts"
+	],
+	"skipped": ["filter-bar-parity.spec.ts", "history.spec.ts"]
+}

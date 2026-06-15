@@ -101,7 +101,13 @@ test('instance config tab renders file path and coordinator state', async ({ pag
 	await mockSettingsApi(page, mockUserWithView);
 	await page.goto('/settings?tab=instance-config');
 	await expect(page.getByText('/etc/uptrakit/controller.toml')).toBeVisible();
-	await expect(page.getByText('idle')).toBeVisible();
+	// `idle` is the no-banner state: InstanceConfigTab only renders a
+	// coordinator banner when state is `degraded`. Assert the banner is absent
+	// and the structural section cards are visible — that's the externally
+	// observable "idle" signal.
+	await expect(page.getByRole('heading', { name: 'Coordinator degraded' })).not.toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Config File' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Last Reload' })).toBeVisible();
 });
 
 test('clear degraded button hidden without manage_instance_config_state permission', async ({ page }) => {
