@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { Copy } from 'lucide-svelte';
+	import { Copy } from '@lucide/svelte';
 	import { getUser, getAuthMethod, initialize } from '$lib/auth.svelte';
 	import {
 		listApiTokens,

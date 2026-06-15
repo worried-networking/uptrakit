@@ -3,7 +3,7 @@
 </script>
 
 <script lang="ts">
-	import { Info } from 'lucide-svelte';
+	import { Info } from '@lucide/svelte';
 	import { portal } from '$lib/actions/portal';
 
 	let {

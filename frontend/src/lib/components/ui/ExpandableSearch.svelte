@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { tick, untrack } from 'svelte';
-	import { Search, X } from 'lucide-svelte';
+	import { Search, X } from '@lucide/svelte';
 	import Button from '$lib/components/Button.svelte';
 	import { Input } from '$lib/components/forms';
 

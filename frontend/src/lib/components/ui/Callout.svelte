@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { Info, CircleCheck, TriangleAlert, OctagonAlert } from 'lucide-svelte';
+	import { Info, CircleCheck, TriangleAlert, OctagonAlert } from '@lucide/svelte';
 
 	export type CalloutTone = 'info' | 'success' | 'warning' | 'danger';
 

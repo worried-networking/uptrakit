@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
-	import { CheckCircle } from 'lucide-svelte';
+	import { CheckCircle } from '@lucide/svelte';
 	import { Callout } from '$lib/components/ui';
 	import PublicEntryShell from '$lib/components/ui/PublicEntryShell.svelte';
 	import ConsentPrompt from '$lib/components/ConsentPrompt.svelte';

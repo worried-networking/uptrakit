@@ -4,7 +4,7 @@
 	import { clearError, clearSuccess, getErrorMessage, getSuccessMessage } from '$lib/notifications.svelte';
 	import { Callout, SectionCard, StatusBadge } from '$lib/components/ui';
 	import Button from './Button.svelte';
-	import { X } from 'lucide-svelte';
+	import { X } from '@lucide/svelte';
 	import type { SystemAlert } from '$lib/types';
 	import { portal } from '$lib/actions/portal';
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Box, Trash2 } from 'lucide-svelte';
+import { Box, Trash2 } from '@lucide/svelte';
 import { ICONS, resolveIcon } from './icons';
 
 describe('resolveIcon', () => {

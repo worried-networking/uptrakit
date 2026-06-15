@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createRawSnippet } from 'svelte';
-import { Package } from 'lucide-svelte';
+import { Package } from '@lucide/svelte';
 import EmptyState from './EmptyState.svelte';
 
 function makeSnippet(html: string) {
