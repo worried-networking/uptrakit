@@ -1,17 +1,19 @@
 //! `ReleaseFetcher` implementation for the Agent Skills plugin.
 //!
-//! Skills are versioned by the SHA of the subdirectory in the source repository
-//! (obtained via the GitHub Trees API). A single tree call covers all skills
-//! that share the same `owner/repo`, so `batch_fetch` groups items before
-//! making API calls.
+//! Skills are versioned by the subtree SHA of the skill directory in the source
+//! repository as of the newest commit touching that path
+//! ([`list_recent_commit_dates_for_path`]). Each [`UpstreamRelease`] carries the
+//! corresponding commit date in `display_version` (strict ISO 8601 UTC second
+//! precision). `batch_fetch` groups items by `(owner, repo, skill_dir)` and
+//! makes one provider call per unique group.
+//!
+//! [`list_recent_commit_dates_for_path`]: uptrakit_global_github_provider::GitHubProviderClient::list_recent_commit_dates_for_path
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use async_trait::async_trait;
 use rootcause::prelude::*;
-use uptrakit_global_github_provider::{
-    GitHubProviderError, GitHubRepositoryTree, GitHubTreeEntryKind, PACKAGE_MANAGER_SKILLS,
-};
+use uptrakit_global_github_provider::{GitHubProviderError, PACKAGE_MANAGER_SKILLS, TreeCommit};
 use uptrakit_plugin_infrastructure_core::{
     BatchFetchItem, BatchFetchResult, PluginError, ReleaseFetcher, Result, UpstreamRelease, Version,
 };
@@ -19,6 +21,32 @@ use uptrakit_plugin_infrastructure_core::{
 use crate::error::SkillsError;
 use crate::lock::parse_skill_identifier;
 use crate::plugin::SkillsPlugin;
+
+/// Strict ISO 8601 UTC second-precision format for `display_version`.
+///
+/// The frontend matches this exact shape with the regex
+/// `^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$`; any deviation (e.g. RFC 3339
+/// subsecond precision) breaks the formatter.
+const DISPLAY_FMT: &[time::format_description::FormatItem<'_>] =
+    time::macros::format_description!("[year]-[month]-[day]T[hour]:[minute]:[second]Z");
+
+/// Hard cap on the number of recent commits requested from the provider per skill
+/// directory. Matches the provider's own `min(limit, 90)` ceiling.
+const COMMIT_WINDOW: usize = 90;
+
+/// Turn a [`TreeCommit`] into an [`UpstreamRelease`] for the given skill directory.
+fn commit_to_release(
+    commit: &TreeCommit,
+    owner: &str,
+    repo: &str,
+    skill_dir: &str,
+) -> UpstreamRelease {
+    let sha = commit.tree_sha_at_path.clone();
+    let url = format!("https://github.com/{owner}/{repo}/tree/HEAD/{skill_dir}");
+    let mut release = UpstreamRelease::new(Version::new(sha.clone()), sha, false, url);
+    release.display_version = commit.committed_at.format(&DISPLAY_FMT).ok();
+    release
+}
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -80,32 +108,6 @@ fn parse_github_owner_repo(url: &url::Url) -> Result<(String, String)> {
     Ok((owner, repo))
 }
 
-/// Convert a repository tree into an [`UpstreamRelease`] for the given `skill_dir`.
-///
-/// Looks for a `Tree`-kind entry whose path equals `skill_dir`. When `skill_dir`
-/// is empty the repo root (SHA obtained from the tree itself) is used instead.
-/// Returns `None` when the directory is not found in the tree.
-fn tree_to_release(
-    tree: &GitHubRepositoryTree,
-    skill_dir: &str,
-    owner: &str,
-    repo: &str,
-) -> Option<UpstreamRelease> {
-    let sha = tree
-        .entries
-        .iter()
-        .find(|e| e.kind == GitHubTreeEntryKind::Tree && e.path == skill_dir)
-        .map(|e| e.sha.clone())?;
-
-    let url = format!("https://github.com/{owner}/{repo}/tree/HEAD/{skill_dir}");
-    Some(UpstreamRelease::new(
-        Version::new(sha.clone()),
-        sha,
-        false,
-        url,
-    ))
-}
-
 // ── `ReleaseFetcher` impl ─────────────────────────────────────────────────────
 
 #[async_trait]
@@ -113,7 +115,9 @@ impl ReleaseFetcher for SkillsPlugin {
     /// Fetch the single upstream release for a skill identifier.
     ///
     /// A skill identifier has the form `<source_url>#<skill_path>`. The version
-    /// is the SHA of the skill's subdirectory from the GitHub Trees API.
+    /// is the SHA of the skill's subdirectory as of the newest commit touching
+    /// it (within the recent commit window); `display_version` is the commit
+    /// date formatted as strict ISO 8601 UTC second precision.
     async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
         let provider = self
             .provider
@@ -129,22 +133,6 @@ impl ReleaseFetcher for SkillsPlugin {
 
         let (owner, repo) = parse_github_owner_repo(&source_url)?;
 
-        let tree = provider
-            .fetch_repository_tree(PACKAGE_MANAGER_SKILLS, &owner, &repo, "HEAD", true)
-            .await
-            .map_err(map_provider_error)?;
-
-        if tree.truncated {
-            tracing::warn!(
-                owner = %owner,
-                repo = %repo,
-                "repository tree is truncated; skill directory SHA may be missing"
-            );
-            return Err(report!(PluginError::PluginInternal(format!(
-                "repository tree for {owner}/{repo} is truncated; cannot determine skill SHA"
-            ))));
-        }
-
         let skill_dir = derive_skill_dir(&skill_path);
 
         if skill_dir.is_empty() {
@@ -155,18 +143,31 @@ impl ReleaseFetcher for SkillsPlugin {
             return Ok(vec![]);
         }
 
-        match tree_to_release(&tree, skill_dir, &owner, &repo) {
-            Some(release) => Ok(vec![release]),
-            None => Err(report!(PluginError::PluginInternal(format!(
-                "skill directory '{skill_dir}' not found in {owner}/{repo} tree"
-            )))),
-        }
+        let entries = provider
+            .list_recent_commit_dates_for_path(
+                PACKAGE_MANAGER_SKILLS,
+                &owner,
+                &repo,
+                skill_dir,
+                COMMIT_WINDOW,
+                &HashSet::new(),
+            )
+            .await
+            .map_err(map_provider_error)?;
+
+        // Provider contract: entries are oldest-first; the newest entry is `.last()`.
+        let Some(top) = entries.last() else {
+            return Ok(vec![]);
+        };
+
+        Ok(vec![commit_to_release(top, &owner, &repo, skill_dir)])
     }
 
-    /// Fetch releases for multiple skills in a single API call per repository.
+    /// Fetch releases for multiple skills in a single API call per skill directory.
     ///
-    /// Groups items by `(owner, repo)`, performs one `fetch_repository_tree`
-    /// call per group, then resolves per-skill results from the shared tree.
+    /// Groups items by `(owner, repo, skill_dir)`, performs one
+    /// `list_recent_commit_dates_for_path` call per group, then resolves the
+    /// per-skill newest entry into a [`BatchFetchResult`].
     async fn batch_fetch(&self, items: &[BatchFetchItem]) -> Result<Vec<BatchFetchResult>> {
         // ── 1. Resolve identifiers ────────────────────────────────────────────
         struct Resolved {
@@ -208,42 +209,41 @@ impl ReleaseFetcher for SkillsPlugin {
             }
         }
 
-        // ── 2. Group by (owner, repo) and fetch trees ─────────────────────────
-        // Map "(owner, repo)" → GitHubRepositoryTree (or an error string).
-        let mut tree_cache: HashMap<
-            (String, String),
-            std::result::Result<GitHubRepositoryTree, String>,
+        // ── 2. Group by (owner, repo, skill_dir); skip empty skill_dir ────────
+        // Map (owner, repo, skill_dir) → Result<top TreeCommit, error string>.
+        // `None` for the inner option means the group was queried successfully
+        // but the path has no commits in the recent window.
+        let mut commit_cache: HashMap<
+            (String, String, String),
+            std::result::Result<Option<TreeCommit>, String>,
         > = HashMap::new();
 
         for item_result in &resolved {
             let Ok(r) = item_result else { continue };
-            let key = (r.owner.clone(), r.repo.clone());
-            if tree_cache.contains_key(&key) {
+            if r.skill_dir.is_empty() {
                 continue;
             }
-            let tree_result = provider
-                .fetch_repository_tree(PACKAGE_MANAGER_SKILLS, &r.owner, &r.repo, "HEAD", true)
+            let key = (r.owner.clone(), r.repo.clone(), r.skill_dir.clone());
+            if commit_cache.contains_key(&key) {
+                continue;
+            }
+            let resp = provider
+                .list_recent_commit_dates_for_path(
+                    PACKAGE_MANAGER_SKILLS,
+                    &r.owner,
+                    &r.repo,
+                    &r.skill_dir,
+                    COMMIT_WINDOW,
+                    &HashSet::new(),
+                )
                 .await;
-            match tree_result {
-                Ok(tree) if tree.truncated => {
-                    tracing::warn!(
-                        owner = %r.owner,
-                        repo = %r.repo,
-                        "repository tree is truncated; results may be incomplete"
-                    );
-                    tree_cache.insert(
-                        key,
-                        Err(format!(
-                            "repository tree for {}/{} is truncated",
-                            r.owner, r.repo
-                        )),
-                    );
-                }
-                Ok(tree) => {
-                    tree_cache.insert(key, Ok(tree));
+            match resp {
+                Ok(mut entries) => {
+                    // Oldest-first; pop the newest off the tail.
+                    commit_cache.insert(key, Ok(entries.pop()));
                 }
                 Err(e) => {
-                    tree_cache.insert(key, Err(e.to_string()));
+                    commit_cache.insert(key, Err(e.to_string()));
                 }
             }
         }
@@ -256,41 +256,31 @@ impl ReleaseFetcher for SkillsPlugin {
                     results.push(BatchFetchResult::error(id, err));
                 }
                 Ok(r) => {
-                    let key = (r.owner.clone(), r.repo.clone());
-                    match tree_cache.get(&key) {
+                    if r.skill_dir.is_empty() {
+                        results.push(BatchFetchResult::empty(r.package_identifier));
+                        continue;
+                    }
+                    let key = (r.owner.clone(), r.repo.clone(), r.skill_dir.clone());
+                    match commit_cache.get(&key) {
                         None => {
-                            // No entry means we never tried (shouldn't happen).
+                            // Should not happen — every successful resolve seeds the cache.
                             results.push(BatchFetchResult::error(
                                 r.package_identifier,
-                                "tree not fetched (internal error)".to_string(),
+                                "commit window not fetched (internal error)".to_string(),
                             ));
                         }
                         Some(Err(msg)) => {
                             results
                                 .push(BatchFetchResult::error(r.package_identifier, msg.clone()));
                         }
-                        Some(Ok(tree)) => {
-                            if r.skill_dir.is_empty() {
-                                results.push(BatchFetchResult::empty(r.package_identifier));
-                            } else {
-                                match tree_to_release(tree, &r.skill_dir, &r.owner, &r.repo) {
-                                    Some(release) => {
-                                        results.push(BatchFetchResult::found(
-                                            r.package_identifier,
-                                            vec![release],
-                                        ));
-                                    }
-                                    None => {
-                                        results.push(BatchFetchResult::error(
-                                            r.package_identifier,
-                                            format!(
-                                                "skill directory '{}' not found in {}/{} tree",
-                                                r.skill_dir, r.owner, r.repo
-                                            ),
-                                        ));
-                                    }
-                                }
-                            }
+                        Some(Ok(None)) => {
+                            results.push(BatchFetchResult::empty(r.package_identifier));
+                        }
+                        Some(Ok(Some(commit))) => {
+                            let release =
+                                commit_to_release(commit, &r.owner, &r.repo, &r.skill_dir);
+                            results
+                                .push(BatchFetchResult::found(r.package_identifier, vec![release]));
                         }
                     }
                 }
@@ -304,13 +294,15 @@ impl ReleaseFetcher for SkillsPlugin {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+    use std::collections::HashSet;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use async_trait::async_trait;
     use uptrakit_global_github_provider::{
-        GitHubProviderClient, GitHubProviderError, GitHubRepositoryTree, GitHubTreeEntry,
-        GitHubTreeEntryKind, GlobalProviderConsumerId,
+        GitHubProviderClient, GitHubProviderError, GitHubRepositoryTree, GlobalProviderConsumerId,
+        TreeCommit,
     };
     use uptrakit_plugin_infrastructure_core::PluginError;
     use uptrakit_plugin_infrastructure_core::ReleaseFetcher as _;
@@ -333,26 +325,17 @@ mod tests {
         format!("{source_url}#{skill_path}")
     }
 
-    fn make_tree(entries: Vec<GitHubTreeEntry>) -> GitHubRepositoryTree {
-        GitHubRepositoryTree {
-            truncated: false,
-            entries,
-        }
-    }
-
-    fn tree_entry(path: &str, kind: GitHubTreeEntryKind, sha: &str) -> GitHubTreeEntry {
-        GitHubTreeEntry {
-            path: path.to_string(),
-            kind,
-            sha: sha.to_string(),
-        }
+    fn fixed_date() -> time::OffsetDateTime {
+        time::macros::datetime!(2026-06-11 01:15:00 UTC)
     }
 
     // ── FakeProvider ─────────────────────────────────────────────────────────
 
-    /// Returns a fixed tree regardless of owner/repo.
+    /// Returns a fixed `path → SHA` mapping. Each lookup yields a single
+    /// (oldest = newest) `TreeCommit`. Paths absent from the map return an
+    /// empty vec (path not in the recent commit window).
     struct FakeProvider {
-        tree: GitHubRepositoryTree,
+        commits_by_path: HashMap<String, String>,
     }
 
     #[async_trait]
@@ -365,22 +348,42 @@ mod tests {
             _git_ref: &str,
             _recursive: bool,
         ) -> std::result::Result<GitHubRepositoryTree, GitHubProviderError> {
-            Ok(self.tree.clone())
+            Err(GitHubProviderError::Misconfigured(
+                "test double: Skills release fetching no longer calls fetch_repository_tree; \
+                 update the test to stub list_recent_commit_dates_for_path instead"
+                    .to_string(),
+            ))
+        }
+
+        async fn list_recent_commit_dates_for_path(
+            &self,
+            _consumer: GlobalProviderConsumerId,
+            _owner: &str,
+            _repo: &str,
+            path: &str,
+            _limit: usize,
+            _expected: &HashSet<String>,
+        ) -> std::result::Result<Vec<TreeCommit>, GitHubProviderError> {
+            match self.commits_by_path.get(path) {
+                Some(sha) => Ok(vec![TreeCommit::new(sha.clone(), fixed_date())]),
+                None => Ok(vec![]),
+            }
         }
     }
 
     // ── CountingProvider ─────────────────────────────────────────────────────
 
-    /// Counts calls and returns a fixed tree.
+    /// Counts calls to `list_recent_commit_dates_for_path` and returns a
+    /// fixed `path → SHA` mapping.
     struct CountingProvider {
-        tree: GitHubRepositoryTree,
+        commits_by_path: HashMap<String, String>,
         calls: AtomicUsize,
     }
 
     impl CountingProvider {
-        fn new(tree: GitHubRepositoryTree) -> Arc<Self> {
+        fn new(commits_by_path: HashMap<String, String>) -> Arc<Self> {
             Arc::new(Self {
-                tree,
+                commits_by_path,
                 calls: AtomicUsize::new(0),
             })
         }
@@ -396,8 +399,27 @@ mod tests {
             _git_ref: &str,
             _recursive: bool,
         ) -> std::result::Result<GitHubRepositoryTree, GitHubProviderError> {
+            Err(GitHubProviderError::Misconfigured(
+                "test double: Skills release fetching no longer calls fetch_repository_tree; \
+                 update the test to stub list_recent_commit_dates_for_path instead"
+                    .to_string(),
+            ))
+        }
+
+        async fn list_recent_commit_dates_for_path(
+            &self,
+            _consumer: GlobalProviderConsumerId,
+            _owner: &str,
+            _repo: &str,
+            path: &str,
+            _limit: usize,
+            _expected: &HashSet<String>,
+        ) -> std::result::Result<Vec<TreeCommit>, GitHubProviderError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            Ok(self.tree.clone())
+            match self.commits_by_path.get(path) {
+                Some(sha) => Ok(vec![TreeCommit::new(sha.clone(), fixed_date())]),
+                None => Ok(vec![]),
+            }
         }
     }
 
@@ -406,16 +428,9 @@ mod tests {
     #[tokio::test]
     async fn fetch_releases_skill_folder_found_returns_one_release() {
         let sha = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
-        let tree = make_tree(vec![
-            tree_entry("skills", GitHubTreeEntryKind::Tree, "aaaa"),
-            tree_entry("skills/brainstorming", GitHubTreeEntryKind::Tree, sha),
-            tree_entry(
-                "skills/brainstorming/SKILL.md",
-                GitHubTreeEntryKind::Blob,
-                "bbbb",
-            ),
-        ]);
-        let provider = Arc::new(FakeProvider { tree });
+        let provider = Arc::new(FakeProvider {
+            commits_by_path: HashMap::from([("skills/brainstorming".to_string(), sha.to_string())]),
+        });
         let plugin = make_plugin_with_provider(provider);
 
         let id = skill_id(
@@ -432,21 +447,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fetch_releases_skill_folder_missing_returns_error() {
-        let tree = make_tree(vec![tree_entry(
-            "skills/other",
-            GitHubTreeEntryKind::Tree,
-            "cccc",
-        )]);
-        let provider = Arc::new(FakeProvider { tree });
+    async fn fetch_releases_skill_folder_missing_returns_empty() {
+        // No mapping for `skills/brainstorming` → provider returns no commits.
+        // Miss collapses to an empty release list; the frontend short-SHA
+        // fallback renders without an error path.
+        let provider = Arc::new(FakeProvider {
+            commits_by_path: HashMap::new(),
+        });
         let plugin = make_plugin_with_provider(provider);
 
         let id = skill_id(
             "https://github.com/obra/superpowers",
             "skills/brainstorming/SKILL.md",
         );
-        let result = plugin.fetch_releases(&id).await;
-        assert!(result.is_err(), "expected error when skill dir is missing");
+        let releases = plugin
+            .fetch_releases(&id)
+            .await
+            .expect("missing skill dir is not an error");
+        assert!(releases.is_empty(), "expected no releases for missing path");
     }
 
     #[tokio::test]
@@ -467,8 +485,9 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_releases_non_github_id_returns_error() {
-        let tree = make_tree(vec![]);
-        let provider = Arc::new(FakeProvider { tree });
+        let provider = Arc::new(FakeProvider {
+            commits_by_path: HashMap::new(),
+        });
         let plugin = make_plugin_with_provider(provider);
 
         // gitlab.com URL — not a GitHub source
@@ -494,6 +513,20 @@ mod tests {
                 _git_ref: &str,
                 _recursive: bool,
             ) -> std::result::Result<GitHubRepositoryTree, GitHubProviderError> {
+                Err(GitHubProviderError::Misconfigured(
+                    "test double: Skills release fetching no longer uses fetch_repository_tree"
+                        .to_string(),
+                ))
+            }
+            async fn list_recent_commit_dates_for_path(
+                &self,
+                _consumer: GlobalProviderConsumerId,
+                _owner: &str,
+                _repo: &str,
+                _path: &str,
+                _limit: usize,
+                _expected: &HashSet<String>,
+            ) -> std::result::Result<Vec<TreeCommit>, GitHubProviderError> {
                 Err(GitHubProviderError::Throttled)
             }
         }
@@ -526,6 +559,20 @@ mod tests {
                 _git_ref: &str,
                 _recursive: bool,
             ) -> std::result::Result<GitHubRepositoryTree, GitHubProviderError> {
+                Err(GitHubProviderError::Misconfigured(
+                    "test double: Skills release fetching no longer uses fetch_repository_tree"
+                        .to_string(),
+                ))
+            }
+            async fn list_recent_commit_dates_for_path(
+                &self,
+                _consumer: GlobalProviderConsumerId,
+                _owner: &str,
+                _repo: &str,
+                _path: &str,
+                _limit: usize,
+                _expected: &HashSet<String>,
+            ) -> std::result::Result<Vec<TreeCommit>, GitHubProviderError> {
                 Err(GitHubProviderError::AuthFailed("bad token".to_string()))
             }
         }
@@ -558,6 +605,20 @@ mod tests {
                 _git_ref: &str,
                 _recursive: bool,
             ) -> std::result::Result<GitHubRepositoryTree, GitHubProviderError> {
+                Err(GitHubProviderError::Misconfigured(
+                    "test double: Skills release fetching no longer uses fetch_repository_tree"
+                        .to_string(),
+                ))
+            }
+            async fn list_recent_commit_dates_for_path(
+                &self,
+                _consumer: GlobalProviderConsumerId,
+                _owner: &str,
+                _repo: &str,
+                _path: &str,
+                _limit: usize,
+                _expected: &HashSet<String>,
+            ) -> std::result::Result<Vec<TreeCommit>, GitHubProviderError> {
                 Err(GitHubProviderError::Misconfigured("bad config".to_string()))
             }
         }
@@ -577,15 +638,71 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn batch_fetch_one_tree_call_per_repo() {
+    async fn fetch_releases_sets_display_version_to_iso_8601_commit_date() {
+        let sha = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+
+        struct DateProvider {
+            sha: &'static str,
+        }
+        #[async_trait]
+        impl GitHubProviderClient for DateProvider {
+            async fn fetch_repository_tree(
+                &self,
+                _: GlobalProviderConsumerId,
+                _: &str,
+                _: &str,
+                _: &str,
+                _: bool,
+            ) -> std::result::Result<GitHubRepositoryTree, GitHubProviderError> {
+                Err(GitHubProviderError::Misconfigured(
+                    "test double: fetch_releases must not call fetch_repository_tree anymore"
+                        .to_string(),
+                ))
+            }
+            async fn list_recent_commit_dates_for_path(
+                &self,
+                _consumer: GlobalProviderConsumerId,
+                _owner: &str,
+                _repo: &str,
+                _path: &str,
+                _limit: usize,
+                _expected: &HashSet<String>,
+            ) -> std::result::Result<Vec<TreeCommit>, GitHubProviderError> {
+                Ok(vec![TreeCommit::new(
+                    self.sha.to_string(),
+                    time::macros::datetime!(2026-06-11 01:15:00 UTC),
+                )])
+            }
+        }
+
+        let plugin = make_plugin_with_provider(Arc::new(DateProvider { sha }));
+        let id = skill_id(
+            "https://github.com/obra/superpowers",
+            "skills/brainstorming/SKILL.md",
+        );
+        let releases = plugin.fetch_releases(&id).await.expect("fetch ok");
+        assert_eq!(releases.len(), 1);
+        assert_eq!(releases[0].tag, sha, "tag still carries the SHA");
+        assert_eq!(
+            releases[0].display_version.as_deref(),
+            Some("2026-06-11T01:15:00Z"),
+            "display_version is strict ISO 8601 UTC second-precision"
+        );
+    }
+
+    #[tokio::test]
+    async fn batch_fetch_groups_by_skill_dir() {
+        // With the per-skill-directory commit-walk primitive, batch_fetch
+        // makes exactly one provider call per unique (owner, repo, skill_dir).
+        // Two skills sharing a directory collapse to a single call; two
+        // skills in distinct directories of the same repo result in two.
         let sha1 = "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111";
         let sha2 = "bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222";
-        let tree = make_tree(vec![
-            tree_entry("skills/brainstorming", GitHubTreeEntryKind::Tree, sha1),
-            tree_entry("skills/spec", GitHubTreeEntryKind::Tree, sha2),
-        ]);
 
-        let counting = CountingProvider::new(tree);
+        let counting = CountingProvider::new(HashMap::from([
+            ("skills/brainstorming".to_string(), sha1.to_string()),
+            ("skills/spec".to_string(), sha2.to_string()),
+        ]));
         let plugin = {
             let mut p =
                 SkillsPlugin::new(SkillsConfig::default(), test_runtime()).expect("create plugin");
@@ -602,26 +719,43 @@ mod tests {
                 "https://github.com/obra/superpowers",
                 "skills/spec/SKILL.md",
             )),
+            // Same skill_dir as the first item → must reuse the cached call.
+            BatchFetchItem::new(skill_id(
+                "https://github.com/obra/superpowers",
+                "skills/brainstorming/README.md",
+            )),
         ];
 
         let results = plugin.batch_fetch(&items).await.expect("batch ok");
 
-        // Exactly one tree call for both items (same owner/repo).
         assert_eq!(
             counting.calls.load(Ordering::SeqCst),
-            1,
-            "expected exactly one tree call for two skills in the same repo"
+            2,
+            "expected one provider call per unique (owner, repo, skill_dir)"
         );
-        assert_eq!(results.len(), 2);
+        assert_eq!(results.len(), 3);
 
         let r0 = &results[0];
         assert!(r0.error.is_none(), "skill 0 error: {:?}", r0.error);
         assert_eq!(r0.releases.len(), 1);
         assert_eq!(r0.releases[0].tag, sha1);
+        assert_eq!(
+            r0.releases[0].display_version.as_deref(),
+            Some("2026-06-11T01:15:00Z")
+        );
 
         let r1 = &results[1];
         assert!(r1.error.is_none(), "skill 1 error: {:?}", r1.error);
         assert_eq!(r1.releases.len(), 1);
         assert_eq!(r1.releases[0].tag, sha2);
+
+        let r2 = &results[2];
+        assert!(r2.error.is_none(), "skill 2 error: {:?}", r2.error);
+        assert_eq!(
+            r2.releases.len(),
+            1,
+            "third item shares brainstorming dir; same SHA"
+        );
+        assert_eq!(r2.releases[0].tag, sha1);
     }
 }
