@@ -53,6 +53,10 @@ macro_rules! declare_plugin {
                 create: $rf_create_fn:expr,
                 host_requirements: $rf_hr:expr $(,)?
             } )?
+            $(, installed_version_enricher_create: {
+                create: $ive_create_fn:expr,
+                host_requirements: $ive_hr:expr $(,)?
+            } )?
             $(, owned_surface_ids: $surface_action_ids:expr )?
             $(, raw_settings_keys: $raw_keys:expr )?
             $(, global_provider_consumers: [ $( $global_provider_consumer:expr ),+ $(,)? ] )?
@@ -81,6 +85,13 @@ macro_rules! declare_plugin {
         $(
             $crate::__assert_role_impl!($plugin, $role);
         )*
+        $(
+            const _: fn() = || {
+                fn _assert<T: $crate::InstalledVersionEnricher>() {}
+                // Ensures the supplied fn type matches the slot's signature.
+                let _: $crate::CreateInstalledVersionEnricherFn = $ive_create_fn;
+            };
+        )?
 
         // ── 3. Private module with generated functions ──────────────────
         #[doc(hidden)]
@@ -270,6 +281,14 @@ macro_rules! declare_plugin {
                         $rf_hr,
                     ));
                 )?
+                $(
+                    rc.installed_version_enricher = Some(
+                        $crate::InstalledVersionEnricherSlot::new(
+                            $ive_create_fn,
+                            $ive_hr,
+                        ),
+                    );
+                )?
                 rc
             },
             surface_actions: $crate::__optional_static_ref!(surface_actions
@@ -363,6 +382,14 @@ macro_rules! __assert_role_impl {
     ($plugin:ty, SoftwareItemLifecycle) => {
         const _: () = {
             fn _assert<T: $crate::SoftwareItemLifecycle>() {}
+            fn _check() {
+                _assert::<$plugin>();
+            }
+        };
+    };
+    ($plugin:ty, InstalledVersionEnricher) => {
+        const _: () = {
+            fn _assert<T: $crate::InstalledVersionEnricher>() {}
             fn _check() {
                 _assert::<$plugin>();
             }
@@ -490,6 +517,7 @@ macro_rules! __define_role_creator {
     // Singleton roles — no creation function generated here
     ($plugin:ty, $config:ty, NotificationTransport) => {};
     ($plugin:ty, $config:ty, SoftwareItemLifecycle) => {};
+    ($plugin:ty, $config:ty, InstalledVersionEnricher) => {};
 }
 
 /// Set a role field on a mutable `RoleCreators` instance.
@@ -538,6 +566,7 @@ macro_rules! __set_role_field {
     // Singleton roles — handled separately via dedicated macro keys.
     ($rc:ident, NotificationTransport, $hr:expr) => {};
     ($rc:ident, SoftwareItemLifecycle, $hr:expr) => {};
+    ($rc:ident, InstalledVersionEnricher, $hr:expr) => {};
 }
 
 /// Resolve the plugin scope: use the provided value, or default to `Tenant`.
@@ -693,6 +722,11 @@ macro_rules! __accumulate_role_caps {
             [ $($acc,)* $crate::PluginCapability::SoftwareItemLifecycle ]
             $($rest)*
         )
+    };
+    // `InstalledVersionEnricher` contributes no implicit capability — gating
+    // is declared explicitly via `extra_capabilities:` (e.g. `EnrichInstalledVersion`).
+    ( [ $($acc:expr),* ], InstalledVersionEnricher $($rest:tt)* ) => {
+        $crate::__accumulate_role_caps!([ $($acc),* ] $($rest)*)
     };
 }
 
