@@ -741,12 +741,37 @@ async fn resolve_matching_host_software_items(
     }
 }
 
+/// Tri-state for the installed-display-version write path.
+///
+/// `UseAgentValue` preserves backward-compatible behaviour: the value comes
+/// straight from `result.installed_display_version` (the wire payload).
+/// `Override(Some(s))` writes the supplied display string. `Override(None)`
+/// explicitly clears the column. The dispatcher in
+/// `handle_version_check_results` constructs the value from enricher output:
+/// no enricher applies → `UseAgentValue`; enricher ran and returned a string →
+/// `Override(Some(...))`; enricher ran and returned `None` (miss / throttle /
+/// out-of-window) → `Override(None)`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum DisplayOverride {
+    UseAgentValue,
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "constructed in tests only until Task 11 wires the version-display enricher; \
+                      unfulfilled_lint_expectations will fail the build once a non-test caller exists"
+        )
+    )]
+    Override(Option<String>),
+}
+
 /// Build and execute the `update_many` query for a version check result.
 async fn apply_version_update_to_db(
     db: &sea_orm::DatabaseConnection,
     result: &uptrakit_wire::VersionCheckResult,
     matching_ids: Vec<uuid::Uuid>,
     now: time::OffsetDateTime,
+    installed_display_override: DisplayOverride,
 ) {
     debug_assert!(
         result.error.is_none(),
@@ -773,7 +798,10 @@ async fn apply_version_update_to_db(
             )
             .col_expr(
                 host_software_item::Column::InstalledDisplayVersion,
-                sea_orm::sea_query::Expr::value(result.installed_display_version.clone()),
+                sea_orm::sea_query::Expr::value(match &installed_display_override {
+                    DisplayOverride::UseAgentValue => result.installed_display_version.clone(),
+                    DisplayOverride::Override(value) => value.clone(),
+                }),
             );
     }
     if let Some(ref latest_version) = result.latest_version {
@@ -1048,7 +1076,14 @@ pub(super) async fn handle_version_check_results(
             completed_pairs.push((first_host_id, result.software_item_id));
         }
 
-        apply_version_update_to_db(state.db(), result, matching_ids, now).await;
+        apply_version_update_to_db(
+            state.db(),
+            result,
+            matching_ids,
+            now,
+            DisplayOverride::UseAgentValue,
+        )
+        .await;
 
         if let Some(tenant_id) = svc_tenant_id {
             dispatch_version_update_notification(state, tenant_id, result, matching_host_ids).await;
@@ -3110,6 +3145,145 @@ mod tests {
         assert_eq!(
             success_after.update_category,
             UpdateCategory::Security.to_string()
+        );
+    }
+
+    /// Shared setup for `apply_version_update_to_db` direct-call tests.
+    ///
+    /// Builds one service with one linked host and one `host_software_item`
+    /// row with no installed/display versions yet.
+    async fn setup_apply_version_update_to_db_fixture()
+    -> (Arc<crate::AppState>, software_item::Model, uuid::Uuid) {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+
+        let svc = insert_service(&db, tenant_id).await;
+        let host = insert_host(&db, tenant_id).await;
+        link_service_host(&db, svc.id, host.id).await;
+
+        let sw = insert_software_item(&db, tenant_id).await;
+        let hsi = insert_host_software_item(&db, host.id, sw.id).await;
+        (state, sw, hsi.id)
+    }
+
+    #[tokio::test]
+    async fn apply_version_update_to_db_writes_override_into_installed_display_version() {
+        let (state, sw, hsi_id) = setup_apply_version_update_to_db_fixture().await;
+        let now = time::OffsetDateTime::now_utc();
+        let result = VersionCheckResult {
+            software_item_id: sw.id,
+            installed_version: Some("sha_abc".to_string()),
+            installed_display_version: None, // agent sent nothing
+            latest_version: None,
+            update_category: UpdateCategory::Unknown,
+            error: None,
+            host_software_item_id: Some(hsi_id),
+            not_ready: None,
+        };
+
+        apply_version_update_to_db(
+            state.db(),
+            &result,
+            vec![hsi_id],
+            now,
+            DisplayOverride::Override(Some("2026-06-11T01:15:00Z".to_string())),
+        )
+        .await;
+
+        let row = host_software_item::Entity::find_by_id(hsi_id)
+            .one(state.db())
+            .await
+            .expect("query")
+            .expect("row");
+        assert_eq!(row.installed_version.as_deref(), Some("sha_abc"));
+        assert_eq!(
+            row.installed_display_version.as_deref(),
+            Some("2026-06-11T01:15:00Z")
+        );
+    }
+
+    #[tokio::test]
+    async fn apply_version_update_to_db_override_clear_overwrites_prior_display() {
+        let (state, sw, hsi_id) = setup_apply_version_update_to_db_fixture().await;
+
+        // Seed a prior display value so we can prove Override(None) clears it.
+        host_software_item::ActiveModel {
+            id: Set(hsi_id),
+            installed_display_version: Set(Some("old_display".to_string())),
+            ..Default::default()
+        }
+        .update(state.db())
+        .await
+        .expect("seed prior display");
+
+        let now = time::OffsetDateTime::now_utc();
+        let result = VersionCheckResult {
+            software_item_id: sw.id,
+            installed_version: Some("sha_new".to_string()),
+            installed_display_version: Some("legacy_agent_supplied".to_string()),
+            latest_version: None,
+            update_category: UpdateCategory::Unknown,
+            error: None,
+            host_software_item_id: Some(hsi_id),
+            not_ready: None,
+        };
+
+        // Enricher ran but returned no display for this SHA → Override(None).
+        apply_version_update_to_db(
+            state.db(),
+            &result,
+            vec![hsi_id],
+            now,
+            DisplayOverride::Override(None),
+        )
+        .await;
+
+        let row = host_software_item::Entity::find_by_id(hsi_id)
+            .one(state.db())
+            .await
+            .expect("query")
+            .expect("row");
+        assert_eq!(row.installed_version.as_deref(), Some("sha_new"));
+        assert_eq!(
+            row.installed_display_version, None,
+            "Override(None) must overwrite prior display"
+        );
+    }
+
+    #[tokio::test]
+    async fn apply_version_update_to_db_use_agent_value_preserves_wire_value() {
+        let (state, sw, hsi_id) = setup_apply_version_update_to_db_fixture().await;
+        let now = time::OffsetDateTime::now_utc();
+        let result = VersionCheckResult {
+            software_item_id: sw.id,
+            installed_version: Some("sha_zzz".to_string()),
+            installed_display_version: Some("docker_supplied_date".to_string()),
+            latest_version: None,
+            update_category: UpdateCategory::Unknown,
+            error: None,
+            host_software_item_id: Some(hsi_id),
+            not_ready: None,
+        };
+
+        // No enricher applies → UseAgentValue preserves the wire-supplied display.
+        apply_version_update_to_db(
+            state.db(),
+            &result,
+            vec![hsi_id],
+            now,
+            DisplayOverride::UseAgentValue,
+        )
+        .await;
+
+        let row = host_software_item::Entity::find_by_id(hsi_id)
+            .one(state.db())
+            .await
+            .expect("query")
+            .expect("row");
+        assert_eq!(
+            row.installed_display_version.as_deref(),
+            Some("docker_supplied_date")
         );
     }
 
