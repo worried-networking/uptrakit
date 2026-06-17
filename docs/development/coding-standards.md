@@ -2041,6 +2041,31 @@ Plugin `from_config()` constructors are called every time the plugin's config ch
   replacement.
 - See `crates/plugins/notifications/email/src/plugin.rs` for the reference implementation.
 
+### InstalledVersionEnricher (controller-only)
+
+When an agent reports an opaque `installed_version` (e.g. a git tree SHA), the controller can enrich it with a human-friendly
+`installed_display_version` through the `InstalledVersionEnricher` trait. The role is controller-only and its factory receives an
+`InstalledVersionEnrichmentContext` (mirror of `ReleaseFetchContext` from ADR-0015), so the enricher can reach the global GitHub provider or
+similar shared resources.
+
+Declare it like any other role:
+
+```rust
+roles: [
+    // ...
+    InstalledVersionEnricher { host_requirements: HostRequirements::CONTROLLER_ONLY },
+],
+extra_capabilities: [PluginCapability::EnrichInstalledVersion],
+installed_version_enricher_create: {
+    create: create_installed_version_enricher_my_plugin,
+    host_requirements: HostRequirements::CONTROLLER_ONLY,
+},
+```
+
+Web-api dispatches via descriptor slot lookup; no plugin-type strings appear in the handler (ADR-0018). The trait returns a `Vec` the same
+length and order as the input; dispatcher zips by index. See ADR-0021 for the full contract, observability tags, and the 90-commit
+operational ceiling.
+
 ## File vs. DB Section Assignment
 
 Config key ownership: TOML file owns structural config (listen addresses, DB pool URL, TLS, NATS, zeroconf). The `global_settings` DB table owns
