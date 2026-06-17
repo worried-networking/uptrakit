@@ -1053,6 +1053,11 @@ async fn build_enriched_display_overrides(
             Arc::new(uptrakit_command::NoopCommandExecutor),
             HostCapabilities::default(),
         );
+        // Empty per-plugin config: SkillsConfig has all-default fields and does not
+        // need stored config to enrich. Future enrichers requiring stored config must
+        // resolve it from `plugin_configs`/`plugin_type_settings` via the same path
+        // `scheduler-runtime::fetch_releases` uses (`merged_plugin_config`) before
+        // calling the factory. Tracked as a deferred follow-up in ADR-0021.
         let merged_cfg = serde_json::json!({});
         let enricher = match (slot.create)(&merged_cfg, runtime, &ctx) {
             Ok(e) => e,
