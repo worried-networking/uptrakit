@@ -69,6 +69,16 @@ raise the cap or pair it with a persistent per-`(owner, repo, path)` SHA→date 
 - **Storing `sha_history: Vec<{sha, committed_at}>` inside `latest_release_metadata`** — rejected: replaces the typed slot boundary with a
   stringly-typed JSON key; future plugin authors would couple via the blob shape rather than via the role trait.
 
+## Deferred follow-ups
+
+- **Per-plugin stored config resolution in dispatch.** The dispatch in `handle_version_check_results` currently constructs the enricher
+  factory with `merged_cfg = serde_json::json!({})`. Skills works because `SkillsConfig` derives `Default` and all fields use
+  `#[serde(default)]`. Any future enricher requiring stored config fields will need the dispatch path to resolve config from
+  `plugin_configs` / `plugin_type_settings` via the same `merged_plugin_config` flow `scheduler-runtime::fetch_releases` uses for the
+  latest side.
+- **Persistent commit-date cache across cycles** so installed SHAs that did not change skip the per-cycle GitHub round-trip.
+- **Re-enrichment endpoint** to retry past misses without waiting for the next scheduler cycle.
+
 ## Related
 
 - ADR-0015 (Release-fetcher context) — sibling pattern for the latest side.

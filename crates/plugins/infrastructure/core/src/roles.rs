@@ -218,7 +218,7 @@ impl InstalledVersionDisplay {
 /// is opaque (e.g. a git tree SHA) and the display string must come from
 /// upstream metadata only the controller can reach.
 #[async_trait]
-pub trait InstalledVersionEnricher: Send + Sync {
+pub trait InstalledVersionEnricher: PluginMeta {
     /// Returns a `Vec` of the same length and order as `items`. The
     /// dispatcher zips by index, not by `package_identifier`, so two items
     /// sharing a `package_identifier` (e.g. the same Skill installed on two
@@ -864,23 +864,19 @@ pub trait GuestExec: PluginMeta {
 mod release_fetch_context_tests {
     use super::*;
 
+    #[cfg(feature = "catalog")]
     #[test]
     fn release_fetch_context_none_has_no_lookup() {
         let ctx = ReleaseFetchContext::none();
-        #[cfg(feature = "catalog")]
         assert!(ctx.global_provider_lookup.is_none());
-        #[cfg(not(feature = "catalog"))]
-        let _ = ctx;
     }
 
+    #[cfg(feature = "catalog")]
     #[test]
     fn release_fetch_context_default_equals_none() {
         // Default is a convenience alias for none().
         let ctx = ReleaseFetchContext::default();
-        #[cfg(feature = "catalog")]
         assert!(ctx.global_provider_lookup.is_none());
-        #[cfg(not(feature = "catalog"))]
-        let _ = ctx;
     }
 
     #[cfg(feature = "catalog")]
@@ -1010,6 +1006,11 @@ mod tests {
     async fn installed_version_enricher_trait_is_object_safe() {
         use std::sync::Arc;
         struct Noop;
+        impl crate::PluginMeta for Noop {
+            fn plugin_type_id(&self) -> crate::PluginTypeId {
+                crate::PluginTypeId::new("test_noop_enricher")
+            }
+        }
         #[async_trait::async_trait]
         impl crate::InstalledVersionEnricher for Noop {
             async fn enrich_installed_versions(
