@@ -17,6 +17,7 @@ pub mod discovery_allowlist;
 pub mod embedded_runtime_states;
 pub mod enrollment_tokens;
 pub mod global_settings;
+pub mod host_software_item_plugins;
 pub mod host_tags;
 pub mod hosts;
 pub mod notifications;
