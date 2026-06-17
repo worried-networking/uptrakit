@@ -82,6 +82,18 @@ pub enum GitHubTreeEntryKind {
     Tree,
 }
 
+/// A commit returned by [`GitHubProviderClient::list_recent_commit_dates_for_path`].
+///
+/// `tree_sha_at_path` is the SHA of the **subtree at the queried `path`** as of this
+/// commit — not the commit's root tree SHA. `committed_at` is the committer date
+/// (`commit.committer.date`), chosen over author date for rebase-stability.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TreeCommit {
+    pub tree_sha_at_path: String,
+    pub committed_at: time::OffsetDateTime,
+}
+
 /// Opaque handle stored in the plugin catalog lookup table.
 pub struct GitHubProviderHandle {
     client: Arc<dyn GitHubProviderClient>,
@@ -110,6 +122,30 @@ pub trait GitHubProviderClient: Send + Sync {
         git_ref: &str,
         recursive: bool,
     ) -> Result<GitHubRepositoryTree, GitHubProviderError>;
+
+    /// Return up to `min(limit, 90)` recent commits that touched `path`, oldest-first,
+    /// each annotated with the subtree SHA at `path` as of that commit.
+    ///
+    /// `expected_shas` lets the caller short-circuit the walk when every target SHA
+    /// has been bound — pass `&HashSet::new()` to force the full walk.
+    ///
+    /// Default impl returns `Misconfigured("...not implemented")` so existing
+    /// implementors compile unchanged. The Skills enricher treats this error like
+    /// any other provider failure: log + write `None`.
+    async fn list_recent_commit_dates_for_path(
+        &self,
+        consumer: GlobalProviderConsumerId,
+        owner: &str,
+        repo: &str,
+        path: &str,
+        limit: usize,
+        expected_shas: &std::collections::HashSet<String>,
+    ) -> std::result::Result<Vec<TreeCommit>, GitHubProviderError> {
+        let _ = (consumer, owner, repo, path, limit, expected_shas);
+        Err(GitHubProviderError::Misconfigured(
+            "list_recent_commit_dates_for_path not implemented".to_string(),
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -134,5 +170,47 @@ mod tests {
     #[test]
     fn github_provider_error_request_failed_is_not_retryable() {
         assert!(!GitHubProviderError::RequestFailed("bad request".into()).is_retryable());
+    }
+}
+
+#[cfg(test)]
+mod tree_commit_tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    struct UnimplementedProvider;
+    #[async_trait::async_trait]
+    impl GitHubProviderClient for UnimplementedProvider {
+        async fn fetch_repository_tree(
+            &self,
+            _consumer: GlobalProviderConsumerId,
+            _owner: &str,
+            _repo: &str,
+            _git_ref: &str,
+            _recursive: bool,
+        ) -> std::result::Result<GitHubRepositoryTree, GitHubProviderError> {
+            unreachable!()
+        }
+    }
+
+    #[tokio::test]
+    async fn list_recent_commit_dates_for_path_default_returns_misconfigured() {
+        let p = UnimplementedProvider;
+        let expected: HashSet<String> = HashSet::new();
+        let err = p
+            .list_recent_commit_dates_for_path(
+                PACKAGE_MANAGER_SKILLS,
+                "owner",
+                "repo",
+                "skills/x",
+                90,
+                &expected,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, GitHubProviderError::Misconfigured(_)),
+            "expected Misconfigured, got: {err:?}"
+        );
     }
 }
