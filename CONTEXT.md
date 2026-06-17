@@ -82,6 +82,16 @@ level via `global_settings`, gated by `ManageGlobalSettings`. When disabled, no 
 Surface, or runtime hook exposes its existence to tenant Operators.
 _Avoid_: global plugin (in code), system plugin, root plugin
 
+**Installed Version Enricher**:
+A controller-only plugin role (trait + slot) that derives a human-friendly
+`installed_display_version` from the raw `installed_version` reported by an Agent. Used when
+the raw value is an opaque identifier (e.g. a git tree SHA for an LLM Skill) and the
+display string must come from upstream metadata that only the Controller can reach. Mirrors
+the `ReleaseFetcher` controller-side pattern but targets the detect_version output instead of
+the fetch_releases output. Gated by the `EnrichInstalledVersion` capability.
+_Avoid_: version translator, display resolver (too generic), version formatter (frontend
+concern).
+
 **Enrollment**:
 The process by which a Service registers with and gets approved by the Controller.
 _Avoid_: registration, onboarding
