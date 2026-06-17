@@ -200,7 +200,9 @@ mod tree_commit_tests {
             _git_ref: &str,
             _recursive: bool,
         ) -> std::result::Result<GitHubRepositoryTree, GitHubProviderError> {
-            unreachable!()
+            Err(GitHubProviderError::Misconfigured(
+                "test fixture: fetch_repository_tree must not be called".to_string(),
+            ))
         }
     }
 
