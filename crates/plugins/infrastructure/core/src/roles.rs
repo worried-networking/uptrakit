@@ -171,6 +171,110 @@ pub trait ReleaseFetcher: PluginMeta {
     }
 }
 
+/// Per-item input to an [`InstalledVersionEnricher`].
+#[non_exhaustive]
+pub struct InstalledVersionItem {
+    pub package_identifier: String,
+    pub installed_version: Option<String>,
+}
+
+impl InstalledVersionItem {
+    pub fn new(package_identifier: String, installed_version: Option<String>) -> Self {
+        Self {
+            package_identifier,
+            installed_version,
+        }
+    }
+}
+
+/// Per-item output from an [`InstalledVersionEnricher`].
+///
+/// The dispatcher zips inputs ↔ outputs **by index** (the returned `Vec` MUST
+/// be the same length and order as the input slice). `installed_version_echo`
+/// doubles as a contract sanity-check — see the trait doc.
+#[non_exhaustive]
+pub struct InstalledVersionDisplay {
+    pub package_identifier: String,
+    pub installed_version_echo: Option<String>,
+    pub display_version: Option<String>,
+}
+
+impl InstalledVersionDisplay {
+    pub fn new(
+        package_identifier: String,
+        installed_version_echo: Option<String>,
+        display_version: Option<String>,
+    ) -> Self {
+        Self {
+            package_identifier,
+            installed_version_echo,
+            display_version,
+        }
+    }
+}
+
+/// Controller-only role: derive a human-friendly `installed_display_version`
+/// from the raw `installed_version` an agent reported. Used when the raw value
+/// is opaque (e.g. a git tree SHA) and the display string must come from
+/// upstream metadata only the controller can reach.
+#[async_trait]
+pub trait InstalledVersionEnricher: Send + Sync {
+    /// Returns a `Vec` of the same length and order as `items`. The
+    /// dispatcher zips by index, not by `package_identifier`, so two items
+    /// sharing a `package_identifier` (e.g. the same Skill installed on two
+    /// hosts with different SHAs) stay distinct. Implementors MUST preserve
+    /// order; the dispatcher checks length and treats a mismatch as a fatal
+    /// contract violation (warn + drop all display values to `None`).
+    ///
+    /// **`None`-input contract**: if `items[i].installed_version` is `None`,
+    /// implementors MUST return `display_version = None` for that index.
+    /// Returning a phantom display for an unknown installed SHA is a
+    /// trait-contract violation.
+    async fn enrich_installed_versions(
+        &self,
+        items: &[InstalledVersionItem],
+    ) -> Result<Vec<InstalledVersionDisplay>>;
+}
+
+/// Context object passed to [`InstalledVersionEnricher`] factories at construction
+/// time. Mirrors [`ReleaseFetchContext`] (ADR-0015). Carries the optional
+/// `GlobalProviderLookup` so Skills can reach the GitHub provider client.
+#[non_exhaustive]
+pub struct InstalledVersionEnrichmentContext {
+    /// Global GitHub provider lookup, available when the embedded scheduler
+    /// runs inside the controller. `None` in standalone-scheduler deployments.
+    #[cfg(feature = "catalog")]
+    pub global_provider_lookup: Option<std::sync::Arc<dyn GlobalProviderLookup>>,
+}
+
+impl InstalledVersionEnrichmentContext {
+    /// Construct an empty context (no provider lookup). Available under all feature
+    /// combinations; non-catalog builds use this exclusively.
+    pub const fn empty() -> Self {
+        Self {
+            #[cfg(feature = "catalog")]
+            global_provider_lookup: None,
+        }
+    }
+
+    /// Attach a `GlobalProviderLookup` (builder method). Available only with `catalog`.
+    /// Call sites that need conditional attachment wrap this in a **single positive**
+    /// `#[cfg(feature = "catalog")]` block — never `#[cfg(not(...))]`. Example:
+    ///
+    /// ```ignore
+    /// let mut ctx = InstalledVersionEnrichmentContext::empty();
+    /// #[cfg(feature = "catalog")]
+    /// {
+    ///     ctx = ctx.with_lookup(provider_lookup);
+    /// }
+    /// ```
+    #[cfg(feature = "catalog")]
+    pub fn with_lookup(mut self, lookup: std::sync::Arc<dyn GlobalProviderLookup>) -> Self {
+        self.global_provider_lookup = Some(lookup);
+        self
+    }
+}
+
 /// Refresh/sync the local package index from remote sources.
 #[async_trait]
 pub trait PackageIndexer: PluginMeta {
@@ -889,5 +993,47 @@ mod controller_boundary_tests {
         }
         let ctrl = TestHookCtrl;
         let _dyn: &dyn UpdateHookController = &ctrl;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn installed_version_enrichment_context_empty() {
+        let ctx = crate::InstalledVersionEnrichmentContext::empty();
+        #[cfg(feature = "catalog")]
+        assert!(ctx.global_provider_lookup.is_none());
+        let _ = ctx;
+    }
+
+    #[tokio::test]
+    async fn installed_version_enricher_trait_is_object_safe() {
+        use std::sync::Arc;
+        struct Noop;
+        #[async_trait::async_trait]
+        impl crate::InstalledVersionEnricher for Noop {
+            async fn enrich_installed_versions(
+                &self,
+                items: &[crate::InstalledVersionItem],
+            ) -> crate::Result<Vec<crate::InstalledVersionDisplay>> {
+                Ok(items
+                    .iter()
+                    .map(|i| crate::InstalledVersionDisplay {
+                        package_identifier: i.package_identifier.clone(),
+                        installed_version_echo: i.installed_version.clone(),
+                        display_version: None,
+                    })
+                    .collect())
+            }
+        }
+        let arc: Arc<dyn crate::InstalledVersionEnricher> = Arc::new(Noop);
+        let items = vec![crate::InstalledVersionItem {
+            package_identifier: "x".to_string(),
+            installed_version: Some("sha".to_string()),
+        }];
+        let out = arc.enrich_installed_versions(&items).await.expect("ok");
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].installed_version_echo.as_deref(), Some("sha"));
+        assert!(out[0].display_version.is_none());
     }
 }

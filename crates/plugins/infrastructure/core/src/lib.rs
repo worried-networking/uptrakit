@@ -40,7 +40,9 @@ pub use batch_update::{BatchUpdateItem, BatchUpdateResult};
 pub use error::{PluginError, Result};
 pub use roles::{
     ControllerPostUpdateContext, ControllerProtectionContext, ControllerProtectionDecision,
-    PostUpdateOutcome, SoftwareItemCreatedEvent, SoftwareItemLifecycleContext, SoftwareItemPatch,
+    InstalledVersionDisplay, InstalledVersionEnricher, InstalledVersionEnrichmentContext,
+    InstalledVersionItem, PostUpdateOutcome, SoftwareItemCreatedEvent,
+    SoftwareItemLifecycleContext, SoftwareItemPatch,
 };
 pub use traits::{
     HostCompatibility, PreUpdateHookResult, SudoCommandEntry, SudoHelperScript,
