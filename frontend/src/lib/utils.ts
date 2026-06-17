@@ -84,12 +84,16 @@ export function parseUrlPage(url: URL): number {
 /**
  * Formats a version string for display.
  * SHA-256 digests (sha256:...) are shortened to "sha256:<first 12 hex chars>…".
+ * Bare 40-hex git SHAs are shortened to "<first 12 hex chars>…".
  * Returns the fallback string for null/undefined values.
  */
 export function formatVersion(version: string | null | undefined, fallback = '—'): string {
 	if (!version) return fallback;
 	if (version.startsWith('sha256:')) {
 		return `sha256:${version.slice(7, 19)}\u2026`;
+	}
+	if (/^[0-9a-f]{40}$/i.test(version)) {
+		return `${version.slice(0, 12)}\u2026`;
 	}
 	if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(version)) {
 		return new Date(version).toLocaleString(undefined, {

@@ -234,6 +234,21 @@ describe('formatVersion', () => {
 	});
 });
 
+describe('formatVersion git tree SHA fallback', () => {
+	it('shortens 40-hex git SHA to first 12 chars + ellipsis', () => {
+		expect(formatVersion('f260c775073816860fef8a37c032ac77e2ff5821')).toBe('f260c7750738\u2026');
+	});
+	it('passes already-formatted dates through to locale rendering', () => {
+		const out = formatVersion('2026-06-11T01:15:00Z');
+		expect(out).not.toBe('2026-06-11T01:15:00Z');
+		expect(out.length).toBeGreaterThan(0);
+	});
+	it('passes short or non-hex strings through unchanged', () => {
+		expect(formatVersion('1.2.3')).toBe('1.2.3');
+		expect(formatVersion('f260c775')).toBe('f260c775');
+	});
+});
+
 // ── resolveDisplayVersion ─────────────────────────────────────────────────────
 
 describe('resolveDisplayVersion', () => {
