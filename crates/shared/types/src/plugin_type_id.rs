@@ -122,6 +122,10 @@ pub mod plugin_ids {
     pub const TEST_PER_ITEM_FAIL: PluginTypeId = PluginTypeId::from_static("__test_per_item_fail");
     #[cfg(feature = "test-support")]
     pub const TEST_CTX_CAPTURE: PluginTypeId = PluginTypeId::from_static("__test_ctx_capture");
+    #[cfg(feature = "test-support")]
+    pub const TEST_ENRICHER_ECHO: PluginTypeId = PluginTypeId::from_static("__test_enricher_echo");
+    #[cfg(feature = "test-support")]
+    pub const TEST_ENRICHER_MISS: PluginTypeId = PluginTypeId::from_static("__test_enricher_miss");
 
     /// All well-known plugin type IDs. Must include every constant above.
     /// Tests verify bidirectional consistency with `all_descriptors()`.

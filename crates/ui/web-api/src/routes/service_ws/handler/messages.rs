@@ -754,14 +754,6 @@ async fn resolve_matching_host_software_items(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum DisplayOverride {
     UseAgentValue,
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "constructed in tests only until Task 11 wires the version-display enricher; \
-                      unfulfilled_lint_expectations will fail the build once a non-test caller exists"
-        )
-    )]
     Override(Option<String>),
 }
 
@@ -959,6 +951,171 @@ impl VersionCheckAuditSummary {
     }
 }
 
+/// Build the `host_software_item_id → DisplayOverride` map for a set of
+/// `VersionCheckResult`s by dispatching to each capable plugin's
+/// `InstalledVersionEnricher` slot.
+///
+/// Web-api stays plugin-agnostic — purely typed registry lookup (ADR-0018).
+/// Tenant isolation flows through `TenantDb::find_via_tenant_join`. Items not
+/// covered by an enricher are absent from the map; the caller treats absence
+/// as `DisplayOverride::UseAgentValue`.
+async fn build_enriched_display_overrides(
+    state: &Arc<AppState>,
+    svc_tenant_id: Option<uuid::Uuid>,
+    payload: &VersionCheckResultsPayload,
+) -> std::collections::HashMap<uuid::Uuid, DisplayOverride> {
+    use std::collections::HashMap;
+
+    use uptrakit_plugin_infrastructure_registry::{
+        GlobalProviderLookup, HostCapabilities, InstalledVersionEnrichmentContext,
+        InstalledVersionItem, PluginCapability, construct_host_runtime, get_descriptor,
+    };
+
+    let mut enriched: HashMap<uuid::Uuid, DisplayOverride> = HashMap::new();
+
+    // 1. Source (plugin_type, package_identifier) per host_software_item_id
+    //    for role `detect_version`.
+    let hsi_ids: Vec<uuid::Uuid> = payload
+        .results
+        .iter()
+        .filter_map(|r| r.host_software_item_id)
+        .collect();
+    if hsi_ids.is_empty() {
+        return enriched;
+    }
+    let Some(tenant_id) = svc_tenant_id else {
+        tracing::warn!("enrichment: tenant resolution failed; skipping");
+        return enriched;
+    };
+    let tenant_db = uptrakit_web_api_queries::TenantDb::new(state.db().clone(), tenant_id);
+    let assignments =
+        match uptrakit_web_api_queries::queries::host_software_item_plugins::plugin_types_for_role(
+            &tenant_db,
+            &hsi_ids,
+            "detect_version",
+        )
+        .await
+        {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!(error = %e, "enrichment: plugin_type lookup failed; skipping");
+                return enriched;
+            }
+        };
+
+    // 2. Group items by plugin_type. Items inherit `package_identifier` from
+    //    the DB-side assignment (NOT from the wire payload, which doesn't
+    //    carry it).
+    #[derive(Default)]
+    struct Group {
+        hsi_ids: Vec<uuid::Uuid>,
+        items: Vec<InstalledVersionItem>,
+    }
+    let mut by_plugin: HashMap<String, Group> = HashMap::new();
+    for r in &payload.results {
+        let Some(hsi_id) = r.host_software_item_id else {
+            continue;
+        };
+        let Some(assignment) = assignments.get(&hsi_id) else {
+            continue;
+        };
+        let g = by_plugin.entry(assignment.plugin_type.clone()).or_default();
+        g.hsi_ids.push(hsi_id);
+        g.items.push(InstalledVersionItem::new(
+            assignment.package_identifier.clone(),
+            r.installed_version.clone(),
+        ));
+    }
+
+    // 3. For each plugin_type, look up descriptor + capability + slot, then
+    //    invoke the enricher and merge results into the override map.
+    let lookup: Arc<dyn GlobalProviderLookup> =
+        state.plugin.global_providers.clone() as Arc<dyn GlobalProviderLookup>;
+    for (pt, group) in by_plugin {
+        let Some(desc) = get_descriptor(&pt) else {
+            continue;
+        };
+        if !desc
+            .capabilities
+            .contains(&PluginCapability::EnrichInstalledVersion)
+        {
+            continue;
+        }
+        let Some(slot) = desc.roles.installed_version_enricher.as_ref() else {
+            continue;
+        };
+
+        // Single positive `with_lookup` call — web-api always pulls
+        // `core/catalog` transitively via the registry, so attaching the
+        // lookup is unconditional here.
+        let ctx = InstalledVersionEnrichmentContext::empty().with_lookup(lookup.clone());
+        let runtime = construct_host_runtime(
+            Arc::new(uptrakit_command::NoopCommandExecutor),
+            HostCapabilities::default(),
+        );
+        let merged_cfg = serde_json::json!({});
+        let enricher = match (slot.create)(&merged_cfg, runtime, &ctx) {
+            Ok(e) => e,
+            Err(e) => {
+                tracing::warn!(
+                    plugin_type = %pt, error = %e, reason = "provider_error",
+                    "enrichment: factory failed; collapsing group"
+                );
+                for hsi in &group.hsi_ids {
+                    enriched.insert(*hsi, DisplayOverride::Override(None));
+                }
+                continue;
+            }
+        };
+        let out = match enricher.enrich_installed_versions(&group.items).await {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(
+                    plugin_type = %pt, error = %e, reason = "provider_error",
+                    "enrichment: enricher returned Err; collapsing group"
+                );
+                for hsi in &group.hsi_ids {
+                    enriched.insert(*hsi, DisplayOverride::Override(None));
+                }
+                continue;
+            }
+        };
+        if out.len() != group.items.len() {
+            tracing::warn!(
+                plugin_type = %pt, expected = group.items.len(), got = out.len(),
+                reason = "race_skipped",
+                "enrichment: length mismatch; collapsing group"
+            );
+            for hsi in &group.hsi_ids {
+                enriched.insert(*hsi, DisplayOverride::Override(None));
+            }
+            continue;
+        }
+        for (i, display) in out.into_iter().enumerate() {
+            let hsi = group.hsi_ids[i];
+            if display.installed_version_echo != group.items[i].installed_version {
+                tracing::warn!(
+                    plugin_type = %pt, %hsi, reason = "race_skipped",
+                    "enrichment: installed_version_echo mismatch"
+                );
+                enriched.insert(hsi, DisplayOverride::Override(None));
+                continue;
+            }
+            if display.package_identifier != group.items[i].package_identifier {
+                tracing::warn!(
+                    plugin_type = %pt, %hsi, reason = "race_skipped",
+                    "enrichment: package_identifier echo mismatch"
+                );
+                enriched.insert(hsi, DisplayOverride::Override(None));
+                continue;
+            }
+            enriched.insert(hsi, DisplayOverride::Override(display.display_version));
+        }
+    }
+
+    enriched
+}
+
 /// Handle a `VersionCheckResults` message: update installed versions, upsert
 /// available versions, batch update `last_checked_at`, push software states.
 #[tracing::instrument(skip_all, fields(%service_id, result_count = payload.results.len()))]
@@ -1019,6 +1176,15 @@ pub(super) async fn handle_version_check_results(
         ..VersionCheckAuditSummary::default()
     };
 
+    // ── Installed-version enrichment dispatch ────────────────────────────
+    // Resolves a `host_software_item_id → DisplayOverride` map for every
+    // result whose plugin_type declares `EnrichInstalledVersion`. Items not
+    // covered by an enricher fall through to `DisplayOverride::UseAgentValue`
+    // at the write site.
+    //
+    // Web-api stays plugin-agnostic — purely typed registry lookup. ADR-0018.
+    let enriched = build_enriched_display_overrides(state, svc_tenant_id, payload).await;
+
     for result in &payload.results {
         // AwaitingRestart correlation: evaluated even for error results so that
         // an error=Some response correctly triggers the stay-or-fail rule in
@@ -1076,14 +1242,12 @@ pub(super) async fn handle_version_check_results(
             completed_pairs.push((first_host_id, result.software_item_id));
         }
 
-        apply_version_update_to_db(
-            state.db(),
-            result,
-            matching_ids,
-            now,
-            DisplayOverride::UseAgentValue,
-        )
-        .await;
+        let override_for_result = result
+            .host_software_item_id
+            .and_then(|hsi| enriched.get(&hsi).cloned())
+            .unwrap_or(DisplayOverride::UseAgentValue);
+        apply_version_update_to_db(state.db(), result, matching_ids, now, override_for_result)
+            .await;
 
         if let Some(tenant_id) = svc_tenant_id {
             dispatch_version_update_notification(state, tenant_id, result, matching_host_ids).await;
@@ -4003,6 +4167,292 @@ mod tests {
         assert_eq!(
             details["reason_code"].as_str(),
             Some("unknown_host_machine_id")
+        );
+    }
+
+    // ── Enricher dispatch tests ───────────────────────────────────────────
+    //
+    // The 4 tests below exercise `build_enriched_display_overrides` (invoked
+    // from `handle_version_check_results`) against the test-only descriptors
+    // registered by `uptrakit_plugin_infrastructure_registry::test_support`:
+    //
+    //   * `__test_enricher_echo` — capable; returns
+    //     `display_version = Some(format!("date_for_{sha}"))`.
+    //   * `__test_enricher_miss` — capable; always returns
+    //     `display_version = None`.
+    //   * `__test_fetch_fail`   — NOT capable (no `EnrichInstalledVersion`).
+    //
+    // Per-test fixtures seed a `host_software_item_plugin` row with role
+    // `detect_version` so `plugin_types_for_role` resolves the plugin type.
+
+    use uptrakit_shared_db::entity::host_software_item_plugin;
+
+    /// Insert a `host_software_item_plugin` row with role `detect_version`
+    /// linking the given `host_software_item` to a plugin type.
+    async fn insert_detect_version_plugin_assignment(
+        db: &sea_orm::DatabaseConnection,
+        host_id: Uuid,
+        software_item_id: Uuid,
+        host_software_item_id: Uuid,
+        plugin_type: &str,
+        package_identifier: &str,
+    ) {
+        let now = time::OffsetDateTime::now_utc();
+        host_software_item_plugin::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_id),
+            host_software_item_id: Set(host_software_item_id),
+            plugin_config_id: Set(None),
+            plugin_type: Set(plugin_type.to_string()),
+            role: Set("detect_version".to_string()),
+            ordinal: Set(0),
+            package_identifier: Set(package_identifier.to_string()),
+            config: Set(None),
+            execution_site: Set("auto".to_string()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(db)
+        .await
+        .expect("insert host_software_item_plugin");
+    }
+
+    #[tokio::test]
+    async fn handle_version_check_results_invokes_enricher_for_capable_plugin() {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+
+        let svc = insert_service(&db, tenant_id).await;
+        let host = insert_host(&db, tenant_id).await;
+        link_service_host(&db, svc.id, host.id).await;
+        let sw = insert_software_item(&db, tenant_id).await;
+        let hsi = insert_host_software_item(&db, host.id, sw.id).await;
+        insert_detect_version_plugin_assignment(
+            &db,
+            host.id,
+            sw.id,
+            hsi.id,
+            "__test_enricher_echo",
+            "pkg/foo",
+        )
+        .await;
+
+        let payload = VersionCheckResultsPayload {
+            results: vec![VersionCheckResult {
+                software_item_id: sw.id,
+                installed_version: Some("abc123".to_string()),
+                installed_display_version: None,
+                latest_version: None,
+                error: None,
+                update_category: UpdateCategory::Unknown,
+                host_software_item_id: Some(hsi.id),
+                not_ready: None,
+            }],
+        };
+
+        handle_version_check_results(&state, svc.id, &payload).await;
+
+        let row = host_software_item::Entity::find_by_id(hsi.id)
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row");
+        assert_eq!(
+            row.installed_display_version.as_deref(),
+            Some("date_for_abc123"),
+            "enricher output must flow into the write"
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_version_check_results_does_not_invoke_enricher_without_capability() {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+
+        let svc = insert_service(&db, tenant_id).await;
+        let host = insert_host(&db, tenant_id).await;
+        link_service_host(&db, svc.id, host.id).await;
+        let sw = insert_software_item(&db, tenant_id).await;
+        let hsi = insert_host_software_item(&db, host.id, sw.id).await;
+        // `__test_fetch_fail` declares ReleaseFetching but NOT
+        // EnrichInstalledVersion — dispatcher must skip the enricher path.
+        insert_detect_version_plugin_assignment(
+            &db,
+            host.id,
+            sw.id,
+            hsi.id,
+            "__test_fetch_fail",
+            "pkg/foo",
+        )
+        .await;
+
+        let payload = VersionCheckResultsPayload {
+            results: vec![VersionCheckResult {
+                software_item_id: sw.id,
+                installed_version: Some("xyz".to_string()),
+                installed_display_version: None,
+                latest_version: None,
+                error: None,
+                update_category: UpdateCategory::Unknown,
+                host_software_item_id: Some(hsi.id),
+                not_ready: None,
+            }],
+        };
+
+        handle_version_check_results(&state, svc.id, &payload).await;
+
+        let row = host_software_item::Entity::find_by_id(hsi.id)
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row");
+        assert!(
+            row.installed_display_version.is_none(),
+            "no enricher capability → no override"
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_version_check_results_writes_none_when_enricher_misses() {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+
+        let svc = insert_service(&db, tenant_id).await;
+        let host = insert_host(&db, tenant_id).await;
+        link_service_host(&db, svc.id, host.id).await;
+        let sw = insert_software_item(&db, tenant_id).await;
+        let hsi = insert_host_software_item(&db, host.id, sw.id).await;
+        // Seed a prior display value so the test proves Override(None) clears it.
+        host_software_item::ActiveModel {
+            id: Set(hsi.id),
+            installed_display_version: Set(Some("old".to_string())),
+            ..Default::default()
+        }
+        .update(&db)
+        .await
+        .expect("seed prior display");
+
+        insert_detect_version_plugin_assignment(
+            &db,
+            host.id,
+            sw.id,
+            hsi.id,
+            "__test_enricher_miss",
+            "pkg/foo",
+        )
+        .await;
+
+        let payload = VersionCheckResultsPayload {
+            results: vec![VersionCheckResult {
+                software_item_id: sw.id,
+                installed_version: Some("new".to_string()),
+                installed_display_version: None,
+                latest_version: None,
+                error: None,
+                update_category: UpdateCategory::Unknown,
+                host_software_item_id: Some(hsi.id),
+                not_ready: None,
+            }],
+        };
+
+        handle_version_check_results(&state, svc.id, &payload).await;
+
+        let row = host_software_item::Entity::find_by_id(hsi.id)
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row");
+        assert!(
+            row.installed_display_version.is_none(),
+            "miss must overwrite stale display with None"
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_version_check_results_keeps_distinct_display_per_host_for_same_skill() {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+
+        let svc = insert_service(&db, tenant_id).await;
+        let host_a = insert_host(&db, tenant_id).await;
+        let host_b = insert_host(&db, tenant_id).await;
+        link_service_host(&db, svc.id, host_a.id).await;
+        link_service_host(&db, svc.id, host_b.id).await;
+
+        let sw = insert_software_item(&db, tenant_id).await;
+        let hsi_a = insert_host_software_item(&db, host_a.id, sw.id).await;
+        let hsi_b = insert_host_software_item(&db, host_b.id, sw.id).await;
+        // Same package_identifier — only the per-result SHA differs.
+        insert_detect_version_plugin_assignment(
+            &db,
+            host_a.id,
+            sw.id,
+            hsi_a.id,
+            "__test_enricher_echo",
+            "pkg/shared",
+        )
+        .await;
+        insert_detect_version_plugin_assignment(
+            &db,
+            host_b.id,
+            sw.id,
+            hsi_b.id,
+            "__test_enricher_echo",
+            "pkg/shared",
+        )
+        .await;
+
+        let payload = VersionCheckResultsPayload {
+            results: vec![
+                VersionCheckResult {
+                    software_item_id: sw.id,
+                    installed_version: Some("sha_a".to_string()),
+                    installed_display_version: None,
+                    latest_version: None,
+                    error: None,
+                    update_category: UpdateCategory::Unknown,
+                    host_software_item_id: Some(hsi_a.id),
+                    not_ready: None,
+                },
+                VersionCheckResult {
+                    software_item_id: sw.id,
+                    installed_version: Some("sha_b".to_string()),
+                    installed_display_version: None,
+                    latest_version: None,
+                    error: None,
+                    update_category: UpdateCategory::Unknown,
+                    host_software_item_id: Some(hsi_b.id),
+                    not_ready: None,
+                },
+            ],
+        };
+
+        handle_version_check_results(&state, svc.id, &payload).await;
+
+        let row_a = host_software_item::Entity::find_by_id(hsi_a.id)
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row");
+        let row_b = host_software_item::Entity::find_by_id(hsi_b.id)
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row");
+        assert_eq!(
+            row_a.installed_display_version.as_deref(),
+            Some("date_for_sha_a"),
+            "host_a must see its own SHA-derived display"
+        );
+        assert_eq!(
+            row_b.installed_display_version.as_deref(),
+            Some("date_for_sha_b"),
+            "host_b must see its own SHA-derived display"
         );
     }
 }
