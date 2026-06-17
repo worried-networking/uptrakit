@@ -58,6 +58,11 @@ pub enum PluginCapability {
     /// Controller-side plugins test API connectivity; agent-side plugins
     /// test command execution or version detection against a specific host.
     ConfigTest,
+    /// Plugin can enrich agent-reported `installed_version` strings with a
+    /// human-friendly `installed_display_version` (e.g. a git commit date for
+    /// a Skills tree-SHA). Implementations live in `InstalledVersionEnricher`.
+    /// Dispatched controller-side from `handle_version_check_results`.
+    EnrichInstalledVersion,
 }
 
 #[cfg(test)]
@@ -113,6 +118,10 @@ mod tests {
                 "software_item_lifecycle",
             ),
             (PluginCapability::ConfigTest, "config_test"),
+            (
+                PluginCapability::EnrichInstalledVersion,
+                "enrich_installed_version",
+            ),
         ];
         for (cap, expected) in cases {
             let json = serde_json::to_string(&cap).expect("serialize");
