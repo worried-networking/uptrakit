@@ -27,12 +27,12 @@ use crate::plugin::SkillsPlugin;
 /// The frontend matches this exact shape with the regex
 /// `^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$`; any deviation (e.g. RFC 3339
 /// subsecond precision) breaks the formatter.
-const DISPLAY_FMT: &[time::format_description::FormatItem<'_>] =
+pub(crate) const DISPLAY_FMT: &[time::format_description::FormatItem<'_>] =
     time::macros::format_description!("[year]-[month]-[day]T[hour]:[minute]:[second]Z");
 
 /// Hard cap on the number of recent commits requested from the provider per skill
 /// directory. Matches the provider's own `min(limit, 90)` ceiling.
-const COMMIT_WINDOW: usize = 90;
+pub(crate) const COMMIT_WINDOW: usize = 90;
 
 /// Turn a [`TreeCommit`] into an [`UpstreamRelease`] for the given skill directory.
 fn commit_to_release(
@@ -54,7 +54,7 @@ fn commit_to_release(
 ///
 /// Returns everything up to (but not including) the last `/`. When the path has
 /// no `/`, returns an empty string (the root of the repository).
-fn derive_skill_dir(skill_path: &str) -> &str {
+pub(crate) fn derive_skill_dir(skill_path: &str) -> &str {
     skill_path
         .rfind('/')
         .map(|i| skill_path.split_at(i).0)
@@ -82,7 +82,7 @@ fn map_provider_error(e: GitHubProviderError) -> Report<PluginError> {
 ///
 /// Accepts `https://github.com/owner/repo` and strips trailing `.git` or extra
 /// path segments — only the first two path components are used.
-fn parse_github_owner_repo(url: &url::Url) -> Result<(String, String)> {
+pub(crate) fn parse_github_owner_repo(url: &url::Url) -> Result<(String, String)> {
     let host = url.host_str().unwrap_or("");
     if !host.eq_ignore_ascii_case("github.com") {
         return Err(report!(SkillsError::UnsupportedSource(format!(
