@@ -386,6 +386,10 @@ async fn prepare_snapshot_protection(
                 error = %error,
                 "Proxmox snapshot creation failed"
             );
+            if let Some(tx) = ctx.output_tx.as_ref() {
+                let _ =
+                    tx.send(format!("Proxmox snapshot failed to start: {error}\n").into_bytes());
+            }
             let audit = ProtectionAudit {
                 update_history_id: ctx.update_history_id,
                 tenant_id: ctx.tenant_id,
@@ -604,6 +608,9 @@ async fn prepare_backup_protection(
                 error = %error,
                 "Proxmox backup task failed to start"
             );
+            if let Some(tx) = ctx.output_tx.as_ref() {
+                let _ = tx.send(format!("Proxmox backup failed to start: {error}\n").into_bytes());
+            }
             let audit = ProtectionAudit {
                 update_history_id: ctx.update_history_id,
                 tenant_id: ctx.tenant_id,
