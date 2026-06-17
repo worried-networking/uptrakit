@@ -2437,6 +2437,7 @@ pub async fn check_versions_host(
         &state.notification.notification_service,
         &state.notification.event_broadcaster,
         tenant_db.tenant_id(),
+        Some(state.global_providers()),
         controller_fetch_jobs,
     )
     .await;

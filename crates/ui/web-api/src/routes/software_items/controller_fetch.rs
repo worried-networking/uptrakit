@@ -11,7 +11,8 @@ use std::sync::Arc;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, prelude::Expr};
 use time::OffsetDateTime;
 use uptrakit_plugin_infrastructure_registry::{
-    ControllerRuntime, PluginCapability, PluginTypeId, ReleaseFetchContext, get_descriptor,
+    ControllerRuntime, GlobalProviderLookup, PluginCapability, PluginTypeId, ReleaseFetchContext,
+    get_descriptor,
 };
 use uptrakit_shared_db::entity::{host_software_item, software_item};
 use uptrakit_web_api_types::events::AdminEvent;
@@ -66,6 +67,7 @@ pub(super) async fn run_controller_fetch_jobs(
     notification_service: &crate::notification_service::NotificationService,
     event_broadcaster: &crate::event_broadcaster::EventBroadcaster,
     tenant_id: Uuid,
+    provider_lookup: Option<Arc<dyn GlobalProviderLookup>>,
     jobs: Vec<ControllerFetchJob>,
 ) -> u32 {
     if jobs.is_empty() {
@@ -107,7 +109,7 @@ pub(super) async fn run_controller_fetch_jobs(
             }
         };
 
-        let fetch_ctx = ReleaseFetchContext::none();
+        let fetch_ctx = ReleaseFetchContext::with_lookup_opt(provider_lookup.clone());
         let fetcher =
             match (slot.create)(&job.merged_config, controller_runtime.clone(), &fetch_ctx) {
                 Ok(f) => f,
@@ -234,4 +236,56 @@ pub(super) async fn run_controller_fetch_jobs(
     }
 
     succeeded
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uptrakit_service_connections::ServiceConnectionRegistry;
+
+    #[tokio::test]
+    async fn run_controller_fetch_jobs_threads_provider_lookup() {
+        use uptrakit_plugin_infrastructure_registry::test_support::{
+            ctx_capture_had_lookup, reset_ctx_capture_had_lookup,
+        };
+
+        struct DummyLookup;
+        impl GlobalProviderLookup for DummyLookup {
+            fn lookup(&self, _provider_id: &str) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+                None
+            }
+        }
+
+        reset_ctx_capture_had_lookup();
+
+        let db = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
+        let notification_service = crate::notification_service::NotificationService::new(
+            ServiceConnectionRegistry::new(),
+            Uuid::now_v7(),
+        );
+        let event_broadcaster = crate::event_broadcaster::EventBroadcaster::new();
+        let lookup: Arc<dyn GlobalProviderLookup> = Arc::new(DummyLookup);
+
+        let job = ControllerFetchJob {
+            plugin_type: PluginTypeId::from_static("__test_ctx_capture"),
+            package_identifier: "irrelevant".to_string(),
+            merged_config: serde_json::json!({}),
+            targets: vec![],
+        };
+
+        run_controller_fetch_jobs(
+            &db,
+            &notification_service,
+            &event_broadcaster,
+            Uuid::now_v7(),
+            Some(lookup),
+            vec![job],
+        )
+        .await;
+
+        assert!(
+            ctx_capture_had_lookup(),
+            "provider_lookup must thread from run_controller_fetch_jobs into ReleaseFetchContext"
+        );
+    }
 }
