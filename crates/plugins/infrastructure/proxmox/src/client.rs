@@ -235,16 +235,33 @@ impl ProxmoxClient {
     }
 
     fn task_upid_from_data(data: serde_json::Value, operation: &str) -> Result<String> {
-        if let Some(upid) = data.as_str()
-            && !upid.trim().is_empty()
-        {
-            return Ok(upid.to_string());
+        // PVE UPIDs are always prefixed `UPID:` (see `PVE::Tools::upid_decode`).
+        // PVE returns `{"data":"OK"}` for vzdump targeting a vmid that does not
+        // live on the requested node — treating that as a UPID makes the next
+        // status poll 400 on `unable to parse worker upid`, hiding the real
+        // cause (a stale `proxmox_host_mappings.proxmox_node`).
+        if let Some(upid) = data.as_str() {
+            let upid = upid.trim();
+            if upid.starts_with("UPID:") {
+                return Ok(upid.to_string());
+            }
+            if !upid.is_empty() {
+                bail!(ProxmoxError::ParseResponse(format!(
+                    "{operation} returned unexpected response {upid:?} — guest may not be reachable on the recorded node (commonly: guest migrated — re-run Proxmox Discovery to refresh the host mapping)"
+                )));
+            }
         }
 
-        if let Some(upid) = data.get("upid").and_then(serde_json::Value::as_str)
-            && !upid.trim().is_empty()
-        {
-            return Ok(upid.to_string());
+        if let Some(upid) = data.get("upid").and_then(serde_json::Value::as_str) {
+            let upid = upid.trim();
+            if upid.starts_with("UPID:") {
+                return Ok(upid.to_string());
+            }
+            if !upid.is_empty() {
+                bail!(ProxmoxError::ParseResponse(format!(
+                    "{operation} returned unexpected response {upid:?} — guest may not be reachable on the recorded node (commonly: guest migrated — re-run Proxmox Discovery to refresh the host mapping)"
+                )));
+            }
         }
 
         bail!(ProxmoxError::ParseResponse(format!(
@@ -819,6 +836,80 @@ mod tests {
             ProxmoxClient::backup_target_key("pve1", "local", "dir", false),
             "pve1:local:dir"
         );
+    }
+
+    #[test]
+    fn task_upid_string_with_upid_prefix_is_accepted() {
+        let data = serde_json::Value::String(
+            "UPID:pve1:00012345:0099AABB:60000000:vzdump:152:root@pam:".to_string(),
+        );
+        let upid =
+            ProxmoxClient::task_upid_from_data(data, "backup start").expect("valid UPID accepted");
+        assert!(upid.starts_with("UPID:"));
+    }
+
+    #[test]
+    fn task_upid_string_ok_is_rejected_with_remediation_hint() {
+        let data = serde_json::Value::String("OK".to_string());
+        let err = ProxmoxClient::task_upid_from_data(data, "backup start")
+            .expect_err("OK must be rejected");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("backup start"),
+            "operation name in message: {msg}"
+        );
+        assert!(
+            msg.contains("Proxmox Discovery"),
+            "remediation in message: {msg}"
+        );
+        assert!(msg.contains("\"OK\""), "unexpected value in message: {msg}");
+    }
+
+    #[test]
+    fn task_upid_empty_string_falls_through_to_no_task_id() {
+        let data = serde_json::Value::String(String::new());
+        let err = ProxmoxClient::task_upid_from_data(data, "snapshot create")
+            .expect_err("empty must be rejected");
+        assert!(err.to_string().contains("returned no task id"));
+    }
+
+    #[test]
+    fn task_upid_null_falls_through_to_no_task_id() {
+        let data = serde_json::Value::Null;
+        let err = ProxmoxClient::task_upid_from_data(data, "snapshot create")
+            .expect_err("null must be rejected");
+        assert!(err.to_string().contains("returned no task id"));
+    }
+
+    #[test]
+    fn task_upid_empty_object_falls_through_to_no_task_id() {
+        let data = serde_json::json!({});
+        let err = ProxmoxClient::task_upid_from_data(data, "snapshot create")
+            .expect_err("empty object must be rejected");
+        assert!(err.to_string().contains("returned no task id"));
+    }
+
+    #[test]
+    fn task_upid_object_with_valid_upid_field_is_accepted() {
+        let data = serde_json::json!({
+            "upid": "UPID:pve1:00012345:0099AABB:60000000:vzdump:152:root@pam:",
+        });
+        let upid =
+            ProxmoxClient::task_upid_from_data(data, "backup start").expect("valid UPID accepted");
+        assert!(upid.starts_with("UPID:"));
+    }
+
+    #[test]
+    fn task_upid_object_with_ok_upid_field_is_rejected() {
+        let data = serde_json::json!({ "upid": "OK" });
+        let err = ProxmoxClient::task_upid_from_data(data, "backup start")
+            .expect_err("OK in object must be rejected");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Proxmox Discovery"),
+            "remediation in message: {msg}"
+        );
+        assert!(msg.contains("\"OK\""));
     }
 
     #[test]
