@@ -5,8 +5,8 @@ use uptrakit_global_github_provider::GitHubProviderClient;
 #[cfg(feature = "catalog")]
 use uptrakit_global_github_provider::GitHubProviderHandle;
 use uptrakit_plugin_infrastructure_core::{
-    ConfigModel, HostRequirements, HostRuntime, PluginConfigValidationError, PluginError,
-    PluginFamily, ReleaseFetcher, Result, declare_plugin, roles::ReleaseFetchContext,
+    ConfigModel, HostRequirements, HostRuntime, PluginCapability, PluginConfigValidationError,
+    PluginError, PluginFamily, ReleaseFetcher, Result, declare_plugin, roles::ReleaseFetchContext,
 };
 
 use crate::config::SkillsConfig;
@@ -103,6 +103,7 @@ declare_plugin!(SkillsPlugin, SkillsConfig, "package_manager_skills", {
         ReleaseFetcher { host_requirements: HostRequirements::CONTROLLER_ONLY },
         UpdateExecutor,
     ],
+    extra_capabilities: [PluginCapability::ControllerSideFetchReleases],
     release_fetcher_create: {
         create: create_release_fetcher_skills,
         host_requirements: HostRequirements::CONTROLLER_ONLY,
@@ -148,6 +149,11 @@ mod tests {
             DESCRIPTOR
                 .capabilities
                 .contains(&PluginCapability::ReleaseFetching)
+        );
+        assert!(
+            DESCRIPTOR
+                .capabilities
+                .contains(&PluginCapability::ControllerSideFetchReleases)
         );
         assert!(
             DESCRIPTOR
