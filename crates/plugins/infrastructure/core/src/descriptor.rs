@@ -272,6 +272,40 @@ impl ReleaseFetcherSlot {
     }
 }
 
+/// Factory fn pointer for an [`InstalledVersionEnricher`] role. Three-arg
+/// shape (config + runtime + context) mirrors [`CreateReleaseFetcherFn`].
+///
+/// [`InstalledVersionEnricher`]: crate::roles::InstalledVersionEnricher
+pub type CreateInstalledVersionEnricherFn =
+    fn(
+        &serde_json::Value,
+        Arc<dyn HostRuntime>,
+        &roles::InstalledVersionEnrichmentContext,
+    ) -> crate::error::Result<Box<dyn roles::InstalledVersionEnricher>>;
+
+/// Slot for the [`InstalledVersionEnricher`] role. Bespoke (not [`RoleSlot`])
+/// because the factory needs the enrichment context, identical in shape to
+/// [`ReleaseFetcherSlot`].
+///
+/// [`InstalledVersionEnricher`]: crate::roles::InstalledVersionEnricher
+#[non_exhaustive]
+pub struct InstalledVersionEnricherSlot {
+    pub create: CreateInstalledVersionEnricherFn,
+    pub host_requirements: HostRequirements,
+}
+
+impl InstalledVersionEnricherSlot {
+    pub const fn new(
+        create: CreateInstalledVersionEnricherFn,
+        host_requirements: HostRequirements,
+    ) -> Self {
+        Self {
+            create,
+            host_requirements,
+        }
+    }
+}
+
 /// Creation for a notification transport (singleton).
 ///
 /// Always compiled — `CatalogConfig` is un-gated so this type is visible in all
@@ -496,6 +530,7 @@ pub struct InfraBundle {
 // ── Role creators ───────────────────────────────────────────────────────────
 
 /// Role creation function pointers. Most are `None` for any given plugin.
+#[derive(Default)]
 pub struct RoleCreators {
     // Per-instance roles (config + runtime → Box<dyn Role>)
     pub discoverer: Option<RoleSlot<dyn roles::Discoverer>>,
@@ -518,6 +553,8 @@ pub struct RoleCreators {
     // Always present (not cfg-gated) so that `declare_plugin!` macro expansions
     // in consuming crates always see the field, regardless of feature flags.
     pub infra: Option<InfraSlot>,
+    // Per-instance installed-version enricher (3-arg factory mirroring release_fetcher).
+    pub installed_version_enricher: Option<InstalledVersionEnricherSlot>,
 }
 
 // ── Plugin descriptor ───────────────────────────────────────────────────────
@@ -603,6 +640,36 @@ mod plugin_scope_tests {
     fn plugin_scope_display_lowercase() {
         assert_eq!(PluginScope::Tenant.to_string(), "tenant");
         assert_eq!(PluginScope::Instance.to_string(), "instance");
+    }
+}
+
+#[cfg(test)]
+mod installed_version_enricher_slot_tests {
+    #[test]
+    fn installed_version_enricher_slot_const_constructable() {
+        use crate::{
+            HostRequirements, HostRuntime, InstalledVersionEnricher, InstalledVersionEnricherSlot,
+            InstalledVersionEnrichmentContext, Result,
+        };
+        use std::sync::Arc;
+
+        fn make_dummy(
+            _cfg: &serde_json::Value,
+            _runtime: Arc<dyn HostRuntime>,
+            _ctx: &InstalledVersionEnrichmentContext,
+        ) -> Result<Box<dyn InstalledVersionEnricher>> {
+            panic!("not invoked in this test");
+        }
+
+        const SLOT: InstalledVersionEnricherSlot =
+            InstalledVersionEnricherSlot::new(make_dummy, HostRequirements::CONTROLLER_ONLY);
+        const { assert!(SLOT.host_requirements.controller_only) };
+    }
+
+    #[test]
+    fn role_creators_default_installed_version_enricher_is_none() {
+        let rc = crate::descriptor::RoleCreators::default();
+        assert!(rc.installed_version_enricher.is_none());
     }
 }
 

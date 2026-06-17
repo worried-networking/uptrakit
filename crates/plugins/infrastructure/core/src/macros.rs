@@ -227,6 +227,7 @@ macro_rules! declare_plugin {
                     controller_update_protection: None,
                     controller_update_hook: None,
                     infra: None,
+                    installed_version_enricher: None,
                 };
                 $(
                     $crate::__set_role_field!(rc, $role,

@@ -859,6 +859,7 @@ mod tests {
             controller_update_protection: None,
             controller_update_hook: None,
             infra: None,
+            installed_version_enricher: None,
         },
         surface_actions: None,
         surfaces: Some(&TEST_SURFACE_OPS),
@@ -901,6 +902,7 @@ mod tests {
             #[cfg(feature = "plugin-ops")]
             controller_update_hook: None,
             infra: None,
+            installed_version_enricher: None,
         },
         surface_actions: None,
         surfaces: None,
@@ -943,6 +945,7 @@ mod tests {
             #[cfg(feature = "plugin-ops")]
             controller_update_hook: None,
             infra: None,
+            installed_version_enricher: None,
         },
         surface_actions: None,
         surfaces: None,
@@ -985,6 +988,7 @@ mod tests {
             #[cfg(feature = "plugin-ops")]
             controller_update_hook: None,
             infra: None,
+            installed_version_enricher: None,
         },
         surface_actions: None,
         surfaces: None,
@@ -1026,6 +1030,7 @@ mod tests {
             controller_update_protection: None,
             controller_update_hook: None,
             infra: None,
+            installed_version_enricher: None,
         },
         surface_actions: None,
         surfaces: None,
@@ -1263,6 +1268,7 @@ mod tests {
             #[cfg(feature = "plugin-ops")]
             controller_update_hook: None,
             infra: None,
+            installed_version_enricher: None,
         },
         surface_actions: None,
         surfaces: None,
@@ -1326,6 +1332,7 @@ mod tests {
             #[cfg(feature = "plugin-ops")]
             controller_update_hook: None,
             infra: None,
+            installed_version_enricher: None,
         },
         surface_actions: None,
         surfaces: None,
