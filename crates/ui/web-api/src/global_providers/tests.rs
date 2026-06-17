@@ -18,9 +18,9 @@ use uptrakit_global_github_provider::{
 use uptrakit_web_api_types::events::AdminEvent;
 
 use super::github::{
-    GitHubClientFactory, GitHubProviderRuntime, GitHubProviderRuntimeOptions,
-    GitHubRequestExecutor, RuntimeRequestError, emit_global_github_provider_diagnostic_if_needed,
-    map_client_failure_for_tests,
+    CommitItem, GitHubClientFactory, GitHubProviderRuntime, GitHubProviderRuntimeOptions,
+    GitHubRequestExecutor, RuntimeRequestError, TreeEntry,
+    emit_global_github_provider_diagnostic_if_needed, map_client_failure_for_tests,
 };
 
 struct RecordingFactory;
@@ -64,6 +64,32 @@ impl GitHubRequestExecutor for FakeExecutor {
         _recursive: bool,
     ) -> Result<GitHubRepositoryTree, RuntimeRequestError> {
         self.result.lock().clone()
+    }
+
+    async fn list_commits_for_path_page(
+        &self,
+        _consumer: uptrakit_global_github_provider::GlobalProviderConsumerId,
+        _owner: &str,
+        _repo: &str,
+        _path: &str,
+        _per_page: usize,
+        _page: usize,
+    ) -> Result<Vec<CommitItem>, RuntimeRequestError> {
+        Err(RuntimeRequestError::RequestFailed(
+            "test fake: list_commits_for_path_page not configured".to_string(),
+        ))
+    }
+
+    async fn fetch_tree_non_recursive(
+        &self,
+        _consumer: uptrakit_global_github_provider::GlobalProviderConsumerId,
+        _owner: &str,
+        _repo: &str,
+        _tree_sha: &str,
+    ) -> Result<Vec<TreeEntry>, RuntimeRequestError> {
+        Err(RuntimeRequestError::RequestFailed(
+            "test fake: fetch_tree_non_recursive not configured".to_string(),
+        ))
     }
 }
 
@@ -256,6 +282,32 @@ impl GitHubRequestExecutor for SequenceExecutor {
             .lock()
             .pop_front()
             .unwrap_or_else(|| FakeExecutor::success().result.lock().clone())
+    }
+
+    async fn list_commits_for_path_page(
+        &self,
+        _consumer: uptrakit_global_github_provider::GlobalProviderConsumerId,
+        _owner: &str,
+        _repo: &str,
+        _path: &str,
+        _per_page: usize,
+        _page: usize,
+    ) -> Result<Vec<CommitItem>, RuntimeRequestError> {
+        Err(RuntimeRequestError::RequestFailed(
+            "test fake: list_commits_for_path_page not configured".to_string(),
+        ))
+    }
+
+    async fn fetch_tree_non_recursive(
+        &self,
+        _consumer: uptrakit_global_github_provider::GlobalProviderConsumerId,
+        _owner: &str,
+        _repo: &str,
+        _tree_sha: &str,
+    ) -> Result<Vec<TreeEntry>, RuntimeRequestError> {
+        Err(RuntimeRequestError::RequestFailed(
+            "test fake: fetch_tree_non_recursive not configured".to_string(),
+        ))
     }
 }
 
