@@ -9,6 +9,10 @@ description = "Shared GitHub provider contract for global plugins"
 
 [dependencies]
 async-trait = { workspace = true }
+time = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
 
 [lints]
 workspace = true

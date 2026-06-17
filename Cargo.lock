@@ -7568,6 +7568,8 @@ name = "uptrakit-global-github-provider"
 version = "0.0.1"
 dependencies = [
  "async-trait",
+ "time",
+ "tokio",
 ]
 
 [[package]]
