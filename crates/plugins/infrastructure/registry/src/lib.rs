@@ -61,8 +61,10 @@ pub use uptrakit_plugin_infrastructure_core::host_requirements::RoleKey;
 pub use uptrakit_plugin_infrastructure_core::roles::{ReleaseFetchContext, ReleaseFetcher};
 pub use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchFetchItem, BatchFetchResult, BatchUpdateItem, ExecuteUpdateResult,
-    HostCapabilities, HostCompatibility, InfraBundle, PluginError, RouterOsExecutor,
-    RouterOsHostRuntime, ServiceMetadataProvider, UpdateLifecycleContext, construct_host_runtime,
+    HostCapabilities, HostCompatibility, InfraBundle, InstalledVersionDisplay,
+    InstalledVersionEnricher, InstalledVersionEnricherSlot, InstalledVersionEnrichmentContext,
+    InstalledVersionItem, PluginError, RouterOsExecutor, RouterOsHostRuntime,
+    ServiceMetadataProvider, UpdateLifecycleContext, construct_host_runtime,
     construct_routeros_host_runtime,
 };
 pub use uptrakit_plugin_infrastructure_core::{

@@ -4,8 +4,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use async_trait::async_trait;
 use uptrakit_plugin_infrastructure_core::{
     BatchFetchItem, BatchFetchResult, ConfigModel, ConfigOps, HostRequirements, HostRuntime,
-    PluginCapability, PluginConfigValidationError, PluginDescriptor, PluginError, PluginFamily,
-    PluginMeta, PluginScope, ReleaseFetcher, Result, RoleCreators, UpstreamRelease,
+    InstalledVersionDisplay, InstalledVersionEnricher, InstalledVersionEnricherSlot,
+    InstalledVersionEnrichmentContext, InstalledVersionItem, PluginCapability,
+    PluginConfigValidationError, PluginDescriptor, PluginError, PluginFamily, PluginMeta,
+    PluginScope, ReleaseFetcher, Result, RoleCreators, UpstreamRelease,
     descriptor::ReleaseFetcherSlot, form_schema::FormFieldDescriptor, roles::ReleaseFetchContext,
 };
 use uptrakit_shared_types::PluginTypeId;
@@ -227,6 +229,173 @@ fn create_ctx_capture_fetcher(
     CTX_CAPTURE_HAD_LOOKUP.store(ctx.global_provider_lookup.is_some(), Ordering::SeqCst);
     Ok(Box::new(TestCtxCapturePlugin))
 }
+
+const TEST_ENRICHER_CAPABILITIES: &[PluginCapability] = &[PluginCapability::EnrichInstalledVersion];
+
+/// Echoes the input `installed_version` as `display_version = Some("date_for_{sha}")`.
+/// `None` input → `None` output (per the `None`-input contract).
+pub struct TestEnricherEchoPlugin;
+
+impl PluginMeta for TestEnricherEchoPlugin {
+    fn plugin_type_id(&self) -> PluginTypeId {
+        PluginTypeId::from_static("__test_enricher_echo")
+    }
+}
+
+#[async_trait]
+impl InstalledVersionEnricher for TestEnricherEchoPlugin {
+    async fn enrich_installed_versions(
+        &self,
+        items: &[InstalledVersionItem],
+    ) -> Result<Vec<InstalledVersionDisplay>> {
+        Ok(items
+            .iter()
+            .map(|item| {
+                InstalledVersionDisplay::new(
+                    item.package_identifier.clone(),
+                    item.installed_version.clone(),
+                    item.installed_version
+                        .as_ref()
+                        .map(|sha| format!("date_for_{sha}")),
+                )
+            })
+            .collect())
+    }
+}
+
+fn create_test_enricher_echo(
+    _cfg: &serde_json::Value,
+    _runtime: Arc<dyn HostRuntime>,
+    _ctx: &InstalledVersionEnrichmentContext,
+) -> Result<Box<dyn InstalledVersionEnricher>> {
+    Ok(Box::new(TestEnricherEchoPlugin))
+}
+
+pub static ENRICHER_ECHO_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
+    type_id: "__test_enricher_echo",
+    display_name: "Test Enricher Echo (test-only)",
+    family: PluginFamily::Software,
+    config_model: ConfigModel::None,
+    capabilities: TEST_ENRICHER_CAPABILITIES,
+    scope: PluginScope::Tenant,
+    instance_config: None,
+    config: ConfigOps {
+        validate,
+        mask_secrets,
+        restore_secrets,
+        sample,
+        form_schema,
+        validate_identifier,
+    },
+    roles: RoleCreators {
+        discoverer: None,
+        version_detector: None,
+        release_fetcher: None,
+        package_indexer: None,
+        update_executor: None,
+        lifecycle_hook: None,
+        notification_transport: None,
+        software_item_lifecycle: None,
+        controller_update_protection: None,
+        controller_update_hook: None,
+        infra: None,
+        installed_version_enricher: Some(InstalledVersionEnricherSlot::new(
+            create_test_enricher_echo,
+            HostRequirements::CONTROLLER_ONLY,
+        )),
+    },
+    surface_actions: None,
+    surfaces: None,
+    type_settings: None,
+    config_test: None,
+    sudo: None,
+    raw_settings_keys: &[],
+    migrations: None,
+    reset_tenant_data: None,
+    db_migrate_tables: None,
+    global_provider_consumers: &[],
+};
+
+/// Always returns `display_version = None`, regardless of input.
+pub struct TestEnricherMissPlugin;
+
+impl PluginMeta for TestEnricherMissPlugin {
+    fn plugin_type_id(&self) -> PluginTypeId {
+        PluginTypeId::from_static("__test_enricher_miss")
+    }
+}
+
+#[async_trait]
+impl InstalledVersionEnricher for TestEnricherMissPlugin {
+    async fn enrich_installed_versions(
+        &self,
+        items: &[InstalledVersionItem],
+    ) -> Result<Vec<InstalledVersionDisplay>> {
+        Ok(items
+            .iter()
+            .map(|item| {
+                InstalledVersionDisplay::new(
+                    item.package_identifier.clone(),
+                    item.installed_version.clone(),
+                    None,
+                )
+            })
+            .collect())
+    }
+}
+
+fn create_test_enricher_miss(
+    _cfg: &serde_json::Value,
+    _runtime: Arc<dyn HostRuntime>,
+    _ctx: &InstalledVersionEnrichmentContext,
+) -> Result<Box<dyn InstalledVersionEnricher>> {
+    Ok(Box::new(TestEnricherMissPlugin))
+}
+
+pub static ENRICHER_MISS_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
+    type_id: "__test_enricher_miss",
+    display_name: "Test Enricher Miss (test-only)",
+    family: PluginFamily::Software,
+    config_model: ConfigModel::None,
+    capabilities: TEST_ENRICHER_CAPABILITIES,
+    scope: PluginScope::Tenant,
+    instance_config: None,
+    config: ConfigOps {
+        validate,
+        mask_secrets,
+        restore_secrets,
+        sample,
+        form_schema,
+        validate_identifier,
+    },
+    roles: RoleCreators {
+        discoverer: None,
+        version_detector: None,
+        release_fetcher: None,
+        package_indexer: None,
+        update_executor: None,
+        lifecycle_hook: None,
+        notification_transport: None,
+        software_item_lifecycle: None,
+        controller_update_protection: None,
+        controller_update_hook: None,
+        infra: None,
+        installed_version_enricher: Some(InstalledVersionEnricherSlot::new(
+            create_test_enricher_miss,
+            HostRequirements::CONTROLLER_ONLY,
+        )),
+    },
+    surface_actions: None,
+    surfaces: None,
+    type_settings: None,
+    config_test: None,
+    sudo: None,
+    raw_settings_keys: &[],
+    migrations: None,
+    reset_tenant_data: None,
+    db_migrate_tables: None,
+    global_provider_consumers: &[],
+};
 
 pub static CTX_CAPTURE_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
     type_id: "__test_ctx_capture",
