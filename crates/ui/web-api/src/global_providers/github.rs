@@ -16,15 +16,16 @@ use parking_lot::Mutex;
 use sea_orm::DatabaseConnection;
 #[cfg(test)]
 use sha2::Digest;
+use time::format_description::well_known::Rfc3339;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::{Instant, timeout};
 use uptrakit_github_client::{
-    AttemptOutcome, GitHubAuth, GitHubClient, GitHubClientConfig, GitHubClientError,
-    RepositoryTreeEntryKind, ResponseMetadata, RetryDecision,
+    AttemptOutcome, AuthKind, GitHubAuth, GitHubClient, GitHubClientConfig, GitHubClientError,
+    RepositoryTreeEntryKind, ResponseMetadata, RetryDecision, classify_http_failure_with_auth,
 };
 use uptrakit_global_github_provider::{
     GitHubProviderClient, GitHubProviderError, GitHubProviderHandle, GitHubRepositoryTree,
-    GitHubTreeEntry, GitHubTreeEntryKind, GlobalProviderConsumerId,
+    GitHubTreeEntry, GitHubTreeEntryKind, GlobalProviderConsumerId, TreeCommit,
 };
 use uptrakit_plugin_infrastructure_registry::{
     GlobalProviderLookup, PluginHttpClientConfig, build_plugin_http_client,
@@ -533,6 +534,211 @@ impl GitHubProviderClient for GitHubProviderRuntime {
             "retry budget exhausted".to_string(),
         ))
     }
+
+    async fn list_recent_commit_dates_for_path(
+        &self,
+        consumer: GlobalProviderConsumerId,
+        owner: &str,
+        repo: &str,
+        path: &str,
+        limit: usize,
+        expected_shas: &std::collections::HashSet<String>,
+    ) -> Result<Vec<TreeCommit>, GitHubProviderError> {
+        const PER_PAGE: usize = 30;
+        const HARD_CAP: usize = 90;
+        let effective_limit = limit.min(HARD_CAP);
+        if effective_limit == 0 {
+            return Ok(Vec::new());
+        }
+        let max_pages = effective_limit.div_ceil(PER_PAGE);
+
+        // Paged commits walk (newest-first per call; reversed after collection).
+        let mut commits: Vec<CommitItem> = Vec::new();
+        'pages: for page in 1..=max_pages {
+            let page_resp = self
+                .run_with_retry_shell(consumer, |state| {
+                    let owner = owner.to_string();
+                    let repo = repo.to_string();
+                    let path = path.to_string();
+                    async move {
+                        state
+                            .client
+                            .list_commits_for_path_page(
+                                consumer, &owner, &repo, &path, PER_PAGE, page,
+                            )
+                            .await
+                    }
+                })
+                .await?;
+            let page_len = page_resp.len();
+            if page_len == 0 {
+                break;
+            }
+            for c in page_resp {
+                commits.push(c);
+                if commits.len() >= effective_limit {
+                    break 'pages;
+                }
+            }
+            // GitHub returns fewer than `per_page` rows on the last page; stop
+            // paginating to avoid a redundant fetch (and the 404 it would yield
+            // against a strict httpmock harness).
+            if page_len < PER_PAGE {
+                break;
+            }
+        }
+        if commits.is_empty() {
+            return Ok(Vec::new());
+        }
+        commits.reverse(); // oldest-first
+
+        // Resolve subtree-at-path per commit. Cross-batch cache keyed by
+        // (tree_sha, path_segment). Each cache miss is one non-recursive tree
+        // call routed through the same retry shell.
+        let path_segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+        let mut subtree_cache: std::collections::HashMap<(String, String), String> =
+            std::collections::HashMap::new();
+
+        let mut out: Vec<TreeCommit> = Vec::new();
+        for commit in &commits {
+            let mut current = commit.root_tree_sha.clone();
+            let mut walk_ok = true;
+            for seg in &path_segments {
+                let cache_key = (current.clone(), (*seg).to_string());
+                if let Some(child) = subtree_cache.get(&cache_key) {
+                    current = child.clone();
+                    continue;
+                }
+                let tree_entries = self
+                    .run_with_retry_shell(consumer, |state| {
+                        let owner = owner.to_string();
+                        let repo = repo.to_string();
+                        let tree_sha = current.clone();
+                        async move {
+                            state
+                                .client
+                                .fetch_tree_non_recursive(consumer, &owner, &repo, &tree_sha)
+                                .await
+                        }
+                    })
+                    .await?;
+                let next = tree_entries.iter().find(|e| e.path == *seg);
+                let Some(entry) = next else {
+                    walk_ok = false;
+                    break;
+                };
+                subtree_cache.insert(cache_key, entry.sha.clone());
+                current = entry.sha.clone();
+            }
+            if !walk_ok {
+                continue; // path renamed at this commit; skip
+            }
+            out.push(TreeCommit::new(current.clone(), commit.committed_at));
+            // Short-circuit when every expected SHA is bound.
+            if !expected_shas.is_empty()
+                && expected_shas
+                    .iter()
+                    .all(|want| out.iter().any(|tc| &tc.tree_sha_at_path == want))
+            {
+                break;
+            }
+        }
+        Ok(out)
+    }
+}
+
+impl GitHubProviderRuntime {
+    /// Retry shell mirroring `fetch_repository_tree`: per-call cooldown wait,
+    /// permit acquisition, metrics, and per-variant `RuntimeRequestError` ladder.
+    /// The per-variant arms must remain identical to `fetch_repository_tree`'s
+    /// arms to preserve observability parity.
+    async fn run_with_retry_shell<T, F, Fut>(
+        &self,
+        consumer: GlobalProviderConsumerId,
+        mut call: F,
+    ) -> Result<T, GitHubProviderError>
+    where
+        F: FnMut(Arc<GitHubProviderRuntimeState>) -> Fut,
+        Fut: std::future::Future<Output = Result<T, RuntimeRequestError>>,
+    {
+        for attempt in 0..=self.retry_policy.max_retries {
+            let state = self.current_state().await?;
+            self.wait_for_cooldown(state.key_kind).await?;
+            let _permit = self.acquire_request_permit().await?;
+            self.metrics.record_request(consumer, "attempt");
+            metrics::counter!(
+                "uptrakit_global_provider_requests_total",
+                "provider" => "github",
+                "consumer" => consumer.as_str(),
+                "status" => "scheduled"
+            )
+            .increment(1);
+
+            match call(Arc::clone(&state)).await {
+                Ok(value) => {
+                    self.metrics.record_request(consumer, "success");
+                    return Ok(value);
+                }
+                Err(RuntimeRequestError::Throttled { retry_after }) => {
+                    self.metrics.record_request(consumer, "throttled");
+                    if let Some(retry_after) = retry_after {
+                        self.set_cooldown(retry_after);
+                        self.metrics.record_cooldown(state.key_kind, retry_after);
+                    }
+                    if attempt < self.retry_policy.max_retries {
+                        self.metrics.record_retry(consumer, "throttled");
+                        if retry_after.is_none() {
+                            let backoff = self.backoff_for_attempt(attempt);
+                            self.sleeper.sleep(backoff).await;
+                        }
+                        continue;
+                    }
+                    return Err(GitHubProviderError::Throttled);
+                }
+                Err(RuntimeRequestError::AuthFailed(message)) => {
+                    self.metrics.record_request(consumer, "auth_failed");
+                    self.metrics.record_auth_failure(consumer);
+                    return Err(GitHubProviderError::AuthFailed(message));
+                }
+                Err(RuntimeRequestError::NotFound(message)) => {
+                    self.metrics.record_request(consumer, "request_failed");
+                    return Err(GitHubProviderError::RequestFailed(message));
+                }
+                Err(RuntimeRequestError::UpstreamUnavailable {
+                    message,
+                    retry_after,
+                }) => {
+                    self.metrics
+                        .record_request(consumer, "upstream_unavailable");
+                    if let Some(retry_after) = retry_after {
+                        self.set_cooldown(retry_after);
+                        self.metrics.record_cooldown(state.key_kind, retry_after);
+                    }
+                    if attempt < self.retry_policy.max_retries {
+                        self.metrics.record_retry(consumer, "upstream_unavailable");
+                        if retry_after.is_none() {
+                            let backoff = self.backoff_for_attempt(attempt);
+                            self.sleeper.sleep(backoff).await;
+                        }
+                        continue;
+                    }
+                    return Err(GitHubProviderError::UpstreamUnavailable(message));
+                }
+                Err(RuntimeRequestError::RequestFailed(message)) => {
+                    self.metrics.record_request(consumer, "request_failed");
+                    return Err(GitHubProviderError::RequestFailed(message));
+                }
+                Err(RuntimeRequestError::Misconfigured(message)) => {
+                    self.metrics.record_request(consumer, "misconfigured");
+                    return Err(GitHubProviderError::Misconfigured(message));
+                }
+            }
+        }
+
+        Err(GitHubProviderError::UpstreamUnavailable(
+            "retry budget exhausted".to_string(),
+        ))
+    }
 }
 
 pub(crate) async fn detect_global_github_provider_problem(
@@ -609,6 +815,39 @@ pub(crate) trait GitHubRequestExecutor: Send + Sync {
         git_ref: &str,
         recursive: bool,
     ) -> Result<GitHubRepositoryTree, RuntimeRequestError>;
+
+    async fn list_commits_for_path_page(
+        &self,
+        consumer: GlobalProviderConsumerId,
+        owner: &str,
+        repo: &str,
+        path: &str,
+        per_page: usize,
+        page: usize,
+    ) -> Result<Vec<CommitItem>, RuntimeRequestError>;
+
+    async fn fetch_tree_non_recursive(
+        &self,
+        consumer: GlobalProviderConsumerId,
+        owner: &str,
+        repo: &str,
+        tree_sha: &str,
+    ) -> Result<Vec<TreeEntry>, RuntimeRequestError>;
+}
+
+/// Newest-first commit-by-path projection. Fields parsed from the GitHub
+/// `/repos/{owner}/{repo}/commits` response.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CommitItem {
+    pub(crate) root_tree_sha: String,
+    pub(crate) committed_at: time::OffsetDateTime,
+}
+
+/// Non-recursive tree-entry projection. Filtered to `type = "tree"` rows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TreeEntry {
+    pub(crate) path: String,
+    pub(crate) sha: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -688,19 +927,17 @@ impl GitHubClientFactory for ReqwestGitHubClientFactory {
             None => GitHubAuth::Anonymous,
         };
 
-        let client = GitHubClient::new(GitHubClientConfig::new(
-            http_client,
-            base_url,
-            auth,
-            GITHUB_PROVIDER_USER_AGENT,
-        ));
+        let config =
+            GitHubClientConfig::new(http_client, base_url, auth, GITHUB_PROVIDER_USER_AGENT);
+        let client = GitHubClient::new(config.clone());
 
-        Ok(Arc::new(ReqwestGitHubRequestExecutor { client }))
+        Ok(Arc::new(ReqwestGitHubRequestExecutor { client, config }))
     }
 }
 
 struct ReqwestGitHubRequestExecutor {
     client: GitHubClient,
+    config: GitHubClientConfig,
 }
 
 #[async_trait]
@@ -729,6 +966,179 @@ impl GitHubRequestExecutor for ReqwestGitHubRequestExecutor {
             )),
         }
     }
+
+    async fn list_commits_for_path_page(
+        &self,
+        _consumer: GlobalProviderConsumerId,
+        owner: &str,
+        repo: &str,
+        path: &str,
+        per_page: usize,
+        page: usize,
+    ) -> Result<Vec<CommitItem>, RuntimeRequestError> {
+        let mut url = self.config.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| {
+                RuntimeRequestError::Misconfigured(
+                    "base_url cannot be used as a path base".to_string(),
+                )
+            })?
+            .push("repos")
+            .push(owner)
+            .push(repo)
+            .push("commits");
+        url.query_pairs_mut()
+            .append_pair("path", path)
+            .append_pair("per_page", &per_page.to_string())
+            .append_pair("page", &page.to_string());
+
+        let body = self.run_get_json(url).await?;
+        let commits: Vec<CommitDto> = serde_json::from_str(&body)
+            .map_err(|error| RuntimeRequestError::RequestFailed(error.to_string()))?;
+        commits
+            .into_iter()
+            .map(CommitDto::into_model)
+            .collect::<Result<Vec<_>, _>>()
+    }
+
+    async fn fetch_tree_non_recursive(
+        &self,
+        _consumer: GlobalProviderConsumerId,
+        owner: &str,
+        repo: &str,
+        tree_sha: &str,
+    ) -> Result<Vec<TreeEntry>, RuntimeRequestError> {
+        let mut url = self.config.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| {
+                RuntimeRequestError::Misconfigured(
+                    "base_url cannot be used as a path base".to_string(),
+                )
+            })?
+            .push("repos")
+            .push(owner)
+            .push(repo)
+            .push("git")
+            .push("trees")
+            .push(tree_sha);
+
+        let body = self.run_get_json(url).await?;
+        let parsed: TreeListDto = serde_json::from_str(&body)
+            .map_err(|error| RuntimeRequestError::RequestFailed(error.to_string()))?;
+        Ok(parsed
+            .tree
+            .into_iter()
+            .filter(|entry| entry.kind == "tree")
+            .map(|entry| TreeEntry {
+                path: entry.path,
+                sha: entry.sha,
+            })
+            .collect())
+    }
+}
+
+impl ReqwestGitHubRequestExecutor {
+    /// Issue a GET against `url` using the configured auth/user-agent headers, then
+    /// classify HTTP/transport failures via the shared `classify_http_failure_with_auth`
+    /// ladder so 404/401/403/429/5xx mapping stays identical to `GitHubClient`.
+    async fn run_get_json(&self, url: url::Url) -> Result<String, RuntimeRequestError> {
+        let auth_kind = match &self.config.auth {
+            GitHubAuth::Anonymous => AuthKind::Anonymous,
+            GitHubAuth::BearerToken(_) => AuthKind::Bearer,
+            other => {
+                tracing::warn!(
+                    auth = ?std::mem::discriminant(other),
+                    "unknown GitHubAuth variant; defaulting to Anonymous"
+                );
+                AuthKind::Anonymous
+            }
+        };
+
+        let mut builder = self
+            .config
+            .http_client
+            .get(url)
+            .header(http::header::USER_AGENT, &self.config.user_agent)
+            .header(http::header::ACCEPT, "application/vnd.github+json")
+            .header("x-github-api-version", "2022-11-28");
+        if let GitHubAuth::BearerToken(token) = &self.config.auth {
+            builder = builder.bearer_auth(token.expose_secret());
+        }
+
+        let response =
+            builder
+                .send()
+                .await
+                .map_err(|error| RuntimeRequestError::UpstreamUnavailable {
+                    message: error.to_string(),
+                    retry_after: None,
+                })?;
+        let status = response.status();
+        let headers = response.headers().clone();
+        let body = response
+            .text()
+            .await
+            .map_err(|error| RuntimeRequestError::RequestFailed(error.to_string()))?;
+
+        if status.is_success() {
+            return Ok(body);
+        }
+
+        let (error, decision, metadata) =
+            classify_http_failure_with_auth(status, &headers, &body, auth_kind)
+                .map_err(|error| map_client_failure(error, None, None))?;
+        Err(map_client_failure(error, Some(decision), Some(metadata)))
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct CommitDto {
+    commit: CommitMetaDto,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct CommitMetaDto {
+    committer: CommitterDto,
+    tree: CommitTreeDto,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct CommitterDto {
+    date: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct CommitTreeDto {
+    sha: String,
+}
+
+impl CommitDto {
+    fn into_model(self) -> Result<CommitItem, RuntimeRequestError> {
+        let committed_at = time::OffsetDateTime::parse(&self.commit.committer.date, &Rfc3339)
+            .map_err(|error| {
+                RuntimeRequestError::RequestFailed(format!(
+                    "invalid committer date {:?}: {error}",
+                    self.commit.committer.date
+                ))
+            })?;
+        Ok(CommitItem {
+            root_tree_sha: self.commit.tree.sha,
+            committed_at,
+        })
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct TreeListDto {
+    tree: Vec<TreeListEntryDto>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct TreeListEntryDto {
+    path: String,
+    #[serde(rename = "type")]
+    kind: String,
+    sha: String,
 }
 
 fn map_repository_tree_response(
@@ -1042,5 +1452,285 @@ impl GitHubRequestExecutor for FakeGitHubRequestExecutor {
             .lock()
             .pop_front()
             .unwrap_or_else(|| Ok(default_test_tree()))
+    }
+
+    async fn list_commits_for_path_page(
+        &self,
+        _consumer: GlobalProviderConsumerId,
+        _owner: &str,
+        _repo: &str,
+        _path: &str,
+        _per_page: usize,
+        _page: usize,
+    ) -> Result<Vec<CommitItem>, RuntimeRequestError> {
+        Err(RuntimeRequestError::RequestFailed(
+            "test fake: list_commits_for_path_page not configured".to_string(),
+        ))
+    }
+
+    async fn fetch_tree_non_recursive(
+        &self,
+        _consumer: GlobalProviderConsumerId,
+        _owner: &str,
+        _repo: &str,
+        _tree_sha: &str,
+    ) -> Result<Vec<TreeEntry>, RuntimeRequestError> {
+        Err(RuntimeRequestError::RequestFailed(
+            "test fake: fetch_tree_non_recursive not configured".to_string(),
+        ))
+    }
+}
+
+#[cfg(test)]
+mod list_recent_commit_dates_for_path_tests {
+    use std::collections::HashSet;
+    use std::sync::Arc;
+
+    use httpmock::prelude::*;
+    use uptrakit_github_client::{GitHubAuth, GitHubClient, GitHubClientConfig};
+    use uptrakit_global_github_provider::{GitHubProviderClient, GitHubProviderError};
+    use uptrakit_plugin_infrastructure_registry::{
+        PluginHttpClientConfig, build_plugin_http_client,
+    };
+    use uptrakit_shared_db::provider_settings::GitHubProviderDefaults;
+
+    use super::{
+        GITHUB_PROVIDER_USER_AGENT, GitHubClientFactory, GitHubProviderRuntime,
+        GitHubProviderRuntimeOptions, GitHubRequestExecutor, ReqwestGitHubRequestExecutor,
+        runtime_test_db,
+    };
+
+    /// Test factory that builds a real `ReqwestGitHubRequestExecutor` pointed at the
+    /// mock server's `base_url`, bypassing the HTTPS-only validation enforced by
+    /// `normalize_github_provider_defaults` on the upsert path.
+    struct MockServerFactory {
+        base_url: url::Url,
+    }
+
+    impl GitHubClientFactory for MockServerFactory {
+        fn build(
+            &self,
+            _defaults: Option<&GitHubProviderDefaults>,
+        ) -> Result<Arc<dyn GitHubRequestExecutor>, GitHubProviderError> {
+            let http_client = build_plugin_http_client(PluginHttpClientConfig {
+                user_agent: GITHUB_PROVIDER_USER_AGENT,
+                ..PluginHttpClientConfig::default()
+            })
+            .map_err(|error| GitHubProviderError::Misconfigured(error.to_string()))?;
+            // Use anonymous auth so 404 responses map to `NotFound` → `RequestFailed`
+            // through `classify_http_failure_with_auth`. With bearer auth the same
+            // ladder remaps to `AuthFailed`, which is correct production behaviour
+            // but obscures the 404 marker the test exercises.
+            let config = GitHubClientConfig::new(
+                http_client,
+                self.base_url.clone(),
+                GitHubAuth::Anonymous,
+                GITHUB_PROVIDER_USER_AGENT,
+            );
+            let client = GitHubClient::new(config.clone());
+            Ok(Arc::new(ReqwestGitHubRequestExecutor { client, config }))
+        }
+    }
+
+    /// Build a runtime wired to a real `ReqwestGitHubRequestExecutor` whose
+    /// `base_url` points at the supplied httpmock server.
+    async fn make_runtime_for_test(server: &MockServer) -> Arc<GitHubProviderRuntime> {
+        let db = runtime_test_db().await;
+        let base_url = url::Url::parse(&server.base_url()).expect("valid mock server URL");
+        GitHubProviderRuntime::new_for_tests(
+            db,
+            Arc::new(MockServerFactory { base_url }),
+            GitHubProviderRuntimeOptions::default(),
+        )
+    }
+
+    #[tokio::test]
+    async fn list_recent_commit_dates_for_path_walks_commits_then_trees() {
+        let server = httpmock::MockServer::start_async().await;
+
+        // 1 page of 2 commits touching skills/foo.
+        server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/repos/o/r/commits")
+                    .query_param("path", "skills/foo")
+                    .query_param("per_page", "30")
+                    .query_param("page", "1");
+                then.status(200).json_body(serde_json::json!([
+                    {
+                        "sha": "c2",
+                        "commit": {
+                            "committer": {"date": "2026-06-11T01:15:00Z"},
+                            "tree": {"sha": "root_c2"}
+                        }
+                    },
+                    {
+                        "sha": "c1",
+                        "commit": {
+                            "committer": {"date": "2026-05-01T08:00:00Z"},
+                            "tree": {"sha": "root_c1"}
+                        }
+                    }
+                ]));
+            })
+            .await;
+        server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/repos/o/r/commits")
+                    .query_param("page", "2");
+                then.status(200).json_body(serde_json::json!([]));
+            })
+            .await;
+
+        // Non-recursive tree calls (per commit) — each returns one level.
+        server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/repos/o/r/git/trees/root_c1");
+                then.status(200).json_body(serde_json::json!({
+                    "tree": [{"path": "skills", "type": "tree", "sha": "skills_c1"}]
+                }));
+            })
+            .await;
+        server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/repos/o/r/git/trees/skills_c1");
+                then.status(200).json_body(serde_json::json!({
+                    "tree": [{"path": "foo", "type": "tree", "sha": "foo_c1"}]
+                }));
+            })
+            .await;
+        server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/repos/o/r/git/trees/root_c2");
+                then.status(200).json_body(serde_json::json!({
+                    "tree": [{"path": "skills", "type": "tree", "sha": "skills_c2"}]
+                }));
+            })
+            .await;
+        server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/repos/o/r/git/trees/skills_c2");
+                then.status(200).json_body(serde_json::json!({
+                    "tree": [{"path": "foo", "type": "tree", "sha": "foo_c2"}]
+                }));
+            })
+            .await;
+
+        let runtime = make_runtime_for_test(&server).await;
+        let out = runtime
+            .list_recent_commit_dates_for_path(
+                uptrakit_global_github_provider::PACKAGE_MANAGER_SKILLS,
+                "o",
+                "r",
+                "skills/foo",
+                90,
+                &HashSet::new(),
+            )
+            .await
+            .expect("ok");
+
+        // Oldest-first ordering.
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].tree_sha_at_path, "foo_c1");
+        assert_eq!(out[1].tree_sha_at_path, "foo_c2");
+    }
+
+    #[tokio::test]
+    async fn list_recent_commit_dates_for_path_short_circuits_on_expected_shas() {
+        let server = httpmock::MockServer::start_async().await;
+
+        server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/repos/o/r/commits")
+                    .query_param("page", "1");
+                then.status(200).json_body(serde_json::json!([
+                    {"sha":"c2","commit":{"committer":{"date":"2026-06-11T01:15:00Z"},"tree":{"sha":"root_c2"}}},
+                    {"sha":"c1","commit":{"committer":{"date":"2026-05-01T08:00:00Z"},"tree":{"sha":"root_c1"}}}
+                ]));
+            })
+            .await;
+        // ONLY define tree mocks for c1 (oldest). If the walker hits c2's trees the
+        // test fails.
+        server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/repos/o/r/git/trees/root_c1");
+                then.status(200).json_body(serde_json::json!({
+                    "tree": [{"path":"skills","type":"tree","sha":"skills_c1"}]
+                }));
+            })
+            .await;
+        server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/repos/o/r/git/trees/skills_c1");
+                then.status(200).json_body(serde_json::json!({
+                    "tree": [{"path":"foo","type":"tree","sha":"foo_c1"}]
+                }));
+            })
+            .await;
+
+        let runtime = make_runtime_for_test(&server).await;
+        let mut expected: HashSet<String> = HashSet::new();
+        expected.insert("foo_c1".to_string());
+
+        let out = runtime
+            .list_recent_commit_dates_for_path(
+                uptrakit_global_github_provider::PACKAGE_MANAGER_SKILLS,
+                "o",
+                "r",
+                "skills/foo",
+                90,
+                &expected,
+            )
+            .await
+            .expect("ok");
+
+        assert_eq!(
+            out.len(),
+            1,
+            "must short-circuit after binding all expected"
+        );
+        assert_eq!(out[0].tree_sha_at_path, "foo_c1");
+    }
+
+    #[tokio::test]
+    async fn list_recent_commit_dates_for_path_404_surfaces_with_marker() {
+        let server = httpmock::MockServer::start_async().await;
+        server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/repos/o/r/commits");
+                then.status(404);
+            })
+            .await;
+        let runtime = make_runtime_for_test(&server).await;
+        let err = runtime
+            .list_recent_commit_dates_for_path(
+                uptrakit_global_github_provider::PACKAGE_MANAGER_SKILLS,
+                "o",
+                "r",
+                "skills/foo",
+                90,
+                &HashSet::new(),
+            )
+            .await
+            .unwrap_err();
+        // The existing `fetch_repository_tree` ladder maps
+        // `RuntimeRequestError::NotFound` to `GitHubProviderError::RequestFailed`.
+        // Assert on the 404 marker substring so the downstream dispatcher can pick
+        // up the `upstream_gone` tag.
+        let msg = err.to_string();
+        assert!(msg.contains("404"), "404 marker missing from error: {msg}");
+        assert!(
+            matches!(err, GitHubProviderError::RequestFailed(_)),
+            "expected RequestFailed, got: {err:?}"
+        );
     }
 }

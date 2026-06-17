@@ -94,6 +94,17 @@ pub struct TreeCommit {
     pub committed_at: time::OffsetDateTime,
 }
 
+impl TreeCommit {
+    /// Construct a new tree commit. Use this from external crates since `TreeCommit`
+    /// is `#[non_exhaustive]` and struct-literal construction is forbidden.
+    pub fn new(tree_sha_at_path: String, committed_at: time::OffsetDateTime) -> Self {
+        Self {
+            tree_sha_at_path,
+            committed_at,
+        }
+    }
+}
+
 /// Opaque handle stored in the plugin catalog lookup table.
 pub struct GitHubProviderHandle {
     client: Arc<dyn GitHubProviderClient>,
