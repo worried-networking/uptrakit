@@ -153,14 +153,17 @@ jobs:
       - name: Run database integration tests
         run: cargo test -p uptrakit-integration-tests --test database -- --ignored
 
-  sentrux:
+  unused-deps:
     runs-on:
       - ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Install sentrux
-        run: curl -fsSL https://raw.githubusercontent.com/sentrux/sentrux/main/install.sh | sh
-      - run: sentrux check . || true
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-machete@0.9.2
+      - name: cargo machete (advisory)
+        run: cargo machete
+        continue-on-error: true
 
   frontend:
     runs-on:

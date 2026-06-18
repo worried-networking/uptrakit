@@ -318,19 +318,13 @@ build environments.
   communication changes, run the system integration tests (requires Docker and pre-built image):
   - `docker build -f docker/Dockerfile.test -t uptrakit-test:latest .`
   - `cargo test -p uptrakit-integration-tests -- --ignored`
-- **At the start of every session**, call `mcp__plugin_sentrux_sentrux__scan` (passing
-  the project root path) followed by `mcp__plugin_sentrux_sentrux__session_start`
-  to capture the current architecture baseline. The scan must run first — `session_start`
-  requires scan data.
-- **During the session**, after making structural changes, call
-  `mcp__plugin_sentrux_sentrux__rescan` followed by `mcp__plugin_sentrux_sentrux__health`
-  to verify no dimension has regressed.
-- **At the end of every session** (before the final commit), call
-  `mcp__plugin_sentrux_sentrux__session_end` to compare against the baseline.
-  If any dimension grade has degraded, fix the regression before committing.
-- **Architecture quality must never regress.** A task is not complete if it leaves
-  coupling, cycles, cohesion, duplication, or any other sentrux dimension at a worse
-  grade than the session baseline.
+- **Architecture is enforced by CI and existing gates**, not by a per-session MCP tool.
+  The blocking gates are `cargo deny check` and `python3 ci/check_plugin_semantic_boundary.py`;
+  `cargo machete` (unused dependencies) runs **advisory** in CI. Behavioral health — hotspots,
+  change-coupling, code-health grade — lives in the **CodeScene** dashboard (advisory, not a gate).
+- **Do not regress architecture quality.** A task is not complete if it introduces a dependency
+  cycle, leaks a plugin/production boundary (caught by `check_plugin_semantic_boundary.py`), or
+  adds unused dependencies without reason.
 
 ### Dependency registration
 

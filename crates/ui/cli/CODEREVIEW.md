@@ -37,12 +37,12 @@ top-level dispatch, a duplicated type, and minor consistency gaps in how paramet
 
 - **Dimension**: maintainability
 - **Scope**: `crates/ui/cli/src/main.rs:run` (lines 206-327)
-- **Description**: The `run` function contains a 24-arm match statement (CC=38 per Sentrux).
+- **Description**: The `run` function contains a 24-arm match statement (CC=38 by structural analysis).
   Every arm follows the identical pattern `dispatch(command, &ctx).await?`, making this
   mechanical boilerplate rather than complex logic. The high CC is structural, not cognitive.
 - **Why it matters**: Adding a new command requires touching this function. While low-risk
   individually, the function's length makes it the single largest contributor to the CLI's
-  Sentrux modularity score drag.
+  modularity drag.
 - **Failure scenario**: A future refactor that changes the dispatch pattern (e.g., adding
   middleware or pre-dispatch hooks) requires modifying all 24 arms simultaneously.
 
