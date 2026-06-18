@@ -25,7 +25,6 @@ Quality gates are automatically enforced locally via git hooks managed by
 | `cargo deny check`                                                      | Fast (~3 s)                                                                                  |
 | `python3 ci/check_plugin_semantic_boundary.py`                          | Blocks production-code semantic leaks; `docs/**`, tests, examples, and migrations are exempt |
 | `cargo test --no-default-features --features db-sqlite`                 |                                                                                              |
-| `sentrux check .`                                                       | Skipped gracefully if `sentrux` is not installed                                             |
 | `npm run check` + `npm run test` + `npm run build` (cwd: `frontend/`)   | Guarded by `node_modules`                                                                    |
 
 ### Bypass methods
@@ -206,20 +205,22 @@ required schema fields `scope`, `owner`, `expiry_date`, `capture_region`,
 `justification`, and `review_ref`. Expired waivers must be renewed or removed;
 they do not remain valid by default.
 
-## Architectural rules (sentrux)
+## Architecture health
 
-Run `sentrux check .` to validate the architectural constraints defined in `.sentrux/rules.toml`.
-This checks layer ordering, boundary rules, and structural thresholds (coupling grade, cyclomatic
-complexity, file/function length, circular dependencies).
+The previous third-party architecture tool was abandoned and has been removed (see ADR-0022).
+Architecture is now governed by:
 
-Install sentrux if not already present:
+- **Plugin boundary** — `python3 ci/check_plugin_semantic_boundary.py` (blocking; `semantic-boundary:` CI
+  job). Enforces the plugin/production boundary as a path/layer rule.
+- **Licenses / advisories / bans** — `cargo deny check` (blocking; `backend-deny:` CI job).
+- **Unused dependencies** — `cargo machete` runs **advisory** (non-blocking) in the `unused-deps:` CI job.
+  It surfaces unused-dep signal but does not gate merges: this workspace is macro- and feature-heavy, so
+  `cargo machete` produces false positives that would otherwise need an ongoing per-crate ignore list.
+- **Behavioral health** — code-health grade, hotspots, change/temporal coupling — lives in the **CodeScene**
+  dashboard (advisory, SaaS; see the architecture-health design spec).
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/sentrux/sentrux/main/install.sh | sh
-```
-
-```sh
-sentrux check .
-```
-
-The pre-push hook runs this automatically when `sentrux` is on `PATH`. CI always runs it.
+> **Why no module-cycle gate?** Rust's resolver already forbids circular *crate* dependencies at build time.
+> `cargo modules --acyclic` was evaluated and rejected: it analyses the *item* graph, so any idiomatic
+> `Debug`/`Clone`/`Display`/`fn new() -> Self` impl reads as a `Type ↔ Type::method` cycle — it flagged 66 of
+> 71 crates with zero genuine cycles and no flag suppresses it. There is no turnkey Rust module-cycle tool
+> worth gating on.

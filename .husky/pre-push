@@ -72,15 +72,6 @@ else
   cargo test --no-default-features --features db-sqlite
 fi
 
-# --- Sentrux architectural rules ---
-if command -v sentrux >/dev/null 2>&1; then
-  echo "[pre-push] Running sentrux check (advisory)..."
-  sentrux check . || echo "[pre-push] sentrux check failed — advisory only, not blocking push."
-else
-  echo "[pre-push] sentrux not found, skipping architectural check."
-  echo "[pre-push] Install: curl -fsSL https://raw.githubusercontent.com/sentrux/sentrux/main/install.sh | sh"
-fi
-
 # --- Frontend ---
 if [ -d frontend/node_modules ]; then
   echo "[pre-push] Running npm check..."

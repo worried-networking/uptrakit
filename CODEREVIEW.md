@@ -3,7 +3,7 @@
 - Review date: 2026-03-17
 - Scope: full workspace review across 14 dimensions (DB design, security, HA/fault-tolerance,
   architecture, code quality, coding standards, idiomatic Rust, allocation, tests, consistency,
-  extensibility, maintainability, crate structure, Sentrux metrics). Frontend excluded.
+  extensibility, maintainability, crate structure, structural metrics). Frontend excluded.
   `crates/core/integration-tests` and ignored integration suites excluded from findings.
 - Validation:
   - `cargo check --no-default-features --features db-sqlite` -- passed
@@ -27,7 +27,7 @@ actionable structural work.
 
 ## Strengths
 
-- Zero dependency cycles. Sentrux reports 0 above-diagonal edges and acyclicity score 10000.
+- Zero dependency cycles. Structural analysis reports 0 above-diagonal edges and acyclicity score 10000.
 - Coding-standards compliance is comprehensive and clean. All required `#[non_exhaustive]`
   annotations, wire-safe `Other(String)` catch-all variants, `parking_lot` lock discipline,
   HTTP client timeouts, and SSRF protection are verified present with no violations.
@@ -45,7 +45,7 @@ actionable structural work.
 - Wire protocol forward compatibility is comprehensive: `#[serde(other)]` on message enums,
   `Other(String)` on value enums, sequence validation, and protocol version stamping.
 
-## Sentrux Snapshot
+## Structural Snapshot
 
 - Quality signal: `7018`
 - Bottleneck: `modularity`
@@ -60,7 +60,7 @@ actionable structural work.
     `event_delivery.rs:deliver_controller_event` CC=37)
   - 58 functions exceed 150 lines
   - 93 files exceed 800 lines
-- Test coverage: 74 test files for 1185 source files (~18.5% by Sentrux structural heuristic).
+- Test coverage: 74 test files for 1185 source files (~18.5% by structural heuristic).
   Acceptable as a project tradeoff; noted as maintainability context only.
 - Propagation cost: 43% -- a change to one file affects ~43% of the dependency graph on average.
   Bottleneck crates: `uptrakit-shared-types` (imported by 38+ crates), `uptrakit-web-api`.
@@ -247,7 +247,7 @@ actionable structural work.
 - Scope: `crates/ui/web-api/src/lib.rs`, `crates/core/agent-ssh/src/main.rs`,
   `crates/core/controller/src/pki.rs`, `crates/shared/extension-framework/src/lib.rs`,
   `crates/shared/wire/src/payloads.rs`
-- Why it matters: Sentrux still flags large files and long functions as the dominant structural
+- Why it matters: structural analysis still flags large files and long functions as the dominant structural
   debt, and `uptrakit-web-api` still exports a very broad public module surface.
 
 ### [LOW] `uptrakit-shared-types` is still too broad for a high-fanout crate
