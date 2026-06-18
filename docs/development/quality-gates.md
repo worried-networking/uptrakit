@@ -224,3 +224,22 @@ Architecture is now governed by:
 > `Debug`/`Clone`/`Display`/`fn new() -> Self` impl reads as a `Type ↔ Type::method` cycle — it flagged 66 of
 > 71 crates with zero genuine cycles and no flag suppresses it. There is no turnkey Rust module-cycle tool
 > worth gating on.
+
+### Coverage (advisory)
+
+The `backend-test:` CI job produces coverage with `cargo llvm-cov --workspace --all-features --lcov`. It
+replaces the plain `cargo test` step — `cargo-llvm-cov` runs the same tests under instrumentation — and a
+separate `cargo test --workspace --all-features --doc` step keeps doctests running (llvm-cov does not
+instrument doctests on stable). The resulting `lcov.info` is uploaded to **Codecov** (the coverage home —
+report, PR delta, and the README badge). Upload does not block merges (`fail_ci_if_error: false`).
+
+Codecov needs the `CODECOV_TOKEN` secret (already configured). Coverage is **not** uploaded to CodeScene:
+its coverage import requires an API access token that the CodeScene open-source plan does not provide.
+
+### CodeScene dashboard (advisory)
+
+CodeScene (SaaS, free for open source) provides the behavioral health view — code-health grade, hotspots,
+change/temporal coupling — that no cargo tool reproduces. It analyses source + git history only (no
+coverage import on the open-source plan). One-time setup: connect the public repo at `codescene.io`. The
+per-PR delta status is optional and only worth enabling if someone owns reviewing it. An opt-in local MCP
+server (`codescene-oss/codescene-mcp-server`) exposes it to Claude Code for developers who want it.

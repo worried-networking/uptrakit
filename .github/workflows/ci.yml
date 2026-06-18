@@ -98,7 +98,27 @@ jobs:
         with:
           shared-key: "rust-all-features"
           save-if: "false"
-      - run: cargo test --all-features
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov@0.8.7
+      # cargo-llvm-cov runs the full test suite under instrumentation (replaces the
+      # plain `cargo test --all-features` gate). default-members is unset, so
+      # `--workspace` selects the same packages the old bare `cargo test` did.
+      - name: Test + coverage
+        run: cargo llvm-cov --workspace --all-features --lcov --output-path lcov.info
+      # Doctests are not instrumented by cargo-llvm-cov on stable; run them separately
+      # so doctest execution (part of the old `cargo test` gate) is preserved.
+      - name: Doctests
+        run: cargo test --workspace --all-features --doc
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: lcov.info
+          fail_ci_if_error: false
+      # No CodeScene coverage upload: its coverage import needs an API access token,
+      # which the CodeScene open-source plan does not provide. CodeScene still runs as
+      # a source + git-history dashboard; coverage lives in Codecov only.
       - name: Verify handler state contract (routes/ only)
         run: bash ci/verify_handler_state_contract.sh
       - name: Verify DB access policy (routes/ only)

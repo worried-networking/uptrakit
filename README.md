@@ -1,5 +1,7 @@
 # Uptrakit
 
+[![codecov](https://codecov.io/gh/worried-networking/uptrakit/branch/main/graph/badge.svg)](https://codecov.io/gh/worried-networking/uptrakit)
+
 > **Note:** Uptrakit is in early development. APIs may change, documentation may be incomplete,
 > and some features are still being built. Contributions and feedback are welcome!
 
