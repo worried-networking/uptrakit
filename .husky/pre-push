@@ -72,6 +72,12 @@ else
   cargo test --no-default-features --features db-sqlite
 fi
 
+# Doctests run at CI parity (--all-features). Must use `cargo test` — nextest does not
+# run doctests. uptrakit-mqtt-runtime is excluded: it sets `[lib] doctest = false` and
+# `--doc` would otherwise override that opt-out.
+echo "[pre-push] Running doctests (--all-features)..."
+cargo test --workspace --all-features --doc --exclude uptrakit-mqtt-runtime
+
 # --- Frontend ---
 if [ -d frontend/node_modules ]; then
   echo "[pre-push] Running npm check..."
