@@ -8,6 +8,10 @@ repository.workspace = true
 version = "0.0.3"
 
 [lib]
+# ha_discovery examples document pub(crate) helpers (covered by #[cfg(test)] unit tests);
+# they can't compile as external-crate doctests. CI/pre-push also pass
+# `--exclude uptrakit-mqtt-runtime` because `cargo test --doc` overrides this setting.
+# Do not delete this line without also removing those excludes.
 doctest = false
 
 [dependencies]

@@ -109,7 +109,9 @@ jobs:
       # Doctests are not instrumented by cargo-llvm-cov on stable; run them separately
       # so doctest execution (part of the old `cargo test` gate) is preserved.
       - name: Doctests
-        run: cargo test --workspace --all-features --doc
+        # cargo test --doc overrides a crate's `[lib] doctest = false`; uptrakit-mqtt-runtime
+        # opts out (its ha_discovery examples document pub(crate) helpers, covered by unit tests).
+        run: cargo test --workspace --all-features --doc --exclude uptrakit-mqtt-runtime
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
         with:

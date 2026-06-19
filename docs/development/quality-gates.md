@@ -18,14 +18,15 @@ Quality gates are automatically enforced locally via git hooks managed by
 
 **`pre-push`** (thorough) — always runs on every push:
 
-| Command                                                                 | Notes                                                                                        |
-| ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `cargo check --no-default-features --features db-sqlite`                |                                                                                              |
-| `cargo clippy --all-targets --no-default-features --features db-sqlite` |                                                                                              |
-| `cargo deny check`                                                      | Fast (~3 s)                                                                                  |
-| `python3 ci/check_plugin_semantic_boundary.py`                          | Blocks production-code semantic leaks; `docs/**`, tests, examples, and migrations are exempt |
-| `cargo test --no-default-features --features db-sqlite`                 |                                                                                              |
-| `npm run check` + `npm run test` + `npm run build` (cwd: `frontend/`)   | Guarded by `node_modules`                                                                    |
+| Command                                                                       | Notes                                                                                        |
+| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `cargo check --no-default-features --features db-sqlite`                      |                                                                                              |
+| `cargo clippy --all-targets --no-default-features --features db-sqlite`       |                                                                                              |
+| `cargo deny check`                                                            | Fast (~3 s)                                                                                  |
+| `python3 ci/check_plugin_semantic_boundary.py`                                | Blocks production-code semantic leaks; `docs/**`, tests, examples, and migrations are exempt |
+| `cargo test --no-default-features --features db-sqlite`                       |                                                                                              |
+| `cargo test --workspace --all-features --doc --exclude uptrakit-mqtt-runtime` | Doctests at CI parity; `cargo test` (not nextest — nextest skips doctests)                   |
+| `npm run check` + `npm run test` + `npm run build` (cwd: `frontend/`)         | Guarded by `node_modules`                                                                    |
 
 ### Bypass methods
 
@@ -230,8 +231,10 @@ Architecture is now governed by:
 The `backend-test:` CI job produces coverage with `cargo llvm-cov --workspace --all-features --lcov`. It
 replaces the plain `cargo test` step — `cargo-llvm-cov` runs the same tests under instrumentation — and a
 separate `cargo test --workspace --all-features --doc` step keeps doctests running (llvm-cov does not
-instrument doctests on stable). The resulting `lcov.info` is uploaded to **Codecov** (the coverage home —
-report, PR delta, and the README badge). Upload does not block merges (`fail_ci_if_error: false`).
+instrument doctests on stable). That step excludes `uptrakit-mqtt-runtime` (`--exclude`): it sets
+`[lib] doctest = false`, and `cargo test --doc` would otherwise override that opt-out. The resulting
+`lcov.info` is uploaded to **Codecov** (the coverage home — report, PR delta, and the README badge).
+Upload does not block merges (`fail_ci_if_error: false`).
 
 Codecov needs the `CODECOV_TOKEN` secret (already configured). Coverage is **not** uploaded to CodeScene:
 its coverage import requires an API access token that the CodeScene open-source plan does not provide.
