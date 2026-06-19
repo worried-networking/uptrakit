@@ -11,9 +11,12 @@ set -euo pipefail
 PUSH_STDIN=$(cat)
 ZERO_SHA="0000000000000000000000000000000000000000"
 if [[ -n "${1:-}" ]]; then
-  if [[ -z "$PUSH_STDIN" ]] || \
-     ! awk -v zero="$ZERO_SHA" 'NF>=2 && $2!=zero {found=1; exit} END {exit !found}' <<<"$PUSH_STDIN"; then
-    echo "[pre-push] Branch deletion (or empty push) — skipping checks."
+  if [[ -z "$PUSH_STDIN" ]]; then
+    echo "[pre-push] Nothing to push — skipping checks."
+    exit 0
+  fi
+  if ! awk -v zero="$ZERO_SHA" 'NF>=2 && $2!=zero {found=1; exit} END {exit !found}' <<<"$PUSH_STDIN"; then
+    echo "[pre-push] Branch deletion — skipping checks."
     exit 0
   fi
   if ! awk '$1 !~ /^refs\/tags\// {found=1; exit} END {exit !found}' <<<"$PUSH_STDIN"; then
