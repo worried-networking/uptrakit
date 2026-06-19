@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.5](https://github.com/worried-networking/uptrakit/compare/uptrakit-cli-v0.0.4...uptrakit-cli-v0.0.5) - 2026-06-19
+
+### Fixed
+
+- *(build-info)* align --version with binary crate via build_info! macro
+
+### Other
+
+- *(arch)* remove abandoned Sentrux; cargo-machete advisory gate
+
 ## [0.0.4](https://github.com/worried-networking/uptrakit/compare/uptrakit-cli-v0.0.3...uptrakit-cli-v0.0.4) - 2026-06-04
 
 ### Added
