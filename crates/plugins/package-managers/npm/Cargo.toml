@@ -10,7 +10,7 @@ version = "0.0.1"
 [dependencies]
 uptrakit-plugin-infrastructure-core = { workspace = true, features = ["http-client"] }
 uptrakit-shared-macros = { workspace = true }
-uptrakit-backoff = { workspace = true }
+backon = { workspace = true }
 rootcause = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
@@ -23,8 +23,9 @@ tokio = { workspace = true, features = ["time"] }
 
 [dev-dependencies]
 uptrakit-plugin-infrastructure-core = { workspace = true, features = ["testing"] }
-tokio = { workspace = true, features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
 uptrakit-command = { workspace = true }
+httpmock = { workspace = true }
 
 [lints]
 workspace = true
