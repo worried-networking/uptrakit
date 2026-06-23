@@ -936,6 +936,34 @@ loop {
 `without_max_times()` is encapsulated inside `reconnect_backoff_builder()` — never construct an `ExponentialBuilder` inline for reconnect loops without
 it. The default `backon` `max_times = Some(3)` would silently stop the loop after three attempts.
 
+Every reconnect builder must ship a guard test confirming the iterator is actually infinite:
+
+```rust
+#[test]
+fn reconnect_backoff_is_infinite() {
+    use backon::BackoffBuilder;
+    let builder = reconnect_backoff_builder();
+    assert!(builder.build().nth(1_000).is_some(), "backoff must be infinite");
+}
+```
+
+### Bounded-Retry Idiom
+
+For operations that should give up after a fixed number of attempts (e.g. version detection, HTTP fetch), use `backon`'s `Retryable` combinator instead
+of a manual loop:
+
+```rust
+use backon::{ExponentialBuilder, Retryable};
+
+let result = fetch_version
+    .retry(ExponentialBuilder::default().with_max_times(4))
+    .when(|e| e.is_transient())
+    .notify(|e, delay| tracing::warn!(error = %e, ?delay, "retrying"))
+    .await?;
+```
+
+Note: `with_max_times(M)` means **M + 1 total attempts** (M retries after the first try).
+
 ### API Reference
 
 Standard parameters: **base 2 s, cap 60 s** with ~25 % jitter. See `crates/shared/service-sdk/src/lib.rs` for `reconnect_backoff_builder()` and
