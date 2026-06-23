@@ -98,6 +98,13 @@ New `crates/core/controller-runtime/src/boot/` submodule:
 `AppError`, `Result`, `ControllerReexecHook`, `async_main`, `run` stay in `lib.rs`. All extracted
 items are `pub(crate)` or narrower (`unreachable_pub = "deny"`).
 
+The existing `startup/` module (low-level init helpers: `master_key`, `database`, `encryption`,
+`jwt`, `oauth`, `pki_init`, `settings`, `validation`, `bootstrap`, `installation_id`) is unified
+into this tree as `boot/init/` — `startup` and `boot` are synonyms for "process start", and one
+module with a clear `init/` (helpers) vs `<phase>.rs` (orchestrators) split is less ambiguous than
+two siblings. The phase fns call `boot::init::*`. This relocation is mechanical (module rename +
+path updates) and lands as the last structural step.
+
 `boot/identity.rs` (five sub-concerns: OAuth, PKI runtime, TLS, JWT, cert_signer) and
 `boot/components.rs` (broadcasters, plugin catalog, dispatchers, surfaces) are the highest-risk
 files for re-acquiring the brain-class smell at phase granularity. The five identity sub-concerns
@@ -164,25 +171,25 @@ AuditLogDispatcher)`; the caller binds `_audit_filter` (lib.rs 753) and discards
 
 4. **Silent unused-var suppression.** `spawn_background_tasks` ends with
    `let _ = &service_connections;` (lib.rs 1452) to quiet a `nats`-disabled warning — a silent
-   suppression the snapshot bans. **Fix:** gate the parameter itself with `#[cfg(feature =
-"nats")]` (it is read only inside the `nats` block) and delete the `let _ =` line. This is
-   purely additive — enabling `nats` only _adds_ the parameter — and avoids the banned
-   `cfg(not(feature = "X"))` form entirely. Do **not** use `#[cfg_attr(not(feature = "nats"),
-…)]`: the `not(feature)` predicate violates the additive-features rule.
+   suppression the snapshot bans. The `service_connections` param is read only inside the
+   `#[cfg(feature = "nats")]` block, but its call-site argument (lib.rs 1174) is passed
+   **unconditionally**, so gating only the parameter would break the non-nats build. **Fix:** gate
+   **both** the parameter AND the call-site argument with `#[cfg(feature = "nats")]` — exactly as
+   the adjacent `nats_transport` param/arg already are (lib.rs 1386 / 1176) — then delete the
+   `let _ =` line. Purely additive (enabling `nats` only _adds_ the param+arg); no
+   `cfg(not(feature))` and no suppression.
 
 5. **`reload_audit_bridge` ring buffer `Vec::remove(0)`** (O(n) shift, cap 20; four sites,
    lib.rs 1556/1580/1596/1600). **Fix (minor, optional):** use `VecDeque` with `pop_front` when
    `len > 20`. Include only if it stays a clean drive-by; do not expand scope.
 
-6. **`master_key_hex` held as plain `String`** (not `SecretString`), passed to
-   `ServiceCredentialSources`. The snapshot mandates `SecretString` for credentials. **In scope
-   (partial):** the new `Crypto` struct field MUST be typed `SecretString` from day one — the
-   decomposition creates this boundary, and codifying a plain `String` there would worsen the
-   surface and make the eventual fix more disruptive. `boot::crypto::init` converts the raw
-   `init_master_key` output into `SecretString`; the handoff to `ServiceCredentialSources::new`
-   uses `.expose_secret()` at that single call site. **Deferred:** changing
-   `startup::init_master_key`'s own return signature from `String` to `SecretString` (a wider
-   ripple) — see Open Questions.
+6. **~~`master_key_hex` as plain `String`~~ — WITHDRAWN (not an issue).** Verification against
+   `startup/master_key.rs` shows `init_master_key` already returns
+   `crate::Result<Option<uptrakit_wire::SecretString>>`, and `ServiceCredentialSources::new` already
+   takes `Option<uptrakit_wire::SecretString>`. The master key is already a `SecretString` end to
+   end — no plain `String` exists. The only requirement on the refactor: the new `MasterKey`/`Crypto`
+   struct field preserves the `Option<uptrakit_wire::SecretString>` type (no re-wrap, no
+   `.expose_secret()` roundtrip). No deferred follow-up needed.
 
 ## Hard constraints (must not regress)
 
@@ -229,11 +236,12 @@ reexec (the consecutive-FD invariant), and graceful shutdown. Reverse-proxy test
 
 ### Implementation sequencing & commit boundaries
 
-1. **Commit 1 — latent fixes, pre-refactor, no structural moves.** Land issues #1–#4 (and #6's
-   `SecretString` boundary) as a single standalone commit _before_ any extraction, while the code
-   is still one file. They are self-contained and behavior-neutral today; isolating them means a
-   later `git bisect` on a Docker-gated boot regression attributes failures unambiguously to the
-   structural refactor, not to a semantic fix.
+1. **Commit 1 — latent fixes, pre-refactor, no structural moves.** Land issues #1, #3, #4 (and #5
+   if clean) as a single standalone commit _before_ any extraction, while the code is still one
+   file. (Issue #2 is structurally part of the reload extraction; #6 is withdrawn.) They are
+   self-contained and behavior-neutral today; isolating them means a later `git bisect` on a
+   Docker-gated boot regression attributes failures unambiguously to the structural refactor, not
+   to a semantic fix.
 2. **Commits 2..N — pure structural extraction, one phase per commit.** Each compiles and passes
    the SQLite gate independently.
 3. **Indivisible pair.** The reload-wiring extraction (`boot::reload::wire` returning the
@@ -244,7 +252,7 @@ reexec (the consecutive-FD invariant), and graceful shutdown. Reverse-proxy test
    per-commit gate applies to every phase except this pair.
 
 Verify each commit independently compiles and passes the SQLite gate; behavior-preserving each
-step (commit 1 excepted — it removes confirmed dead code and tightens a credential type).
+step (commit 1 excepted — it removes confirmed dead code).
 
 ## Documentation deliverables
 
@@ -264,21 +272,17 @@ step (commit 1 excepted — it removes confirmed dead code and tightens a creden
 
 ## Out of scope / deferred
 
-- `startup::init_master_key` return-signature change (`String` → `SecretString`) — deferred to a
-  focused follow-up (wider ripple, security-adjacent, deserves its own diff). NOTE: the in-boot
-  `Crypto` struct field IS typed `SecretString` in this change (issue #6) — only the upstream
-  `init_master_key` signature is deferred, so the new boundary does not codify the violation.
 - Other controller-runtime hotspots beyond `lib.rs` (`tasks.rs`, `startup.rs`, `reload/*`) — user
   scoped this change to `lib.rs` only.
 - Any change to reload semantics, reexec triage, or the irreversibly-bound key set (ADR 0008
   amendment territory).
+- Pre-existing `file_digest` format inconsistency (`boot_config` writes `sha256:…` digests while
+  `reload_audit_bridge`'s copy writes plain hex / empty-on-error) — surfaced during review.
+  Out of scope to keep this refactor behavior-neutral; flag as a separate follow-up.
 
 ## Open questions
 
-1. **Issue #6 — `startup::init_master_key` signature** (`String` → `SecretString`): change it now,
-   or keep the deferred follow-up (the `Crypto` struct field is `SecretString` either way)?
-   (Default: defer the signature change.)
-2. **Issue #5 (`VecDeque` ring buffer)** — include as drive-by, or leave the `Vec::remove(0)`?
+1. **Issue #5 (`VecDeque` ring buffer)** — include as drive-by, or leave the `Vec::remove(0)`?
    (Default: include only if trivially clean.)
-3. ~~Coding-standards "Boot phase pattern" note~~ — **resolved:** mandatory deliverable (see
+2. ~~Coding-standards "Boot phase pattern" note~~ — **resolved:** mandatory deliverable (see
    Documentation deliverables). Decomposition without the convention just relocates the debt.
