@@ -10,6 +10,7 @@ pub(crate) mod config;
 pub(crate) mod crypto;
 pub(crate) mod directories;
 pub(crate) mod persistence;
+pub(crate) mod settings;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -20,7 +21,6 @@ use uptrakit_build_info::BuildInfo;
 use uptrakit_plugin_infrastructure_registry::{PluginHttpClientConfig, build_plugin_http_client};
 use uptrakit_web_api::AppState;
 use uptrakit_web_api::oauth::boot::{boot_oauth_state, deregister_oauth_instance};
-use uptrakit_web_api::settings::Settings;
 
 use crate::{AppError, ReloadBridgeChannels};
 
@@ -47,47 +47,27 @@ pub(crate) async fn run_server(args: crate::cli::Args, info: BuildInfo) -> crate
     let controller_installation_id = layout.installation_id;
 
     // Phase 3: Database — URL and pool size from TOML [db].
+    let db = persistence::open(&cfg, &layout).await?;
+
+    // Phases 4/4b/4c/4d: master key verify, column AAD mappings, data key ring, ENC:v3 migration
+    crypto::verify_and_migrate(&db.db).await?;
+
+    // Phases 5, 6, 7, 7b, 7c, 8: load settings, reconcile, seed, validate
+    let settings::SettingsBundle {
+        settings,
+        reconciled,
+        validated,
+    } = settings::load_and_seed(&cfg, &db).await?;
+
+    // Destructure cfg and db after Phases 3–8 so earlier phases can borrow them.
+    let booted = cfg.booted;
+    let args = cfg.args;
+    let runtime = &booted.runtime;
     let persistence::Persistence {
         db: db_conn,
         url: db_url,
         default_tenant_id,
-    } = persistence::open(&cfg, &layout).await?;
-
-    // Destructure cfg after Phase 3 so persistence::open can borrow it by reference.
-    let booted = cfg.booted;
-    let oidc_bootstrap = cfg.oidc_bootstrap;
-    let enrollment_bootstrap = cfg.enrollment_bootstrap;
-    let args = cfg.args;
-    let runtime = &booted.runtime;
-
-    // Phases 4/4b/4c/4d: master key verify, column AAD mappings, data key ring, ENC:v3 migration
-    crypto::verify_and_migrate(&db_conn).await?;
-
-    // Phase 5: Load settings
-    let (settings, global_raw, _tenant_raw, reg_token) =
-        Settings::load(&db_conn, default_tenant_id)
-            .await
-            .context(AppError::Settings)?;
-    if let Some(token) = reg_token {
-        eprintln!("==========================================================");
-        eprintln!("  No users found. Use this one-time registration token:");
-        eprintln!("  {token}");
-        eprintln!("==========================================================");
-    }
-
-    // Phase 6: Reconcile settings — use TOML values as seeds
-    let reconciled =
-        crate::startup::reconcile_all_settings(&db_conn, runtime, &settings, &global_raw).await?;
-
-    // Phase 7: OIDC bootstrap
-    crate::startup::bootstrap_oidc(&db_conn, default_tenant_id, &oidc_bootstrap).await?;
-
-    // Phase 7b: Enrollment token bootstrap
-    crate::startup::bootstrap_enrollment_tokens(&db_conn, default_tenant_id, &enrollment_bootstrap)
-        .await?;
-
-    // Phase 7c: OAuth settings defaults
-    crate::startup::seed_oauth_defaults(&db_conn).await?;
+    } = db;
 
     // Phase 7d: OAuth boot — wire OAuthState when mcp_enabled resolves to true.
     let oauth_state = boot_oauth_state(&db_conn)
@@ -98,9 +78,6 @@ pub(crate) async fn run_server(args: crate::cli::Args, info: BuildInfo) -> crate
     let oauth_instance_for_shutdown = oauth_state
         .enabled
         .then_some((oauth_state.instance_id, db_conn.clone()));
-
-    // Phase 8: Validate configuration
-    let validated = crate::startup::validate_configuration(runtime, &reconciled)?;
 
     // Phase 8b: Claim inherited TCP sockets and pre-bind listeners.
     //
