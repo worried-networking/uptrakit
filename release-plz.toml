@@ -189,11 +189,6 @@ git_release_enable = false
 publish = true
 
 [[package]]
-name = "uptrakit-backoff"
-git_release_enable = false
-publish = true
-
-[[package]]
 name = "uptrakit-agent-core"
 git_only = true
 git_release_enable = false
@@ -665,5 +660,4 @@ changelog_include = [
   "uptrakit-wire",
   "uptrakit-shared-types",
   "uptrakit-surfaces",
-  "uptrakit-backoff",
 ]
