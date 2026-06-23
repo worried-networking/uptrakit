@@ -2,9 +2,9 @@
 //!
 //! This module owns the top-level `run_server` entry point that drives
 //! every phase of controller startup, from config loading through to the
-//! main event loop.  Helper functions (`build_audit_logger`,
-//! `spawn_background_tasks`, etc.) remain in the crate root so that later
-//! per-phase extraction tasks can move them independently.
+//! main event loop.  The final phase — background tasks, embedded service
+//! registration, signal handling, and graceful shutdown — lives in
+//! [`serve`].
 
 pub(crate) mod app_state;
 pub(crate) mod components;
@@ -18,16 +18,12 @@ pub(crate) mod nats;
 pub(crate) mod persistence;
 pub(crate) mod recovery;
 pub(crate) mod reload;
+pub(crate) mod serve;
 pub(crate) mod settings;
 
 use std::sync::Arc;
-use std::time::Duration;
 
-use rootcause::prelude::*;
 use uptrakit_build_info::BuildInfo;
-use uptrakit_web_api::oauth::boot::deregister_oauth_instance;
-
-use crate::AppError;
 
 pub(crate) async fn run_server(args: crate::cli::Args, info: BuildInfo) -> crate::Result<()> {
     // Phase 0: Load TOML config, parse bootstrap env args, initialise tracing.
@@ -62,14 +58,12 @@ pub(crate) async fn run_server(args: crate::cli::Args, info: BuildInfo) -> crate
     // Phase 8b: Claim inherited TCP sockets and pre-bind listeners (FD-atomic).
     //
     // This must happen before the coordinator block so that `listener_count` and
-    // `https_std`/`pki_std_for_spawn` are in scope when the reexec hook is
-    // constructed and when the server task is spawned.
-    let listeners::Listeners {
-        https_std,
-        pki_std_for_spawn,
-        listener_count,
-        first_listener_fd,
-    } = listeners::claim(&settings_bundle)?;
+    // `first_listener_fd` are in scope when the reexec hook is constructed.
+    // The `Listeners` struct is passed by value to `serve::run`, which consumes
+    // the actual sockets (`https_std` and `pki_std_for_spawn`).
+    let listeners = listeners::claim(&settings_bundle)?;
+    let listener_count = listeners.listener_count;
+    let first_listener_fd = listeners.first_listener_fd;
 
     // Phases 7d, 9, 10: OAuth boot, PKI/TLS init, cert_signer construction, JWT init.
     // identity::init borrows cfg (via runtime), db.db, and settings_bundle.reconciled,
@@ -145,7 +139,7 @@ pub(crate) async fn run_server(args: crate::cli::Args, info: BuildInfo) -> crate
             &components.plugins.embedded_host,
         ));
 
-        app_state::ServeDeps {
+        serve::ServeDeps {
             crl_manager: Arc::clone(&identity.pki.crl_manager),
             ca_tx: identity.pki.ca_tx.clone(),
             ca_managed: identity.pki.ca_managed,
@@ -176,6 +170,9 @@ pub(crate) async fn run_server(args: crate::cli::Args, info: BuildInfo) -> crate
             controller_installation_id,
             #[cfg(any(feature = "embedded-agent", feature = "embedded-ssh-agent"))]
             state_dir: layout.app_dirs.state_dir().to_path_buf(),
+            https_addr: reconciled.https_addr,
+            static_dir: validated.static_dir,
+            pki_http_port: validated.pki_http_port,
         }
     };
 
@@ -202,167 +199,7 @@ pub(crate) async fn run_server(args: crate::cli::Args, info: BuildInfo) -> crate
     // Startup recovery: GitHub diagnostic, rollout cleanup, denylist seed.
     recovery::run(&app_state).await?;
 
-    // Spawn background tasks (reads crl_manager, ca_managed, ca_tx, etc. from serve_deps).
-    let mut bg = crate::tasks::BackgroundTasks::new(serve_deps.shutdown_token);
-    crate::spawn_background_tasks(
-        &mut bg,
-        &app_state,
-        &serve_deps.crl_manager,
-        serve_deps.ca_managed,
-        &serve_deps.ca_tx,
-        serve_deps.initial_ca_version,
-        serve_deps.has_external_tls_cert,
-        #[cfg(feature = "nats")]
-        &serve_deps.service_connections,
-        #[cfg(feature = "nats")]
-        &serve_deps.nats_transport,
-    )
-    .await;
-
-    // Embedded service registration. Failures are fatal — a broken embedded
-    // service should not leave the deployment in an indeterminate state.
-    #[cfg(feature = "embedded-scheduler")]
-    crate::service_host::builtins::register_scheduler(
-        &serve_deps.builtin_host,
-        &app_state,
-        &mut bg,
-        serve_deps.controller_id,
-        serve_deps.controller_installation_id,
-        serve_deps.ca_managed,
-        &serve_deps.ca_tx,
-    )
-    .await
-    .map_err(|e| {
-        report!(AppError::Config(format!(
-            "failed to start embedded scheduler: {e}"
-        )))
-    })?;
-
-    #[cfg(feature = "embedded-agent")]
-    crate::service_host::builtins::register_agent(
-        &serve_deps.builtin_host,
-        &app_state,
-        &mut bg,
-        serve_deps.controller_installation_id,
-        serve_deps.state_dir.clone(),
-        None,
-        &info,
-    )
-    .await
-    .map_err(|e| {
-        report!(AppError::Config(format!(
-            "failed to start embedded agent: {e}"
-        )))
-    })?;
-
-    #[cfg(feature = "embedded-ssh-agent")]
-    crate::service_host::builtins::register_agent_ssh(
-        &serve_deps.builtin_host,
-        &app_state,
-        &mut bg,
-        serve_deps.controller_installation_id,
-        serve_deps.state_dir.clone(),
-        &info,
-    )
-    .await
-    .map_err(|e| {
-        report!(AppError::Config(format!(
-            "failed to start embedded SSH agent: {e}"
-        )))
-    })?;
-
-    #[cfg(feature = "embedded-mqtt")]
-    crate::service_host::builtins::register_mqtt(
-        &serve_deps.builtin_host,
-        &app_state,
-        &mut bg,
-        serve_deps.controller_installation_id,
-    )
-    .await
-    .map_err(|e| {
-        report!(AppError::Config(format!(
-            "failed to start embedded MQTT service: {e}"
-        )))
-    })?;
-
-    // Set up signal handlers
-    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-        .context_transform(|e| {
-            AppError::Config(format!("failed to set up SIGTERM handler: {e}"))
-        })?;
-    let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
-        .context_transform(|e| AppError::Config(format!("failed to set up SIGINT handler: {e}")))?;
-
-    // Spawn HTTPS server
-    let server_handle = axum_server::Handle::new();
-    let server_options = crate::server::ServerOptions {
-        https_addr: reconciled.https_addr,
-        rustls_config: app_state.server.rustls_config.clone(),
-        app_state: Arc::clone(&app_state),
-        static_dir: validated.static_dir,
-        handle: server_handle.clone(),
-        inherited_listener: Some(https_std),
-    };
-    let server_task = tokio::spawn(crate::server::run(server_options));
-
-    // Spawn zeroconf mDNS advertiser if enabled
-    #[cfg(feature = "zeroconf")]
-    crate::spawn_zeroconf(&mut bg, &app_state, reconciled.https_addr);
-
-    // Spawn PKI HTTP server if needed
-    crate::spawn_pki_http(
-        &mut bg,
-        &app_state,
-        validated.pki_http_port,
-        pki_std_for_spawn,
-    );
-
-    // Notify the service manager (and stdout-based supervisors) that all
-    // servers are bound and the controller is ready to accept connections.
-    crate::reexec::sd_notify::signal_ready();
-
-    // Main event loop — wait for shutdown signal or server exit
-    let mut server_task = server_task;
-    let shutdown_reason = tokio::select! {
-        result = &mut server_task => {
-            match result {
-                Ok(Ok(())) => {
-                    tracing::info!("server task exited normally");
-                    "server exit"
-                }
-                Ok(Err(e)) => {
-                    tracing::error!(error = ?e, "server error");
-                    return Err(e).context(AppError::Server)?;
-                }
-                Err(e) => {
-                    tracing::error!(error = %e, "server task panicked");
-                    "server panic"
-                }
-            }
-        }
-        _ = sigterm.recv() => {
-            tracing::info!("received SIGTERM, initiating graceful shutdown");
-            "SIGTERM"
-        }
-        _ = sigint.recv() => {
-            tracing::info!("received SIGINT, initiating graceful shutdown");
-            "SIGINT"
-        }
-    };
-
-    // Graceful shutdown — 30 second default timeout
-    tracing::info!(reason = shutdown_reason, "shutdown signal received");
-    let shutdown_timeout = Duration::from_secs(30);
-    bg.shutdown(
-        server_handle,
-        serve_deps.service_connections,
-        shutdown_timeout,
-    )
-    .await;
-
-    if let Some((instance_id, ref db)) = serve_deps.oauth_instance_for_shutdown {
-        deregister_oauth_instance(db, instance_id).await;
-    }
-
-    Ok(())
+    // Final phase: background tasks, embedded registration, signal handling,
+    // HTTPS server, and graceful shutdown.
+    serve::run(app_state, listeners, serve_deps, &info).await
 }

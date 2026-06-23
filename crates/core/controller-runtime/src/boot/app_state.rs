@@ -5,9 +5,8 @@
 //! wrapping, no unreachable `match` arms.  The old 7-`Some` tuple and its
 //! trailing `_ => builder` arm no longer exist.
 //!
-//! This module also defines [`ServeDeps`], a bundle of cloned / moved handles
-//! that the server-tail code (signal loop, shutdown, embedded registration)
-//! needs after `assemble` has consumed `identity` and `components` by move.
+//! The [`super::serve::ServeDeps`] bundle that the server-tail code needs
+//! is defined in [`super::serve`], its natural home.
 
 use std::sync::Arc;
 
@@ -17,71 +16,6 @@ use crate::AppError;
 use crate::boot::components::Components;
 use crate::boot::identity::Identity;
 use crate::boot::reload::ReloadWiring;
-
-// ---------------------------------------------------------------------------
-// ServeDeps — handles separated before assemble consumes identity/components
-// ---------------------------------------------------------------------------
-
-/// Handles that the server-tail code (background tasks, embedded registration,
-/// signal loop, graceful shutdown, OAuth deregister) needs after [`assemble`]
-/// has consumed `identity` and `components` by move.
-///
-/// Build this struct *before* calling `assemble`, by cloning `Arc`/`Copy`
-/// fields from `identity.pki` and `components`, and by moving
-/// `oauth_instance_for_shutdown` out of `identity` (the SIGTERM path owns it).
-pub(crate) struct ServeDeps {
-    // ---- PKI / TLS ----
-    pub crl_manager: Arc<crate::crl_manager::CrlManager>,
-    /// Cloned watch sender — `ca_tx.clone()` is cheap (Arc-backed).
-    pub ca_tx: tokio::sync::watch::Sender<crate::pki::CaSnapshot>,
-    pub ca_managed: bool,
-    pub initial_ca_version: i64,
-    pub has_external_tls_cert: bool,
-
-    // ---- Service connections, NATS, and shutdown ----
-    /// Cloned unconditionally — `bg.shutdown` needs it on every build.
-    pub service_connections: uptrakit_web_api::service_connections::ServiceConnectionRegistry,
-    /// Cloned (Arc-cheap) when the `nats` feature is enabled.
-    #[cfg(feature = "nats")]
-    pub nats_transport: Option<uptrakit_web_api::nats_transport::NatsTransport>,
-    /// Cloned for `BackgroundTasks::new`; components are moved into assemble.
-    pub shutdown_token: tokio_util::sync::CancellationToken,
-
-    // ---- OAuth shutdown ----
-    /// Moved (not cloned) from `identity.oauth_instance_for_shutdown`.
-    /// The SIGTERM/SIGINT deregister path is the single owner.
-    pub oauth_instance_for_shutdown: Option<(uuid::Uuid, sea_orm::DatabaseConnection)>,
-
-    // ---- Controller identity ----
-    /// Copied before components is moved into assemble.
-    /// Used by `register_scheduler` under `#[cfg(feature = "embedded-scheduler")]`.
-    #[cfg_attr(
-        not(feature = "embedded-scheduler"),
-        expect(
-            dead_code,
-            reason = "controller_id is only passed to register_scheduler when the embedded-scheduler feature is enabled"
-        )
-    )]
-    pub controller_id: uuid::Uuid,
-
-    // ---- Embedded-service fields ----
-    #[cfg(any(
-        feature = "embedded-scheduler",
-        feature = "embedded-agent",
-        feature = "embedded-ssh-agent",
-        feature = "embedded-mqtt"
-    ))]
-    pub builtin_host: crate::service_host::BuiltinServiceHost,
-    #[cfg(any(
-        feature = "embedded-scheduler",
-        feature = "embedded-agent",
-        feature = "embedded-ssh-agent",
-        feature = "embedded-mqtt"
-    ))]
-    pub controller_installation_id: uuid::Uuid,
-    #[cfg(any(feature = "embedded-agent", feature = "embedded-ssh-agent"))]
-    pub state_dir: std::path::PathBuf,
-}
 
 // ---------------------------------------------------------------------------
 // Assemble
