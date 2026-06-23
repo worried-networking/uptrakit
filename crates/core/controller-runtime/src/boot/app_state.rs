@@ -43,10 +43,10 @@ use crate::boot::reload::ReloadWiring;
 /// `match infallible {}` — an intentional infallible exhaustive match over
 /// `Infallible`.  This pattern is preserved verbatim from the original code.
 #[cfg_attr(
-    feature = "nats",
+    feature = "test-utils",
     expect(
         clippy::too_many_arguments,
-        reason = "assembles AppState from all boot phase structs; each parameter is a distinct phase output"
+        reason = "the test-utils-gated reexec-plan parameters push the count past the threshold; each is a distinct phase output"
     )
 )]
 pub(crate) async fn assemble(
