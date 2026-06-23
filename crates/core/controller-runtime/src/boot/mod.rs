@@ -6,11 +6,14 @@
 //! `spawn_background_tasks`, etc.) remain in the crate root so that later
 //! per-phase extraction tasks can move them independently.
 
+pub(crate) mod components;
 pub(crate) mod config;
 pub(crate) mod crypto;
 pub(crate) mod directories;
 pub(crate) mod identity;
 pub(crate) mod listeners;
+#[cfg(feature = "nats")]
+pub(crate) mod nats;
 pub(crate) mod persistence;
 pub(crate) mod settings;
 
@@ -18,9 +21,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rootcause::prelude::*;
-use tokio_util::sync::CancellationToken;
 use uptrakit_build_info::BuildInfo;
-use uptrakit_plugin_infrastructure_registry::{PluginHttpClientConfig, build_plugin_http_client};
 use uptrakit_web_api::AppState;
 use uptrakit_web_api::oauth::boot::deregister_oauth_instance;
 
@@ -34,7 +35,6 @@ pub(crate) async fn run_server(args: crate::cli::Args, info: BuildInfo) -> crate
     // master_key as a fallback. The TOML value already carries the full source
     // string (file:, env:, or inline hex) so no prefix injection is needed.
     let crypto = crypto::init(&cfg)?;
-    let master_key_hex = crypto.hex;
 
     let config_path_for_coord = cfg.config_path.clone();
 
@@ -57,16 +57,6 @@ pub(crate) async fn run_server(args: crate::cli::Args, info: BuildInfo) -> crate
     // Phases 5, 6, 7, 7b, 7c, 8: load settings, reconcile, seed, validate
     let settings_bundle = settings::load_and_seed(&cfg, &db).await?;
 
-    // Destructure cfg and db after Phases 3–8 so earlier phases can borrow them.
-    let booted = cfg.booted;
-    let args = cfg.args;
-    let runtime = &booted.runtime;
-    let persistence::Persistence {
-        db: db_conn,
-        url: db_url,
-        default_tenant_id,
-    } = db;
-
     // Phase 8b: Claim inherited TCP sockets and pre-bind listeners (FD-atomic).
     //
     // This must happen before the coordinator block so that `listener_count` and
@@ -79,14 +69,42 @@ pub(crate) async fn run_server(args: crate::cli::Args, info: BuildInfo) -> crate
         first_listener_fd,
     } = listeners::claim(&settings_bundle)?;
 
-    // Destructure the settings bundle now that listener FDs are claimed.
+    // Phases 7d, 9, 10: OAuth boot, PKI/TLS init, cert_signer construction, JWT init.
+    // identity::init borrows cfg (via runtime), db.db, and settings_bundle.reconciled,
+    // so it runs before any of those are destructured.
+    let identity = identity::init(
+        &cfg.booted.runtime,
+        &db.db,
+        layout.app_dirs.config_dir(),
+        layout.app_dirs.state_dir(),
+        &settings_bundle.reconciled,
+    )
+    .await?;
+
+    // Build all web-API components (stores, plugin catalog, audit, broadcasters, etc.).
+    // Borrows cfg, db, settings_bundle, and crypto by reference so none of them
+    // need to be destructured yet.
+    let components = components::build(&cfg, &db, &settings_bundle, &crypto).await?;
+
+    // Destructure cfg and db now that components::build has finished borrowing them.
+    let booted = cfg.booted;
+    let args = cfg.args;
+    let persistence::Persistence {
+        db: db_conn,
+        url: db_url,
+        default_tenant_id,
+    } = db;
+
+    // Destructure the settings bundle now that listener FDs are claimed and
+    // components have been built.
     let settings::SettingsBundle {
         settings,
         reconciled,
         validated,
     } = settings_bundle;
 
-    // Phases 7d, 9, 10: OAuth boot, PKI/TLS init, cert_signer construction, JWT init.
+    // Destructure identity into flat locals for the AppState builder and
+    // background-task spawner.
     let identity::Identity {
         pki:
             identity::PkiFields {
@@ -108,238 +126,16 @@ pub(crate) async fn run_server(args: crate::cli::Args, info: BuildInfo) -> crate
         cert_signer,
         oauth_state,
         oauth_instance_for_shutdown,
-    } = identity::init(
-        runtime,
-        &db_conn,
-        layout.app_dirs.config_dir(),
-        layout.app_dirs.state_dir(),
-        &reconciled,
-    )
-    .await?;
+    } = identity;
 
-    #[cfg(feature = "oidc")]
-    let oidc_flow_store = uptrakit_web_api::auth::oidc_state::OidcFlowStore::new(db_conn.clone());
-    #[cfg(feature = "oidc")]
-    let account_link_store =
-        uptrakit_web_api::auth::oidc_state::AccountLinkStore::new(db_conn.clone());
-    #[cfg(feature = "oidc")]
-    let oidc_token_exchange_store =
-        uptrakit_web_api::auth::oidc_state::OidcTokenExchangeStore::new(db_conn.clone());
-    #[cfg(feature = "oidc")]
-    let oidc_registration_store =
-        uptrakit_web_api::auth::oidc_state::OidcRegistrationStore::new(db_conn.clone());
-    let device_flow_store =
-        uptrakit_web_api::auth::device_flow::DeviceFlowStore::new(db_conn.clone());
-    let rate_limit_store = uptrakit_web_api::auth::rate_limit::RateLimitStore::new(db_conn.clone());
-
-    let service_connections =
-        uptrakit_web_api::service_connections::ServiceConnectionRegistry::new();
-    let controller_id = uuid::Uuid::now_v7();
-    let workload_claim_registry =
-        Arc::new(uptrakit_web_api::workload_claims::WorkloadClaimRegistry::new());
-    #[cfg_attr(
-        not(feature = "nats"),
-        expect(
-            unused_mut,
-            reason = "only mutated inside the #[cfg(feature = \"nats\")] block below"
-        )
-    )]
-    let mut notification_service =
-        uptrakit_web_api::notification_service::NotificationService::new(
-            service_connections.clone(),
-            controller_id,
-        )
-        .with_claim_registry(Arc::clone(&workload_claim_registry));
-
-    // NATS transport (optional, feature-gated)
-    // Uses the reconciled NATS URL (DB value wins over TOML; TOML seeds DB on first run).
-    #[cfg(feature = "nats")]
-    let nats_transport = if let Some(ref url) = reconciled.nats_url {
-        let nats = uptrakit_web_api::nats_transport::NatsTransport::connect(url, controller_id)
-            .await
-            .context_transform(|e| {
-                use uptrakit_web_api::nats_transport::NatsTransportError;
-                match e {
-                    NatsTransportError::Connection(msg) => {
-                        AppError::Config(format!("NATS connection failed: {msg}"))
-                    }
-                    NatsTransportError::JetStream(msg) => AppError::Config(format!(
-                        "NATS JetStream setup failed: {msg}\n\
-                         Ensure JetStream is enabled on the NATS server: start with the \
-                         -js flag, or add `jetstream: {{enabled: true}}` to nats-server.conf"
-                    )),
-                    _ => AppError::Config("NATS initialization failed".to_string()),
-                }
-            })?;
-        notification_service = notification_service.with_nats(Arc::new(nats.clone()));
-        Some(nats)
-    } else {
-        None
-    };
-
-    // Build the batch progress broadcaster with NATS for cross-instance SSE.
-    // When NATS is not configured the broadcaster operates in single-instance mode.
-    let batch_progress_broadcaster =
-        uptrakit_web_api::batch_progress_broadcaster::BatchProgressBroadcaster::new();
-    #[cfg(feature = "nats")]
-    let batch_progress_broadcaster = if let Some(ref nats) = nats_transport {
-        batch_progress_broadcaster.with_nats(nats.nats_client())
-    } else {
-        batch_progress_broadcaster
-    };
-
-    // Build the admin event broadcaster with NATS for cross-instance SSE fan-out.
-    // When NATS is not configured the broadcaster operates in single-instance mode.
-    #[cfg_attr(
-        not(feature = "nats"),
-        expect(
-            unused_mut,
-            reason = "only mutated inside the #[cfg(feature = \"nats\")] block below"
-        )
-    )]
-    let mut event_broadcaster = uptrakit_web_api::event_broadcaster::EventBroadcaster::new();
-    #[cfg(feature = "nats")]
-    if let Some(ref nats) = nats_transport {
-        event_broadcaster = event_broadcaster.with_nats(Arc::new(nats.clone()), controller_id);
-    }
-
-    let token_denylist = Arc::new(
-        uptrakit_web_api::auth::token_denylist::TokenDenylist::new_with_db(db_conn.clone()),
-    );
-    let global_providers = Arc::new(uptrakit_web_api::global_providers::GlobalProviders::new(
-        db_conn.clone(),
-    ));
-
-    // Shared cancellation token: cancelled by BackgroundTasks::shutdown(), which
-    // also signals open SSE streams in the web API to terminate cleanly.
-    let shutdown_token = CancellationToken::new();
-
-    // Load instance-scoped plugin state from DB before catalog construction so
-    // that instance-gated plugins reflect their persisted enabled/disabled state
-    // from first request rather than requiring a restart after toggling.
-    let instance_plugin_snapshot =
-        uptrakit_web_api_queries::instance_plugin_settings::load_at_boot(&db_conn)
-            .await
-            .map_err(|e| {
-                report!(AppError::Config(format!(
-                    "failed to load instance plugin snapshot: {e}"
-                )))
-            })?;
-    tracing::info!(
-        plugin_count = instance_plugin_snapshot.iter().count(),
-        "instance plugin snapshot loaded"
-    );
-
-    // Build InstancePluginStates by intersecting the snapshot with all
-    // compiled-in instance-scoped descriptors.
-    let all_descriptors = uptrakit_plugin_infrastructure_registry::all_descriptors();
-    let instance_states = uptrakit_plugin_infrastructure_registry::InstancePluginStates::from_pairs(
-        all_descriptors
-            .iter()
-            .filter(|d| d.scope == uptrakit_plugin_infrastructure_registry::PluginScope::Instance)
-            .map(|d| (d.type_id, instance_plugin_snapshot.enabled(d.type_id))),
-    );
-
-    // Wrap the snapshot in Arc<ArcSwap<>> so AppState can serve lock-free reads
-    // on the hot path and routes can atomically publish upserts.
-    let instance_plugin_snapshot_handle =
-        std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(instance_plugin_snapshot));
-
-    // Build the plugin catalog from all compiled-in descriptors.
-    // The catalog replaces the old PluginRegistry and provides PluginOps.
-    // allow_private_urls defaults to false (SSRF-safe by default).
-    let catalog_config = uptrakit_plugin_infrastructure_registry::CatalogConfig {
-        allow_private_urls: false,
-        http_client: Some(
-            build_plugin_http_client(PluginHttpClientConfig {
-                user_agent: "uptrakit-controller",
-                redirect_policy: reqwest::redirect::Policy::limited(5),
-                ..Default::default()
-            })
-            .map_err(|e| report!(AppError::Config(format!("plugin catalog HTTP client: {e}"))))?,
-        ),
-        cancellation_token: Some(shutdown_token.clone()),
-        global_provider_lookup: Some(global_providers.clone()),
-    };
-    let catalog =
-        uptrakit_plugin_infrastructure_registry::build_catalog(&catalog_config, instance_states)
-            .context_transform(|_| {
-                AppError::Config("failed to build plugin catalog".to_string())
-            })?;
-
-    let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> = Arc::new(catalog);
-
-    tracing::info!(
-        update_protection = plugin_ops.controller_update_protection().is_some(),
-        "plugin catalog ready"
-    );
-
-    let callback_base_url = format!("https://{}", reconciled.https_addr);
-    let notification_dispatcher =
-        uptrakit_web_api::notifications::dispatcher::NotificationDispatcher::new(
-            db_conn.clone(),
-            Arc::clone(&plugin_ops),
-            callback_base_url,
-        );
-
-    // Build credential sources for external services that need direct infrastructure access.
-    let credential_sources = {
-        #[cfg_attr(
-            not(feature = "nats"),
-            expect(
-                unused_mut,
-                reason = "only mutated inside the #[cfg(feature = \"nats\")] block below"
-            )
-        )]
-        let mut sources = uptrakit_web_api::ServiceCredentialSources::new(
-            Some(db_url.clone()),
-            None,
-            master_key_hex,
-        );
-        #[cfg(feature = "nats")]
-        if let Some(ref url) = reconciled.nats_url {
-            sources.nats_url = Some(url.clone());
-        }
-        sources
-    };
-
-    // Audit log backend and filter wiring.
-    let audit_dispatcher = crate::build_audit_logger(runtime, &db_conn).await?;
-
-    let surface_registry = Arc::new(uptrakit_web_api::surface_registry::SurfaceRegistry::new(
-        uptrakit_web_api::surface_registry::SurfaceRegistryConfig::default(),
-    ));
-    for registration in plugin_ops.surface_registrations() {
-        let provider_id = registration.provider.provider_id.clone();
-        surface_registry
-            .bootstrap_plugin(registration)
-            .map_err(|error| {
-                report!(AppError::Config(format!(
-                    "failed to bootstrap plugin surfaces for provider {provider_id}: {error}"
-                )))
-            })?;
-    }
-    let audit_emitter = uptrakit_audit_log::AuditEmitter::new(audit_dispatcher.clone());
-    let surface_proxy = Arc::new(
-        uptrakit_web_api::surface_proxy::SurfaceProxy::new().with_local_executor(Arc::new(
-            uptrakit_web_api::surface_proxy::PluginSurfaceLocalExecutor::new(
-                Arc::new(db_conn.clone()),
-                Arc::clone(&plugin_ops),
-            )
-            .with_audit_emitter(audit_emitter.clone()),
-        )),
-    );
-
-    // Create the embedded service host before AppState so it can be stored
-    // in the state. The host's `add()` is called later for embedded service registration.
-    let embedded_host = Arc::new(crate::embedded::EmbeddedServiceHost::new());
     #[cfg(any(
         feature = "embedded-scheduler",
         feature = "embedded-agent",
         feature = "embedded-ssh-agent",
         feature = "embedded-mqtt"
     ))]
-    let builtin_host = crate::service_host::BuiltinServiceHost::new(Arc::clone(&embedded_host));
+    let builtin_host =
+        crate::service_host::BuiltinServiceHost::new(Arc::clone(&components.plugins.embedded_host));
 
     let builder = AppState::builder()
         .ca_snapshot(ca_rx)
@@ -347,14 +143,13 @@ pub(crate) async fn run_server(args: crate::cli::Args, info: BuildInfo) -> crate
         .db(db_conn.clone())
         .settings(settings)
         .cert_signer(cert_signer)
-        .service_connections(service_connections.clone())
+        .service_connections(components.service_connections.clone())
         .revocation_notify(revocation_notify)
-        .embedded_service_notifier(
-            Arc::clone(&embedded_host) as Arc<dyn uptrakit_web_api::EmbeddedServiceNotifier>
-        )
+        .embedded_service_notifier(Arc::clone(&components.plugins.embedded_host)
+            as Arc<dyn uptrakit_web_api::EmbeddedServiceNotifier>)
         .jwt(Arc::new(jwt_manager))
-        .device_flow_store(device_flow_store)
-        .rate_limit_store(rate_limit_store)
+        .device_flow_store(components.auth.device_flow)
+        .rate_limit_store(components.auth.rate_limit)
         .pki_path(pki_path)
         .rustls_config(rustls_config.clone())
         .server_cert_resolver(std::sync::Arc::clone(&server_cert_resolver)
@@ -362,22 +157,22 @@ pub(crate) async fn run_server(args: crate::cli::Args, info: BuildInfo) -> crate
         .crl_pem_cache(crl_pem_cache)
         .ca_rotation_trigger(ca_rotation_trigger)
         .default_tenant_id(default_tenant_id)
-        .controller_id(controller_id)
-        .notification_service(notification_service)
-        .notification_dispatcher(notification_dispatcher)
-        .token_denylist(token_denylist)
-        .credential_sources(credential_sources)
-        .global_providers(global_providers)
-        .event_broadcaster(event_broadcaster.clone())
-        .batch_progress_broadcaster(batch_progress_broadcaster)
-        .shutdown_token(shutdown_token.clone())
-        .audit_log_dispatcher(audit_dispatcher.clone())
-        .audit_emitter(audit_emitter.clone())
-        .plugin_ops(plugin_ops)
-        .surface_registry(surface_registry)
-        .surface_proxy(surface_proxy)
-        .workload_claim_registry(workload_claim_registry)
-        .instance_plugin_snapshot(std::sync::Arc::clone(&instance_plugin_snapshot_handle))
+        .controller_id(components.controller_id)
+        .notification_service(components.notification.service)
+        .notification_dispatcher(components.notification.dispatcher)
+        .token_denylist(components.auth.token_denylist)
+        .credential_sources(components.credential_sources)
+        .global_providers(components.auth.global_providers)
+        .event_broadcaster(components.notification.event_broadcaster.clone())
+        .batch_progress_broadcaster(components.notification.batch_progress_broadcaster)
+        .shutdown_token(components.shutdown_token.clone())
+        .audit_log_dispatcher(components.audit.dispatcher.clone())
+        .audit_emitter(components.audit.emitter.clone())
+        .plugin_ops(components.plugins.plugin_ops)
+        .surface_registry(components.plugins.surface_registry)
+        .surface_proxy(components.plugins.surface_proxy)
+        .workload_claim_registry(components.workload_claim_registry)
+        .instance_plugin_snapshot(Arc::clone(&components.plugins.instance_snapshot_handle))
         .reject_dangerous_commands(true)
         .oauth(oauth_state);
 
@@ -411,7 +206,7 @@ pub(crate) async fn run_server(args: crate::cli::Args, info: BuildInfo) -> crate
         );
         let (audit_reloadable, audit_log_filter_rx) =
             crate::reload::audit::AuditDispatcherReloadable::new(
-                audit_dispatcher.clone(),
+                components.audit.dispatcher.clone(),
                 b.runtime.audit.clone(),
             );
         let (zeroconf_reloadable, _zeroconf_rx) =
@@ -446,7 +241,7 @@ pub(crate) async fn run_server(args: crate::cli::Args, info: BuildInfo) -> crate
         ];
 
         #[cfg(feature = "nats")]
-        if let (Some(nats), Some(url)) = (&nats_transport, &reconciled.nats_url) {
+        if let (Some(nats), Some(url)) = (&components.nats_transport, &reconciled.nats_url) {
             reloadables.push(Arc::new(crate::reload::nats::NatsReloadable::new(
                 nats.nats_client(),
                 url.clone(),
@@ -455,7 +250,7 @@ pub(crate) async fn run_server(args: crate::cli::Args, info: BuildInfo) -> crate
 
         b.coordinator.extend_reloadables(reloadables);
         b.coordinator.set_alert_writer(std::sync::Arc::new(
-            crate::reload::audit::AuditAlertWriter::new(audit_emitter.clone()),
+            crate::reload::audit::AuditAlertWriter::new(components.audit.emitter.clone()),
         ));
 
         let current_exe = std::env::current_exe()
@@ -480,7 +275,7 @@ pub(crate) async fn run_server(args: crate::cli::Args, info: BuildInfo) -> crate
             db_rx,
             coordinator_handle.sender(),
             b.settings_version_cache.clone(),
-            shutdown_token.clone(),
+            components.shutdown_token.clone(),
         );
 
         tokio::spawn(b.coordinator.run());
@@ -494,7 +289,7 @@ pub(crate) async fn run_server(args: crate::cli::Args, info: BuildInfo) -> crate
         let reload_recent_events_rx = b.reload_recent_events_rx;
         tokio::spawn(crate::reload_audit_bridge(
             audit_rx,
-            audit_emitter,
+            components.audit.emitter.clone(),
             ReloadBridgeChannels {
                 file_state_tx: reload_file_state_tx,
                 last_reload_tx: reload_last_reload_tx,
@@ -542,10 +337,10 @@ pub(crate) async fn run_server(args: crate::cli::Args, info: BuildInfo) -> crate
 
     #[cfg(feature = "oidc")]
     let builder = builder
-        .oidc_flow_store(oidc_flow_store)
-        .account_link_store(account_link_store)
-        .oidc_token_exchange_store(oidc_token_exchange_store)
-        .oidc_registration_store(oidc_registration_store);
+        .oidc_flow_store(components.auth.oidc_flow_store)
+        .account_link_store(components.auth.account_link_store)
+        .oidc_token_exchange_store(components.auth.oidc_token_exchange_store)
+        .oidc_registration_store(components.auth.oidc_registration_store);
 
     let app_state = Arc::new(
         builder
@@ -723,6 +518,14 @@ pub(crate) async fn run_server(args: crate::cli::Args, info: BuildInfo) -> crate
             )))
         })?;
 
+    // Extract the service_connections and shutdown_token from components before
+    // consuming components for background tasks (CancellationToken is Clone;
+    // ServiceConnectionRegistry is Clone).
+    let service_connections = components.service_connections.clone();
+    #[cfg(feature = "nats")]
+    let nats_transport = components.nats_transport;
+    let shutdown_token = components.shutdown_token;
+
     // Spawn background tasks
     let mut bg = crate::tasks::BackgroundTasks::new(shutdown_token);
     crate::spawn_background_tasks(
@@ -747,7 +550,7 @@ pub(crate) async fn run_server(args: crate::cli::Args, info: BuildInfo) -> crate
         &builtin_host,
         &app_state,
         &mut bg,
-        controller_id,
+        components.controller_id,
         controller_installation_id,
         ca_managed,
         &ca_tx,
