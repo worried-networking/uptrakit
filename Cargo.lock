@@ -8480,7 +8480,6 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
- "uptrakit-backoff",
  "uptrakit-build-info",
  "uptrakit-shared-types",
  "uptrakit-wire",
