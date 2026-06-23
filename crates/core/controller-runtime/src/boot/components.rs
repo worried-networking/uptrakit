@@ -133,45 +133,49 @@ pub(crate) async fn build(
     let workload_claim_registry =
         Arc::new(uptrakit_web_api::workload_claims::WorkloadClaimRegistry::new());
 
-    let notification_service_base =
+    #[cfg_attr(
+        not(feature = "nats"),
+        expect(unused_mut, reason = "mutated only under the nats feature")
+    )]
+    let mut notification_service =
         uptrakit_web_api::notification_service::NotificationService::new(
             service_connections.clone(),
             controller_id,
         )
         .with_claim_registry(Arc::clone(&workload_claim_registry));
 
-    // Build the batch progress broadcaster (NATS wiring applied below).
-    let batch_progress_broadcaster_base =
+    // Build the batch progress broadcaster (NATS wiring may replace it below).
+    #[cfg_attr(
+        not(feature = "nats"),
+        expect(unused_mut, reason = "mutated only under the nats feature")
+    )]
+    let mut batch_progress_broadcaster =
         uptrakit_web_api::batch_progress_broadcaster::BatchProgressBroadcaster::new();
 
-    // Build the admin event broadcaster (NATS wiring applied below).
-    let event_broadcaster_base = uptrakit_web_api::event_broadcaster::EventBroadcaster::new();
+    // Build the admin event broadcaster (NATS wiring may replace it below).
+    #[cfg_attr(
+        not(feature = "nats"),
+        expect(unused_mut, reason = "mutated only under the nats feature")
+    )]
+    let mut event_broadcaster = uptrakit_web_api::event_broadcaster::EventBroadcaster::new();
 
     // NATS wiring: connects to the server and augments the three objects above.
-    // The entire block is feature-gated; without nats, we keep the base objects.
+    // Only present under the nats feature; without it the three vars keep their base values.
     #[cfg(feature = "nats")]
-    let (nats_transport, notification_service, event_broadcaster, batch_progress_broadcaster) = {
+    let nats_transport = {
         let bits = super::nats::wire(
             reconciled.nats_url.as_deref(),
             controller_id,
-            notification_service_base,
-            event_broadcaster_base,
-            batch_progress_broadcaster_base,
+            notification_service,
+            event_broadcaster,
+            batch_progress_broadcaster,
         )
         .await?;
-        (
-            bits.transport,
-            bits.notification_service,
-            bits.event_broadcaster,
-            bits.batch_progress_broadcaster,
-        )
+        notification_service = bits.notification_service;
+        event_broadcaster = bits.event_broadcaster;
+        batch_progress_broadcaster = bits.batch_progress_broadcaster;
+        bits.transport
     };
-    #[cfg(not(feature = "nats"))]
-    let (notification_service, event_broadcaster, batch_progress_broadcaster) = (
-        notification_service_base,
-        event_broadcaster_base,
-        batch_progress_broadcaster_base,
-    );
 
     let token_denylist = Arc::new(
         uptrakit_web_api::auth::token_denylist::TokenDenylist::new_with_db(db_conn.clone()),
