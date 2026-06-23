@@ -638,7 +638,6 @@ The most-used `uptrakit-service-sdk` exports, organized by where they apply.
 | `CertificateRenewalHandler`                                  | Standalone                 | Tracks and schedules certificate renewal during the lifecycle                                                     |
 | `ServiceConfigProxy`, `ServiceSurfaceProxy`                  | Both                       | Async batching for service-config and surface-action requests                                                     |
 | `init_cli_tracing`, `init_test_tracing`, `TracingBuilder`    | Both                       | Tracing setup helpers                                                                                             |
-| `Backoff`                                                    | Both                       | Configurable exponential backoff (no async)                                                                       |
 | `ShutdownSignal`, `SignalShutdown`, `TokenShutdown`          | Both                       | Shutdown signal abstractions                                                                                      |
 
 Embedded-only symbols are reachable only when the embedding controller pulls them in via
