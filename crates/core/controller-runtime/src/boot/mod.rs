@@ -9,6 +9,7 @@
 pub(crate) mod config;
 pub(crate) mod crypto;
 pub(crate) mod directories;
+pub(crate) mod identity;
 pub(crate) mod listeners;
 pub(crate) mod persistence;
 pub(crate) mod settings;
@@ -21,7 +22,7 @@ use tokio_util::sync::CancellationToken;
 use uptrakit_build_info::BuildInfo;
 use uptrakit_plugin_infrastructure_registry::{PluginHttpClientConfig, build_plugin_http_client};
 use uptrakit_web_api::AppState;
-use uptrakit_web_api::oauth::boot::{boot_oauth_state, deregister_oauth_instance};
+use uptrakit_web_api::oauth::boot::deregister_oauth_instance;
 
 use crate::{AppError, ReloadBridgeChannels};
 
@@ -66,16 +67,6 @@ pub(crate) async fn run_server(args: crate::cli::Args, info: BuildInfo) -> crate
         default_tenant_id,
     } = db;
 
-    // Phase 7d: OAuth boot — wire OAuthState when mcp_enabled resolves to true.
-    let oauth_state = boot_oauth_state(&db_conn)
-        .await
-        .context(AppError::Config("OAuth boot failed".into()))?;
-    // Capture before oauth_state is consumed by the builder; used for graceful cleanup
-    // on both the SIGTERM/SIGINT path and the reexec path.
-    let oauth_instance_for_shutdown = oauth_state
-        .enabled
-        .then_some((oauth_state.instance_id, db_conn.clone()));
-
     // Phase 8b: Claim inherited TCP sockets and pre-bind listeners (FD-atomic).
     //
     // This must happen before the coordinator block so that `listener_count` and
@@ -95,58 +86,36 @@ pub(crate) async fn run_server(args: crate::cli::Args, info: BuildInfo) -> crate
         validated,
     } = settings_bundle;
 
-    // Phase 9: PKI + TLS — cert/key paths from TOML [tls]
-    let pki = crate::startup::init_pki_runtime(
+    // Phases 7d, 9, 10: OAuth boot, PKI/TLS init, cert_signer construction, JWT init.
+    let identity::Identity {
+        pki:
+            identity::PkiFields {
+                ca_managed,
+                pki_path,
+                ca_tx,
+                ca_rx,
+                ca_key_store,
+                rustls_config,
+                server_cert_resolver,
+                revocation_notify,
+                ca_rotation_trigger,
+                crl_pem_cache,
+                crl_manager,
+                initial_ca_version,
+                has_external_tls_cert,
+            },
+        jwt_manager,
+        cert_signer,
+        oauth_state,
+        oauth_instance_for_shutdown,
+    } = identity::init(
         runtime,
         &db_conn,
         layout.app_dirs.config_dir(),
+        layout.app_dirs.state_dir(),
         &reconciled,
     )
     .await?;
-
-    // Phase 10: JWT
-    let jwt_manager = crate::startup::init_jwt(&db_conn, layout.app_dirs.state_dir()).await?;
-
-    // Destructure PKI runtime for distribution across AppState and tasks
-    let crate::startup::PkiRuntime {
-        ca_managed,
-        pki_path,
-        ca_tx,
-        ca_rx,
-        ca_key_store,
-        rustls_config,
-        server_cert_resolver,
-        revocation_notify,
-        ca_rotation_trigger,
-        crl_pem_cache,
-        crl_manager,
-        initial_ca_version,
-        has_external_tls_cert,
-    } = pki;
-
-    // Build shared application state
-    // Two-step: clone as concrete type then coerce to Arc<dyn IssuerSource>.
-    // Arc::clone resolves its argument type from the return annotation, so
-    // we cannot pass &Arc<CrlManager> when the binding expects Arc<dyn Trait>.
-    let issuer_source: Arc<dyn crate::cert_signer::IssuerSource> = {
-        let concrete: Arc<crate::crl_manager::CrlManager> = Arc::clone(&crl_manager);
-        concrete
-    };
-    // Resolve the effective trust domain: explicit tls.trust_domain wins;
-    // falls back to tls.sans[0] (legacy derivation); empty = SPIFFE disabled.
-    let effective_trust_domain = runtime
-        .tls
-        .effective_trust_domain(&runtime.tls.sans)
-        .to_owned();
-    let cert_signer = {
-        let signer = crate::cert_signer::RcgenAgentCertSigner::new(ca_rx.clone(), issuer_source);
-        if effective_trust_domain.is_empty() {
-            Arc::new(signer) as Arc<dyn uptrakit_web_api::cert_signer::AgentCertSigner>
-        } else {
-            Arc::new(signer.with_trust_domain(effective_trust_domain))
-                as Arc<dyn uptrakit_web_api::cert_signer::AgentCertSigner>
-        }
-    };
 
     #[cfg(feature = "oidc")]
     let oidc_flow_store = uptrakit_web_api::auth::oidc_state::OidcFlowStore::new(db_conn.clone());
