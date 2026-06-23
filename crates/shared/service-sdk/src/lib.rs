@@ -115,3 +115,65 @@ pub use shutdown::{ShutdownSignal, SignalShutdown, TokenShutdown};
 pub use signal::{Signal, SignalWatcher};
 pub use surface_proxy::{PendingSurfaceRequest, ServiceSurfaceProxy, ServiceSurfaceProxyError};
 pub use uptrakit_backoff::Backoff;
+
+use std::time::Duration;
+
+/// Builder for the standard service reconnect/enrollment backoff: 2s base, 60s
+/// cap, jittered, never terminates (infinite reconnect). `without_max_times()`
+/// is mandatory — backon defaults to `max_times = Some(3)`, which would silently
+/// stop a reconnect loop after three attempts — so it is encapsulated here once
+/// rather than repeated at every call site.
+///
+/// Consume natively: `let mut backoff = reconnect_backoff_builder().build();`,
+/// reset with `backoff = builder.build();`, advance with
+/// `backoff.next().unwrap_or(Duration::from_secs(60))` (the `unwrap_or` cap is a
+/// panic-free guard; `without_max_times()` means `next()` is always `Some`).
+pub fn reconnect_backoff_builder() -> backon::ExponentialBuilder {
+    backon::ExponentialBuilder::default()
+        .with_min_delay(Duration::from_secs(2))
+        .with_max_delay(Duration::from_secs(60))
+        .with_jitter()
+        .without_max_times()
+}
+
+#[cfg(test)]
+mod backoff_helpers_tests {
+    use super::reconnect_backoff_builder;
+    use backon::BackoffBuilder;
+    use std::time::Duration;
+
+    #[test]
+    fn builder_is_infinite_no_max_times_cliff() {
+        // Guard the backon default `max_times = Some(3)` cliff: the reconnect
+        // builder must never terminate.
+        assert!(reconnect_backoff_builder().build().nth(50).is_some());
+    }
+
+    #[test]
+    fn first_delay_in_base_band() {
+        // First yield is min_delay + jitter ∈ [2s, 4s).
+        let mut backoff = reconnect_backoff_builder().build();
+        let d = backoff.next().expect("infinite iterator yields");
+        assert!(d >= Duration::from_secs(2), "delay {d:?} below base");
+        assert!(d < Duration::from_secs(4), "delay {d:?} above 2*base");
+    }
+
+    #[test]
+    fn delay_escalates_and_caps_at_60s() {
+        let mut backoff = reconnect_backoff_builder().build();
+        // Pull many delays; the cap means none ever reaches 2*60s, and later
+        // delays are >= the 60s cap floor.
+        let mut last = Duration::ZERO;
+        for _ in 0..20 {
+            last = backoff.next().expect("infinite iterator yields");
+            assert!(
+                last < Duration::from_secs(120),
+                "delay {last:?} exceeds 2*cap"
+            );
+        }
+        assert!(
+            last >= Duration::from_secs(60),
+            "capped delay {last:?} below cap floor"
+        );
+    }
+}

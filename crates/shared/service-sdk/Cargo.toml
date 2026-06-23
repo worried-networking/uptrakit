@@ -26,6 +26,7 @@ futures-util = { workspace = true, features = ["async-await-macro"] }
 hostname = { workspace = true }
 http = { workspace = true }
 parking_lot = { workspace = true }
+backon = { workspace = true }
 uptrakit-backoff = { workspace = true }
 zeroize = { workspace = true }
 base64 = { workspace = true }
