@@ -16,6 +16,7 @@ doctest = false
 
 [dependencies]
 async-trait = { workspace = true }
+backon = { workspace = true }
 base64 = { workspace = true }
 futures-util = { workspace = true }
 rootcause = { workspace = true }

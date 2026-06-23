@@ -1,13 +1,14 @@
 use std::fmt;
 use std::time::Duration;
 
+use backon::{BackoffBuilder, ExponentialBuilder};
 use rootcause::prelude::*;
 use rumqttc::{AsyncClient, EventLoop, LastWill, MqttOptions, Packet, QoS, Transport};
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
-use uptrakit_service_sdk::Backoff;
+use uptrakit_service_sdk::reconnect_backoff_builder;
 use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_wire::SecretString;
 
@@ -308,7 +309,7 @@ pub(crate) async fn start(
     let task_topic = topic.clone();
     let task_client = client.clone();
     let task_token = shutdown_token.clone();
-    let reconnect_backoff = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
+    let reconnect_backoff_builder = reconnect_backoff_builder();
     let task = tokio::spawn(run_event_loop(
         event_loop,
         task_client,
@@ -316,7 +317,7 @@ pub(crate) async fn start(
         task_token,
         reporter,
         ha_status_topic,
-        reconnect_backoff,
+        reconnect_backoff_builder,
     ));
 
     MqttHandle {
@@ -385,8 +386,9 @@ async fn run_event_loop(
     shutdown_token: CancellationToken,
     reporter: Option<MqttEventReporter>,
     ha_status_topic: Option<String>,
-    mut reconnect_backoff: Backoff,
+    reconnect_backoff_builder: ExponentialBuilder,
 ) {
+    let mut reconnect_backoff = reconnect_backoff_builder.build();
     // Tracks whether the "online" retained publish and the HA-status
     // subscription still need to be sent after the most recent ConnAck.
     //
@@ -436,8 +438,8 @@ async fn run_event_loop(
             poll = event_loop.poll() => {
                 match poll {
                     Ok(rumqttc::Event::Incoming(Packet::ConnAck(_))) => {
-                        // reset chosen: ConnAck is the clean success signal.
-                        reconnect_backoff.reset();
+                        // reset chosen: ConnAck is the clean success signal; rebuild = reset.
+                        reconnect_backoff = reconnect_backoff_builder.build();
                         tracing::info!("MQTT connected");
                         if let Some(ref r) = reporter {
                             r.report_status(MqttClientConnectionStatus::Online);
@@ -479,7 +481,7 @@ async fn run_event_loop(
                         // escalate chosen: rumqttc retries connect internally; a surfaced
                         // Err means it gave up. Resetting backoff would stampede a
                         // recovering broker; preserve the accumulated escalation.
-                        let delay = reconnect_backoff.escalate();
+                        let delay = reconnect_backoff.next().unwrap_or(Duration::from_secs(60));
                         tracing::warn!("MQTT error: {e}; retrying in {delay:?}");
                         if let Some(ref r) = reporter {
                             r.report_status(MqttClientConnectionStatus::Offline);
@@ -525,6 +527,17 @@ async fn shutdown_task(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod backoff_tests {
+    use backon::BackoffBuilder;
+    use uptrakit_service_sdk::reconnect_backoff_builder;
+
+    #[test]
+    fn mqtt_reconnect_backoff_is_infinite() {
+        assert!(reconnect_backoff_builder().build().nth(50).is_some());
     }
 }
 

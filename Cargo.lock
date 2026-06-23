@@ -7679,6 +7679,7 @@ name = "uptrakit-mqtt-runtime"
 version = "0.0.3"
 dependencies = [
  "async-trait",
+ "backon",
  "base64 0.22.1",
  "futures-util",
  "rcgen",
