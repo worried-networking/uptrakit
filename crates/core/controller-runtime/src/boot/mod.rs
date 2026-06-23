@@ -9,6 +9,7 @@
 pub(crate) mod config;
 pub(crate) mod crypto;
 pub(crate) mod directories;
+pub(crate) mod persistence;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -34,11 +35,6 @@ pub(crate) async fn run_server(args: crate::cli::Args, info: BuildInfo) -> crate
     let master_key_hex = crypto.hex;
 
     let config_path_for_coord = cfg.config_path.clone();
-    let booted = cfg.booted;
-    let oidc_bootstrap = cfg.oidc_bootstrap;
-    let enrollment_bootstrap = cfg.enrollment_bootstrap;
-    let args = cfg.args;
-    let runtime = &booted.runtime;
 
     // Phase 2: Application directories — use platform defaults (no CLI overrides).
     let layout = directories::resolve().await?;
@@ -51,16 +47,18 @@ pub(crate) async fn run_server(args: crate::cli::Args, info: BuildInfo) -> crate
     let controller_installation_id = layout.installation_id;
 
     // Phase 3: Database — URL and pool size from TOML [db].
-    let db_init = crate::startup::init_database(
-        &runtime.db.url,
-        runtime.db.pool_size,
-        layout.app_dirs.state_dir(),
-    )
-    .await?;
-    let db_conn = db_init.conn;
-    let db_url = db_init.url;
-    let default_tenant_id = db_init.default_tenant.id;
-    tracing::info!(%default_tenant_id, "loaded default tenant");
+    let persistence::Persistence {
+        db: db_conn,
+        url: db_url,
+        default_tenant_id,
+    } = persistence::open(&cfg, &layout).await?;
+
+    // Destructure cfg after Phase 3 so persistence::open can borrow it by reference.
+    let booted = cfg.booted;
+    let oidc_bootstrap = cfg.oidc_bootstrap;
+    let enrollment_bootstrap = cfg.enrollment_bootstrap;
+    let args = cfg.args;
+    let runtime = &booted.runtime;
 
     // Phases 4/4b/4c/4d: master key verify, column AAD mappings, data key ring, ENC:v3 migration
     crypto::verify_and_migrate(&db_conn).await?;
