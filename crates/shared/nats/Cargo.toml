@@ -16,7 +16,7 @@ thiserror = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time"] }
 tracing = { workspace = true }
-uptrakit-backoff = { workspace = true }
+backon = { workspace = true }
 uptrakit-crypto = { workspace = true }
 uptrakit-wire = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
