@@ -14,8 +14,8 @@ use crate::boot::persistence::Persistence;
 /// Output of Phases 5–8: loaded settings, reconciled addresses, and validated config.
 pub(crate) struct SettingsBundle {
     pub settings: uptrakit_web_api::settings::Settings,
-    pub reconciled: crate::startup::ReconciledSettings,
-    pub validated: crate::startup::ValidatedConfig,
+    pub reconciled: crate::boot::init::ReconciledSettings,
+    pub validated: crate::boot::init::ValidatedConfig,
 }
 
 /// Phases 5, 6, 7, 7b, 7c, 8: load settings from the database, reconcile with
@@ -44,13 +44,13 @@ pub(crate) async fn load_and_seed(
 
     // Phase 6: Reconcile settings — use TOML values as seeds
     let reconciled =
-        crate::startup::reconcile_all_settings(&db.db, runtime, &settings, &global_raw).await?;
+        crate::boot::init::reconcile_all_settings(&db.db, runtime, &settings, &global_raw).await?;
 
     // Phase 7: OIDC bootstrap
-    crate::startup::bootstrap_oidc(&db.db, db.default_tenant_id, &cfg.oidc_bootstrap).await?;
+    crate::boot::init::bootstrap_oidc(&db.db, db.default_tenant_id, &cfg.oidc_bootstrap).await?;
 
     // Phase 7b: Enrollment token bootstrap
-    crate::startup::bootstrap_enrollment_tokens(
+    crate::boot::init::bootstrap_enrollment_tokens(
         &db.db,
         db.default_tenant_id,
         &cfg.enrollment_bootstrap,
@@ -58,10 +58,10 @@ pub(crate) async fn load_and_seed(
     .await?;
 
     // Phase 7c: OAuth settings defaults
-    crate::startup::seed_oauth_defaults(&db.db).await?;
+    crate::boot::init::seed_oauth_defaults(&db.db).await?;
 
     // Phase 8: Validate configuration
-    let validated = crate::startup::validate_configuration(runtime, &reconciled)?;
+    let validated = crate::boot::init::validate_configuration(runtime, &reconciled)?;
 
     Ok(SettingsBundle {
         settings,

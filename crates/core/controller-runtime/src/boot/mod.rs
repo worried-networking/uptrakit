@@ -12,6 +12,7 @@ pub(crate) mod config;
 pub(crate) mod crypto;
 pub(crate) mod directories;
 pub(crate) mod identity;
+pub(crate) mod init;
 pub(crate) mod listeners;
 #[cfg(feature = "nats")]
 pub(crate) mod nats;

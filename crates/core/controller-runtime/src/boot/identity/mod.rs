@@ -19,7 +19,7 @@ use uptrakit_web_api::oauth::OAuthState;
 // PkiFields — flat representation of PkiRuntime after destructuring
 // ---------------------------------------------------------------------------
 
-/// The 13 fields of [`crate::startup::PkiRuntime`], stored directly so that
+/// The 13 fields of [`crate::boot::init::PkiRuntime`], stored directly so that
 /// the `AppState` builder (Task 12) and `ServeDeps` (Task 12.3) can access
 /// individual fields without fighting over a nested un-destructured struct.
 pub(crate) struct PkiFields {
@@ -44,7 +44,7 @@ pub(crate) struct PkiFields {
 
 /// Combined output of the identity boot phases (7d, 9, 10).
 pub(crate) struct Identity {
-    /// Flat PKI/TLS runtime state (destructured from [`crate::startup::PkiRuntime`]).
+    /// Flat PKI/TLS runtime state (destructured from [`crate::boot::init::PkiRuntime`]).
     pub pki: PkiFields,
     /// JWT signing-key manager (Phase 10).
     pub jwt_manager: JwtManager,
@@ -85,7 +85,7 @@ pub(crate) async fn init(
     db: &sea_orm::DatabaseConnection,
     config_dir: &std::path::Path,
     state_dir: &std::path::Path,
-    reconciled: &crate::startup::ReconciledSettings,
+    reconciled: &crate::boot::init::ReconciledSettings,
 ) -> crate::Result<Identity> {
     // Phase 7d: OAuth
     let (oauth_state, oauth_instance_for_shutdown) = oauth::boot(db).await?;
@@ -98,7 +98,7 @@ pub(crate) async fn init(
 
     // Destructure PkiRuntime into PkiFields so downstream consumers get plain
     // field access rather than a nested struct.
-    let crate::startup::PkiRuntime {
+    let crate::boot::init::PkiRuntime {
         ca_managed,
         pki_path,
         ca_tx,

@@ -1,6 +1,6 @@
 //! Phase 9: PKI + TLS initialization and cert-signer construction.
 //!
-//! Thin wrappers around [`crate::startup::init_pki_runtime`] and the
+//! Thin wrappers around [`crate::boot::init::init_pki_runtime`] and the
 //! `RcgenAgentCertSigner` builder that previously lived inline in
 //! `boot::run_server`.
 
@@ -8,18 +8,18 @@ use std::sync::Arc;
 
 use uptrakit_web_api::cert_signer::AgentCertSigner;
 
-use crate::startup::PkiRuntime;
+use crate::boot::init::PkiRuntime;
 
 /// Phase 9: initialize the entire PKI subsystem.
 ///
-/// Delegates to [`crate::startup::init_pki_runtime`].
+/// Delegates to [`crate::boot::init::init_pki_runtime`].
 pub(super) async fn init(
     runtime: &uptrakit_config_reload::RuntimeConfig,
     db: &sea_orm::DatabaseConnection,
     config_dir: &std::path::Path,
-    reconciled: &crate::startup::ReconciledSettings,
+    reconciled: &crate::boot::init::ReconciledSettings,
 ) -> crate::Result<PkiRuntime> {
-    crate::startup::init_pki_runtime(runtime, db, config_dir, reconciled).await
+    crate::boot::init::init_pki_runtime(runtime, db, config_dir, reconciled).await
 }
 
 /// Build a [`AgentCertSigner`] from an already-initialized [`PkiRuntime`].
