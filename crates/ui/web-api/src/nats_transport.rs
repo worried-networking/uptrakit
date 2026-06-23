@@ -31,12 +31,12 @@ use std::time::Duration;
 
 use async_nats::jetstream;
 use async_nats::jetstream::consumer::PullConsumer;
+use backon::{BackoffBuilder, ExponentialBuilder};
 use rootcause::prelude::*;
 use sea_orm::DatabaseConnection;
 use thiserror::Error;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
-use uptrakit_backoff::Backoff;
 use uptrakit_nats::{NatsConnection, NatsEventEnvelope};
 use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_wire::ControllerMessage;
@@ -91,6 +91,14 @@ pub enum NatsTransportError {
 impl_report_conversion!(async_nats::ConnectError => NatsTransportError,
     |e| NatsTransportError::Connection(e.to_string())
 );
+
+fn consumer_backoff_builder() -> ExponentialBuilder {
+    ExponentialBuilder::default()
+        .with_min_delay(Duration::from_secs(1))
+        .with_max_delay(Duration::from_secs(30))
+        .with_jitter()
+        .without_max_times()
+}
 
 /// NATS transport handle used by
 /// [`NotificationService`](crate::notification_service::NotificationService) to
@@ -178,7 +186,8 @@ impl NatsTransport {
 
         tracing::info!("NATS consumer started");
 
-        let mut backoff = Backoff::new(Duration::from_secs(1), Duration::from_secs(30));
+        let builder = consumer_backoff_builder();
+        let mut backoff = builder.build();
 
         loop {
             // Race each pull request against the shutdown token so the consumer
@@ -198,15 +207,16 @@ impl NatsTransport {
                 {
                     match result {
                         Ok(m) => {
-                            // reset chosen: successful fetch is the clean success signal.
-                            backoff.reset();
+                            // reset chosen: rebuild is the native backon reset idiom.
+                            backoff = builder.build();
                             m
                         }
                         Err(e) => {
                             // escalate chosen: async_nats handles internal reconnect;
                             // a surfaced fetch-Err means it gave up. Resetting backoff
                             // would stampede a recovering JetStream server.
-                            let delay = backoff.escalate();
+                            // without_max_times() guarantees Some; unwrap_or cap is a panic-free guard.
+                            let delay = backoff.next().unwrap_or(Duration::from_secs(30));
                             tracing::warn!(
                                 error = %e,
                                 delay_ms = delay.as_millis(),
@@ -346,6 +356,16 @@ impl uptrakit_controller_core::notification::NatsPublisher for NatsTransport {
             msg,
         )
         .await;
+    }
+}
+
+#[cfg(test)]
+mod backoff_tests {
+    use backon::BackoffBuilder;
+
+    #[test]
+    fn consumer_backoff_is_infinite() {
+        assert!(super::consumer_backoff_builder().build().nth(50).is_some());
     }
 }
 
