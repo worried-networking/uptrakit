@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use backon::{ExponentialBuilder, Retryable};
 use futures_util::future::join_all;
-use uptrakit_backoff::Backoff;
 use uptrakit_plugin_infrastructure_registry::{
     BatchDetectItem, BatchFetchItem, HostRuntime, PluginCapability, PluginError, PluginResult,
     ReleaseFetchContext, ReleaseFetcher, get_descriptor,
@@ -521,51 +521,34 @@ pub async fn batch_check_versions(
 /// `true`. On each transient failure, sleeps an exponentially increasing delay
 /// and logs a debug message. Returns the first successful result or an error
 /// string if all attempts fail.
-#[expect(
-    clippy::expect_used,
-    reason = "last_error is always Some when the loop exhausts retries; the expect is a programming-error guard"
-)]
 async fn run_with_retry<'a, T>(
     label: &'static str,
     max_retries: u32,
-    mut op: impl FnMut() -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = PluginResult<T>> + Send + 'a>,
-    >,
+    op: impl FnMut()
+        -> std::pin::Pin<Box<dyn std::future::Future<Output = PluginResult<T>> + Send + 'a>>,
 ) -> Result<T, String> {
-    let mut backoff = Backoff::new(RETRY_BASE_DELAY, RETRY_MAX_DELAY);
-    let mut last_error = None;
+    let builder = ExponentialBuilder::default()
+        .with_min_delay(RETRY_BASE_DELAY)
+        .with_max_delay(RETRY_MAX_DELAY)
+        .with_jitter()
+        // max_retries retries after the first attempt = max_retries + 1 total,
+        // preserving the previous `for 0..=max_retries` count.
+        .with_max_times(max_retries as usize);
 
-    for attempt in 0..=max_retries {
-        match op().await {
-            Ok(v) => return Ok(v),
-            Err(e) => {
-                let retryable = e.current_context().is_retryable() && attempt < max_retries;
-                if retryable {
-                    // escalate chosen: PluginError trait surface carries no
-                    // partial-progress signal; treat every retryable error as
-                    // an unhealthy cycle.
-                    let delay = backoff.escalate();
-                    tracing::debug!(
-                        attempt = attempt + 1,
-                        max_retries,
-                        delay_ms = delay.as_millis() as u64,
-                        error = %e,
-                        label,
-                        "transient error, retrying",
-                    );
-                    tokio::time::sleep(delay).await;
-                    last_error = Some(e);
-                    continue;
-                }
-                return Err(format!("{label} failed: {e}"));
-            }
-        }
-    }
-
-    Err(format!(
-        "{label} failed: {}",
-        last_error.expect("last_error is set when loop exhausts retries")
-    ))
+    op.retry(builder)
+        .when(|e: &rootcause::Report<PluginError>| e.current_context().is_retryable())
+        .notify(
+            |e: &rootcause::Report<PluginError>, delay: std::time::Duration| {
+                tracing::debug!(
+                    delay_ms = delay.as_millis() as u64,
+                    error = %e,
+                    label,
+                    "transient error, retrying",
+                );
+            },
+        )
+        .await
+        .map_err(|e| format!("{label} failed: {e}"))
 }
 
 /// Detect the installed version using a specific plugin assignment.
@@ -1074,5 +1057,28 @@ mod tests {
         assert!(outcome.installed_version.is_none());
         assert!(outcome.latest_version.is_none());
         assert!(outcome.error.is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn run_with_retry_makes_max_retries_plus_one_attempts() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let calls = Arc::new(AtomicU32::new(0));
+        let c = Arc::clone(&calls);
+        let result: Result<(), String> = run_with_retry("test", 2, move || {
+            let c = Arc::clone(&c);
+            Box::pin(async move {
+                c.fetch_add(1, Ordering::SeqCst);
+                // PluginError::TimedOut is retryable (is_retryable() == true), so every
+                // attempt is consumed. Verified variants: error.rs is_retryable() returns
+                // true for CommandSpawn/CommandFailed/CommandWait/TimedOut/CaptureFailed/PluginInternal.
+                Err::<(), _>(rootcause::report!(
+                    uptrakit_plugin_infrastructure_core::PluginError::TimedOut
+                ))
+            })
+        })
+        .await;
+        assert!(result.is_err());
+        assert_eq!(calls.load(Ordering::SeqCst), 3, "2 retries + 1 initial = 3");
     }
 }
