@@ -7,6 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.6](https://github.com/worried-networking/uptrakit/compare/uptrakit-controller-standalone-v0.0.5...uptrakit-controller-standalone-v0.0.6) - 2026-06-23
+
+### Added
+
+- *(frontend)* short-SHA fallback in formatVersion
+- *(frontend)* hide embedded services from merge dialog + surface reason codes
+- *(backoff)* [**breaking**] rewrite API with consuming guard pattern
+- *(web-api)* typed-slot dispatch for InstalledVersionEnricher
+- *(web-api)* apply_version_update_to_db accepts display override
+- *(plugin-infra)* add InstalledVersionEnricherSlot + RoleCreators field
+- *(web-api/providers)* implement list_recent_commit_dates_for_path
+- *(web-api)* thread GlobalProviderLookup into controller fetch jobs
+- *(web-api)* redirect-aware bearer auth + rekey_resolved audit
+- *(web-api)* route-level 400 for embedded merge with ValidationFailed audit
+- *(web-api)* typed errors for embedded-merge ban + invariant violation
+- *(web-api-queries)* tenant-scoped plugin_types_for_role lookup
+- *(web-api-queries)* embedded-merge ban + redirect upsert + invariant assert
+- *(plugin-infra)* declare_plugin! supports installed_version_enricher_create
+- *(plugin-infra)* add InstalledVersionEnricher trait + context
+- *(proxmox)* stream protection start-time errors to update output
+- *(plugins/skills)* register InstalledVersionEnricher role
+- *(plugins/skills)* implement InstalledVersionEnricher
+- *(plugins/skills)* emit commit-date display_version from batch_fetch
+
+### Fixed
+
+- *(build-info)* align --version with binary crate via build_info! macro
+- *(controller)* correct too_many_arguments expect feature gate
+- *(controller)* use additive nats gating in boot::components
+- *(plugin-infra)* verify-pass cleanups for enricher role
+- *(proxmox)* reject non-UPID responses from PVE task endpoints
+- *(plugins/skills)* route fetch_releases to controller
+
+### Other
+
+- *(controller)* unify startup/ into boot/init/
+- *(controller)* extract boot::serve phase; run_server now ~40 lines
+- *(controller)* extract boot::recovery phase
+- *(controller)* extract boot::reload + boot::app_state
+- *(controller)* extract boot::components + boot::nats
+- *(controller)* extract boot::identity sub-module
+- *(controller)* extract boot::listeners phase (FD-atomic)
+- *(controller)* extract boot::settings phase
+- *(controller)* extract boot::persistence phase
+- *(controller)* extract boot::directories phase
+- *(controller)* extract boot::crypto phase
+- *(controller)* extract boot::config phase
+- *(controller)* introduce boot/ module, move run_server
+- *(controller)* pre-decomposition latent fixes
+- update Cargo.toml dependencies
+- *(frontend)* drop libc fields auto-cleaned by npm on darwin
+- *(frontend)* allow 2% cross-host pixel drift in parity snapshots
+- *(frontend)* run Playwright e2e on every push
+- *(frontend)* scope auth e2e selectors to form
+- *(deps)* refresh frontend npm deps to latest
+- *(agent-core)* migrate version_check retry to backon
+- *(backoff)* [**breaking**] drop AttemptGuard, ship plain methods
+- *(mqtt-runtime)* migrate reconnect backoff to backon builder
+- *(doctests)* honor doctest=false opt-out; add doctest gate to pre-push
+- *(web-api)* migrate NATS consumer backoff to backon
+- *(npm)* migrate release fetch retry to backon
+
 ## [0.0.5](https://github.com/worried-networking/uptrakit/compare/uptrakit-controller-standalone-v0.0.4...uptrakit-controller-standalone-v0.0.5) - 2026-06-05
 
 ### Fixed
