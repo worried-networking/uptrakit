@@ -7143,6 +7143,7 @@ name = "uptrakit-agent-core"
 version = "0.0.1"
 dependencies = [
  "async-trait",
+ "backon",
  "futures-util",
  "parking_lot",
  "reqwest",
@@ -7152,7 +7153,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "uptrakit-backoff",
  "uptrakit-command",
  "uptrakit-directories",
  "uptrakit-plugin-infrastructure-core",
