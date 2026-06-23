@@ -146,7 +146,7 @@ Main functionality that delivers the core value proposition.
 - [ ] Retry logic for failed version checks
   - **Category**: Core / Reliability | **Impact**: Medium | **Effort**: Low-Medium
   - Automatic retry with exponential backoff when `fetch_releases` or `detect_version` fails.
-    The `uptrakit-backoff` crate already exists. Currently relies on the next scheduled run.
+    Use `reconnect_backoff_builder()` from `uptrakit-service-sdk` (`backon::ExponentialBuilder`). Currently relies on the next scheduled run.
 - [ ] Proxmox Helper Scripts: script integrity verification
   - **Category**: Plugins / Security | **Impact**: Medium | **Effort**: Medium
   - Verify script checksums or signatures before execution to prevent tampered update scripts.

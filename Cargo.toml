@@ -102,7 +102,6 @@ rumqttc = { version = "0.25.1", default-features = false, features = ["use-rustl
 serde_yaml_ng = "0.10"
 uptrakit-frontend = { path = "frontend", version = "0.0.4" }
 backon = { version = "1.6.0", default-features = false, features = ["std", "tokio-sleep"] }
-uptrakit-backoff = { path = "crates/shared/backoff", version = "0.0.1" }
 uptrakit-shared-macros = { path = "crates/shared/macros", version = "0.0.1" }
 uptrakit-shared-types = { path = "crates/shared/types", version = "0.0.2" }
 uptrakit-openapi-client = { path = "crates/shared/openapi-client", version = "0.0.2" }

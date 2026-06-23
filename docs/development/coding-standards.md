@@ -894,31 +894,33 @@ security.
 
 ## Service Reconnect Backoff
 
-All reconnect loops in service binaries must use `uptrakit_backoff::Backoff` — not a fixed sleep. Fixed delays hammer a recovering broker or
-controller and produce bursty log storms. The API is four plain methods: `new`, `reset`, `escalate`, `sample_base_jitter`. Every call site explicitly
-chooses the verb with an inline `// reset chosen: <reason>` / `// escalate chosen: <reason>` comment as the audit log.
+All reconnect loops in service binaries must use `backon::ExponentialBuilder` via the
+`uptrakit_service_sdk::reconnect_backoff_builder()` helper — not a fixed sleep. Fixed delays hammer a recovering broker or controller and produce bursty
+log storms.
 
-### Reset on Success
+### Standard Builder
 
-When the connection succeeds or the cycle completes with a meaningful milestone (WebSocket upgrade succeeds), call `backoff.reset()` so that `current`
-returns to `base` and the next attempt starts fresh:
+Use `reconnect_backoff_builder()` from `uptrakit-service-sdk` to get a preconfigured builder (2 s base, 60 s cap, jitter, infinite). Call
+`.build()` to get an iterator and advance it with `.next().unwrap_or(Duration::from_secs(60))`. To "reset" the backoff (e.g. after a successful
+connection), discard the iterator and call `.build()` again on the stored builder:
 
 ```rust
-use uptrakit_backoff::Backoff;
+use uptrakit_service_sdk::reconnect_backoff_builder;
+use backon::BackoffBuilder;
 use std::time::Duration;
 
-let mut backoff = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
+let builder = reconnect_backoff_builder();
+let mut backoff = builder.build();
 
 loop {
     match connect().await {
         Ok(conn) => {
-            // reset chosen: connection succeeded.
-            backoff.reset();
+            // reset: connection succeeded — rebuild iterator from base.
+            backoff = builder.build();
             handle(conn).await;
         }
         Err(e) => {
-            // escalate chosen: pre-connection failure; no milestone reached.
-            let delay = backoff.escalate();
+            let delay = backoff.next().unwrap_or(Duration::from_secs(60));
             tracing::warn!(error = %e, ?delay, "connection failed; retrying");
             tokio::select! {
                 _ = shutdown_token.cancelled() => break,
@@ -929,73 +931,15 @@ loop {
 }
 ```
 
-### Partial-Progress: Distinguishing Post-Upgrade Close from Transient Failure
-
-A closed WebSocket **after upgrade** signals a healthy cycle (TCP + TLS + application-level protocol established). A TCP refusal or DNS error **before
-upgrade** means no progress was made. Split error classification explicitly and annotate each arm:
-
-```rust
-if is_receive_closed_report(&e) {
-    // reset chosen: post-WS-upgrade close — connection was healthy; reset so
-    // the next reconnect starts from base rather than inheriting a prior streak.
-    enrollment_backoff.reset();
-    let delay = enrollment_backoff.sample_base_jitter();
-    tracing::info!(error = %e, ?delay, "post-upgrade enrollment close, reconnecting");
-    tokio::select! {
-        () = tokio::time::sleep(delay) => {}
-        signal = signals.recv() => {
-            tracing::info!(%signal, "received signal during enrollment, exiting");
-            return Ok(());
-        }
-    }
-    continue;
-}
-if is_transient_network_report(&e) {
-    // escalate chosen: pre-upgrade transient failure (TCP/DNS); no milestone reached.
-    let delay = enrollment_backoff.escalate();
-    tracing::info!(error = %e, ?delay, "transient enrollment error, reconnecting");
-    tokio::select! {
-        () = tokio::time::sleep(delay) => {}
-        signal = signals.recv() => {
-            tracing::info!(%signal, "received signal during enrollment, exiting");
-            return Ok(());
-        }
-    }
-    continue;
-}
-```
-
-### LoopOutcome::Disconnected Pattern
-
-When an upstream `Ok` arm already called `reset()` (so `current == base`), use `sample_base_jitter()` to read the post-reset delay without further
-state mutation — do **not** call `reset()` again:
-
-```rust
-match loop_outcome {
-    LoopOutcome::Disconnected => {
-        // reset() was called in the Ok(outcome) arm above; current == base.
-        // Use sample_base_jitter() for the post-reset delay without state mutation.
-        let delay = reconnect_backoff.sample_base_jitter();
-        tracing::warn!(?delay, "disconnected by controller, reconnecting");
-        tokio::select! {
-            () = tokio::time::sleep(delay) => {}
-            _ = shutdown_token.cancelled() => break,
-        }
-    }
-    // ... other branches
-}
-```
-
 ### Safety Property
 
-`Backoff::escalate()` is `#[must_use]` on its `Duration` return — the caller must bind and use the delay. Workspace lint
-`clippy::let_underscore_must_use = "deny"` closes the `let _ = backoff.escalate();` escape, making a bare escalate-without-sleep a hard compile error.
-This is belt-and-suspenders ergonomics; the load-bearing correctness property is the inline verb annotation + the enrollment regression test in
-`crates/shared/service-sdk/src/lifecycle.rs`.
+`without_max_times()` is encapsulated inside `reconnect_backoff_builder()` — never construct an `ExponentialBuilder` inline for reconnect loops without
+it. The default `backon` `max_times = Some(3)` would silently stop the loop after three attempts.
 
 ### API Reference
 
-Standard parameters: **base 2 s, cap 60 s** with ~25 % jitter. For full API documentation, see <https://docs.rs/uptrakit-backoff>.
+Standard parameters: **base 2 s, cap 60 s** with ~25 % jitter. See `crates/shared/service-sdk/src/lib.rs` for `reconnect_backoff_builder()` and
+`crates/shared/service-sdk/src/lifecycle.rs` for the canonical enrollment/reconnect loop.
 
 **Never** replace this with `tokio::time::sleep(Duration::from_secs(5))`. A fixed delay:
 

@@ -7285,14 +7285,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "uptrakit-backoff"
-version = "0.0.1"
-dependencies = [
- "rand 0.9.4",
- "tracing",
-]
-
-[[package]]
 name = "uptrakit-build-info"
 version = "0.0.1"
 dependencies = [
