@@ -56,7 +56,7 @@ use tokio::signal::unix::{SignalKind, signal};
 use tokio_util::sync::CancellationToken;
 #[cfg(feature = "journald")]
 use tracing_subscriber::prelude::*;
-use uptrakit_audit_log::{AuditFilter, AuditLogDispatcher};
+use uptrakit_audit_log::AuditLogDispatcher;
 use uptrakit_build_info::BuildInfo;
 use uptrakit_plugin_infrastructure_registry::{PluginHttpClientConfig, build_plugin_http_client};
 use uptrakit_shared_macros::impl_report_conversion;
@@ -750,7 +750,7 @@ async fn run_server(args: cli::Args, info: BuildInfo) -> Result<()> {
     };
 
     // Audit log backend and filter wiring.
-    let (_audit_filter, audit_dispatcher) = build_audit_logger(runtime, &db_conn).await?;
+    let audit_dispatcher = build_audit_logger(runtime, &db_conn).await?;
 
     let surface_registry = Arc::new(uptrakit_web_api::surface_registry::SurfaceRegistry::new(
         uptrakit_web_api::surface_registry::SurfaceRegistryConfig::default(),
@@ -935,10 +935,12 @@ async fn run_server(args: cli::Args, info: BuildInfo) -> Result<()> {
         tokio::spawn(reload_audit_bridge(
             audit_rx,
             audit_emitter,
-            reload_file_state_tx,
-            reload_last_reload_tx,
-            reload_recent_events_tx,
-            config_path_for_coord.clone(),
+            ReloadBridgeChannels {
+                file_state_tx: reload_file_state_tx,
+                last_reload_tx: reload_last_reload_tx,
+                recent_events_tx: reload_recent_events_tx,
+                config_path: config_path_for_coord.clone(),
+            },
         ));
 
         (
@@ -1171,6 +1173,7 @@ async fn run_server(args: cli::Args, info: BuildInfo) -> Result<()> {
         &ca_tx,
         initial_ca_version,
         has_external_tls_cert,
+        #[cfg(feature = "nats")]
         &service_connections,
         #[cfg(feature = "nats")]
         &nats_transport,
@@ -1332,7 +1335,7 @@ async fn run_server(args: cli::Args, info: BuildInfo) -> Result<()> {
 async fn build_audit_logger(
     runtime: &uptrakit_config_reload::RuntimeConfig,
     db_conn: &DatabaseConnection,
-) -> Result<(AuditFilter, AuditLogDispatcher)> {
+) -> Result<AuditLogDispatcher> {
     use uptrakit_audit_log::{FilterMode, NoopBackend};
 
     let filter_mode = match runtime.audit.filter.as_str() {
@@ -1344,10 +1347,7 @@ async fn build_audit_logger(
     if filter_mode == FilterMode::None {
         let backend: std::sync::Arc<dyn uptrakit_audit_log::AuditLogBackend> =
             std::sync::Arc::new(NoopBackend);
-        return Ok((
-            AuditFilter::new(FilterMode::None),
-            AuditLogDispatcher::new(backend),
-        ));
+        return Ok(AuditLogDispatcher::new(backend));
     }
 
     // Default: database backend using the main DB connection.
@@ -1361,18 +1361,18 @@ async fn build_audit_logger(
 
     let enricher = std::sync::Arc::new(audit_enricher::DbActorEnricher::new(db_conn.clone()));
 
-    Ok((
-        AuditFilter::new(filter_mode),
-        AuditLogDispatcher::with_enricher(backend, enricher),
-    ))
+    Ok(AuditLogDispatcher::with_enricher(backend, enricher))
 }
 
 /// Spawn background tasks: CRL manager, denylist cleanup, CA reload/rotation,
 /// server cert renewal, and NATS consumer. Embedded service registration is
 /// handled by the caller after this function returns.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "spawns background infrastructure tasks; each parameter drives a distinct lifecycle phase"
+#[cfg_attr(
+    feature = "nats",
+    expect(
+        clippy::too_many_arguments,
+        reason = "spawns background infrastructure tasks; each parameter drives a distinct lifecycle phase"
+    )
 )]
 async fn spawn_background_tasks(
     bg: &mut tasks::BackgroundTasks,
@@ -1382,6 +1382,7 @@ async fn spawn_background_tasks(
     ca_tx: &tokio::sync::watch::Sender<pki::CaSnapshot>,
     initial_ca_version: i64,
     has_external_tls_cert: bool,
+    #[cfg(feature = "nats")]
     service_connections: &uptrakit_web_api::service_connections::ServiceConnectionRegistry,
     #[cfg(feature = "nats")] nats_transport: &Option<
         uptrakit_web_api::nats_transport::NatsTransport,
@@ -1447,9 +1448,6 @@ async fn spawn_background_tasks(
         );
         bg.track("nats-consumer", h);
     }
-
-    // Suppress unused-variable warnings when nats feature is disabled.
-    let _ = &service_connections;
 }
 
 /// Spawn the zeroconf mDNS advertiser if the feature is enabled and configured.
@@ -1486,6 +1484,14 @@ fn file_digest(path: &std::path::Path) -> String {
     }
 }
 
+/// Status-watch channels + config path consumed by `reload_audit_bridge`.
+pub(crate) struct ReloadBridgeChannels {
+    pub file_state_tx: tokio::sync::watch::Sender<uptrakit_config_reload::ConfigFileState>,
+    pub last_reload_tx: tokio::sync::watch::Sender<Option<uptrakit_config_reload::LastReloadInfo>>,
+    pub recent_events_tx: tokio::sync::watch::Sender<Vec<serde_json::Value>>,
+    pub config_path: std::path::PathBuf,
+}
+
 /// Bridge task: receive [`ReloadAuditEvent`]s from the coordinator and emit them as
 /// system-scoped [`AuditEntry`] rows via [`AuditEmitter::emit_event`].
 ///
@@ -1494,10 +1500,7 @@ fn file_digest(path: &std::path::Path) -> String {
 async fn reload_audit_bridge(
     mut rx: tokio::sync::mpsc::UnboundedReceiver<uptrakit_config_reload::ReloadAuditEvent>,
     emitter: uptrakit_audit_log::AuditEmitter,
-    file_state_tx: tokio::sync::watch::Sender<uptrakit_config_reload::ConfigFileState>,
-    last_reload_tx: tokio::sync::watch::Sender<Option<uptrakit_config_reload::LastReloadInfo>>,
-    recent_events_tx: tokio::sync::watch::Sender<Vec<serde_json::Value>>,
-    config_path: std::path::PathBuf,
+    channels: ReloadBridgeChannels,
 ) {
     use uptrakit_audit_log::{AuditActionType, AuditEntry, AuditOutcome, Event};
     use uptrakit_config_reload::ReloadAuditEvent;
@@ -1507,7 +1510,7 @@ async fn reload_audit_bridge(
         match &event {
             ReloadAuditEvent::FileChanged { path } => {
                 let pending_digest = file_digest(path);
-                file_state_tx.send_modify(|s| {
+                channels.file_state_tx.send_modify(|s| {
                     s.pending_digest = Some(pending_digest);
                     s.pending_detected_at = Some(time::OffsetDateTime::now_utc());
                 });
@@ -1523,13 +1526,13 @@ async fn reload_audit_bridge(
                     per_subsystem_ms.clone(),
                 );
                 // Receivers may have been dropped (e.g. tests); ignore send errors.
-                drop(last_reload_tx.send(Some(info)));
+                drop(channels.last_reload_tx.send(Some(info)));
 
                 match source {
                     uptrakit_config_reload::ReloadSource::Sighup
                     | uptrakit_config_reload::ReloadSource::FileWatch { .. } => {
-                        let new_digest = file_digest(&config_path);
-                        file_state_tx.send_modify(|s| {
+                        let new_digest = file_digest(&channels.config_path);
+                        channels.file_state_tx.send_modify(|s| {
                             s.digest = new_digest;
                             s.loaded_at = time::OffsetDateTime::now_utc();
                             s.pending_digest = None;
@@ -1551,7 +1554,7 @@ async fn reload_audit_bridge(
                         .unwrap_or_else(|_| String::new()),
                     "sections": sections,
                 });
-                recent_events_tx.send_modify(|v| {
+                channels.recent_events_tx.send_modify(|v| {
                     v.push(event_json);
                     if v.len() > 20 {
                         v.remove(0);
@@ -1563,7 +1566,7 @@ async fn reload_audit_bridge(
                 subsystem,
                 error,
             } => {
-                file_state_tx.send_modify(|s| {
+                channels.file_state_tx.send_modify(|s| {
                     s.pending_digest = None;
                     s.pending_detected_at = None;
                 });
@@ -1576,7 +1579,7 @@ async fn reload_audit_bridge(
                     "subsystem": subsystem,
                     "error": error,
                 });
-                recent_events_tx.send_modify(|v| {
+                channels.recent_events_tx.send_modify(|v| {
                     v.push(event_json);
                     if v.len() > 20 {
                         v.remove(0);
@@ -1592,7 +1595,7 @@ async fn reload_audit_bridge(
                     "subsystem": subsystem,
                     "reason": reason,
                 });
-                recent_events_tx.send_modify(|v| {
+                channels.recent_events_tx.send_modify(|v| {
                     v.push(event_json);
                     if v.len() > 20 {
                         v.remove(0);
