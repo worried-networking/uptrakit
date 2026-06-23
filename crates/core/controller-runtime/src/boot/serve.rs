@@ -248,6 +248,11 @@ pub(super) fn spawn_pki_http(
 
 /// Final boot phase: spawn background tasks, register embedded services,
 /// install signal handlers, start servers, and drive the shutdown loop.
+// `info` is consumed only by the embedded agent / ssh-agent registration calls below, which are
+// feature-gated. A `_info` rename is not viable: `clippy::used_underscore_binding` (workspace-deny)
+// fires when those features ARE enabled and the underscored binding is used. The function-level
+// `expect(unused_variables)`, gated to the builds where `info` is genuinely unused, is the
+// idiomatic resolution under this lint set.
 #[cfg_attr(
     not(any(feature = "embedded-agent", feature = "embedded-ssh-agent")),
     expect(
