@@ -45,9 +45,6 @@ pub(crate) mod tasks;
 #[cfg(feature = "zeroconf")]
 mod zeroconf;
 
-use std::net::SocketAddr;
-use std::sync::Arc;
-
 use clap::Parser;
 use sea_orm::DatabaseConnection;
 use thiserror::Error;
@@ -56,7 +53,6 @@ use uptrakit_build_info::BuildInfo;
 use uptrakit_shared_macros::impl_report_conversion;
 
 use uptrakit_config_reload::{ReexecHook, ReexecOutcome};
-use uptrakit_web_api::AppState;
 use uptrakit_web_api::oauth::boot::deregister_oauth_instance;
 
 #[derive(Debug, Error)]
@@ -196,10 +192,6 @@ async fn async_main(info: BuildInfo) -> std::process::ExitCode {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Extracted helper functions
-// ---------------------------------------------------------------------------
-
 /// Build the audit log filter and dispatcher from TOML configuration.
 ///
 /// Configures the audit backend (database or noop) and the event filter
@@ -237,142 +229,12 @@ pub(crate) async fn build_audit_logger(
     Ok(AuditLogDispatcher::with_enricher(backend, enricher))
 }
 
-/// Spawn background tasks: CRL manager, denylist cleanup, CA reload/rotation,
-/// server cert renewal, and NATS consumer. Embedded service registration is
-/// handled by the caller after this function returns.
-#[cfg_attr(
-    feature = "nats",
-    expect(
-        clippy::too_many_arguments,
-        reason = "spawns background infrastructure tasks; each parameter drives a distinct lifecycle phase"
-    )
-)]
-pub(crate) async fn spawn_background_tasks(
-    bg: &mut tasks::BackgroundTasks,
-    app_state: &Arc<AppState>,
-    crl_manager: &Arc<crl_manager::CrlManager>,
-    ca_managed: bool,
-    ca_tx: &tokio::sync::watch::Sender<pki::CaSnapshot>,
-    initial_ca_version: i64,
-    has_external_tls_cert: bool,
-    #[cfg(feature = "nats")]
-    service_connections: &uptrakit_web_api::service_connections::ServiceConnectionRegistry,
-    #[cfg(feature = "nats")] nats_transport: &Option<
-        uptrakit_web_api::nats_transport::NatsTransport,
-    >,
-) {
-    // CRL manager: uses the child cancellation token for cooperative shutdown.
-    // Must use track() (not track_abort()) so the manager finishes its current
-    // cycle and writes the final TLS config before the process exits.
-    let crl_handle = tokio::spawn(Arc::clone(crl_manager).run(Some(bg.child_token())));
-    bg.track("crl-manager", crl_handle);
-
-    // Token denylist cleanup (in-memory, per-instance — not in scheduler)
-    let h =
-        tasks::spawn_denylist_cleanup(bg.child_token(), Arc::clone(&app_state.auth.token_denylist));
-    bg.track("denylist-cleanup", h);
-
-    if ca_managed {
-        let h = tasks::spawn_ca_reload(
-            bg.child_token(),
-            Arc::clone(app_state),
-            ca_tx.clone(),
-            Arc::clone(crl_manager),
-            initial_ca_version,
-        );
-        bg.track("ca-reload", h);
-    }
-
-    if ca_managed {
-        let h = tasks::spawn_ca_rotation(
-            bg.child_token(),
-            Arc::clone(app_state),
-            ca_tx.clone(),
-            Arc::clone(crl_manager),
-        );
-        bg.track("ca-rotation", h);
-    }
-
-    if !has_external_tls_cert {
-        let h = tasks::spawn_server_cert_renewal(
-            bg.child_token(),
-            Arc::clone(app_state),
-            Arc::clone(crl_manager),
-        );
-        bg.track("server-cert-renewal", h);
-    }
-
-    // NATS consumer (cross-controller event delivery)
-    #[cfg(feature = "nats")]
-    if let Some(ref nats) = *nats_transport {
-        let h = tasks::spawn_nats_consumer(
-            bg.child_token(),
-            nats.clone(),
-            uptrakit_web_api::nats_transport::NatsConsumerConfig {
-                registry: service_connections.clone(),
-                db: app_state.db().clone(),
-                notification_service: app_state.notification.notification_service.clone(),
-                event_broadcaster: app_state.notification.event_broadcaster.clone(),
-                ca_rotation_trigger: Some(Arc::clone(&app_state.cert.ca_rotation_trigger)),
-                revocation_notify: Some(Arc::clone(&app_state.cert.revocation_notify)),
-                token_denylist: Some(Arc::clone(&app_state.auth.token_denylist)),
-                claim_registry: Some(Arc::clone(&app_state.workload_claim_registry)),
-            },
-        );
-        bg.track("nats-consumer", h);
-    }
-}
-
-/// Spawn the zeroconf mDNS advertiser if the feature is enabled and configured.
-#[cfg(feature = "zeroconf")]
-pub(crate) fn spawn_zeroconf(
-    bg: &mut tasks::BackgroundTasks,
-    app_state: &Arc<AppState>,
-    https_addr: SocketAddr,
-) {
-    let zeroconf_settings = app_state.settings.zeroconf();
-    if zeroconf_settings.enabled {
-        let ca_snap = app_state.cert.ca_snapshot.borrow().clone();
-        let zc_cancel = bg.child_token();
-        let handle = tokio::spawn(zeroconf::run_advertiser(
-            zc_cancel,
-            https_addr,
-            ca_snap,
-            zeroconf_settings,
-        ));
-        bg.track("zeroconf-advertiser", handle);
-    }
-}
-
 /// Status-watch channels + config path consumed by `reload_audit_bridge`.
 pub(crate) struct ReloadBridgeChannels {
     pub file_state_tx: tokio::sync::watch::Sender<uptrakit_config_reload::ConfigFileState>,
     pub last_reload_tx: tokio::sync::watch::Sender<Option<uptrakit_config_reload::LastReloadInfo>>,
     pub recent_events_tx: tokio::sync::watch::Sender<Vec<serde_json::Value>>,
     pub config_path: std::path::PathBuf,
-}
-
-/// Spawn the optional plain-HTTP PKI server on the given port.
-///
-/// `inherited` is a pre-bound socket to reuse on the reexec path; `None` on
-/// cold start causes a fresh `bind(addr)`.
-pub(crate) fn spawn_pki_http(
-    bg: &mut tasks::BackgroundTasks,
-    app_state: &Arc<AppState>,
-    pki_http_port: Option<u16>,
-    inherited: Option<std::net::TcpListener>,
-) {
-    let Some(port) = pki_http_port else {
-        return;
-    };
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    let app_state_for_pki = Arc::clone(app_state);
-    let pki_http_handle = tokio::spawn(async move {
-        if let Err(e) = server::run_pki_http(addr, app_state_for_pki, inherited).await {
-            tracing::error!(error = ?e, "PKI HTTP server error");
-        }
-    });
-    bg.track_abort("pki-http", pki_http_handle);
 }
 
 #[expect(
