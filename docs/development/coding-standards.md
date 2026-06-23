@@ -2013,6 +2013,29 @@ delegates the decision to a `ReexecHook` implementation registered at startup.
   tasks. The raw FD integer is valid after the socket is moved into the server task; `clear_cloexec_raw` uses the integer, not the Rust wrapper.
 - When no `ReexecHook` is registered (e.g. in tests), the coordinator skips the reexec check and proceeds with in-process apply.
 
+## Boot Phase Pattern
+
+**Mandatory:** New controller subsystems must be added as a new `boot/<phase>.rs` file with a free
+async function that returns a typed output struct. Never add an inline block to an existing phase
+function or to `run_server`; doing so re-monolithizes the orchestrator that ADR 0023 decomposed.
+
+Rules:
+
+- One file per phase. The phase function signature is `async fn <phase>(deps…) -> Result<<Output>>`.
+- The output struct carries only the values this phase produces. High-fan-out values already in
+  `Arc<AppState>` must not be duplicated into phase structs.
+- Post-assembly phases (`recovery`, `serve`) take `Arc<AppState>` as their primary argument, not an
+  accumulation of phase structs.
+- If a phase has five or more distinct sub-concerns (e.g. OAuth + PKI + TLS + JWT + cert_signer),
+  start it as a sub-module directory (`boot/<phase>/mod.rs` + per-concern files) rather than a
+  single file that will immediately need splitting.
+- The consecutive-FD atomicity invariant: inherited-FD claim, HTTPS bind, PKI bind, and both
+  `clear_cloexec` calls must remain in one atomic function (`boot::listeners::claim`). No
+  fd-allocating call may run between the HTTPS and PKI binds.
+
+See [ADR 0023](../adr/0023-controller-boot-phase-decomposition.md) for the full rationale, module
+layout, and guard rails against re-forming a god-struct.
+
 ## Per-Section Watch Pattern
 
 Config changes flow through `tokio::sync::watch<Arc<SectionConfig>>` channels. Inject receivers at construction time; never pass config values
