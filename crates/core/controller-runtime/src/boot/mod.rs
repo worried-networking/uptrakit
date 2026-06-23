@@ -7,6 +7,7 @@
 //! per-phase extraction tasks can move them independently.
 
 pub(crate) mod config;
+pub(crate) mod crypto;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -24,25 +25,19 @@ use crate::{AppError, ReloadBridgeChannels};
 pub(crate) async fn run_server(args: crate::cli::Args, info: BuildInfo) -> crate::Result<()> {
     // Phase 0: Load TOML config, parse bootstrap env args, initialise tracing.
     let cfg = config::load(args, &info).await?;
+
+    // Phase 1: Master key initialization — reads from --master-key-from or TOML
+    // master_key as a fallback. The TOML value already carries the full source
+    // string (file:, env:, or inline hex) so no prefix injection is needed.
+    let crypto = crypto::init(&cfg)?;
+    let master_key_hex = crypto.hex;
+
     let config_path_for_coord = cfg.config_path.clone();
     let booted = cfg.booted;
     let oidc_bootstrap = cfg.oidc_bootstrap;
     let enrollment_bootstrap = cfg.enrollment_bootstrap;
     let args = cfg.args;
     let runtime = &booted.runtime;
-
-    // Phase 1: Master key initialization — reads from --master-key-from or TOML
-    // master_key as a fallback. The TOML value already carries the full source
-    // string (file:, env:, or inline hex) so no prefix injection is needed.
-    let toml_key = runtime.master_key.expose_secret();
-    let master_key_source = args.master_key_from.as_deref().or({
-        if toml_key.is_empty() {
-            None
-        } else {
-            Some(toml_key)
-        }
-    });
-    let master_key_hex = crate::startup::init_master_key(master_key_source)?;
 
     // Phase 2: Application directories — use platform defaults (no CLI overrides).
     let app_dirs =
@@ -76,17 +71,8 @@ pub(crate) async fn run_server(args: crate::cli::Args, info: BuildInfo) -> crate
     let default_tenant_id = db_init.default_tenant.id;
     tracing::info!(%default_tenant_id, "loaded default tenant");
 
-    // Phase 4: Master key verification (HA safety)
-    crate::startup::verify_master_key(&db_conn).await?;
-
-    // Phase 4b: Register column AAD mappings (enables ENC:v2/v3 read support)
-    crate::reencrypt::register_column_aad_mappings();
-
-    // Phase 4c: Initialize data key ring (envelope encryption)
-    crate::startup::init_data_key_ring(&db_conn).await?;
-
-    // Phase 4d: Migrate all encrypted values to ENC:v3 (automatic)
-    crate::reencrypt::reencrypt_to_v3(&db_conn).await;
+    // Phases 4/4b/4c/4d: master key verify, column AAD mappings, data key ring, ENC:v3 migration
+    crypto::verify_and_migrate(&db_conn).await?;
 
     // Phase 5: Load settings
     let (settings, global_raw, _tenant_raw, reg_token) =
