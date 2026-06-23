@@ -22,7 +22,7 @@ pub(crate) struct Persistence {
 /// on-disk SQLite path when the URL is empty.
 pub(crate) async fn open(cfg: &BootConfig, layout: &AppLayout) -> crate::Result<Persistence> {
     let runtime = &cfg.booted.runtime;
-    let db_init = crate::startup::init_database(
+    let db_init = crate::boot::init::init_database(
         &runtime.db.url,
         runtime.db.pool_size,
         layout.app_dirs.state_dir(),

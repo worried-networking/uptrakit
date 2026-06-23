@@ -3,7 +3,7 @@
 //! Splits the crypto boot work by DB dependency:
 //!
 //! - [`init`] — Phase 1 (no DB): resolve master-key source and call
-//!   `startup::init_master_key`. Runs immediately after config is loaded.
+//!   `boot::init::init_master_key`. Runs immediately after config is loaded.
 //! - [`verify_and_migrate`] — Phases 4/4b/4c/4d (needs DB): verify the key
 //!   matches existing encrypted data, register column AAD mappings, initialise
 //!   the data key ring, and migrate legacy values to `ENC:v3:`. Runs after the
@@ -14,7 +14,7 @@ use crate::boot::config::BootConfig;
 /// Carries the raw master-key hex produced by Phase 1.
 ///
 /// `hex` is `None` when no master key is configured (encryption disabled).
-/// The type is exactly what [`crate::startup::init_master_key`] returns —
+/// The type is exactly what [`crate::boot::init::init_master_key`] returns —
 /// no wrapping or unwrapping is applied.
 pub(crate) struct MasterKey {
     pub hex: Option<uptrakit_wire::SecretString>,
@@ -28,7 +28,7 @@ pub(crate) struct MasterKey {
 ///
 /// The result is stored in [`MasterKey::hex`] as-is — the exact
 /// `Option<uptrakit_wire::SecretString>` returned by
-/// `startup::init_master_key`, with no additional wrapping.
+/// `boot::init::init_master_key`, with no additional wrapping.
 pub(crate) fn init(cfg: &BootConfig) -> crate::Result<MasterKey> {
     let runtime = &cfg.booted.runtime;
     let toml_key = runtime.master_key.expose_secret();
@@ -39,7 +39,7 @@ pub(crate) fn init(cfg: &BootConfig) -> crate::Result<MasterKey> {
             Some(toml_key)
         }
     });
-    let hex = crate::startup::init_master_key(master_key_source)?;
+    let hex = crate::boot::init::init_master_key(master_key_source)?;
     Ok(MasterKey { hex })
 }
 
@@ -55,13 +55,13 @@ pub(crate) fn init(cfg: &BootConfig) -> crate::Result<MasterKey> {
 /// signature once `Persistence` is available.
 pub(crate) async fn verify_and_migrate(db: &sea_orm::DatabaseConnection) -> crate::Result<()> {
     // Phase 4: Master key verification (HA safety)
-    crate::startup::verify_master_key(db).await?;
+    crate::boot::init::verify_master_key(db).await?;
 
     // Phase 4b: Register column AAD mappings (enables ENC:v2/v3 read support)
     crate::reencrypt::register_column_aad_mappings();
 
     // Phase 4c: Initialize data key ring (envelope encryption)
-    crate::startup::init_data_key_ring(db).await?;
+    crate::boot::init::init_data_key_ring(db).await?;
 
     // Phase 4d: Migrate all encrypted values to ENC:v3 (automatic)
     crate::reencrypt::reencrypt_to_v3(db).await;

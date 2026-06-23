@@ -40,7 +40,6 @@ mod server_cert_resolver;
 pub(crate) mod service_host;
 #[cfg(feature = "embedded-ssh-agent")]
 mod ssh_agent;
-pub(crate) mod startup;
 pub(crate) mod tasks;
 #[cfg(feature = "zeroconf")]
 mod zeroconf;

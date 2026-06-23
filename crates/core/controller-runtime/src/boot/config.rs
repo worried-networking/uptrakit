@@ -15,7 +15,7 @@ use crate::AppError;
 /// Output of Phase 0: holds the loaded TOML runtime config, parsed bootstrap
 /// args, config-file path, and the original CLI args needed downstream.
 pub(crate) struct BootConfig {
-    pub booted: crate::startup::BootedConfig,
+    pub booted: crate::boot::init::BootedConfig,
     pub oidc_bootstrap: crate::cli::OidcBootstrapArgs,
     pub enrollment_bootstrap: crate::cli::EnrollmentBootstrapArgs,
     pub config_path: std::path::PathBuf,
@@ -35,7 +35,7 @@ pub(crate) async fn load(args: crate::cli::Args, info: &BuildInfo) -> crate::Res
         )))
     })?;
     tracing::info!("toml config path: {}", config_path.display());
-    let booted = crate::startup::boot_config(config_path.clone())
+    let booted = crate::boot::init::boot_config(config_path.clone())
         .await
         .map_err(|e| report!(AppError::Config(format!("failed to load TOML config: {e}"))))?;
 

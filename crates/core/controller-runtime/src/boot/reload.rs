@@ -64,7 +64,7 @@ pub(crate) struct ReloadWiring {
     reason = "wires coordinator from all phase outputs; each parameter drives a distinct subsystem or lifecycle hook"
 )]
 pub(crate) async fn wire(
-    mut booted: crate::startup::BootedConfig,
+    mut booted: crate::boot::init::BootedConfig,
     config_path_for_coord: std::path::PathBuf,
     args_master_key_from: Option<String>,
     components: &Components,
@@ -73,7 +73,7 @@ pub(crate) async fn wire(
     identity: &Identity,
     db_conn: sea_orm::DatabaseConnection,
     db_url: String,
-    #[cfg(feature = "nats")] reconciled: &crate::startup::ReconciledSettings,
+    #[cfg(feature = "nats")] reconciled: &crate::boot::init::ReconciledSettings,
 ) -> crate::Result<ReloadWiring> {
     // DB → TLS → Listeners → NATS → Audit → Zeroconf → Plugins → Embedded
     let db_reloadable =
@@ -375,10 +375,10 @@ async fn reload_audit_bridge(
 ///
 /// Returns an empty string and logs a warning if the file cannot be read.
 ///
-/// # Divergence from `startup::file_digest`
+/// # Divergence from `boot::init::file_digest`
 ///
 /// This function returns a plain hex string and falls back to `String::new()`
-/// on error.  `startup::file_digest` returns `"sha256:<hex>"` / `"size:N"`.
+/// on error.  `boot::init::file_digest` returns `"sha256:<hex>"` / `"size:N"`.
 /// The two formats are intentionally kept distinct: swapping them would
 /// silently change the digest format written by the `reload_audit_bridge`.
 fn file_digest(path: &std::path::Path) -> String {

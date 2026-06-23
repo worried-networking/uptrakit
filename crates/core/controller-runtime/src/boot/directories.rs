@@ -43,7 +43,7 @@ pub(crate) async fn resolve() -> crate::Result<AppLayout> {
         feature = "embedded-ssh-agent",
         feature = "embedded-mqtt"
     ))]
-    let installation_id = crate::startup::init_installation_id(app_dirs.state_dir()).await?;
+    let installation_id = crate::boot::init::init_installation_id(app_dirs.state_dir()).await?;
 
     Ok(AppLayout {
         app_dirs,
