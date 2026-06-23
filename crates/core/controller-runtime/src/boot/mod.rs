@@ -8,6 +8,7 @@
 
 pub(crate) mod config;
 pub(crate) mod crypto;
+pub(crate) mod directories;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -40,32 +41,22 @@ pub(crate) async fn run_server(args: crate::cli::Args, info: BuildInfo) -> crate
     let runtime = &booted.runtime;
 
     // Phase 2: Application directories — use platform defaults (no CLI overrides).
-    let app_dirs =
-        uptrakit_directories::AppDirs::resolve("controller", None, None).map_err(|e| {
-            report!(AppError::Config(format!(
-                "failed to resolve directories: {e}"
-            )))
-        })?;
-    app_dirs.ensure_dirs().await.map_err(|e| {
-        report!(AppError::Config(format!(
-            "failed to create directories: {e}"
-        )))
-    })?;
-    tracing::info!("config directory: {}", app_dirs.config_dir().display());
-    tracing::info!("state directory: {}", app_dirs.state_dir().display());
+    let layout = directories::resolve().await?;
     #[cfg(any(
         feature = "embedded-scheduler",
         feature = "embedded-agent",
         feature = "embedded-ssh-agent",
         feature = "embedded-mqtt"
     ))]
-    let controller_installation_id =
-        crate::startup::init_installation_id(app_dirs.state_dir()).await?;
+    let controller_installation_id = layout.installation_id;
 
     // Phase 3: Database — URL and pool size from TOML [db].
-    let db_init =
-        crate::startup::init_database(&runtime.db.url, runtime.db.pool_size, app_dirs.state_dir())
-            .await?;
+    let db_init = crate::startup::init_database(
+        &runtime.db.url,
+        runtime.db.pool_size,
+        layout.app_dirs.state_dir(),
+    )
+    .await?;
     let db_conn = db_init.conn;
     let db_url = db_init.url;
     let default_tenant_id = db_init.default_tenant.id;
@@ -213,12 +204,16 @@ pub(crate) async fn run_server(args: crate::cli::Args, info: BuildInfo) -> crate
         };
 
     // Phase 9: PKI + TLS — cert/key paths from TOML [tls]
-    let pki =
-        crate::startup::init_pki_runtime(runtime, &db_conn, app_dirs.config_dir(), &reconciled)
-            .await?;
+    let pki = crate::startup::init_pki_runtime(
+        runtime,
+        &db_conn,
+        layout.app_dirs.config_dir(),
+        &reconciled,
+    )
+    .await?;
 
     // Phase 10: JWT
-    let jwt_manager = crate::startup::init_jwt(&db_conn, app_dirs.state_dir()).await?;
+    let jwt_manager = crate::startup::init_jwt(&db_conn, layout.app_dirs.state_dir()).await?;
 
     // Destructure PKI runtime for distribution across AppState and tasks
     let crate::startup::PkiRuntime {
@@ -909,7 +904,7 @@ pub(crate) async fn run_server(args: crate::cli::Args, info: BuildInfo) -> crate
         &app_state,
         &mut bg,
         controller_installation_id,
-        app_dirs.state_dir().to_path_buf(),
+        layout.app_dirs.state_dir().to_path_buf(),
         None,
         &info,
     )
@@ -926,7 +921,7 @@ pub(crate) async fn run_server(args: crate::cli::Args, info: BuildInfo) -> crate
         &app_state,
         &mut bg,
         controller_installation_id,
-        app_dirs.state_dir().to_path_buf(),
+        layout.app_dirs.state_dir().to_path_buf(),
         &info,
     )
     .await
