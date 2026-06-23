@@ -383,7 +383,6 @@ skip = [
     { crate = "sec1@0.7.3", reason = "pulled by elliptic-curve 0.13 / pkcs8 0.10 (openidconnect); newer 0.8 used by russh 0.60" },
     { crate = "sha2@0.10.9", reason = "pulled by digest 0.10 chain (openidconnect/argon2); newer 0.11 used by russh 0.61 crypto" },
     { crate = "spki@0.7.3", reason = "pulled by pkcs8 0.10 / ecdsa (openidconnect ecdsa/rsa chain); newer 0.8 used by russh 0.61 crypto" },
-    { crate = "wit-bindgen@0.51.0", reason = "pulled by older wasm/wit-bindgen-rt chain; newer 0.57 added by cargo update" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive
