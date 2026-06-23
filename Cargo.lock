@@ -7704,6 +7704,7 @@ name = "uptrakit-nats"
 version = "0.0.1"
 dependencies = [
  "async-nats",
+ "backon",
  "futures-util",
  "rootcause",
  "serde",
@@ -7712,7 +7713,6 @@ dependencies = [
  "time",
  "tokio",
  "tracing",
- "uptrakit-backoff",
  "uptrakit-crypto",
  "uptrakit-shared-macros",
  "uptrakit-wire",

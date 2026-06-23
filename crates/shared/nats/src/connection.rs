@@ -2,9 +2,9 @@ use std::time::Duration;
 
 use async_nats::jetstream;
 use async_nats::jetstream::stream::RetentionPolicy;
+use backon::{ExponentialBuilder, Retryable};
 use rootcause::prelude::*;
 use time::OffsetDateTime;
-use uptrakit_backoff::Backoff;
 use uptrakit_wire::ControllerMessage;
 use uuid::Uuid;
 
@@ -49,45 +49,26 @@ impl NatsConnection {
         tracing::info!(url, "connecting to NATS");
         // Retry up to 10 times with exponential backoff (1s base, 30s cap).
         // Transient NATS unavailability at startup should not cause permanent failure.
-        const MAX_ATTEMPTS: u32 = 10;
-        let client = 'connect: {
-            let mut backoff = Backoff::new(Duration::from_secs(1), Duration::from_secs(30));
-            let mut last_err = None;
-            for attempt in 1..=MAX_ATTEMPTS {
-                match async_nats::connect(url).await {
-                    Ok(c) => {
-                        // no reset: backoff is locally scoped; bounded loop exits on success
-                        break 'connect c;
-                    }
-                    Err(e) => {
-                        // escalate chosen: bounded MAX_ATTEMPTS=10 retry; each
-                        // attempt either connects or fails with no partial-progress
-                        // distinction. Escalate naturally to spread retries.
-                        let delay = backoff.escalate();
-                        tracing::warn!(
-                            url,
-                            attempt,
-                            max_attempts = MAX_ATTEMPTS,
-                            delay_ms = delay.as_millis(),
-                            error = %e,
-                            "NATS connection attempt failed; retrying"
-                        );
-                        if attempt < MAX_ATTEMPTS {
-                            tokio::time::sleep(delay).await;
-                        }
-                        last_err = Some(e);
-                    }
-                }
-            }
-            // All attempts exhausted — propagate the last error.
-            // SAFETY invariant: MAX_ATTEMPTS >= 1, so the loop always runs at least once,
-            // guaranteeing last_err is Some.
-            #[expect(
-                clippy::expect_used,
-                reason = "invariant: loop runs at least MAX_ATTEMPTS times so last_err is always Some when we reach this point"
-            )]
-            return Err(last_err.expect("loop ran at least once")).context_to::<NatsError>();
-        };
+        const MAX_ATTEMPTS: usize = 10;
+        let client = (|| async_nats::connect(url))
+            .retry(
+                ExponentialBuilder::default()
+                    .with_min_delay(Duration::from_secs(1))
+                    .with_max_delay(Duration::from_secs(30))
+                    .with_jitter()
+                    // 9 retries after the first = 10 total attempts (preserves MAX_ATTEMPTS).
+                    .with_max_times(MAX_ATTEMPTS - 1),
+            )
+            .notify(|e, delay| {
+                tracing::warn!(
+                    url,
+                    delay_ms = delay.as_millis(),
+                    error = %e,
+                    "NATS connection attempt failed; retrying"
+                );
+            })
+            .await
+            .context_to::<NatsError>()?;
 
         let js = jetstream::new(client.clone());
         Ok(Self { js, client })
