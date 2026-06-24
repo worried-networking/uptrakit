@@ -12,11 +12,20 @@ use std::collections::BTreeMap;
 pub struct ConfigFileState {
     /// Absolute path to the active TOML config file.
     pub path: String,
-    /// Hex-encoded SHA-256 digest (or a size-based stub if `sha2` is unavailable).
+    /// Canonical `sha256:<hex>` digest of the active config file.
+    ///
+    /// This value is set at boot and updated after each successful reload.
+    /// On a transient applied-path re-read error the field retains its previous
+    /// value (never blanked). A *persistent* re-read failure — e.g. the config
+    /// file is moved or removed after the controller started — therefore leaves a
+    /// stale digest displayed here. The only signal is repeated
+    /// `applied digest re-read failed` warn log lines; operators should treat
+    /// sustained warns as "displayed digest may be stale."
     pub digest: String,
     /// When this file was last successfully loaded.
     pub loaded_at: time::OffsetDateTime,
-    /// Digest of a file change detected but not yet reloaded.
+    /// `sha256:<hex>` of a detected-but-unapplied change; `None` when no change
+    /// is pending or the changed file could not be read.
     pub pending_digest: Option<String>,
     /// When the pending change was first detected.
     pub pending_detected_at: Option<time::OffsetDateTime>,

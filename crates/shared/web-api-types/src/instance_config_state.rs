@@ -53,7 +53,10 @@ impl ConfigStateResponse {
 pub struct FileStateView {
     /// Absolute path to the TOML config file.
     pub path: String,
-    /// Digest of the file as last loaded (hex SHA-256 or size stub).
+    /// `sha256:<hex>` digest of the active config file.
+    ///
+    /// Retains its last value on a transient re-read error (never blanked);
+    /// see `ConfigFileState::digest` for the stale-on-persistent-error contract.
     pub digest: String,
     /// When the file was last successfully loaded.
     #[serde(with = "time::serde::rfc3339")]
@@ -62,7 +65,8 @@ pub struct FileStateView {
         schema(value_type = String, format = DateTime)
     )]
     pub loaded_at: OffsetDateTime,
-    /// Digest of a pending (not yet reloaded) change detected on disk.
+    /// `sha256:<hex>` of a detected-but-unapplied change; `null` when no change
+    /// is pending or the changed file could not be read.
     pub pending_digest: Option<String>,
     /// When the pending change was first detected.
     #[serde(with = "time::serde::rfc3339::option")]
