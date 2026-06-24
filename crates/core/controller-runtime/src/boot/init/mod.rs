@@ -144,8 +144,8 @@ pub(crate) async fn boot_config(config_path: PathBuf) -> Result<BootedConfig, ro
     );
     let settings_version_cache = uptrakit_config_reload::SettingsVersionCache::new();
 
-    // Compute initial file state using SHA-256 digest.
-    let digest = file_digest(&config_path);
+    // Seed the initial file state from the digest already computed by the loader.
+    let digest = loaded.digest.clone();
     let initial_file_state = uptrakit_config_reload::ConfigFileState::new(
         config_path.display().to_string(),
         digest,
@@ -176,33 +176,6 @@ pub(crate) async fn boot_config(config_path: PathBuf) -> Result<BootedConfig, ro
         reload_recent_events_tx,
         reload_recent_events_rx,
     })
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Compute a `"sha256:<hex>"` digest of the file at `path`.
-///
-/// Falls back to `"size:<N>"` on I/O error so that the status endpoint
-/// always has a value rather than returning an empty string.
-pub(crate) fn file_digest(path: &std::path::Path) -> String {
-    use sha2::{Digest as _, Sha256};
-    match std::fs::read(path) {
-        Ok(bytes) => {
-            let mut h = Sha256::new();
-            h.update(&bytes);
-            format!("sha256:{:x}", h.finalize())
-        }
-        Err(e) => {
-            tracing::warn!(
-                path = %path.display(),
-                error = %e,
-                "could not read config for digest; using size stub"
-            );
-            format!("size:{}", path.metadata().map(|m| m.len()).unwrap_or(0))
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------

@@ -218,9 +218,15 @@ async fn reload_audit_bridge(
         // Update status watch channels.
         match &event {
             ReloadAuditEvent::FileChanged { path } => {
-                let pending_digest = file_digest(path);
+                let pending = match uptrakit_config_reload::file_digest(path) {
+                    Ok(d) => Some(d),
+                    Err(e) => {
+                        tracing::warn!(path = %path.display(), error = %e, "pending digest unavailable");
+                        None
+                    }
+                };
                 channels.file_state_tx.send_modify(|s| {
-                    s.pending_digest = Some(pending_digest);
+                    s.pending_digest = pending;
                     s.pending_detected_at = Some(time::OffsetDateTime::now_utc());
                 });
             }
@@ -240,9 +246,13 @@ async fn reload_audit_bridge(
                 match source {
                     uptrakit_config_reload::ReloadSource::Sighup
                     | uptrakit_config_reload::ReloadSource::FileWatch { .. } => {
-                        let new_digest = file_digest(&channels.config_path);
+                        let applied = uptrakit_config_reload::file_digest(&channels.config_path)
+                            .inspect_err(|e| tracing::warn!(error = %e, "applied digest re-read failed; keeping last digest"))
+                            .ok();
                         channels.file_state_tx.send_modify(|s| {
-                            s.digest = new_digest;
+                            if let Some(d) = applied {
+                                s.digest = d;
+                            }
                             s.loaded_at = time::OffsetDateTime::now_utc();
                             s.pending_digest = None;
                             s.pending_detected_at = None;
@@ -367,26 +377,6 @@ async fn reload_audit_bridge(
             .build()
         {
             emitter.emit_event(entry);
-        }
-    }
-}
-
-/// Compute the hex-encoded SHA-256 digest of a file at `path`.
-///
-/// Returns an empty string and logs a warning if the file cannot be read.
-///
-/// # Divergence from `boot::init::file_digest`
-///
-/// This function returns a plain hex string and falls back to `String::new()`
-/// on error.  `boot::init::file_digest` returns `"sha256:<hex>"` / `"size:N"`.
-/// The two formats are intentionally kept distinct: swapping them would
-/// silently change the digest format written by the `reload_audit_bridge`.
-fn file_digest(path: &std::path::Path) -> String {
-    match std::fs::read(path) {
-        Ok(bytes) => crate::pki::sha256_hex(&bytes),
-        Err(e) => {
-            tracing::warn!(path = %path.display(), error = %e, "could not read config file for digest");
-            String::new()
         }
     }
 }
