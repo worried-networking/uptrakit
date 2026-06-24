@@ -15,6 +15,7 @@ notify-debouncer-full = { workspace = true }
 parking_lot = { workspace = true }
 rootcause = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
+sha2 = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true, features = ["serde"] }
 tokio = { workspace = true, features = ["sync", "rt", "macros", "signal", "time"] }

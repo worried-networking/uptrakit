@@ -27,7 +27,7 @@ pub use coordinator::{
 };
 pub use delta::RuntimeConfigDelta;
 pub use error::ConfigReloadError;
-pub use loader::{LoadedConfig, TomlConfigLoader};
+pub use loader::{LoadedConfig, TomlConfigLoader, file_digest};
 pub use reconciler::SettingsVersionCache;
 pub use reexec_hook::{ReexecHook, ReexecOutcome};
 pub use reloadable::{Reloadable, ReloadableErased};

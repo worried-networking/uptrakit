@@ -1,9 +1,37 @@
 use std::path::Path;
 
 use rootcause::prelude::*;
+use sha2::{Digest as _, Sha256};
 
 use crate::config::RuntimeConfig;
 use crate::error::ConfigReloadError;
+
+/// Lowercase hex SHA-256 of `bytes`. Same output as `pki::sha256_hex` (one-shot `Sha256::digest`
+/// instead of new/update/finalize — identical result).
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
+    uptrakit_shared_types::hex::encode(Sha256::digest(bytes))
+}
+
+/// The one place the config-digest format is defined: `sha256:<hex>`.
+fn config_digest(bytes: &[u8]) -> String {
+    format!("sha256:{}", sha256_hex(bytes))
+}
+
+/// Reads `path` and returns its `sha256:<hex>` digest.
+///
+/// # Errors
+/// Returns the read error if the file cannot be read (transient race: the change
+/// that triggered the read may have been superseded or the file removed).
+pub fn file_digest(path: &Path) -> Result<String, rootcause::Report> {
+    // Mirror load()'s read map_err idiom — same TomlIo variant.
+    let bytes = std::fs::read(path).map_err(|e| {
+        report!(ConfigReloadError::TomlIo {
+            path: path.to_path_buf(),
+            source_msg: e.to_string(),
+        })
+    })?;
+    Ok(config_digest(&bytes))
+}
 
 /// The result of loading and parsing a TOML config file.
 #[non_exhaustive]
@@ -12,6 +40,8 @@ pub struct LoadedConfig {
     pub config: RuntimeConfig,
     /// Warnings about unknown keys that were ignored during parse.
     pub warnings: Vec<String>,
+    /// `sha256:<hex>` of the file bytes read by `load`.
+    pub digest: String,
 }
 
 /// Loads and validates a TOML config file from disk.
@@ -29,10 +59,17 @@ impl TomlConfigLoader {
     /// or any section fails [`RuntimeConfig::validate`].
     pub fn load(path: impl AsRef<Path>) -> Result<LoadedConfig, Report> {
         let path = path.as_ref();
-        let raw = std::fs::read_to_string(path).map_err(|e| {
+        let bytes = std::fs::read(path).map_err(|e| {
             report!(ConfigReloadError::TomlIo {
                 path: path.to_path_buf(),
                 source_msg: e.to_string(),
+            })
+        })?;
+        let digest = config_digest(&bytes);
+        let raw = String::from_utf8(bytes).map_err(|e| {
+            report!(ConfigReloadError::TomlIo {
+                path: path.to_path_buf(),
+                source_msg: format!("config is not valid UTF-8: {e}"),
             })
         })?;
         check_old_format_hint(&raw, path)?;
@@ -45,7 +82,11 @@ impl TomlConfigLoader {
         config.validate()?;
         check_config_permissions(path, &config)?;
         let warnings = config.warn_about_extras();
-        Ok(LoadedConfig { config, warnings })
+        Ok(LoadedConfig {
+            config,
+            warnings,
+            digest,
+        })
     }
 
     /// Read, parse, and validate the config at `path` without returning it.
@@ -134,4 +175,54 @@ fn check_config_permissions_inner(path: &Path) -> Result<(), Report> {
         "inline master_key in config file — cannot verify file permissions on this platform"
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn sha256_hex_known_vector() {
+        // SHA-256("") = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+        assert_eq!(
+            super::sha256_hex(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
+
+    #[test]
+    fn config_digest_is_sha256_prefixed() {
+        assert_eq!(
+            super::config_digest(b""),
+            "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
+
+    #[test]
+    fn file_digest_ok_and_err() {
+        let dir = tempfile::tempdir().unwrap(); // already a dev-dep; auto-cleaned, parallel-safe
+        let p = dir.path().join("c.toml");
+        std::fs::write(&p, b"hello").unwrap(); // binary write: deterministic across platforms
+        let d = super::file_digest(&p).unwrap();
+        assert!(d.starts_with("sha256:") && d.len() == "sha256:".len() + 64);
+        super::file_digest(&dir.path().join("missing.toml")).unwrap_err();
+    }
+
+    #[test]
+    fn loaded_digest_matches_file_digest() {
+        // boot-seed path (LoadedConfig.digest from in-memory bytes) and the re-read path
+        // (file_digest) must agree for the same file — the whole point of this change.
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("controller.toml");
+        // Minimal valid config (network section required by RuntimeConfig).
+        std::fs::write(
+            &p,
+            b"master_key = \"env:UT\"\n\
+              [db]\nurl = \"sqlite://x\"\npool_size = 1\nacquire_timeout_ms = 5000\n\
+              [network]\naddr = \"0.0.0.0:8443\"\npki_addr = \"0.0.0.0:8444\"\n\
+              [audit]\nfilter = \"all\"\nretention_days = 90\n\
+              [log]\npath = \"/tmp/ut.log\"\nlevel = \"info\"\n",
+        )
+        .unwrap();
+        let loaded = super::TomlConfigLoader::load(&p).unwrap();
+        assert_eq!(loaded.digest, super::file_digest(&p).unwrap());
+    }
 }
