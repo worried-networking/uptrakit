@@ -13,6 +13,30 @@ updates:
       prefix: chore
       include: scope
     open-pull-requests-limit: 20
+    # These crates are deliberately pinned in the workspace Cargo.toml; bumping
+    # them produces an un-buildable graph until upstream constraints lift. The
+    # ignore ranges block the breaking bump while still allowing patches within
+    # the pinned series. Revisit when the pin comments in Cargo.toml are removed.
+    ignore:
+      # der/const-oid/spki/x509-cert: blocked by openidconnect 4.x -> spki 0.7 chain
+      - dependency-name: "der"
+        versions: [">= 0.8"]
+      - dependency-name: "spki"
+        versions: [">= 0.8"]
+      - dependency-name: "const-oid"
+        versions: [">= 0.10"]
+      - dependency-name: "x509-cert"
+        versions: [">= 0.3"]
+      # sha2/hmac/sha1: openidconnect 4.x hardcodes sha2 0.10.6
+      - dependency-name: "sha2"
+        versions: [">= 0.11"]
+      - dependency-name: "hmac"
+        versions: [">= 0.13"]
+      - dependency-name: "sha1"
+        versions: [">= 0.11"]
+      # rand: testcontainers 0.27 -> bollard 0.20 -> rand 0.9
+      - dependency-name: "rand"
+        versions: [">= 0.10"]
     groups:
       crypto-provider:
         patterns:
