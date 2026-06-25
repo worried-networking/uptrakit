@@ -18,8 +18,9 @@ use sea_orm::sea_query::Expr;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use time::OffsetDateTime;
 
-use super::shared_types::{ProcessorResponse, load_linked_host_ids};
-use super::{HandlerError, HandlerResult, MAX_UPDATE_OUTPUT_BYTES};
+use super::shared_types::{
+    HandlerError, HandlerResult, MAX_UPDATE_OUTPUT_BYTES, ProcessorResponse, load_linked_host_ids,
+};
 use crate::AppState;
 use crate::notifications::events::{NotificationEvent, NotificationEventDetails};
 use rootcause::prelude::*;

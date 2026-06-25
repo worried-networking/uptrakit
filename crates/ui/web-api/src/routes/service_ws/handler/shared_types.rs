@@ -8,10 +8,38 @@ use std::collections::HashSet;
 
 use rootcause::prelude::*;
 use sea_orm::{ColumnTrait, EntityTrait, JoinType, QueryFilter, QuerySelect, RelationTrait as _};
+use thiserror::Error;
 use uptrakit_shared_db::entity::{host, service, service_host};
+use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_wire::{CloseReason, ControllerMessage};
 
-use super::{HandlerError, HandlerResult};
+// ---------------------------------------------------------------------------
+// Error types
+// ---------------------------------------------------------------------------
+
+/// Internal error type for helper functions (deliver_pending_updates, etc.).
+#[derive(Debug, Error)]
+pub(super) enum HandlerError {
+    #[error("database error: {0}")]
+    Database(#[from] sea_orm::DbErr),
+    #[error("websocket send failed")]
+    WebSocketSend,
+}
+
+pub(super) type HandlerResult<T> = std::result::Result<T, Report<HandlerError>>;
+
+impl_report_conversion!(sea_orm::DbErr => HandlerError::Database);
+
+/// Maximum size of the `update_history.output` column (50 MB).
+///
+/// Docker image pulls generate very verbose progress output (tens of megabytes
+/// for large images). This cap covers virtually all real-world update outputs
+/// while preventing unbounded DB growth.
+///
+/// When the cap is first exceeded, a visible system output line is emitted
+/// into the stream and the `output_truncated` flag is set on the history
+/// record so the UI can display a persistent warning banner.
+pub(super) const MAX_UPDATE_OUTPUT_BYTES: usize = 52_428_800;
 
 // ---------------------------------------------------------------------------
 // ProcessorAction
