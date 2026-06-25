@@ -63,6 +63,7 @@ use cert::{
 use credentials::deliver_service_credentials;
 pub(crate) use discovery::trigger_discovery_for_agent_host;
 use shared_types::{ProcessorAction, ProcessorResponse, load_linked_host_ids};
+pub(crate) use updates::dispatch_next_batch_update;
 
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
