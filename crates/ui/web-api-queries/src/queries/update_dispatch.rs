@@ -1995,5 +1995,29 @@ mod tests {
             resp.output,
             "Update failed before agent dispatch: controller pre-update protection failed."
         );
+
+        // The same consolidated content must surface through the list path too,
+        // not just the detail endpoint.
+        let listed = crate::queries::update_history::list_update_history(
+            &tenant_db,
+            &uptrakit_web_api_types::update_history::UpdateHistoryQuery::new(
+                None,
+                None,
+                None,
+                Some(1),
+                Some(20),
+            ),
+        )
+        .await
+        .unwrap();
+        let item = listed
+            .items
+            .iter()
+            .find(|i| i.id == id)
+            .expect("record present in list");
+        assert_eq!(
+            item.output,
+            "plugin error: Timed out waiting for Proxmox task\n"
+        );
     }
 }
