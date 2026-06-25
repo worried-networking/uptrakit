@@ -30,11 +30,13 @@ An instruction dispatched to an Agent to apply a change to a Software Item on a 
 _Avoid_: upgrade, install, deployment
 
 **UpdateStatus**:
-The lifecycle state of a single Update row. Terminal statuses: `Succeeded`, `Failed`,
-`Cancelled`. Non-terminal statuses: `Queued`, `Pending`, `InProgress`, `AwaitingRestart`.
-Grouping helpers — `unfinished()` = [Queued, Pending, InProgress, AwaitingRestart] (all
-non-terminal; use for duplicate-trigger checks); `host_blocking()` = [Pending, InProgress,
-AwaitingRestart] (occupies host execution slot; excludes Queued).
+The lifecycle state of a single Update row. Terminal statuses: `Completed`, `Failed`,
+`Interrupted`. Non-terminal statuses: `Queued`, `Pending`, `InProgress`, `AwaitingRestart`.
+`Interrupted` = outcome unknown (connection lost / deadline exceeded); verify before
+re-running. Grouping helpers — `unfinished()` = [Queued, Pending, InProgress, AwaitingRestart]
+(all non-terminal; use for duplicate-trigger checks); `host_blocking()` = [Pending, InProgress,
+AwaitingRestart] (occupies host execution slot; excludes Queued). Terminal statuses appear in
+neither helper set.
 
 **Controller**:
 The central server that coordinates all Services.
@@ -87,9 +89,9 @@ A controller-only plugin role (trait + slot) that derives a human-friendly
 `installed_display_version` from the raw `installed_version` reported by an Agent. Used when
 the raw value is an opaque identifier (e.g. a git tree SHA for an LLM Skill) and the
 display string must come from upstream metadata that only the Controller can reach. Mirrors
-the `ReleaseFetcher` controller-side pattern but targets the detect_version output instead of
+the `ReleaseFetcher` controller-side pattern but targets the detect*version output instead of
 the fetch_releases output. Gated by the `EnrichInstalledVersion` capability.
-_Avoid_: version translator, display resolver (too generic), version formatter (frontend
+\_Avoid*: version translator, display resolver (too generic), version formatter (frontend
 concern).
 
 **Enrollment**:
