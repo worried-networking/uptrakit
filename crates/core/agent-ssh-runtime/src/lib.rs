@@ -491,7 +491,10 @@ where
             self.pending_initial_host_report = false;
 
             for (host_machine_id, update) in &self.in_flight_updates {
-                let interactive = cfg!(feature = "interactive") && update.stdin_tx.is_some();
+                #[cfg(feature = "interactive")]
+                let interactive = update.stdin_tx.is_some();
+                #[cfg(not(feature = "interactive"))]
+                let interactive = false;
 
                 tracing::debug!(
                     %host_machine_id,

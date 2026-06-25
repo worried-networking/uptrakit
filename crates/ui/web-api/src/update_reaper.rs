@@ -80,7 +80,9 @@ pub fn spawn_update_reaper(state: Arc<AppState>) {
                             update_history_id: row.id,
                             host_id: row.host_id,
                             software_item_id: row.software_item_id,
-                            status: "interrupted".to_string(),
+                            status: uptrakit_shared_types::UpdateStatus::Interrupted
+                                .as_str()
+                                .to_string(),
                         },
                     )
                     .await;

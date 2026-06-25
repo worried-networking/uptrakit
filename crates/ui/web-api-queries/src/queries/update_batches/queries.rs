@@ -171,7 +171,8 @@ pub async fn get_batch_with_items(
                 | update_history::UpdateStatus::Interrupted => failed_count += 1,
                 update_history::UpdateStatus::Queued
                 | update_history::UpdateStatus::Pending
-                | update_history::UpdateStatus::InProgress => pending_count += 1,
+                | update_history::UpdateStatus::InProgress
+                | update_history::UpdateStatus::AwaitingRestart => pending_count += 1,
                 _ => {
                     tracing::warn!(
                         "Unknown update status {:?}, counting as pending",
