@@ -5751,8 +5751,11 @@ mod tests {
                 .await
                 .unwrap()
                 .unwrap();
-            assert_eq!(row.status, update_history::UpdateStatus::Failed);
-            assert_eq!(row.output, "Update interrupted: agent restarted");
+            assert_eq!(row.status, update_history::UpdateStatus::Interrupted);
+            assert_eq!(
+                row.output,
+                "Update interrupted: agent restarted (outcome unknown)"
+            );
         }
 
         #[tokio::test]

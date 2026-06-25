@@ -1749,13 +1749,17 @@ async fn notify_failed_reconnect_update(
     tracing::warn!(
         update_id = %record.id,
         host_id = %record.host_id,
-        "in-progress update marked failed due to agent restart"
+        "in-progress update marked interrupted due to agent restart"
     );
 
     state
         .broadcast
         .update_output_broadcaster
-        .send_completed(record.id, "failed".to_string(), Some(reason.to_string()))
+        .send_completed(
+            record.id,
+            "interrupted".to_string(),
+            Some(reason.to_string()),
+        )
         .await;
 
     state
@@ -1767,7 +1771,7 @@ async fn notify_failed_reconnect_update(
                 update_history_id: record.id,
                 host_id: record.host_id,
                 software_item_id: record.software_item_id,
-                status: "failed".to_string(),
+                status: "interrupted".to_string(),
             },
         )
         .await;
@@ -2160,7 +2164,10 @@ pub(super) async fn emit_batch_progress_from_db(state: &Arc<AppState>, batch_id:
             update_history::UpdateStatus::Failed | update_history::UpdateStatus::Interrupted => {
                 failed += 1
             }
-            update_history::UpdateStatus::Pending | update_history::UpdateStatus::InProgress => {
+            update_history::UpdateStatus::Queued
+            | update_history::UpdateStatus::Pending
+            | update_history::UpdateStatus::InProgress
+            | update_history::UpdateStatus::AwaitingRestart => {
                 pending += 1;
             }
             _ => {
