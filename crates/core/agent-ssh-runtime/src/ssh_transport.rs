@@ -41,7 +41,31 @@ const MAX_OUTPUT_BYTES: usize = 10 * 1024 * 1024;
 /// probe if the server is sluggish.
 const BANNER_PEEK_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// SSH client keepalive interval: send keep-alive messages every 15 seconds.
+/// Detects dead/zombie SSH peers on the agent side.
+const SSH_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);
+
+/// SSH client keepalive max: allow up to 4 consecutive keepalive messages
+/// without a response before closing the connection.
+const SSH_KEEPALIVE_MAX: usize = 4;
+
 // ── Configuration types ──────────────────────────────────────────────
+
+/// Builds an SSH client configuration with keepalive enabled.
+///
+/// Keepalive sends periodic messages every [`SSH_KEEPALIVE_INTERVAL`] seconds
+/// and closes the connection after [`SSH_KEEPALIVE_MAX`] consecutive
+/// unanswered messages. This detects dead/zombie SSH peers on the agent side.
+///
+/// Note: [`inactivity_timeout`](client::Config::inactivity_timeout) is left as
+/// `None` to allow graceful detection via keepalive instead of a hard timeout.
+fn build_ssh_client_config() -> client::Config {
+    client::Config {
+        keepalive_interval: Some(SSH_KEEPALIVE_INTERVAL),
+        keepalive_max: SSH_KEEPALIVE_MAX,
+        ..Default::default()
+    }
+}
 
 /// SSH connection configuration.
 pub(crate) struct SshConnectionConfig {
@@ -807,7 +831,7 @@ pub(crate) async fn connect_and_authenticate(
         hostname: config.hostname.clone(),
     };
 
-    let ssh_config = Arc::new(client::Config::default());
+    let ssh_config = Arc::new(build_ssh_client_config());
     let addr = format!("{}:{}", config.hostname, config.port);
 
     #[expect(
@@ -1412,5 +1436,29 @@ mod tests {
         buf.flush().await;
         let output = buf.into_output();
         assert!(output.is_empty());
+    }
+
+    #[test]
+    fn client_config_enables_keepalive() {
+        let config = build_ssh_client_config();
+
+        // Verify keepalive_interval is set to SSH_KEEPALIVE_INTERVAL.
+        assert_eq!(
+            config.keepalive_interval,
+            Some(SSH_KEEPALIVE_INTERVAL),
+            "keepalive_interval should be set to SSH_KEEPALIVE_INTERVAL (15s)"
+        );
+
+        // Verify keepalive_max is set to SSH_KEEPALIVE_MAX.
+        assert_eq!(
+            config.keepalive_max, SSH_KEEPALIVE_MAX,
+            "keepalive_max should be set to SSH_KEEPALIVE_MAX (4)"
+        );
+
+        // Verify inactivity_timeout is None (not a hard timeout).
+        assert_eq!(
+            config.inactivity_timeout, None,
+            "inactivity_timeout should be None to allow graceful keepalive detection"
+        );
     }
 }
