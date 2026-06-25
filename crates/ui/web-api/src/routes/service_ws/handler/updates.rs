@@ -2155,7 +2155,11 @@ pub(super) async fn emit_batch_progress_from_db(state: &Arc<AppState>, batch_id:
     for r in &batch {
         match r.status {
             update_history::UpdateStatus::Completed => completed += 1,
-            update_history::UpdateStatus::Failed => failed += 1,
+            // `Interrupted` is terminal (outcome unknown, non-success); bucket it
+            // with failures, not pending.
+            update_history::UpdateStatus::Failed | update_history::UpdateStatus::Interrupted => {
+                failed += 1
+            }
             update_history::UpdateStatus::Pending | update_history::UpdateStatus::InProgress => {
                 pending += 1;
             }

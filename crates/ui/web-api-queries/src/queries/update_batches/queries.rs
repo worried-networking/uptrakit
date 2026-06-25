@@ -165,7 +165,10 @@ pub async fn get_batch_with_items(
         .map(|child| {
             match child.status {
                 update_history::UpdateStatus::Completed => completed_count += 1,
-                update_history::UpdateStatus::Failed => failed_count += 1,
+                // `Interrupted` is terminal (outcome unknown, non-success); bucket it
+                // with failures, not pending.
+                update_history::UpdateStatus::Failed
+                | update_history::UpdateStatus::Interrupted => failed_count += 1,
                 update_history::UpdateStatus::Queued
                 | update_history::UpdateStatus::Pending
                 | update_history::UpdateStatus::InProgress => pending_count += 1,

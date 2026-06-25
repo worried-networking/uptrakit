@@ -55,7 +55,11 @@ fn trigger_status_from_update_history_status(
 ) -> TriggerUpdateStatus {
     match status {
         update_history::UpdateStatus::Queued => TriggerUpdateStatus::Queued,
-        update_history::UpdateStatus::Failed => TriggerUpdateStatus::Failed,
+        // `Interrupted` is a non-success terminal state (outcome unknown); map it the
+        // same way as `Failed`.
+        update_history::UpdateStatus::Failed | update_history::UpdateStatus::Interrupted => {
+            TriggerUpdateStatus::Failed
+        }
         update_history::UpdateStatus::Pending
         | update_history::UpdateStatus::InProgress
         | update_history::UpdateStatus::Completed => TriggerUpdateStatus::Pending,
@@ -387,6 +391,20 @@ pub(crate) mod tests {
         async fn send_to_service(&self, _service_id: &Uuid, _msg: ControllerMessage) -> bool {
             true
         }
+    }
+
+    #[test]
+    fn interrupted_maps_to_failed_trigger_status() {
+        // `Interrupted` is a non-success terminal state; it must map to the same
+        // `TriggerUpdateStatus` as `Failed`, not `Queued`/`Pending`.
+        assert_eq!(
+            trigger_status_from_update_history_status(update_history::UpdateStatus::Interrupted),
+            trigger_status_from_update_history_status(update_history::UpdateStatus::Failed),
+        );
+        assert_eq!(
+            trigger_status_from_update_history_status(update_history::UpdateStatus::Interrupted),
+            TriggerUpdateStatus::Failed,
+        );
     }
 
     pub(crate) struct FailFirstProtection {
