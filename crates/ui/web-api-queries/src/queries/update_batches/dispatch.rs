@@ -17,6 +17,7 @@ use crate::queries::update_dispatch::{
     DispatchContext, DispatchUpdateParams, PreUpdateProtectionOutcome, TriggerUpdateError,
     finalize_post_update, load_target_for_dispatch, prepare_pre_update_protection,
 };
+use crate::queries::update_reaper::RECOVERY_HINT;
 
 /// Information about a batch that just transitioned to a terminal status.
 pub struct BatchCompletionInfo {
@@ -43,11 +44,6 @@ pub enum ClaimExecutionOutcome {
     Rejected,
 }
 
-/// Shared with the controller liveness backstop (`update_reaper::RECOVERY_HINT`):
-/// orphaned/interrupted updates are outcome-unknown, so the user must verify the
-/// installed version before re-running.
-const RECOVERY_HINT: &str = "execution outcome unknown — connection lost or deadline exceeded; \
-     verify the installed version before re-running";
 /// Maximum stored output bytes per update (50 MB).
 ///
 /// Must stay aligned with the WebSocket handler/API cap.

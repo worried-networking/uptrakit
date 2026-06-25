@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 use crate::queries::update_dispatch::TriggerUpdateError;
 
-const RECOVERY_HINT: &str = "execution outcome unknown — connection lost or deadline exceeded; \
+pub(crate) const RECOVERY_HINT: &str = "execution outcome unknown — connection lost or deadline exceeded; \
      verify the installed version before re-running";
 const REASON: &str = "Update interrupted: deadline exceeded without a terminal result";
 
