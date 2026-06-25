@@ -581,6 +581,40 @@ pub async fn fail_before_agent_dispatch(
     Ok(())
 }
 
+/// Write the streamed protection output lines into the authoritative
+/// `update_history.output` column.
+///
+/// Called from the orchestrator on a pre-dispatch failure **after** the output
+/// forwarder has been joined, so `update_output_lines` is fully flushed and no
+/// concurrent writer exists. Because of that join, no transaction is needed: the
+/// line read and the single UPDATE are independent autocommit statements.
+#[tracing::instrument(skip_all, fields(update_history_id = %update_history_id))]
+pub async fn consolidate_protection_output(
+    db: &DatabaseConnection,
+    update_history_id: Uuid,
+) -> Result<()> {
+    let (output, truncated) =
+        crate::queries::update_history::load_output_lines_with_truncation(db, update_history_id)
+            .await
+            .context_to()?;
+    let output_bytes = output.len() as i64;
+    UpdateHistory::update_many()
+        .filter(update_history::Column::Id.eq(update_history_id))
+        .col_expr(update_history::Column::Output, Expr::value(output))
+        .col_expr(
+            update_history::Column::OutputBytes,
+            Expr::value(output_bytes),
+        )
+        .col_expr(
+            update_history::Column::OutputTruncated,
+            Expr::value(truncated),
+        )
+        .exec(db)
+        .await
+        .context_to()?;
+    Ok(())
+}
+
 /// Run controller-side pre-update protection before dispatch.
 ///
 /// Contract:
@@ -1760,5 +1794,198 @@ mod tests {
             Some("Snapshot rejected: storage full"),
         );
         assert_eq!(row.output, "");
+    }
+
+    #[tokio::test]
+    async fn consolidate_protection_output_writes_streamed_lines() {
+        use sea_orm::{ActiveModelTrait, EntityTrait};
+        use uptrakit_shared_db::entity::update_history;
+        use uptrakit_shared_types::OutputStreamType;
+        let db = make_sqlite_db().await;
+        let (tenant_id, host_id, software_item_id) = insert_update_history_parents(&db).await;
+        let now = time::OffsetDateTime::now_utc();
+        let id = uuid::Uuid::now_v7();
+        update_history::ActiveModel {
+            id: sea_orm::Set(id),
+            tenant_id: sea_orm::Set(tenant_id),
+            host_id: sea_orm::Set(host_id),
+            software_item_id: sea_orm::Set(software_item_id),
+            host_software_item_id: sea_orm::Set(None),
+            from_version: sea_orm::Set(None),
+            to_version: sea_orm::Set(Some("1.0.0".to_string())),
+            status: sea_orm::Set(update_history::UpdateStatus::Failed),
+            output: sea_orm::Set(String::new()),
+            output_bytes: sea_orm::Set(0),
+            actor_type: sea_orm::Set("user".to_string()),
+            actor_id: sea_orm::Set(String::new()),
+            execution_owner_service_id: sea_orm::Set(None),
+            execution_owner_instance_id: sea_orm::Set(None),
+            started_at: sea_orm::Set(Some(now)),
+            completed_at: sea_orm::Set(Some(now)),
+            awaiting_restart_since: sea_orm::Set(None),
+            created_at: sea_orm::Set(now),
+            update_category: sea_orm::Set("security".to_string()),
+            batch_id: sea_orm::Set(None),
+            interactive: sea_orm::Set(false),
+            output_truncated: sea_orm::Set(false),
+            pre_update_protection_status: sea_orm::Set(Some("failed".to_string())),
+            pre_update_protection_summary: sea_orm::Set(None),
+            recovery_hint: sea_orm::Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        super::insert_protection_output_line(
+            &db,
+            id,
+            uuid::Uuid::now_v7(),
+            "Creating snapshot…\n".to_string(),
+            OutputStreamType::Stdout,
+            now,
+        )
+        .await
+        .unwrap();
+        super::insert_protection_output_line(
+            &db,
+            id,
+            uuid::Uuid::now_v7(),
+            "plugin error: Timed out waiting for Proxmox task\n".to_string(),
+            OutputStreamType::Stdout,
+            now + time::Duration::milliseconds(1),
+        )
+        .await
+        .unwrap();
+
+        super::consolidate_protection_output(&db, id).await.unwrap();
+
+        let row = update_history::Entity::find_by_id(id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            row.output,
+            "Creating snapshot…\nplugin error: Timed out waiting for Proxmox task\n",
+        );
+        assert_eq!(row.output_bytes as usize, row.output.len());
+        assert!(!row.output_truncated);
+    }
+
+    #[tokio::test]
+    async fn consolidate_protection_output_no_lines_leaves_output_empty() {
+        use sea_orm::{ActiveModelTrait, EntityTrait};
+        use uptrakit_shared_db::entity::update_history;
+        let db = make_sqlite_db().await;
+        let (tenant_id, host_id, software_item_id) = insert_update_history_parents(&db).await;
+        let now = time::OffsetDateTime::now_utc();
+        let id = uuid::Uuid::now_v7();
+        update_history::ActiveModel {
+            id: sea_orm::Set(id),
+            tenant_id: sea_orm::Set(tenant_id),
+            host_id: sea_orm::Set(host_id),
+            software_item_id: sea_orm::Set(software_item_id),
+            host_software_item_id: sea_orm::Set(None),
+            from_version: sea_orm::Set(None),
+            to_version: sea_orm::Set(Some("1.0.0".to_string())),
+            status: sea_orm::Set(update_history::UpdateStatus::Failed),
+            output: sea_orm::Set(String::new()),
+            output_bytes: sea_orm::Set(0),
+            actor_type: sea_orm::Set("user".to_string()),
+            actor_id: sea_orm::Set(String::new()),
+            execution_owner_service_id: sea_orm::Set(None),
+            execution_owner_instance_id: sea_orm::Set(None),
+            started_at: sea_orm::Set(Some(now)),
+            completed_at: sea_orm::Set(Some(now)),
+            awaiting_restart_since: sea_orm::Set(None),
+            created_at: sea_orm::Set(now),
+            update_category: sea_orm::Set("security".to_string()),
+            batch_id: sea_orm::Set(None),
+            interactive: sea_orm::Set(false),
+            output_truncated: sea_orm::Set(false),
+            pre_update_protection_status: sea_orm::Set(Some("failed".to_string())),
+            pre_update_protection_summary: sea_orm::Set(None),
+            recovery_hint: sea_orm::Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        super::consolidate_protection_output(&db, id).await.unwrap();
+
+        let row = update_history::Entity::find_by_id(id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.output, "");
+        assert_eq!(row.output_bytes, 0);
+    }
+
+    #[tokio::test]
+    async fn consolidated_failure_output_served_through_get_update_history() {
+        use sea_orm::ActiveModelTrait;
+        use uptrakit_shared_db::{TenantDb, entity::update_history};
+        use uptrakit_shared_types::OutputStreamType;
+        let db = make_sqlite_db().await;
+        let (tenant_id, host_id, software_item_id) = insert_update_history_parents(&db).await;
+        let now = time::OffsetDateTime::now_utc();
+        let id = uuid::Uuid::now_v7();
+        update_history::ActiveModel {
+            id: sea_orm::Set(id),
+            tenant_id: sea_orm::Set(tenant_id),
+            host_id: sea_orm::Set(host_id),
+            software_item_id: sea_orm::Set(software_item_id),
+            host_software_item_id: sea_orm::Set(None),
+            from_version: sea_orm::Set(None),
+            to_version: sea_orm::Set(Some("1.0.0".to_string())),
+            status: sea_orm::Set(update_history::UpdateStatus::Failed),
+            output: sea_orm::Set(String::new()),
+            output_bytes: sea_orm::Set(0),
+            actor_type: sea_orm::Set("user".to_string()),
+            actor_id: sea_orm::Set(String::new()),
+            execution_owner_service_id: sea_orm::Set(None),
+            execution_owner_instance_id: sea_orm::Set(None),
+            started_at: sea_orm::Set(Some(now)),
+            completed_at: sea_orm::Set(Some(now)),
+            awaiting_restart_since: sea_orm::Set(None),
+            created_at: sea_orm::Set(now),
+            update_category: sea_orm::Set("security".to_string()),
+            batch_id: sea_orm::Set(None),
+            interactive: sea_orm::Set(false),
+            output_truncated: sea_orm::Set(false),
+            pre_update_protection_status: sea_orm::Set(Some("failed".to_string())),
+            pre_update_protection_summary: sea_orm::Set(None),
+            recovery_hint: sea_orm::Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        super::insert_protection_output_line(
+            &db,
+            id,
+            uuid::Uuid::now_v7(),
+            "plugin error: Timed out waiting for Proxmox task\n".to_string(),
+            OutputStreamType::Stdout,
+            now,
+        )
+        .await
+        .unwrap();
+
+        super::consolidate_protection_output(&db, id).await.unwrap();
+
+        let tenant_db = TenantDb::new(db, tenant_id);
+        let resp = crate::queries::update_history::get_update_history(&tenant_db, id)
+            .await
+            .unwrap()
+            .expect("record present");
+        assert_eq!(
+            resp.output,
+            "plugin error: Timed out waiting for Proxmox task\n"
+        );
+        assert_ne!(
+            resp.output,
+            "Update failed before agent dispatch: controller pre-update protection failed."
+        );
     }
 }
