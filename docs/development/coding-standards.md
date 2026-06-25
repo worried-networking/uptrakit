@@ -1672,6 +1672,24 @@ of which backend is active.
 **Write-only transactions** (DELETE/UPDATE with no prior SELECT inside the same transaction) do not need `BEGIN IMMEDIATE`; `busy_timeout` handles the
 ordinary writer-writer lock contention for those.
 
+### Active partial-index predicates must track the active status set
+
+Partial unique indexes that hand-maintain a SQL literal status set (the `WHERE status IN (…)` predicate) must stay in sync with the corresponding
+`UpdateStatus` grouping helper. Two such indexes exist and differ **by design**:
+
+- `uix_update_history_host_active` → `('pending','in_progress','awaiting_restart')` = `UpdateStatus::host_blocking()` (excludes `Queued`: a queued
+  item does not block the host slot).
+- `uix_update_history_host_software_item_active` → `('queued','pending','in_progress','awaiting_restart')` = `UpdateStatus::unfinished()` (`Queued`
+  counts as active per (host, item) to prevent duplicate triggers).
+
+The `active_indexes_match_enum_sets` test (`crates/ui/web-api-queries/src/queries/update_history.rs`) introspects `sqlite_master` and maps **each index
+to its own helper set** (host index ↔ `host_blocking()`, item index ↔ `unfinished()`), failing CI if a future variant is added without reconciling the
+matching index. It deliberately does **not** assert one shared set across both indexes — that would wrongly flag the intentional `Queued` difference.
+
+**New terminal statuses go in neither set.** A terminal status (e.g. `Interrupted`) must be absent from both helpers and both index predicates; a
+terminal status that leaks into an active index would pin the host/item slot forever and block the user's re-trigger with a 409 — a compiler-invisible
+failure mode the test exists to catch.
+
 ### Database Pool Migration
 
 `DbPoolReloadable` owns a `tokio::sync::watch` channel that publishes replacement `Arc<DbConnHandle>` values when the pool is reloaded. Two patterns
