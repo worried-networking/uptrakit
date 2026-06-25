@@ -412,8 +412,6 @@ pub(crate) fn build_plugin_assignment(
 
 const PRE_UPDATE_PROTECTION_FAILURE_SUMMARY: &str =
     "Controller pre-update protection failed before dispatch.";
-const PRE_UPDATE_PROTECTION_FAILURE_OUTPUT: &str =
-    "Update failed before agent dispatch: controller pre-update protection failed.";
 
 /// Outcome of attempting controller-side pre-update protection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -556,9 +554,12 @@ pub async fn fail_before_agent_dispatch(
     db: &DatabaseConnection,
     update_history_id: Uuid,
     protection_status: Option<String>,
+    protection_summary: Option<String>,
 ) -> Result<()> {
     let now = OffsetDateTime::now_utc();
-    let output = PRE_UPDATE_PROTECTION_FAILURE_OUTPUT.to_string();
+    let summary = protection_summary
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| PRE_UPDATE_PROTECTION_FAILURE_SUMMARY.to_string());
     UpdateHistory::update_many()
         .filter(update_history::Column::Id.eq(update_history_id))
         .col_expr(
@@ -566,19 +567,13 @@ pub async fn fail_before_agent_dispatch(
             Expr::value(update_history::UpdateStatus::Failed),
         )
         .col_expr(update_history::Column::CompletedAt, Expr::value(Some(now)))
-        .col_expr(update_history::Column::Output, Expr::value(output.clone()))
-        .col_expr(
-            update_history::Column::OutputBytes,
-            Expr::value(output.len() as i64),
-        )
-        .col_expr(update_history::Column::OutputTruncated, Expr::value(false))
         .col_expr(
             update_history::Column::PreUpdateProtectionStatus,
             Expr::value(protection_status.or_else(|| Some("failed".to_string()))),
         )
         .col_expr(
             update_history::Column::PreUpdateProtectionSummary,
-            Expr::value(Some(PRE_UPDATE_PROTECTION_FAILURE_SUMMARY.to_string())),
+            Expr::value(Some(summary)),
         )
         .exec(db)
         .await
@@ -614,7 +609,7 @@ pub async fn prepare_pre_update_protection(
     let decision = match protection.prepare_pre_update_protection(&ctx).await {
         Ok(decision) => decision,
         Err(error) => {
-            fail_before_agent_dispatch(db, update_history_id, None).await?;
+            fail_before_agent_dispatch(db, update_history_id, None, None).await?;
             tracing::warn!(
                 update_id = %update_history_id,
                 error = %error,
@@ -646,7 +641,13 @@ pub async fn prepare_pre_update_protection(
         return Ok(PreUpdateProtectionOutcome::Proceed);
     }
 
-    fail_before_agent_dispatch(db, update_history_id, decision.protection_status.clone()).await?;
+    fail_before_agent_dispatch(
+        db,
+        update_history_id,
+        decision.protection_status.clone(),
+        decision.protection_summary.clone(),
+    )
+    .await?;
     Ok(PreUpdateProtectionOutcome::Failed)
 }
 
@@ -1640,5 +1641,124 @@ mod tests {
             .await
             .unwrap();
         assert!(active, "AwaitingRestart should count as active");
+    }
+
+    #[tokio::test]
+    async fn fail_before_agent_dispatch_does_not_clobber_output() {
+        use sea_orm::{ActiveModelTrait, EntityTrait};
+        use uptrakit_shared_db::entity::update_history;
+        let db = make_sqlite_db().await;
+        let (tenant_id, host_id, software_item_id) = insert_update_history_parents(&db).await;
+        let now = time::OffsetDateTime::now_utc();
+        let id = uuid::Uuid::now_v7();
+        update_history::ActiveModel {
+            id: sea_orm::Set(id),
+            tenant_id: sea_orm::Set(tenant_id),
+            host_id: sea_orm::Set(host_id),
+            software_item_id: sea_orm::Set(software_item_id),
+            host_software_item_id: sea_orm::Set(None),
+            from_version: sea_orm::Set(None),
+            to_version: sea_orm::Set(Some("1.0.0".to_string())),
+            status: sea_orm::Set(update_history::UpdateStatus::InProgress),
+            output: sea_orm::Set(String::new()),
+            output_bytes: sea_orm::Set(0),
+            actor_type: sea_orm::Set("user".to_string()),
+            actor_id: sea_orm::Set(String::new()),
+            execution_owner_service_id: sea_orm::Set(None),
+            execution_owner_instance_id: sea_orm::Set(None),
+            started_at: sea_orm::Set(Some(now)),
+            completed_at: sea_orm::Set(None),
+            awaiting_restart_since: sea_orm::Set(None),
+            created_at: sea_orm::Set(now),
+            update_category: sea_orm::Set("security".to_string()),
+            batch_id: sea_orm::Set(None),
+            interactive: sea_orm::Set(false),
+            output_truncated: sea_orm::Set(false),
+            pre_update_protection_status: sea_orm::Set(None),
+            pre_update_protection_summary: sea_orm::Set(None),
+            recovery_hint: sea_orm::Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        super::fail_before_agent_dispatch(&db, id, None, None)
+            .await
+            .unwrap();
+
+        let row = update_history::Entity::find_by_id(id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.output, "", "output column must not be clobbered");
+        assert_eq!(row.status, update_history::UpdateStatus::Failed);
+        assert_eq!(row.pre_update_protection_status.as_deref(), Some("failed"));
+        assert_eq!(
+            row.pre_update_protection_summary.as_deref(),
+            Some("Controller pre-update protection failed before dispatch."),
+            "no summary supplied falls back to the generic constant",
+        );
+        assert!(row.completed_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn fail_before_agent_dispatch_persists_real_summary() {
+        use sea_orm::{ActiveModelTrait, EntityTrait};
+        use uptrakit_shared_db::entity::update_history;
+        let db = make_sqlite_db().await;
+        let (tenant_id, host_id, software_item_id) = insert_update_history_parents(&db).await;
+        let now = time::OffsetDateTime::now_utc();
+        let id = uuid::Uuid::now_v7();
+        update_history::ActiveModel {
+            id: sea_orm::Set(id),
+            tenant_id: sea_orm::Set(tenant_id),
+            host_id: sea_orm::Set(host_id),
+            software_item_id: sea_orm::Set(software_item_id),
+            host_software_item_id: sea_orm::Set(None),
+            from_version: sea_orm::Set(None),
+            to_version: sea_orm::Set(Some("1.0.0".to_string())),
+            status: sea_orm::Set(update_history::UpdateStatus::InProgress),
+            output: sea_orm::Set(String::new()),
+            output_bytes: sea_orm::Set(0),
+            actor_type: sea_orm::Set("user".to_string()),
+            actor_id: sea_orm::Set(String::new()),
+            execution_owner_service_id: sea_orm::Set(None),
+            execution_owner_instance_id: sea_orm::Set(None),
+            started_at: sea_orm::Set(Some(now)),
+            completed_at: sea_orm::Set(None),
+            awaiting_restart_since: sea_orm::Set(None),
+            created_at: sea_orm::Set(now),
+            update_category: sea_orm::Set("security".to_string()),
+            batch_id: sea_orm::Set(None),
+            interactive: sea_orm::Set(false),
+            output_truncated: sea_orm::Set(false),
+            pre_update_protection_status: sea_orm::Set(None),
+            pre_update_protection_summary: sea_orm::Set(None),
+            recovery_hint: sea_orm::Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        super::fail_before_agent_dispatch(
+            &db,
+            id,
+            Some("failed".to_string()),
+            Some("Snapshot rejected: storage full".to_string()),
+        )
+        .await
+        .unwrap();
+
+        let row = update_history::Entity::find_by_id(id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            row.pre_update_protection_summary.as_deref(),
+            Some("Snapshot rejected: storage full"),
+        );
+        assert_eq!(row.output, "");
     }
 }

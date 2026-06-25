@@ -341,7 +341,9 @@ pub async fn run_protection_and_dispatch(
                 error = %e,
                 "prepare_pre_update_protection returned an error; marking update failed"
             );
-            if let Err(fail_err) = fail_before_agent_dispatch(&db, update_history_id, None).await {
+            if let Err(fail_err) =
+                fail_before_agent_dispatch(&db, update_history_id, None, None).await
+            {
                 tracing::warn!(
                     update_id = %update_history_id,
                     error = %fail_err,
@@ -419,7 +421,7 @@ pub async fn run_protection_and_dispatch(
                         "dispatch_update_to_agent failed"
                     );
                     if let Err(fail_err) =
-                        fail_before_agent_dispatch(&db, update_history_id, None).await
+                        fail_before_agent_dispatch(&db, update_history_id, None, None).await
                     {
                         tracing::warn!(
                             update_id = %update_history_id,
