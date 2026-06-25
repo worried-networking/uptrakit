@@ -384,15 +384,43 @@ fn claim_execution_info(record: &update_history::Model) -> ClaimExecutionInfo {
     }
 }
 
-fn owned_in_progress_condition(service_id: Uuid, runtime_instance_id: Option<Uuid>) -> Condition {
+/// Owner-guarded condition accepting any of `statuses` for the given owner
+/// (`ExecutionOwnerServiceId` + instance match).
+fn owned_status_condition(
+    service_id: Uuid,
+    runtime_instance_id: Option<Uuid>,
+    statuses: impl IntoIterator<Item = update_history::UpdateStatus>,
+) -> Condition {
     let cond = Condition::all()
-        .add(update_history::Column::Status.eq(update_history::UpdateStatus::InProgress))
+        .add(update_history::Column::Status.is_in(statuses))
         .add(update_history::Column::ExecutionOwnerServiceId.eq(service_id));
 
     match runtime_instance_id {
         Some(id) => cond.add(update_history::Column::ExecutionOwnerInstanceId.eq(id)),
         None => cond.add(update_history::Column::ExecutionOwnerInstanceId.is_null()),
     }
+}
+
+fn owned_in_progress_condition(service_id: Uuid, runtime_instance_id: Option<Uuid>) -> Condition {
+    owned_status_condition(
+        service_id,
+        runtime_instance_id,
+        [update_history::UpdateStatus::InProgress],
+    )
+}
+
+/// Owner-guarded states a terminal agent result may finalize FROM: the normal
+/// `InProgress`, plus `Interrupted` — so a late, authoritative agent result
+/// upgrades a backstop-reaped row (agent authority wins when it reports).
+fn owned_finalizable_condition(service_id: Uuid, runtime_instance_id: Option<Uuid>) -> Condition {
+    owned_status_condition(
+        service_id,
+        runtime_instance_id,
+        [
+            update_history::UpdateStatus::InProgress,
+            update_history::UpdateStatus::Interrupted,
+        ],
+    )
 }
 
 async fn load_owned_reconnect_candidates(
@@ -904,7 +932,7 @@ pub async fn finalize_update_result_if_owned(
 
     let result = UpdateHistory::update_many()
         .filter(update_history::Column::Id.eq(args.update_history_id))
-        .filter(owned_in_progress_condition(
+        .filter(owned_finalizable_condition(
             args.service_id,
             args.runtime_instance_id,
         ))
@@ -2318,17 +2346,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn finalize_update_result_if_owned_rejects_failed_row() {
+    async fn finalize_update_result_if_owned_rejects_already_finalized_row() {
         let db = setup_db().await;
         let f = insert_base_fixture(&db).await;
         let runtime_instance_id = Uuid::now_v7();
         let record =
             insert_owned_in_progress_record(&db, &f, f.service_id, Some(runtime_instance_id)).await;
-        mark_owned_in_progress_as_interrupted_on_reconnect(&db, f.service_id, Some(Uuid::now_v7()))
-            .await
-            .unwrap();
 
-        let rows = finalize_update_result_if_owned(
+        // First terminal result wins.
+        let first = finalize_update_result_if_owned(
             &db,
             FinalizeUpdateResultIfOwnedArgs {
                 update_history_id: record.id,
@@ -2343,8 +2369,74 @@ mod tests {
         )
         .await
         .unwrap();
+        assert_eq!(first, 1);
 
-        assert_eq!(rows, 0);
+        // A second finalization of an already-terminal (Completed) row is rejected.
+        let second = finalize_update_result_if_owned(
+            &db,
+            FinalizeUpdateResultIfOwnedArgs {
+                update_history_id: record.id,
+                service_id: f.service_id,
+                runtime_instance_id: Some(runtime_instance_id),
+                status: UpdateFinalStatus::Failed,
+                error: Some("late, conflicting result".to_string()),
+                output: String::new(),
+                from_version: None,
+                to_version: Some("1.1.0".to_string()),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(second, 0);
+
+        let row = UpdateHistory::find_by_id(record.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.status, update_history::UpdateStatus::Completed);
+    }
+
+    #[tokio::test]
+    async fn late_agent_result_upgrades_interrupted() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let runtime_instance_id = Uuid::now_v7();
+        let record =
+            insert_owned_in_progress_record(&db, &f, f.service_id, Some(runtime_instance_id)).await;
+        // Backstop reaper writes Interrupted via a different-instance reconnect.
+        mark_owned_in_progress_as_interrupted_on_reconnect(&db, f.service_id, Some(Uuid::now_v7()))
+            .await
+            .unwrap();
+
+        let affected = finalize_update_result_if_owned(
+            &db,
+            FinalizeUpdateResultIfOwnedArgs {
+                update_history_id: record.id,
+                service_id: f.service_id,
+                runtime_instance_id: Some(runtime_instance_id),
+                status: UpdateFinalStatus::Failed,
+                error: Some("boom".to_string()),
+                output: String::new(),
+                from_version: None,
+                to_version: Some("1.1.0".to_string()),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            affected, 1,
+            "a late agent result must overwrite Interrupted"
+        );
+
+        let row = UpdateHistory::find_by_id(record.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.status, update_history::UpdateStatus::Failed);
     }
 
     #[tokio::test]
