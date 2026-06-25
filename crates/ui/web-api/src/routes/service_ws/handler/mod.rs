@@ -69,13 +69,10 @@ use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
-use thiserror::Error;
 
-use rootcause::prelude::*;
 use sea_orm::EntityTrait;
 
 use uptrakit_shared_db::entity::{service, system_service as sys_svc_entity};
-use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_wire::limits::{MAX_LONG_STRING_LEN, MAX_SHORT_STRING_LEN, WireValidate};
 use uptrakit_wire::report_tracker::ReportTracker;
 use uptrakit_wire::{
@@ -96,17 +93,6 @@ use uptrakit_wire::service_profile::parse_capabilities;
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
-/// Maximum size of the `update_history.output` column (50 MB).
-///
-/// Docker image pulls generate very verbose progress output (tens of megabytes
-/// for large images). This cap covers virtually all real-world update outputs
-/// while preventing unbounded DB growth.
-///
-/// When the cap is first exceeded, a visible system output line is emitted
-/// into the stream and the `output_truncated` flag is set on the history
-/// record so the UI can display a persistent warning banner.
-const MAX_UPDATE_OUTPUT_BYTES: usize = 52_428_800;
 
 /// Interval between approval-status DB polls in enrolled loops.
 const APPROVAL_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
@@ -1098,23 +1084,6 @@ impl LoopAction {
         matches!(self, Self::Break)
     }
 }
-
-// ---------------------------------------------------------------------------
-// Error types
-// ---------------------------------------------------------------------------
-
-/// Internal error type for helper functions (deliver_pending_updates, etc.).
-#[derive(Debug, Error)]
-enum HandlerError {
-    #[error("database error: {0}")]
-    Database(#[from] sea_orm::DbErr),
-    #[error("websocket send failed")]
-    WebSocketSend,
-}
-
-type HandlerResult<T> = std::result::Result<T, Report<HandlerError>>;
-
-impl_report_conversion!(sea_orm::DbErr => HandlerError::Database);
 
 // ---------------------------------------------------------------------------
 // ProcessorMessage
@@ -3388,6 +3357,7 @@ mod tests {
 
     use std::sync::Arc;
 
+    use rootcause::prelude::*;
     use uptrakit_wire::surfaces;
     use uuid::Uuid;
 
