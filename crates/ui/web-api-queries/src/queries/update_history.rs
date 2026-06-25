@@ -149,10 +149,12 @@ async fn load_actor_names(
     Ok(presentation)
 }
 
-async fn load_output_lines(
+/// Concatenate a record's streamed output lines in order, applying the
+/// `UPDATE_OUTPUT_BYTES_CAP` byte cap. Returns `(consolidated, was_truncated)`.
+pub(crate) async fn load_output_lines_with_truncation(
     db: &sea_orm::DatabaseConnection,
     update_history_id: Uuid,
-) -> Result<String, sea_orm::DbErr> {
+) -> Result<(String, bool), sea_orm::DbErr> {
     let lines = update_output_line::Entity::find()
         .filter(update_output_line::Column::UpdateHistoryId.eq(update_history_id))
         .order_by_asc(update_output_line::Column::CreatedAt)
@@ -161,12 +163,22 @@ async fn load_output_lines(
         .await?;
 
     let mut output = String::new();
+    let mut truncated = false;
     for line in lines {
         if append_output_with_cap(&mut output, &line.output, UPDATE_OUTPUT_BYTES_CAP) {
+            truncated = true;
             break;
         }
     }
 
+    Ok((output, truncated))
+}
+
+async fn load_output_lines(
+    db: &sea_orm::DatabaseConnection,
+    update_history_id: Uuid,
+) -> Result<String, sea_orm::DbErr> {
+    let (output, _truncated) = load_output_lines_with_truncation(db, update_history_id).await?;
     Ok(output)
 }
 
@@ -1125,5 +1137,55 @@ mod tests {
             .expect("history item");
 
         assert_eq!(resp.actor_name.as_deref(), Some("MQTT Bridge"));
+    }
+
+    #[tokio::test]
+    async fn load_output_lines_with_truncation_under_cap_not_truncated() {
+        let db = setup_test_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let software_item_id = Uuid::now_v7();
+        let update_history_id = Uuid::now_v7();
+        insert_tenant_record(&db, tenant_id).await;
+        insert_host_record(&db, tenant_id, host_id).await;
+        insert_software_item_record(&db, tenant_id, software_item_id).await;
+        insert_update_history_record(&db, tenant_id, host_id, software_item_id, update_history_id)
+            .await;
+        insert_output_line_record(&db, update_history_id, "hello ".to_string()).await;
+        insert_output_line_record(&db, update_history_id, "world".to_string()).await;
+
+        let (out, truncated) = load_output_lines_with_truncation(&db, update_history_id)
+            .await
+            .unwrap();
+
+        assert_eq!(out, "hello world");
+        assert!(!truncated);
+    }
+
+    #[tokio::test]
+    async fn load_output_lines_with_truncation_over_cap_sets_flag() {
+        let db = setup_test_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let software_item_id = Uuid::now_v7();
+        let update_history_id = Uuid::now_v7();
+        insert_tenant_record(&db, tenant_id).await;
+        insert_host_record(&db, tenant_id, host_id).await;
+        insert_software_item_record(&db, tenant_id, software_item_id).await;
+        insert_update_history_record(&db, tenant_id, host_id, software_item_id, update_history_id)
+            .await;
+        insert_output_line_record(
+            &db,
+            update_history_id,
+            format!("{}étail", "a".repeat(UPDATE_OUTPUT_BYTES_CAP - 1)),
+        )
+        .await;
+
+        let (out, truncated) = load_output_lines_with_truncation(&db, update_history_id)
+            .await
+            .unwrap();
+
+        assert_eq!(out, "a".repeat(UPDATE_OUTPUT_BYTES_CAP - 1));
+        assert!(truncated);
     }
 }
