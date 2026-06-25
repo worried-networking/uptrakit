@@ -1800,7 +1800,7 @@ async fn notify_failed_reconnect_update(
 /// Resolves the service's tenant_id, calls `dispatch_next_in_batch`, and logs
 /// any errors without failing the calling handler. If the batch just completed,
 /// dispatches a notification event.
-async fn dispatch_next_batch_update(
+pub(crate) async fn dispatch_next_batch_update(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
     batch_id: uuid::Uuid,

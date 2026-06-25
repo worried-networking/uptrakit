@@ -188,6 +188,11 @@ pub(super) async fn spawn_background_tasks(
         );
         bg.track("nats-consumer", h);
     }
+
+    // Update reaper: absolute-deadline backstop that forces overdue in_progress
+    // updates to a terminal Interrupted state. Detached (fire-and-forget),
+    // mirroring `spawn_heartbeat`; the loop has no cancellation token.
+    uptrakit_web_api::update_reaper::spawn_update_reaper(Arc::clone(app_state));
 }
 
 // ---------------------------------------------------------------------------
