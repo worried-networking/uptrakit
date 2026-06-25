@@ -541,7 +541,7 @@ pub(super) async fn recover_owned_updates_on_connect_with_dispatch_mode(
     successor_dispatch_mode: ReconnectSuccessorDispatchMode,
 ) -> HandlerResult<()> {
     let failed =
-        match crate::queries::update_batches::mark_owned_in_progress_as_failed_on_reconnect(
+        match crate::queries::update_batches::mark_owned_in_progress_as_interrupted_on_reconnect(
             state.db(),
             service_id,
             runtime_instance_id,

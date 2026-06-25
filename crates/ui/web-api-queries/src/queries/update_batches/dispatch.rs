@@ -43,6 +43,11 @@ pub enum ClaimExecutionOutcome {
     Rejected,
 }
 
+/// Shared with the controller liveness backstop (`update_reaper::RECOVERY_HINT`):
+/// orphaned/interrupted updates are outcome-unknown, so the user must verify the
+/// installed version before re-running.
+const RECOVERY_HINT: &str = "execution outcome unknown — connection lost or deadline exceeded; \
+     verify the installed version before re-running";
 /// Maximum stored output bytes per update (50 MB).
 ///
 /// Must stay aligned with the WebSocket handler/API cap.
@@ -421,8 +426,14 @@ async fn load_owned_reconnect_candidates(
     }
 }
 
-/// Mark only updates owned by a previous runtime instance of the same service as failed.
-pub async fn mark_owned_in_progress_as_failed_on_reconnect(
+/// Mark updates owned by a previous runtime instance of the same service as
+/// terminal [`Interrupted`](update_history::UpdateStatus::Interrupted).
+///
+/// A restarted agent's orphaned in-flight updates are outcome-unknown, not
+/// known-failed, so they are routed to `Interrupted` with a `recovery_hint`
+/// rather than `Failed`. The instance-aware filter is preserved: a same-instance
+/// reconnect never touches a live update.
+pub async fn mark_owned_in_progress_as_interrupted_on_reconnect(
     db: &DatabaseConnection,
     service_id: Uuid,
     runtime_instance_id: Option<Uuid>,
@@ -434,8 +445,8 @@ pub async fn mark_owned_in_progress_as_failed_on_reconnect(
 
     let txn = db.begin().await.context_to()?;
     let now = OffsetDateTime::now_utc();
-    let reason = "Update interrupted: agent restarted";
-    let mut failed = Vec::new();
+    let reason = "Update interrupted: agent restarted (outcome unknown)";
+    let mut interrupted = Vec::new();
 
     for record in candidates {
         let mut update = UpdateHistory::update_many()
@@ -455,9 +466,13 @@ pub async fn mark_owned_in_progress_as_failed_on_reconnect(
         let result = update
             .col_expr(
                 update_history::Column::Status,
-                Expr::value(update_history::UpdateStatus::Failed),
+                Expr::value(update_history::UpdateStatus::Interrupted),
             )
             .col_expr(update_history::Column::CompletedAt, Expr::value(Some(now)))
+            .col_expr(
+                update_history::Column::RecoveryHint,
+                Expr::value(Some(RECOVERY_HINT.to_string())),
+            )
             .col_expr(
                 update_history::Column::Output,
                 Expr::value(reason.to_string()),
@@ -473,16 +488,17 @@ pub async fn mark_owned_in_progress_as_failed_on_reconnect(
 
         if result.rows_affected == 1 {
             let mut updated_record = record;
-            updated_record.status = update_history::UpdateStatus::Failed;
+            updated_record.status = update_history::UpdateStatus::Interrupted;
             updated_record.completed_at = Some(now);
+            updated_record.recovery_hint = Some(RECOVERY_HINT.to_string());
             updated_record.output = reason.to_string();
             updated_record.output_bytes = reason.len() as i64;
-            failed.push(updated_record);
+            interrupted.push(updated_record);
         }
     }
 
-    if !failed.is_empty() {
-        let ids: Vec<Uuid> = failed.iter().map(|record| record.id).collect();
+    if !interrupted.is_empty() {
+        let ids: Vec<Uuid> = interrupted.iter().map(|record| record.id).collect();
         UpdateOutputLine::delete_many()
             .filter(update_output_line::Column::UpdateHistoryId.is_in(ids))
             .exec(&txn)
@@ -491,11 +507,12 @@ pub async fn mark_owned_in_progress_as_failed_on_reconnect(
     }
 
     txn.commit().await.context_to()?;
-    Ok(failed)
+    Ok(interrupted)
 }
 
-/// Rollout repair hook: fail every pre-existing in-progress row.
-pub async fn mark_all_in_progress_as_failed_for_rollout(
+/// Rollout repair hook: mark every pre-existing in-progress row terminal
+/// [`Interrupted`](update_history::UpdateStatus::Interrupted) (outcome unknown).
+pub async fn mark_all_in_progress_as_interrupted_for_rollout(
     db: &DatabaseConnection,
 ) -> std::result::Result<Vec<update_history::Model>, rootcause::Report<TriggerUpdateError>> {
     let candidates = UpdateHistory::find()
@@ -510,8 +527,8 @@ pub async fn mark_all_in_progress_as_failed_for_rollout(
 
     let txn = db.begin().await.context_to()?;
     let now = OffsetDateTime::now_utc();
-    let reason = "Update interrupted: owner-aware rollout";
-    let mut failed = Vec::new();
+    let reason = "Update interrupted: owner-aware rollout (outcome unknown)";
+    let mut interrupted = Vec::new();
 
     for record in candidates {
         let result = UpdateHistory::update_many()
@@ -519,9 +536,13 @@ pub async fn mark_all_in_progress_as_failed_for_rollout(
             .filter(update_history::Column::Status.eq(update_history::UpdateStatus::InProgress))
             .col_expr(
                 update_history::Column::Status,
-                Expr::value(update_history::UpdateStatus::Failed),
+                Expr::value(update_history::UpdateStatus::Interrupted),
             )
             .col_expr(update_history::Column::CompletedAt, Expr::value(Some(now)))
+            .col_expr(
+                update_history::Column::RecoveryHint,
+                Expr::value(Some(RECOVERY_HINT.to_string())),
+            )
             .col_expr(
                 update_history::Column::Output,
                 Expr::value(reason.to_string()),
@@ -537,16 +558,17 @@ pub async fn mark_all_in_progress_as_failed_for_rollout(
 
         if result.rows_affected == 1 {
             let mut updated_record = record;
-            updated_record.status = update_history::UpdateStatus::Failed;
+            updated_record.status = update_history::UpdateStatus::Interrupted;
             updated_record.completed_at = Some(now);
+            updated_record.recovery_hint = Some(RECOVERY_HINT.to_string());
             updated_record.output = reason.to_string();
             updated_record.output_bytes = reason.len() as i64;
-            failed.push(updated_record);
+            interrupted.push(updated_record);
         }
     }
 
-    if !failed.is_empty() {
-        let ids: Vec<Uuid> = failed.iter().map(|record| record.id).collect();
+    if !interrupted.is_empty() {
+        let ids: Vec<Uuid> = interrupted.iter().map(|record| record.id).collect();
         UpdateOutputLine::delete_many()
             .filter(update_output_line::Column::UpdateHistoryId.is_in(ids))
             .exec(&txn)
@@ -555,7 +577,7 @@ pub async fn mark_all_in_progress_as_failed_for_rollout(
     }
 
     txn.commit().await.context_to()?;
-    Ok(failed)
+    Ok(interrupted)
 }
 
 /// Fail all orchestrator-owned InProgress records for the given hosts on agent reconnect.
@@ -564,7 +586,7 @@ pub async fn mark_all_in_progress_as_failed_for_rollout(
 /// These records were mid-protection or mid-dispatch when the controller restarted.
 /// The user must re-trigger; Proxmox protection will re-run.
 ///
-/// Called after `mark_owned_in_progress_as_failed_on_reconnect` so agent-owned rows
+/// Called after `mark_owned_in_progress_as_interrupted_on_reconnect` so agent-owned rows
 /// are handled first.
 pub async fn mark_orchestrator_inprogress_as_failed_on_reconnect(
     db: &DatabaseConnection,
@@ -1858,7 +1880,7 @@ mod tests {
         )
         .await;
 
-        let failed = mark_owned_in_progress_as_failed_on_reconnect(&db, f.service_id, None)
+        let failed = mark_owned_in_progress_as_interrupted_on_reconnect(&db, f.service_id, None)
             .await
             .unwrap();
 
@@ -1894,7 +1916,7 @@ mod tests {
         )
         .await;
 
-        let failed = mark_owned_in_progress_as_failed_on_reconnect(
+        let failed = mark_owned_in_progress_as_interrupted_on_reconnect(
             &db,
             f.service_id,
             Some(current_instance_id),
@@ -1916,16 +1938,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn orphaned_in_progress_becomes_interrupted() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let old_instance = Uuid::now_v7();
+        let new_instance = Uuid::now_v7();
+        let orphan =
+            insert_owned_in_progress_record(&db, &f, f.service_id, Some(old_instance)).await;
+
+        let reaped = mark_owned_in_progress_as_interrupted_on_reconnect(
+            &db,
+            f.service_id,
+            Some(new_instance),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(reaped.len(), 1);
+        let row = UpdateHistory::find_by_id(orphan.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.status, update_history::UpdateStatus::Interrupted);
+        assert!(row.recovery_hint.is_some());
+    }
+
+    #[tokio::test]
     async fn reconnect_cleanup_leaves_other_service_rows_untouched() {
         let db = setup_db().await;
         let f = insert_base_fixture(&db).await;
         let owner =
             insert_owned_in_progress_record(&db, &f, Uuid::now_v7(), Some(Uuid::now_v7())).await;
 
-        let failed =
-            mark_owned_in_progress_as_failed_on_reconnect(&db, f.service_id, Some(Uuid::now_v7()))
-                .await
-                .unwrap();
+        let failed = mark_owned_in_progress_as_interrupted_on_reconnect(
+            &db,
+            f.service_id,
+            Some(Uuid::now_v7()),
+        )
+        .await
+        .unwrap();
 
         assert!(failed.is_empty());
         assert_eq!(
@@ -1947,7 +1999,7 @@ mod tests {
         let record =
             insert_owned_in_progress_record(&db, &f, f.service_id, Some(runtime_instance_id)).await;
 
-        let failed = mark_owned_in_progress_as_failed_on_reconnect(
+        let failed = mark_owned_in_progress_as_interrupted_on_reconnect(
             &db,
             f.service_id,
             Some(runtime_instance_id),
@@ -1973,10 +2025,13 @@ mod tests {
         let f = insert_base_fixture(&db).await;
         let pending = insert_update_record(&db, &f, update_history::UpdateStatus::Pending).await;
 
-        let failed =
-            mark_owned_in_progress_as_failed_on_reconnect(&db, f.service_id, Some(Uuid::now_v7()))
-                .await
-                .unwrap();
+        let failed = mark_owned_in_progress_as_interrupted_on_reconnect(
+            &db,
+            f.service_id,
+            Some(Uuid::now_v7()),
+        )
+        .await
+        .unwrap();
 
         assert!(failed.is_empty());
         assert_eq!(
@@ -1997,10 +2052,13 @@ mod tests {
         let completed =
             insert_update_record(&db, &f, update_history::UpdateStatus::Completed).await;
 
-        let failed =
-            mark_owned_in_progress_as_failed_on_reconnect(&db, f.service_id, Some(Uuid::now_v7()))
-                .await
-                .unwrap();
+        let failed = mark_owned_in_progress_as_interrupted_on_reconnect(
+            &db,
+            f.service_id,
+            Some(Uuid::now_v7()),
+        )
+        .await
+        .unwrap();
 
         assert!(failed.is_empty());
         assert_eq!(
@@ -2015,26 +2073,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rollout_cleanup_fails_preexisting_in_progress_rows_regardless_of_owner() {
+    async fn rollout_cleanup_interrupts_preexisting_in_progress_rows_regardless_of_owner() {
         let db = setup_db().await;
         let f = insert_base_fixture(&db).await;
         let record = insert_owned_in_progress_record(&db, &f, Uuid::now_v7(), None).await;
 
-        let failed = mark_all_in_progress_as_failed_for_rollout(&db)
+        let interrupted = mark_all_in_progress_as_interrupted_for_rollout(&db)
             .await
             .unwrap();
 
-        assert_eq!(failed.len(), 1);
-        assert_eq!(failed[0].id, record.id);
-        assert_eq!(
-            UpdateHistory::find_by_id(record.id)
-                .one(&db)
-                .await
-                .unwrap()
-                .unwrap()
-                .status,
-            update_history::UpdateStatus::Failed
-        );
+        assert_eq!(interrupted.len(), 1);
+        assert_eq!(interrupted[0].id, record.id);
+        let row = UpdateHistory::find_by_id(record.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.status, update_history::UpdateStatus::Interrupted);
+        assert!(row.recovery_hint.is_some());
     }
 
     #[tokio::test]
@@ -2247,7 +2303,7 @@ mod tests {
         let runtime_instance_id = Uuid::now_v7();
         let record =
             insert_owned_in_progress_record(&db, &f, f.service_id, Some(runtime_instance_id)).await;
-        mark_owned_in_progress_as_failed_on_reconnect(&db, f.service_id, Some(Uuid::now_v7()))
+        mark_owned_in_progress_as_interrupted_on_reconnect(&db, f.service_id, Some(Uuid::now_v7()))
             .await
             .unwrap();
 
@@ -2272,7 +2328,7 @@ mod tests {
         let runtime_instance_id = Uuid::now_v7();
         let record =
             insert_owned_in_progress_record(&db, &f, f.service_id, Some(runtime_instance_id)).await;
-        mark_owned_in_progress_as_failed_on_reconnect(&db, f.service_id, Some(Uuid::now_v7()))
+        mark_owned_in_progress_as_interrupted_on_reconnect(&db, f.service_id, Some(Uuid::now_v7()))
             .await
             .unwrap();
 
@@ -2366,7 +2422,7 @@ mod tests {
         let runtime_instance_id = Uuid::now_v7();
         let record =
             insert_owned_in_progress_record(&db, &f, f.service_id, Some(runtime_instance_id)).await;
-        mark_owned_in_progress_as_failed_on_reconnect(&db, f.service_id, Some(Uuid::now_v7()))
+        mark_owned_in_progress_as_interrupted_on_reconnect(&db, f.service_id, Some(Uuid::now_v7()))
             .await
             .unwrap();
 
@@ -2395,7 +2451,7 @@ mod tests {
         let runtime_instance_id = Uuid::now_v7();
         let record =
             insert_owned_in_progress_record(&db, &f, f.service_id, Some(runtime_instance_id)).await;
-        mark_owned_in_progress_as_failed_on_reconnect(&db, f.service_id, Some(Uuid::now_v7()))
+        mark_owned_in_progress_as_interrupted_on_reconnect(&db, f.service_id, Some(Uuid::now_v7()))
             .await
             .unwrap();
 

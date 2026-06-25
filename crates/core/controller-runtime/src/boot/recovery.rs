@@ -34,7 +34,7 @@ pub(crate) async fn run(state: &Arc<AppState>) -> crate::Result<()> {
     // left in-progress (e.g. from a previous crash) as failed, then
     // re-dispatch the next queued item for each affected host or batch.
     let recovered =
-        uptrakit_web_api::queries::update_batches::mark_all_in_progress_as_failed_for_rollout(
+        uptrakit_web_api::queries::update_batches::mark_all_in_progress_as_interrupted_for_rollout(
             state.db(),
         )
         .await
