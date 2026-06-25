@@ -550,6 +550,14 @@ async fn write_pre_update_protection_status(
     Ok(())
 }
 
+/// Mark an update record `Failed` with the given protection status and summary.
+///
+/// This function intentionally does **not** touch `output`, `output_bytes`, or
+/// `output_truncated`. The caller is responsible for consolidating streamed output
+/// lines into `output` via [`consolidate_protection_output`] after the output
+/// forwarder has been joined. If no `protection_summary` is supplied (or it is
+/// empty), the generic `PRE_UPDATE_PROTECTION_FAILURE_SUMMARY` constant is used
+/// as the fallback.
 pub async fn fail_before_agent_dispatch(
     db: &DatabaseConnection,
     update_history_id: Uuid,

@@ -74,6 +74,47 @@ The `UpdateStatus` enum is defined in two places:
 triggered for that host while such a row exists). The partial unique index
 `uix_update_history_host_active` covers exactly these two statuses.
 
+## Output lifecycle
+
+### Authoritative `output` column
+
+`update_history.output` is the single authoritative source of truth for the captured output of every
+**terminal** record (status `Failed` or `Completed`). Once a record reaches a terminal state, `output`
+holds the full, byte-capped text of the update run and `output_bytes` / `output_truncated` are set
+accordingly. No further writes to these columns occur after that point.
+
+### In-progress streaming window
+
+While an update is in progress (`InProgress`) the agent streams output lines in real time via the
+`update_output_lines` side table rather than writing to `output` directly. During this window `output`
+is empty. The read path (`get_update_history`, `list_update_history`) detects this state via an
+`output.is_empty()` check and falls back to loading and concatenating the rows from
+`update_output_lines`. This fallback is intentionally limited to the in-progress streaming window; any
+terminal record is served from `output` directly.
+
+### Pre-dispatch protection failures
+
+When the controller's pre-update protection phase (e.g. Proxmox snapshot or backup) fails before the
+update is dispatched to the agent, the orchestrator (`run_protection_and_dispatch`) consolidates the
+streamed protection output into the authoritative `output` column via `consolidate_protection_output`
+(`crates/ui/web-api-queries/src/queries/update_dispatch.rs`). This call happens **after** the output
+forwarder task is joined, guaranteeing that every streamed line has been flushed to `update_output_lines`
+before the consolidation read. The result is that a protection-failure record is byte-identical in
+structure to any other terminal record — `output` holds the real plugin log, not a generic placeholder.
+
+`fail_before_agent_dispatch` marks the record `Failed` and sets the protection status/summary fields,
+but intentionally leaves `output` untouched. It is always followed by `consolidate_protection_output`
+at the call sites that have joined the forwarder.
+
+### Agent-disconnected path
+
+When the agent disconnects mid-dispatch (`dispatch_update_to_agent` returns `Ok(false)`), the record
+is intentionally left in `InProgress` — it is **not** consolidated and not marked terminal. This
+preserves the reconnect-recovery path: when the agent reconnects, `select_best_output` reads all
+`update_output_lines` for the record (including any protection-phase lines written before dispatch)
+and finalizes the record with the combined output. Calling `consolidate_protection_output` on this
+path would wrongly finalize a live record.
+
 ## Per-host update queue
 
 At most one active (`Pending` or `InProgress`) update may run on a host at any time.
