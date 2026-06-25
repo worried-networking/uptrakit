@@ -36,6 +36,7 @@ pub mod tenant_settings;
 pub mod update_batches;
 pub mod update_dispatch;
 pub mod update_history;
+pub mod update_reaper;
 pub mod update_tracking_states;
 pub mod update_triggers;
 pub mod update_types;
