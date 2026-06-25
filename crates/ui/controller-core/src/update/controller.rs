@@ -352,6 +352,9 @@ pub async fn run_protection_and_dispatch(
             }
             #[cfg(feature = "plugin-ops")]
             drop(hook_tx);
+            // All senders are now dropped, so the join completes; consolidation
+            // then runs against a flushed `update_output_lines` with no concurrent
+            // writer (the autocommit-safety invariant — see `join_and_consolidate`).
             join_and_consolidate(forwarder, db.clone(), update_history_id).await;
             output_stream
                 .send_completed(update_history_id, DispatchOutcome::Failed, None)
@@ -370,6 +373,8 @@ pub async fn run_protection_and_dispatch(
             // Protection failed — record already marked Failed by the query.
             #[cfg(feature = "plugin-ops")]
             drop(hook_tx);
+            // Senders dropped → join completes → consolidation sees a flushed,
+            // writer-free `update_output_lines` (autocommit-safety invariant).
             join_and_consolidate(forwarder, db.clone(), update_history_id).await;
             output_stream
                 .send_completed(update_history_id, DispatchOutcome::Failed, None)
@@ -435,6 +440,9 @@ pub async fn run_protection_and_dispatch(
                             "fail_before_agent_dispatch also failed after dispatch error"
                         );
                     }
+                    // Both senders are already moved/dropped on this path (`tx` into
+                    // protection, `hook_tx` into the hook step), so the join completes
+                    // and consolidation runs writer-free (autocommit-safety invariant).
                     join_and_consolidate(forwarder, db.clone(), update_history_id).await;
                     output_stream
                         .send_completed(update_history_id, DispatchOutcome::Failed, None)
