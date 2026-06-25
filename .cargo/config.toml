@@ -9,6 +9,17 @@ xtask = "run --package xtask --"
 [registries.uptrakit-private]
 index = "sparse+https://index.crates.io/"
 
+# Work around recurring crates.io CDN flake: curl's HTTP/2 framing layer
+# gets connection-reset mid-download ("[16] Error in the HTTP2 framing
+# layer (Send failure: Connection reset)"), notably during release-plz
+# `cargo package`. Disabling multiplexing forces HTTP/1.1 and avoids it;
+# the retry bump rides out transient resets / 429s.
+[http]
+multiplexing = false
+
+[net]
+retry = 10
+
 # Build speed optimizations for development.
 # These settings do not affect release builds or CI unless explicitly opted in.
 
