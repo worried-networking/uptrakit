@@ -1197,4 +1197,66 @@ mod tests {
         assert_eq!(out, "a".repeat(UPDATE_OUTPUT_BYTES_CAP - 1));
         assert!(truncated);
     }
+
+    #[tokio::test]
+    async fn active_indexes_match_enum_sets() {
+        use sea_orm::{ConnectionTrait, Statement};
+        let db = setup_test_db().await;
+
+        async fn index_sql(db: &sea_orm::DatabaseConnection, name: &str) -> String {
+            let row = db
+                .query_one_raw(Statement::from_string(
+                    db.get_database_backend(),
+                    format!("SELECT sql FROM sqlite_master WHERE type='index' AND name='{name}'"),
+                ))
+                .await
+                .unwrap()
+                .expect("index must exist");
+            row.try_get::<String>("", "sql").unwrap()
+        }
+
+        fn statuses_in(sql: &str) -> std::collections::BTreeSet<String> {
+            [
+                "queued",
+                "pending",
+                "in_progress",
+                "awaiting_restart",
+                "interrupted",
+                "completed",
+                "failed",
+            ]
+            .into_iter()
+            .filter(|s| sql.contains(&format!("'{s}'")))
+            .map(str::to_string)
+            .collect()
+        }
+
+        let expect = |set: &[update_history::UpdateStatus]| {
+            set.iter()
+                .map(|s| s.as_str().to_string())
+                .collect::<std::collections::BTreeSet<_>>()
+        };
+
+        let host_sql = index_sql(&db, "uix_update_history_host_active").await;
+        assert_eq!(
+            statuses_in(&host_sql),
+            expect(&update_history::UpdateStatus::host_blocking())
+        );
+
+        let item_sql = index_sql(&db, "uix_update_history_host_software_item_active").await;
+        assert_eq!(
+            statuses_in(&item_sql),
+            expect(&update_history::UpdateStatus::unfinished())
+        );
+
+        // Terminal statuses must never appear in either active index.
+        for sql in [&host_sql, &item_sql] {
+            for terminal in ["interrupted", "completed", "failed"] {
+                assert!(
+                    !sql.contains(&format!("'{terminal}'")),
+                    "terminal {terminal} in active index"
+                );
+            }
+        }
+    }
 }
