@@ -15,6 +15,7 @@ pub enum UpdateStatus {
     AwaitingRestart,
     Completed,
     Failed,
+    Interrupted,
 }
 
 impl UpdateStatus {
@@ -26,6 +27,7 @@ impl UpdateStatus {
             Self::AwaitingRestart => "awaiting_restart",
             Self::Completed => "completed",
             Self::Failed => "failed",
+            Self::Interrupted => "interrupted",
         }
     }
 }
@@ -51,6 +53,7 @@ impl std::str::FromStr for UpdateStatus {
             "awaiting_restart" => Ok(Self::AwaitingRestart),
             "completed" => Ok(Self::Completed),
             "failed" => Ok(Self::Failed),
+            "interrupted" => Ok(Self::Interrupted),
             _ => Err(ParseUpdateStatusError),
         }
     }
@@ -250,5 +253,15 @@ mod tests {
         assert_eq!(json, r#""awaiting_restart""#);
         let back: UpdateStatus = serde_json::from_str(&json).unwrap();
         assert_eq!(back, UpdateStatus::AwaitingRestart);
+    }
+
+    #[test]
+    fn interrupted_roundtrips() {
+        use std::str::FromStr;
+        assert_eq!(UpdateStatus::Interrupted.as_str(), "interrupted");
+        assert_eq!(
+            UpdateStatus::from_str("interrupted").unwrap(),
+            UpdateStatus::Interrupted
+        );
     }
 }
