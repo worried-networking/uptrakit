@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.3](https://github.com/worried-networking/uptrakit/compare/uptrakit-openapi-client-v0.0.2...uptrakit-openapi-client-v0.0.3) - 2026-06-25
+
+### Added
+
+- *(web-api)* typed-slot dispatch for InstalledVersionEnricher
+- *(plugin-types)* add EnrichInstalledVersion capability
+
+### Other
+
+- update Cargo.toml dependencies
+- *(controller)* document canonical sha256 config digest + stale-on-error
+
 ## [0.0.2](https://github.com/worried-networking/uptrakit/compare/uptrakit-openapi-client-v0.0.1...uptrakit-openapi-client-v0.0.2) - 2026-05-05
 
 ### Added
