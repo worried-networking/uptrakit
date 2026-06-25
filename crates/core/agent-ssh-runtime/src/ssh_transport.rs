@@ -385,6 +385,7 @@ impl SshSession {
         &self,
         command: &str,
         output_tx: &mpsc::Sender<uptrakit_command::UpdateOutputLine>,
+        timeout: Option<Duration>,
     ) -> Result<uptrakit_command::executor::InteractiveHandle> {
         use uptrakit_command::executor::InteractiveHandle;
 
@@ -425,6 +426,7 @@ impl SshSession {
                 &mut signal_rx,
                 &attention_tx,
                 &output_tx_clone,
+                timeout,
             )
             .await
         });
@@ -453,6 +455,7 @@ impl SshSession {
         signal_rx: &mut mpsc::Receiver<i32>,
         attention_tx: &mpsc::Sender<()>,
         output_tx: &mpsc::Sender<uptrakit_command::UpdateOutputLine>,
+        timeout: Option<Duration>,
     ) -> uptrakit_command::Result<uptrakit_command::CommandOutput> {
         use rootcause::prelude::*;
         use uptrakit_command::CommandError;
@@ -473,6 +476,12 @@ impl SshSession {
         // since both pending buffers are empty at loop start.
         let mut flush_interval = tokio::time::interval(PTY_FLUSH_INTERVAL);
         flush_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+        // Overall-budget backstop. Resolves once the update's total timeout
+        // elapses (or never, when `timeout` is `None`). Created once and pinned
+        // so its deadline is fixed across loop iterations.
+        let deadline = interactive_deadline(timeout);
+        tokio::pin!(deadline);
 
         loop {
             let attention_sleep = if state.attention_sent {
@@ -537,6 +546,12 @@ impl SshSession {
                         let _ = attention_tx.try_send(());
                         state.attention_sent = true;
                     }
+                }
+
+                () = &mut deadline => {
+                    tracing::warn!(timeout = ?timeout, "interactive SSH update exceeded its timeout");
+                    state.flush_pending_output(output_tx, "final ");
+                    bail!(CommandError::TimedOut);
                 }
             }
         }
@@ -660,6 +675,16 @@ impl SshSession {
 }
 
 // ── Interactive session helpers ──────────────────────────────────────
+
+/// Future that resolves once the interactive update's overall budget elapses.
+/// `None` means no deadline (resolves never).
+#[cfg(feature = "interactive")]
+async fn interactive_deadline(timeout: Option<Duration>) {
+    match timeout {
+        Some(dur) => tokio::time::sleep(dur).await,
+        None => std::future::pending::<()>().await,
+    }
+}
 
 /// Mutable state for the interactive SSH session event loop.
 ///
@@ -1459,6 +1484,47 @@ mod tests {
         assert_eq!(
             config.inactivity_timeout, None,
             "inactivity_timeout should be None to allow graceful keepalive detection"
+        );
+    }
+}
+
+#[cfg(all(test, feature = "interactive"))]
+mod interactive_timeout_tests {
+    use super::*;
+    use std::time::Duration;
+
+    // The deadline policy: `Some(budget)` resolves after the budget elapses;
+    // `None` never resolves. Tested via `tokio::time::timeout` under
+    // `start_paused` — the paused runtime auto-advances to the nearest timer
+    // when all tasks are parked, so racing two timers resolves deterministically
+    // by earliest deadline, with NO new dependency and NO manual `advance`.
+    #[tokio::test(start_paused = true)]
+    async fn some_budget_resolves_after_it_elapses() {
+        let mut fut = Box::pin(interactive_deadline(Some(Duration::from_secs(7200))));
+        // A 7199s timeout fires before the 7200s budget → still pending.
+        assert!(
+            tokio::time::timeout(Duration::from_secs(7199), &mut fut)
+                .await
+                .is_err(),
+            "deadline must not resolve before the budget elapses"
+        );
+        // 2 more seconds crosses 7200s → the budget future now resolves first.
+        assert!(
+            tokio::time::timeout(Duration::from_secs(2), &mut fut)
+                .await
+                .is_ok(),
+            "deadline must resolve once the budget elapses"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn none_budget_never_resolves() {
+        let fut = interactive_deadline(None);
+        assert!(
+            tokio::time::timeout(Duration::from_secs(100_000), fut)
+                .await
+                .is_err(),
+            "a None budget must never resolve"
         );
     }
 }

@@ -191,7 +191,7 @@ impl CommandExecutor for PosixSshCommandExecutor {
         );
         self.inner
             .session
-            .exec_command_interactive(&remote_cmd, output_tx)
+            .exec_command_interactive(&remote_cmd, output_tx, spec.timeout)
             .await
             .map_err(|e| {
                 report!(CommandError::CommandSpawn(std::io::Error::other(
