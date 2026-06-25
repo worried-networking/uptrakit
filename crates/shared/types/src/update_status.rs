@@ -37,6 +37,13 @@ pub enum UpdateStatus {
     /// The update failed.
     #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "failed"))]
     Failed,
+    /// The update's outcome is unknown: the executing connection was lost or the
+    /// update exceeded its time budget before a terminal result was reported.
+    /// Terminal. Distinct from [`Self::Failed`], which carries a real failure
+    /// outcome from the agent. Recovery is user-driven — verify the installed
+    /// version before re-running.
+    #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "interrupted"))]
+    Interrupted,
 }
 
 impl UpdateStatus {
@@ -49,6 +56,7 @@ impl UpdateStatus {
             Self::AwaitingRestart => "awaiting_restart",
             Self::Completed => "completed",
             Self::Failed => "failed",
+            Self::Interrupted => "interrupted",
         }
     }
 
@@ -100,6 +108,7 @@ impl FromStr for UpdateStatus {
             "awaiting_restart" => Ok(Self::AwaitingRestart),
             "completed" => Ok(Self::Completed),
             "failed" => Ok(Self::Failed),
+            "interrupted" => Ok(Self::Interrupted),
             _ => Err(ParseUpdateStatusError),
         }
     }
@@ -155,6 +164,7 @@ mod tests {
         assert_eq!(UpdateStatus::AwaitingRestart.as_str(), "awaiting_restart");
         assert_eq!(UpdateStatus::Completed.as_str(), "completed");
         assert_eq!(UpdateStatus::Failed.as_str(), "failed");
+        assert_eq!(UpdateStatus::Interrupted.as_str(), "interrupted");
     }
 
     #[test]
@@ -191,5 +201,12 @@ mod tests {
         assert!(h.contains(&UpdateStatus::Pending));
         assert!(h.contains(&UpdateStatus::InProgress));
         assert!(h.contains(&UpdateStatus::AwaitingRestart));
+    }
+
+    #[test]
+    fn interrupted_is_terminal_and_serialises() {
+        assert_eq!(UpdateStatus::Interrupted.as_str(), "interrupted");
+        assert!(!UpdateStatus::unfinished().contains(&UpdateStatus::Interrupted));
+        assert!(!UpdateStatus::host_blocking().contains(&UpdateStatus::Interrupted));
     }
 }
