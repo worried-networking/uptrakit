@@ -15,9 +15,9 @@ use uptrakit_plugin_infrastructure_registry::PluginOps;
 use uptrakit_shared_db::entity::update_history;
 use uptrakit_shared_types::OutputStreamType;
 use uptrakit_web_api_queries::queries::update_dispatch::{
-    DispatchUpdateParams, PreUpdateProtectionOutcome, dispatch_update_to_agent,
-    fail_before_agent_dispatch, insert_protection_output_line, prepare_pre_update_protection,
-    set_inprogress_for_orchestrator,
+    DispatchUpdateParams, PreUpdateProtectionOutcome, consolidate_protection_output,
+    dispatch_update_to_agent, fail_before_agent_dispatch, insert_protection_output_line,
+    prepare_pre_update_protection, set_inprogress_for_orchestrator,
 };
 use uptrakit_web_api_queries::queries::update_triggers::{
     PendingProtectionWork, TriggerUpdateParams, trigger_update_for_host,
@@ -312,7 +312,7 @@ pub async fn run_protection_and_dispatch(
 
     // 7. Spawn forwarder task.
     let output_stream_for_fwd = output_stream.clone();
-    tokio::spawn(forward_protection_output(
+    let forwarder = tokio::spawn(forward_protection_output(
         db.clone(),
         output_stream_for_fwd,
         update_history_id,
@@ -350,6 +350,9 @@ pub async fn run_protection_and_dispatch(
                     "fail_before_agent_dispatch also failed after prepare_pre_update_protection error"
                 );
             }
+            #[cfg(feature = "plugin-ops")]
+            drop(hook_tx);
+            join_and_consolidate(forwarder, db.clone(), update_history_id).await;
             output_stream
                 .send_completed(update_history_id, DispatchOutcome::Failed, None)
                 .await;
@@ -365,6 +368,9 @@ pub async fn run_protection_and_dispatch(
     match outcome {
         PreUpdateProtectionOutcome::Failed => {
             // Protection failed — record already marked Failed by the query.
+            #[cfg(feature = "plugin-ops")]
+            drop(hook_tx);
+            join_and_consolidate(forwarder, db.clone(), update_history_id).await;
             output_stream
                 .send_completed(update_history_id, DispatchOutcome::Failed, None)
                 .await;
@@ -429,6 +435,7 @@ pub async fn run_protection_and_dispatch(
                             "fail_before_agent_dispatch also failed after dispatch error"
                         );
                     }
+                    join_and_consolidate(forwarder, db.clone(), update_history_id).await;
                     output_stream
                         .send_completed(update_history_id, DispatchOutcome::Failed, None)
                         .await;
@@ -483,6 +490,30 @@ async fn forward_protection_output(
                 timestamp,
             )
             .await;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Join + consolidate helper
+// ---------------------------------------------------------------------------
+
+/// Join the output forwarder, then write the streamed protection lines into the
+/// authoritative `update_history.output` column.
+///
+/// Call ONLY after every channel sender (`tx`, and the cfg-gated `hook_tx`) has
+/// been dropped — otherwise `forwarder.await` hangs forever (the channel never
+/// closes). Autocommit is safe: joining the forwarder first guarantees no
+/// concurrent writer on `update_output_lines`.
+async fn join_and_consolidate(
+    forwarder: tokio::task::JoinHandle<()>,
+    db: sea_orm::DatabaseConnection,
+    update_history_id: Uuid,
+) {
+    if let Err(e) = forwarder.await {
+        tracing::warn!(update_id = %update_history_id, error = %e, "protection output forwarder join failed");
+    }
+    if let Err(e) = consolidate_protection_output(&db, update_history_id).await {
+        tracing::warn!(update_id = %update_history_id, error = %e, "consolidating protection output failed");
     }
 }
 
@@ -581,5 +612,170 @@ fn map_trigger_error(
         | TriggerUpdateError::Database(_)
         | TriggerUpdateError::PostUpdateFinalization(_)
         | TriggerUpdateError::PostUpdateFinalizationTimeout => UpdateDispatchError::Internal,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    struct NoopOutputStream;
+
+    #[async_trait::async_trait]
+    impl UpdateOutputStream for NoopOutputStream {
+        async fn create_channel(&self, _update_id: Uuid) {}
+        async fn send_line(
+            &self,
+            _update_id: Uuid,
+            _line_id: Uuid,
+            _text: String,
+            _stream: uptrakit_shared_types::OutputStreamType,
+            _ts: OffsetDateTime,
+        ) {
+        }
+        async fn send_completed(
+            &self,
+            _update_id: Uuid,
+            _outcome: DispatchOutcome,
+            _error: Option<String>,
+        ) {
+        }
+    }
+
+    async fn make_sqlite_db() -> sea_orm::DatabaseConnection {
+        let db = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
+        uptrakit_shared_db::migration::run_migrations(&db)
+            .await
+            .unwrap();
+        db
+    }
+
+    // `start_paused = true` would be ideal here but is incompatible with SQLite:
+    // sqlx's SQLite driver dispatches every query via `spawn_blocking`. Under a
+    // paused clock, tokio sees no runnable *async* tasks while the blocking thread
+    // runs, auto-advances virtual time, and fires the 5 s timeout before the
+    // forwarder finishes — a false alarm. Instead we use a real 5 s wall-clock
+    // guard: correct execution completes in <<1 s; a deadlock regression (sender
+    // not dropped before `forwarder.await`) hangs and fails after 5 s real time.
+    // That's still a deterministic regression signal — just not instant.
+    #[tokio::test]
+    async fn forwarder_join_completes_and_consolidates_after_senders_dropped() {
+        use sea_orm::{ActiveModelTrait, EntityTrait};
+        use uptrakit_shared_db::entity::{host, software_item, tenant, update_history};
+        let db = make_sqlite_db().await;
+        let now = OffsetDateTime::now_utc();
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let software_item_id = Uuid::now_v7();
+        let id = Uuid::now_v7();
+        // minimal FK parents
+        tenant::ActiveModel {
+            id: sea_orm::Set(tenant_id),
+            name: sea_orm::Set("t".into()),
+            slug: sea_orm::Set(format!("t-{tenant_id}")),
+            is_default: sea_orm::Set(false),
+            created_at: sea_orm::Set(now),
+            updated_at: sea_orm::Set(now),
+            deactivated_at: sea_orm::Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        host::ActiveModel {
+            id: sea_orm::Set(host_id),
+            tenant_id: sea_orm::Set(tenant_id),
+            machine_id: sea_orm::Set(format!("m-{host_id}")),
+            hostname: sea_orm::Set("h".into()),
+            friendly_name: sea_orm::Set("H".into()),
+            os_type: sea_orm::Set(None),
+            os_version: sea_orm::Set(None),
+            architecture: sea_orm::Set(None),
+            ip_address: sea_orm::Set(None),
+            host_features: sea_orm::Set(None),
+            last_seen_at: sea_orm::Set(None),
+            created_at: sea_orm::Set(now),
+            updated_at: sea_orm::Set(now),
+            deactivated_at: sea_orm::Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        software_item::ActiveModel {
+            id: sea_orm::Set(software_item_id),
+            tenant_id: sea_orm::Set(tenant_id),
+            name: sea_orm::Set("s".into()),
+            featured: sea_orm::Set(false),
+            icon_url: sea_orm::Set(None),
+            last_checked_at: sea_orm::Set(None),
+            awaiting_restart_timeout: sea_orm::Set(None),
+            created_at: sea_orm::Set(now),
+            updated_at: sea_orm::Set(now),
+            deactivated_at: sea_orm::Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        update_history::ActiveModel {
+            id: sea_orm::Set(id),
+            tenant_id: sea_orm::Set(tenant_id),
+            host_id: sea_orm::Set(host_id),
+            software_item_id: sea_orm::Set(software_item_id),
+            host_software_item_id: sea_orm::Set(None),
+            from_version: sea_orm::Set(None),
+            to_version: sea_orm::Set(Some("1.0.0".into())),
+            status: sea_orm::Set(update_history::UpdateStatus::Failed),
+            output: sea_orm::Set(String::new()),
+            output_bytes: sea_orm::Set(0),
+            actor_type: sea_orm::Set("user".into()),
+            actor_id: sea_orm::Set(String::new()),
+            execution_owner_service_id: sea_orm::Set(None),
+            execution_owner_instance_id: sea_orm::Set(None),
+            started_at: sea_orm::Set(Some(now)),
+            completed_at: sea_orm::Set(Some(now)),
+            awaiting_restart_since: sea_orm::Set(None),
+            created_at: sea_orm::Set(now),
+            update_category: sea_orm::Set("security".into()),
+            batch_id: sea_orm::Set(None),
+            interactive: sea_orm::Set(false),
+            output_truncated: sea_orm::Set(false),
+            pre_update_protection_status: sea_orm::Set(Some("failed".into())),
+            pre_update_protection_summary: sea_orm::Set(None),
+            recovery_hint: sea_orm::Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+        let stream: std::sync::Arc<dyn UpdateOutputStream> = std::sync::Arc::new(NoopOutputStream);
+        let forwarder = tokio::spawn(forward_protection_output(db.clone(), stream, id, rx));
+
+        // Senders confined to a scope that closes before the join (the invariant).
+        // `tx` is MOVED into the scope (`let tx = tx;`) so it is dropped at scope
+        // exit — `UnboundedSender::send` takes `&self`, so without the move `tx`
+        // would outlive the scope, the channel would never close, and the join
+        // would deadlock (the very regression this test guards).
+        {
+            let tx = tx;
+            let hook_tx = tx.clone();
+            tx.send(b"line one\n".to_vec()).unwrap();
+            hook_tx.send(b"line two\n".to_vec()).unwrap();
+        } // tx + hook_tx dropped here -> channel closes
+
+        // Must NOT hang: bound the join so a regression fails fast.
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            join_and_consolidate(forwarder, db.clone(), id),
+        )
+        .await
+        .expect("join_and_consolidate must not deadlock");
+
+        let row = update_history::Entity::find_by_id(id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.output, "line one\nline two\n");
     }
 }
