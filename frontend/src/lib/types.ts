@@ -670,7 +670,14 @@ export interface UpdateSoftwareItemRequest {
 	icon_url?: string | null;
 }
 
-export type UpdateHistoryStatus = 'queued' | 'pending' | 'in_progress' | 'awaiting_restart' | 'completed' | 'failed';
+export type UpdateHistoryStatus =
+	| 'queued'
+	| 'pending'
+	| 'in_progress'
+	| 'awaiting_restart'
+	| 'completed'
+	| 'failed'
+	| 'interrupted';
 
 export interface UpdateHistoryResponse {
 	id: string;
