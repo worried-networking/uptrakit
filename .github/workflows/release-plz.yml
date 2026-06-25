@@ -42,7 +42,7 @@ jobs:
       any_binary_released: ${{ steps.any_binary.outputs.released }}
       any_released: ${{ steps.any_released.outputs.released }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           token: ${{ secrets.RELEASE_PLZ_TOKEN }}
@@ -117,7 +117,7 @@ jobs:
       group: release-pr-${{ github.ref }}
       cancel-in-progress: true
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           token: ${{ secrets.RELEASE_PLZ_TOKEN }}
@@ -278,7 +278,7 @@ jobs:
     if: ${{ needs.release-plz.outputs.released == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v6
         with:
@@ -327,7 +327,7 @@ jobs:
     env:
       RELEASES: ${{ needs.release-plz.outputs.releases }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -533,7 +533,7 @@ jobs:
       tags_csv: ${{ steps.parse.outputs.tags_csv }}
       needs_frontend: ${{ steps.parse.outputs.needs_frontend }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Parse and validate backfill tags
         id: parse
@@ -548,7 +548,7 @@ jobs:
     if: ${{ always() && needs.backfill-plan.result == 'success' && needs.backfill-plan.outputs.needs_frontend == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v6
         with:
@@ -605,7 +605,7 @@ jobs:
       PLAN: ${{ needs.backfill-plan.outputs.plan }}
       TARGET: ${{ matrix.target }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Compute per-target build set
         id: build_set
