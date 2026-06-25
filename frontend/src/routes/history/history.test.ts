@@ -37,7 +37,12 @@ vi.mock('$lib/sse', () => ({
 	connectEventStream: vi.fn(() => () => {})
 }));
 
-import HistoryPage from './+page.svelte';
+import HistoryPage, {
+	statusLabel,
+	statusBadgeTone,
+	historyStatusGlyph,
+	historyStatusGlyphClasses
+} from './+page.svelte';
 import * as api from '$lib/api';
 import * as auth from '$lib/auth.svelte';
 
@@ -150,6 +155,47 @@ const pendingItem = {
 	created_at: '2026-01-30T12:00:00Z'
 } satisfies UpdateHistoryResponse;
 
+const interruptedItem = {
+	id: 'hist-interrupted',
+	host_id: 'host-6',
+	host_name: 'prod-06',
+	software_item_id: 'software-6',
+	software_item_name: 'caddy',
+	from_version: '2.7.0',
+	to_version: '2.8.0',
+	status: 'interrupted',
+	started_at: '2026-01-30T07:00:00Z',
+	completed_at: '2026-01-30T07:05:00Z',
+	output: 'Connection lost.',
+	output_truncated: false,
+	interactive: false,
+	actor_type: 'user',
+	actor_id: 'actor-6',
+	actor_name: 'Frank Ng',
+	created_at: '2026-01-30T07:00:00Z'
+} satisfies UpdateHistoryResponse;
+
+describe('interrupted status helpers', () => {
+	it('labels interrupted', () => {
+		expect(statusLabel('interrupted')).toBe('Interrupted');
+	});
+
+	it('uses a warning tone distinct from the danger tone used for failed', () => {
+		expect(statusBadgeTone('interrupted')).toBe('warning');
+		expect(statusBadgeTone('interrupted')).not.toBe(statusBadgeTone('failed'));
+	});
+
+	it('maps interrupted to a non-empty glyph distinct from failed', () => {
+		const glyph = historyStatusGlyph('interrupted');
+		expect(glyph).not.toBe('');
+		expect(glyph).not.toBe(historyStatusGlyph('failed'));
+	});
+
+	it('uses warning styling classes for the interrupted glyph', () => {
+		expect(historyStatusGlyphClasses('interrupted')).toContain('--color-warning');
+	});
+});
+
 describe('History Route', () => {
 	beforeAll(() => {
 		class ResizeObserverMock {
@@ -219,6 +265,22 @@ describe('History Route', () => {
 		expect(glyphTexts).toEqual(expect.arrayContaining(['✓', '✕', '↑', '·']));
 	});
 
+	it('renders the Interrupted badge for an interrupted feed entry', async () => {
+		vi.mocked(api.listUpdateHistory).mockResolvedValue({
+			items: [interruptedItem],
+			total: 1,
+			page: 1,
+			per_page: 25,
+			total_pages: 1
+		});
+
+		render(HistoryPage);
+		await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+
+		const entry = screen.getByText('caddy on prod-06').closest('article')!;
+		expect(within(entry).getByText('Interrupted')).toBeInTheDocument();
+	});
+
 	it('opens waiting-state output in the shared terminal modal shell', async () => {
 		render(HistoryPage);
 
@@ -269,8 +331,8 @@ describe('History Route', () => {
 			expect(filterBar).not.toBeNull();
 			const select = filterBar!.querySelector('#history-status-filter') as HTMLSelectElement | null;
 			expect(select).not.toBeNull();
-			// 6 options: all, in_progress, queued, pending, failed, completed
-			expect(select!.querySelectorAll('option')).toHaveLength(6);
+			// 7 options: all, in_progress, queued, pending, failed, interrupted, completed
+			expect(select!.querySelectorAll('option')).toHaveLength(7);
 			// No separate Filters SectionCard heading.
 			expect(screen.queryByRole('heading', { name: 'Filters' })).not.toBeInTheDocument();
 		});

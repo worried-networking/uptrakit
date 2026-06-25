@@ -381,6 +381,8 @@
 				return 'danger';
 			case 'in_progress':
 				return 'warning';
+			case 'interrupted':
+				return 'warning';
 			case 'awaiting_restart':
 			case 'queued':
 			case 'pending':
@@ -396,6 +398,8 @@
 				return 'Failed';
 			case 'in_progress':
 				return 'Running';
+			case 'interrupted':
+				return 'Interrupted';
 			case 'awaiting_restart':
 				return 'Awaiting Restart';
 			case 'queued':

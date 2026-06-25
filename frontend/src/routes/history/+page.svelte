@@ -1,3 +1,67 @@
+<script lang="ts" module>
+	import type { UpdateHistoryStatus } from '$lib/types';
+
+	export function statusBadgeTone(status: UpdateHistoryStatus): 'neutral' | 'info' | 'success' | 'warning' | 'danger' {
+		switch (status) {
+			case 'queued':
+				return 'neutral';
+			case 'pending':
+				return 'info';
+			case 'in_progress':
+				return 'warning';
+			case 'awaiting_restart':
+				return 'info';
+			case 'completed':
+				return 'success';
+			case 'failed':
+				return 'danger';
+			case 'interrupted':
+				return 'warning';
+		}
+	}
+
+	export function statusLabel(status: UpdateHistoryStatus): string {
+		if (status === 'in_progress') return 'In Progress';
+		if (status === 'interrupted') return 'Interrupted';
+		return status.charAt(0).toUpperCase() + status.slice(1);
+	}
+
+	export function historyStatusGlyph(status: UpdateHistoryStatus): string {
+		switch (status) {
+			case 'completed':
+				return '✓';
+			case 'failed':
+				return '✕';
+			case 'in_progress':
+				return '↑';
+			case 'awaiting_restart':
+				return '⟳';
+			case 'interrupted':
+				return '!';
+			case 'queued':
+			case 'pending':
+				return '·';
+		}
+	}
+
+	export function historyStatusGlyphClasses(status: UpdateHistoryStatus): string {
+		switch (status) {
+			case 'completed':
+				return 'border-[var(--color-success-border)] bg-[var(--color-success-bg)] text-[var(--color-success)]';
+			case 'failed':
+				return 'border-[var(--color-danger-border)] bg-[var(--color-danger-bg)] text-[var(--color-danger)]';
+			case 'in_progress':
+				return 'border-[var(--color-warning-border)] bg-[var(--color-warning-bg)] text-[var(--color-warning)]';
+			case 'interrupted':
+				return 'border-[var(--color-warning-border)] bg-[var(--color-warning-bg)] text-[var(--color-warning)]';
+			case 'awaiting_restart':
+			case 'queued':
+			case 'pending':
+				return 'border-[var(--color-info-border)] bg-[var(--color-info-bg)] text-[var(--color-info)]';
+		}
+	}
+</script>
+
 <script lang="ts">
 	import { onMount, onDestroy, untrack } from 'svelte';
 	import { SvelteMap } from 'svelte/reactivity';
@@ -19,7 +83,7 @@
 	import type { InteractiveConnectionState } from '$lib/interactive';
 	import { connectEventStream, AdminEventType } from '$lib/sse';
 	import { Permission } from '$lib/types';
-	import type { UpdateHistoryResponse, UpdateHistoryStatus, SoftwareItemResponse } from '$lib/types';
+	import type { UpdateHistoryResponse, SoftwareItemResponse } from '$lib/types';
 	import Button from '$lib/components/Button.svelte';
 	import {
 		Callout,
@@ -46,7 +110,8 @@
 		'pending',
 		'in_progress',
 		'completed',
-		'failed'
+		'failed',
+		'interrupted'
 	] as const satisfies readonly StatusFilter[];
 
 	let items: UpdateHistoryResponse[] = $state([]);
@@ -258,58 +323,6 @@
 		} catch {
 			// Fallback: reload the whole page
 			loadHistory(currentPage);
-		}
-	}
-
-	function statusBadgeTone(status: UpdateHistoryStatus): 'neutral' | 'info' | 'success' | 'warning' | 'danger' {
-		switch (status) {
-			case 'queued':
-				return 'neutral';
-			case 'pending':
-				return 'info';
-			case 'in_progress':
-				return 'warning';
-			case 'awaiting_restart':
-				return 'info';
-			case 'completed':
-				return 'success';
-			case 'failed':
-				return 'danger';
-		}
-	}
-
-	function statusLabel(status: UpdateHistoryStatus): string {
-		return status === 'in_progress' ? 'In Progress' : status.charAt(0).toUpperCase() + status.slice(1);
-	}
-
-	function historyStatusGlyph(status: UpdateHistoryStatus): string {
-		switch (status) {
-			case 'completed':
-				return '✓';
-			case 'failed':
-				return '✕';
-			case 'in_progress':
-				return '↑';
-			case 'awaiting_restart':
-				return '⟳';
-			case 'queued':
-			case 'pending':
-				return '·';
-		}
-	}
-
-	function historyStatusGlyphClasses(status: UpdateHistoryStatus): string {
-		switch (status) {
-			case 'completed':
-				return 'border-[var(--color-success-border)] bg-[var(--color-success-bg)] text-[var(--color-success)]';
-			case 'failed':
-				return 'border-[var(--color-danger-border)] bg-[var(--color-danger-bg)] text-[var(--color-danger)]';
-			case 'in_progress':
-				return 'border-[var(--color-warning-border)] bg-[var(--color-warning-bg)] text-[var(--color-warning)]';
-			case 'awaiting_restart':
-			case 'queued':
-			case 'pending':
-				return 'border-[var(--color-info-border)] bg-[var(--color-info-bg)] text-[var(--color-info)]';
 		}
 	}
 
@@ -677,6 +690,7 @@
 									{ value: 'queued', label: 'Queued' },
 									{ value: 'pending', label: 'Pending' },
 									{ value: 'failed', label: 'Failed' },
+									{ value: 'interrupted', label: 'Interrupted' },
 									{ value: 'completed', label: 'Completed' }
 								]}
 								onchange={(e) => {
