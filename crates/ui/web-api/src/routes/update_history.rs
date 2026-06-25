@@ -173,12 +173,15 @@ pub async fn stream_update_output(
 
     let is_terminal = matches!(
         record.status,
-        update_history::UpdateStatus::Completed | update_history::UpdateStatus::Failed
+        update_history::UpdateStatus::Completed
+            | update_history::UpdateStatus::Failed
+            | update_history::UpdateStatus::Interrupted
     );
     let shutdown_token = state.shutdown_token.clone();
     let terminal_status = match record.status {
         update_history::UpdateStatus::Completed => "completed",
         update_history::UpdateStatus::Failed => "failed",
+        update_history::UpdateStatus::Interrupted => "interrupted",
         _ => "",
     };
 
