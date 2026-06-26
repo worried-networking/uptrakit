@@ -100,7 +100,7 @@ pub(super) async fn emit_batch_update_finalized_audit(
     service_id: uuid::Uuid,
     tenant_id: uuid::Uuid,
     batch_id: uuid::Uuid,
-    summary: &super::BatchUpdateAuditSummary,
+    summary: &super::batch::BatchUpdateAuditSummary,
 ) {
     let mut details = serde_json::json!({
         "completed_count": summary.completed_count,
