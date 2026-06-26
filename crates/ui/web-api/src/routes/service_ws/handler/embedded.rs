@@ -11,8 +11,9 @@ use uptrakit_wire::report_tracker::ReportTracker;
 use uptrakit_wire::{Capability, ServiceMessage};
 
 use super::message_processor::MessageProcessor;
+use super::session_authenticated::load_session_host_ids;
 use super::shared_types::ProcessorAction;
-use super::{load_session_host_ids, workload};
+use super::workload;
 use crate::AppState;
 
 // ---------------------------------------------------------------------------
