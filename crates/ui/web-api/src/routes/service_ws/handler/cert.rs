@@ -403,6 +403,10 @@ pub(super) async fn poll_approval_status(
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
     #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
+    #![expect(
+        clippy::expect_used,
+        reason = "expect used for infallible operations in test code; message documents the invariant"
+    )]
 
     use super::*;
 

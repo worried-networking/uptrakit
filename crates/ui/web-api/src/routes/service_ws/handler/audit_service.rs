@@ -85,7 +85,7 @@ fn validate_audit_event_payload(
         return Err(format!("outcome exceeds {MAX_SHORT_STRING_LEN} bytes"));
     }
     let outcome = uptrakit_audit_log::AuditOutcome::try_from(payload.outcome.as_str())
-        .map_err(|_| format!("unsupported audit outcome: {}", payload.outcome))?;
+        .map_err(|_outcome_err| format!("unsupported audit outcome: {}", payload.outcome))?;
     for (field, value) in [
         ("tenant_id", payload.tenant_id.as_deref()),
         ("target_type", payload.target_type.as_deref()),
@@ -514,8 +514,9 @@ pub(super) async fn emit_service_certificate_renew_audit_event(
 
 #[cfg(test)]
 mod tests {
+    use super::super::message_processor::MessageProcessor;
+    use super::super::shared_types::ProcessorAction;
     use super::super::test_support::*;
-    use super::super::{MessageProcessor, ProcessorAction};
     use super::*;
     use std::collections::HashSet;
     use std::sync::Arc;

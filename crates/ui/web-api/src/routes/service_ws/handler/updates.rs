@@ -2588,6 +2588,10 @@ mod tests {
         clippy::unwrap_used,
         reason = "test code: panics on failure are acceptable"
     )]
+    #![expect(
+        clippy::expect_used,
+        reason = "expect used for infallible operations in test code; message documents the invariant"
+    )]
 
     use super::*;
     use async_trait::async_trait;

@@ -23,7 +23,7 @@ use crate::AppState;
 
 // Private types from handler accessible to child modules.
 #[cfg(feature = "db-sqlite")]
-use super::AuthenticatedSessionState;
+use super::session_authenticated::AuthenticatedSessionState;
 
 // pub(crate) constants / types from service_ws::protocol.
 #[cfg(feature = "db-sqlite")]
