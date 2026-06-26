@@ -234,13 +234,42 @@ pub(super) async fn dispatch_next_queued_update(
     dispatch_next_queued_update_with_notifier(state, service_id, host_id).await;
 }
 
+/// Mark a queued update as `Failed` after its dispatch target could not be
+/// loaded. Best-effort: a secondary update error is logged, not propagated.
+async fn fail_dispatch_target_load(
+    state: &Arc<AppState>,
+    next: &update_history::Model,
+    host_id: uuid::Uuid,
+    error: impl std::fmt::Display,
+) {
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+
+    tracing::warn!(
+        update_id = %next.id,
+        %host_id,
+        error = %error,
+        "failed to load dispatch data for queued update, marking as failed"
+    );
+    let mut active: update_history::ActiveModel = next.clone().into();
+    active.status = Set(update_history::UpdateStatus::Failed);
+    active.completed_at = Set(Some(time::OffsetDateTime::now_utc()));
+    let output = format!("dispatch failed: {error}");
+    active.output_bytes = Set(output.len() as i64);
+    active.output = Set(output);
+    if let Err(upd_err) = active.update(state.db()).await {
+        tracing::warn!(
+            update_id = %next.id,
+            error = %upd_err,
+            "failed to mark queued update as failed after load_target_for_dispatch error"
+        );
+    }
+}
+
 async fn dispatch_next_queued_update_with_notifier(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
     host_id: uuid::Uuid,
 ) {
-    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
-
     let tenant_id = match service::Entity::find_by_id(service_id)
         .one(state.db())
         .await
@@ -312,25 +341,7 @@ async fn dispatch_next_queued_update_with_notifier(
         {
             Ok(target) => target,
             Err(e) => {
-                tracing::warn!(
-                    update_id = %next.id,
-                    %host_id,
-                    error = %e,
-                    "failed to load dispatch data for queued update, marking as failed"
-                );
-                let mut active: update_history::ActiveModel = next.clone().into();
-                active.status = Set(update_history::UpdateStatus::Failed);
-                active.completed_at = Set(Some(time::OffsetDateTime::now_utc()));
-                let output = format!("dispatch failed: {e}");
-                active.output_bytes = Set(output.len() as i64);
-                active.output = Set(output);
-                if let Err(upd_err) = active.update(state.db()).await {
-                    tracing::warn!(
-                        update_id = %next.id,
-                        error = %upd_err,
-                        "failed to mark queued update as failed after load_target_for_dispatch error"
-                    );
-                }
+                fail_dispatch_target_load(state, &next, host_id, e).await;
                 return;
             }
         };
