@@ -357,6 +357,21 @@ handle_delete_service_config = "no-db"
 [routes."service_ws/handler/shared_types.rs"]
 load_linked_host_ids = "no-db"
 
+[routes."service_ws/handler/test_support.rs"]
+sign_agent_csr = "ignore"
+build_handler_test_state = "ignore"
+register_test_connection = "ignore"
+insert_test_service_row = "ignore"
+build_db_audited_state = "ignore"
+insert_test_system_service_row = "ignore"
+tenant_audit_row_for_action = "ignore"
+system_audit_row_for_action = "ignore"
+insert_service_row = "ignore"
+insert_linked_host_and_item = "ignore"
+relink_service_host = "ignore"
+insert_owned_in_progress_update = "ignore"
+run_embedded_register_once = "ignore"
+
 [routes."service_ws/handler/update_tracking.rs"]
 handle_service_trigger_update = "no-db"
 handle_service_trigger_host_batch_update = "no-db"
