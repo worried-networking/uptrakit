@@ -996,7 +996,7 @@ async fn broadcast_update_started_events(
         request_id: None,
         correlation_id: None,
     };
-    let _ = super::ingest_service_audit_event(
+    let _ = super::audit_service::ingest_service_audit_event(
         state,
         service_id,
         false,
@@ -1031,7 +1031,7 @@ async fn broadcast_update_started_events(
             request_id: None,
             correlation_id: None,
         };
-        let _ = super::ingest_service_audit_event(
+        let _ = super::audit_service::ingest_service_audit_event(
             state,
             service_id,
             false,

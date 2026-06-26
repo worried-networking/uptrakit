@@ -11,6 +11,7 @@
 use crate::AppState;
 use uptrakit_wire::surfaces;
 
+use super::shared_types::ServiceAuditCtx;
 use super::surface_wire;
 
 pub(super) fn surface_action_target_display(
@@ -102,12 +103,6 @@ pub(super) fn classify_surface_registration_error_for_audit(
             "registration_error"
         }
     }
-}
-
-pub(super) struct ServiceAuditCtx<'a> {
-    pub(super) state: &'a AppState,
-    pub(super) service_id: uuid::Uuid,
-    pub(super) service_app_name: Option<&'a str>,
 }
 
 pub(super) fn emit_surface_registration_audit_event(

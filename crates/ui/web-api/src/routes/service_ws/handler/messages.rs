@@ -162,8 +162,10 @@ async fn emit_service_certificate_renew_non_success_audit_event(
         request_id: None,
         correlation_id: None,
     };
-    let _ =
-        super::ingest_service_audit_event(state, service_id, is_system, None, None, payload).await;
+    let _ = super::audit_service::ingest_service_audit_event(
+        state, service_id, is_system, None, None, payload,
+    )
+    .await;
 }
 
 #[derive(Default)]
@@ -319,7 +321,7 @@ pub(super) async fn handle_renew_certificate(
                     cert_pem: bundle.cert_pem,
                     not_after: bundle.not_after,
                 });
-                super::emit_service_certificate_renew_audit_event(
+                super::audit_service::emit_service_certificate_renew_audit_event(
                     state,
                     service_id,
                     true,
@@ -420,7 +422,7 @@ pub(super) async fn handle_renew_certificate(
                     cert_pem: bundle.cert_pem,
                     not_after: bundle.not_after,
                 });
-                super::emit_service_certificate_renew_audit_event(
+                super::audit_service::emit_service_certificate_renew_audit_event(
                     state,
                     service_id,
                     false,
