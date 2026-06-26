@@ -22,7 +22,13 @@ use super::shared_types::{
     HandlerError, HandlerResult, MAX_UPDATE_OUTPUT_BYTES, ProcessorResponse, load_linked_host_ids,
 };
 use crate::AppState;
+
+mod lookups;
+mod ownership;
+
 use crate::notifications::events::{NotificationEvent, NotificationEventDetails};
+pub(super) use lookups::{resolve_host_name, resolve_software_item_name};
+use ownership::validate_host_link_visibility;
 use rootcause::prelude::*;
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, plugin_config, service, software_item,
@@ -50,47 +56,6 @@ impl crate::ServiceNotifier for ReplayPreparationNotifier {
     async fn send_to_service(&self, _service_id: &uuid::Uuid, _msg: ControllerMessage) -> bool {
         false
     }
-}
-
-// ---------------------------------------------------------------------------
-// validate_host_link_visibility
-// ---------------------------------------------------------------------------
-
-/// Validate that an `update_history` record belongs to a host linked to the
-/// current service. Returns the record on success, logs a warning and returns
-/// an error if the service does not own the record.
-#[tracing::instrument(skip_all, fields(%service_id, %update_history_id))]
-pub(super) async fn validate_host_link_visibility(
-    db: &sea_orm::DatabaseConnection,
-    service_id: uuid::Uuid,
-    update_history_id: uuid::Uuid,
-    linked_host_ids: impl std::borrow::Borrow<HashSet<uuid::Uuid>>,
-) -> HandlerResult<update_history::Model> {
-    let linked_host_ids = linked_host_ids.borrow();
-    let record = uptrakit_shared_db::entity::prelude::UpdateHistory::find_by_id(update_history_id)
-        .one(db)
-        .await
-        .context_to::<HandlerError>()?
-        .ok_or_else(|| {
-            tracing::warn!(
-                %service_id,
-                update_id = %update_history_id,
-                "update_history record not found"
-            );
-            report!(HandlerError::WebSocketSend)
-        })?;
-
-    if !linked_host_ids.contains(&record.host_id) {
-        tracing::warn!(
-            %service_id,
-            update_id = %update_history_id,
-            host_id = %record.host_id,
-            "service attempted to update record for unlinked host"
-        );
-        bail!(HandlerError::WebSocketSend);
-    }
-
-    Ok(record)
 }
 
 async fn finalize_post_update_best_effort(state: &Arc<AppState>, record: &update_history::Model) {
@@ -2189,31 +2154,6 @@ pub(super) async fn emit_batch_progress_from_db(state: &Arc<AppState>, batch_id:
         },
     )
     .await;
-}
-
-/// Resolve a software item name by ID (for batch progress events).
-pub(super) async fn resolve_software_item_name(
-    state: &Arc<AppState>,
-    item_id: uuid::Uuid,
-) -> String {
-    software_item::Entity::find_by_id(item_id)
-        .one(state.db())
-        .await
-        .ok()
-        .flatten()
-        .map(|sw| sw.name)
-        .unwrap_or_else(|| "Unknown Software".to_string())
-}
-
-/// Resolve a host name by ID (for batch progress events).
-pub(super) async fn resolve_host_name(state: &Arc<AppState>, host_id: uuid::Uuid) -> String {
-    host::Entity::find_by_id(host_id)
-        .one(state.db())
-        .await
-        .ok()
-        .flatten()
-        .map(|h| h.friendly_name)
-        .unwrap_or_else(|| "Unknown Host".to_string())
 }
 
 // ---------------------------------------------------------------------------

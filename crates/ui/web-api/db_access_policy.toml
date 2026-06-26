@@ -402,8 +402,14 @@ run_embedded_register_once = "ignore"
 handle_service_trigger_update = "no-db"
 handle_service_trigger_host_batch_update = "no-db"
 
-[routes."service_ws/handler/updates/mod.rs"]
+[routes."service_ws/handler/updates/ownership.rs"]
 validate_host_link_visibility = "ignore"
+
+[routes."service_ws/handler/updates/lookups.rs"]
+resolve_software_item_name = "ignore"
+resolve_host_name = "ignore"
+
+[routes."service_ws/handler/updates/mod.rs"]
 load_pending_update_records = "ignore"
 prepare_pending_replay_messages = "ignore"
 fail_unreplayable_pending_update = "ignore"
@@ -427,8 +433,6 @@ dispatch_next_queued_update_for_replay = "ignore"
 dispatch_next_queued_update_with_notifier = "ignore"
 emit_batch_progress_event = "ignore"
 emit_batch_progress_from_db = "ignore"
-resolve_software_item_name = "ignore"
-resolve_host_name = "ignore"
 process_single_batch_result = "ignore"
 handle_batch_update_result = "no-db"
 handle_stdin_attention = "ignore"
