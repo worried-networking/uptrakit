@@ -318,8 +318,7 @@ enrich_discovered_items = "ignore"
 emit_service_certificate_renew_non_success_audit_event = "ignore"
 trigger_host_progression_after_awaiting_restart = "ignore"
 
-[routes."service_ws/handler/mod.rs"]
-send_ws_with_timeout = "ignore"
+[routes."service_ws/handler/message_processor.rs"]
 run = "ignore"
 dispatch = "ignore"
 dispatch_update_hooks = "ignore"
@@ -327,6 +326,9 @@ dispatch_update_tracking = "ignore"
 dispatch_surfaces = "ignore"
 handle_surface_registration = "ignore"
 handle_surface_action_request = "ignore"
+
+[routes."service_ws/handler/mod.rs"]
+send_ws_with_timeout = "ignore"
 load_service_capabilities = "ignore"
 register_connection = "ignore"
 load_session_host_ids = "ignore"

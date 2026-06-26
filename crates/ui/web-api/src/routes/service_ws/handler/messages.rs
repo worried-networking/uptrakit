@@ -29,8 +29,8 @@ use uptrakit_wire::{
 
 use uptrakit_shared_db::entity::system_service as sys_svc_entity;
 
-use super::LoopAction;
 use super::discovery::trigger_discovery_for_agent_host;
+use super::message_processor::LoopAction;
 use super::renewal::{sign_renewal_csr, sign_renewal_csr_system};
 use super::shared_types::{ProcessorResponse, load_linked_host_ids};
 use uptrakit_web_api_types::events::AdminEvent;
