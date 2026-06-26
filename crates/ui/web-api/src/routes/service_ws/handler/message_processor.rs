@@ -21,10 +21,13 @@ use uptrakit_wire::report_tracker::ReportTracker;
 use uptrakit_wire::{ControllerMessage, ErrorCode, ErrorPayload, ReportPagination, ServiceMessage};
 
 use super::super::protocol::CertIdentity;
-use super::shared_types::{self, ProcessorAction, ProcessorResponse};
+use super::session_enrolled::upgrade_service_capabilities;
+use super::shared_types::{
+    self, ProcessorAction, ProcessorResponse, is_valid_service_config_scope,
+};
 use super::{
-    audit_service, audit_surface, is_valid_service_config_scope, messages, service_config,
-    surface_wire, update_tracking, updates, upgrade_service_capabilities, workload,
+    audit_service, audit_surface, messages, service_config, surface_wire, update_tracking, updates,
+    workload,
 };
 use crate::AppState;
 

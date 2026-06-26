@@ -26,10 +26,11 @@ use super::super::protocol::{
     deserialize_service_msg, record_service_activity, record_system_service_activity, send_pong,
     serialize_controller_msg,
 };
+use super::audit_service;
 use super::cert::{
     ApprovalPollResult, CertificateResult, handle_request_certificate, poll_approval_status,
 };
-use super::{WS_WRITE_TIMEOUT, audit_service};
+use super::shared_types::WS_WRITE_TIMEOUT;
 use crate::AppState;
 use uptrakit_wire::service_profile::parse_capabilities;
 
