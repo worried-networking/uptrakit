@@ -13,6 +13,8 @@ use uptrakit_shared_db::entity::{host, service, service_host};
 use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_wire::{CloseReason, ControllerMessage};
 
+use crate::AppState;
+
 // ---------------------------------------------------------------------------
 // Error types
 // ---------------------------------------------------------------------------
@@ -95,6 +97,23 @@ impl ProcessorResponse {
             action: ProcessorAction::CloseWithReason(reason),
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// load_linked_host_ids
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// ServiceAuditCtx
+// ---------------------------------------------------------------------------
+
+/// Shared context for service-lifecycle audit helpers.
+///
+/// Used by both `audit_surface` and `audit_service` sub-modules.
+pub(super) struct ServiceAuditCtx<'a> {
+    pub(super) state: &'a AppState,
+    pub(super) service_id: uuid::Uuid,
+    pub(super) service_app_name: Option<&'a str>,
 }
 
 // ---------------------------------------------------------------------------

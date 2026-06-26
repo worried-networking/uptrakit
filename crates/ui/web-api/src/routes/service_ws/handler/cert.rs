@@ -168,7 +168,7 @@ where
             if let Some(json) = serialize_controller_msg(out_seq, cert_msg) {
                 let _ = sink.send(Message::Text(json.into())).await;
             }
-            crate::routes::service_ws::handler::emit_service_certificate_issue_audit_event(
+            crate::routes::service_ws::handler::audit_service::emit_service_certificate_issue_audit_event(
                 state,
                 service_id,
                 bundle.not_after.into(),
@@ -381,7 +381,7 @@ pub(super) async fn poll_approval_status(
                 if let Some(json) = serialize_controller_msg(out_seq, msg) {
                     let _ = sink.send(Message::Text(json.into())).await;
                 }
-                crate::routes::service_ws::handler::emit_service_enrollment_completed_audit_event(
+                crate::routes::service_ws::handler::audit_service::emit_service_enrollment_completed_audit_event(
                     state, service_id,
                 )
                 .await;
