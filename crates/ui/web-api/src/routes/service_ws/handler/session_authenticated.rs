@@ -33,13 +33,20 @@ use super::super::protocol::{
 };
 use super::credentials::{self, ServiceCredentialTarget};
 use super::message_processor::{MessageProcessor, ProcessorMessage, spawn_message_processor};
+use super::session_enrolled::upgrade_service_capabilities;
+use super::shared_types::WS_WRITE_TIMEOUT;
 use super::shared_types::{ProcessorAction, ProcessorResponse, load_linked_host_ids};
-use super::{messages, reconnect, service_config, upgrade_service_capabilities, workload};
+use super::{messages, reconnect, service_config, workload};
 use crate::AppState;
 use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_wire::service_profile::parse_capabilities;
 
-use super::{MAX_CONSECUTIVE_UNKNOWN_MESSAGES, WS_WRITE_TIMEOUT};
+/// Maximum consecutive unknown messages before closing the connection.
+///
+/// Prevents a misbehaving or fuzzing client from keeping a connection alive
+/// indefinitely by sending only garbage message types. Resets on any known
+/// message.
+const MAX_CONSECUTIVE_UNKNOWN_MESSAGES: u32 = 10;
 
 // ---------------------------------------------------------------------------
 // send_ws_with_timeout
@@ -113,7 +120,7 @@ pub(super) async fn load_service_capabilities(
             Ok(Some(svc)) => (
                 parse_capabilities(&svc.capabilities),
                 svc.service_app_name.clone(),
-                super::system_service_tenant_binding(
+                super::shared_types::system_service_tenant_binding(
                     svc.service_app_name.as_deref(),
                     state.default_tenant_id,
                 ),
