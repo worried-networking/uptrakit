@@ -459,6 +459,8 @@ process_single_batch_result = "ignore"
 
 [routes."service_ws/handler/updates/mod.rs"]
 send_to_service = "ignore"
+
+[routes."service_ws/handler/updates/stdin.rs"]
 handle_stdin_attention = "ignore"
 
 [routes."service_ws/handler/workload.rs"]
