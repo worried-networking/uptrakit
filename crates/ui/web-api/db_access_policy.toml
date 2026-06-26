@@ -419,10 +419,14 @@ finalize_post_update_best_effort = "ignore"
 resolve_software_item_name = "ignore"
 resolve_host_name = "ignore"
 
-[routes."service_ws/handler/updates/mod.rs"]
+[routes."service_ws/handler/updates/replay.rs"]
 load_pending_update_records = "ignore"
 prepare_pending_replay_messages = "ignore"
+recover_owned_updates_on_connect_with_dispatch_mode = "ignore"
 fail_unreplayable_pending_update = "ignore"
+prepare_single_pending_record = "ignore"
+
+[routes."service_ws/handler/updates/mod.rs"]
 send_to_service = "ignore"
 broadcast_update_started_events = "ignore"
 handle_update_started = "no-db"
@@ -432,7 +436,6 @@ update_installed_version_on_success = "ignore"
 emit_update_completed_event = "ignore"
 dispatch_update_notification = "ignore"
 handle_update_result = "no-db"
-recover_owned_updates_on_connect_with_dispatch_mode = "ignore"
 notify_failed_reconnect_update = "ignore"
 dispatch_next_batch_update = "ignore"
 dispatch_next_batch_update_for_replay = "ignore"
