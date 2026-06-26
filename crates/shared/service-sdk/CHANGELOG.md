@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.3](https://github.com/worried-networking/uptrakit/compare/uptrakit-service-sdk-v0.0.2...uptrakit-service-sdk-v0.0.3) - 2026-06-26
+
+### Added
+
+- *(service-sdk)* add backon dep + reconnect_backoff_builder
+- *(backoff)* [**breaking**] rewrite API with consuming guard pattern
+- *(service-sdk)* rebind identity on Approved.service_id mismatch
+- *(types)* add terminal UpdateStatus::Interrupted (outcome unknown)
+- *(web-api)* typed-slot dispatch for InstalledVersionEnricher
+- *(plugin-types)* add EnrichInstalledVersion capability
+
+### Fixed
+
+- *(service-sdk)* also bound and cancel the WebSocket upgrade in connect_ws
+- *(service-sdk)* make enrollment WS waits Ctrl+C-interruptible
+
+### Other
+
+- *(service-sdk)* migrate lifecycle backoff to backon; drop Backoff re-export
+- *(service-sdk)* acquire UNIX_SIGNAL_TEST_SEM in ws SignalWatcher tests
+- *(backoff)* [**breaking**] drop AttemptGuard, ship plain methods
+- ADR 0020 + glossary + asyncapi notes for service-merge redirect
+
 ## [0.0.2](https://github.com/worried-networking/uptrakit/compare/uptrakit-service-sdk-v0.0.1...uptrakit-service-sdk-v0.0.2) - 2026-05-05
 
 ### Added
