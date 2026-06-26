@@ -23,10 +23,12 @@ use super::shared_types::{
 };
 use crate::AppState;
 
+mod finalize;
 mod lookups;
 mod ownership;
 
 use crate::notifications::events::{NotificationEvent, NotificationEventDetails};
+use finalize::finalize_post_update_best_effort;
 pub(super) use lookups::{resolve_host_name, resolve_software_item_name};
 use ownership::validate_host_link_visibility;
 use rootcause::prelude::*;
@@ -55,76 +57,6 @@ struct ReplayPreparationNotifier;
 impl crate::ServiceNotifier for ReplayPreparationNotifier {
     async fn send_to_service(&self, _service_id: &uuid::Uuid, _msg: ControllerMessage) -> bool {
         false
-    }
-}
-
-async fn finalize_post_update_best_effort(state: &Arc<AppState>, record: &update_history::Model) {
-    // Hook first (scale down) — must run before protection finalization.
-    #[cfg(feature = "plugin-ops")]
-    if let Err(error) = crate::queries::update_dispatch::finalize_post_update_hook(
-        state.db(),
-        state.controller_update_hook(),
-        state.plugin.plugin_ops.as_ref(),
-        record,
-    )
-    .await
-    {
-        tracing::warn!(
-            error = %error,
-            update_id = %record.id,
-            "post-update hook (resource restore) failed"
-        );
-    }
-    // Then protection finalization (existing call, unchanged).
-    if let Err(error) = crate::queries::update_dispatch::finalize_post_update(
-        state.db(),
-        state.controller_update_protection(),
-        record,
-    )
-    .await
-    {
-        tracing::warn!(
-            error = %error,
-            update_id = %record.id,
-            "post-update finalization failed"
-        );
-    }
-}
-
-async fn finalize_post_update_with_recovery_timeout_best_effort(
-    state: &Arc<AppState>,
-    record: &update_history::Model,
-) {
-    // Hook first (scale down) — must run before protection finalization.
-    #[cfg(feature = "plugin-ops")]
-    if let Err(error) = crate::queries::update_dispatch::finalize_post_update_hook(
-        state.db(),
-        state.controller_update_hook(),
-        state.plugin.plugin_ops.as_ref(),
-        record,
-    )
-    .await
-    {
-        tracing::warn!(
-            error = %error,
-            update_id = %record.id,
-            "post-update hook (resource restore) failed during reconnect recovery"
-        );
-    }
-    // Then protection finalization (existing call, unchanged).
-    if let Err(error) = crate::queries::update_dispatch::finalize_post_update_with_timeout(
-        state.db(),
-        state.controller_update_protection(),
-        record,
-        RECOVERY_FINALIZATION_TIMEOUT,
-    )
-    .await
-    {
-        tracing::warn!(
-            error = %error,
-            update_id = %record.id,
-            "post-update finalization failed during reconnect recovery"
-        );
     }
 }
 
@@ -551,7 +483,7 @@ pub(super) async fn recover_owned_updates_on_connect_with_dispatch_mode(
 
     let reason = "Update interrupted: agent restarted".to_string();
     for record in &failed {
-        finalize_post_update_with_recovery_timeout_best_effort(state, record).await;
+        finalize_post_update_best_effort(state, record, Some(RECOVERY_FINALIZATION_TIMEOUT)).await;
         notify_failed_reconnect_update(
             state,
             service_id,
@@ -705,7 +637,7 @@ async fn fail_unreplayable_pending_update(
     failed_record.output = reason.clone();
     failed_record.output_bytes = reason.len() as i64;
 
-    finalize_post_update_best_effort(state, &failed_record).await;
+    finalize_post_update_best_effort(state, &failed_record, None).await;
 
     let tenant_id = service::Entity::find_by_id(service_id)
         .one(state.db())
@@ -1574,7 +1506,7 @@ pub(super) async fn handle_update_result(
         finalized_record.completed_at = Some(OffsetDateTime::now_utc());
         finalized_record.output = final_output.clone();
         finalized_record.output_bytes = final_output.len() as i64;
-        finalize_post_update_best_effort(state, &finalized_record).await;
+        finalize_post_update_best_effort(state, &finalized_record, None).await;
     }
 
     if agent_truncated
@@ -2246,7 +2178,7 @@ async fn process_single_batch_result(
         result.output.clone()
     };
     finalized_record.output_bytes = finalized_record.output.len() as i64;
-    finalize_post_update_best_effort(state, &finalized_record).await;
+    finalize_post_update_best_effort(state, &finalized_record, None).await;
 
     // On success, update installed version by host_software_item ID.
     if result.status == UpdateFinalStatus::Completed

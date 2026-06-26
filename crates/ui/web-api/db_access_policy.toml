@@ -405,6 +405,9 @@ handle_service_trigger_host_batch_update = "no-db"
 [routes."service_ws/handler/updates/ownership.rs"]
 validate_host_link_visibility = "ignore"
 
+[routes."service_ws/handler/updates/finalize.rs"]
+finalize_post_update_best_effort = "ignore"
+
 [routes."service_ws/handler/updates/lookups.rs"]
 resolve_software_item_name = "ignore"
 resolve_host_name = "ignore"
@@ -436,8 +439,6 @@ emit_batch_progress_from_db = "ignore"
 process_single_batch_result = "ignore"
 handle_batch_update_result = "no-db"
 handle_stdin_attention = "ignore"
-finalize_post_update_best_effort = "ignore"
-finalize_post_update_with_recovery_timeout_best_effort = "ignore"
 emit_service_update_lifecycle_audit = "ignore"
 emit_update_finalized_audit = "ignore"
 emit_batch_update_finalized_audit = "ignore"
