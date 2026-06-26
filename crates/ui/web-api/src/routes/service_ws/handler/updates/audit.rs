@@ -5,8 +5,8 @@ use std::sync::Arc;
 use uptrakit_shared_db::entity::update_history;
 use uptrakit_wire::UpdateFinalStatus;
 
-use super::final_status_str;
 use super::lookups::{resolve_host_name, resolve_software_item_name};
+use super::result::final_status_str;
 use crate::AppState;
 
 struct UpdateLifecycleAuditCtx<'a> {
