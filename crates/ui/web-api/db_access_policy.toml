@@ -460,6 +460,30 @@ process_single_batch_result = "ignore"
 [routes."service_ws/handler/updates/mod.rs"]
 send_to_service = "ignore"
 
+[routes."service_ws/handler/updates/tests.rs"]
+prepare_pre_update_protection = "ignore"
+finalize_post_update = "ignore"
+handle_surface_action = "ignore"
+on_software_item_created = "ignore"
+build_test_state_with_protection = "ignore"
+insert_service_row = "ignore"
+insert_linked_host = "ignore"
+insert_software_item = "ignore"
+tenant_audit_row_for_action = "ignore"
+broadcast_update_started_emits_semantic_audit_event = "ignore"
+broadcast_batch_update_started_emits_batch_audit_event = "ignore"
+insert_pending_update_without_assignment = "ignore"
+insert_replayable_queued_update = "ignore"
+insert_owned_in_progress_update = "ignore"
+prepare_pending_replay_messages_fails_unreplayable_rows_and_unblocks_successors = "ignore"
+prepare_pending_replay_messages_skips_replay_dispatch_when_successor_protection_fails = "ignore"
+handle_update_result_unowned_failure_finalization_error_still_promotes_successor = "ignore"
+handle_update_result_emits_update_finalized_audit_event = "ignore"
+handle_batch_update_result_emits_batch_update_finalized_audit_summary = "ignore"
+handle_stdin_attention_emits_update_stdin_attention_audit_event = "ignore"
+load_pending_update_records_skips_deactivated_hosts = "ignore"
+select_best_output_truncates_agent_output_on_utf8_boundary = "ignore"
+
 [routes."service_ws/handler/updates/stdin.rs"]
 handle_stdin_attention = "ignore"
 
