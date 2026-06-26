@@ -442,13 +442,16 @@ dispatch_next_queued_update_for_replay = "ignore"
 dispatch_next_queued_update = "ignore"
 dispatch_next_queued_update_with_notifier = "ignore"
 
-[routes."service_ws/handler/updates/mod.rs"]
-send_to_service = "ignore"
+[routes."service_ws/handler/updates/result.rs"]
 select_best_output = "ignore"
+set_installed_version = "ignore"
 update_installed_version_on_success = "ignore"
 emit_update_completed_event = "ignore"
 dispatch_update_notification = "ignore"
 handle_update_result = "no-db"
+
+[routes."service_ws/handler/updates/mod.rs"]
+send_to_service = "ignore"
 handle_batch_completion = "ignore"
 emit_batch_progress_event = "ignore"
 emit_batch_progress_from_db = "ignore"
