@@ -271,6 +271,9 @@ enroll_service = "ignore"
 resolve_service_auth_target = "ignore"
 emit_service_authentication_failure_audit = "ignore"
 
+[routes."service_ws/handler/audit_surface.rs"]
+emit_surface_action_scope_denied_audit_event = "ignore"
+
 [routes."service_ws/handler/cert.rs"]
 sign_service_csr = "ignore"
 handle_request_certificate = "no-db"
@@ -334,7 +337,6 @@ upgrade_service_capabilities = "ignore"
 setup_enrolled_session = "ignore"
 cleanup_enrolled_session = "ignore"
 handle_enrolled_loop = "ignore"
-emit_surface_action_scope_denied_audit_event = "ignore"
 resolve_service_audit_identity = "ignore"
 resolve_service_target_display = "ignore"
 ingest_service_audit_event = "ignore"

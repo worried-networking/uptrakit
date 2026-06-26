@@ -2309,6 +2309,7 @@ mod tests {
         .expect("insert ca certificate");
     }
 
+    #[expect(clippy::string_slice, reason = "UUID hex is always ASCII")]
     async fn insert_service(
         db: &sea_orm::DatabaseConnection,
         tenant_id: uuid::Uuid,
@@ -2341,6 +2342,7 @@ mod tests {
         .expect("insert service")
     }
 
+    #[expect(clippy::string_slice, reason = "UUID hex is always ASCII")]
     async fn insert_system_service(db: &sea_orm::DatabaseConnection) -> system_service::Model {
         let id = Uuid::now_v7();
         let now = time::OffsetDateTime::now_utc();
@@ -2546,6 +2548,7 @@ mod tests {
         .expect("link service_host");
     }
 
+    #[expect(clippy::string_slice, reason = "UUID hex is always ASCII")]
     async fn insert_software_item(
         db: &sea_orm::DatabaseConnection,
         tenant_id: uuid::Uuid,
@@ -3811,6 +3814,7 @@ mod tests {
 
     /// Insert a service with a recognisable sentinel `hostname` so that any
     /// leak of `service.hostname` into a downstream `host` row is detectable.
+    #[expect(clippy::string_slice, reason = "UUID hex is always ASCII")]
     async fn insert_service_with_hostname(
         db: &sea_orm::DatabaseConnection,
         tenant_id: Uuid,
