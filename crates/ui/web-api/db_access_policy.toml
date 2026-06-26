@@ -402,7 +402,7 @@ run_embedded_register_once = "ignore"
 handle_service_trigger_update = "no-db"
 handle_service_trigger_host_batch_update = "no-db"
 
-[routes."service_ws/handler/updates.rs"]
+[routes."service_ws/handler/updates/mod.rs"]
 validate_host_link_visibility = "ignore"
 load_pending_update_records = "ignore"
 prepare_pending_replay_messages = "ignore"
