@@ -1,9 +1,13 @@
-//! Update delivery, ownership validation, and update-lifecycle message handlers.
+//! Update delivery, ownership, reconnect recovery, and update-lifecycle message
+//! handlers, split across topical submodules. This facade wires the submodules
+//! and re-exports the surface consumed by sibling handler modules.
 //!
-//! Contains host-link visibility checks, reconnect recovery, pending replay preparation,
-//! and the per-message handlers
-//! `handle_update_started`, `handle_update_output`, `handle_update_result`, and
-//! `handle_stdin_attention`.
+//! - [`ownership`] — host-link visibility checks
+//! - [`replay`] — reconnect recovery + pending replay
+//! - [`started`] / [`output`] / [`result`] — per-message handlers
+//! - [`batch`] — batch result handling + progress
+//! - [`dispatch`] — successor dispatch (batch/queue)
+//! - [`audit`] / [`lookups`] / [`finalize`] / [`stdin`] — cross-cutting helpers
 
 use std::time::Duration;
 
