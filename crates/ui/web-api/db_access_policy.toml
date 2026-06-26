@@ -274,6 +274,7 @@ emit_service_authentication_failure_audit = "ignore"
 [routes."service_ws/handler/audit_service.rs"]
 resolve_service_audit_identity = "ignore"
 resolve_service_target_display = "ignore"
+emit_service_lifecycle_audit_event = "ignore"
 ingest_service_audit_event = "ignore"
 emit_service_enrollment_completed_audit_event = "ignore"
 emit_service_certificate_issue_audit_event = "ignore"
