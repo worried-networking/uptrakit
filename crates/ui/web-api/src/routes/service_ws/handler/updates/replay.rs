@@ -16,11 +16,10 @@ use uptrakit_shared_db::entity::{
 };
 use uptrakit_wire::{ControllerMessage, ExecuteUpdatePayload, PluginAssignment};
 
+use super::dispatch::notify_failed_reconnect_update;
 use super::finalize::finalize_post_update_best_effort;
 use super::{HandlerError, HandlerResult, load_linked_host_ids};
-use super::{
-    RECOVERY_FINALIZATION_TIMEOUT, ReconnectSuccessorDispatchMode, notify_failed_reconnect_update,
-};
+use super::{RECOVERY_FINALIZATION_TIMEOUT, ReconnectSuccessorDispatchMode};
 use crate::AppState;
 
 /// Result of preparing one pending record during reconnect replay.
