@@ -42,6 +42,7 @@ mod audit_surface;
 mod cert;
 mod credentials;
 mod discovery;
+mod embedded;
 mod message_processor;
 pub(super) mod messages;
 mod reconnect;
@@ -62,6 +63,7 @@ use cert::{
 };
 use credentials::deliver_service_credentials;
 pub(crate) use discovery::trigger_discovery_for_agent_host;
+pub(crate) use embedded::{run_embedded_message_handler, run_embedded_system_message_handler};
 use message_processor::{MessageProcessor, ProcessorMessage, spawn_message_processor};
 use shared_types::{ProcessorAction, ProcessorResponse, load_linked_host_ids};
 pub(crate) use updates::dispatch_next_batch_update;
@@ -318,205 +320,6 @@ async fn prepare_reconnect_updates_on_connect(
             tracing::error!(%service_id, "failed to send replayed pending update on reconnect");
             break;
         }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Embedded service message handler
-// ---------------------------------------------------------------------------
-
-/// Run a message handler loop for an embedded service.
-///
-/// This creates a [`MessageProcessor`] configured for an embedded (in-process)
-/// service and reads messages from the provided channel. Replies are pushed
-/// back through the [`ServiceConnectionRegistry`].
-///
-/// Used by `embedded_support::run_embedded_message_handler`.
-pub(crate) async fn run_embedded_message_handler(
-    state: Arc<AppState>,
-    service_id: uuid::Uuid,
-    tenant_id: uuid::Uuid,
-    capabilities: &BTreeSet<Capability>,
-    app_name: &str,
-    service_rx: tokio::sync::mpsc::Receiver<ServiceMessage>,
-    cancel: tokio_util::sync::CancellationToken,
-) {
-    run_embedded_message_handler_inner(
-        state,
-        EmbeddedHandlerSession {
-            service_id,
-            is_system: false,
-            service_tenant_id: Some(tenant_id),
-            app_name,
-        },
-        capabilities,
-        service_rx,
-        cancel,
-    )
-    .await;
-}
-
-pub(crate) async fn run_embedded_system_message_handler(
-    state: Arc<AppState>,
-    service_id: uuid::Uuid,
-    service_tenant_id: Option<uuid::Uuid>,
-    capabilities: &BTreeSet<Capability>,
-    app_name: &str,
-    service_rx: tokio::sync::mpsc::Receiver<ServiceMessage>,
-    cancel: tokio_util::sync::CancellationToken,
-) {
-    run_embedded_message_handler_inner(
-        state,
-        EmbeddedHandlerSession {
-            service_id,
-            is_system: true,
-            service_tenant_id,
-            app_name,
-        },
-        capabilities,
-        service_rx,
-        cancel,
-    )
-    .await;
-}
-
-struct EmbeddedHandlerSession<'a> {
-    service_id: uuid::Uuid,
-    is_system: bool,
-    service_tenant_id: Option<uuid::Uuid>,
-    app_name: &'a str,
-}
-
-async fn run_embedded_message_handler_inner(
-    state: Arc<AppState>,
-    session: EmbeddedHandlerSession<'_>,
-    capabilities: &BTreeSet<Capability>,
-    mut service_rx: tokio::sync::mpsc::Receiver<ServiceMessage>,
-    cancel: tokio_util::sync::CancellationToken,
-) {
-    let has_software_discovery = capabilities.contains(&Capability::SoftwareDiscovery);
-    let has_update_hooks = capabilities.contains(&Capability::UpdateHooks);
-    let has_ui_surfaces = capabilities.contains(&Capability::UiSurfaces);
-    let has_workload_claims = capabilities.contains(&Capability::WorkloadClaims);
-    let has_update_tracking = capabilities.contains(&Capability::UpdateTracking);
-
-    let linked_host_ids =
-        load_session_host_ids(&state, session.service_id, has_software_discovery).await;
-
-    let mut processor = MessageProcessor {
-        state: Arc::clone(&state),
-        service_id: session.service_id,
-        cert: None,
-        is_system: session.is_system,
-        has_update_tracking,
-        has_software_discovery,
-        has_update_hooks,
-        has_ui_surfaces,
-        has_workload_claims,
-        runtime_instance_id: None,
-        service_app_name: Some(session.app_name.to_string()),
-        service_tenant_id: session.service_tenant_id,
-        linked_host_ids,
-        report_tracker: ReportTracker::new(),
-    };
-
-    'msg_loop: loop {
-        let msg = tokio::select! {
-            biased;
-            () = cancel.cancelled() => break 'msg_loop,
-            msg = service_rx.recv() => match msg {
-                Some(m) => m,
-                None => break 'msg_loop,
-            },
-        };
-
-        // dispatch and reply-send are wrapped in separate cancellable selects so
-        // that drain/abort can interrupt even when a SeaORM query or a channel
-        // send is in progress. Dropping dispatch mid-flight cancels any in-flight
-        // DB query; the connection is returned to the pool and the transaction
-        // rolled back. cleanup_embedded_service_session handles workload release.
-        let response = tokio::select! {
-            biased;
-            () = cancel.cancelled() => break 'msg_loop,
-            r = processor.dispatch(msg, None) => r,
-        };
-
-        for reply in response.replies {
-            tokio::select! {
-                biased;
-                () = cancel.cancelled() => break 'msg_loop,
-                _ = state.service_connections.send(&session.service_id, reply) => {}
-            }
-        }
-
-        match response.action {
-            ProcessorAction::Continue => {}
-            ProcessorAction::Break | ProcessorAction::CloseWithReason(_) => {
-                tracing::info!(
-                    service_id = %session.service_id,
-                    app_name = session.app_name,
-                    "embedded message handler stopping (processor requested break)"
-                );
-                break 'msg_loop;
-            }
-        }
-    }
-
-    cleanup_embedded_service_session(
-        &state,
-        session.service_id,
-        session.app_name,
-        has_workload_claims,
-        session.service_tenant_id,
-    )
-    .await;
-
-    tracing::debug!(
-        service_id = %session.service_id,
-        app_name = session.app_name,
-        "embedded message handler exited"
-    );
-}
-
-async fn cleanup_embedded_service_session(
-    state: &Arc<AppState>,
-    service_id: uuid::Uuid,
-    _service_app_name: &str,
-    has_workload_claims: bool,
-    tenant_id: Option<uuid::Uuid>,
-) {
-    if has_workload_claims {
-        workload::release_all_claims_on_disconnect(state, service_id).await;
-    }
-
-    if let Some(provider_id) = state
-        .surface_proxy_deps
-        .registry
-        .provider_id_for_service(&service_id)
-    {
-        state
-            .surface_proxy_deps
-            .proxy
-            .fail_in_flight_for_provider(&provider_id);
-        if let Some(tid) = tenant_id
-            && !state.shutdown_token.is_cancelled()
-        {
-            state
-                .notification
-                .event_broadcaster
-                .send(tid, AdminEvent::SurfacesChanged)
-                .await;
-        }
-    }
-    state
-        .surface_proxy_deps
-        .registry
-        .unregister_service(&service_id);
-
-    state.service_connections.unregister(&service_id).await;
-
-    if let Some(ref notifier) = state.embedded_service_notifier {
-        notifier.on_external_disconnected(&service_id);
     }
 }
 
