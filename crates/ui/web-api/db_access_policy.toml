@@ -426,11 +426,15 @@ recover_owned_updates_on_connect_with_dispatch_mode = "ignore"
 fail_unreplayable_pending_update = "ignore"
 prepare_single_pending_record = "ignore"
 
-[routes."service_ws/handler/updates/mod.rs"]
-send_to_service = "ignore"
+[routes."service_ws/handler/updates/started.rs"]
 broadcast_update_started_events = "ignore"
 handle_update_started = "no-db"
+
+[routes."service_ws/handler/updates/output.rs"]
 handle_update_output = "no-db"
+
+[routes."service_ws/handler/updates/mod.rs"]
+send_to_service = "ignore"
 select_best_output = "ignore"
 update_installed_version_on_success = "ignore"
 emit_update_completed_event = "ignore"
