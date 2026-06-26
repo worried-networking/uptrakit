@@ -441,6 +441,7 @@ dispatch_next_batch_update_with_notifier = "ignore"
 dispatch_next_queued_update_for_replay = "ignore"
 dispatch_next_queued_update = "ignore"
 dispatch_next_queued_update_with_notifier = "ignore"
+fail_dispatch_target_load = "ignore"
 
 [routes."service_ws/handler/updates/result.rs"]
 select_best_output = "ignore"
