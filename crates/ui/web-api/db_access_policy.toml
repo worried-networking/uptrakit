@@ -450,13 +450,15 @@ emit_update_completed_event = "ignore"
 dispatch_update_notification = "ignore"
 handle_update_result = "no-db"
 
-[routes."service_ws/handler/updates/mod.rs"]
-send_to_service = "ignore"
+[routes."service_ws/handler/updates/batch.rs"]
+handle_batch_update_result = "no-db"
 handle_batch_completion = "ignore"
 emit_batch_progress_event = "ignore"
 emit_batch_progress_from_db = "ignore"
 process_single_batch_result = "ignore"
-handle_batch_update_result = "no-db"
+
+[routes."service_ws/handler/updates/mod.rs"]
+send_to_service = "ignore"
 handle_stdin_attention = "ignore"
 
 [routes."service_ws/handler/workload.rs"]
