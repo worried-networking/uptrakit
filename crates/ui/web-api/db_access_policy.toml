@@ -402,6 +402,13 @@ run_embedded_register_once = "ignore"
 handle_service_trigger_update = "no-db"
 handle_service_trigger_host_batch_update = "no-db"
 
+[routes."service_ws/handler/updates/audit.rs"]
+emit_service_update_lifecycle_audit = "ignore"
+emit_update_finalized_audit = "ignore"
+emit_batch_update_finalized_audit = "ignore"
+emit_stdin_attention_audit = "ignore"
+resolve_target_display = "ignore"
+
 [routes."service_ws/handler/updates/ownership.rs"]
 validate_host_link_visibility = "ignore"
 
@@ -439,10 +446,6 @@ emit_batch_progress_from_db = "ignore"
 process_single_batch_result = "ignore"
 handle_batch_update_result = "no-db"
 handle_stdin_attention = "ignore"
-emit_service_update_lifecycle_audit = "ignore"
-emit_update_finalized_audit = "ignore"
-emit_batch_update_finalized_audit = "ignore"
-emit_stdin_attention_audit = "ignore"
 
 [routes."service_ws/handler/workload.rs"]
 handle_workload_claim = "no-db"
