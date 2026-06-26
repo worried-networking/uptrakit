@@ -407,39 +407,55 @@ pub(super) async fn ingest_service_audit_event(
     true
 }
 
-pub(super) async fn emit_service_enrollment_completed_audit_event(
-    state: &AppState,
-    service_id: uuid::Uuid,
-) {
-    let payload = AuditEventPayload {
-        action_type: uptrakit_audit_log::AuditActionType::SERVICE_ENROLLMENT_COMPLETED.to_string(),
-        tenant_id: None,
-        target_type: Some("service".to_string()),
-        target_id: Some(service_id.to_string()),
-        target_display: Some(resolve_service_target_display(state, service_id, false).await),
-        outcome: uptrakit_audit_log::AuditOutcome::Success
-            .as_str()
-            .to_string(),
-        details_json: Some(serde_json::json!({ "service_id": service_id }).to_string()),
-        request_id: None,
-        correlation_id: None,
-    };
-    let _ = ingest_service_audit_event(state, service_id, false, None, None, payload).await;
+/// Discriminator for the three service lifecycle audit event kinds.
+enum ServiceLifecycleAuditKind {
+    EnrollmentCompleted,
+    CertificateIssue {
+        not_after: time::OffsetDateTime,
+    },
+    CertificateRenew {
+        not_after: time::OffsetDateTime,
+        is_system: bool,
+    },
 }
 
-pub(super) async fn emit_service_certificate_issue_audit_event(
+/// Shared body for all three service-lifecycle `emit_service_*` helpers.
+///
+/// Resolves `is_system`, builds the differing `action_type` / `details_json`,
+/// then delegates to [`ingest_service_audit_event`].
+async fn emit_service_lifecycle_audit_event(
     state: &AppState,
     service_id: uuid::Uuid,
-    not_after: time::OffsetDateTime,
+    kind: ServiceLifecycleAuditKind,
 ) {
-    let is_system = sys_svc_entity::Entity::find_by_id(service_id)
-        .one(state.db())
-        .await
-        .ok()
-        .flatten()
-        .is_some();
+    let is_system = match &kind {
+        ServiceLifecycleAuditKind::EnrollmentCompleted => false,
+        ServiceLifecycleAuditKind::CertificateIssue { .. } => {
+            sys_svc_entity::Entity::find_by_id(service_id)
+                .one(state.db())
+                .await
+                .ok()
+                .flatten()
+                .is_some()
+        }
+        ServiceLifecycleAuditKind::CertificateRenew { is_system, .. } => *is_system,
+    };
+    let (action_type, details_json) = match &kind {
+        ServiceLifecycleAuditKind::EnrollmentCompleted => (
+            uptrakit_audit_log::AuditActionType::SERVICE_ENROLLMENT_COMPLETED,
+            serde_json::json!({ "service_id": service_id }),
+        ),
+        ServiceLifecycleAuditKind::CertificateIssue { not_after } => (
+            uptrakit_audit_log::AuditActionType::SERVICE_CERTIFICATE_ISSUE,
+            serde_json::json!({ "not_after": not_after.to_string() }),
+        ),
+        ServiceLifecycleAuditKind::CertificateRenew { not_after, .. } => (
+            uptrakit_audit_log::AuditActionType::SERVICE_CERTIFICATE_RENEW,
+            serde_json::json!({ "not_after": not_after.to_string() }),
+        ),
+    };
     let payload = AuditEventPayload {
-        action_type: uptrakit_audit_log::AuditActionType::SERVICE_CERTIFICATE_ISSUE.to_string(),
+        action_type: action_type.to_string(),
         tenant_id: None,
         target_type: Some("service".to_string()),
         target_id: Some(service_id.to_string()),
@@ -447,16 +463,36 @@ pub(super) async fn emit_service_certificate_issue_audit_event(
         outcome: uptrakit_audit_log::AuditOutcome::Success
             .as_str()
             .to_string(),
-        details_json: Some(
-            serde_json::json!({
-                "not_after": not_after.to_string(),
-            })
-            .to_string(),
-        ),
+        details_json: Some(details_json.to_string()),
         request_id: None,
         correlation_id: None,
     };
     let _ = ingest_service_audit_event(state, service_id, is_system, None, None, payload).await;
+}
+
+pub(super) async fn emit_service_enrollment_completed_audit_event(
+    state: &AppState,
+    service_id: uuid::Uuid,
+) {
+    emit_service_lifecycle_audit_event(
+        state,
+        service_id,
+        ServiceLifecycleAuditKind::EnrollmentCompleted,
+    )
+    .await;
+}
+
+pub(super) async fn emit_service_certificate_issue_audit_event(
+    state: &AppState,
+    service_id: uuid::Uuid,
+    not_after: time::OffsetDateTime,
+) {
+    emit_service_lifecycle_audit_event(
+        state,
+        service_id,
+        ServiceLifecycleAuditKind::CertificateIssue { not_after },
+    )
+    .await;
 }
 
 pub(super) async fn emit_service_certificate_renew_audit_event(
@@ -465,25 +501,15 @@ pub(super) async fn emit_service_certificate_renew_audit_event(
     is_system: bool,
     not_after: time::OffsetDateTime,
 ) {
-    let payload = AuditEventPayload {
-        action_type: uptrakit_audit_log::AuditActionType::SERVICE_CERTIFICATE_RENEW.to_string(),
-        tenant_id: None,
-        target_type: Some("service".to_string()),
-        target_id: Some(service_id.to_string()),
-        target_display: Some(resolve_service_target_display(state, service_id, is_system).await),
-        outcome: uptrakit_audit_log::AuditOutcome::Success
-            .as_str()
-            .to_string(),
-        details_json: Some(
-            serde_json::json!({
-                "not_after": not_after.to_string(),
-            })
-            .to_string(),
-        ),
-        request_id: None,
-        correlation_id: None,
-    };
-    let _ = ingest_service_audit_event(state, service_id, is_system, None, None, payload).await;
+    emit_service_lifecycle_audit_event(
+        state,
+        service_id,
+        ServiceLifecycleAuditKind::CertificateRenew {
+            not_after,
+            is_system,
+        },
+    )
+    .await;
 }
 
 #[cfg(test)]
