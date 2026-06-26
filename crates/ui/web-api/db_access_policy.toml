@@ -274,6 +274,7 @@ emit_service_authentication_failure_audit = "ignore"
 [routes."service_ws/handler/embedded.rs"]
 run_embedded_message_handler = "ignore"
 run_embedded_system_message_handler = "ignore"
+run_embedded_session = "ignore"
 run_embedded_message_handler_inner = "ignore"
 cleanup_embedded_service_session = "ignore"
 

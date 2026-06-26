@@ -35,15 +35,13 @@ pub(crate) async fn run_embedded_message_handler(
     service_rx: tokio::sync::mpsc::Receiver<ServiceMessage>,
     cancel: tokio_util::sync::CancellationToken,
 ) {
-    run_embedded_message_handler_inner(
+    run_embedded_session(
         state,
-        EmbeddedHandlerSession {
-            service_id,
-            is_system: false,
-            service_tenant_id: Some(tenant_id),
-            app_name,
-        },
+        service_id,
+        false,
+        Some(tenant_id),
         capabilities,
+        app_name,
         service_rx,
         cancel,
     )
@@ -59,11 +57,42 @@ pub(crate) async fn run_embedded_system_message_handler(
     service_rx: tokio::sync::mpsc::Receiver<ServiceMessage>,
     cancel: tokio_util::sync::CancellationToken,
 ) {
+    run_embedded_session(
+        state,
+        service_id,
+        true,
+        service_tenant_id,
+        capabilities,
+        app_name,
+        service_rx,
+        cancel,
+    )
+    .await;
+}
+
+/// Shared dispatch path for both embedded handler entry points.
+///
+/// Constructs the [`EmbeddedHandlerSession`] from the resolved `is_system` flag
+/// and `service_tenant_id`, then delegates to [`run_embedded_message_handler_inner`].
+#[expect(
+    clippy::too_many_arguments,
+    reason = "consolidates two identical 7-arg wrapper bodies; struct overhead not warranted for a private helper"
+)]
+async fn run_embedded_session(
+    state: Arc<AppState>,
+    service_id: uuid::Uuid,
+    is_system: bool,
+    service_tenant_id: Option<uuid::Uuid>,
+    capabilities: &BTreeSet<Capability>,
+    app_name: &str,
+    service_rx: tokio::sync::mpsc::Receiver<ServiceMessage>,
+    cancel: tokio_util::sync::CancellationToken,
+) {
     run_embedded_message_handler_inner(
         state,
         EmbeddedHandlerSession {
             service_id,
-            is_system: true,
+            is_system,
             service_tenant_id,
             app_name,
         },
