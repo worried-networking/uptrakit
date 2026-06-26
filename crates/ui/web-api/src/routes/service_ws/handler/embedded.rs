@@ -35,13 +35,15 @@ pub(crate) async fn run_embedded_message_handler(
     service_rx: tokio::sync::mpsc::Receiver<ServiceMessage>,
     cancel: tokio_util::sync::CancellationToken,
 ) {
-    run_embedded_session(
+    run_embedded_message_handler_inner(
         state,
-        service_id,
-        false,
-        Some(tenant_id),
+        EmbeddedHandlerSession {
+            service_id,
+            is_system: false,
+            service_tenant_id: Some(tenant_id),
+            app_name,
+        },
         capabilities,
-        app_name,
         service_rx,
         cancel,
     )
@@ -57,42 +59,11 @@ pub(crate) async fn run_embedded_system_message_handler(
     service_rx: tokio::sync::mpsc::Receiver<ServiceMessage>,
     cancel: tokio_util::sync::CancellationToken,
 ) {
-    run_embedded_session(
-        state,
-        service_id,
-        true,
-        service_tenant_id,
-        capabilities,
-        app_name,
-        service_rx,
-        cancel,
-    )
-    .await;
-}
-
-/// Shared dispatch path for both embedded handler entry points.
-///
-/// Constructs the [`EmbeddedHandlerSession`] from the resolved `is_system` flag
-/// and `service_tenant_id`, then delegates to [`run_embedded_message_handler_inner`].
-#[expect(
-    clippy::too_many_arguments,
-    reason = "consolidates two identical 7-arg wrapper bodies; struct overhead not warranted for a private helper"
-)]
-async fn run_embedded_session(
-    state: Arc<AppState>,
-    service_id: uuid::Uuid,
-    is_system: bool,
-    service_tenant_id: Option<uuid::Uuid>,
-    capabilities: &BTreeSet<Capability>,
-    app_name: &str,
-    service_rx: tokio::sync::mpsc::Receiver<ServiceMessage>,
-    cancel: tokio_util::sync::CancellationToken,
-) {
     run_embedded_message_handler_inner(
         state,
         EmbeddedHandlerSession {
             service_id,
-            is_system,
+            is_system: true,
             service_tenant_id,
             app_name,
         },
@@ -257,13 +228,9 @@ mod tests {
         use std::collections::{BTreeMap, BTreeSet};
         use std::sync::Arc;
 
-        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
         use tokio_util::sync::CancellationToken;
-        use uptrakit_shared_db::entity::{service_host, update_history};
         use uptrakit_wire::Capability;
         use uuid::Uuid;
-
-        use super::super::super::updates;
 
         #[tokio::test]
         async fn embedded_system_handler_cleanup_releases_claims_and_unregisters_state() {
@@ -351,146 +318,6 @@ mod tests {
                     .is_empty()
             );
             assert_eq!(*notifier.disconnected.lock(), vec![service_id]);
-        }
-
-        #[tokio::test]
-        async fn reconnect_cleanup_same_instance_leaves_owned_update_in_progress() {
-            let db = crate::test_harness::setup_migrated_db().await;
-            let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
-            let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
-            let service_id = Uuid::now_v7();
-            let runtime_id = Uuid::now_v7();
-            let capabilities: BTreeSet<Capability> =
-                [Capability::SoftwareDiscovery, Capability::UpdateHooks]
-                    .into_iter()
-                    .collect();
-            let (host_id, software_item_id) =
-                insert_linked_host_and_item(state.db(), tenant_id, service_id).await;
-            let update_history_id = insert_owned_in_progress_update(
-                state.db(),
-                tenant_id,
-                host_id,
-                software_item_id,
-                service_id,
-                Some(runtime_id),
-            )
-            .await;
-
-            run_embedded_register_once(
-                Arc::clone(&state),
-                service_id,
-                tenant_id,
-                capabilities,
-                runtime_id,
-            )
-            .await;
-
-            let row = update_history::Entity::find_by_id(update_history_id)
-                .one(state.db())
-                .await
-                .unwrap()
-                .unwrap();
-            assert_eq!(row.status, update_history::UpdateStatus::InProgress);
-        }
-
-        #[tokio::test]
-        async fn reconnect_cleanup_new_instance_fails_prior_owned_update_even_without_host_links() {
-            let db = crate::test_harness::setup_migrated_db().await;
-            let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
-            let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
-            let service_id = Uuid::now_v7();
-            let old_runtime_id = Uuid::now_v7();
-            let new_runtime_id = Uuid::now_v7();
-            let capabilities: BTreeSet<Capability> =
-                [Capability::SoftwareDiscovery, Capability::UpdateHooks]
-                    .into_iter()
-                    .collect();
-            let (host_id, software_item_id) =
-                insert_linked_host_and_item(state.db(), tenant_id, service_id).await;
-            let update_history_id = insert_owned_in_progress_update(
-                state.db(),
-                tenant_id,
-                host_id,
-                software_item_id,
-                service_id,
-                Some(old_runtime_id),
-            )
-            .await;
-
-            service_host::Entity::delete_many()
-                .filter(service_host::Column::ServiceId.eq(service_id))
-                .exec(state.db())
-                .await
-                .unwrap();
-
-            run_embedded_register_once(
-                Arc::clone(&state),
-                service_id,
-                tenant_id,
-                capabilities,
-                new_runtime_id,
-            )
-            .await;
-
-            let row = update_history::Entity::find_by_id(update_history_id)
-                .one(state.db())
-                .await
-                .unwrap()
-                .unwrap();
-            assert_eq!(row.status, update_history::UpdateStatus::Interrupted);
-            assert_eq!(
-                row.output,
-                "Update interrupted: agent restarted (outcome unknown)"
-            );
-        }
-
-        #[tokio::test]
-        async fn connect_phase_does_not_fail_update_owned_by_different_linked_service() {
-            let db = crate::test_harness::setup_migrated_db().await;
-            let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
-            let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
-            let owner_service_id = Uuid::now_v7();
-            let reconnecting_service_id = Uuid::now_v7();
-            let old_runtime_id = Uuid::now_v7();
-            let new_runtime_id = Uuid::now_v7();
-            let (host_id, software_item_id) =
-                insert_linked_host_and_item(state.db(), tenant_id, owner_service_id).await;
-            insert_service_row(
-                state.db(),
-                tenant_id,
-                reconnecting_service_id,
-                "uptrakit-agent",
-            )
-            .await;
-            relink_service_host(state.db(), reconnecting_service_id, host_id).await;
-            let update_history_id = insert_owned_in_progress_update(
-                state.db(),
-                tenant_id,
-                host_id,
-                software_item_id,
-                owner_service_id,
-                Some(old_runtime_id),
-            )
-            .await;
-
-            updates::recover_owned_updates_on_connect_with_dispatch_mode(
-                &state,
-                reconnecting_service_id,
-                Some(new_runtime_id),
-                updates::ReconnectSuccessorDispatchMode::Immediate,
-            )
-            .await
-            .unwrap();
-            let _ = updates::load_pending_update_records(&state, reconnecting_service_id)
-                .await
-                .unwrap();
-
-            let row = update_history::Entity::find_by_id(update_history_id)
-                .one(state.db())
-                .await
-                .unwrap()
-                .unwrap();
-            assert_eq!(row.status, update_history::UpdateStatus::InProgress);
         }
     }
 

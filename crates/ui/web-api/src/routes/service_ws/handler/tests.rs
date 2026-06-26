@@ -989,6 +989,13 @@ async fn successful_system_surface_registration_emits_success_system_audit_row()
 mod db_sqlite {
     use super::super::test_support::*;
     use super::*;
+    use std::collections::BTreeSet;
+
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+    use uptrakit_shared_db::entity::{service_host, update_history};
+    use uptrakit_wire::Capability;
+
+    use super::super::updates;
 
     #[tokio::test]
     async fn cleanup_authenticated_session_unregisters_runtime_state_even_with_stale_ui_snapshot() {
@@ -1362,6 +1369,146 @@ mod db_sqlite {
             ),
             "fail_in_flight_for_provider should have cancelled in-flight invoke: {invoke_result:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn reconnect_cleanup_same_instance_leaves_owned_update_in_progress() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        let service_id = Uuid::now_v7();
+        let runtime_id = Uuid::now_v7();
+        let capabilities: BTreeSet<Capability> =
+            [Capability::SoftwareDiscovery, Capability::UpdateHooks]
+                .into_iter()
+                .collect();
+        let (host_id, software_item_id) =
+            insert_linked_host_and_item(state.db(), tenant_id, service_id).await;
+        let update_history_id = insert_owned_in_progress_update(
+            state.db(),
+            tenant_id,
+            host_id,
+            software_item_id,
+            service_id,
+            Some(runtime_id),
+        )
+        .await;
+
+        run_embedded_register_once(
+            Arc::clone(&state),
+            service_id,
+            tenant_id,
+            capabilities,
+            runtime_id,
+        )
+        .await;
+
+        let row = update_history::Entity::find_by_id(update_history_id)
+            .one(state.db())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.status, update_history::UpdateStatus::InProgress);
+    }
+
+    #[tokio::test]
+    async fn reconnect_cleanup_new_instance_fails_prior_owned_update_even_without_host_links() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        let service_id = Uuid::now_v7();
+        let old_runtime_id = Uuid::now_v7();
+        let new_runtime_id = Uuid::now_v7();
+        let capabilities: BTreeSet<Capability> =
+            [Capability::SoftwareDiscovery, Capability::UpdateHooks]
+                .into_iter()
+                .collect();
+        let (host_id, software_item_id) =
+            insert_linked_host_and_item(state.db(), tenant_id, service_id).await;
+        let update_history_id = insert_owned_in_progress_update(
+            state.db(),
+            tenant_id,
+            host_id,
+            software_item_id,
+            service_id,
+            Some(old_runtime_id),
+        )
+        .await;
+
+        service_host::Entity::delete_many()
+            .filter(service_host::Column::ServiceId.eq(service_id))
+            .exec(state.db())
+            .await
+            .unwrap();
+
+        run_embedded_register_once(
+            Arc::clone(&state),
+            service_id,
+            tenant_id,
+            capabilities,
+            new_runtime_id,
+        )
+        .await;
+
+        let row = update_history::Entity::find_by_id(update_history_id)
+            .one(state.db())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.status, update_history::UpdateStatus::Interrupted);
+        assert_eq!(
+            row.output,
+            "Update interrupted: agent restarted (outcome unknown)"
+        );
+    }
+
+    #[tokio::test]
+    async fn connect_phase_does_not_fail_update_owned_by_different_linked_service() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        let owner_service_id = Uuid::now_v7();
+        let reconnecting_service_id = Uuid::now_v7();
+        let old_runtime_id = Uuid::now_v7();
+        let new_runtime_id = Uuid::now_v7();
+        let (host_id, software_item_id) =
+            insert_linked_host_and_item(state.db(), tenant_id, owner_service_id).await;
+        insert_service_row(
+            state.db(),
+            tenant_id,
+            reconnecting_service_id,
+            "uptrakit-agent",
+        )
+        .await;
+        relink_service_host(state.db(), reconnecting_service_id, host_id).await;
+        let update_history_id = insert_owned_in_progress_update(
+            state.db(),
+            tenant_id,
+            host_id,
+            software_item_id,
+            owner_service_id,
+            Some(old_runtime_id),
+        )
+        .await;
+
+        updates::recover_owned_updates_on_connect_with_dispatch_mode(
+            &state,
+            reconnecting_service_id,
+            Some(new_runtime_id),
+            updates::ReconnectSuccessorDispatchMode::Immediate,
+        )
+        .await
+        .unwrap();
+        let _ = updates::load_pending_update_records(&state, reconnecting_service_id)
+            .await
+            .unwrap();
+
+        let row = update_history::Entity::find_by_id(update_history_id)
+            .one(state.db())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.status, update_history::UpdateStatus::InProgress);
     }
 
     #[tokio::test]
