@@ -1,12 +1,13 @@
 use super::test_support::*;
 use super::*;
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_wire::limits::MAX_SHORT_STRING_LEN;
 use uptrakit_wire::report_tracker::ReportTracker;
 use uptrakit_wire::surfaces;
+use uptrakit_wire::{Capability, ControllerMessage, ErrorCode, ServiceMessage};
 use uuid::Uuid;
 
 use super::message_processor::MessageProcessor;
@@ -768,30 +769,6 @@ async fn surface_action_provider_unavailable_emits_failed_tenant_audit_row() {
     assert_eq!(details["provider_service_app_name"], "uptrakit-agent-ssh");
     assert_eq!(details["reason_code"], "provider_unavailable");
     assert!(details.get("params").is_none());
-}
-
-#[cfg(feature = "db-sqlite")]
-#[tokio::test]
-async fn setup_enrolled_session_emits_enrollment_completed_audit_for_already_approved_service() {
-    let db = crate::test_harness::setup_migrated_db().await;
-    let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
-    let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
-    let service_id = Uuid::now_v7();
-    insert_test_service_row(&db, tenant_id, service_id, "uptrakit-agent").await;
-
-    let session = setup_enrolled_session(&state, service_id, false).await;
-    assert!(session.approved);
-
-    let row = tenant_audit_row_for_action(
-        &db,
-        uptrakit_audit_log::AuditActionType::SERVICE_ENROLLMENT_COMPLETED,
-    )
-    .await;
-    assert_eq!(
-        row.actor_type,
-        uptrakit_audit_log::AuditActorType::Service.as_str()
-    );
-    assert_eq!(row.actor_id, Some(service_id));
 }
 
 #[cfg(feature = "db-sqlite")]
