@@ -64,7 +64,7 @@ fn classify_version_check_context_load_failure(
 ///
 /// Each implementing type retains its own distinct HTTP status mapping and audit
 /// reason codes — this trait only captures the method *shape*.
-trait VersionCheckError: Sized {
+trait VersionCheckError {
     fn into_response(self) -> Response;
     fn audit(&self) -> (uptrakit_audit_log::AuditOutcome, &'static str);
 }
