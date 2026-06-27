@@ -3,6 +3,7 @@
 //! Controller-side fetch orchestration lives in [`controller_fetch`].
 //! Version-check context loading and agent dispatch live in [`version_check_dispatch`].
 
+mod audit;
 mod controller_fetch;
 mod version_check_dispatch;
 
@@ -16,9 +17,7 @@ use crate::middleware::permission::{
     CanCreateSoftware, CanDeleteSoftware, CanTriggerChecks, CanTriggerUpdates, CanUpdateSoftware,
     CanViewSoftware,
 };
-use crate::middleware::require_auth::{
-    AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
-};
+use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::queries::autodiscovery as autodiscovery_queries;
 use crate::queries::plugin_configs::find_raw_active_config;
 use crate::queries::plugin_type_settings as pts_queries;
@@ -59,89 +58,18 @@ pub use uptrakit_web_api_types::software_items::{
     UpdateHostAssignmentRequest, UpdateSoftwareItemRequest,
 };
 
+use audit::{
+    AuditContext, SOFTWARE_ITEM_APPROVE_AUDIT_ACTION, SOFTWARE_ITEM_ASSIGN_HOSTS_AUDIT_ACTION,
+    SOFTWARE_ITEM_BATCH_AUDIT_ACTION, SOFTWARE_ITEM_CREATE_AUDIT_ACTION,
+    SOFTWARE_ITEM_DELETE_AUDIT_ACTION, SOFTWARE_ITEM_DELETE_PLUGIN_ASSIGNMENT_AUDIT_ACTION,
+    SOFTWARE_ITEM_MERGE_AUDIT_ACTION, SOFTWARE_ITEM_UNASSIGN_HOST_AUDIT_ACTION,
+    SOFTWARE_ITEM_UPDATE_AUDIT_ACTION, SOFTWARE_ITEM_UPDATE_HOST_ASSIGNMENT_AUDIT_ACTION,
+    emit_software_item_mutation_audit, emit_software_version_check_audit,
+};
 use controller_fetch::{ControllerFetchJob, is_controller_fetch_site, run_controller_fetch_jobs};
 use version_check_dispatch::{
     collect_and_run_controller_fetches, dispatch_agent_version_checks, load_version_check_context,
 };
-
-const SOFTWARE_ITEM_CREATE_AUDIT_ACTION: uptrakit_audit_log::RegisteredAuditAction =
-    uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_CREATE;
-const SOFTWARE_ITEM_UPDATE_AUDIT_ACTION: uptrakit_audit_log::RegisteredAuditAction =
-    uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_UPDATE;
-const SOFTWARE_ITEM_DELETE_AUDIT_ACTION: uptrakit_audit_log::RegisteredAuditAction =
-    uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_DELETE;
-const SOFTWARE_ITEM_APPROVE_AUDIT_ACTION: uptrakit_audit_log::RegisteredAuditAction =
-    uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_APPROVE;
-const SOFTWARE_ITEM_ASSIGN_HOSTS_AUDIT_ACTION: uptrakit_audit_log::RegisteredAuditAction =
-    uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_ASSIGN_HOSTS;
-const SOFTWARE_ITEM_UNASSIGN_HOST_AUDIT_ACTION: uptrakit_audit_log::RegisteredAuditAction =
-    uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_UNASSIGN_HOST;
-const SOFTWARE_ITEM_UPDATE_HOST_ASSIGNMENT_AUDIT_ACTION: uptrakit_audit_log::RegisteredAuditAction =
-    uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_UPDATE_HOST_ASSIGNMENT;
-const SOFTWARE_ITEM_DELETE_PLUGIN_ASSIGNMENT_AUDIT_ACTION:
-    uptrakit_audit_log::RegisteredAuditAction =
-    uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_DELETE_PLUGIN_ASSIGNMENT;
-const SOFTWARE_ITEM_MERGE_AUDIT_ACTION: uptrakit_audit_log::RegisteredAuditAction =
-    uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_MERGE;
-const SOFTWARE_ITEM_BATCH_AUDIT_ACTION: uptrakit_audit_log::RegisteredAuditAction =
-    uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_BATCH;
-const SOFTWARE_VERSION_CHECK_TRIGGERED_AUDIT_ACTION: uptrakit_audit_log::RegisteredAuditAction =
-    uptrakit_audit_log::AuditActionType::SOFTWARE_VERSION_CHECK_TRIGGERED;
-
-struct AuditContext<'a> {
-    audit_emitter: &'a uptrakit_audit_log::AuditEmitter,
-    tenant_id: Uuid,
-    user: &'a AuthenticatedUser,
-    api_token_id: Option<AuthenticatedApiTokenId>,
-}
-
-fn emit_software_item_mutation_audit(
-    ctx: &AuditContext<'_>,
-    action_type: uptrakit_audit_log::RegisteredAuditAction,
-    target_id: String,
-    target_display: Option<String>,
-    outcome: uptrakit_audit_log::AuditOutcome,
-    details: serde_json::Value,
-) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
-    let entry = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .tenant_scope(ctx.tenant_id)
-        .actor(actor_type, actor_id)
-        .target("software_item", target_id, target_display)
-        .outcome(outcome)
-        .details(details)
-        .build();
-
-    if let Ok(entry) = entry {
-        ctx.audit_emitter.emit_event(entry);
-    }
-}
-
-fn emit_software_version_check_audit(
-    ctx: &AuditContext<'_>,
-    item_id: Uuid,
-    item_name: Option<&str>,
-    outcome: uptrakit_audit_log::AuditOutcome,
-    details: serde_json::Value,
-) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
-    let entry =
-        uptrakit_audit_log::AuditEntry::builder(SOFTWARE_VERSION_CHECK_TRIGGERED_AUDIT_ACTION)
-            .tenant_scope(ctx.tenant_id)
-            .actor(actor_type, actor_id)
-            .target(
-                "software_item",
-                item_id.to_string(),
-                item_name.map(str::to_string),
-            )
-            .outcome(outcome)
-            .details(details)
-            .build();
-
-    if let Ok(entry) = entry {
-        ctx.audit_emitter.emit_event(entry);
-    }
-}
 
 fn version_check_dispatch_mode(agents_notified: u32, controller_checks_run: u32) -> &'static str {
     match (agents_notified > 0, controller_checks_run > 0) {
