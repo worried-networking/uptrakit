@@ -243,6 +243,13 @@ its coverage import requires an API access token that the CodeScene open-source 
 
 CodeScene (SaaS, free for open source) provides the behavioral health view — code-health grade, hotspots,
 change/temporal coupling — that no cargo tool reproduces. It analyses source + git history only (no
-coverage import on the open-source plan). One-time setup: connect the public repo at `codescene.io`. The
-per-PR delta status is optional and only worth enabling if someone owns reviewing it. An opt-in local MCP
-server (`codescene-oss/codescene-mcp-server`) exposes it to Claude Code for developers who want it.
+coverage import on the open-source plan). An opt-in local MCP server
+(`codescene-oss/codescene-mcp-server`) exposes it to Claude Code for developers who want it.
+
+**Auto-analysis on push.** Connect the repo via the **CodeScene GitHub App** (not a plain Git URL): the App
+installs a push webhook, so CodeScene re-analyses automatically on every push to an analysed branch. A plain
+Git-URL connection only polls on a schedule. Verify the connection at `codescene.io` → the uptrakit project →
+**Project Configuration → Integrations / VCS**, and confirm the webhook under the repo's GitHub **Settings →
+Webhooks**. If your CodeScene tier only polls, analysis still refreshes — on a schedule, not per-push; say so
+rather than relying on a toggle that does nothing. The per-PR delta status is optional and only worth
+enabling if someone owns reviewing it.
