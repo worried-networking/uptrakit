@@ -8,7 +8,7 @@
     reason = "test code: slice indexes are at validated boundaries"
 )]
 
-use super::load_agent_service;
+use super::version_check::load_agent_service;
 use crate::tenant_db::TenantDb;
 use crate::test_harness::TestApp;
 use crate::test_harness::fixtures::{insert_host, link_service_host};

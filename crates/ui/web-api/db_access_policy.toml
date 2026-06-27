@@ -665,14 +665,16 @@ delete_plugin_assignment = "full-state"
 
 [routes."software_items/mod.rs"]
 trigger_update = "full-state"
-check_versions = "full-state"
-verify_software_item_and_host = "ignore"
-load_agent_service = "ignore"
-classify_role_assignments = "ignore"
-check_versions_host = "full-state"
 batch_software_items = "full-state"
 preview_software_item_merge = "tenant-scoped"
 execute_software_item_merge = "tenant-scoped"
+
+[routes."software_items/version_check.rs"]
+check_versions = "full-state"
+check_versions_host = "full-state"
+verify_software_item_and_host = "ignore"
+load_agent_service = "ignore"
+classify_role_assignments = "ignore"
 
 [routes."software_items/tests.rs"]
 setup_state = "ignore"
