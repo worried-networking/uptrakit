@@ -54,6 +54,75 @@ pub(in super::super) async fn handle_renew_certificate(
     payload: &uptrakit_wire::RenewCertificatePayload,
     is_system: bool,
 ) -> ProcessorResponse {
+    /// Shared post-sign sequence: revoke old cert, bump CRL version, notify
+    /// listeners, emit the success audit event, and return the reply.
+    async fn post_sign_success(
+        state: &Arc<AppState>,
+        service_id: uuid::Uuid,
+        cert: &CertIdentity,
+        is_system: bool,
+        bundle: crate::cert_signer::SignedCertBundle,
+    ) -> ProcessorResponse {
+        if is_system {
+            if let Err(e) =
+                revoke_system_certificate(state.db(), &cert.serial, &cert.ca_fingerprint).await
+            {
+                tracing::error!(error = %e, "failed to revoke old system service certificate");
+            }
+        } else {
+            if let Err(e) = revoke_certificate(
+                state.db(),
+                &cert.serial,
+                &cert.ca_fingerprint,
+                uptrakit_shared_db::entity::prelude::RevocationReason::CertificateRenewed,
+            )
+            .await
+            {
+                tracing::error!(error = %e, "failed to revoke old certificate");
+            }
+        }
+
+        if let Err(e) =
+            crate::settings_store::bump_revocation_version(state.db(), state.default_tenant_id)
+                .await
+        {
+            tracing::warn!(error = ?e, "failed to bump revocation version counter");
+        }
+        state.cert.revocation_notify.notify_one();
+        state
+            .notification
+            .notification_service
+            .publish_controller_event(ControllerMessage::RequestCrlRenewal(
+                RequestCrlRenewalPayload::default(),
+            ))
+            .await;
+        if is_system {
+            tracing::info!(
+                %service_id,
+                old_serial = %cert.serial,
+                "system service certificate renewed, old cert revoked"
+            );
+        } else {
+            tracing::info!(
+                %service_id,
+                old_serial = %cert.serial,
+                "certificate renewed, old cert revoked"
+            );
+        }
+        let cert_msg = ControllerMessage::Certificate(CertificatePayload {
+            cert_pem: bundle.cert_pem,
+            not_after: bundle.not_after,
+        });
+        emit_service_certificate_renew_audit_event(
+            state,
+            service_id,
+            is_system,
+            bundle.not_after.into(),
+        )
+        .await;
+        ProcessorResponse::reply_and_close(cert_msg, CloseReason::CertificateRotated)
+    }
+
     if is_system {
         // System service renewal path.
         let svc = match sys_svc_entity::Entity::find_by_id(service_id)
@@ -93,50 +162,7 @@ pub(in super::super) async fn handle_renew_certificate(
         )
         .await
         {
-            Ok(bundle) => {
-                // Revoke old system service certificate.
-                if let Err(e) =
-                    revoke_system_certificate(state.db(), &cert.serial, &cert.ca_fingerprint).await
-                {
-                    tracing::error!(error = %e, "failed to revoke old system service certificate");
-                }
-
-                // Bump CRL and notify (system certs share the CRL).
-                if let Err(e) = crate::settings_store::bump_revocation_version(
-                    state.db(),
-                    state.default_tenant_id,
-                )
-                .await
-                {
-                    tracing::warn!(error = ?e, "failed to bump revocation version counter");
-                }
-                state.cert.revocation_notify.notify_one();
-                state
-                    .notification
-                    .notification_service
-                    .publish_controller_event(ControllerMessage::RequestCrlRenewal(
-                        RequestCrlRenewalPayload::default(),
-                    ))
-                    .await;
-                tracing::info!(
-                    %service_id,
-                    old_serial = %cert.serial,
-                    "system service certificate renewed, old cert revoked"
-                );
-
-                let cert_msg = ControllerMessage::Certificate(CertificatePayload {
-                    cert_pem: bundle.cert_pem,
-                    not_after: bundle.not_after,
-                });
-                emit_service_certificate_renew_audit_event(
-                    state,
-                    service_id,
-                    true,
-                    bundle.not_after.into(),
-                )
-                .await;
-                ProcessorResponse::reply_and_close(cert_msg, CloseReason::CertificateRotated)
-            }
+            Ok(bundle) => post_sign_success(state, service_id, cert, true, bundle).await,
             Err(e) => {
                 emit_service_certificate_renew_non_success_audit_event(
                     state,
@@ -190,54 +216,7 @@ pub(in super::super) async fn handle_renew_certificate(
         )
         .await
         {
-            Ok(bundle) => {
-                // Revoke old certificate.
-                if let Err(e) = revoke_certificate(
-                    state.db(),
-                    &cert.serial,
-                    &cert.ca_fingerprint,
-                    uptrakit_shared_db::entity::prelude::RevocationReason::CertificateRenewed,
-                )
-                .await
-                {
-                    tracing::error!(error = %e, "failed to revoke old certificate");
-                }
-
-                if let Err(e) = crate::settings_store::bump_revocation_version(
-                    state.db(),
-                    state.default_tenant_id,
-                )
-                .await
-                {
-                    tracing::warn!(error = ?e, "failed to bump revocation version counter");
-                }
-                state.cert.revocation_notify.notify_one();
-                state
-                    .notification
-                    .notification_service
-                    .publish_controller_event(ControllerMessage::RequestCrlRenewal(
-                        RequestCrlRenewalPayload::default(),
-                    ))
-                    .await;
-                tracing::info!(
-                    %service_id,
-                    old_serial = %cert.serial,
-                    "certificate renewed, old cert revoked"
-                );
-
-                let cert_msg = ControllerMessage::Certificate(CertificatePayload {
-                    cert_pem: bundle.cert_pem,
-                    not_after: bundle.not_after,
-                });
-                emit_service_certificate_renew_audit_event(
-                    state,
-                    service_id,
-                    false,
-                    bundle.not_after.into(),
-                )
-                .await;
-                ProcessorResponse::reply_and_close(cert_msg, CloseReason::CertificateRotated)
-            }
+            Ok(bundle) => post_sign_success(state, service_id, cert, false, bundle).await,
             Err(e) => {
                 emit_service_certificate_renew_non_success_audit_event(
                     state,

@@ -8,6 +8,7 @@ use super::discovery::enrich_discovered_items;
 use super::version_check::{DisplayOverride, apply_version_update_to_db};
 use super::*;
 use crate::AppState;
+use crate::routes::service_ws::protocol::CertIdentity;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Set,
 };
@@ -663,6 +664,55 @@ async fn insert_plugin_config(
     .expect("insert plugin_config")
 }
 
+// ── Shared fixture builders ───────────────────────────────────────────
+
+/// Returns the `CertIdentity` used by all `handle_renew_certificate` tests.
+fn test_cert_identity() -> CertIdentity {
+    CertIdentity {
+        serial: "old-serial".to_string(),
+        ca_fingerprint: TEST_CA_FINGERPRINT.to_string(),
+    }
+}
+
+/// Builds one service with one linked host and one `host_software_item` row.
+/// Used by version-check and enricher tests that operate on a single host.
+async fn setup_single_host_sw_fixture() -> (
+    sea_orm::DatabaseConnection,
+    Arc<AppState>,
+    service::Model,
+    host::Model,
+    software_item::Model,
+    host_software_item::Model,
+) {
+    let db = setup_migrated_db().await;
+    let tenant_id = insert_default_tenant(&db).await;
+    let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+    let svc = insert_service(&db, tenant_id).await;
+    let host = insert_host(&db, tenant_id).await;
+    link_service_host(&db, svc.id, host.id).await;
+    let sw = insert_software_item(&db, tenant_id).await;
+    let hsi = insert_host_software_item(&db, host.id, sw.id).await;
+    (db, state, svc, host, sw, hsi)
+}
+
+/// Builds a service with a sentinel hostname and an empty `linked_host_ids`
+/// set. Used by the SSH/report-hosts regression tests.
+async fn setup_ssh_report_hosts_fixture(
+    sentinel: &str,
+) -> (
+    sea_orm::DatabaseConnection,
+    Arc<AppState>,
+    service::Model,
+    Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>>,
+) {
+    let db = setup_migrated_db().await;
+    let tenant_id = insert_default_tenant(&db).await;
+    let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+    let svc = insert_service_with_hostname(&db, tenant_id, sentinel).await;
+    let linked_host_ids = Arc::new(parking_lot::Mutex::new(HashSet::new()));
+    (db, state, svc, linked_host_ids)
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────
 
 #[tokio::test]
@@ -677,10 +727,7 @@ async fn handle_renew_certificate_tenant_service_writes_tenant_semantic_audit_ro
     let response = handle_renew_certificate(
         &state,
         svc.id,
-        &crate::routes::service_ws::protocol::CertIdentity {
-            serial: "old-serial".to_string(),
-            ca_fingerprint: TEST_CA_FINGERPRINT.to_string(),
-        },
+        &test_cert_identity(),
         &RenewCertificatePayload {
             csr_pem: test_renewal_csr_pem(),
         },
@@ -723,10 +770,7 @@ async fn handle_renew_certificate_tenant_service_not_approved_emits_denied_tenan
     let response = handle_renew_certificate(
         &state,
         svc.id,
-        &crate::routes::service_ws::protocol::CertIdentity {
-            serial: "old-serial".to_string(),
-            ca_fingerprint: TEST_CA_FINGERPRINT.to_string(),
-        },
+        &test_cert_identity(),
         &RenewCertificatePayload {
             csr_pem: test_renewal_csr_pem(),
         },
@@ -760,10 +804,7 @@ async fn handle_renew_certificate_tenant_signing_failure_emits_failed_tenant_aud
     let response = handle_renew_certificate(
         &state,
         svc.id,
-        &crate::routes::service_ws::protocol::CertIdentity {
-            serial: "old-serial".to_string(),
-            ca_fingerprint: TEST_CA_FINGERPRINT.to_string(),
-        },
+        &test_cert_identity(),
         &RenewCertificatePayload {
             csr_pem: test_renewal_csr_pem(),
         },
@@ -973,10 +1014,7 @@ async fn handle_renew_certificate_system_service_keeps_writing_system_audit_row(
     let response = handle_renew_certificate(
         &state,
         svc.id,
-        &crate::routes::service_ws::protocol::CertIdentity {
-            serial: "old-serial".to_string(),
-            ca_fingerprint: TEST_CA_FINGERPRINT.to_string(),
-        },
+        &test_cert_identity(),
         &RenewCertificatePayload {
             csr_pem: test_renewal_csr_pem(),
         },
@@ -1024,10 +1062,7 @@ async fn handle_renew_certificate_system_service_not_approved_emits_denied_syste
     let response = handle_renew_certificate(
         &state,
         svc.id,
-        &crate::routes::service_ws::protocol::CertIdentity {
-            serial: "old-serial".to_string(),
-            ca_fingerprint: TEST_CA_FINGERPRINT.to_string(),
-        },
+        &test_cert_identity(),
         &RenewCertificatePayload {
             csr_pem: test_renewal_csr_pem(),
         },
@@ -1061,10 +1096,7 @@ async fn handle_renew_certificate_system_signing_failure_emits_failed_system_aud
     let response = handle_renew_certificate(
         &state,
         svc.id,
-        &crate::routes::service_ws::protocol::CertIdentity {
-            serial: "old-serial".to_string(),
-            ca_fingerprint: TEST_CA_FINGERPRINT.to_string(),
-        },
+        &test_cert_identity(),
         &RenewCertificatePayload {
             csr_pem: test_renewal_csr_pem(),
         },
@@ -1348,16 +1380,7 @@ async fn version_check_results_error_result_preserves_targeted_row_while_success
 /// row with no installed/display versions yet.
 async fn setup_apply_version_update_to_db_fixture()
 -> (Arc<crate::AppState>, software_item::Model, uuid::Uuid) {
-    let db = setup_migrated_db().await;
-    let tenant_id = insert_default_tenant(&db).await;
-    let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
-
-    let svc = insert_service(&db, tenant_id).await;
-    let host = insert_host(&db, tenant_id).await;
-    link_service_host(&db, svc.id, host.id).await;
-
-    let sw = insert_software_item(&db, tenant_id).await;
-    let hsi = insert_host_software_item(&db, host.id, sw.id).await;
+    let (_, state, _, _, sw, hsi) = setup_single_host_sw_fixture().await;
     (state, sw, hsi.id)
 }
 
@@ -1483,16 +1506,7 @@ async fn apply_version_update_to_db_use_agent_value_preserves_wire_value() {
 
 #[tokio::test]
 async fn version_check_results_targeted_update_skips_deactivated_host() {
-    let db = setup_migrated_db().await;
-    let tenant_id = insert_default_tenant(&db).await;
-    let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
-
-    let svc = insert_service(&db, tenant_id).await;
-    let host = insert_host(&db, tenant_id).await;
-    link_service_host(&db, svc.id, host.id).await;
-
-    let sw = insert_software_item(&db, tenant_id).await;
-    let hsi = insert_host_software_item(&db, host.id, sw.id).await;
+    let (db, state, svc, host, sw, hsi) = setup_single_host_sw_fixture().await;
 
     host::ActiveModel {
         id: Set(host.id),
@@ -1873,10 +1887,7 @@ async fn insert_service_with_hostname(
 #[tokio::test]
 async fn report_hosts_uses_ssh_target_over_remote_hostname() {
     const SERVICE_SENTINEL: &str = "controller-host-sentinel";
-    let db = setup_migrated_db().await;
-    let tenant_id = insert_default_tenant(&db).await;
-    let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
-    let svc = insert_service_with_hostname(&db, tenant_id, SERVICE_SENTINEL).await;
+    let (db, state, svc, linked_host_ids) = setup_ssh_report_hosts_fixture(SERVICE_SENTINEL).await;
 
     // SSH agent reports both: ip_address = user-typed SSH target host
     // (bare hostname, parsed out of `user@host:port` by SshTarget at
@@ -1896,7 +1907,6 @@ async fn report_hosts_uses_ssh_target_over_remote_hostname() {
         agent_version: "1.0.0".to_string(),
         capabilities: [Capability::SoftwareDiscovery].into_iter().collect(),
     };
-    let linked_host_ids = Arc::new(parking_lot::Mutex::new(HashSet::new()));
     handle_report_hosts(&state, svc.id, &payload, &linked_host_ids).await;
 
     let row = host::Entity::find()
@@ -1915,10 +1925,7 @@ async fn report_hosts_uses_ssh_target_over_remote_hostname() {
 #[tokio::test]
 async fn report_hosts_uses_hostname_when_no_ssh_target() {
     const SERVICE_SENTINEL: &str = "controller-host-sentinel";
-    let db = setup_migrated_db().await;
-    let tenant_id = insert_default_tenant(&db).await;
-    let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
-    let svc = insert_service_with_hostname(&db, tenant_id, SERVICE_SENTINEL).await;
+    let (db, state, svc, linked_host_ids) = setup_ssh_report_hosts_fixture(SERVICE_SENTINEL).await;
 
     let payload = ReportHostsPayload {
         hosts: vec![HostInfo {
@@ -1934,7 +1941,6 @@ async fn report_hosts_uses_hostname_when_no_ssh_target() {
         agent_version: "1.0.0".to_string(),
         capabilities: [Capability::SoftwareDiscovery].into_iter().collect(),
     };
-    let linked_host_ids = Arc::new(parking_lot::Mutex::new(HashSet::new()));
     handle_report_hosts(&state, svc.id, &payload, &linked_host_ids).await;
 
     let row = host::Entity::find()
@@ -1956,10 +1962,7 @@ async fn report_hosts_uses_hostname_when_no_ssh_target() {
 #[tokio::test]
 async fn report_hosts_falls_back_to_ip_address_not_service_hostname() {
     const SERVICE_SENTINEL: &str = "MacBook-Pro---Andrey.local";
-    let db = setup_migrated_db().await;
-    let tenant_id = insert_default_tenant(&db).await;
-    let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
-    let svc = insert_service_with_hostname(&db, tenant_id, SERVICE_SENTINEL).await;
+    let (db, state, svc, linked_host_ids) = setup_ssh_report_hosts_fixture(SERVICE_SENTINEL).await;
 
     let payload = ReportHostsPayload {
         hosts: vec![HostInfo {
@@ -1975,7 +1978,6 @@ async fn report_hosts_falls_back_to_ip_address_not_service_hostname() {
         agent_version: "1.0.0".to_string(),
         capabilities: [Capability::SoftwareDiscovery].into_iter().collect(),
     };
-    let linked_host_ids = Arc::new(parking_lot::Mutex::new(HashSet::new()));
     handle_report_hosts(&state, svc.id, &payload, &linked_host_ids).await;
 
     let row = host::Entity::find()
@@ -1998,10 +2000,7 @@ async fn report_hosts_falls_back_to_ip_address_not_service_hostname() {
 #[tokio::test]
 async fn report_hosts_skips_when_neither_hostname_nor_ip_provided() {
     const SERVICE_SENTINEL: &str = "controller-sentinel";
-    let db = setup_migrated_db().await;
-    let tenant_id = insert_default_tenant(&db).await;
-    let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
-    let svc = insert_service_with_hostname(&db, tenant_id, SERVICE_SENTINEL).await;
+    let (db, state, svc, linked_host_ids) = setup_ssh_report_hosts_fixture(SERVICE_SENTINEL).await;
 
     let payload = ReportHostsPayload {
         hosts: vec![HostInfo {
@@ -2017,7 +2016,6 @@ async fn report_hosts_skips_when_neither_hostname_nor_ip_provided() {
         agent_version: "1.0.0".to_string(),
         capabilities: [Capability::SoftwareDiscovery].into_iter().collect(),
     };
-    let linked_host_ids = Arc::new(parking_lot::Mutex::new(HashSet::new()));
     handle_report_hosts(&state, svc.id, &payload, &linked_host_ids).await;
 
     let row = host::Entity::find()
@@ -2041,11 +2039,8 @@ async fn report_hosts_does_not_oscillate_hostname_on_fast_path_reload() {
     // time before the SSH agent stores it locally and reports it as
     // `ip_address`.
     const SSH_TARGET: &str = "mikrotik.uk-home.example";
-    let db = setup_migrated_db().await;
-    let tenant_id = insert_default_tenant(&db).await;
-    let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
-    let svc = insert_service_with_hostname(&db, tenant_id, "controller-sentinel").await;
-    let linked_host_ids = Arc::new(parking_lot::Mutex::new(HashSet::new()));
+    let (db, state, svc, linked_host_ids) =
+        setup_ssh_report_hosts_fixture("controller-sentinel").await;
 
     // Slow path (initial bootstrap report): SSH agent set both fields.
     let initial = ReportHostsPayload {
@@ -2247,15 +2242,7 @@ async fn insert_detect_version_plugin_assignment(
 
 #[tokio::test]
 async fn handle_version_check_results_invokes_enricher_for_capable_plugin() {
-    let db = setup_migrated_db().await;
-    let tenant_id = insert_default_tenant(&db).await;
-    let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
-
-    let svc = insert_service(&db, tenant_id).await;
-    let host = insert_host(&db, tenant_id).await;
-    link_service_host(&db, svc.id, host.id).await;
-    let sw = insert_software_item(&db, tenant_id).await;
-    let hsi = insert_host_software_item(&db, host.id, sw.id).await;
+    let (db, state, svc, host, sw, hsi) = setup_single_host_sw_fixture().await;
     insert_detect_version_plugin_assignment(
         &db,
         host.id,
@@ -2295,15 +2282,7 @@ async fn handle_version_check_results_invokes_enricher_for_capable_plugin() {
 
 #[tokio::test]
 async fn handle_version_check_results_does_not_invoke_enricher_without_capability() {
-    let db = setup_migrated_db().await;
-    let tenant_id = insert_default_tenant(&db).await;
-    let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
-
-    let svc = insert_service(&db, tenant_id).await;
-    let host = insert_host(&db, tenant_id).await;
-    link_service_host(&db, svc.id, host.id).await;
-    let sw = insert_software_item(&db, tenant_id).await;
-    let hsi = insert_host_software_item(&db, host.id, sw.id).await;
+    let (db, state, svc, host, sw, hsi) = setup_single_host_sw_fixture().await;
     // `__test_fetch_fail` declares ReleaseFetching but NOT
     // EnrichInstalledVersion — dispatcher must skip the enricher path.
     insert_detect_version_plugin_assignment(
@@ -2344,15 +2323,7 @@ async fn handle_version_check_results_does_not_invoke_enricher_without_capabilit
 
 #[tokio::test]
 async fn handle_version_check_results_writes_none_when_enricher_misses() {
-    let db = setup_migrated_db().await;
-    let tenant_id = insert_default_tenant(&db).await;
-    let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
-
-    let svc = insert_service(&db, tenant_id).await;
-    let host = insert_host(&db, tenant_id).await;
-    link_service_host(&db, svc.id, host.id).await;
-    let sw = insert_software_item(&db, tenant_id).await;
-    let hsi = insert_host_software_item(&db, host.id, sw.id).await;
+    let (db, state, svc, host, sw, hsi) = setup_single_host_sw_fixture().await;
     // Seed a prior display value so the test proves Override(None) clears it.
     host_software_item::ActiveModel {
         id: Set(hsi.id),
