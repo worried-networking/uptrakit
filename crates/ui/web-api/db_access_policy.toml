@@ -667,9 +667,11 @@ delete_plugin_assignment = "full-state"
 preview_software_item_merge = "tenant-scoped"
 execute_software_item_merge = "tenant-scoped"
 
+[routes."software_items/batch.rs"]
+batch_software_items = "full-state"
+
 [routes."software_items/mod.rs"]
 trigger_update = "full-state"
-batch_software_items = "full-state"
 
 [routes."software_items/version_check.rs"]
 check_versions = "full-state"
