@@ -310,6 +310,7 @@ handle_ping = "no-db"
 [routes."service_ws/handler/messages/certificate.rs"]
 handle_renew_certificate = "no-db"
 emit_service_certificate_renew_non_success_audit_event = "ignore"
+post_sign_success = "ignore"
 
 [routes."service_ws/handler/messages/hosts.rs"]
 link_reported_hosts = "ignore"
@@ -337,6 +338,8 @@ trigger_host_progression_after_awaiting_restart = "ignore"
 handle_report_plugin_config = "no-db"
 
 [routes."service_ws/handler/messages/tests.rs"]
+setup_single_host_sw_fixture = "ignore"
+setup_ssh_report_hosts_fixture = "ignore"
 insert_embedded_service = "ignore"
 on_software_item_created = "ignore"
 handle_surface_action = "ignore"
