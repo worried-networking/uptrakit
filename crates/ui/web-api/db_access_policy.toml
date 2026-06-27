@@ -330,7 +330,7 @@ process_discovery_page_for_host = "ignore"
 handle_discovery_results = "no-db"
 enrich_discovered_items = "ignore"
 
-[routes."service_ws/handler/messages/mod.rs"]
+[routes."service_ws/handler/messages/restart_progression.rs"]
 trigger_host_progression_after_awaiting_restart = "ignore"
 
 [routes."service_ws/handler/messages/plugin_config.rs"]

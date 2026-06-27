@@ -7,7 +7,10 @@
 use super::discovery::enrich_discovered_items;
 use super::version_check::{DisplayOverride, apply_version_update_to_db};
 use super::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, QueryFilter, QueryOrder, Set};
+use crate::AppState;
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Set,
+};
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::sync::{Arc, OnceLock};
