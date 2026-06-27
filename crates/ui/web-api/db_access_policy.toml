@@ -324,12 +324,14 @@ finalize_version_check_results = "ignore"
 build_enriched_display_overrides = "ignore"
 handle_version_check_results = "no-db"
 
-[routes."service_ws/handler/messages/mod.rs"]
+[routes."service_ws/handler/messages/discovery.rs"]
 find_linked_host_by_machine_id = "ignore"
 process_discovery_page_for_host = "ignore"
 handle_discovery_results = "no-db"
-handle_report_plugin_config = "no-db"
 enrich_discovered_items = "ignore"
+
+[routes."service_ws/handler/messages/mod.rs"]
+handle_report_plugin_config = "no-db"
 trigger_host_progression_after_awaiting_restart = "ignore"
 
 [routes."service_ws/handler/messages/tests.rs"]
