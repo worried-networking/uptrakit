@@ -16,8 +16,8 @@ use uptrakit_shared_db::entity::{
     software_item, system_audit_log, system_service,
 };
 use uptrakit_wire::{
-    Capability, DiscoveredSoftware, DiscoveryPluginResult, DiscoveryResultsPayload, HostInfo,
-    RenewCertificatePayload, ReportHostsPayload, UpdateCategory, VersionCheckResult,
+    Capability, DiscoveredSoftware, DiscoveryPluginResult, DiscoveryResultsPayload, ErrorCode,
+    HostInfo, RenewCertificatePayload, ReportHostsPayload, UpdateCategory, VersionCheckResult,
     VersionCheckResultsPayload,
 };
 use uuid::Uuid;

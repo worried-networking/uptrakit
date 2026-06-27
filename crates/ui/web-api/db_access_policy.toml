@@ -307,8 +307,11 @@ trigger_discovery_for_agent_host = "ignore"
 [routes."service_ws/handler/messages/shared.rs"]
 handle_ping = "no-db"
 
-[routes."service_ws/handler/messages/mod.rs"]
+[routes."service_ws/handler/messages/certificate.rs"]
 handle_renew_certificate = "no-db"
+emit_service_certificate_renew_non_success_audit_event = "ignore"
+
+[routes."service_ws/handler/messages/mod.rs"]
 link_reported_hosts = "ignore"
 notify_reported_hosts_online = "ignore"
 handle_report_hosts = "no-db"
@@ -323,7 +326,6 @@ process_discovery_page_for_host = "ignore"
 handle_discovery_results = "no-db"
 handle_report_plugin_config = "no-db"
 enrich_discovered_items = "ignore"
-emit_service_certificate_renew_non_success_audit_event = "ignore"
 trigger_host_progression_after_awaiting_restart = "ignore"
 
 [routes."service_ws/handler/messages/tests.rs"]
