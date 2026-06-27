@@ -1593,7 +1593,7 @@ overflow are dropped with a `tracing::warn!` rather than causing unbounded heap 
 
 `update_available`, `update_completed`, `update_failed`, `new_software_discovered`, `new_service_enrolled`,
 `ca_rotated`, `batch_update_completed`, `batch_update_partially_completed`, `stdin_attention`.
-Events are wired into existing WebSocket handlers (`messages.rs`, `updates.rs`), `services.rs`,
+Events are wired into existing WebSocket handlers (`messages/`, `updates/`), `services.rs`,
 and `settings_ca.rs`. The `stdin_attention` event is dispatched when an interactive update appears
 to be waiting for stdin input.
 
