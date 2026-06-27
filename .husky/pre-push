@@ -68,6 +68,12 @@ bash scripts/check_deny.sh ${DENY_BASE:+"$DENY_BASE"}
 echo "[pre-push] Running semantic boundary check..."
 python3 ci/check_plugin_semantic_boundary.py
 
+echo "[pre-push] Running no-security-audit check..."
+bash ci/verify_no_security_audit.sh
+
+echo "[pre-push] Running typed-audit-actions check..."
+bash ci/verify_typed_audit_actions.sh
+
 echo "[pre-push] Running cargo test (db-sqlite)..."
 if command -v cargo-nextest >/dev/null 2>&1; then
   cargo nextest run --no-default-features --features db-sqlite
