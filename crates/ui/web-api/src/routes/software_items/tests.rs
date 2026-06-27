@@ -23,6 +23,7 @@ use crate::test_harness::{
     build_test_state_with_plugin_ops, insert_default_tenant, setup_migrated_db,
 };
 use async_trait::async_trait;
+use axum::extract::Query;
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set};
 use time::OffsetDateTime;
 use uptrakit_plugin_infrastructure_registry::{
@@ -37,6 +38,7 @@ use uptrakit_plugin_infrastructure_registry::{
 use uptrakit_shared_db::entity::{
     audit_log, host_software_item, host_software_item_plugin, software_item, update_history,
 };
+use uptrakit_web_api_types::PluginRole;
 
 struct SkipProtection;
 
