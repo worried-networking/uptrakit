@@ -316,13 +316,15 @@ link_reported_hosts = "ignore"
 notify_reported_hosts_online = "ignore"
 handle_report_hosts = "no-db"
 
-[routes."service_ws/handler/messages/mod.rs"]
+[routes."service_ws/handler/messages/version_check.rs"]
 resolve_matching_host_software_items = "ignore"
 apply_version_update_to_db = "ignore"
 dispatch_version_update_notification = "ignore"
 finalize_version_check_results = "ignore"
 build_enriched_display_overrides = "ignore"
 handle_version_check_results = "no-db"
+
+[routes."service_ws/handler/messages/mod.rs"]
 find_linked_host_by_machine_id = "ignore"
 process_discovery_page_for_host = "ignore"
 handle_discovery_results = "no-db"
