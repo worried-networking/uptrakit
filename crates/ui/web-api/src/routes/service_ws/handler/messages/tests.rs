@@ -1,8 +1,10 @@
 #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
 
+use super::version_check::{DisplayOverride, apply_version_update_to_db};
 use super::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, QueryFilter, QueryOrder, Set};
 use serde::Deserialize;
+use std::collections::HashSet;
 use std::sync::{Arc, OnceLock};
 use uptrakit_plugin_infrastructure_registry::{
     ControllerUpdateHookOps, ControllerUpdateProtection, ControllerUpdateProtectionOps,
