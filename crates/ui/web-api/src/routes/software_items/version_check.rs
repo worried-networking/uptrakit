@@ -60,6 +60,15 @@ fn classify_version_check_context_load_failure(
 // check_versions_host helpers
 // ---------------------------------------------------------------------------
 
+/// Shared contract for per-phase precondition errors in version-check handlers.
+///
+/// Each implementing type retains its own distinct HTTP status mapping and audit
+/// reason codes — this trait only captures the method *shape*.
+trait VersionCheckError: Sized {
+    fn into_response(self) -> Response;
+    fn audit(&self) -> (uptrakit_audit_log::AuditOutcome, &'static str);
+}
+
 /// Verify that a software item exists, a host exists and belongs to the tenant,
 /// and the host is assigned to the software item.
 ///
@@ -73,7 +82,7 @@ enum CheckVersionsHostPreconditionError {
     Internal,
 }
 
-impl CheckVersionsHostPreconditionError {
+impl VersionCheckError for CheckVersionsHostPreconditionError {
     fn into_response(self) -> Response {
         match self {
             Self::SoftwareItemNotFound => {
@@ -168,7 +177,7 @@ pub(super) enum LoadAgentServiceError {
     Internal,
 }
 
-impl LoadAgentServiceError {
+impl VersionCheckError for LoadAgentServiceError {
     fn into_response(self) -> Response {
         match self {
             Self::NoAgentLinked => {
