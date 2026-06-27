@@ -16,7 +16,7 @@ use super::*;
 use crate::auth::AuthMethod;
 use crate::auth::permissions::Permission;
 use crate::middleware::permission::{
-    CanCreateSoftware, CanDeleteSoftware, CanTriggerUpdates, CanUpdateSoftware,
+    CanCreateSoftware, CanDeleteSoftware, CanTriggerChecks, CanTriggerUpdates, CanUpdateSoftware,
 };
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, AuthenticatedUser};
 use crate::test_harness::{
@@ -24,7 +24,9 @@ use crate::test_harness::{
 };
 use async_trait::async_trait;
 use axum::extract::Query;
-use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
+};
 use time::OffsetDateTime;
 use uptrakit_plugin_infrastructure_registry::{
     CatalogConfig, ControllerPostUpdateContext, ControllerProtectionContext,
@@ -36,7 +38,8 @@ use uptrakit_plugin_infrastructure_registry::{
     build_catalog,
 };
 use uptrakit_shared_db::entity::{
-    audit_log, host_software_item, host_software_item_plugin, software_item, update_history,
+    audit_log, host_software_item, host_software_item_plugin, service, software_item,
+    update_history,
 };
 use uptrakit_web_api_types::PluginRole;
 
