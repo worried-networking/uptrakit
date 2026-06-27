@@ -304,8 +304,10 @@ deliver_service_credentials_with_sink = "ignore"
 [routes."service_ws/handler/discovery.rs"]
 trigger_discovery_for_agent_host = "ignore"
 
-[routes."service_ws/handler/messages/mod.rs"]
+[routes."service_ws/handler/messages/shared.rs"]
 handle_ping = "no-db"
+
+[routes."service_ws/handler/messages/mod.rs"]
 handle_renew_certificate = "no-db"
 link_reported_hosts = "ignore"
 notify_reported_hosts_online = "ignore"
