@@ -9,12 +9,11 @@ use uptrakit_wire::{
 };
 
 use super::{
-    ProcessorResponse, emit_service_certificate_renew_audit_event, ingest_service_audit_event,
-    sign_renewal_csr, sign_renewal_csr_system,
+    CertIdentity, ProcessorResponse, emit_service_certificate_renew_audit_event,
+    ingest_service_audit_event, revoke_certificate, revoke_system_certificate, sign_renewal_csr,
+    sign_renewal_csr_system,
 };
 use crate::AppState;
-use crate::routes::agent_operations::{revoke_certificate, revoke_system_certificate};
-use crate::routes::service_ws::protocol::CertIdentity;
 
 pub(super) async fn emit_service_certificate_renew_non_success_audit_event(
     state: &AppState,

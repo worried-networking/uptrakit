@@ -4,11 +4,8 @@ use axum::extract::ws::{Message, WebSocket};
 use uptrakit_shared_db::entity::service;
 use uptrakit_wire::OutgoingSeq;
 
-use super::LoopAction;
+use super::{LoopAction, record_service_activity, record_system_service_activity, send_pong};
 use crate::AppState;
-use crate::routes::service_ws::protocol::{
-    record_service_activity, record_system_service_activity, send_pong,
-};
 
 pub(super) fn emit_service_inventory_audit(
     state: &AppState,

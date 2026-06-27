@@ -10,6 +10,12 @@
 //! - [`restart_progression`] — post-restart host progression
 //! - [`shared`] — ping handler + service-inventory audit helper
 
+use super::super::super::agent_operations::{
+    find_or_create_host_and_link, revoke_certificate, revoke_system_certificate,
+};
+use super::super::protocol::{
+    CertIdentity, record_service_activity, record_system_service_activity, send_pong,
+};
 use super::audit_service::{
     emit_service_certificate_renew_audit_event, ingest_service_audit_event,
 };

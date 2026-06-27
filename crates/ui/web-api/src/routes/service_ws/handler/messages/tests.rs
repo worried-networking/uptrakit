@@ -4,11 +4,11 @@
     reason = "test code: panics on failure are acceptable"
 )]
 
+use super::CertIdentity;
 use super::discovery::enrich_discovered_items;
 use super::version_check::{DisplayOverride, apply_version_update_to_db};
 use super::*;
 use crate::AppState;
-use crate::routes::service_ws::protocol::CertIdentity;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Set,
 };
