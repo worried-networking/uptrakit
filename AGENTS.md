@@ -321,7 +321,8 @@ build environments.
 - **Architecture is enforced by CI and existing gates**, not by a per-session MCP tool.
   The blocking gates are `cargo deny check` and `python3 ci/check_plugin_semantic_boundary.py`;
   `cargo machete` (unused dependencies) runs **advisory** in CI. Behavioral health — hotspots,
-  change-coupling, code-health grade — lives in the **CodeScene** dashboard (advisory, not a gate).
+  change-coupling, code-health grade — lives in the **CodeScene** dashboard (advisory, not a gate),
+  which auto-analyses on push via the GitHub App webhook.
 - **Do not regress architecture quality.** A task is not complete if it introduces a dependency
   cycle, leaks a plugin/production boundary (caught by `check_plugin_semantic_boundary.py`), or
   adds unused dependencies without reason.
