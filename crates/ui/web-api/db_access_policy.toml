@@ -670,7 +670,7 @@ execute_software_item_merge = "tenant-scoped"
 [routes."software_items/batch.rs"]
 batch_software_items = "full-state"
 
-[routes."software_items/mod.rs"]
+[routes."software_items/updates.rs"]
 trigger_update = "full-state"
 
 [routes."software_items/version_check.rs"]
