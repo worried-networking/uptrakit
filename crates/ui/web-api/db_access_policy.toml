@@ -311,10 +311,12 @@ handle_ping = "no-db"
 handle_renew_certificate = "no-db"
 emit_service_certificate_renew_non_success_audit_event = "ignore"
 
-[routes."service_ws/handler/messages/mod.rs"]
+[routes."service_ws/handler/messages/hosts.rs"]
 link_reported_hosts = "ignore"
 notify_reported_hosts_online = "ignore"
 handle_report_hosts = "no-db"
+
+[routes."service_ws/handler/messages/mod.rs"]
 resolve_matching_host_software_items = "ignore"
 apply_version_update_to_db = "ignore"
 dispatch_version_update_notification = "ignore"
