@@ -7,6 +7,7 @@ mod audit;
 mod controller_fetch;
 mod crud;
 mod host_assignments;
+mod merge;
 mod version_check;
 mod version_check_dispatch;
 
@@ -28,18 +29,18 @@ pub use host_assignments::{
     DeleteHostAssignmentParams, assign_hosts, delete_plugin_assignment, unassign_host,
     update_host_assignment,
 };
+pub use merge::{__path_execute_software_item_merge, __path_preview_software_item_merge};
+pub use merge::{execute_software_item_merge, preview_software_item_merge};
 pub use version_check::{__path_check_versions, __path_check_versions_host};
 pub use version_check::{check_versions, check_versions_host};
 
 use crate::AppState;
 use crate::actions::software_items as item_actions;
 use crate::api_error::ApiError;
-use crate::app_state::AuditEmitterState;
 use crate::error_response::error_response;
 use crate::extract::Validated;
-use crate::middleware::permission::{CanDeleteSoftware, CanTriggerUpdates, CanUpdateSoftware};
+use crate::middleware::permission::{CanDeleteSoftware, CanTriggerUpdates};
 use crate::middleware::require_auth::AuthenticatedApiTokenId;
-use crate::queries::software_items as item_queries;
 use crate::queries::update_types::ActorType;
 use crate::tenant_db::TenantDb;
 use axum::{
@@ -64,101 +65,7 @@ pub use uptrakit_web_api_types::software_items::{
     UpdateHostAssignmentRequest, UpdateSoftwareItemRequest,
 };
 
-use audit::{
-    AuditContext, SOFTWARE_ITEM_BATCH_AUDIT_ACTION, SOFTWARE_ITEM_MERGE_AUDIT_ACTION,
-    emit_software_item_mutation_audit,
-};
-
-// --- Endpoints ---
-
-/// Preview a manual merge of software items.
-#[utoipa::path(
-    post,
-    path = "/api/v1/software-items/merge/preview",
-    request_body = MergeSoftwareItemsPreviewRequest,
-    extensions(("x-required-permission" = json!("update_software"))),
-    responses(
-        (status = 200, description = "Merge preview calculated", body = MergeSoftwareItemsPreviewResponse),
-        (status = 400, description = "Invalid merge request")
-    ),
-    tag = "Software Items",
-    security(("bearer_token" = []))
-)]
-#[tracing::instrument(skip_all)]
-pub async fn preview_software_item_merge(
-    tenant_db: TenantDb,
-    CanUpdateSoftware(_user): CanUpdateSoftware,
-    Json(req): Json<MergeSoftwareItemsPreviewRequest>,
-) -> Result<impl IntoResponse, ApiError> {
-    let resp = item_queries::preview_merge_software_items(&tenant_db, &req).await?;
-    Ok((StatusCode::OK, Json(resp)).into_response())
-}
-
-/// Execute a manual merge of software items.
-#[utoipa::path(
-    post,
-    path = "/api/v1/software-items/merge/execute",
-    request_body = MergeSoftwareItemsExecuteRequest,
-    extensions(("x-required-permission" = json!("update_software and delete_software"))),
-    responses(
-        (status = 200, description = "Software items merged", body = MergeSoftwareItemsExecuteResponse),
-        (status = 400, description = "Invalid merge request")
-    ),
-    tag = "Software Items",
-    security(("bearer_token" = []))
-)]
-#[tracing::instrument(skip_all)]
-pub async fn execute_software_item_merge(
-    State(audit_emitter_state): State<AuditEmitterState>,
-    tenant_db: TenantDb,
-    CanUpdateSoftware(update_user): CanUpdateSoftware,
-    CanDeleteSoftware(_delete_user): CanDeleteSoftware,
-    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
-    Json(req): Json<MergeSoftwareItemsExecuteRequest>,
-) -> Result<impl IntoResponse, ApiError> {
-    let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
-        audit_emitter: &audit_emitter_state.0,
-        tenant_id: tenant_db.tenant_id(),
-        user: &update_user,
-        api_token_id,
-    };
-    let requested_count = req.candidate_ids.len();
-    let resp = match item_queries::execute_merge_software_items(&tenant_db, &req).await {
-        Ok(resp) => resp,
-        Err(err) => {
-            let (outcome, reason_code) = err.current_context().audit_classification();
-            emit_software_item_mutation_audit(
-                &audit_ctx,
-                SOFTWARE_ITEM_MERGE_AUDIT_ACTION,
-                req.survivor_id.to_string(),
-                None,
-                outcome,
-                serde_json::json!({
-                    "reason_code": reason_code,
-                    "candidate_count": requested_count,
-                }),
-            );
-            return Err(err.into());
-        }
-    };
-
-    emit_software_item_mutation_audit(
-        &audit_ctx,
-        SOFTWARE_ITEM_MERGE_AUDIT_ACTION,
-        resp.survivor_id.to_string(),
-        None,
-        uptrakit_audit_log::AuditOutcome::Success,
-        serde_json::json!({
-            "candidate_count": requested_count,
-            "deleted_count": resp.deleted_ids.len(),
-            "moved_link_count": resp.moved_link_ids.len(),
-            "skipped_duplicate_link_count": resp.skipped_duplicate_link_ids.len(),
-        }),
-    );
-
-    Ok((StatusCode::OK, Json(resp)).into_response())
-}
+use audit::{AuditContext, SOFTWARE_ITEM_BATCH_AUDIT_ACTION, emit_software_item_mutation_audit};
 
 /// Trigger a software update for a specific host.
 #[utoipa::path(

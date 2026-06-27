@@ -13,6 +13,7 @@ use super::audit::{
     SOFTWARE_ITEM_UPDATE_AUDIT_ACTION, SOFTWARE_ITEM_UPDATE_HOST_ASSIGNMENT_AUDIT_ACTION,
 };
 use super::*;
+use crate::app_state::AuditEmitterState;
 use crate::auth::AuthMethod;
 use crate::auth::permissions::Permission;
 use crate::middleware::permission::{
