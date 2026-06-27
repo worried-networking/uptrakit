@@ -1,4 +1,8 @@
 #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
+#![expect(
+    clippy::expect_used,
+    reason = "test code: panics on failure are acceptable"
+)]
 
 use super::discovery::enrich_discovered_items;
 use super::version_check::{DisplayOverride, apply_version_update_to_db};
@@ -20,9 +24,10 @@ use uptrakit_shared_db::entity::{
 };
 use uptrakit_wire::report_tracker::ReportTracker;
 use uptrakit_wire::{
-    Capability, DiscoveredSoftware, DiscoveryPluginResult, DiscoveryResultsPayload, ErrorCode,
-    HostInfo, RenewCertificatePayload, ReportHostsPayload, UpdateCategory, VersionCheckResult,
-    VersionCheckResultsPayload,
+    Capability, ControllerMessage, DiscoveredSoftware, DiscoveryPluginResult,
+    DiscoveryResultsPayload, ErrorCode, HostInfo, RenewCertificatePayload, ReportHostsPayload,
+    ReportPluginConfigPayload, ReportPluginConfigResponsePayload, UpdateCategory,
+    VersionCheckResult, VersionCheckResultsPayload,
 };
 use uuid::Uuid;
 
