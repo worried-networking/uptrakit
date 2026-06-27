@@ -1334,7 +1334,16 @@ for component details.
 | `crates/ui/web-api-queries/src/queries/plugin_configs.rs`                    | `batch_delete_plugin_configs`                                                                                          |
 | `crates/ui/web-api/src/routes/services.rs`                                   | `batch_services` handler                                                                                               |
 | `crates/ui/web-api/src/routes/system_services.rs`                            | `batch_system_services` handler                                                                                        |
-| `crates/ui/web-api/src/routes/software_items/mod.rs`                         | All 14 HTTP handlers (`batch_software_items` + remaining handlers)                                                     |
+| `crates/ui/web-api/src/routes/software_items/mod.rs`                         | Software-item route facade (module wiring + handler re-exports)                                                        |
+| `crates/ui/web-api/src/routes/software_items/audit.rs`                       | Audit-action consts, `AuditContext`, audit-emit helpers                                                                |
+| `crates/ui/web-api/src/routes/software_items/crud.rs`                        | CRUD handlers (create/list/get/update/delete/approve) + create lifecycle hook                                          |
+| `crates/ui/web-api/src/routes/software_items/merge.rs`                       | Merge preview/execute handlers                                                                                         |
+| `crates/ui/web-api/src/routes/software_items/host_assignments.rs`            | Host + plugin assignment handlers                                                                                      |
+| `crates/ui/web-api/src/routes/software_items/version_check.rs`               | Version-check handlers + precondition/agent-service helpers                                                            |
+| `crates/ui/web-api/src/routes/software_items/updates.rs`                     | Update-trigger handler                                                                                                 |
+| `crates/ui/web-api/src/routes/software_items/batch.rs`                       | Batch-action handler                                                                                                   |
+| `crates/ui/web-api/src/routes/software_items/tests.rs`                       | Unit tests for the software_items submodules                                                                           |
+| `crates/ui/web-api/src/routes/software_items/audit_tests.rs`                 | Audit-emission unit tests for the software_items submodules                                                            |
 | `crates/ui/web-api/src/routes/software_items/controller_fetch.rs`            | `ControllerFetchJob`, `collect_and_run_controller_fetches`                                                             |
 | `crates/ui/web-api/src/routes/software_items/version_check_dispatch.rs`      | `VersionCheckContext`, `load_version_check_context`, `dispatch_agent_version_checks`                                   |
 | `crates/ui/web-api/src/routes/hosts.rs`                                      | `batch_hosts` handler                                                                                                  |
