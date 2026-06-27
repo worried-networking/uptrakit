@@ -13,6 +13,7 @@ use super::audit::{
     SOFTWARE_ITEM_UPDATE_AUDIT_ACTION, SOFTWARE_ITEM_UPDATE_HOST_ASSIGNMENT_AUDIT_ACTION,
 };
 use super::*;
+use crate::AppState;
 use crate::app_state::AuditEmitterState;
 use crate::auth::AuthMethod;
 use crate::auth::permissions::Permission;
@@ -21,14 +22,22 @@ use crate::middleware::permission::{
     CanCreateSoftware, CanDeleteSoftware, CanTriggerChecks, CanTriggerUpdates, CanUpdateSoftware,
 };
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, AuthenticatedUser};
+use crate::queries::update_types::ActorType;
+use crate::tenant_db::TenantDb;
 use crate::test_harness::{
     build_test_state_with_plugin_ops, insert_default_tenant, setup_migrated_db,
 };
 use async_trait::async_trait;
-use axum::extract::Query;
+use axum::{
+    Extension, Json,
+    extract::{Path, Query, State},
+    http::StatusCode,
+    response::IntoResponse,
+};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
 };
+use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_plugin_infrastructure_registry::{
     CatalogConfig, ControllerPostUpdateContext, ControllerProtectionContext,
@@ -44,6 +53,7 @@ use uptrakit_shared_db::entity::{
     update_history,
 };
 use uptrakit_web_api_types::PluginRole;
+use uuid::Uuid;
 
 struct SkipProtection;
 
