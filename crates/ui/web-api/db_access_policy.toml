@@ -648,13 +648,16 @@ invoke_surface_interaction = "full-state"
 [routes."software_items/controller_fetch.rs"]
 run_controller_fetch_jobs = "no-db"
 
-[routes."software_items/mod.rs"]
+[routes."software_items/crud.rs"]
 create_software_item = "full-state"
 list_software_items = "tenant-scoped"
 get_software_item = "tenant-scoped"
 update_software_item = "full-state"
 delete_software_item = "full-state"
 approve_software_item = "full-state"
+fire_software_item_lifecycle = "ignore"
+
+[routes."software_items/mod.rs"]
 assign_hosts = "full-state"
 unassign_host = "full-state"
 update_host_assignment = "full-state"
@@ -668,7 +671,6 @@ check_versions_host = "full-state"
 batch_software_items = "full-state"
 preview_software_item_merge = "tenant-scoped"
 execute_software_item_merge = "tenant-scoped"
-fire_software_item_lifecycle = "ignore"
 
 [routes."software_items/tests.rs"]
 setup_state = "ignore"
