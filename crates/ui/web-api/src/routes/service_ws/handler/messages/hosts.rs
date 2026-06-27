@@ -6,11 +6,10 @@ use uptrakit_shared_db::entity::service;
 use uptrakit_wire::{HostConnectivityUpdate, ReportHostsPayload};
 
 use crate::AppState;
-use crate::routes::agent_operations::find_or_create_host_and_link;
 
 use super::emit_service_inventory_audit;
 use super::trigger_discovery_for_agent_host;
-use super::{ProcessorResponse, load_linked_host_ids};
+use super::{ProcessorResponse, find_or_create_host_and_link, load_linked_host_ids};
 
 #[derive(Default)]
 struct ReportHostsSummary {
