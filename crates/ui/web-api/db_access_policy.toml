@@ -331,8 +331,10 @@ handle_discovery_results = "no-db"
 enrich_discovered_items = "ignore"
 
 [routes."service_ws/handler/messages/mod.rs"]
-handle_report_plugin_config = "no-db"
 trigger_host_progression_after_awaiting_restart = "ignore"
+
+[routes."service_ws/handler/messages/plugin_config.rs"]
+handle_report_plugin_config = "no-db"
 
 [routes."service_ws/handler/messages/tests.rs"]
 insert_embedded_service = "ignore"
