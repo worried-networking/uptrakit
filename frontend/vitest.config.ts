@@ -18,6 +18,13 @@ export default defineConfig({
 	},
 	test: {
 		environment: 'jsdom',
+		environmentOptions: {
+			jsdom: {
+				// Set a real origin so that hey-api's `new Request(url, init)` can
+				// resolve relative base URLs (undici requires an absolute URL).
+				url: 'http://localhost/'
+			}
+		},
 		// Expose vitest globals (describe, it, expect, vi, etc.) so that
 		// @testing-library/jest-dom can call expect.extend() on import.
 		globals: true,
