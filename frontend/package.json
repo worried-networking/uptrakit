@@ -17,13 +17,15 @@
 		"test:e2e:check-buckets": "node scripts/check-e2e-buckets.mjs",
 		"lint": "eslint .",
 		"format": "prettier --write .",
-		"format:check": "prettier --check ."
+		"format:check": "prettier --check .",
+		"gen:api": "openapi-ts"
 	},
 	"overrides": {
 		"cookie": "^1.1.1"
 	},
 	"devDependencies": {
 		"@eslint/js": "^10.0.1",
+		"@hey-api/openapi-ts": "^0.99.0",
 		"@playwright/test": "^1.61.0",
 		"@skeletonlabs/skeleton": "^4.15.2",
 		"@skeletonlabs/skeleton-svelte": "^4.15.2",
