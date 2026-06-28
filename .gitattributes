@@ -1,0 +1,2 @@
+frontend/src/lib/api/generated/** linguist-generated=true
+crates/ui/web-api/openapi.json linguist-generated=true
