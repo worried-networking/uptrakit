@@ -222,14 +222,16 @@ activate_provider = "full-state"
 deactivate_provider = "full-state"
 find_non_deleted_provider = "ignore"
 
-[routes."plugin_configs/mod.rs"]
-load_active_agent_service_for_host = "ignore"
+[routes."plugin_configs/crud.rs"]
 list_plugin_types = "full-state"
 create_plugin_config = "full-state"
 list_plugin_configs = "full-state"
 get_plugin_config = "full-state"
 update_plugin_config = "full-state"
 delete_plugin_config = "full-state"
+
+[routes."plugin_configs/mod.rs"]
+load_active_agent_service_for_host = "ignore"
 discover_plugin_config = "full-state"
 batch_plugin_configs = "tenant-scoped"
 test_plugin_config = "full-state"
