@@ -585,7 +585,7 @@ send_pong = "ignore"
 record_service_activity = "ignore"
 record_system_service_activity = "ignore"
 
-[routes."services.rs"]
+[routes."services/mod.rs"]
 list_services = "full-state"
 get_service = "full-state"
 update_service = "full-state"
