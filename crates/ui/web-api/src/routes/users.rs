@@ -1253,6 +1253,7 @@ fn extract_refresh_token_from_headers(headers: &axum::http::HeaderMap) -> Option
     ),
     responses(
         (status = 204, description = "Pending email change cancelled (no-op if none exists)"),
+        (status = 401, description = "Not authenticated"),
         (status = 403, description = "Not authorized")
     ),
     tag = "Users",
