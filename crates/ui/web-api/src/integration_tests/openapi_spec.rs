@@ -45,3 +45,31 @@ async fn openapi_json_is_up_to_date() {
         "openapi.json is stale; regenerate with: UPDATE_OPENAPI=1 cargo test -p uptrakit-web-api --all-features openapi_"
     );
 }
+
+#[tokio::test]
+async fn openapi_spec_eligible_endpoints_present() {
+    ensure_crypto_provider();
+    let app = TestApp::new().await;
+    let (_router, api) = build_router_with_openapi(app.state.clone());
+    let paths = api
+        .paths
+        .paths
+        .keys()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    // Representative spec-eligible REST endpoints across domains. If a handler is
+    // moved to a post-split raw `.route()` (or its `routes!()` is dropped), this fails.
+    for required in [
+        "/api/v1/services",
+        "/api/v1/hosts",
+        "/api/v1/software-items",
+        "/api/v1/plugin-type-settings",
+        "/api/v1/users/{id}/password",
+        "/api/v1/auth/email-change/confirm",
+    ] {
+        assert!(
+            paths.contains(required),
+            "spec missing required path: {required}"
+        );
+    }
+}
