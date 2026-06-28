@@ -1354,7 +1354,14 @@ for component details.
 | `crates/ui/web-api/src/routes/software_items/version_check_dispatch.rs`      | `VersionCheckContext`, `load_version_check_context`, `dispatch_agent_version_checks`                                   |
 | `crates/ui/web-api/src/routes/hosts.rs`                                      | `batch_hosts` handler                                                                                                  |
 | `crates/ui/web-api/src/routes/autodiscovery.rs`                              | `batch_software_ignores` handler                                                                                       |
-| `crates/ui/web-api/src/routes/plugin_configs.rs`                             | `batch_plugin_configs` handler                                                                                         |
+| `crates/ui/web-api/src/routes/plugin_configs/mod.rs`                         | Plugin-config route facade (module wiring + handler re-exports)                                                        |
+| `crates/ui/web-api/src/routes/plugin_configs/audit.rs`                       | `AuditContext`, `CommandRiskSummary`, semantic audit-emit helpers                                                      |
+| `crates/ui/web-api/src/routes/plugin_configs/command_safety.rs`              | Dangerous-pattern / command-field detection + rejection messages                                                       |
+| `crates/ui/web-api/src/routes/plugin_configs/crud.rs`                        | List-types / create / list / get / update / delete handlers                                                            |
+| `crates/ui/web-api/src/routes/plugin_configs/discover.rs`                    | Discover plugin-config handler                                                                                         |
+| `crates/ui/web-api/src/routes/plugin_configs/batch.rs`                       | Batch plugin-config-action handler                                                                                     |
+| `crates/ui/web-api/src/routes/plugin_configs/test_action.rs`                 | Test-plugin-config handler + active-agent-service loader                                                               |
+| `crates/ui/web-api/src/routes/plugin_configs/tests.rs`                       | Unit tests for the plugin_configs submodules                                                                           |
 | `crates/shared/openapi-client/src/paths.rs`                                  | `BATCH` path constants for all resources                                                                               |
 | `frontend/src/lib/types.ts`                                                  | `BatchActionRequest`, `BatchActionResponse` TypeScript types                                                           |
 | `frontend/src/lib/api.ts`                                                    | `batchServices`, `batchHosts`, etc. API client functions                                                               |
