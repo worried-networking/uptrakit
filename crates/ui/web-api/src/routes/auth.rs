@@ -1764,6 +1764,21 @@ mod tests {
 /// Confirm an email change via a one-time token.
 ///
 /// `GET /api/v1/auth/email-change/confirm?token=<token>` — public, no auth required.
+#[utoipa::path(
+    get,
+    path = "/api/v1/auth/email-change/confirm",
+    params(
+        ("token" = String, Query, description = "One-time email change confirmation token")
+    ),
+    responses(
+        (status = 200, description = "Email changed; all sessions invalidated. Sign in again.", body = uptrakit_web_api_types::agents::MessageResponse),
+        (status = 400, description = "Missing token parameter"),
+        (status = 404, description = "Invalid or expired token"),
+        (status = 409, description = "Email already in use by another account"),
+        (status = 410, description = "Token has expired")
+    ),
+    tag = "Authentication"
+)]
 #[tracing::instrument(skip_all)]
 pub async fn confirm_email_change(
     State(state): State<Arc<AppState>>,

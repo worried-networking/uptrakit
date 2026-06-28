@@ -43,6 +43,7 @@ use crate::extractors::{GlobalSettingsVersion, SettingsVersion};
         crate::routes::auth::logout,
         crate::routes::auth::me,
         crate::routes::auth::refresh,
+        crate::routes::auth::confirm_email_change,
         crate::routes::settings_access::get_access_settings,
         crate::routes::settings_access::update_access_settings,
         crate::routes::settings_combined::get_combined_settings,
@@ -179,6 +180,9 @@ use crate::extractors::{GlobalSettingsVersion, SettingsVersion};
         crate::routes::users::update_user_roles,
         crate::routes::users::update_user_active,
         crate::routes::users::update_profile,
+        crate::routes::users::initiate_email_change,
+        crate::routes::users::cancel_email_change,
+        crate::routes::users::change_password,
         crate::routes::users::list_permissions,
         // Roles (read-only)
         crate::routes::roles::list_roles,
@@ -344,6 +348,8 @@ use crate::extractors::{GlobalSettingsVersion, SettingsVersion};
             crate::routes::users::UpdateUserActiveRequest,
             crate::routes::users::ApplyPresetRequest,
             crate::routes::users::PermissionInfo,
+            uptrakit_web_api_types::profile::InitiateEmailChangeRequest,
+            uptrakit_web_api_types::profile::ChangePasswordRequest,
             crate::routes::roles::RoleResponse,
             crate::routes::access_presets::AccessPresetResponse,
             // Update batches
@@ -744,15 +750,11 @@ pub fn build_router_with_openapi(state: Arc<AppState>) -> (Router, utoipa::opena
         .routes(routes!(crate::routes::users::update_user_roles))
         .routes(routes!(crate::routes::users::update_user_active))
         .routes(routes!(crate::routes::users::update_profile))
-        .route(
-            "/api/v1/users/{id}/email",
-            axum::routing::post(crate::routes::users::initiate_email_change)
-                .delete(crate::routes::users::cancel_email_change),
-        )
-        .route(
-            "/api/v1/users/{id}/password",
-            axum::routing::put(crate::routes::users::change_password),
-        )
+        .routes(routes!(
+            crate::routes::users::initiate_email_change,
+            crate::routes::users::cancel_email_change
+        ))
+        .routes(routes!(crate::routes::users::change_password))
         // Roles (read-only)
         .routes(routes!(crate::routes::roles::list_roles))
         .routes(routes!(crate::routes::roles::get_role))
@@ -944,10 +946,7 @@ pub fn build_router_with_openapi(state: Arc<AppState>) -> (Router, utoipa::opena
         .routes(routes!(crate::routes::auth::register))
         .routes(routes!(crate::routes::auth::login))
         .routes(routes!(crate::routes::auth::refresh))
-        .route(
-            "/api/v1/auth/email-change/confirm",
-            axum::routing::get(crate::routes::auth::confirm_email_change),
-        )
+        .routes(routes!(crate::routes::auth::confirm_email_change))
         // MFA challenge completion — unauthenticated (pre-login).
         .routes(routes!(crate::routes::mfa::mfa_verify))
         .routes(routes!(crate::routes::mfa::mfa_send_email))
