@@ -1332,7 +1332,13 @@ for component details.
 | `crates/ui/web-api-queries/src/queries/hosts.rs`                             | `batch_deactivate_hosts`                                                                                               |
 | `crates/ui/web-api-queries/src/queries/software_ignores.rs`                  | `batch_delete_ignore_rules`                                                                                            |
 | `crates/ui/web-api-queries/src/queries/plugin_configs.rs`                    | `batch_delete_plugin_configs`                                                                                          |
-| `crates/ui/web-api/src/routes/services.rs`                                   | `batch_services` handler                                                                                               |
+| `crates/ui/web-api/src/routes/services/mod.rs`                               | Service route facade (module wiring + handler re-exports)                                                              |
+| `crates/ui/web-api/src/routes/services/audit.rs`                             | `AuditContext` + service audit-emit helpers                                                                            |
+| `crates/ui/web-api/src/routes/services/crud.rs`                              | List / get / update service handlers                                                                                   |
+| `crates/ui/web-api/src/routes/services/lifecycle.rs`                         | Approve / reject / deactivate / set-update-freeze handlers                                                             |
+| `crates/ui/web-api/src/routes/services/merge.rs`                             | Service merge handler                                                                                                  |
+| `crates/ui/web-api/src/routes/services/batch.rs`                             | Batch service-action handler                                                                                           |
+| `crates/ui/web-api/src/routes/services/tests.rs`                             | Unit tests for the services submodules                                                                                 |
 | `crates/ui/web-api/src/routes/system_services.rs`                            | `batch_system_services` handler                                                                                        |
 | `crates/ui/web-api/src/routes/software_items/mod.rs`                         | Software-item route facade (module wiring + handler re-exports)                                                        |
 | `crates/ui/web-api/src/routes/software_items/audit.rs`                       | Audit-action consts, `AuditContext`, audit-emit helpers                                                                |
