@@ -1,10 +1,9 @@
-pub use uptrakit_web_api_types::batch_actions::{
-    BatchActionFailure, BatchActionRequest, BatchActionResponse, BatchActionSuccess,
-};
-pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
-pub use uptrakit_web_api_types::plugin_configs::{
-    CreatePluginConfigRequest, PluginConfigResponse, PluginTypeInfo, UpdatePluginConfigRequest,
-};
+mod audit;
+mod batch;
+mod command_safety;
+mod crud;
+mod discover;
+mod test_action;
 
 pub use batch::{__path_batch_plugin_configs, batch_plugin_configs};
 pub use crud::ListPluginConfigsParams;
@@ -17,13 +16,13 @@ pub use crud::{
 };
 pub use discover::{__path_discover_plugin_config, discover_plugin_config};
 pub use test_action::{__path_test_plugin_config, test_plugin_config};
-
-mod audit;
-mod batch;
-mod command_safety;
-mod crud;
-mod discover;
-mod test_action;
+pub use uptrakit_web_api_types::batch_actions::{
+    BatchActionFailure, BatchActionRequest, BatchActionResponse, BatchActionSuccess,
+};
+pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
+pub use uptrakit_web_api_types::plugin_configs::{
+    CreatePluginConfigRequest, PluginConfigResponse, PluginTypeInfo, UpdatePluginConfigRequest,
+};
 
 #[cfg(test)]
 mod tests;
