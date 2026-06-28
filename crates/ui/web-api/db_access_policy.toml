@@ -596,8 +596,10 @@ reject_service = "full-state"
 deactivate_service = "full-state"
 set_update_freeze = "full-state"
 
-[routes."services/mod.rs"]
+[routes."services/merge.rs"]
 merge_service = "full-state"
+
+[routes."services/batch.rs"]
 batch_services = "full-state"
 
 [routes."services/tests.rs"]
