@@ -167,78 +167,6 @@ async fn load_active_agent_service_for_host(
     }
 }
 
-struct AuditContext<'a> {
-    audit_emitter: &'a uptrakit_audit_log::AuditEmitter,
-    tenant_id: Uuid,
-    user: &'a AuthenticatedUser,
-    api_token_id: Option<AuthenticatedApiTokenId>,
-}
-
-fn emit_plugin_config_semantic_audit(
-    ctx: &AuditContext<'_>,
-    action_type: uptrakit_audit_log::RegisteredAuditAction,
-    target_type: Option<&'static str>,
-    target_id: Option<String>,
-    target_display: Option<String>,
-    outcome: uptrakit_audit_log::AuditOutcome,
-    details: serde_json::Value,
-) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
-
-    let target_type = target_type.map(std::string::ToString::to_string);
-    if let Ok(entry) =
-        uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(action_type)
-            .tenant_scope(ctx.tenant_id)
-            .actor(actor_type, actor_id)
-            .target_opt(target_type, target_id, target_display)
-            .outcome(outcome)
-            .details(details)
-            .build()
-    {
-        ctx.audit_emitter.emit_event(entry);
-    }
-}
-
-fn dangerous_pattern_matches_to_json(
-    matches: &[command_safety::DangerousPatternMatch],
-) -> serde_json::Value {
-    serde_json::Value::Array(
-        matches
-            .iter()
-            .map(|dangerous| {
-                serde_json::json!({
-                    "field": dangerous.field.clone(),
-                    "description": dangerous.description,
-                })
-            })
-            .collect(),
-    )
-}
-
-#[derive(Default)]
-struct CommandRiskSummary {
-    command_fields: Vec<&'static str>,
-    dangerous_matches: Vec<command_safety::DangerousPatternMatch>,
-}
-
-impl CommandRiskSummary {
-    fn from_config(config: &serde_json::Value) -> Self {
-        Self {
-            command_fields: command_safety::detect_command_fields(config),
-            dangerous_matches: command_safety::collect_dangerous_patterns(config),
-        }
-    }
-
-    fn details_fragment(&self) -> serde_json::Value {
-        serde_json::json!({
-            "contains_command_fields": !self.command_fields.is_empty(),
-            "command_fields": self.command_fields,
-            "dangerous_command_match_count": self.dangerous_matches.len(),
-            "dangerous_matches": dangerous_pattern_matches_to_json(&self.dangerous_matches),
-        })
-    }
-}
-
 /// List all known plugin types with their display names and capabilities.
 ///
 /// Returns static registry metadata — no tenant data is involved. Clients
@@ -368,7 +296,7 @@ pub async fn create_plugin_config(
 
     let plugin_type_str = req.plugin_type.to_string();
     let config_name = req.name.clone();
-    let config_risk = CommandRiskSummary::from_config(&req.config);
+    let config_risk = audit::CommandRiskSummary::from_config(&req.config);
 
     // Validate plugin-specific config and plugin type support.
     let plugin_type_id = PluginTypeId::new(&plugin_type_str);
@@ -396,7 +324,7 @@ pub async fn create_plugin_config(
             "config_name": config_name,
             "contains_command_fields": !config_risk.command_fields.is_empty(),
             "reason_code": "dangerous_command_patterns_detected",
-            "dangerous_matches": dangerous_pattern_matches_to_json(&config_risk.dangerous_matches),
+            "dangerous_matches": audit::dangerous_pattern_matches_to_json(&config_risk.dangerous_matches),
         }))
         .build()
         {
@@ -481,7 +409,7 @@ pub async fn create_plugin_config(
         "contains_command_fields": !config_risk.command_fields.is_empty(),
         "command_fields": config_risk.command_fields,
         "dangerous_command_match_count": config_risk.dangerous_matches.len(),
-        "dangerous_matches": dangerous_pattern_matches_to_json(&config_risk.dangerous_matches),
+        "dangerous_matches": audit::dangerous_pattern_matches_to_json(&config_risk.dangerous_matches),
     }))
     .build()
     {
@@ -667,7 +595,10 @@ pub async fn update_plugin_config(
         return rejection;
     }
 
-    let new_config_risk = req.config.as_ref().map(CommandRiskSummary::from_config);
+    let new_config_risk = req
+        .config
+        .as_ref()
+        .map(audit::CommandRiskSummary::from_config);
 
     // Reject dangerous command patterns when operator policy is enabled.
     if state.reject_dangerous_commands
@@ -685,7 +616,7 @@ pub async fn update_plugin_config(
             "plugin_type": existing_plugin_type.to_string(),
             "contains_command_fields": !risk.command_fields.is_empty(),
             "reason_code": "dangerous_command_patterns_detected",
-            "dangerous_matches": dangerous_pattern_matches_to_json(&risk.dangerous_matches),
+            "dangerous_matches": audit::dangerous_pattern_matches_to_json(&risk.dangerous_matches),
         }))
         .build()
         {
@@ -780,8 +711,8 @@ pub async fn update_plugin_config(
 
     let risk_details = new_config_risk
         .as_ref()
-        .map(CommandRiskSummary::details_fragment)
-        .unwrap_or_else(|| CommandRiskSummary::default().details_fragment());
+        .map(audit::CommandRiskSummary::details_fragment)
+        .unwrap_or_else(|| audit::CommandRiskSummary::default().details_fragment());
 
     let hook = state.audit_emitter.commit_hook();
     let audit_entry = match AuditEntry::<Stateful>::plugin_config_update(&before_view, &after_view)
@@ -918,7 +849,7 @@ pub async fn delete_plugin_config(
     };
 
     let before_view = PluginConfigView::from(&before_model);
-    let config_risk = CommandRiskSummary::from_config(&before_model.config);
+    let config_risk = audit::CommandRiskSummary::from_config(&before_model.config);
     let hook = state.audit_emitter.commit_hook();
     let audit_entry = match AuditEntry::<Stateful>::plugin_config_delete(
         &before_view,
@@ -934,7 +865,7 @@ pub async fn delete_plugin_config(
         "contains_command_fields": !config_risk.command_fields.is_empty(),
         "command_fields": config_risk.command_fields,
         "dangerous_command_match_count": config_risk.dangerous_matches.len(),
-        "dangerous_matches": dangerous_pattern_matches_to_json(&config_risk.dangerous_matches),
+        "dangerous_matches": audit::dangerous_pattern_matches_to_json(&config_risk.dangerous_matches),
     }))
     .build()
     {
@@ -1128,7 +1059,7 @@ pub async fn batch_plugin_configs(
     Validated(body): Validated<BatchActionRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = AuditContext {
+    let audit_ctx = audit::AuditContext {
         audit_emitter: &audit_emitter_state.0,
         tenant_id: tenant_db.tenant_id(),
         user: &user,
@@ -1140,7 +1071,7 @@ pub async fn batch_plugin_configs(
             Ok(r) => r,
             Err(e) => {
                 tracing::error!("batch delete failed: {e}");
-                emit_plugin_config_semantic_audit(
+                audit::emit_plugin_config_semantic_audit(
                     &audit_ctx,
                     uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
                     None,
@@ -1157,7 +1088,7 @@ pub async fn batch_plugin_configs(
             }
         },
         unknown => {
-            emit_plugin_config_semantic_audit(
+            audit::emit_plugin_config_semantic_audit(
                 &audit_ctx,
                 uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
                 None,
@@ -1177,7 +1108,7 @@ pub async fn batch_plugin_configs(
         }
     };
 
-    emit_plugin_config_semantic_audit(
+    audit::emit_plugin_config_semantic_audit(
         &audit_ctx,
         uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
         None,
@@ -1403,6 +1334,7 @@ pub async fn test_plugin_config(
     }
 }
 
+mod audit;
 mod command_safety;
 
 #[cfg(test)]
