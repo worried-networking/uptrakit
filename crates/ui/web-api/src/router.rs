@@ -970,6 +970,11 @@ pub fn build_router_with_openapi(state: Arc<AppState>) -> (Router, utoipa::opena
 
     let (api_router, api) = base_router.split_for_parts();
 
+    // PLACEMENT RULE: only non-spec endpoints (health, PKI, WS, OCSP) may be
+    // registered here, after split_for_parts(). Any spec-eligible REST handler MUST
+    // be registered via `.routes(routes!(...))` BEFORE the split, or it is silently
+    // absent from openapi.json and the generated frontend client. See
+    // src/integration_tests/openapi_spec.rs::openapi_spec_eligible_endpoints_present.
     let mut router = api_router
         .route(
             "/api/v1/notifications/callback/{channel_type}/{channel_id}",
