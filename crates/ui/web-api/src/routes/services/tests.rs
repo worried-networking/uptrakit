@@ -4,6 +4,7 @@
 )]
 
 use super::*;
+use crate::AppState;
 use crate::ServiceCredentialSources;
 use crate::auth::AuthMethod;
 use crate::auth::permissions::Permission;
@@ -17,10 +18,12 @@ use crate::settings::Settings;
 use crate::tenant_db::TenantDb;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use axum::{Extension, Json};
 use sea_orm::{
     ActiveModelTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait, QueryOrder, Set,
 };
+use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{audit_log, prelude::Service, service, tenant};
 
