@@ -234,6 +234,23 @@ discover_plugin_config = "full-state"
 batch_plugin_configs = "tenant-scoped"
 test_plugin_config = "full-state"
 
+[routes."plugin_configs/tests.rs"]
+latest_tenant_audit_row = "ignore"
+create_plugin_config_denied_dangerous_commands_writes_denied_audit_event = "ignore"
+create_plugin_config_success_persists_command_risk_details = "ignore"
+update_plugin_config_success_persists_command_risk_details = "ignore"
+delete_plugin_config_success_persists_command_risk_details = "ignore"
+delete_plugin_config_not_found_writes_denied_audit_event = "ignore"
+delete_plugin_config_load_db_failure_writes_failed_audit_event = "ignore"
+delete_plugin_config_delete_db_failure_writes_failed_audit_event = "ignore"
+batch_plugin_configs_unknown_action_writes_validation_failed_audit_event = "ignore"
+batch_plugin_configs_delete_backend_failure_writes_failed_audit_event = "ignore"
+create_seed_plugin_config = "ignore"
+batch_plugin_configs_delete_summary_success_writes_success_outcome = "ignore"
+batch_plugin_configs_delete_summary_partial_writes_partial_outcome = "ignore"
+batch_plugin_configs_delete_summary_denied_writes_denied_outcome = "ignore"
+create_plugin_config_config_json_absent_from_audit_snapshots = "ignore"
+
 [routes."plugin_type_settings.rs"]
 list_plugin_type_settings = "full-state"
 get_plugin_type_settings = "full-state"
