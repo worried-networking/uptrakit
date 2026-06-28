@@ -521,8 +521,11 @@ pub async fn api_not_found(headers: HeaderMap) -> Response {
     }
 }
 
-/// Build the application router.
-pub fn build_router(state: Arc<AppState>) -> Router {
+/// Builds the application router and returns the assembled OpenAPI document
+/// (identical to what is served at `/api/openapi.json`). The OpenAPI value is
+/// derived from `routes!()` annotations via `split_for_parts()`, so it includes
+/// every `routes!()`-registered path, not just `ApiDoc::paths(...)`.
+pub fn build_router_with_openapi(state: Arc<AppState>) -> (Router, utoipa::openapi::OpenApi) {
     // Authenticated OpenAPI routes (require_auth middleware applied before merge)
     let auth_routes = OpenApiRouter::new()
         .routes(routes!(crate::routes::auth::logout))
@@ -1032,10 +1035,11 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     #[cfg(feature = "swagger-ui")]
     {
         use utoipa_swagger_ui::SwaggerUi;
-        router = router.merge(SwaggerUi::new("/api/docs").url("/api/docs/openapi.json", api));
+        router =
+            router.merge(SwaggerUi::new("/api/docs").url("/api/docs/openapi.json", api.clone()));
     }
 
-    router
+    let router = router
         .layer(axum_mw::from_fn_with_state(
             Arc::clone(&state),
             crate::middleware::resolve_proxy_headers::resolve_proxy_headers,
@@ -1051,7 +1055,13 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .with_state(Arc::clone(&state))
         // OAuth public + optional-auth routes (metadata, token, register, authorize, consent).
         // Merged after with_state so the Router type is Router<()> on both sides.
-        .merge(crate::routes::oauth::build_oauth_router(state))
+        .merge(crate::routes::oauth::build_oauth_router(state));
+    (router, api)
+}
+
+/// Thin wrapper preserved for all existing callers.
+pub fn build_router(state: Arc<AppState>) -> Router {
+    build_router_with_openapi(state).0
 }
 
 /// Build a minimal router serving only PKI endpoints over plain HTTP.
