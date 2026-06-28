@@ -221,9 +221,14 @@ let refreshPromise: Promise<RefreshResult> | null = null;
 function dedupedRefresh(): Promise<RefreshResult> {
 	if (!refreshPromise) {
 		refreshPromise = refreshAccessToken();
-		refreshPromise.finally(() => {
-			refreshPromise = null;
-		});
+		refreshPromise.then(
+			() => {
+				refreshPromise = null;
+			},
+			() => {
+				refreshPromise = null;
+			}
+		);
 	}
 	return refreshPromise;
 }
