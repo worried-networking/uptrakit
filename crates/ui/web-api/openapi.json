@@ -510,7 +510,7 @@
             "description": "Missing token parameter"
           },
           "404": {
-            "description": "Invalid or expired token"
+            "description": "Invalid or expired token, or user no longer exists"
           },
           "409": {
             "description": "Email already in use by another account"
@@ -8144,6 +8144,9 @@
         "responses": {
           "204": {
             "description": "Pending email change cancelled (no-op if none exists)"
+          },
+          "401": {
+            "description": "Not authenticated"
           },
           "403": {
             "description": "Not authorized"

@@ -1773,7 +1773,7 @@ mod tests {
     responses(
         (status = 200, description = "Email changed; all sessions invalidated. Sign in again.", body = uptrakit_web_api_types::agents::MessageResponse),
         (status = 400, description = "Missing token parameter"),
-        (status = 404, description = "Invalid or expired token"),
+        (status = 404, description = "Invalid or expired token, or user no longer exists"),
         (status = 409, description = "Email already in use by another account"),
         (status = 410, description = "Token has expired")
     ),

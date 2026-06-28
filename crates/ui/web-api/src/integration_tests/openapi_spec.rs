@@ -6,15 +6,21 @@
 //!   cargo test -p uptrakit-web-api --all-features openapi_
 //!   UPDATE_OPENAPI=1 cargo test -p uptrakit-web-api --all-features openapi_
 
-use std::path::PathBuf;
-
 use crate::router::build_router_with_openapi;
 use crate::test_harness::TestApp;
 
-fn openapi_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("openapi.json")
+// The committed `openapi.json` is the FULL (all-features) contract. The byte-equality
+// golden test below only runs when every spec-contributing feature is enabled
+// (`oidc` + `nats` + `reset-data`); under a reduced feature set the assembled spec is a
+// legitimate subset, so asserting equality there would be a false failure. CI runs it
+// via `--all-features`. The coverage test (`openapi_spec_eligible_endpoints_present`) is
+// feature-agnostic and runs under every feature set.
+#[cfg(all(feature = "oidc", feature = "nats", feature = "reset-data"))]
+fn openapi_path() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("openapi.json")
 }
 
+#[cfg(all(feature = "oidc", feature = "nats", feature = "reset-data"))]
 #[tokio::test]
 async fn openapi_json_is_up_to_date() {
     let app = TestApp::new().await;
@@ -44,12 +50,6 @@ async fn openapi_json_is_up_to_date() {
 async fn openapi_spec_eligible_endpoints_present() {
     let app = TestApp::new().await;
     let (_router, api) = build_router_with_openapi(app.state.clone());
-    let paths = api
-        .paths
-        .paths
-        .keys()
-        .cloned()
-        .collect::<std::collections::BTreeSet<_>>();
     // Representative spec-eligible REST endpoints across domains. If a handler is
     // moved to a post-split raw `.route()` (or its `routes!()` is dropped), this fails.
     for required in [
@@ -61,7 +61,7 @@ async fn openapi_spec_eligible_endpoints_present() {
         "/api/v1/auth/email-change/confirm",
     ] {
         assert!(
-            paths.contains(required),
+            api.paths.paths.contains_key(required),
             "spec missing required path: {required}"
         );
     }

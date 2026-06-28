@@ -102,6 +102,13 @@ src/routes/
 
 1. **All API calls go through `src/lib/api.ts`.** Do not call `fetch` directly for API endpoints;
    the client mirrors the `uptrakit-openapi-client` Rust crate's endpoint set.
+   - **OpenAPI placement rule:** the frontend↔backend contract is the committed
+     `crates/ui/web-api/openapi.json` (dumped + drift-gated in CI). For an endpoint to appear in it,
+     the backend handler MUST be registered via `.routes(routes!(...))` **before**
+     `split_for_parts()` in `crates/ui/web-api/src/router.rs` — handlers added via raw `.route()`
+     after the split are silently absent from the spec (and, once codegen lands, the generated
+     client). See `router.rs` (placement comment) +
+     `integration_tests/openapi_spec.rs::openapi_spec_eligible_endpoints_present`.
 2. **Use existing shared components first.** Before creating a new UI component, check
    `src/lib/components/` for: `AddSoftwareModal`, `AssignToHostModal`, `BatchActionBar`,
    `BatchResultDialog`, `CheckboxList`, `ConfirmDialog`, `ContextMenu`, `EditHostAssignmentModal`,
