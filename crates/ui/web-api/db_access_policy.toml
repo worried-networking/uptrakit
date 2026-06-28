@@ -230,9 +230,11 @@ get_plugin_config = "full-state"
 update_plugin_config = "full-state"
 delete_plugin_config = "full-state"
 
+[routes."plugin_configs/discover.rs"]
+discover_plugin_config = "full-state"
+
 [routes."plugin_configs/mod.rs"]
 load_active_agent_service_for_host = "ignore"
-discover_plugin_config = "full-state"
 batch_plugin_configs = "tenant-scoped"
 test_plugin_config = "full-state"
 
