@@ -125,6 +125,11 @@ jobs:
         run: bash ci/verify_handler_state_contract.sh
       - name: Verify DB access policy (routes/ only)
         run: python3 ci/verify_db_access_policy.py
+      - name: OpenAPI spec is up to date
+        run: |
+          UPDATE_OPENAPI=1 cargo test -p uptrakit-web-api --all-features openapi_
+          git diff --exit-code crates/ui/web-api/openapi.json \
+            || { echo "::error::openapi.json is stale. Run: UPDATE_OPENAPI=1 cargo test -p uptrakit-web-api --all-features openapi_ (or ./scripts/regen-api.sh once Plan B lands)"; exit 1; }
 
   reverse-proxy-tests:
     runs-on:
