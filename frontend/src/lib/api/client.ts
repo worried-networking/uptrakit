@@ -4,12 +4,13 @@
 // Interceptor map:
 //   request  → applyBearerAuth + mergeTimeoutSignal + applyIfMatch
 //   response → captureEtag + handle2faRedirect + mapToApiError
-//   error    → (Task 5 seam: refresh-retry interceptor attaches here)
+// The exported `apiClient` additionally wraps every call in `requestWithRefresh`
+// (Task 5) for the 401 deduped refresh-retry — see the "401 refresh-retry" section.
 
 import { client } from './generated/client.gen';
-import { getAccessToken, onTokenChange } from '../token-store.svelte';
+import { getAccessToken, setAccessToken, setSessionExpired, onTokenChange } from '../token-store.svelte';
 import { extractApiError } from './errors';
-import type { ResolvedRequestOptions } from './generated/client/types.gen';
+import type { Client, ResolvedRequestOptions } from './generated/client/types.gen';
 
 // ── Base URL resolution ───────────────────────────────────────────────────────
 // hey-api's generated client creates `new Request(url, init)` internally, which
@@ -38,6 +39,7 @@ const BASE: string = (() => {
 })();
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+const REFRESH_TIMEOUT_MS = 10_000;
 
 // ── Settings ETag auto-cache ──────────────────────────────────────────────────
 // The backend `etag_middleware` requires `If-Match` on every PUT/PATCH for
@@ -155,11 +157,11 @@ async function handle2faRedirect(response: Response): Promise<void> {
 }
 
 // ── Response interceptor ──────────────────────────────────────────────────────
-// NOTE — Task 5 seam: 401 is intentionally NOT thrown here. It passes through to
-// the client's built-in error path (throws raw JSON body). Task 5 attaches a
-// `client.interceptors.error` handler that intercepts 401, performs the
-// token-refresh retry, updates the session-expired banner, and retries the
-// original request on success.
+// NOTE — Task 5 seam: 401 is intentionally NOT mapped to ApiError here. It passes
+// through to the client's built-in error path. The 401 refresh-retry is handled by
+// the `requestWithRefresh` wrapper below (see the "401 refresh-retry" section) — an
+// error interceptor cannot work, because its return value is always re-thrown under
+// `throwOnError` and so can never convert a 401 into a successful retried response.
 
 client.interceptors.response.use(async (response: Response, request: Request): Promise<Response> => {
 	captureEtag(response, request.url);
@@ -170,6 +172,147 @@ client.interceptors.response.use(async (response: Response, request: Request): P
 	return response;
 });
 
-// ── Exports ───────────────────────────────────────────────────────────────────
+// ── 401 refresh-retry (Task 5, spike S-A) ───────────────────────────────────────
+// This is the ONLY auth concern that lives outside the interceptors: a 401 surfaces
+// from the response interceptor seam as a *thrown* value (not a Response), and the
+// retry body must be rebuilt from the call OPTIONS (the consumed Request.body stream
+// is gone). The hey-api error interceptor cannot help — its return value is always
+// re-thrown under `throwOnError`, so it can never convert a 401 into a successful
+// retry. Instead we wrap `client.request`, re-issuing the SAME call with
+// `throwOnError: false` so we can inspect `response.status` directly, then re-throw
+// the interceptor-mapped error to preserve the public `throwOnError: true` contract.
+// ETag, 2FA, session-banner wiring and ApiError mapping all stay in the interceptors.
 
-export { client as apiClient };
+/** Minimal shape consumed from the refresh endpoint; backend returns more fields. */
+interface RefreshResult {
+	access_token: string;
+}
+
+/**
+ * Thrown when `/auth/refresh` returns a non-OK response. Carries the HTTP status so
+ * the failure mapper can separate real auth failures (4xx) from transient 5xx.
+ */
+class RefreshError extends Error {
+	public readonly status: number;
+	constructor(status: number) {
+		super(`Refresh failed (${status})`);
+		this.name = 'RefreshError';
+		this.status = status;
+	}
+}
+
+// Ported from api.ts:246-260 — same endpoint, timeout and credentials semantics.
+async function refreshAccessToken(): Promise<RefreshResult> {
+	const res = await fetch(`${BASE}/auth/refresh`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		credentials: 'same-origin',
+		body: JSON.stringify({}),
+		signal: AbortSignal.timeout(REFRESH_TIMEOUT_MS)
+	});
+	if (!res.ok) throw new RefreshError(res.status);
+	return res.json() as Promise<RefreshResult>;
+}
+
+// Deduped refresh (ported from api.ts:294-307): concurrent 401s share one in-flight
+// refresh; the promise is cleared once it settles so the next cycle starts fresh.
+let refreshPromise: Promise<RefreshResult> | null = null;
+
+function dedupedRefresh(): Promise<RefreshResult> {
+	if (!refreshPromise) {
+		refreshPromise = refreshAccessToken();
+		refreshPromise.finally(() => {
+			refreshPromise = null;
+		});
+	}
+	return refreshPromise;
+}
+
+function isTimeoutOrAbort(err: unknown): boolean {
+	return err instanceof DOMException && (err.name === 'TimeoutError' || err.name === 'AbortError');
+}
+
+// Ported from api.ts:338-360. Maps a refresh failure to a user-facing Error and
+// performs the matching session side effect. The default (real 4xx auth failure)
+// clears the token and leaves the session-expired banner raised.
+function mapRefreshFailure(refreshErr: unknown): Error {
+	if (isTimeoutOrAbort(refreshErr)) {
+		setSessionExpired(false);
+		return new Error('Token refresh timed out. Please try again.');
+	}
+	if (refreshErr instanceof TypeError) {
+		setSessionExpired(false);
+		return new Error('Network error during token refresh. Check your connection.');
+	}
+	if (refreshErr instanceof RefreshError && refreshErr.status >= 500) {
+		setSessionExpired(false);
+		return new Error('Server error during token refresh. Please try again later.');
+	}
+	setAccessToken(null);
+	return new Error('Session expired. Please log in again.');
+}
+
+// Result shape of `client.request` under responseStyle 'fields' + throwOnError false.
+type FieldsResult = { data?: unknown; error?: unknown; request?: Request; response?: Response };
+type RequestArgs = Parameters<Client['request']>[0];
+
+/** Re-throws the interceptor-mapped error, or returns the success fields object. */
+function unwrap(result: FieldsResult): unknown {
+	if (result.error !== undefined) throw result.error;
+	return result;
+}
+
+async function refreshAndRetry(options: RequestArgs): Promise<unknown> {
+	setSessionExpired(true);
+	let refreshed: RefreshResult;
+	try {
+		refreshed = await dedupedRefresh();
+	} catch (refreshErr) {
+		throw mapRefreshFailure(refreshErr);
+	}
+	setAccessToken(refreshed.access_token);
+	try {
+		// Single retry. The request interceptor re-applies the new Bearer; the client
+		// rebuilds the body from options.body, so the consumed stream is irrelevant.
+		return unwrap((await client.request({ ...options, throwOnError: false })) as FieldsResult);
+	} finally {
+		setSessionExpired(false);
+	}
+}
+
+async function requestWithRefresh(options: RequestArgs): Promise<unknown> {
+	const first = (await client.request({ ...options, throwOnError: false })) as FieldsResult;
+	if (first.response?.status === 401 && getAccessToken()) {
+		return refreshAndRetry(options);
+	}
+	return unwrap(first);
+}
+
+// ── Exports ───────────────────────────────────────────────────────────────────
+// `apiClient` is the configured client with refresh-retry layered over every HTTP
+// method (and `request`). A Proxy forwards method calls through `requestWithRefresh`
+// while leaving non-call members (interceptors, setConfig, buildUrl, sse, …) intact.
+
+const HTTP_METHOD_VERBS: Readonly<Record<string, string>> = {
+	connect: 'CONNECT',
+	delete: 'DELETE',
+	get: 'GET',
+	head: 'HEAD',
+	options: 'OPTIONS',
+	patch: 'PATCH',
+	post: 'POST',
+	put: 'PUT',
+	trace: 'TRACE'
+};
+
+const apiClient: Client = new Proxy(client, {
+	get(target, prop, receiver) {
+		if (prop === 'request') return requestWithRefresh;
+		const verb = typeof prop === 'string' ? HTTP_METHOD_VERBS[prop] : undefined;
+		if (verb)
+			return (options: Omit<RequestArgs, 'method'>) => requestWithRefresh({ ...options, method: verb } as RequestArgs);
+		return Reflect.get(target, prop, receiver);
+	}
+});
+
+export { apiClient };
