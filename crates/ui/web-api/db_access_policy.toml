@@ -222,7 +222,7 @@ activate_provider = "full-state"
 deactivate_provider = "full-state"
 find_non_deleted_provider = "ignore"
 
-[routes."plugin_configs.rs"]
+[routes."plugin_configs/mod.rs"]
 load_active_agent_service_for_host = "ignore"
 list_plugin_types = "full-state"
 create_plugin_config = "full-state"
