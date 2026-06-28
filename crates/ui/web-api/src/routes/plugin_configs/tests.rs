@@ -476,7 +476,7 @@ fn validate_docker_config_old_semver_fields_are_ignored() {
 
 // ── detect_command_fields tests ──────────────────────────────────────
 
-use super::detect_command_fields;
+use super::command_safety::detect_command_fields;
 
 #[test]
 fn detect_shell_config_command_fields() {
@@ -571,8 +571,8 @@ fn detect_empty_hooks_commands_excluded() {
 
 // ── collect_dangerous_patterns tests ──────────────────────────────
 
-use super::collect_dangerous_patterns;
-use super::format_dangerous_pattern_rejection;
+use super::command_safety::collect_dangerous_patterns;
+use super::command_safety::format_dangerous_pattern_rejection;
 
 #[test]
 fn collect_dangerous_curl_pipe_bash() {
@@ -619,7 +619,7 @@ fn collect_non_object_returns_empty() {
 
 #[test]
 fn format_rejection_message() {
-    let matches = vec![super::DangerousPatternMatch {
+    let matches = vec![super::command_safety::DangerousPatternMatch {
         field: "version_command".to_string(),
         description: "pipe remote script to shell",
     }];
