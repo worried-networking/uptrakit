@@ -857,6 +857,25 @@ pub async fn update_user_active(
 ///
 /// Sends a confirmation email to the new address and a notification to the old address.
 /// Returns 202 Accepted on success.
+#[utoipa::path(
+    post,
+    path = "/api/v1/users/{id}/email",
+    params(
+        ("id" = uuid::Uuid, Path, description = "User UUID")
+    ),
+    request_body = uptrakit_web_api_types::profile::InitiateEmailChangeRequest,
+    responses(
+        (status = 202, description = "Email change initiated; confirmation email sent"),
+        (status = 401, description = "Not authenticated or wrong current password"),
+        (status = 403, description = "Not authorized or account uses OIDC"),
+        (status = 404, description = "User not found"),
+        (status = 409, description = "Email already in use"),
+        (status = 422, description = "Validation error"),
+        (status = 503, description = "Email delivery unavailable")
+    ),
+    tag = "Users",
+    security(("bearer_token" = []))
+)]
 #[tracing::instrument(skip_all)]
 pub async fn initiate_email_change(
     State(state): State<Arc<AppState>>,
@@ -1033,6 +1052,23 @@ pub async fn initiate_email_change(
 /// Change a user's password (self-service, password-authenticated only).
 ///
 /// `PUT /api/v1/users/{id}/password`
+#[utoipa::path(
+    put,
+    path = "/api/v1/users/{id}/password",
+    params(
+        ("id" = uuid::Uuid, Path, description = "User UUID")
+    ),
+    request_body = uptrakit_web_api_types::profile::ChangePasswordRequest,
+    responses(
+        (status = 204, description = "Password changed; other sessions invalidated"),
+        (status = 401, description = "Not authenticated or wrong current password"),
+        (status = 403, description = "Not authorized or account uses OIDC"),
+        (status = 404, description = "User not found"),
+        (status = 422, description = "Validation error")
+    ),
+    tag = "Users",
+    security(("bearer_token" = []))
+)]
 #[tracing::instrument(skip_all)]
 pub async fn change_password(
     State(state): State<Arc<AppState>>,
@@ -1209,6 +1245,19 @@ fn extract_refresh_token_from_headers(headers: &axum::http::HeaderMap) -> Option
 /// Cancel a pending email change for a user (self-service only).
 ///
 /// `DELETE /api/v1/users/{id}/email`
+#[utoipa::path(
+    delete,
+    path = "/api/v1/users/{id}/email",
+    params(
+        ("id" = uuid::Uuid, Path, description = "User UUID")
+    ),
+    responses(
+        (status = 204, description = "Pending email change cancelled (no-op if none exists)"),
+        (status = 403, description = "Not authorized")
+    ),
+    tag = "Users",
+    security(("bearer_token" = []))
+)]
 #[tracing::instrument(skip_all)]
 pub async fn cancel_email_change(
     State(db): State<DbState>,
