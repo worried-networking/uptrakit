@@ -590,11 +590,13 @@ list_services = "full-state"
 get_service = "full-state"
 update_service = "full-state"
 
-[routes."services/mod.rs"]
+[routes."services/lifecycle.rs"]
 approve_service = "full-state"
 reject_service = "full-state"
 deactivate_service = "full-state"
 set_update_freeze = "full-state"
+
+[routes."services/mod.rs"]
 merge_service = "full-state"
 batch_services = "full-state"
 
