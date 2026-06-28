@@ -12,6 +12,7 @@ mod oauth_master_switch_off;
 mod oauth_mcp_roundtrip;
 #[cfg(feature = "oidc")]
 mod oidc_callback;
+mod openapi_spec;
 mod plugin_configs;
 mod plugin_type_settings;
 mod service_ws;
