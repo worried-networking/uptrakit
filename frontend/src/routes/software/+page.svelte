@@ -400,7 +400,9 @@
 				query: {
 					page,
 					featured: featuredFilter(),
-					updatable: updatable.value ? true : undefined
+					updatable: updatable.value ? true : undefined,
+					plugin_type: pluginType.value || undefined,
+					query: queryParam.value?.trim() || undefined
 				}
 			});
 			items = result.items;
@@ -904,8 +906,10 @@
 		};
 	}
 
-	async function searchMergeCandidates(_query: string): Promise<MergeSoftwareItemSummary[]> {
-		const { data: result } = await listSoftwareItems({ query: { page: 1, per_page: 25 } });
+	async function searchMergeCandidates(query: string): Promise<MergeSoftwareItemSummary[]> {
+		const { data: result } = await listSoftwareItems({
+			query: { page: 1, per_page: 25, query: query.trim() || undefined }
+		});
 		return result.items.map(toMergeSummary);
 	}
 
@@ -948,7 +952,9 @@
 						page: p,
 						per_page: 100,
 						featured: featuredFilter(),
-						updatable: updatable.value ? true : undefined
+						updatable: updatable.value ? true : undefined,
+						plugin_type: pluginType.value || undefined,
+						query: queryParam.value?.trim() || undefined
 					}
 				});
 				for (const item of result.items) {

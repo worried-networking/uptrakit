@@ -5894,10 +5894,13 @@
           {
             "name": "page",
             "in": "query",
-            "description": "Page number (1-indexed, default 1)",
+            "description": "Page number (1-indexed). Defaults to 1.",
             "required": false,
             "schema": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64",
               "minimum": 0
             }
@@ -5905,10 +5908,13 @@
           {
             "name": "per_page",
             "in": "query",
-            "description": "Items per page (default 20, max 1000)",
+            "description": "Items per page. Defaults to 20, max 1000.",
             "required": false,
             "schema": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64",
               "minimum": 0
             }
@@ -5919,26 +5925,59 @@
             "description": "Filter by featured status. Omit to return all items.",
             "required": false,
             "schema": {
-              "type": "boolean"
+              "type": [
+                "boolean",
+                "null"
+              ]
             }
           },
           {
             "name": "host_id",
             "in": "query",
-            "description": "Filter by host UUID — only return items assigned to this host.",
+            "description": "Filter by host — only return software items assigned to this host.",
             "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "format": "uuid"
             }
           },
           {
             "name": "updatable",
             "in": "query",
-            "description": "Filter by update availability. true = only items with an update available; false = only up-to-date items.",
+            "description": "Filter by update availability.\n\n- `true`: only items where at least one active host has an update available\n  (`installed_version != latest_version`, both non-null).\n- `false`: only items where no active host has an update available.\n- Omit: no filter.",
             "required": false,
             "schema": {
-              "type": "boolean"
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "plugin_type",
+            "in": "query",
+            "description": "Filter by plugin type — only return items that have at least one host\nassignment using this plugin type (e.g. `\"releases_docker\"`).\nOmit to return items for any plugin type.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "query",
+            "in": "query",
+            "description": "Filter by name — case-insensitive substring match, max 200 chars.\nThe server lowercases and escapes LIKE metacharacters before the SQL\nbind; the database evaluates `LOWER(name) LIKE ? ESCAPE '\\'`.\nEmpty/whitespace-only values are ignored.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         ],

@@ -7507,25 +7507,43 @@ export type ListSoftwareItemsData = {
     path?: never;
     query?: {
         /**
-         * Page number (1-indexed, default 1)
+         * Page number (1-indexed). Defaults to 1.
          */
-        page?: number;
+        page?: number | null;
         /**
-         * Items per page (default 20, max 1000)
+         * Items per page. Defaults to 20, max 1000.
          */
-        per_page?: number;
+        per_page?: number | null;
         /**
          * Filter by featured status. Omit to return all items.
          */
-        featured?: boolean;
+        featured?: boolean | null;
         /**
-         * Filter by host UUID — only return items assigned to this host.
+         * Filter by host — only return software items assigned to this host.
          */
-        host_id?: string;
+        host_id?: string | null;
         /**
-         * Filter by update availability. true = only items with an update available; false = only up-to-date items.
+         * Filter by update availability.
+         *
+         * - `true`: only items where at least one active host has an update available
+         * (`installed_version != latest_version`, both non-null).
+         * - `false`: only items where no active host has an update available.
+         * - Omit: no filter.
          */
-        updatable?: boolean;
+        updatable?: boolean | null;
+        /**
+         * Filter by plugin type — only return items that have at least one host
+         * assignment using this plugin type (e.g. `"releases_docker"`).
+         * Omit to return items for any plugin type.
+         */
+        plugin_type?: string | null;
+        /**
+         * Filter by name — case-insensitive substring match, max 200 chars.
+         * The server lowercases and escapes LIKE metacharacters before the SQL
+         * bind; the database evaluates `LOWER(name) LIKE ? ESCAPE '\'`.
+         * Empty/whitespace-only values are ignored.
+         */
+        query?: string | null;
     };
     url: '/api/v1/software-items';
 };

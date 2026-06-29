@@ -64,13 +64,13 @@ describe('Software page — URL-reactive filter state', () => {
 		expect(input.value).toBe('foo');
 	});
 
-	it('passes query param to listSoftwareItems on mount (text query not forwarded — generated API lacks query field)', async () => {
+	it('forwards the text query param to listSoftwareItems on mount', async () => {
 		const nginxUrl = new URL('http://localhost/software?query=nginx');
 		Object.defineProperty(page, 'url', { value: nginxUrl, configurable: true });
 		render(SoftwarePage);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Software' })).toBeInTheDocument());
 		expect(vi.mocked(api.listSoftwareItems)).toHaveBeenCalledWith(
-			expect.objectContaining({ query: expect.not.objectContaining({ query: 'nginx' }) })
+			expect.objectContaining({ query: expect.objectContaining({ query: 'nginx' }) })
 		);
 	});
 
@@ -95,13 +95,13 @@ describe('Software page — URL-reactive filter state', () => {
 		);
 	});
 
-	it('reads plugin_type=npm from URL (not forwarded to listSoftwareItems — generated API lacks plugin_type field)', async () => {
+	it('reads plugin_type=npm from URL and forwards it to listSoftwareItems', async () => {
 		const url = new URL('http://localhost/software?plugin_type=npm');
 		Object.defineProperty(page, 'url', { value: url, configurable: true });
 		render(SoftwarePage);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Software' })).toBeInTheDocument());
 		expect(vi.mocked(api.listSoftwareItems)).toHaveBeenCalledWith(
-			expect.objectContaining({ query: expect.not.objectContaining({ plugin_type: 'npm' }) })
+			expect.objectContaining({ query: expect.objectContaining({ plugin_type: 'npm' }) })
 		);
 	});
 });
