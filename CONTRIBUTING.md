@@ -30,6 +30,8 @@ Thanks for helping improve Uptrakit. Focus on boring, testable, and well-reviewe
 
 - Use the commands in [docs/development/testing.md](docs/development/testing.md) before opening a PR.
 - Format, lint, and run `cargo deny check` as noted in the setup guide.
+- After any backend route or REST-contract change, run `./scripts/regen-api.sh` and commit
+  `crates/ui/web-api/openapi.json` + `frontend/src/lib/api/generated/`; CI gates on staleness.
 - Describe what changed, how you tested it, and any rollout/migration risks in your PR body.
 - Provide screenshots for UI changes and mention significant AI assistance if applicable.
 - Follow Conventional Commits ([docs/development/pr-process.md](docs/development/pr-process.md)) for your PR title/message.
