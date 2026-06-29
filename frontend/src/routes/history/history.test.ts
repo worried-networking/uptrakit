@@ -14,9 +14,9 @@ vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 
 vi.mock('$lib/api', () => ({
 	listUpdateHistory: vi.fn(),
-	triggerSoftwareUpdate: vi.fn(),
-	getSoftwareItems: vi.fn(),
-	getUpdateHistoryEntry: vi.fn(),
+	triggerUpdate: vi.fn(),
+	listSoftwareItems: vi.fn(),
+	getUpdateHistory: vi.fn(),
 	getSoftwareItem: vi.fn()
 }));
 
@@ -227,12 +227,14 @@ describe('History Route', () => {
 		vi.setSystemTime(new Date('2026-02-01T12:00:00Z'));
 		vi.mocked(auth.getUser).mockReturnValue(user);
 		vi.mocked(api.listUpdateHistory).mockResolvedValue({
-			items: [queuedItem, completedItem, failedItem, inProgressItem, pendingItem],
-			total: 5,
-			page: 1,
-			per_page: 25,
-			total_pages: 1
-		});
+			data: {
+				items: [queuedItem, completedItem, failedItem, inProgressItem, pendingItem],
+				total: 5,
+				page: 1,
+				per_page: 25,
+				total_pages: 1
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listUpdateHistory>>);
 	});
 
 	afterEach(() => {
@@ -267,12 +269,14 @@ describe('History Route', () => {
 
 	it('renders the Interrupted badge for an interrupted feed entry', async () => {
 		vi.mocked(api.listUpdateHistory).mockResolvedValue({
-			items: [interruptedItem],
-			total: 1,
-			page: 1,
-			per_page: 25,
-			total_pages: 1
-		});
+			data: {
+				items: [interruptedItem],
+				total: 1,
+				page: 1,
+				per_page: 25,
+				total_pages: 1
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listUpdateHistory>>);
 
 		render(HistoryPage);
 		await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
@@ -356,16 +360,18 @@ describe('History Route', () => {
 				configurable: true
 			});
 			vi.mocked(api.listUpdateHistory).mockResolvedValue({
-				items: [completedItem],
-				total: 1,
-				page: 1,
-				per_page: 25,
-				total_pages: 1
-			});
+				data: {
+					items: [completedItem],
+					total: 1,
+					page: 1,
+					per_page: 25,
+					total_pages: 1
+				}
+			} as unknown as Awaited<ReturnType<typeof api.listUpdateHistory>>);
 			render(HistoryPage);
 			await waitFor(() => expect(vi.mocked(api.listUpdateHistory)).toHaveBeenCalled());
 			const lastCall = vi.mocked(api.listUpdateHistory).mock.calls.at(-1);
-			expect(lastCall?.[0]).toMatchObject({ status: 'completed' });
+			expect(lastCall?.[0]).toMatchObject({ query: { status: 'completed' } });
 		});
 	});
 
@@ -406,12 +412,14 @@ describe('History Route', () => {
 			configurable: true
 		});
 		vi.mocked(api.listUpdateHistory).mockResolvedValue({
-			items: [completedItem],
-			total: 5,
-			page: 2,
-			per_page: 25,
-			total_pages: 2
-		});
+			data: {
+				items: [completedItem],
+				total: 5,
+				page: 2,
+				per_page: 25,
+				total_pages: 2
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listUpdateHistory>>);
 
 		render(HistoryPage);
 		await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
@@ -446,12 +454,14 @@ describe('History Route', () => {
 
 	it('falls back to trigger source unknown when actor type is missing', async () => {
 		vi.mocked(api.listUpdateHistory).mockResolvedValue({
-			items: [{ ...queuedItem, actor_type: '', actor_name: null }],
-			total: 1,
-			page: 1,
-			per_page: 25,
-			total_pages: 1
-		});
+			data: {
+				items: [{ ...queuedItem, actor_type: '', actor_name: null }],
+				total: 1,
+				page: 1,
+				per_page: 25,
+				total_pages: 1
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listUpdateHistory>>);
 
 		render(HistoryPage);
 		await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
@@ -461,12 +471,14 @@ describe('History Route', () => {
 
 	it('falls back to type-only label when actor name is absent', async () => {
 		vi.mocked(api.listUpdateHistory).mockResolvedValue({
-			items: [{ ...queuedItem, actor_type: 'user', actor_name: null }],
-			total: 1,
-			page: 1,
-			per_page: 25,
-			total_pages: 1
-		});
+			data: {
+				items: [{ ...queuedItem, actor_type: 'user', actor_name: null }],
+				total: 1,
+				page: 1,
+				per_page: 25,
+				total_pages: 1
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listUpdateHistory>>);
 
 		render(HistoryPage);
 		await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());

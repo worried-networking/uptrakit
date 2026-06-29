@@ -11,9 +11,9 @@ import { Permission } from '$lib/types';
 
 vi.mock('$lib/api', () => ({
 	listUpdateHistory: vi.fn(),
-	triggerSoftwareUpdate: vi.fn(),
-	getSoftwareItems: vi.fn(),
-	getUpdateHistoryEntry: vi.fn(),
+	triggerUpdate: vi.fn(),
+	listSoftwareItems: vi.fn(),
+	getUpdateHistory: vi.fn(),
 	getSoftwareItem: vi.fn()
 }));
 
@@ -161,15 +161,21 @@ describe('History Trigger Update Modal', () => {
 		page.url.pathname = '/history';
 		page.url.search = '';
 		vi.mocked(auth.getUser).mockReturnValue(adminUser);
-		vi.mocked(api.listUpdateHistory).mockResolvedValue(makeHistoryPage([]));
-		vi.mocked(api.getSoftwareItems).mockResolvedValue({
-			items: [makeSoftwareItem()],
-			total: 1,
-			page: 1,
-			per_page: 100,
-			total_pages: 1
-		});
-		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail([makeHostSummary()]));
+		vi.mocked(api.listUpdateHistory).mockResolvedValue({ data: makeHistoryPage([]) } as unknown as Awaited<
+			ReturnType<typeof api.listUpdateHistory>
+		>);
+		vi.mocked(api.listSoftwareItems).mockResolvedValue({
+			data: {
+				items: [makeSoftwareItem()],
+				total: 1,
+				page: 1,
+				per_page: 100,
+				total_pages: 1
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listSoftwareItems>>);
+		vi.mocked(api.getSoftwareItem).mockResolvedValue({ data: makeDetail([makeHostSummary()]) } as unknown as Awaited<
+			ReturnType<typeof api.getSoftwareItem>
+		>);
 	});
 
 	afterEach(() => {
@@ -181,10 +187,12 @@ describe('History Trigger Update Modal', () => {
 	});
 
 	it('treats status=failed trigger response as an error and closes modal', async () => {
-		vi.mocked(api.triggerSoftwareUpdate).mockResolvedValue({
-			update_history_id: 'history-failed',
-			status: 'failed'
-		});
+		vi.mocked(api.triggerUpdate).mockResolvedValue({
+			data: {
+				update_history_id: 'history-failed',
+				status: 'failed'
+			}
+		} as unknown as Awaited<ReturnType<typeof api.triggerUpdate>>);
 
 		render(HistoryPage);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Update History' })).toBeInTheDocument());
@@ -203,9 +211,12 @@ describe('History Trigger Update Modal', () => {
 		await fireEvent.click(triggerButtons[triggerButtons.length - 1]);
 
 		await waitFor(() =>
-			expect(api.triggerSoftwareUpdate).toHaveBeenCalledWith('software-1', 'host-1', {
-				to_version: '1.1.0',
-				release_info: undefined
+			expect(api.triggerUpdate).toHaveBeenCalledWith({
+				path: { id: 'software-1', host_id: 'host-1' },
+				body: {
+					to_version: '1.1.0',
+					release_info: undefined
+				}
 			})
 		);
 		expect(notifications.showError).toHaveBeenCalledWith('Update failed before dispatch — history ID: history-failed');
@@ -214,14 +225,14 @@ describe('History Trigger Update Modal', () => {
 	});
 
 	it('renders generic additional details when summary and recovery hint are present', async () => {
-		vi.mocked(api.listUpdateHistory).mockResolvedValue(
-			makeHistoryPage([
+		vi.mocked(api.listUpdateHistory).mockResolvedValue({
+			data: makeHistoryPage([
 				makeHistoryEntry({
 					pre_update_protection_summary: 'Pre-update checks blocked this run.',
 					recovery_hint: 'Resolve the reported issue, then retry the update.'
 				})
 			])
-		);
+		} as unknown as Awaited<ReturnType<typeof api.listUpdateHistory>>);
 
 		render(HistoryPage);
 		await waitFor(() => expect(screen.getByText('Demo App on Host One')).toBeInTheDocument());
@@ -286,11 +297,11 @@ describe('History Trigger Update Modal', () => {
 
 		it('modal Submit shows spinner via aria-busy when triggering, text stays static', async () => {
 			// Stall the trigger call so we can inspect mid-flight state
-			let resolveTrigger!: (v: { update_history_id: string; status: string }) => void;
-			vi.mocked(api.triggerSoftwareUpdate).mockReturnValue(
-				new Promise((res) => {
+			let resolveTrigger!: (v: Awaited<ReturnType<typeof api.triggerUpdate>>) => void;
+			vi.mocked(api.triggerUpdate).mockReturnValue(
+				new Promise<Awaited<ReturnType<typeof api.triggerUpdate>>>((res) => {
 					resolveTrigger = res;
-				})
+				}) as unknown as ReturnType<typeof api.triggerUpdate>
 			);
 
 			render(HistoryPage);
@@ -316,7 +327,9 @@ describe('History Trigger Update Modal', () => {
 			});
 
 			// Resolve so test cleanup works
-			resolveTrigger({ update_history_id: 'h-1', status: 'pending' });
+			resolveTrigger({ data: { update_history_id: 'h-1', status: 'pending' } } as unknown as Awaited<
+				ReturnType<typeof api.triggerUpdate>
+			>);
 		});
 	});
 });

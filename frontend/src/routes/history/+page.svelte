@@ -68,13 +68,7 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
-	import {
-		listUpdateHistory,
-		triggerSoftwareUpdate,
-		getSoftwareItems,
-		getUpdateHistoryEntry,
-		getSoftwareItem
-	} from '$lib/api';
+	import { listUpdateHistory, triggerUpdate, listSoftwareItems, getUpdateHistory, getSoftwareItem } from '$lib/api';
 	import { formatDate, formatVersion, parseUrlPage } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import TerminalOutput from '$lib/components/TerminalOutput.svelte';
@@ -244,9 +238,11 @@
 		loading = true;
 		error = null;
 		try {
-			const res = await listUpdateHistory({
-				page: pg,
-				status: statusParam.value === 'all' ? undefined : statusParam.value
+			const { data: res } = await listUpdateHistory({
+				query: {
+					page: pg,
+					status: statusParam.value === 'all' ? undefined : statusParam.value
+				}
 			});
 			items = res.items;
 			totalPages = res.total_pages;
@@ -318,7 +314,7 @@
 
 	async function reloadItem(id: string) {
 		try {
-			const updated = await getUpdateHistoryEntry(id);
+			const { data: updated } = await getUpdateHistory({ path: { id } });
 			items = items.map((i) => (i.id === id ? updated : i));
 		} catch {
 			// Fallback: reload the whole page
@@ -583,7 +579,7 @@
 		releaseTag = '';
 		releaseUrl = '';
 		try {
-			const res = await getSoftwareItems(1, 100);
+			const { data: res } = await listSoftwareItems({ query: { page: 1, per_page: 100 } });
 			softwareItems = res.items;
 			selectedItemHosts = [];
 		} catch (e) {
@@ -605,7 +601,7 @@
 
 		void (async () => {
 			try {
-				const detail = await getSoftwareItem(selectedItemId);
+				const { data: detail } = await getSoftwareItem({ path: { id: selectedItemId } });
 				selectedItemHosts = detail.hosts.map((host) => ({
 					host_id: host.host_id,
 					label: host.friendly_name || host.hostname
@@ -631,9 +627,12 @@
 							release_url: releaseUrl.trim()
 						}
 					: undefined;
-			const res = await triggerSoftwareUpdate(selectedItemId, selectedHostId, {
-				to_version: targetVersion.trim(),
-				release_info
+			const { data: res } = await triggerUpdate({
+				path: { id: selectedItemId, host_id: selectedHostId },
+				body: {
+					to_version: targetVersion.trim(),
+					release_info
+				}
 			});
 			closeTriggerModal();
 			if (res.status === 'failed') {

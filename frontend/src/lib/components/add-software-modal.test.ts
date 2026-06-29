@@ -23,7 +23,9 @@ describe('AddSoftwareModal Button primitive contracts', () => {
 	});
 
 	it('shows aria-busy and no "Registering..." text during submit', async () => {
-		vi.mocked(api.createSoftwareItem).mockReturnValue(new Promise(() => {}));
+		vi.mocked(api.createSoftwareItem).mockReturnValue(
+			new Promise(() => {}) as unknown as ReturnType<typeof api.createSoftwareItem>
+		);
 		render(AddSoftwareModal, { onclose: vi.fn(), onsuccess: vi.fn() });
 
 		await fireEvent.input(screen.getByRole('textbox', { name: /name/i }), {

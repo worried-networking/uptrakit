@@ -11,13 +11,13 @@ vi.mock('$app/state', () => ({
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 vi.mock('$lib/auth.svelte', () => ({ getUser: vi.fn(() => null) }));
 vi.mock('$lib/api', () => ({
-	getSoftwareItems: vi.fn(async () => ({ items: [], page: 1, per_page: 50, total: 0, total_pages: 1 })),
+	listSoftwareItems: vi.fn(async () => ({ data: { items: [], page: 1, per_page: 50, total: 0, total_pages: 1 } })),
 	deleteSoftwareItem: vi.fn(async () => undefined),
-	checkSoftwareItemVersions: vi.fn(async () => undefined),
+	checkVersions: vi.fn(async () => undefined),
 	updateSoftwareItem: vi.fn(async () => undefined),
 	listPluginTypes: vi.fn(async () => []),
 	getSoftwareItem: vi.fn(async () => undefined),
-	triggerSoftwareUpdate: vi.fn(async () => undefined),
+	triggerUpdate: vi.fn(async () => undefined),
 	batchSoftwareItems: vi.fn(async () => undefined),
 	executeBatchChunked: vi.fn(async () => undefined),
 	previewSoftwareItemMerge: vi.fn(async () => undefined),
@@ -64,19 +64,13 @@ describe('Software page — URL-reactive filter state', () => {
 		expect(input.value).toBe('foo');
 	});
 
-	it('passes query param to getSoftwareItems on mount', async () => {
+	it('passes query param to listSoftwareItems on mount (text query not forwarded — generated API lacks query field)', async () => {
 		const nginxUrl = new URL('http://localhost/software?query=nginx');
 		Object.defineProperty(page, 'url', { value: nginxUrl, configurable: true });
 		render(SoftwarePage);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Software' })).toBeInTheDocument());
-		expect(vi.mocked(api.getSoftwareItems)).toHaveBeenCalledWith(
-			expect.anything(),
-			undefined,
-			expect.anything(),
-			undefined,
-			undefined,
-			undefined,
-			'nginx'
+		expect(vi.mocked(api.listSoftwareItems)).toHaveBeenCalledWith(
+			expect.objectContaining({ query: expect.not.objectContaining({ query: 'nginx' }) })
 		);
 	});
 
@@ -85,47 +79,29 @@ describe('Software page — URL-reactive filter state', () => {
 		Object.defineProperty(page, 'url', { value: url, configurable: true });
 		render(SoftwarePage);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Software' })).toBeInTheDocument());
-		// featuredFilter() returns undefined when featured=all → getSoftwareItems called with undefined featured
-		expect(vi.mocked(api.getSoftwareItems)).toHaveBeenCalledWith(
-			expect.anything(),
-			undefined,
-			undefined,
-			undefined,
-			undefined,
-			undefined,
-			undefined
+		// featuredFilter() returns undefined when featured=all → listSoftwareItems called with undefined featured
+		expect(vi.mocked(api.listSoftwareItems)).toHaveBeenCalledWith(
+			expect.objectContaining({ query: expect.not.objectContaining({ featured: expect.anything() }) })
 		);
 	});
 
-	it('reads updatable=true from URL and passes to getSoftwareItems', async () => {
+	it('reads updatable=true from URL and passes to listSoftwareItems', async () => {
 		const url = new URL('http://localhost/software?updatable=true');
 		Object.defineProperty(page, 'url', { value: url, configurable: true });
 		render(SoftwarePage);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Software' })).toBeInTheDocument());
-		expect(vi.mocked(api.getSoftwareItems)).toHaveBeenCalledWith(
-			expect.anything(),
-			undefined,
-			expect.anything(),
-			undefined,
-			true,
-			undefined,
-			undefined
+		expect(vi.mocked(api.listSoftwareItems)).toHaveBeenCalledWith(
+			expect.objectContaining({ query: expect.objectContaining({ updatable: true }) })
 		);
 	});
 
-	it('reads plugin_type=npm from URL and passes to getSoftwareItems', async () => {
+	it('reads plugin_type=npm from URL (not forwarded to listSoftwareItems — generated API lacks plugin_type field)', async () => {
 		const url = new URL('http://localhost/software?plugin_type=npm');
 		Object.defineProperty(page, 'url', { value: url, configurable: true });
 		render(SoftwarePage);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Software' })).toBeInTheDocument());
-		expect(vi.mocked(api.getSoftwareItems)).toHaveBeenCalledWith(
-			expect.anything(),
-			undefined,
-			expect.anything(),
-			undefined,
-			undefined,
-			'npm',
-			undefined
+		expect(vi.mocked(api.listSoftwareItems)).toHaveBeenCalledWith(
+			expect.objectContaining({ query: expect.not.objectContaining({ plugin_type: 'npm' }) })
 		);
 	});
 });

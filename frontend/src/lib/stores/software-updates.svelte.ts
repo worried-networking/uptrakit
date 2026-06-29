@@ -1,4 +1,4 @@
-import { getSoftwareItems } from '$lib/api';
+import { listSoftwareItems } from '$lib/api';
 
 let count: number | null = $state(null);
 
@@ -16,7 +16,7 @@ export function getUpdatableSoftwareCount(): number | null {
 export async function fetchUpdatableSoftwareCount(): Promise<void> {
 	if (count !== null) return;
 	try {
-		const res = await getSoftwareItems(undefined, 1, true, undefined, true);
+		const { data: res } = await listSoftwareItems({ query: { per_page: 1, featured: true, updatable: true } });
 		count = res.total;
 	} catch {
 		// Non-critical — badge stays hidden on error.

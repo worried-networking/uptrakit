@@ -6,7 +6,7 @@ import homeSource from './+page.svelte?raw';
 vi.mock('$lib/api', () => ({
 	listHosts: vi.fn(),
 	listServices: vi.fn(),
-	getSoftwareItems: vi.fn(),
+	listSoftwareItems: vi.fn(),
 	listUpdateHistory: vi.fn()
 }));
 
@@ -44,28 +44,33 @@ describe('Dashboard Route', () => {
 		vi.mocked(api.listServices).mockResolvedValue({
 			data: makeServices([{ status: 'pending' } as unknown as ServiceResponse])
 		} as unknown as Awaited<ReturnType<typeof api.listServices>>);
-		vi.mocked(api.getSoftwareItems).mockImplementation(async (_page = 1, _perPage = 1, featured = true) => ({
-			items: [],
-			total: featured ? 7 : 2,
-			page: 1,
-			per_page: 1,
-			total_pages: 1
-		}));
+		vi.mocked(api.listSoftwareItems).mockImplementation(((opts: Parameters<typeof api.listSoftwareItems>[0]) =>
+			Promise.resolve({
+				data: {
+					items: [],
+					total: opts?.query?.featured !== false ? 7 : 2,
+					page: 1,
+					per_page: 1,
+					total_pages: 1
+				}
+			})) as unknown as typeof api.listSoftwareItems);
 		vi.mocked(api.listUpdateHistory).mockResolvedValue({
-			items: [
-				{
-					id: 'hist-1',
-					software_item_name: 'nginx',
-					host_name: 'prod-01',
-					status: 'failed',
-					created_at: '2026-01-01T10:00:00Z'
-				} as unknown as UpdateHistoryResponse
-			],
-			total: 1,
-			page: 1,
-			per_page: 5,
-			total_pages: 1
-		});
+			data: {
+				items: [
+					{
+						id: 'hist-1',
+						software_item_name: 'nginx',
+						host_name: 'prod-01',
+						status: 'failed',
+						created_at: '2026-01-01T10:00:00Z'
+					} as unknown as UpdateHistoryResponse
+				],
+				total: 1,
+				page: 1,
+				per_page: 5,
+				total_pages: 1
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listUpdateHistory>>);
 	});
 
 	afterEach(() => {
@@ -94,7 +99,7 @@ describe('Dashboard Route', () => {
 	it('Retry button renders as primary Button with mt-3 class', async () => {
 		vi.mocked(api.listHosts).mockRejectedValue(new Error('fail'));
 		vi.mocked(api.listServices).mockRejectedValue(new Error('fail'));
-		vi.mocked(api.getSoftwareItems).mockRejectedValue(new Error('fail'));
+		vi.mocked(api.listSoftwareItems).mockRejectedValue(new Error('fail'));
 		vi.mocked(api.listUpdateHistory).mockRejectedValue(new Error('fail'));
 		render(HomePage);
 		await waitFor(() => expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument());
@@ -130,18 +135,20 @@ describe('Dashboard Route', () => {
 	it('"View all" action link renders as ghost Button href', async () => {
 		// total > 5 is required for View all to render
 		vi.mocked(api.listUpdateHistory).mockResolvedValue({
-			items: Array.from({ length: 5 }, (_, i) => ({
-				id: `hist-${i}`,
-				software_item_name: `pkg-${i}`,
-				host_name: 'host',
-				status: 'completed',
-				created_at: '2026-01-01T10:00:00Z'
-			})) as unknown as UpdateHistoryResponse[],
-			total: 10,
-			page: 1,
-			per_page: 5,
-			total_pages: 2
-		});
+			data: {
+				items: Array.from({ length: 5 }, (_, i) => ({
+					id: `hist-${i}`,
+					software_item_name: `pkg-${i}`,
+					host_name: 'host',
+					status: 'completed',
+					created_at: '2026-01-01T10:00:00Z'
+				})) as unknown as UpdateHistoryResponse[],
+				total: 10,
+				page: 1,
+				per_page: 5,
+				total_pages: 2
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listUpdateHistory>>);
 		render(HomePage);
 		await waitFor(() => expect(screen.getByText('Recent Updates')).toBeInTheDocument());
 		await waitFor(() => expect(document.querySelector('a[href="/history"]')).not.toBeNull());

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { listSchedulerTasks, updateSchedulerTask, triggerSchedulerTask } from '$lib/api';
+	import { listScheduledTasks, updateScheduledTask, triggerScheduledTask } from '$lib/api';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import { formatDate } from '$lib/utils';
 	import { getUser } from '$lib/auth.svelte';
@@ -46,7 +46,7 @@
 		loading = true;
 		error = null;
 		try {
-			tasks = await listSchedulerTasks();
+			({ data: tasks } = await listScheduledTasks());
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load scheduler tasks';
 		} finally {
@@ -69,10 +69,13 @@
 		if (!editingTask || saving) return;
 		saving = true;
 		try {
-			const updated = await updateSchedulerTask(editingTask.id, {
-				interval_seconds: editInterval,
-				jitter_seconds: editJitter,
-				enabled: editEnabled
+			const { data: updated } = await updateScheduledTask({
+				path: { id: editingTask.id },
+				body: {
+					interval_seconds: editInterval,
+					jitter_seconds: editJitter,
+					enabled: editEnabled
+				}
 			});
 			tasks = tasks.map((t) => (t.id === editingTask!.id ? updated : t));
 			showSuccess('Task updated.');
@@ -87,7 +90,7 @@
 	async function triggerNow(task: ScheduledTaskResponse) {
 		triggeringId = task.id;
 		try {
-			const res = await triggerSchedulerTask(task.id);
+			const { data: res } = await triggerScheduledTask({ path: { id: task.id } });
 			if (res.triggered) {
 				showSuccess(`Task "${task.label}" triggered.`);
 			} else {

@@ -17,7 +17,7 @@ vi.mock('$lib/api', () => ({
 	removeHostDiscoveryAllowlistEntry: vi.fn(),
 	listHostTags: vi.fn(),
 	setHostTags: vi.fn(),
-	getSoftwareItems: vi.fn()
+	listSoftwareItems: vi.fn()
 }));
 
 vi.mock('$lib/auth.svelte', () => ({
@@ -165,7 +165,9 @@ describe('Host Detail Page', () => {
 	beforeEach(() => {
 		page.params.id = 'host-001';
 		vi.mocked(auth.getUser).mockReturnValue(adminUser);
-		vi.mocked(api.listUpdateHistory).mockResolvedValue(makeHistoryPage([]));
+		vi.mocked(api.listUpdateHistory).mockResolvedValue({ data: makeHistoryPage([]) } as unknown as Awaited<
+			ReturnType<typeof api.listUpdateHistory>
+		>);
 		vi.mocked(api.listPluginTypes).mockResolvedValue([]);
 		vi.mocked(api.listHostDiscoveryAllowlist).mockResolvedValue({ data: [] } as unknown as Awaited<
 			ReturnType<typeof api.listHostDiscoveryAllowlist>
@@ -173,7 +175,9 @@ describe('Host Detail Page', () => {
 		vi.mocked(api.listHostTags).mockResolvedValue({
 			data: { items: [], total: 0, page: 1, per_page: 100, total_pages: 1 }
 		} as unknown as Awaited<ReturnType<typeof api.listHostTags>>);
-		vi.mocked(api.getSoftwareItems).mockResolvedValue(makeSoftwareItemsPage());
+		vi.mocked(api.listSoftwareItems).mockResolvedValue({ data: makeSoftwareItemsPage() } as unknown as Awaited<
+			ReturnType<typeof api.listSoftwareItems>
+		>);
 	});
 
 	afterEach(() => {
@@ -278,7 +282,9 @@ describe('Host Detail Page', () => {
 		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
 			ReturnType<typeof api.getHost>
 		>);
-		vi.mocked(api.listUpdateHistory).mockResolvedValue(makeHistoryPage([sampleHistoryEntry]));
+		vi.mocked(api.listUpdateHistory).mockResolvedValue({
+			data: makeHistoryPage([sampleHistoryEntry])
+		} as unknown as Awaited<ReturnType<typeof api.listUpdateHistory>>);
 		render(HostDetailPage);
 		await waitFor(() => expect(screen.getByText('nginx')).toBeInTheDocument());
 		expect(screen.getByText('1.24.0')).toBeInTheDocument();
@@ -290,7 +296,9 @@ describe('Host Detail Page', () => {
 		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
 			ReturnType<typeof api.getHost>
 		>);
-		vi.mocked(api.listUpdateHistory).mockResolvedValue(makeHistoryPage([]));
+		vi.mocked(api.listUpdateHistory).mockResolvedValue({ data: makeHistoryPage([]) } as unknown as Awaited<
+			ReturnType<typeof api.listUpdateHistory>
+		>);
 		render(HostDetailPage);
 		await waitFor(() => expect(screen.getByText(/no update history/i)).toBeInTheDocument());
 	});
@@ -552,7 +560,9 @@ describe('Host Detail Page', () => {
 		vi.mocked(api.listHostDiscoveryAllowlist).mockResolvedValue({ data: [] } as unknown as Awaited<
 			ReturnType<typeof api.listHostDiscoveryAllowlist>
 		>);
-		vi.mocked(api.getSoftwareItems).mockResolvedValue(makeSoftwareItemsPage());
+		vi.mocked(api.listSoftwareItems).mockResolvedValue({ data: makeSoftwareItemsPage() } as unknown as Awaited<
+			ReturnType<typeof api.listSoftwareItems>
+		>);
 
 		render(HostDetailPage);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Production Server' })).toBeInTheDocument());

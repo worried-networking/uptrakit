@@ -14,13 +14,13 @@ import { ApiError } from '$lib/api';
 vi.mock('$lib/api', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('$lib/api')>();
 	return {
-		getSoftwareItems: vi.fn(),
+		listSoftwareItems: vi.fn(),
 		deleteSoftwareItem: vi.fn(),
-		checkSoftwareItemVersions: vi.fn(),
+		checkVersions: vi.fn(),
 		updateSoftwareItem: vi.fn(),
 		listPluginTypes: vi.fn(),
 		getSoftwareItem: vi.fn(),
-		triggerSoftwareUpdate: vi.fn(),
+		triggerUpdate: vi.fn(),
 		batchSoftwareItems: vi.fn(),
 		executeBatchChunked: vi.fn(),
 		previewSoftwareItemMerge: vi.fn(),
@@ -183,14 +183,18 @@ describe('Software Page Trigger Status Handling', () => {
 		const item = makeSoftwareItem('software-1', 'Demo App');
 		const hosts = [makeHostSummary('host-1', 'host-one'), makeHostSummary('host-2', 'host-two')];
 
-		vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
-		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail(item, hosts));
-		vi.mocked(api.triggerSoftwareUpdate).mockImplementation(async (_itemId, hostId) => {
-			if (hostId === 'host-2') {
-				return { update_history_id: 'uh-host-2', status: 'failed' };
+		vi.mocked(api.listSoftwareItems).mockResolvedValue({ data: makeItemsPage([item]) } as unknown as Awaited<
+			ReturnType<typeof api.listSoftwareItems>
+		>);
+		vi.mocked(api.getSoftwareItem).mockResolvedValue({ data: makeDetail(item, hosts) } as unknown as Awaited<
+			ReturnType<typeof api.getSoftwareItem>
+		>);
+		vi.mocked(api.triggerUpdate).mockImplementation((async (req: Parameters<typeof api.triggerUpdate>[0]) => {
+			if (req?.path.host_id === 'host-2') {
+				return { data: { update_history_id: 'uh-host-2', status: 'failed' } };
 			}
-			return { update_history_id: 'uh-host-1', status: 'pending' };
-		});
+			return { data: { update_history_id: 'uh-host-1', status: 'pending' } };
+		}) as unknown as typeof api.triggerUpdate);
 
 		render(SoftwarePage);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Software' })).toBeInTheDocument());
@@ -204,7 +208,7 @@ describe('Software Page Trigger Status Handling', () => {
 		await waitFor(() => expect(screen.getByRole('button', { name: 'Update 2 host(s)' })).toBeInTheDocument());
 		await fireEvent.click(screen.getByRole('button', { name: 'Update 2 host(s)' }));
 
-		await waitFor(() => expect(api.triggerSoftwareUpdate).toHaveBeenCalledTimes(2));
+		await waitFor(() => expect(api.triggerUpdate).toHaveBeenCalledTimes(2));
 		expect(notifications.showSuccess).toHaveBeenCalledWith('Update triggered for 1 host(s).');
 		expect(notifications.showError).toHaveBeenCalledWith('Failed to trigger update for 1 host(s).');
 	});
@@ -213,12 +217,15 @@ describe('Software Page Trigger Status Handling', () => {
 		const item = makeSoftwareItem('software-1', 'Demo App');
 		const hosts = [makeHostSummary('host-1', 'host-one'), makeHostSummary('host-2', 'host-two')];
 
-		vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
-		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail(item, hosts));
-		vi.mocked(api.triggerSoftwareUpdate).mockResolvedValue({
-			update_history_id: 'uh-host-2',
-			status: 'pending'
-		});
+		vi.mocked(api.listSoftwareItems).mockResolvedValue({ data: makeItemsPage([item]) } as unknown as Awaited<
+			ReturnType<typeof api.listSoftwareItems>
+		>);
+		vi.mocked(api.getSoftwareItem).mockResolvedValue({ data: makeDetail(item, hosts) } as unknown as Awaited<
+			ReturnType<typeof api.getSoftwareItem>
+		>);
+		vi.mocked(api.triggerUpdate).mockResolvedValue({
+			data: { update_history_id: 'uh-host-2', status: 'pending' }
+		} as unknown as Awaited<ReturnType<typeof api.triggerUpdate>>);
 
 		render(SoftwarePage);
 		await waitFor(() => expect(screen.getAllByText('Demo App').length).toBeGreaterThan(0));
@@ -236,8 +243,11 @@ describe('Software Page Trigger Status Handling', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Trigger Update' }));
 
-		await waitFor(() => expect(api.triggerSoftwareUpdate).toHaveBeenCalledTimes(1));
-		expect(api.triggerSoftwareUpdate).toHaveBeenCalledWith('software-1', 'host-2', { to_version: '1.1.0' });
+		await waitFor(() => expect(api.triggerUpdate).toHaveBeenCalledTimes(1));
+		expect(api.triggerUpdate).toHaveBeenCalledWith({
+			path: { id: 'software-1', host_id: 'host-2' },
+			body: { to_version: '1.1.0' }
+		});
 	});
 
 	it('folds all host rows when collapsing a software group and preserves that state through background refresh', async () => {
@@ -252,8 +262,12 @@ describe('Software Page Trigger Status Handling', () => {
 			makeHostSummaryWithUpdate('host-4', 'host-four', false)
 		];
 
-		vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
-		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail(item, hosts));
+		vi.mocked(api.listSoftwareItems).mockResolvedValue({ data: makeItemsPage([item]) } as unknown as Awaited<
+			ReturnType<typeof api.listSoftwareItems>
+		>);
+		vi.mocked(api.getSoftwareItem).mockResolvedValue({ data: makeDetail(item, hosts) } as unknown as Awaited<
+			ReturnType<typeof api.getSoftwareItem>
+		>);
 
 		render(SoftwarePage);
 		await waitFor(() => expect(screen.getAllByText('Demo App').length).toBeGreaterThan(0));
@@ -277,7 +291,7 @@ describe('Software Page Trigger Status Handling', () => {
 
 		mockEventSubscriptions.get(AdminEventType.VersionCheckCompleted)?.();
 
-		await waitFor(() => expect(vi.mocked(api.getSoftwareItems)).toHaveBeenCalledTimes(2));
+		await waitFor(() => expect(vi.mocked(api.listSoftwareItems)).toHaveBeenCalledTimes(2));
 		expect(screen.getAllByRole('button', { name: 'Expand Demo App' })[0]).toHaveAttribute('aria-expanded', 'false');
 		expect(screen.queryByText('host-one')).not.toBeInTheDocument();
 		expect(screen.queryByText('host-two')).not.toBeInTheDocument();
@@ -297,8 +311,12 @@ describe('Software Page Trigger Status Handling', () => {
 			makeHostSummaryWithUpdate('host-4', 'host-four', false)
 		];
 
-		vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
-		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail(item, hosts));
+		vi.mocked(api.listSoftwareItems).mockResolvedValue({ data: makeItemsPage([item]) } as unknown as Awaited<
+			ReturnType<typeof api.listSoftwareItems>
+		>);
+		vi.mocked(api.getSoftwareItem).mockResolvedValue({ data: makeDetail(item, hosts) } as unknown as Awaited<
+			ReturnType<typeof api.getSoftwareItem>
+		>);
 
 		render(SoftwarePage);
 		await waitFor(() => expect(screen.getAllByText('Demo App').length).toBeGreaterThan(0));
@@ -323,17 +341,19 @@ describe('Software Page Trigger Status Handling', () => {
 			host_count: 2
 		};
 		const hosts = [makeHostSummary('host-1', 'host-one'), makeHostSummary('host-2', 'host-two')];
-		const pendingRefresh = deferred<SoftwareItemDetailResponse>();
+		const pendingRefresh = deferred<{ data: SoftwareItemDetailResponse }>();
 		let detailCalls = 0;
 
-		vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
-		vi.mocked(api.getSoftwareItem).mockImplementation(async () => {
+		vi.mocked(api.listSoftwareItems).mockResolvedValue({ data: makeItemsPage([item]) } as unknown as Awaited<
+			ReturnType<typeof api.listSoftwareItems>
+		>);
+		vi.mocked(api.getSoftwareItem).mockImplementation((() => {
 			detailCalls += 1;
 			if (detailCalls === 1) {
-				return makeDetail(item, hosts);
+				return Promise.resolve({ data: makeDetail(item, hosts) }) as unknown as ReturnType<typeof api.getSoftwareItem>;
 			}
-			return pendingRefresh.promise;
-		});
+			return pendingRefresh.promise as unknown as ReturnType<typeof api.getSoftwareItem>;
+		}) as unknown as typeof api.getSoftwareItem);
 
 		render(SoftwarePage);
 		await waitFor(() => expect(screen.getAllByText('host-one').length).toBeGreaterThan(0));
@@ -346,7 +366,7 @@ describe('Software Page Trigger Status Handling', () => {
 		expect(screen.getAllByText('host-two').length).toBeGreaterThan(0);
 		expect(screen.queryByText('Loading hosts...')).not.toBeInTheDocument();
 
-		pendingRefresh.resolve(makeDetail(item, hosts));
+		pendingRefresh.resolve({ data: makeDetail(item, hosts) });
 		await waitFor(() => expect(screen.getByRole('button', { name: 'Update 2 host(s)' })).toBeInTheDocument());
 	});
 
@@ -354,8 +374,12 @@ describe('Software Page Trigger Status Handling', () => {
 		const item = makeSoftwareItem('software-1', 'Demo App');
 		const hosts = [makeHostSummary('host-1', 'host-one'), makeHostSummary('host-2', 'host-two')];
 
-		vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
-		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail(item, hosts));
+		vi.mocked(api.listSoftwareItems).mockResolvedValue({ data: makeItemsPage([item]) } as unknown as Awaited<
+			ReturnType<typeof api.listSoftwareItems>
+		>);
+		vi.mocked(api.getSoftwareItem).mockResolvedValue({ data: makeDetail(item, hosts) } as unknown as Awaited<
+			ReturnType<typeof api.getSoftwareItem>
+		>);
 
 		render(SoftwarePage);
 		await waitFor(() => expect(screen.getAllByText('Demo App').length).toBeGreaterThan(0));
@@ -376,8 +400,12 @@ describe('Software Page Trigger Status Handling', () => {
 		const item = makeSoftwareItem('software-1', 'Demo App');
 		const hosts = [makeHostSummary('host-1', 'host-one')];
 
-		vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
-		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail(item, hosts));
+		vi.mocked(api.listSoftwareItems).mockResolvedValue({ data: makeItemsPage([item]) } as unknown as Awaited<
+			ReturnType<typeof api.listSoftwareItems>
+		>);
+		vi.mocked(api.getSoftwareItem).mockResolvedValue({ data: makeDetail(item, hosts) } as unknown as Awaited<
+			ReturnType<typeof api.getSoftwareItem>
+		>);
 
 		render(SoftwarePage);
 		await waitFor(() => expect(screen.getAllByText('Demo App').length).toBeGreaterThan(0));
@@ -401,19 +429,21 @@ describe('Software Page Trigger Status Handling', () => {
 		const itemOne = makeSoftwareItem('software-1', 'Demo App One');
 		const itemTwo = makeSoftwareItem('software-2', 'Demo App Two');
 
-		vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([itemOne, itemTwo]));
-		vi.mocked(api.getSoftwareItem).mockImplementation(async (itemId: string) => {
-			if (itemId === 'software-2') {
-				return makeDetail(itemTwo, [makeHostSummary('host-2', 'host-two')]);
+		vi.mocked(api.listSoftwareItems).mockResolvedValue({
+			data: makeItemsPage([itemOne, itemTwo])
+		} as unknown as Awaited<ReturnType<typeof api.listSoftwareItems>>);
+		vi.mocked(api.getSoftwareItem).mockImplementation((async (req: Parameters<typeof api.getSoftwareItem>[0]) => {
+			if (req?.path.id === 'software-2') {
+				return { data: makeDetail(itemTwo, [makeHostSummary('host-2', 'host-two')]) };
 			}
-			return makeDetail(itemOne, [makeHostSummary('host-1', 'host-one')]);
-		});
-		vi.mocked(api.triggerSoftwareUpdate).mockImplementation(async (itemId: string) => {
-			if (itemId === 'software-2') {
-				return { update_history_id: 'uh-host-2', status: 'failed' };
+			return { data: makeDetail(itemOne, [makeHostSummary('host-1', 'host-one')]) };
+		}) as unknown as typeof api.getSoftwareItem);
+		vi.mocked(api.triggerUpdate).mockImplementation((async (req: Parameters<typeof api.triggerUpdate>[0]) => {
+			if (req?.path.id === 'software-2') {
+				return { data: { update_history_id: 'uh-host-2', status: 'failed' } };
 			}
-			return { update_history_id: 'uh-host-1', status: 'pending' };
-		});
+			return { data: { update_history_id: 'uh-host-1', status: 'pending' } };
+		}) as unknown as typeof api.triggerUpdate);
 
 		render(SoftwarePage);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Software' })).toBeInTheDocument());
@@ -429,7 +459,7 @@ describe('Software Page Trigger Status Handling', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Update All' }));
 
-		await waitFor(() => expect(api.triggerSoftwareUpdate).toHaveBeenCalledTimes(2));
+		await waitFor(() => expect(api.triggerUpdate).toHaveBeenCalledTimes(2));
 		expect(notifications.showSuccess).toHaveBeenCalledWith('Update triggered for 1 host(s) across 2 item(s).');
 		expect(notifications.showError).toHaveBeenCalledWith('Failed to trigger update for 1 host(s).');
 	});
@@ -437,21 +467,22 @@ describe('Software Page Trigger Status Handling', () => {
 	it('keeps the list rendered while refreshing in the background after update dispatch', async () => {
 		const item = makeSoftwareItem('software-1', 'Demo App');
 		const hosts = [makeHostSummary('host-1', 'host-one')];
-		const pendingItemsRefresh = deferred<PaginatedResponse<SoftwareItemResponse>>();
+		const pendingItemsRefresh = deferred<{ data: PaginatedResponse<SoftwareItemResponse> }>();
 		let itemsCalls = 0;
 
-		vi.mocked(api.getSoftwareItems).mockImplementation(async () => {
+		vi.mocked(api.listSoftwareItems).mockImplementation((() => {
 			itemsCalls += 1;
 			if (itemsCalls === 1) {
-				return makeItemsPage([item]);
+				return Promise.resolve({ data: makeItemsPage([item]) }) as unknown as ReturnType<typeof api.listSoftwareItems>;
 			}
-			return pendingItemsRefresh.promise;
-		});
-		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail(item, hosts));
-		vi.mocked(api.triggerSoftwareUpdate).mockResolvedValue({
-			update_history_id: 'uh-host-1',
-			status: 'pending'
-		});
+			return pendingItemsRefresh.promise as unknown as ReturnType<typeof api.listSoftwareItems>;
+		}) as unknown as typeof api.listSoftwareItems);
+		vi.mocked(api.getSoftwareItem).mockResolvedValue({ data: makeDetail(item, hosts) } as unknown as Awaited<
+			ReturnType<typeof api.getSoftwareItem>
+		>);
+		vi.mocked(api.triggerUpdate).mockResolvedValue({
+			data: { update_history_id: 'uh-host-1', status: 'pending' }
+		} as unknown as Awaited<ReturnType<typeof api.triggerUpdate>>);
 
 		render(SoftwarePage);
 		await waitFor(() => expect(screen.getAllByText('Demo App').length).toBeGreaterThan(0));
@@ -461,12 +492,12 @@ describe('Software Page Trigger Status Handling', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Trigger Update' }));
 
-		await waitFor(() => expect(api.triggerSoftwareUpdate).toHaveBeenCalledTimes(1));
+		await waitFor(() => expect(api.triggerUpdate).toHaveBeenCalledTimes(1));
 		await waitFor(() => expect(itemsCalls).toBe(2));
 		expect(screen.getAllByText('Demo App').length).toBeGreaterThan(0);
 		expect(screen.queryByText('Loading software items...')).not.toBeInTheDocument();
 
-		pendingItemsRefresh.resolve(makeItemsPage([item]));
+		pendingItemsRefresh.resolve({ data: makeItemsPage([item]) });
 		await waitFor(() => expect(screen.getAllByText('Demo App').length).toBeGreaterThan(0));
 	});
 
@@ -475,8 +506,12 @@ describe('Software Page Trigger Status Handling', () => {
 		const hosts = [makeHostSummary('host-1', 'host-one')];
 
 		vi.mocked(auth.getUser).mockReturnValue(viewOnlyUser);
-		vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
-		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail(item, hosts));
+		vi.mocked(api.listSoftwareItems).mockResolvedValue({ data: makeItemsPage([item]) } as unknown as Awaited<
+			ReturnType<typeof api.listSoftwareItems>
+		>);
+		vi.mocked(api.getSoftwareItem).mockResolvedValue({ data: makeDetail(item, hosts) } as unknown as Awaited<
+			ReturnType<typeof api.getSoftwareItem>
+		>);
 
 		render(SoftwarePage);
 		await waitFor(() => expect(screen.getAllByText('Demo App').length).toBeGreaterThan(0));
@@ -488,8 +523,12 @@ describe('Software Page Trigger Status Handling', () => {
 
 	it('"Add Software" button renders with primary variant and sm size', async () => {
 		const item = makeSoftwareItem('software-1', 'Demo App');
-		vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
-		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail(item, []));
+		vi.mocked(api.listSoftwareItems).mockResolvedValue({ data: makeItemsPage([item]) } as unknown as Awaited<
+			ReturnType<typeof api.listSoftwareItems>
+		>);
+		vi.mocked(api.getSoftwareItem).mockResolvedValue({ data: makeDetail(item, []) } as unknown as Awaited<
+			ReturnType<typeof api.getSoftwareItem>
+		>);
 
 		render(SoftwarePage);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Software' })).toBeInTheDocument());
@@ -502,8 +541,12 @@ describe('Software Page Trigger Status Handling', () => {
 	it('row context-menu toggle renders ghost sm button', async () => {
 		const item = makeSoftwareItem('software-1', 'Demo App');
 		const hosts = [makeHostSummary('host-1', 'host-one'), makeHostSummary('host-2', 'host-two')];
-		vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
-		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail(item, hosts));
+		vi.mocked(api.listSoftwareItems).mockResolvedValue({ data: makeItemsPage([item]) } as unknown as Awaited<
+			ReturnType<typeof api.listSoftwareItems>
+		>);
+		vi.mocked(api.getSoftwareItem).mockResolvedValue({ data: makeDetail(item, hosts) } as unknown as Awaited<
+			ReturnType<typeof api.getSoftwareItem>
+		>);
 
 		render(SoftwarePage);
 		await waitFor(() => expect(screen.getAllByText('Demo App').length).toBeGreaterThan(0));
@@ -516,8 +559,12 @@ describe('Software Page Trigger Status Handling', () => {
 	it('header row aggregate trigger renders UpdateAllButton, not a raw Button', async () => {
 		const item = makeSoftwareItem('software-1', 'Demo App');
 		const hosts = [makeHostSummary('host-1', 'host-one'), makeHostSummary('host-2', 'host-two')];
-		vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
-		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail(item, hosts));
+		vi.mocked(api.listSoftwareItems).mockResolvedValue({ data: makeItemsPage([item]) } as unknown as Awaited<
+			ReturnType<typeof api.listSoftwareItems>
+		>);
+		vi.mocked(api.getSoftwareItem).mockResolvedValue({ data: makeDetail(item, hosts) } as unknown as Awaited<
+			ReturnType<typeof api.getSoftwareItem>
+		>);
 
 		render(SoftwarePage);
 		await waitFor(() => expect(screen.getAllByText('Demo App').length).toBeGreaterThan(0));
@@ -541,11 +588,15 @@ describe('Software Page Trigger Status Handling', () => {
 			];
 			const detail = makeDetail(item, hosts);
 
-			vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
-			vi.mocked(api.getSoftwareItem).mockResolvedValue(detail);
+			vi.mocked(api.listSoftwareItems).mockResolvedValue({ data: makeItemsPage([item]) } as unknown as Awaited<
+				ReturnType<typeof api.listSoftwareItems>
+			>);
+			vi.mocked(api.getSoftwareItem).mockResolvedValue({ data: detail } as unknown as Awaited<
+				ReturnType<typeof api.getSoftwareItem>
+			>);
 
 			render(SoftwarePage);
-			await waitFor(() => expect(api.getSoftwareItems).toHaveBeenCalled());
+			await waitFor(() => expect(api.listSoftwareItems).toHaveBeenCalled());
 
 			// Multi-host: host rows are shown expanded by default; wait for detail to load
 			await waitFor(() => expect(screen.getAllByTestId('software-host-row-row-host-1').length).toBeGreaterThan(0));
@@ -568,11 +619,15 @@ describe('Software Page Trigger Status Handling', () => {
 			];
 			const detail = makeDetail(item, hosts);
 
-			vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
-			vi.mocked(api.getSoftwareItem).mockResolvedValue(detail);
+			vi.mocked(api.listSoftwareItems).mockResolvedValue({ data: makeItemsPage([item]) } as unknown as Awaited<
+				ReturnType<typeof api.listSoftwareItems>
+			>);
+			vi.mocked(api.getSoftwareItem).mockResolvedValue({ data: detail } as unknown as Awaited<
+				ReturnType<typeof api.getSoftwareItem>
+			>);
 
 			render(SoftwarePage);
-			await waitFor(() => expect(api.getSoftwareItems).toHaveBeenCalled());
+			await waitFor(() => expect(api.listSoftwareItems).toHaveBeenCalled());
 
 			await waitFor(() => expect(screen.getAllByTestId('software-host-row-row-host-1').length).toBeGreaterThan(0));
 			const hostRow = screen.getAllByTestId('software-host-row-row-host-1')[0];
@@ -586,14 +641,18 @@ describe('Software Page Trigger Status Handling', () => {
 			const host = makeHostSummary('host-1', 'host-one');
 			const detail = makeDetail(item, [host]);
 
-			vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
-			vi.mocked(api.getSoftwareItem).mockResolvedValue(detail);
-			vi.mocked(api.triggerSoftwareUpdate).mockRejectedValue(
+			vi.mocked(api.listSoftwareItems).mockResolvedValue({ data: makeItemsPage([item]) } as unknown as Awaited<
+				ReturnType<typeof api.listSoftwareItems>
+			>);
+			vi.mocked(api.getSoftwareItem).mockResolvedValue({ data: detail } as unknown as Awaited<
+				ReturnType<typeof api.getSoftwareItem>
+			>);
+			vi.mocked(api.triggerUpdate).mockRejectedValue(
 				new ApiError('Update already active', 409, 'trigger_update.update_already_active')
 			);
 
 			render(SoftwarePage);
-			await waitFor(() => expect(api.getSoftwareItems).toHaveBeenCalled());
+			await waitFor(() => expect(api.listSoftwareItems).toHaveBeenCalled());
 
 			// Single-host compact layout: Update button is in the header row
 			await waitFor(() => expect(screen.getAllByTestId('software-group-header-software-1').length).toBeGreaterThan(0));
@@ -634,11 +693,15 @@ describe('Software Page Trigger Status Handling', () => {
 			];
 			const detail = makeDetail(item, hosts);
 
-			vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
-			vi.mocked(api.getSoftwareItem).mockResolvedValue(detail);
+			vi.mocked(api.listSoftwareItems).mockResolvedValue({ data: makeItemsPage([item]) } as unknown as Awaited<
+				ReturnType<typeof api.listSoftwareItems>
+			>);
+			vi.mocked(api.getSoftwareItem).mockResolvedValue({ data: detail } as unknown as Awaited<
+				ReturnType<typeof api.getSoftwareItem>
+			>);
 
 			render(SoftwarePage);
-			await waitFor(() => expect(api.getSoftwareItems).toHaveBeenCalled());
+			await waitFor(() => expect(api.listSoftwareItems).toHaveBeenCalled());
 
 			// Multi-host: wait for detail to load
 			await waitFor(() => expect(api.getSoftwareItem).toHaveBeenCalled());
@@ -657,11 +720,15 @@ describe('Software Page Trigger Status Handling', () => {
 			const hosts = [makeHostSummary('host-1', 'host-one'), makeHostSummary('host-2', 'host-two')];
 			const detail = makeDetail(item, hosts);
 
-			vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
-			vi.mocked(api.getSoftwareItem).mockResolvedValue(detail);
+			vi.mocked(api.listSoftwareItems).mockResolvedValue({ data: makeItemsPage([item]) } as unknown as Awaited<
+				ReturnType<typeof api.listSoftwareItems>
+			>);
+			vi.mocked(api.getSoftwareItem).mockResolvedValue({ data: detail } as unknown as Awaited<
+				ReturnType<typeof api.getSoftwareItem>
+			>);
 
 			render(SoftwarePage);
-			await waitFor(() => expect(api.getSoftwareItems).toHaveBeenCalled());
+			await waitFor(() => expect(api.listSoftwareItems).toHaveBeenCalled());
 
 			// Multi-host: expanded host rows are shown; wait for detail to load
 			await waitFor(() => expect(screen.getAllByTestId('software-host-row-row-host-1').length).toBeGreaterThan(0));
@@ -694,11 +761,15 @@ describe('Software Page Trigger Status Handling', () => {
 			];
 			const detail = makeDetail(item, hosts);
 
-			vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
-			vi.mocked(api.getSoftwareItem).mockResolvedValue(detail);
+			vi.mocked(api.listSoftwareItems).mockResolvedValue({ data: makeItemsPage([item]) } as unknown as Awaited<
+				ReturnType<typeof api.listSoftwareItems>
+			>);
+			vi.mocked(api.getSoftwareItem).mockResolvedValue({ data: detail } as unknown as Awaited<
+				ReturnType<typeof api.getSoftwareItem>
+			>);
 
 			render(SoftwarePage);
-			await waitFor(() => expect(api.getSoftwareItems).toHaveBeenCalled());
+			await waitFor(() => expect(api.listSoftwareItems).toHaveBeenCalled());
 
 			// Wait for host rows with "Pending" badge
 			await waitFor(() => expect(screen.getAllByTestId('software-host-row-row-host-1').length).toBeGreaterThan(0));
@@ -732,18 +803,24 @@ describe('Software Page Trigger Status Handling', () => {
 				makeHostSummary('host-2', 'host-two')
 			]);
 
-			vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
-			vi.mocked(api.getSoftwareItem).mockResolvedValueOnce(detail).mockResolvedValue(detailAfter);
+			vi.mocked(api.listSoftwareItems).mockResolvedValue({ data: makeItemsPage([item]) } as unknown as Awaited<
+				ReturnType<typeof api.listSoftwareItems>
+			>);
+			vi.mocked(api.getSoftwareItem)
+				.mockResolvedValueOnce({ data: detail } as unknown as Awaited<ReturnType<typeof api.getSoftwareItem>>)
+				.mockResolvedValue({ data: detailAfter } as unknown as Awaited<ReturnType<typeof api.getSoftwareItem>>);
 
 			render(SoftwarePage);
-			await waitFor(() => expect(api.getSoftwareItems).toHaveBeenCalled());
+			await waitFor(() => expect(api.listSoftwareItems).toHaveBeenCalled());
 
 			// Wait for host rows with "In Progress" badge
 			await waitFor(() => expect(screen.getAllByTestId('software-host-row-row-host-1').length).toBeGreaterThan(0));
 			const hostRow = screen.getAllByTestId('software-host-row-row-host-1')[0];
 			await waitFor(() => expect(within(hostRow).queryByText('In Progress')).toBeInTheDocument());
 
-			vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
+			vi.mocked(api.listSoftwareItems).mockResolvedValue({ data: makeItemsPage([item]) } as unknown as Awaited<
+				ReturnType<typeof api.listSoftwareItems>
+			>);
 
 			// Fire UpdateCompleted
 			mockEventSubscriptions.get(AdminEventType.UpdateCompleted)?.({

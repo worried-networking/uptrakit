@@ -73,12 +73,12 @@ describe('AddSoftwareModal', () => {
 	it('shows loading state while submit is in flight', async () => {
 		const user = userEvent.setup();
 		const onsuccess = vi.fn();
-		let resolveCreate: ((value: SoftwareItemResponse) => void) | null = null;
+		let resolveCreate: ((value: Awaited<ReturnType<typeof api.createSoftwareItem>>) => void) | null = null;
 		vi.mocked(api.createSoftwareItem).mockImplementation(
-			() =>
-				new Promise<SoftwareItemResponse>((resolve) => {
+			(() =>
+				new Promise<Awaited<ReturnType<typeof api.createSoftwareItem>>>((resolve) => {
 					resolveCreate = resolve;
-				})
+				})) as unknown as typeof api.createSoftwareItem
 		);
 
 		render(AddSoftwareModal, {
@@ -94,7 +94,7 @@ describe('AddSoftwareModal', () => {
 		expect(submitBtn).toHaveAttribute('aria-busy', 'true');
 		expect(submitBtn).toBeDisabled();
 		expect(resolveCreate).not.toBeNull();
-		resolveCreate!(makeSoftwareItem());
+		resolveCreate!({ data: makeSoftwareItem() } as unknown as Awaited<ReturnType<typeof api.createSoftwareItem>>);
 
 		await waitFor(() => expect(onsuccess).toHaveBeenCalledWith(makeSoftwareItem()));
 	});

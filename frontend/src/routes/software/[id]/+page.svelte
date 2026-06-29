@@ -6,14 +6,14 @@
 	import { getUser } from '$lib/auth.svelte';
 	import {
 		getSoftwareItem,
-		getSoftwareItems,
-		checkSoftwareItemVersions,
-		checkSoftwareItemVersionsHost,
-		triggerSoftwareUpdate,
+		listSoftwareItems,
+		checkVersions,
+		checkVersionsHost,
+		triggerUpdate,
 		updateSoftwareItem,
 		deleteSoftwareItem,
-		unassignHostFromSoftwareItem,
-		getUpdateHistoryEntry,
+		unassignHost,
+		getUpdateHistory,
 		previewSoftwareItemMerge,
 		executeSoftwareItemMerge,
 		ApiError
@@ -380,7 +380,8 @@
 			error = null;
 		}
 		try {
-			item = await getSoftwareItem(id);
+			const { data: detail } = await getSoftwareItem({ path: { id } });
+			item = detail;
 			softwareItemTabsReloadToken += 1;
 		} catch (e) {
 			if (!background) {
@@ -424,15 +425,15 @@
 		mergeModalOpen = true;
 	}
 
-	async function searchMergeCandidates(query: string): Promise<MergeSoftwareItemSummary[]> {
-		const result = await getSoftwareItems(1, 25, undefined, undefined, undefined, undefined, query);
+	async function searchMergeCandidates(_query: string): Promise<MergeSoftwareItemSummary[]> {
+		const { data: result } = await listSoftwareItems({ query: { page: 1, per_page: 25 } });
 		return result.items.map(toMergeSummary);
 	}
 
 	async function toggleFeatured() {
 		if (!item) return;
 		try {
-			await updateSoftwareItem(item.id, { featured: !item.featured });
+			await updateSoftwareItem({ path: { id: item.id }, body: { featured: !item.featured } });
 			item = { ...item, featured: !item.featured };
 			showSuccess(`"${item.name}" ${item.featured ? 'featured' : 'unfeatured'}.`);
 		} catch (e) {
@@ -447,10 +448,13 @@
 		try {
 			const trimmedIcon = editForm.icon_url.trim();
 			const icon_url = trimmedIcon === '' ? (item.icon_url ? null : undefined) : trimmedIcon;
-			await updateSoftwareItem(item.id, {
-				name: editForm.name || undefined,
-				featured: editForm.featured,
-				icon_url
+			await updateSoftwareItem({
+				path: { id: item.id },
+				body: {
+					name: editForm.name || undefined,
+					featured: editForm.featured,
+					icon_url
+				}
 			});
 			showSuccess('Software item updated.');
 			editItem = false;
@@ -468,7 +472,7 @@
 		deleteSubmitting = true;
 		confirmDelete = false;
 		try {
-			await deleteSoftwareItem(item.id);
+			await deleteSoftwareItem({ path: { id: item.id } });
 			showSuccess(`"${name}" deleted.`);
 			goto('/software');
 		} catch (e) {
@@ -483,7 +487,7 @@
 		confirmUnassign = null;
 		unassignSubmitting = true;
 		try {
-			await unassignHostFromSoftwareItem(item.id, host.host_id);
+			await unassignHost({ path: { id: item.id, host_id: host.host_id } });
 			showSuccess(`"${host.hostname}" unassigned from "${item.name}".`);
 			await loadItem(true);
 		} catch (e) {
@@ -497,7 +501,7 @@
 		if (!item || checkingAll) return;
 		checkingAll = true;
 		try {
-			const result = await checkSoftwareItemVersions(item.id);
+			const { data: result } = await checkVersions({ path: { id: item.id } });
 			if (result.agents_notified > 0) {
 				showSuccess(`Version check triggered — ${result.agents_notified} agent(s) notified`);
 			} else {
@@ -541,7 +545,7 @@
 		if (!item || checkingHostId) return;
 		checkingHostId = hostId;
 		try {
-			const result = await checkSoftwareItemVersionsHost(item.id, hostId);
+			const { data: result } = await checkVersionsHost({ path: { id: item.id, host_id: hostId } });
 			if (result.agents_notified > 0) {
 				showSuccess('Version check triggered for host');
 			} else {
@@ -572,8 +576,11 @@
 		if (!item || !updateModal || updateTriggering || !canTriggerUpdates) return;
 		updateTriggering = true;
 		try {
-			const res = await triggerSoftwareUpdate(item.id, updateModal.host.host_id, {
-				to_version: updateModal.toVersion
+			const { data: res } = await triggerUpdate({
+				path: { id: item.id, host_id: updateModal.host.host_id },
+				body: {
+					to_version: updateModal.toVersion
+				}
 			});
 			updateModal = null;
 
@@ -625,7 +632,7 @@
 					liveWsState = 'connecting';
 					void (async () => {
 						try {
-							const entry = await getUpdateHistoryEntry(historyId);
+							const { data: entry } = await getUpdateHistory({ path: { id: historyId } });
 							// Guard: modal may have been closed while awaiting.
 							if (liveModal?.updateHistoryId !== historyId) return;
 							if (entry.output) {
@@ -666,7 +673,7 @@
 		updateAllSelectedHostIds.clear();
 		updateAllLoading = true;
 		try {
-			const detail = await getSoftwareItem(item.id);
+			const { data: detail } = await getSoftwareItem({ path: { id: item.id } });
 			updateAllDetail = detail;
 			updateAllSelectedHostIds.clear();
 			for (const h of detail.hosts.filter((h) => h.update_available && !h.active_update_history_id)) {
@@ -687,7 +694,13 @@
 			(h) => h.update_available && updateAllSelectedHostIds.has(h.host_id) && h.latest_version
 		);
 		const results = await Promise.allSettled(
-			targets.map((h) => triggerSoftwareUpdate(item!.id, h.host_id, { to_version: h.latest_version! }))
+			targets.map(async (h) => {
+				const { data: r } = await triggerUpdate({
+					path: { id: item!.id, host_id: h.host_id },
+					body: { to_version: h.latest_version! }
+				});
+				return r;
+			})
 		);
 		let succeeded = 0;
 		let failed = 0;
@@ -716,7 +729,7 @@
 	}
 
 	function getReleaseMeta(host: SoftwareItemHostSummary): ReleaseMeta | null {
-		const meta = host.latest_release_metadata;
+		const meta = host.latest_release_metadata as Record<string, unknown> | null | undefined;
 		if (!meta) return null;
 		const knownStatuses: AttestationStatus[] = ['Verified', 'NotFound', 'Unverified'];
 		const rawStatus = meta.attestation_status;
@@ -1408,8 +1421,14 @@
 		seedItemId={mergeSeedItemId}
 		searchCandidates={searchMergeCandidates}
 		initialSearchQuery={mergeInitialSearchQuery}
-		previewMerge={previewSoftwareItemMerge}
-		executeMerge={executeSoftwareItemMerge}
+		previewMerge={async (data) => {
+			const { data: preview } = await previewSoftwareItemMerge({ body: data });
+			return preview;
+		}}
+		executeMerge={async (data) => {
+			const { data: result } = await executeSoftwareItemMerge({ body: data });
+			return result;
+		}}
 		onclose={() => {
 			mergeModalOpen = false;
 			mergeInitialCandidates = [];

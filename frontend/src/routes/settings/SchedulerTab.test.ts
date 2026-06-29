@@ -2,25 +2,27 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/svelte';
 
 vi.mock('$lib/api', () => ({
-	listSchedulerTasks: vi.fn().mockResolvedValue([
-		{
-			id: 'task-1',
-			name: 'Test Task',
-			label: 'Test Task',
-			cron_expression: '0 * * * *',
-			is_enabled: true,
-			is_running: false,
-			last_run_at: null,
-			next_run_at: null,
-			interval_seconds: 3600,
-			jitter_seconds: 0,
-			enabled: true,
-			task_type: 'custom',
-			last_error: null
-		}
-	]),
-	updateSchedulerTask: vi.fn(),
-	triggerSchedulerTask: vi.fn()
+	listScheduledTasks: vi.fn().mockResolvedValue({
+		data: [
+			{
+				id: 'task-1',
+				name: 'Test Task',
+				label: 'Test Task',
+				cron_expression: '0 * * * *',
+				is_enabled: true,
+				is_running: false,
+				last_run_at: null,
+				next_run_at: null,
+				interval_seconds: 3600,
+				jitter_seconds: 0,
+				enabled: true,
+				task_type: 'custom',
+				last_error: null
+			}
+		]
+	}),
+	updateScheduledTask: vi.fn(),
+	triggerScheduledTask: vi.fn()
 }));
 vi.mock('$lib/auth.svelte', () => ({
 	getUser: vi.fn(() => ({
@@ -78,10 +80,10 @@ describe('SchedulerTab button variants', () => {
 	it('Save button carries aria-busy=true while saving', async () => {
 		vi.mocked(auth.getUser).mockReturnValue(makeUser());
 		let resolve!: (v: unknown) => void;
-		vi.mocked(api.updateSchedulerTask).mockReturnValue(
-			new Promise((r) => {
+		vi.mocked(api.updateScheduledTask).mockReturnValue(
+			new Promise<Awaited<ReturnType<typeof api.updateScheduledTask>>>((r) => {
 				resolve = r as unknown as (v: unknown) => void;
-			})
+			}) as unknown as ReturnType<typeof api.updateScheduledTask>
 		);
 		render(SchedulerTab);
 		await waitFor(() => screen.getByText('Test Task'));
@@ -90,19 +92,21 @@ describe('SchedulerTab button variants', () => {
 		await fireEvent.click(saveBtn);
 		await waitFor(() => expect(saveBtn).toHaveAttribute('aria-busy', 'true'));
 		resolve({
-			id: 'task-1',
-			name: 'Test Task',
-			label: 'Test Task',
-			cron_expression: '0 * * * *',
-			is_enabled: true,
-			is_running: false,
-			last_run_at: null,
-			next_run_at: null,
-			interval_seconds: 3600,
-			jitter_seconds: 0,
-			enabled: true,
-			task_type: 'custom',
-			last_error: null
+			data: {
+				id: 'task-1',
+				name: 'Test Task',
+				label: 'Test Task',
+				cron_expression: '0 * * * *',
+				is_enabled: true,
+				is_running: false,
+				last_run_at: null,
+				next_run_at: null,
+				interval_seconds: 3600,
+				jitter_seconds: 0,
+				enabled: true,
+				task_type: 'custom',
+				last_error: null
+			}
 		});
 		// After save completes, modal closes - button is removed from DOM; just wait for aria-busy to clear
 		// or the button to be gone (either is acceptable proof that saving completed)
@@ -124,7 +128,7 @@ describe('SchedulerTab button variants', () => {
 
 	it('Retry button (on load error) has primary gradient class', async () => {
 		vi.mocked(auth.getUser).mockReturnValue(makeUser());
-		vi.mocked(api.listSchedulerTasks).mockRejectedValueOnce(new Error('load failed'));
+		vi.mocked(api.listScheduledTasks).mockRejectedValueOnce(new Error('load failed'));
 		render(SchedulerTab);
 		const retryBtn = await screen.findByRole('button', { name: 'Retry' });
 		expect(retryBtn.className).toContain('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]');
@@ -133,10 +137,10 @@ describe('SchedulerTab button variants', () => {
 	it('Save button text is static "Save" during loading — no text swap', async () => {
 		vi.mocked(auth.getUser).mockReturnValue(makeUser());
 		let resolve!: (v: unknown) => void;
-		vi.mocked(api.updateSchedulerTask).mockReturnValue(
-			new Promise((r) => {
+		vi.mocked(api.updateScheduledTask).mockReturnValue(
+			new Promise<Awaited<ReturnType<typeof api.updateScheduledTask>>>((r) => {
 				resolve = r as unknown as (v: unknown) => void;
-			})
+			}) as unknown as ReturnType<typeof api.updateScheduledTask>
 		);
 		render(SchedulerTab);
 		await waitFor(() => screen.getByText('Test Task'));
@@ -145,6 +149,6 @@ describe('SchedulerTab button variants', () => {
 		await fireEvent.click(saveBtn);
 		await waitFor(() => expect(saveBtn).toHaveAttribute('aria-busy', 'true'));
 		expect(saveBtn).toHaveTextContent('Save');
-		resolve({});
+		resolve({ data: {} });
 	});
 });
