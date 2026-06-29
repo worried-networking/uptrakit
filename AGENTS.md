@@ -318,6 +318,8 @@ build environments.
   communication changes, run the system integration tests (requires Docker and pre-built image):
   - `docker build -f docker/Dockerfile.test -t uptrakit-test:latest .`
   - `cargo test -p uptrakit-integration-tests -- --ignored`
+- **REST API contract**: after any backend route or REST-contract change, run `./scripts/regen-api.sh` and commit
+  `crates/ui/web-api/openapi.json` + `frontend/src/lib/api/generated/`; CI gates on staleness of both.
 - **Architecture is enforced by CI and existing gates**, not by a per-session MCP tool.
   The blocking gates are `cargo deny check` and `python3 ci/check_plugin_semantic_boundary.py`;
   `cargo machete` (unused dependencies) runs **advisory** in CI. Behavioral health — hotspots,

@@ -131,3 +131,19 @@ src/routes/
    `<h1 class="h1 mb-6">` — the same as all built-in pages.
 8. **Batch selection uses `SvelteSet<string>`.** The `svelte/prefer-svelte-reactivity` ESLint rule
    requires `SvelteSet` (not `Set`) for reactive multi-select state in Svelte 5 components.
+
+## Regenerating the API client
+
+The generated TypeScript client at `src/lib/api/generated/` is committed and must stay in sync with
+`crates/ui/web-api/openapi.json`. After any backend route or REST-contract change, regenerate both in one step:
+
+```sh
+./scripts/regen-api.sh
+```
+
+This runs `UPDATE_OPENAPI=1 cargo test -p uptrakit-web-api --all-features openapi_` to dump `openapi.json`,
+then `npm run gen:api` to regenerate the TypeScript client. Commit both `crates/ui/web-api/openapi.json`
+and `frontend/src/lib/api/generated/`. CI gates on staleness of both paths — a stale generated client or
+spec will fail the build.
+
+The generated directory is excluded from ESLint, Prettier, and CodeScene analysis (see `.eslintignore`, `.prettierignore`, `.codescene/exclusions.json`).

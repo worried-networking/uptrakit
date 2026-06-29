@@ -128,6 +128,23 @@ debouncing, you must also run the reload integration tests:
 docker build -f docker/Dockerfile.test -t uptrakit-test:latest . && cargo test -p uptrakit-integration-tests reexec -- --ignored
 ```
 
+### REST API contract staleness gates
+
+After any backend route change or REST-contract change, the OpenAPI spec and the generated TypeScript client must be
+regenerated and committed. CI (`backend-test:` job) gates on both:
+
+1. **Rust openapi\_ test** — `UPDATE_OPENAPI=1 cargo test -p uptrakit-web-api --all-features openapi_`
+   dumps `crates/ui/web-api/openapi.json`; CI diffs and fails if stale.
+2. **Generated TS client** — `npm run gen:api` (cwd: `frontend/`) regenerates `frontend/src/lib/api/generated/`; CI diffs and fails if stale.
+
+Run both in one command from the repo root:
+
+```sh
+./scripts/regen-api.sh
+```
+
+Then commit `crates/ui/web-api/openapi.json` and `frontend/src/lib/api/generated/`.
+
 ## Frontend (SvelteKit)
 
 ```sh
@@ -220,8 +237,8 @@ Architecture is now governed by:
 - **Behavioral health** — code-health grade, hotspots, change/temporal coupling — lives in the **CodeScene**
   dashboard (advisory, SaaS; see the architecture-health design spec).
 
-> **Why no module-cycle gate?** Rust's resolver already forbids circular *crate* dependencies at build time.
-> `cargo modules --acyclic` was evaluated and rejected: it analyses the *item* graph, so any idiomatic
+> **Why no module-cycle gate?** Rust's resolver already forbids circular _crate_ dependencies at build time.
+> `cargo modules --acyclic` was evaluated and rejected: it analyses the _item_ graph, so any idiomatic
 > `Debug`/`Clone`/`Display`/`fn new() -> Self` impl reads as a `Type ↔ Type::method` cycle — it flagged 66 of
 > 71 crates with zero genuine cycles and no flag suppresses it. There is no turnkey Rust module-cycle tool
 > worth gating on.
