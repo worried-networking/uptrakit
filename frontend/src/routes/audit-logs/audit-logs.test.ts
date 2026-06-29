@@ -46,8 +46,11 @@ const sampleEntry: AuditLogEntry = {
 	occurred_at: '2026-04-19T08:00:00Z'
 };
 
-function makePage(items: AuditLogEntry[]): PaginatedResponse<AuditLogEntry> {
-	return { items, total: items.length, page: 1, per_page: 25, total_pages: 1 };
+// The generated SDK fns resolve to `{ data }` (throwOnError=true). Wrap the paginated
+// page accordingly and type via the generated return shape (no `any`, no suppressions).
+function makePage(items: AuditLogEntry[]): Awaited<ReturnType<typeof api.listAuditLogs>> {
+	const page: PaginatedResponse<AuditLogEntry> = { items, total: items.length, page: 1, per_page: 25, total_pages: 1 };
+	return { data: page } as unknown as Awaited<ReturnType<typeof api.listAuditLogs>>;
 }
 
 describe('Audit Logs Page', () => {
@@ -142,7 +145,7 @@ describe('Button Migrations', () => {
 		await userEvent.click(applyBtn);
 		await waitFor(() =>
 			expect(vi.mocked(api.listAuditLogs)).toHaveBeenCalledWith(
-				expect.objectContaining({ page: 1, action_type: 'create' })
+				expect.objectContaining({ query: expect.objectContaining({ page: 1, action_type: 'create' }) })
 			)
 		);
 	});
@@ -158,7 +161,7 @@ describe('Button Migrations', () => {
 		await waitFor(() => {
 			expect((actionInput as HTMLInputElement).value).toBe('');
 			expect(vi.mocked(api.listAuditLogs)).toHaveBeenCalledWith(
-				expect.objectContaining({ page: 1, action_type: undefined })
+				expect.objectContaining({ query: expect.objectContaining({ page: 1, action_type: undefined }) })
 			);
 		});
 	});

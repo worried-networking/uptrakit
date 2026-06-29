@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { listNotificationLog, listNotificationChannels } from '$lib/api';
+	import { listLog, listChannels } from '$lib/api';
 	import type { NotificationLogEntry, NotificationChannelSummary, NotificationEventType } from '$lib/types';
 	import {
 		DataTable,
@@ -41,11 +41,13 @@
 		loading = true;
 		error = null;
 		try {
-			const [logRes, channelsRes] = await Promise.all([
-				listNotificationLog(currentPage),
-				listNotificationChannels(1, 1000)
+			const [{ data: logRes }, { data: channelsRes }] = await Promise.all([
+				listLog({ query: { page: currentPage } }),
+				listChannels({ query: { page: 1, per_page: 1000 } })
 			]);
-			entries = logRes.items;
+			// Bridge generated rows (optional nullable fields) to the hand-written
+			// NotificationLogEntry shape the table/template are built around.
+			entries = logRes.items as unknown as NotificationLogEntry[];
 			totalPages = logRes.total_pages;
 			totalItems = logRes.total;
 			channels = channelsRes.items;

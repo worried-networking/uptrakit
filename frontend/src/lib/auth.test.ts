@@ -16,7 +16,7 @@ import type { AuthResponse, RefreshResponse, User } from './types';
 
 vi.mock('./api', () => ({
 	me: vi.fn(),
-	refreshAccessToken: vi.fn(),
+	dedupedRefresh: vi.fn(),
 	login: vi.fn(),
 	register: vi.fn(),
 	logout: vi.fn(),
@@ -59,12 +59,12 @@ beforeEach(() => {
 
 describe('initialize', () => {
 	it('refreshes when no access token and loads user', async () => {
-		vi.mocked(api.refreshAccessToken).mockResolvedValue(sampleRefresh);
+		vi.mocked(api.dedupedRefresh).mockResolvedValue(sampleRefresh);
 		vi.mocked(api.me).mockResolvedValue({ data: sampleUser } as unknown as Awaited<ReturnType<typeof api.me>>);
 
 		await initialize();
 
-		expect(api.refreshAccessToken).toHaveBeenCalledTimes(1);
+		expect(api.dedupedRefresh).toHaveBeenCalledTimes(1);
 		expect(api.me).toHaveBeenCalledTimes(1);
 		expect(getAccessToken()).toBe(sampleRefresh.access_token);
 		expect(getUser()).toEqual(sampleUser);
@@ -72,11 +72,11 @@ describe('initialize', () => {
 	});
 
 	it('stays anonymous when refresh fails', async () => {
-		vi.mocked(api.refreshAccessToken).mockRejectedValue(new Error('refresh failed'));
+		vi.mocked(api.dedupedRefresh).mockRejectedValue(new Error('refresh failed'));
 
 		await initialize();
 
-		expect(api.refreshAccessToken).toHaveBeenCalledTimes(1);
+		expect(api.dedupedRefresh).toHaveBeenCalledTimes(1);
 		expect(api.me).not.toHaveBeenCalled();
 		expect(getAccessToken()).toBeNull();
 		expect(getUser()).toBeNull();
@@ -89,7 +89,7 @@ describe('initialize', () => {
 
 		await initialize();
 
-		expect(api.refreshAccessToken).not.toHaveBeenCalled();
+		expect(api.dedupedRefresh).not.toHaveBeenCalled();
 		expect(api.me).toHaveBeenCalledTimes(1);
 		expect(getAccessToken()).toBe('existing-token');
 		expect(getUser()).toEqual(sampleUser);

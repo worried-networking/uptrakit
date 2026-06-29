@@ -20,7 +20,7 @@
 			return;
 		}
 		try {
-			await confirmEmailChange(token);
+			await confirmEmailChange({ query: { token } });
 			status = 'success';
 			setTimeout(() => goto('/login'), 2000);
 		} catch (e) {
