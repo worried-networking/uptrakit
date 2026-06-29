@@ -176,7 +176,7 @@ russh = { version = "0.61" }
 russh-sftp = { version = "2" }
 ssh-key = { version = "0.6", default-features = false }
 ssh2-config = "0.7"
-tower-http = { version = "0.6", default-features = false }
+tower-http = { version = "0.7", default-features = false }
 nix = { version = "0.31", default-features = false }
 notify-debouncer-full = "0.7"
 # Plan 3 (reexec) consumers; declared here for license review
