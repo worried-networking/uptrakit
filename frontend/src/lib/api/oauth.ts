@@ -1,4 +1,6 @@
-import { authenticatedFetch, extractErrorMessage, request } from '$lib/api';
+import { authenticatedFetch, extractErrorMessage } from '$lib/api';
+import { getOauthSettings, updateOauthSettings } from './generated';
+import type { OAuthSettingsResponse, UpdateOAuthSettingsRequest } from './generated';
 
 // Internal helper — OAuth paths are NOT under /api/v1/, so we use authenticatedFetch
 // directly with absolute paths instead of the BASE-prefixed request() helper.
@@ -138,28 +140,17 @@ export async function revokeMyConsent(consentId: string): Promise<void> {
 	});
 }
 
-export interface OAuthSettingsResponse {
-	mcp_enabled: boolean;
-	dcr_enabled: boolean;
-	cimd_enabled: boolean;
-	canonical_host: string | null;
-	restart_required: boolean;
+// The OAuth global-settings endpoints ARE under /api/v1, so they route through the
+// generated SDK (auth/ETag/refresh interceptors applied by the configured client) —
+// unlike the OAuth client/consent paths above, which live outside /api/v1.
+export type { OAuthSettingsResponse, UpdateOAuthSettingsRequest };
+
+export async function getOAuthSettings(): Promise<OAuthSettingsResponse> {
+	const { data } = await getOauthSettings();
+	return data;
 }
 
-export interface UpdateOAuthSettingsRequest {
-	mcp_enabled?: boolean;
-	dcr_enabled?: boolean;
-	cimd_enabled?: boolean;
-	canonical_host?: string;
-}
-
-export function getOAuthSettings(): Promise<OAuthSettingsResponse> {
-	return request('/global-settings/oauth');
-}
-
-export function updateOAuthSettings(body: UpdateOAuthSettingsRequest): Promise<OAuthSettingsResponse> {
-	return request('/global-settings/oauth', {
-		method: 'PUT',
-		body: JSON.stringify(body)
-	});
+export async function updateOAuthSettings(body: UpdateOAuthSettingsRequest): Promise<OAuthSettingsResponse> {
+	const { data } = await updateOauthSettings({ body });
+	return data;
 }

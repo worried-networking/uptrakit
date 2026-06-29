@@ -1,31 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { _resetSettingsEtagCacheForTests, request } from '$lib/api';
-// Import the REAL setAccessToken — do NOT vi.mock('./token-store.svelte') in this file.
-// The existing api.test.ts already uses a top-level vi.mock there; adding the same mock
-// here would prevent the onTokenChange listener (registered in api.ts at module init)
-// from ever firing, making cases 6–9 vacuous.
+// As of Task 12a the settings-ETag auto-cache lives solely in api/client.ts (the configured
+// client's request/response interceptors), reached here via the `$lib/api` barrel's `apiClient`.
+// The former `request()` helper these cases used to drive has been removed; the behaviour is
+// identical, so the cases now exercise the canonical interceptor path through `apiClient`.
+import { apiClient, _resetSettingsEtagCacheForTests } from '$lib/api';
+// Import the REAL setAccessToken — do NOT vi.mock('$lib/token-store.svelte') in this file.
+// Mocking it would prevent the onTokenChange listener (registered in api/client.ts at module
+// init) from ever firing, making the sub-change cache-wipe cases (6–9) vacuous.
 import { setAccessToken } from '$lib/token-store.svelte';
-
-interface CallEntry {
-	url: string;
-	init: RequestInit;
-}
-
-function captureFetch(responses: Map<string, () => Response>): { calls: CallEntry[]; fn: typeof fetch } {
-	const calls: CallEntry[] = [];
-	const fn = vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
-		const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
-		const method = (init.method ?? 'GET').toUpperCase();
-		calls.push({ url, init });
-		const key = `${method} ${url}`;
-		const factory = responses.get(key);
-		if (!factory) {
-			throw new Error(`Unexpected fetch: ${key}`);
-		}
-		return factory();
-	});
-	return { calls, fn: fn as unknown as typeof fetch };
-}
 
 function jsonResponse(body: unknown, init: { status?: number; etag?: string | null } = {}): Response {
 	const headers = new Headers({ 'Content-Type': 'application/json' });
@@ -50,21 +32,14 @@ function makeJwtBase64Url(sub: string): string {
 	return `${header}.${payload}.sig`;
 }
 
-function getHeader(init: RequestInit, name: string): string | null {
-	const headers = init.headers;
-	if (headers === undefined) return null;
-	if (headers instanceof Headers) return headers.get(name);
-	if (Array.isArray(headers)) {
-		const found = headers.find(([k]) => k.toLowerCase() === name.toLowerCase());
-		return found ? found[1] : null;
-	}
-	for (const [k, v] of Object.entries(headers as Record<string, string>)) {
-		if (k.toLowerCase() === name.toLowerCase()) return v;
-	}
-	return null;
+// The configured client calls fetch with a single Request argument; read the If-Match
+// header straight off the captured Request.
+function ifMatchOf(spy: ReturnType<typeof vi.spyOn>, callIndex: number): string | null {
+	const req = spy.mock.calls[callIndex][0] as Request;
+	return req.headers.get('if-match');
 }
 
-describe('settings ETag auto-injection', () => {
+describe('settings ETag auto-injection (via configured client interceptors)', () => {
 	beforeEach(() => {
 		_resetSettingsEtagCacheForTests();
 		setAccessToken(null);
@@ -73,222 +48,160 @@ describe('settings ETag auto-injection', () => {
 
 	afterEach(() => {
 		setAccessToken(null);
-		vi.unstubAllGlobals();
+		vi.restoreAllMocks();
 	});
 
 	it('auto-injects If-Match on PUT after GET captures ETag', async () => {
-		const { calls, fn } = captureFetch(
-			new Map<string, () => Response>([
-				['GET /api/v1/global-settings/network', () => jsonResponse({ ok: true }, { etag: 'v1' })],
-				['PUT /api/v1/global-settings/network', () => jsonResponse({ ok: true }, { etag: 'v2' })]
-			])
-		);
-		vi.stubGlobal('fetch', fn);
+		const spy = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValueOnce(jsonResponse({ ok: true }, { etag: 'v1' }))
+			.mockResolvedValueOnce(jsonResponse({ ok: true }, { etag: 'v2' }));
 
-		await request('/global-settings/network');
-		await request('/global-settings/network', { method: 'PUT', body: JSON.stringify({ foo: 'bar' }) });
+		await apiClient.get({ url: '/global-settings/network' });
+		await apiClient.put({ url: '/global-settings/network', body: { foo: 'bar' } });
 
-		expect(calls).toHaveLength(2);
-		expect(getHeader(calls[1].init, 'if-match')).toBe('v1');
+		expect(spy).toHaveBeenCalledTimes(2);
+		expect(ifMatchOf(spy, 1)).toBe('v1');
 	});
 
 	it('honors caller-supplied If-Match verbatim (plain object headers)', async () => {
-		const { calls, fn } = captureFetch(
-			new Map<string, () => Response>([
-				['GET /api/v1/global-settings/network', () => jsonResponse({ ok: true }, { etag: 'v1' })],
-				['PUT /api/v1/global-settings/network', () => jsonResponse({ ok: true })]
-			])
-		);
-		vi.stubGlobal('fetch', fn);
+		const spy = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValueOnce(jsonResponse({ ok: true }, { etag: 'v1' }))
+			.mockResolvedValueOnce(jsonResponse({ ok: true }));
 
-		await request('/global-settings/network');
-		await request('/global-settings/network', {
-			method: 'PUT',
-			body: JSON.stringify({ foo: 'bar' }),
-			headers: { 'if-match': 'custom' }
-		});
+		await apiClient.get({ url: '/global-settings/network' });
+		await apiClient.put({ url: '/global-settings/network', body: { foo: 'bar' }, headers: { 'if-match': 'custom' } });
 
-		expect(getHeader(calls[1].init, 'if-match')).toBe('custom');
+		expect(ifMatchOf(spy, 1)).toBe('custom');
 	});
 
 	it('honors caller-supplied If-Match verbatim (Headers instance)', async () => {
-		const { calls, fn } = captureFetch(
-			new Map<string, () => Response>([
-				['GET /api/v1/global-settings/network', () => jsonResponse({ ok: true }, { etag: 'v1' })],
-				['PUT /api/v1/global-settings/network', () => jsonResponse({ ok: true })]
-			])
-		);
-		vi.stubGlobal('fetch', fn);
+		const spy = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValueOnce(jsonResponse({ ok: true }, { etag: 'v1' }))
+			.mockResolvedValueOnce(jsonResponse({ ok: true }));
 
-		await request('/global-settings/network');
-		await request('/global-settings/network', {
-			method: 'PUT',
-			body: JSON.stringify({ foo: 'bar' }),
+		await apiClient.get({ url: '/global-settings/network' });
+		await apiClient.put({
+			url: '/global-settings/network',
+			body: { foo: 'bar' },
 			headers: new Headers({ 'if-match': 'custom' })
 		});
 
-		expect(getHeader(calls[1].init, 'if-match')).toBe('custom');
+		expect(ifMatchOf(spy, 1)).toBe('custom');
 	});
 
 	it('leaves cache untouched when PUT response is not OK', async () => {
-		const { calls, fn } = captureFetch(
-			new Map<string, () => Response>([
-				['GET /api/v1/global-settings/network', () => jsonResponse({ ok: true }, { etag: 'v1' })],
-				[
-					'PUT /api/v1/global-settings/network',
-					() => new Response('{"error":"stale"}', { status: 428, headers: { 'Content-Type': 'application/json' } })
-				],
-				['PUT /api/v1/global-settings/network#2', () => jsonResponse({ ok: true })]
-			])
-		);
-		vi.stubGlobal('fetch', fn);
+		const spy = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValueOnce(jsonResponse({ ok: true }, { etag: 'v1' })) // GET → caches v1
+			.mockResolvedValueOnce(
+				new Response('{"error":"stale"}', { status: 428, headers: { 'Content-Type': 'application/json' } })
+			) // failed PUT → must NOT overwrite cache
+			.mockResolvedValueOnce(jsonResponse({ ok: true }, { etag: 'v2' })); // retry PUT succeeds
 
-		await request('/global-settings/network');
-		await expect(
-			request('/global-settings/network', { method: 'PUT', body: JSON.stringify({ foo: 'bar' }) })
-		).rejects.toMatchObject({ status: 428 });
+		await apiClient.get({ url: '/global-settings/network' });
+		await expect(apiClient.put({ url: '/global-settings/network', body: { foo: 'bar' } })).rejects.toMatchObject({
+			status: 428
+		});
 
 		// Second PUT — succeeds. Must still carry v1 (the failed PUT didn't overwrite the cache).
-		const responses = new Map<string, () => Response>([
-			['PUT /api/v1/global-settings/network', () => jsonResponse({ ok: true }, { etag: 'v2' })]
-		]);
-		const { calls: calls2, fn: fn2 } = captureFetch(responses);
-		vi.stubGlobal('fetch', fn2);
-		await request('/global-settings/network', { method: 'PUT', body: JSON.stringify({ foo: 'bar' }) });
+		await apiClient.put({ url: '/global-settings/network', body: { foo: 'bar' } });
 
-		expect(getHeader(calls2[0].init, 'if-match')).toBe('v1');
-		expect(calls).toHaveLength(2);
+		expect(ifMatchOf(spy, 2)).toBe('v1');
+		expect(spy).toHaveBeenCalledTimes(3);
 	});
 
 	it('isolates global and tenant scopes', async () => {
-		const { calls, fn } = captureFetch(
-			new Map<string, () => Response>([
-				['GET /api/v1/settings/access', () => jsonResponse({ ok: true }, { etag: 't1' })],
-				['GET /api/v1/global-settings/network', () => jsonResponse({ ok: true }, { etag: 'g1' })],
-				['PUT /api/v1/global-settings/network', () => jsonResponse({ ok: true })]
-			])
-		);
-		vi.stubGlobal('fetch', fn);
+		const spy = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValueOnce(jsonResponse({ ok: true }, { etag: 't1' })) // GET tenant
+			.mockResolvedValueOnce(jsonResponse({ ok: true }, { etag: 'g1' })) // GET global
+			.mockResolvedValueOnce(jsonResponse({ ok: true })); // PUT global
 
-		await request('/settings/access');
-		await request('/global-settings/network');
-		await request('/global-settings/network', { method: 'PUT', body: JSON.stringify({}) });
+		await apiClient.get({ url: '/settings/access' });
+		await apiClient.get({ url: '/global-settings/network' });
+		await apiClient.put({ url: '/global-settings/network', body: {} });
 
-		expect(getHeader(calls[2].init, 'if-match')).toBe('g1');
+		expect(ifMatchOf(spy, 2)).toBe('g1');
 	});
 
 	it('resets both cache slots when JWT sub claim changes', async () => {
-		const { fn } = captureFetch(
-			new Map<string, () => Response>([
-				['GET /api/v1/global-settings/network', () => jsonResponse({ ok: true }, { etag: 'g1' })],
-				['GET /api/v1/settings/access', () => jsonResponse({ ok: true }, { etag: 't1' })]
-			])
-		);
-		vi.stubGlobal('fetch', fn);
+		const spy = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValueOnce(jsonResponse({ ok: true }, { etag: 'g1' })) // GET global
+			.mockResolvedValueOnce(jsonResponse({ ok: true }, { etag: 't1' })) // GET tenant
+			.mockResolvedValueOnce(jsonResponse({ ok: true })) // PUT global
+			.mockResolvedValueOnce(jsonResponse({ ok: true })); // PUT tenant
 
 		setAccessToken(makeJwt('user-a'));
-		await request('/global-settings/network');
-		await request('/settings/access');
+		await apiClient.get({ url: '/global-settings/network' });
+		await apiClient.get({ url: '/settings/access' });
 
-		// Switching sub claim wipes the cache. A subsequent PUT must NOT carry an If-Match.
+		// Switching sub claim wipes the cache. Subsequent PUTs must NOT carry an If-Match.
 		setAccessToken(makeJwt('user-b'));
 
-		const putFetch = captureFetch(
-			new Map<string, () => Response>([
-				['PUT /api/v1/global-settings/network', () => jsonResponse({ ok: true })],
-				['PUT /api/v1/settings/access', () => jsonResponse({ ok: true })]
-			])
-		);
-		vi.stubGlobal('fetch', putFetch.fn);
+		await apiClient.put({ url: '/global-settings/network', body: {} });
+		await apiClient.put({ url: '/settings/access', body: {} });
 
-		await request('/global-settings/network', { method: 'PUT', body: JSON.stringify({}) });
-		await request('/settings/access', { method: 'PUT', body: JSON.stringify({}) });
-
-		expect(getHeader(putFetch.calls[0].init, 'if-match')).toBeNull();
-		expect(getHeader(putFetch.calls[1].init, 'if-match')).toBeNull();
+		expect(ifMatchOf(spy, 2)).toBeNull();
+		expect(ifMatchOf(spy, 3)).toBeNull();
 	});
 
 	it('preserves cache across silent refresh (same sub)', async () => {
-		const { fn } = captureFetch(
-			new Map<string, () => Response>([
-				['GET /api/v1/global-settings/network', () => jsonResponse({ ok: true }, { etag: 'g1' })]
-			])
-		);
-		vi.stubGlobal('fetch', fn);
+		const spy = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValueOnce(jsonResponse({ ok: true }, { etag: 'g1' })) // GET global
+			.mockResolvedValueOnce(jsonResponse({ ok: true })); // PUT global
 
 		setAccessToken(makeJwt('user-a', 'one'));
-		await request('/global-settings/network');
+		await apiClient.get({ url: '/global-settings/network' });
 
 		// Different token string, same sub → silent refresh. Cache must persist.
 		setAccessToken(makeJwt('user-a', 'two'));
 
-		const putFetch = captureFetch(
-			new Map<string, () => Response>([['PUT /api/v1/global-settings/network', () => jsonResponse({ ok: true })]])
-		);
-		vi.stubGlobal('fetch', putFetch.fn);
+		await apiClient.put({ url: '/global-settings/network', body: {} });
 
-		await request('/global-settings/network', { method: 'PUT', body: JSON.stringify({}) });
-
-		expect(getHeader(putFetch.calls[0].init, 'if-match')).toBe('g1');
+		expect(ifMatchOf(spy, 1)).toBe('g1');
 	});
 
 	it('handles a malformed JWT without throwing or wiping the cache', async () => {
-		const { fn } = captureFetch(
-			new Map<string, () => Response>([
-				['GET /api/v1/global-settings/network', () => jsonResponse({ ok: true }, { etag: 'g1' })]
-			])
-		);
-		vi.stubGlobal('fetch', fn);
+		vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(jsonResponse({ ok: true }, { etag: 'g1' }));
 
 		// Prime the cache with a real token first so we have something to check is preserved.
 		setAccessToken(makeJwt('user-a'));
-		await request('/global-settings/network');
+		await apiClient.get({ url: '/global-settings/network' });
 
-		// Malformed JWT — decoder returns null. Previous token also decodes to user-a → null,
-		// so subs differ (user-a → null), cache wipes. To exercise the no-throw path we then
-		// set another malformed JWT (null → null, no wipe).
+		// Malformed JWTs — the decoder returns null and must not throw inside the listener.
 		expect(() => setAccessToken('not.a.jwt')).not.toThrow();
 		expect(() => setAccessToken('also-not-a-jwt')).not.toThrow();
-
-		// Final state: both prev (null) and next (null) decode to null → equal → no further wipe.
-		// We cannot inspect the cache directly, but the absence of a thrown exception in the
-		// listener path is the contract this case asserts.
 	});
 
 	it('resets the cache when sub changes across base64url-encoded JWTs (non-vacuous decoder coverage)', async () => {
-		const { fn } = captureFetch(
-			new Map<string, () => Response>([
-				['GET /api/v1/global-settings/network', () => jsonResponse({ ok: true }, { etag: 'g1' })],
-				['GET /api/v1/settings/access', () => jsonResponse({ ok: true }, { etag: 't1' })]
-			])
-		);
-		vi.stubGlobal('fetch', fn);
+		const spy = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValueOnce(jsonResponse({ ok: true }, { etag: 'g1' })) // GET global
+			.mockResolvedValueOnce(jsonResponse({ ok: true }, { etag: 't1' })) // GET tenant
+			.mockResolvedValueOnce(jsonResponse({ ok: true })) // PUT global
+			.mockResolvedValueOnce(jsonResponse({ ok: true })); // PUT tenant
 
 		const jwtA = makeJwtBase64Url('user-a');
 		const jwtB = makeJwtBase64Url('user-b');
 
 		// Sanity: the payload segment really did receive base64url-only chars.
-		const payloadA = jwtA.split('.')[1];
-		expect(payloadA).toMatch(/[-_]/);
+		expect(jwtA.split('.')[1]).toMatch(/[-_]/);
 
 		setAccessToken(jwtA);
-		await request('/global-settings/network');
-		await request('/settings/access');
+		await apiClient.get({ url: '/global-settings/network' });
+		await apiClient.get({ url: '/settings/access' });
 
 		setAccessToken(jwtB);
 
-		const putFetch = captureFetch(
-			new Map<string, () => Response>([
-				['PUT /api/v1/global-settings/network', () => jsonResponse({ ok: true })],
-				['PUT /api/v1/settings/access', () => jsonResponse({ ok: true })]
-			])
-		);
-		vi.stubGlobal('fetch', putFetch.fn);
+		await apiClient.put({ url: '/global-settings/network', body: {} });
+		await apiClient.put({ url: '/settings/access', body: {} });
 
-		await request('/global-settings/network', { method: 'PUT', body: JSON.stringify({}) });
-		await request('/settings/access', { method: 'PUT', body: JSON.stringify({}) });
-
-		expect(getHeader(putFetch.calls[0].init, 'if-match')).toBeNull();
-		expect(getHeader(putFetch.calls[1].init, 'if-match')).toBeNull();
+		expect(ifMatchOf(spy, 2)).toBeNull();
+		expect(ifMatchOf(spy, 3)).toBeNull();
 	});
 });

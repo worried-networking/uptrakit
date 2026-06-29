@@ -45,7 +45,7 @@ export async function initialize() {
 	try {
 		if (!getAccessToken()) {
 			try {
-				const refreshed = await api.refreshAccessToken();
+				const refreshed = await api.dedupedRefresh();
 				setAccessToken(refreshed.access_token);
 			} catch {
 				user = null;

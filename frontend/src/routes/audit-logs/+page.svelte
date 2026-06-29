@@ -130,9 +130,12 @@
 			action_kind: (filterActionKind as 'stateful' | 'event') || undefined
 		};
 		try {
-			const fn = activeTab === 'system' ? listSystemAuditLogs : listAuditLogs;
-			const res = await fn(params);
-			items = res.items;
+			const { data: res } =
+				activeTab === 'system' ? await listSystemAuditLogs({ query: params }) : await listAuditLogs({ query: params });
+			// Bridge the generated response rows (action_kind: string, snapshots: unknown)
+			// to the richer hand-written AuditLogEntry the detail template is built around.
+			// Matches the existing `rowValue as unknown as AuditLogEntry` cast below.
+			items = res.items as unknown as AuditLogEntry[];
 			currentPage = res.page;
 			totalPages = res.total_pages;
 			totalItems = res.total;

@@ -1,10 +1,12 @@
 <script lang="ts">
 	import {
-		listNotificationChannels,
-		listNotificationRules,
-		createNotificationRule,
-		updateNotificationRule,
-		deleteNotificationRule
+		listChannels,
+		listRules,
+		createRule,
+		updateRule,
+		deleteRule,
+		type CreateNotificationRuleRequest,
+		type UpdateNotificationRuleRequest
 	} from '$lib/api';
 	import type { NotificationChannelSummary, NotificationRuleResponse, NotificationEventType } from '$lib/types';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
@@ -61,11 +63,13 @@
 	async function loadData() {
 		loading = true;
 		try {
-			const [rulesRes, channelsRes] = await Promise.all([
-				listNotificationRules({ page: currentPage }),
-				listNotificationChannels(1, 1000)
+			const [{ data: rulesRes }, { data: channelsRes }] = await Promise.all([
+				listRules({ query: { page: currentPage } }),
+				listChannels({ query: { page: 1, per_page: 1000 } })
 			]);
-			rules = rulesRes.items;
+			// Bridge generated rows (optional nullable fields) to the hand-written
+			// NotificationRuleResponse shape the table/template are built around.
+			rules = rulesRes.items as unknown as NotificationRuleResponse[];
 			totalPages = rulesRes.total_pages;
 			totalCount = rulesRes.total;
 			channels = channelsRes.items;
@@ -115,10 +119,10 @@
 			if (form.plugin_type) data.plugin_type = form.plugin_type;
 
 			if (editingRule) {
-				await updateNotificationRule(editingRule.id, data);
+				await updateRule({ path: { id: editingRule.id }, body: data as UpdateNotificationRuleRequest });
 				onSuccess('Rule updated');
 			} else {
-				await createNotificationRule(data as Parameters<typeof createNotificationRule>[0]);
+				await createRule({ body: data as CreateNotificationRuleRequest });
 				onSuccess('Rule created');
 			}
 			showModal = false;
@@ -133,7 +137,7 @@
 	async function confirmDelete() {
 		if (!deleteConfirm) return;
 		try {
-			await deleteNotificationRule(deleteConfirm.id);
+			await deleteRule({ path: { id: deleteConfirm.id } });
 			onSuccess('Rule deleted');
 			deleteConfirm = null;
 			await loadData();

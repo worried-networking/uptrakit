@@ -9,8 +9,8 @@ vi.mock('$lib/api', () => ({
 	listSystemEnrollmentTokens: vi.fn(),
 	createSystemEnrollmentToken: vi.fn(),
 	revokeSystemEnrollmentToken: vi.fn(),
-	listNotificationLog: vi.fn(),
-	listNotificationChannels: vi.fn(),
+	listLog: vi.fn(),
+	listChannels: vi.fn(),
 	listPluginConfigs: vi.fn(),
 	createPluginConfig: vi.fn(),
 	updatePluginConfig: vi.fn(),
@@ -73,20 +73,12 @@ describe('settings panels design-language alignment', () => {
 				total_pages: 1
 			}
 		} as unknown as Awaited<ReturnType<typeof api.listSystemEnrollmentTokens>>);
-		vi.mocked(api.listNotificationLog).mockResolvedValue({
-			items: [],
-			total: 0,
-			page: 1,
-			per_page: 50,
-			total_pages: 1
-		});
-		vi.mocked(api.listNotificationChannels).mockResolvedValue({
-			items: [],
-			total: 0,
-			page: 1,
-			per_page: 50,
-			total_pages: 1
-		} as never);
+		vi.mocked(api.listLog).mockResolvedValue({
+			data: { items: [], total: 0, page: 1, per_page: 50, total_pages: 1 }
+		} as unknown as Awaited<ReturnType<typeof api.listLog>>);
+		vi.mocked(api.listChannels).mockResolvedValue({
+			data: { items: [], total: 0, page: 1, per_page: 50, total_pages: 1 }
+		} as unknown as Awaited<ReturnType<typeof api.listChannels>>);
 		vi.mocked(api.listPluginTypes).mockResolvedValue({ data: [] } as unknown as Awaited<
 			ReturnType<typeof api.listPluginTypes>
 		>);
@@ -513,20 +505,18 @@ describe('settings panels design-language alignment', () => {
 
 	it('uses shared loading treatment for notification log while data is pending', async () => {
 		const logDeferred = deferred<{
-			items: Array<Record<string, unknown>>;
-			total: number;
-			page: number;
-			per_page: number;
-			total_pages: number;
+			data: {
+				items: Array<Record<string, unknown>>;
+				total: number;
+				page: number;
+				per_page: number;
+				total_pages: number;
+			};
 		}>();
-		vi.mocked(api.listNotificationLog).mockReturnValue(logDeferred.promise as never);
-		vi.mocked(api.listNotificationChannels).mockResolvedValue({
-			items: [],
-			total: 0,
-			page: 1,
-			per_page: 50,
-			total_pages: 1
-		} as never);
+		vi.mocked(api.listLog).mockReturnValue(logDeferred.promise as never);
+		vi.mocked(api.listChannels).mockResolvedValue({
+			data: { items: [], total: 0, page: 1, per_page: 50, total_pages: 1 }
+		} as unknown as Awaited<ReturnType<typeof api.listChannels>>);
 
 		render(NotificationLogView);
 
@@ -538,11 +528,7 @@ describe('settings panels design-language alignment', () => {
 		).toBeInTheDocument();
 
 		logDeferred.resolve({
-			items: [],
-			total: 0,
-			page: 1,
-			per_page: 50,
-			total_pages: 1
+			data: { items: [], total: 0, page: 1, per_page: 50, total_pages: 1 }
 		});
 
 		await waitFor(() => {
@@ -551,14 +537,10 @@ describe('settings panels design-language alignment', () => {
 	});
 
 	it('uses shared empty and error treatments for notification log', async () => {
-		vi.mocked(api.listNotificationLog).mockRejectedValue(new Error('boom'));
-		vi.mocked(api.listNotificationChannels).mockResolvedValue({
-			items: [],
-			total: 0,
-			page: 1,
-			per_page: 50,
-			total_pages: 1
-		} as never);
+		vi.mocked(api.listLog).mockRejectedValue(new Error('boom'));
+		vi.mocked(api.listChannels).mockResolvedValue({
+			data: { items: [], total: 0, page: 1, per_page: 50, total_pages: 1 }
+		} as unknown as Awaited<ReturnType<typeof api.listChannels>>);
 
 		render(NotificationLogView);
 
@@ -567,62 +549,11 @@ describe('settings panels design-language alignment', () => {
 	});
 
 	it('uses shared table language and footer for notification log pagination', async () => {
-		vi.mocked(api.listNotificationLog).mockResolvedValue({
-			items: [
-				{
-					id: 'log-1',
-					event_type: 'update_available',
-					channel_id: 'chan-1',
-					rule_id: 'rule-1',
-					status: 'delivered',
-					created_at: '2026-04-01T11:00:00Z',
-					delivered_at: '2026-04-01T11:01:00Z',
-					error_message: null
-				}
-			],
-			total: 2,
-			page: 1,
-			per_page: 1,
-			total_pages: 2
-		});
-		vi.mocked(api.listNotificationChannels).mockResolvedValue({
-			items: [
-				{
-					id: 'chan-1',
-					name: 'Ops Email'
-				}
-			],
-			total: 1,
-			page: 1,
-			per_page: 50,
-			total_pages: 1
-		} as never);
-
-		render(NotificationLogView);
-
-		await screen.findByText('Update Available');
-		expect(document.querySelector('[data-ui="data-table"]')).toBeInTheDocument();
-		expect(document.querySelector('[data-ui="table-footer-bar"]')).toBeInTheDocument();
-		expect(screen.getByText('2 total')).toBeInTheDocument();
-	});
-
-	it('loads notification log only once per page change', async () => {
-		const pageTwoDeferred = deferred<{
-			items: Array<Record<string, unknown>>;
-			total: number;
-			page: number;
-			per_page: number;
-			total_pages: number;
-		}>();
-
-		vi.mocked(api.listNotificationLog).mockImplementation((page = 1) => {
-			if (page === 2) {
-				return pageTwoDeferred.promise as never;
-			}
-			return Promise.resolve({
+		vi.mocked(api.listLog).mockResolvedValue({
+			data: {
 				items: [
 					{
-						id: 'log-page-1',
+						id: 'log-1',
 						event_type: 'update_available',
 						channel_id: 'chan-1',
 						rule_id: 'rule-1',
@@ -636,20 +567,72 @@ describe('settings panels design-language alignment', () => {
 				page: 1,
 				per_page: 1,
 				total_pages: 2
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listLog>>);
+		vi.mocked(api.listChannels).mockResolvedValue({
+			data: {
+				items: [{ id: 'chan-1', name: 'Ops Email' }],
+				total: 1,
+				page: 1,
+				per_page: 50,
+				total_pages: 1
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listChannels>>);
+
+		render(NotificationLogView);
+
+		await screen.findByText('Update Available');
+		expect(document.querySelector('[data-ui="data-table"]')).toBeInTheDocument();
+		expect(document.querySelector('[data-ui="table-footer-bar"]')).toBeInTheDocument();
+		expect(screen.getByText('2 total')).toBeInTheDocument();
+	});
+
+	it('loads notification log only once per page change', async () => {
+		const pageTwoDeferred = deferred<{
+			data: {
+				items: Array<Record<string, unknown>>;
+				total: number;
+				page: number;
+				per_page: number;
+				total_pages: number;
+			};
+		}>();
+
+		vi.mocked(api.listLog).mockImplementation((opts) => {
+			const page = (opts as { query?: { page?: number } } | undefined)?.query?.page ?? 1;
+			if (page === 2) {
+				return pageTwoDeferred.promise as never;
+			}
+			return Promise.resolve({
+				data: {
+					items: [
+						{
+							id: 'log-page-1',
+							event_type: 'update_available',
+							channel_id: 'chan-1',
+							rule_id: 'rule-1',
+							status: 'delivered',
+							created_at: '2026-04-01T11:00:00Z',
+							delivered_at: '2026-04-01T11:01:00Z',
+							error_message: null
+						}
+					],
+					total: 2,
+					page: 1,
+					per_page: 1,
+					total_pages: 2
+				}
 			}) as never;
 		});
-		vi.mocked(api.listNotificationChannels).mockResolvedValue({
-			items: [
-				{
-					id: 'chan-1',
-					name: 'Ops Email'
-				}
-			],
-			total: 1,
-			page: 1,
-			per_page: 50,
-			total_pages: 1
-		} as never);
+		vi.mocked(api.listChannels).mockResolvedValue({
+			data: {
+				items: [{ id: 'chan-1', name: 'Ops Email' }],
+				total: 1,
+				page: 1,
+				per_page: 50,
+				total_pages: 1
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listChannels>>);
 
 		render(NotificationLogView);
 
@@ -657,27 +640,29 @@ describe('settings panels design-language alignment', () => {
 		await fireEvent.click(screen.getByRole('button', { name: '2' }));
 
 		await waitFor(() => {
-			expect(vi.mocked(api.listNotificationLog)).toHaveBeenCalledTimes(2);
-			expect(vi.mocked(api.listNotificationLog)).toHaveBeenLastCalledWith(2);
+			expect(vi.mocked(api.listLog)).toHaveBeenCalledTimes(2);
+			expect(vi.mocked(api.listLog)).toHaveBeenLastCalledWith({ query: { page: 2 } });
 		});
 
 		pageTwoDeferred.resolve({
-			items: [
-				{
-					id: 'log-page-2',
-					event_type: 'update_completed',
-					channel_id: 'chan-1',
-					rule_id: 'rule-1',
-					status: 'delivered',
-					created_at: '2026-04-02T11:00:00Z',
-					delivered_at: '2026-04-02T11:01:00Z',
-					error_message: null
-				}
-			],
-			total: 2,
-			page: 2,
-			per_page: 1,
-			total_pages: 2
+			data: {
+				items: [
+					{
+						id: 'log-page-2',
+						event_type: 'update_completed',
+						channel_id: 'chan-1',
+						rule_id: 'rule-1',
+						status: 'delivered',
+						created_at: '2026-04-02T11:00:00Z',
+						delivered_at: '2026-04-02T11:01:00Z',
+						error_message: null
+					}
+				],
+				total: 2,
+				page: 2,
+				per_page: 1,
+				total_pages: 2
+			}
 		});
 
 		expect(await screen.findByText('Update Completed')).toBeInTheDocument();

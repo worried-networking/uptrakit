@@ -68,7 +68,7 @@
 		profileSaving = true;
 		profileError = '';
 		try {
-			await updateProfile(user.id, { first_name: firstName, last_name: lastName });
+			await updateProfile({ path: { id: user.id }, body: { first_name: firstName, last_name: lastName } });
 			showSuccess('Profile updated');
 		} catch (e) {
 			profileError = e instanceof Error ? e.message : 'Failed to update profile';
@@ -89,9 +89,9 @@
 		emailChanging = true;
 		emailError = '';
 		try {
-			await initiateEmailChange(user.id, {
-				new_email: newEmail,
-				current_password: emailCurrentPassword
+			await initiateEmailChange({
+				path: { id: user.id },
+				body: { new_email: newEmail, current_password: emailCurrentPassword }
 			});
 			newEmail = '';
 			emailCurrentPassword = '';
@@ -109,7 +109,7 @@
 	async function handleCancelEmailChange() {
 		if (!user) return;
 		try {
-			await cancelEmailChange(user.id);
+			await cancelEmailChange({ path: { id: user.id } });
 			showSuccess('Email change cancelled');
 			await initialize();
 			showChangeEmailModal = false;
@@ -146,9 +146,9 @@
 		passwordError = '';
 		passwordSaving = true;
 		try {
-			await changePassword(user.id, {
-				current_password: currentPassword,
-				new_password: newPassword
+			await changePassword({
+				path: { id: user.id },
+				body: { current_password: currentPassword, new_password: newPassword }
 			});
 			closePasswordModal();
 			showSuccess('Password changed. Other sessions have been signed out.');
