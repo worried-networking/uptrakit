@@ -9,7 +9,7 @@
 
 import { client } from './generated/client.gen';
 import { getAccessToken, setAccessToken, setSessionExpired, onTokenChange } from '../token-store.svelte';
-import { extractApiError } from './errors';
+import { ApiError, extractApiError } from './errors';
 import type { Client, ResolvedRequestOptions } from './generated/client/types.gen';
 
 // ── Base URL resolution ───────────────────────────────────────────────────────
@@ -252,6 +252,17 @@ function isTimeoutOrAbort(err: unknown): boolean {
 	return err instanceof DOMException && (err.name === 'TimeoutError' || err.name === 'AbortError');
 }
 
+// Maps network-level errors thrown by fetch() to user-facing Error instances.
+// DOMException(TimeoutError/AbortError) → 'Request timed out'
+// TypeError (network failure) → 'Network error: Unable to connect to the server.'
+// Other: re-thrown as-is (already an Error or ApiError from the interceptors).
+function translateFetchError(err: unknown): Error {
+	if (isTimeoutOrAbort(err)) return new Error('Request timed out');
+	if (err instanceof TypeError) return new Error('Network error: Unable to connect to the server.');
+	if (err instanceof Error) return err;
+	return new Error(String(err));
+}
+
 // Ported from api.ts:338-360. Maps a refresh failure to a user-facing Error and
 // performs the matching session side effect. The default (real 4xx auth failure)
 // clears the token and leaves the session-expired banner raised.
@@ -297,15 +308,44 @@ async function refreshAndRetry(options: RequestArgs): Promise<unknown> {
 		// Single retry. The request interceptor re-applies the new Bearer; the client
 		// rebuilds the body from options.body, so the consumed stream is irrelevant.
 		return unwrap((await client.request({ ...options, throwOnError: false })) as FieldsResult);
+	} catch (retryErr) {
+		throw translateFetchError(retryErr);
 	} finally {
 		setSessionExpired(false);
 	}
 }
 
 async function requestWithRefresh(options: RequestArgs): Promise<unknown> {
-	const first = (await client.request({ ...options, throwOnError: false })) as FieldsResult;
-	if (first.response?.status === 401 && getAccessToken()) {
-		return refreshAndRetry(options);
+	let first: FieldsResult;
+	try {
+		first = (await client.request({ ...options, throwOnError: false })) as FieldsResult;
+	} catch (fetchErr) {
+		throw translateFetchError(fetchErr);
+	}
+	// Under throwOnError: false, network-level errors (DOMException, TypeError) are
+	// captured in first.error when first.response is undefined (no HTTP response).
+	// Translate them to user-facing errors before any further processing.
+	if (first.response === undefined && first.error !== undefined) {
+		throw translateFetchError(first.error);
+	}
+	if (first.response?.status === 401) {
+		if (getAccessToken()) {
+			return refreshAndRetry(options);
+		}
+		// No token available for refresh — convert 401 to ApiError.
+		// The response body is already consumed by the generated client (it parsed
+		// first.error from it), so we build ApiError from first.error directly.
+		const status = (first.response as Response).status;
+		const statusText = (first.response as Response).statusText;
+		const body = first.error;
+		let message = statusText || 'Unauthorized';
+		let errorCode: string | null = null;
+		if (typeof body === 'object' && body !== null) {
+			const b = body as Record<string, unknown>;
+			if (typeof b.error === 'string') message = b.error;
+			if (typeof b.error_code === 'string') errorCode = b.error_code;
+		}
+		throw new ApiError(message, status, errorCode);
 	}
 	return unwrap(first);
 }

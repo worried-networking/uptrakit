@@ -52,8 +52,8 @@ export async function initialize() {
 				return;
 			}
 		}
-		const u = await api.me();
-		user = u;
+		const { data: u } = await api.me();
+		user = u as unknown as User;
 		// Clear any prior session-expired banner on successful auth
 		setSessionExpired(false);
 	} catch {
@@ -65,22 +65,22 @@ export async function initialize() {
 }
 
 export async function handleLogin(data: LoginRequest) {
-	const res = await api.login(data);
+	const { data: res } = await api.login({ body: data });
 	setAccessToken(res.access_token);
-	user = res.user;
+	user = res.user as unknown as User;
 	setSessionExpired(false);
 }
 
 export async function handleRegister(data: RegisterRequest) {
-	const res = await api.register(data);
+	const { data: res } = await api.register({ body: data });
 	setAccessToken(res.access_token);
-	user = res.user;
+	user = res.user as unknown as User;
 	setSessionExpired(false);
 }
 
 export async function handleLogout() {
 	try {
-		await api.logout();
+		await api.logout({ body: {} });
 	} finally {
 		setAccessToken(null);
 		user = null;
@@ -91,7 +91,9 @@ export async function handleLogout() {
 }
 
 export async function handleOidcLogin(providerId: string) {
-	const { authorize_url } = await api.getOidcAuthorizeUrl(providerId);
+	const {
+		data: { authorize_url }
+	} = await api.oidcAuthorize({ path: { provider_id: providerId } });
 	if (!authorize_url.startsWith('https://')) {
 		throw new Error('Invalid OIDC authorize URL: only HTTPS redirects are allowed');
 	}
@@ -99,16 +101,18 @@ export async function handleOidcLogin(providerId: string) {
 }
 
 export async function handleOidcCallback(code: string) {
-	const res = await api.oidcExchange(code);
+	const { data: res } = await api.oidcExchange({ body: { code } });
 	setAccessToken(res.access_token);
-	user = res.user;
+	user = res.user as unknown as User;
 	setSessionExpired(false);
 }
 
 export async function handleOidcCompleteRegistration(registrationCode: string, registrationToken: string) {
-	const res = await api.oidcCompleteRegistration(registrationCode, registrationToken);
+	const { data: res } = await api.oidcCompleteRegistration({
+		body: { registration_code: registrationCode, registration_token: registrationToken }
+	});
 	setAccessToken(res.access_token);
-	user = res.user;
+	user = res.user as unknown as User;
 	setSessionExpired(false);
 }
 
@@ -117,8 +121,8 @@ export async function handleOidcLink(linkToken: string, password?: string) {
 	if (password) {
 		data.password = password;
 	}
-	const res = await api.oidcLink(data);
+	const { data: res } = await api.oidcLink({ body: data });
 	setAccessToken(res.access_token);
-	user = res.user;
+	user = res.user as unknown as User;
 	setSessionExpired(false);
 }

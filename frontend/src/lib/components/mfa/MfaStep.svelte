@@ -31,8 +31,8 @@
 		loading = true;
 		errorMsg = '';
 		try {
-			const res = await mfaVerify({ mfa_token: mfaToken, code, method });
-			onSuccess(res);
+			const { data: res } = await mfaVerify({ body: { mfa_token: mfaToken, code, method } });
+			onSuccess(res as unknown as AuthResponse);
 		} catch (e) {
 			const msg = e instanceof Error ? e.message : 'Verification failed';
 			errorMsg = msg;
@@ -47,7 +47,7 @@
 		loading = true;
 		errorMsg = '';
 		try {
-			await mfaSendEmail({ mfa_token: mfaToken });
+			await mfaSendEmail({ body: { mfa_token: mfaToken } });
 			emailSent = true;
 			code = '';
 			phase = 'email';

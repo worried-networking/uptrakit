@@ -25,8 +25,6 @@ import type {
 	AgentCertificateSettings,
 	ApiTokenListResponse,
 	AssignHostsRequest,
-	AuthMethodsResponse,
-	AuthResponse,
 	SoftwareIgnoreResponse,
 	CombinedSettingsResponse,
 	CreateApiTokenRequest,
@@ -37,17 +35,14 @@ import type {
 	EnrollmentTokenCreatedResponse,
 	EnrollmentTokenResponse,
 	HostResponse,
-	LoginRequest,
 	MessageResponse,
 	PaginatedResponse,
 	PluginConfigResponse,
 	CreatePluginConfigRequest,
 	CreateSoftwareItemRequest,
 	NetworkSettings,
-	OidcLinkRequest,
 	OidcProviderResponse,
 	RefreshResponse,
-	RegisterRequest,
 	RenewServerCertResponse,
 	RotateCaResponse,
 	ScheduledTaskResponse,
@@ -70,7 +65,6 @@ import type {
 	UpdateScheduledTaskRequest,
 	UpdateServiceRequest,
 	UpdateSoftwareItemRequest,
-	User,
 	TenantDiscoveryAllowlistEntry,
 	HostDiscoveryAllowlistEntry,
 	CreateDiscoveryAllowlistEntryRequest,
@@ -106,20 +100,10 @@ import type {
 	MergeSoftwareItemsPreviewRequest,
 	MergeSoftwareItemsPreviewResponse,
 	InstancePluginSummary,
-	ConfigStateResponse,
-	MfaVerifyRequest,
-	MfaEmailRequest,
-	MfaStatusResponse,
-	TotpEnrollResponse,
-	TotpConfirmRequest,
-	TotpConfirmResponse,
-	DisableTotpRequest,
-	RegenerateRecoveryCodesRequest,
-	RegenerateRecoveryCodesResponse
+	ConfigStateResponse
 } from './types';
 
 const BASE: string = import.meta.env.VITE_API_BASE || '/api/v1';
-const DEFAULT_TIMEOUT_MS = 30_000;
 const REFRESH_TIMEOUT_MS = 10_000;
 const MAX_ERROR_LENGTH = 500;
 
@@ -289,121 +273,6 @@ async function requestVoid(path: string, options: RequestInit = {}): Promise<voi
 	if (!res.ok) {
 		throw await extractApiError(res);
 	}
-}
-
-export function register(data: RegisterRequest): Promise<AuthResponse> {
-	return request('/auth/register', { method: 'POST', body: JSON.stringify(data) });
-}
-
-export function login(data: LoginRequest): Promise<AuthResponse> {
-	return request('/auth/login', { method: 'POST', body: JSON.stringify(data) });
-}
-
-export function logout(): Promise<void> {
-	return requestVoid('/auth/logout', {
-		method: 'POST',
-		body: JSON.stringify({})
-	});
-}
-
-export function me(): Promise<User> {
-	return request('/auth/me');
-}
-
-export function getAuthMethods(): Promise<AuthMethodsResponse> {
-	return request('/auth/methods');
-}
-
-export function getOidcAuthorizeUrl(providerId: string): Promise<{ authorize_url: string }> {
-	return request(`/auth/oidc/${encodeURIComponent(providerId)}/authorize`);
-}
-
-export function oidcLink(data: OidcLinkRequest): Promise<AuthResponse> {
-	return request('/auth/oidc/link', { method: 'POST', body: JSON.stringify(data) });
-}
-
-export async function oidcCompleteRegistration(
-	registrationCode: string,
-	registrationToken: string
-): Promise<AuthResponse> {
-	const res = await fetch(`${BASE}/auth/oidc/complete-registration`, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		credentials: 'same-origin',
-		body: JSON.stringify({ registration_code: registrationCode, registration_token: registrationToken }),
-		signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS)
-	});
-	if (!res.ok) {
-		const message = await extractErrorMessage(res);
-		throw new Error(message);
-	}
-	return res.json();
-}
-
-export async function oidcExchange(code: string): Promise<AuthResponse> {
-	// Direct fetch without auth headers — this is a public endpoint
-	const res = await fetch(`${BASE}/auth/oidc/exchange`, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		credentials: 'same-origin',
-		body: JSON.stringify({ code }),
-		signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS)
-	});
-	if (!res.ok) {
-		const message = await extractErrorMessage(res);
-		throw new Error(message);
-	}
-	return res.json();
-}
-
-/** POST /auth/mfa/verify — complete MFA challenge (unauthenticated, uses mfa_token) */
-export async function mfaVerify(data: MfaVerifyRequest): Promise<AuthResponse> {
-	const res = await fetch(`${BASE}/auth/mfa/verify`, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		credentials: 'same-origin',
-		body: JSON.stringify(data),
-		signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS)
-	});
-	if (!res.ok) throw new Error(await extractErrorMessage(res));
-	return res.json();
-}
-
-/** POST /auth/mfa/email — trigger email OTP (unauthenticated, uses mfa_token) */
-export async function mfaSendEmail(data: MfaEmailRequest): Promise<void> {
-	const res = await fetch(`${BASE}/auth/mfa/email`, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		credentials: 'same-origin',
-		body: JSON.stringify(data),
-		signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS)
-	});
-	if (!res.ok) throw new Error(await extractErrorMessage(res));
-}
-
-/** GET /auth/me/2fa — current 2FA status */
-export function mfaStatus(): Promise<MfaStatusResponse> {
-	return request('/auth/me/2fa');
-}
-
-/** POST /auth/me/2fa/totp/enroll — begin TOTP enrollment */
-export function mfaEnroll(): Promise<TotpEnrollResponse> {
-	return request('/auth/me/2fa/totp/enroll', { method: 'POST', body: JSON.stringify({}) });
-}
-
-/** POST /auth/me/2fa/totp/confirm — confirm TOTP code */
-export function mfaConfirm(data: TotpConfirmRequest): Promise<TotpConfirmResponse> {
-	return request('/auth/me/2fa/totp/confirm', { method: 'POST', body: JSON.stringify(data) });
-}
-
-/** POST /auth/me/2fa/totp/disable — disable TOTP */
-export function mfaDisable(data: DisableTotpRequest): Promise<void> {
-	return requestVoid('/auth/me/2fa/totp/disable', { method: 'POST', body: JSON.stringify(data) });
-}
-
-/** POST /auth/me/2fa/recovery-codes/regenerate — replace recovery codes */
-export function mfaRegenerateCodes(data: RegenerateRecoveryCodesRequest): Promise<RegenerateRecoveryCodesResponse> {
-	return request('/auth/me/2fa/recovery-codes/regenerate', { method: 'POST', body: JSON.stringify(data) });
 }
 
 export function getServices(options?: {
@@ -583,32 +452,6 @@ export function activateOidcProvider(id: string): Promise<OidcProviderResponse> 
 
 export function deactivateOidcProvider(id: string): Promise<OidcProviderResponse> {
 	return request(`/settings/oidc-providers/${encodeURIComponent(id)}/deactivate`, { method: 'POST' });
-}
-
-// --- Device Authorization ---
-
-export function approveDeviceAuth(userCode: string): Promise<{ message: string }> {
-	return request('/auth/device/approve', {
-		method: 'POST',
-		body: JSON.stringify({ user_code: userCode })
-	});
-}
-
-export interface DeviceLookup {
-	client_name: string | null;
-	expires_at: string; // RFC 3339
-}
-
-export async function denyDeviceAuth(userCode: string): Promise<{ message: string }> {
-	return request('/auth/device/deny', {
-		method: 'POST',
-		body: JSON.stringify({ user_code: userCode })
-	});
-}
-
-export async function lookupDeviceAuth(userCode: string): Promise<DeviceLookup> {
-	const qs = new URLSearchParams({ user_code: userCode });
-	return request(`/auth/device/lookup?${qs.toString()}`);
 }
 
 // --- System Alerts ---

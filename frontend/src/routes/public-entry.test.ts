@@ -3,10 +3,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { page } from '$app/state';
 
 vi.mock('$lib/api', () => ({
-	getAuthMethods: vi.fn(),
-	approveDeviceAuth: vi.fn(),
-	denyDeviceAuth: vi.fn(),
-	lookupDeviceAuth: vi.fn().mockResolvedValue({ client_name: null, expires_at: '2026-05-12T12:00:00Z' })
+	authMethods: vi.fn(),
+	deviceAuthApprove: vi.fn(),
+	deviceAuthDeny: vi.fn(),
+	deviceAuthLookup: vi.fn().mockResolvedValue({ data: { client_name: null, expires_at: '2026-05-12T12:00:00Z' } })
 }));
 
 vi.mock('$lib/auth.svelte', () => ({
@@ -46,12 +46,9 @@ describe('Public entry shell contract', () => {
 			message: 'Something broke'
 		};
 
-		vi.mocked(api.getAuthMethods).mockResolvedValue({
-			password: true,
-			oidc_providers: [],
-			setup_required: false,
-			registration_token_required: false
-		});
+		vi.mocked(api.authMethods).mockResolvedValue({
+			data: { password: true, oidc_providers: [], setup_required: false, registration_token_required: false }
+		} as unknown as Awaited<ReturnType<typeof api.authMethods>>);
 	});
 
 	it('renders login inside shared shell and shows inline required errors', async () => {
@@ -143,12 +140,14 @@ describe('Public entry shell contract', () => {
 	});
 
 	it('OIDC button shows aria-busy=true while loading', async () => {
-		vi.mocked(api.getAuthMethods).mockResolvedValue({
-			password: false,
-			oidc_providers: [{ id: 'google', name: 'Google', slug: 'google' }],
-			setup_required: false,
-			registration_token_required: false
-		});
+		vi.mocked(api.authMethods).mockResolvedValue({
+			data: {
+				password: false,
+				oidc_providers: [{ id: 'google', name: 'Google', slug: 'google' }],
+				setup_required: false,
+				registration_token_required: false
+			}
+		} as unknown as Awaited<ReturnType<typeof api.authMethods>>);
 		vi.mocked(auth.handleOidcLogin).mockReturnValue(new Promise(() => {}));
 
 		render(LoginPage);
@@ -176,7 +175,7 @@ describe('Public entry shell contract', () => {
 			has_pending_email_change: false,
 			permissions: []
 		});
-		vi.mocked(api.approveDeviceAuth).mockReturnValue(new Promise(() => {}));
+		vi.mocked(api.deviceAuthApprove).mockReturnValue(new Promise(() => {}) as ReturnType<typeof api.deviceAuthApprove>);
 
 		render(DevicePage);
 
@@ -235,12 +234,14 @@ describe('Public entry shell contract', () => {
 	});
 
 	it('OIDC button is disabled AND aria-busy=true when offline and loading simultaneously', async () => {
-		vi.mocked(api.getAuthMethods).mockResolvedValue({
-			password: false,
-			oidc_providers: [{ id: 'google', name: 'Google', slug: 'google' }],
-			setup_required: false,
-			registration_token_required: false
-		});
+		vi.mocked(api.authMethods).mockResolvedValue({
+			data: {
+				password: false,
+				oidc_providers: [{ id: 'google', name: 'Google', slug: 'google' }],
+				setup_required: false,
+				registration_token_required: false
+			}
+		} as unknown as Awaited<ReturnType<typeof api.authMethods>>);
 		vi.mocked(network.getIsOnline).mockReturnValue(false);
 		vi.mocked(auth.handleOidcLogin).mockReturnValue(new Promise(() => {}));
 

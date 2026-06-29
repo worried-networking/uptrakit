@@ -128,9 +128,9 @@ describe('authenticatedFetch', () => {
 		await me();
 
 		expect(mockFetch).toHaveBeenCalledTimes(1);
-		const callOptions = mockFetch.mock.calls[0][1] as RequestInit;
-		const headers = callOptions.headers as Headers;
-		expect(headers.get('Authorization')).toBe('Bearer my-token');
+		// hey-api calls fetch(Request) — the Request object is the first (and only) arg
+		const request = mockFetch.mock.calls[0][0] as Request;
+		expect(request.headers.get('Authorization')).toBe('Bearer my-token');
 	});
 
 	it('does not include Authorization header when no token is set', async () => {
@@ -141,18 +141,28 @@ describe('authenticatedFetch', () => {
 		await me();
 
 		expect(mockFetch).toHaveBeenCalledTimes(1);
-		const callOptions = mockFetch.mock.calls[0][1] as RequestInit;
-		const headers = callOptions.headers as Headers;
-		expect(headers.get('Authorization')).toBeNull();
+		// hey-api calls fetch(Request) — the Request object is the first (and only) arg
+		const request = mockFetch.mock.calls[0][0] as Request;
+		expect(request.headers.get('Authorization')).toBeNull();
 	});
 
 	it('retries with new token after a 401 (3 fetch calls total)', async () => {
 		vi.mocked(getAccessToken).mockReturnValue('old-token');
+		// Wire setAccessToken so that calling it updates what getAccessToken returns,
+		// mirroring the real token-store behaviour (needed to verify the retry header).
+		vi.mocked(setAccessToken).mockImplementation((token) => {
+			vi.mocked(getAccessToken).mockReturnValue(token);
+		});
 		const mockFetch = vi
 			.fn()
 			.mockResolvedValueOnce(new Response('', { status: 401, statusText: 'Unauthorized' }))
 			.mockResolvedValueOnce(new Response(JSON.stringify(sampleRefresh), { status: 200 }))
-			.mockResolvedValueOnce(new Response(JSON.stringify(sampleUser), { status: 200 }));
+			.mockResolvedValueOnce(
+				new Response(JSON.stringify(sampleUser), {
+					status: 200,
+					headers: { 'Content-Type': 'application/json' }
+				})
+			);
 		vi.stubGlobal('fetch', mockFetch);
 
 		const result = await me();
@@ -160,10 +170,10 @@ describe('authenticatedFetch', () => {
 		expect(mockFetch).toHaveBeenCalledTimes(3);
 		expect(vi.mocked(setAccessToken)).toHaveBeenCalledWith('new-token');
 		// Retry uses the new token in Authorization header
-		const retryOptions = mockFetch.mock.calls[2][1] as RequestInit;
-		const retryHeaders = retryOptions.headers as Headers;
-		expect(retryHeaders.get('Authorization')).toBe('Bearer new-token');
-		expect(result).toEqual(sampleUser);
+		// hey-api calls fetch(Request) — the Request object is the first (and only) arg
+		const retryRequest = mockFetch.mock.calls[2][0] as Request;
+		expect(retryRequest.headers.get('Authorization')).toBe('Bearer new-token');
+		expect((result as { data: User }).data).toEqual(sampleUser);
 	});
 
 	it('deduplicates concurrent 401 refresh calls', async () => {
@@ -182,9 +192,13 @@ describe('authenticatedFetch', () => {
 		// 2 original requests + 1 shared refresh + 2 retries = 5
 		expect(mockFetch).toHaveBeenCalledTimes(5);
 		// Verify that only 1 call went to the refresh endpoint
-		const refreshCalls = mockFetch.mock.calls.filter((args: unknown[]) =>
-			(args[0] as string).includes('/auth/refresh')
-		);
+		// hey-api calls fetch(Request) so args[0] is a Request object; for the
+		// raw refresh fetch (inside client.ts) args[0] is a string URL.
+		const refreshCalls = mockFetch.mock.calls.filter((args: unknown[]) => {
+			const first = args[0];
+			const url = first instanceof Request ? first.url : String(first);
+			return url.includes('/auth/refresh');
+		});
 		expect(refreshCalls).toHaveLength(1);
 		// setAccessToken should be called twice (once per concurrent request receiving the result)
 		expect(vi.mocked(setAccessToken)).toHaveBeenCalledWith('new-token');
@@ -274,7 +288,12 @@ describe('authenticatedFetch', () => {
 			.fn()
 			.mockResolvedValueOnce(new Response('', { status: 401, statusText: 'Unauthorized' }))
 			.mockResolvedValueOnce(new Response(JSON.stringify(sampleRefresh), { status: 200 }))
-			.mockResolvedValueOnce(new Response(JSON.stringify(sampleUser), { status: 200 }));
+			.mockResolvedValueOnce(
+				new Response(JSON.stringify(sampleUser), {
+					status: 200,
+					headers: { 'Content-Type': 'application/json' }
+				})
+			);
 		vi.stubGlobal('fetch', mockFetch);
 
 		const result = await me();
@@ -282,7 +301,8 @@ describe('authenticatedFetch', () => {
 		const calls = vi.mocked(setSessionExpired).mock.calls.map((c) => c[0]);
 		expect(calls).toContain(true);
 		expect(calls[calls.length - 1]).toBe(false);
-		expect(result).toEqual(sampleUser);
+		// me() now returns { data, response, request } — unwrap the data field
+		expect((result as { data: User }).data).toEqual(sampleUser);
 	});
 
 	it('clears sessionExpired via finally even when retry fetch rejects', async () => {
@@ -376,13 +396,14 @@ describe('authenticatedFetch', () => {
 
 	it('concurrent 401s sharing one refresh both clear sessionExpired after retry', async () => {
 		vi.mocked(getAccessToken).mockReturnValue('old-token');
+		const jsonUser = { status: 200, headers: { 'Content-Type': 'application/json' } };
 		const mockFetch = vi
 			.fn()
 			.mockResolvedValueOnce(new Response('', { status: 401, statusText: 'Unauthorized' }))
 			.mockResolvedValueOnce(new Response('', { status: 401, statusText: 'Unauthorized' }))
 			.mockResolvedValueOnce(new Response(JSON.stringify(sampleRefresh), { status: 200 }))
-			.mockResolvedValueOnce(new Response(JSON.stringify(sampleUser), { status: 200 }))
-			.mockResolvedValueOnce(new Response(JSON.stringify(sampleUser), { status: 200 }));
+			.mockResolvedValueOnce(new Response(JSON.stringify(sampleUser), jsonUser))
+			.mockResolvedValueOnce(new Response(JSON.stringify(sampleUser), jsonUser));
 		vi.stubGlobal('fetch', mockFetch);
 
 		const results = await Promise.all([me(), me()]);
@@ -393,8 +414,9 @@ describe('authenticatedFetch', () => {
 		expect(trueCalls.length).toBeGreaterThanOrEqual(2);
 		expect(falseCalls.length).toBeGreaterThanOrEqual(2);
 		expect(calls[calls.length - 1]).toBe(false);
-		expect(results[0]).toEqual(sampleUser);
-		expect(results[1]).toEqual(sampleUser);
+		// me() now returns { data, response, request } — unwrap the data field
+		expect((results[0] as { data: User }).data).toEqual(sampleUser);
+		expect((results[1] as { data: User }).data).toEqual(sampleUser);
 	});
 });
 
