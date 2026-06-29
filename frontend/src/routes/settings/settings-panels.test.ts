@@ -16,9 +16,9 @@ vi.mock('$lib/api', () => ({
 	updatePluginConfig: vi.fn(),
 	deletePluginConfig: vi.fn(),
 	triggerPluginConfigDiscovery: vi.fn(),
-	listDiscoveryAllowlist: vi.fn(),
-	addDiscoveryAllowlistEntry: vi.fn(),
-	deleteDiscoveryAllowlistEntry: vi.fn(),
+	listTenantDiscoveryAllowlist: vi.fn(),
+	addTenantDiscoveryAllowlistEntry: vi.fn(),
+	removeTenantDiscoveryAllowlistEntry: vi.fn(),
 	listPluginTypes: vi.fn(),
 	batchPluginConfigs: vi.fn(),
 	listPluginTypeSettings: vi.fn(),
@@ -91,7 +91,9 @@ describe('settings panels design-language alignment', () => {
 			per_page: 50,
 			total_pages: 1
 		});
-		vi.mocked(api.listDiscoveryAllowlist).mockResolvedValue([]);
+		vi.mocked(api.listTenantDiscoveryAllowlist).mockResolvedValue({ data: [] } as unknown as Awaited<
+			ReturnType<typeof api.listTenantDiscoveryAllowlist>
+		>);
 		vi.mocked(api.listPluginTypeSettings).mockResolvedValue([]);
 		vi.mocked(auth.getUser).mockReturnValue({
 			id: 'user-1',
@@ -714,13 +716,15 @@ describe('settings panels design-language alignment', () => {
 			per_page: 1,
 			total_pages: 2
 		});
-		vi.mocked(api.listDiscoveryAllowlist).mockResolvedValue([
-			{
-				id: 'allow-1',
-				plugin_type: 'releases_github',
-				created_at: '2026-04-01T11:00:00Z'
-			} as never
-		]);
+		vi.mocked(api.listTenantDiscoveryAllowlist).mockResolvedValue({
+			data: [
+				{
+					id: 'allow-1',
+					plugin_type: 'releases_github',
+					created_at: '2026-04-01T11:00:00Z'
+				} as never
+			]
+		} as unknown as Awaited<ReturnType<typeof api.listTenantDiscoveryAllowlist>>);
 		vi.mocked(api.listPluginTypeSettings).mockResolvedValue([]);
 
 		render(PluginConfigsTab);
@@ -742,7 +746,7 @@ describe('settings panels design-language alignment', () => {
 			per_page: number;
 			total_pages: number;
 		}>();
-		const allowlistDeferred = deferred<Array<Record<string, unknown>>>();
+		const allowlistDeferred = deferred<Awaited<ReturnType<typeof api.listTenantDiscoveryAllowlist>>>();
 		const typeSettingsDeferred = deferred<Array<Record<string, unknown>>>();
 
 		vi.mocked(api.listPluginTypes).mockResolvedValue([
@@ -763,7 +767,9 @@ describe('settings panels design-language alignment', () => {
 			} as never
 		]);
 		vi.mocked(api.getPluginConfigs).mockReturnValue(configsDeferred.promise as never);
-		vi.mocked(api.listDiscoveryAllowlist).mockReturnValue(allowlistDeferred.promise as never);
+		vi.mocked(api.listTenantDiscoveryAllowlist).mockReturnValue(
+			allowlistDeferred.promise as ReturnType<typeof api.listTenantDiscoveryAllowlist>
+		);
 		vi.mocked(api.listPluginTypeSettings).mockReturnValue(typeSettingsDeferred.promise as never);
 
 		render(PluginConfigsTab);
@@ -783,7 +789,7 @@ describe('settings panels design-language alignment', () => {
 			per_page: 50,
 			total_pages: 1
 		});
-		allowlistDeferred.resolve([]);
+		allowlistDeferred.resolve({ data: [] } as unknown as Awaited<ReturnType<typeof api.listTenantDiscoveryAllowlist>>);
 		typeSettingsDeferred.resolve([]);
 
 		await waitFor(() => {
@@ -843,7 +849,9 @@ describe('settings panels design-language alignment', () => {
 				total_pages: 2
 			};
 		});
-		vi.mocked(api.listDiscoveryAllowlist).mockResolvedValue([]);
+		vi.mocked(api.listTenantDiscoveryAllowlist).mockResolvedValue({ data: [] } as unknown as Awaited<
+			ReturnType<typeof api.listTenantDiscoveryAllowlist>
+		>);
 		vi.mocked(api.listPluginTypeSettings).mockResolvedValue([]);
 
 		render(PluginConfigsTab);
@@ -883,7 +891,9 @@ describe('settings panels design-language alignment', () => {
 			per_page: 50,
 			total_pages: 1
 		});
-		vi.mocked(api.listDiscoveryAllowlist).mockResolvedValue([]);
+		vi.mocked(api.listTenantDiscoveryAllowlist).mockResolvedValue({ data: [] } as unknown as Awaited<
+			ReturnType<typeof api.listTenantDiscoveryAllowlist>
+		>);
 		vi.mocked(api.listPluginTypeSettings).mockResolvedValue([]);
 
 		render(PluginConfigsTab);
@@ -933,7 +943,9 @@ describe('settings panels design-language alignment', () => {
 			per_page: 50,
 			total_pages: 1
 		});
-		vi.mocked(api.listDiscoveryAllowlist).mockResolvedValue([]);
+		vi.mocked(api.listTenantDiscoveryAllowlist).mockResolvedValue({ data: [] } as unknown as Awaited<
+			ReturnType<typeof api.listTenantDiscoveryAllowlist>
+		>);
 		vi.mocked(api.listPluginTypeSettings).mockResolvedValue([]);
 
 		render(PluginConfigsTab);
@@ -976,7 +988,9 @@ describe('settings panels design-language alignment', () => {
 			per_page: 50,
 			total_pages: 1
 		});
-		vi.mocked(api.listDiscoveryAllowlist).mockResolvedValue([]);
+		vi.mocked(api.listTenantDiscoveryAllowlist).mockResolvedValue({ data: [] } as unknown as Awaited<
+			ReturnType<typeof api.listTenantDiscoveryAllowlist>
+		>);
 		vi.mocked(api.listPluginTypeSettings).mockResolvedValue([]);
 
 		render(PluginConfigsTab);
@@ -1006,7 +1020,9 @@ describe('settings panels design-language alignment', () => {
 			per_page: 50,
 			total_pages: 1
 		});
-		vi.mocked(api.listDiscoveryAllowlist).mockResolvedValue([]);
+		vi.mocked(api.listTenantDiscoveryAllowlist).mockResolvedValue({ data: [] } as unknown as Awaited<
+			ReturnType<typeof api.listTenantDiscoveryAllowlist>
+		>);
 		vi.mocked(api.listPluginTypeSettings).mockResolvedValue([]);
 
 		render(PluginConfigsTab);
@@ -1021,7 +1037,7 @@ describe('settings panels design-language alignment', () => {
 
 		expect(await screen.findByText('Plugin type is required.')).toBeInTheDocument();
 		expect(screen.getByLabelText('Plugin Type')).toHaveAttribute('aria-invalid', 'true');
-		expect(vi.mocked(api.addDiscoveryAllowlistEntry)).not.toHaveBeenCalled();
+		expect(vi.mocked(api.addTenantDiscoveryAllowlistEntry)).not.toHaveBeenCalled();
 	});
 
 	it('renders plugin config test results inside shared callout treatment', async () => {
@@ -1043,7 +1059,9 @@ describe('settings panels design-language alignment', () => {
 			per_page: 50,
 			total_pages: 1
 		});
-		vi.mocked(api.listDiscoveryAllowlist).mockResolvedValue([]);
+		vi.mocked(api.listTenantDiscoveryAllowlist).mockResolvedValue({ data: [] } as unknown as Awaited<
+			ReturnType<typeof api.listTenantDiscoveryAllowlist>
+		>);
 		vi.mocked(api.listPluginTypeSettings).mockResolvedValue([]);
 		vi.mocked(api.testPluginConfig).mockResolvedValue({
 			success: true,
@@ -1087,7 +1105,7 @@ describe('settings panels design-language alignment', () => {
 			} as never
 		]);
 		vi.mocked(api.getPluginConfigs).mockRejectedValue(new Error('configs failed'));
-		vi.mocked(api.listDiscoveryAllowlist).mockRejectedValue(new Error('allowlist failed'));
+		vi.mocked(api.listTenantDiscoveryAllowlist).mockRejectedValue(new Error('allowlist failed'));
 		vi.mocked(api.listPluginTypeSettings).mockRejectedValue(new Error('type settings failed'));
 
 		render(PluginConfigsTab);

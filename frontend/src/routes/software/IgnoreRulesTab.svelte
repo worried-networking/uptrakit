@@ -1,7 +1,12 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
-	import { getSoftwareIgnores, createSoftwareIgnore, deleteSoftwareIgnore, batchAutodiscoveryIgnores } from '$lib/api';
+	import {
+		listAutodiscoveryIgnores,
+		createAutodiscoveryIgnore,
+		deleteAutodiscoveryIgnore,
+		batchAutodiscoveryIgnores
+	} from '$lib/api';
 	import { formatDate, nextValidPage } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
@@ -51,7 +56,7 @@
 	async function loadIgnores(p: number) {
 		ignoresLoading = true;
 		try {
-			const res = await getSoftwareIgnores(p);
+			const { data: res } = await listAutodiscoveryIgnores({ query: { page: p } });
 			ignores = res.items;
 			ignoresPage = res.page;
 			ignoresTotalPages = res.total_pages;
@@ -78,7 +83,7 @@
 			return;
 		}
 		try {
-			await createSoftwareIgnore({ name: ignoreForm.name.trim() });
+			await createAutodiscoveryIgnore({ body: { name: ignoreForm.name.trim() } });
 			showSuccess('Ignore rule created.');
 			closeIgnoreModal();
 			loadIgnores(1);
@@ -92,7 +97,7 @@
 		const { id } = ignoreDeleteConfirm;
 		ignoreDeleteConfirm = null;
 		try {
-			await deleteSoftwareIgnore(id);
+			await deleteAutodiscoveryIgnore({ path: { id } });
 			showSuccess('Ignore rule deleted.');
 			await loadIgnores(ignoresPage);
 			const p = nextValidPage(ignoresPage, ignoresTotalPages);

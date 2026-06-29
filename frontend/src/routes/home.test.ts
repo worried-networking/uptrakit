@@ -4,7 +4,7 @@ import { Permission, type PaginatedResponse, type ServiceResponse, type UpdateHi
 import homeSource from './+page.svelte?raw';
 
 vi.mock('$lib/api', () => ({
-	getHosts: vi.fn(),
+	listHosts: vi.fn(),
 	listServices: vi.fn(),
 	getSoftwareItems: vi.fn(),
 	listUpdateHistory: vi.fn()
@@ -38,7 +38,9 @@ function makeServices(items: ServiceResponse[]): PaginatedResponse<ServiceRespon
 describe('Dashboard Route', () => {
 	beforeEach(() => {
 		vi.mocked(auth.getUser).mockReturnValue(user);
-		vi.mocked(api.getHosts).mockResolvedValue({ items: [], total: 3, page: 1, per_page: 1, total_pages: 1 });
+		vi.mocked(api.listHosts).mockResolvedValue({
+			data: { items: [], total: 3, page: 1, per_page: 1, total_pages: 1 }
+		} as unknown as Awaited<ReturnType<typeof api.listHosts>>);
 		vi.mocked(api.listServices).mockResolvedValue({
 			data: makeServices([{ status: 'pending' } as unknown as ServiceResponse])
 		} as unknown as Awaited<ReturnType<typeof api.listServices>>);
@@ -90,7 +92,7 @@ describe('Dashboard Route', () => {
 	});
 
 	it('Retry button renders as primary Button with mt-3 class', async () => {
-		vi.mocked(api.getHosts).mockRejectedValue(new Error('fail'));
+		vi.mocked(api.listHosts).mockRejectedValue(new Error('fail'));
 		vi.mocked(api.listServices).mockRejectedValue(new Error('fail'));
 		vi.mocked(api.getSoftwareItems).mockRejectedValue(new Error('fail'));
 		vi.mocked(api.listUpdateHistory).mockRejectedValue(new Error('fail'));

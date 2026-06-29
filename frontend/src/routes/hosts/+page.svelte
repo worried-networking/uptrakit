@@ -3,14 +3,7 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
-	import {
-		getHosts,
-		updateHost,
-		deactivateHost,
-		triggerHostDiscovery,
-		batchHosts,
-		executeBatchChunked
-	} from '$lib/api';
+	import { listHosts, updateHost, deactivateHost, discoverHost, batchHosts, executeBatchChunked } from '$lib/api';
 	import type { HostResponse, BatchActionResponse } from '$lib/types';
 	import { Permission, hasAnyPermission } from '$lib/types';
 	import { formatDate, parseUrlPage, nextValidPage } from '$lib/utils';
@@ -102,8 +95,8 @@
 	async function loadHosts(page: number, background = false) {
 		try {
 			if (!background) error = null;
-			const result = await getHosts(page);
-			hosts = result.items;
+			const { data: result } = await listHosts({ query: { page } });
+			hosts = result.items as unknown as HostResponse[];
 			currentPage = result.page;
 			totalPages = result.total_pages;
 			totalItems = result.total;
@@ -160,8 +153,11 @@
 		submitting = true;
 		try {
 			error = null;
-			const updated = await updateHost(editHost.id, { friendly_name: editHost.friendlyName });
-			hosts = hosts.map((h) => (h.id === editHost?.id ? updated : h));
+			const { data: updated } = await updateHost({
+				path: { id: editHost.id },
+				body: { friendly_name: editHost.friendlyName }
+			});
+			hosts = hosts.map((h) => (h.id === editHost?.id ? (updated as unknown as HostResponse) : h));
 			editHost = null;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to update host';
@@ -178,7 +174,7 @@
 
 		try {
 			error = null;
-			await deactivateHost(hostId);
+			await deactivateHost({ path: { id: hostId } });
 			await loadHosts(currentPage);
 			const p = nextValidPage(currentPage, totalPages);
 			if (p !== null) await loadHosts(p);
@@ -202,7 +198,7 @@
 		try {
 			let p = 1;
 			while (true) {
-				const result = await getHosts(p, 100);
+				const { data: result } = await listHosts({ query: { page: p, per_page: 100 } });
 				for (const host of result.items) selectedIds.add(host.id);
 				if (p >= result.total_pages) break;
 				p++;
@@ -225,7 +221,7 @@
 	async function executeBatchDiscover() {
 		const ids = [...selectedIds];
 		selectedIds.clear();
-		const results = await Promise.allSettled(ids.map((id) => triggerHostDiscovery(id)));
+		const results = await Promise.allSettled(ids.map((id) => discoverHost({ path: { id } })));
 		const succeeded = results.filter((r) => r.status === 'fulfilled').length;
 		const failed = results.length - succeeded;
 		if (succeeded > 0 && failed === 0) {
@@ -282,7 +278,7 @@
 		closeMenu();
 		discoveringHostIds = new Set([...discoveringHostIds, host.id]);
 		try {
-			const result = await triggerHostDiscovery(host.id);
+			const { data: result } = await discoverHost({ path: { id: host.id } });
 			if (result.plugins_queued > 0) {
 				showSuccess(`Discovery triggered — ${result.plugins_queued} plugin(s) queued for "${host.friendly_name}"`);
 			} else {

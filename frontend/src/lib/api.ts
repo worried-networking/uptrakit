@@ -24,16 +24,13 @@ import type {
 	AgentCertificateSettings,
 	ApiTokenListResponse,
 	AssignHostsRequest,
-	SoftwareIgnoreResponse,
 	CombinedSettingsResponse,
 	CreateApiTokenRequest,
 	CreateApiTokenResponse,
-	CreateSoftwareIgnoreRequest,
 	CreateEnrollmentTokenRequest,
 	CreateOidcProviderRequest,
 	EnrollmentTokenCreatedResponse,
 	EnrollmentTokenResponse,
-	HostResponse,
 	MessageResponse,
 	PaginatedResponse,
 	PluginConfigResponse,
@@ -56,15 +53,11 @@ import type {
 	UpdateAgentCertificateSettings,
 	UpdateHistoryResponse,
 	UpdateHostAssignmentRequest,
-	UpdateHostRequest,
 	UpdateNetworkSettings,
 	UpdateOidcProviderRequest,
 	UpdatePluginConfigRequest,
 	UpdateScheduledTaskRequest,
 	UpdateSoftwareItemRequest,
-	TenantDiscoveryAllowlistEntry,
-	HostDiscoveryAllowlistEntry,
-	CreateDiscoveryAllowlistEntryRequest,
 	GitHubProviderSettingsResponse,
 	NatsSettingsResponse,
 	UpdateNatsSettingsRequest,
@@ -78,11 +71,6 @@ import type {
 	PluginTypeSettingsResponse,
 	AuditLogEntry,
 	AuditLogListParams,
-	HostTagResponse,
-	CreateHostTagRequest,
-	UpdateHostTagRequest,
-	SetHostTagsRequest,
-	HostTagSummary,
 	NotificationChannelSummary,
 	NotificationRuleResponse,
 	NotificationLogEntry,
@@ -268,63 +256,6 @@ async function requestVoid(path: string, options: RequestInit = {}): Promise<voi
 	if (!res.ok) {
 		throw await extractApiError(res);
 	}
-}
-
-// --- Host APIs ---
-
-export function getHosts(page?: number, perPage?: number): Promise<PaginatedResponse<HostResponse>> {
-	const params = new URLSearchParams();
-	if (page != null) params.set('page', String(page));
-	if (perPage != null) params.set('per_page', String(perPage));
-	const query = params.toString();
-	return request(`/hosts${query ? `?${query}` : ''}`);
-}
-
-export function getHost(id: string): Promise<HostResponse> {
-	return request(`/hosts/${encodeURIComponent(id)}`);
-}
-
-export function updateHost(id: string, data: UpdateHostRequest): Promise<HostResponse> {
-	return request(`/hosts/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(data) });
-}
-
-export function deactivateHost(id: string): Promise<void> {
-	return requestVoid(`/hosts/${encodeURIComponent(id)}`, { method: 'DELETE' });
-}
-
-// --- Host Tag APIs ---
-
-export function getHostTags(
-	page?: number,
-	perPage?: number,
-	search?: string
-): Promise<PaginatedResponse<HostTagResponse>> {
-	const params = new URLSearchParams();
-	if (page != null) params.set('page', String(page));
-	if (perPage != null) params.set('per_page', String(perPage));
-	if (search) params.set('search', search);
-	const query = params.toString();
-	return request(`/host-tags${query ? `?${query}` : ''}`);
-}
-
-export function getHostTag(id: string): Promise<HostTagResponse> {
-	return request(`/host-tags/${encodeURIComponent(id)}`);
-}
-
-export function createHostTag(data: CreateHostTagRequest): Promise<HostTagResponse> {
-	return request('/host-tags', { method: 'POST', body: JSON.stringify(data) });
-}
-
-export function updateHostTag(id: string, data: UpdateHostTagRequest): Promise<HostTagResponse> {
-	return request(`/host-tags/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(data) });
-}
-
-export function deleteHostTag(id: string): Promise<void> {
-	return requestVoid(`/host-tags/${encodeURIComponent(id)}`, { method: 'DELETE' });
-}
-
-export function setHostTags(hostId: string, data: SetHostTagsRequest): Promise<HostTagSummary[]> {
-	return request(`/hosts/${encodeURIComponent(hostId)}/tags`, { method: 'PUT', body: JSON.stringify(data) });
 }
 
 // --- Settings APIs ---
@@ -633,29 +564,6 @@ export function checkSoftwareItemVersions(itemId: string): Promise<TriggerVersio
 	return request(`/software-items/${encodeURIComponent(itemId)}/check-versions`, { method: 'POST' });
 }
 
-export function triggerHostDiscovery(hostId: string): Promise<TriggerDiscoveryResponse> {
-	return request(`/hosts/${encodeURIComponent(hostId)}/discover`, { method: 'POST' });
-}
-
-export function getSoftwareIgnores(
-	page?: number,
-	perPage?: number
-): Promise<PaginatedResponse<SoftwareIgnoreResponse>> {
-	const params = new URLSearchParams();
-	if (page != null) params.set('page', String(page));
-	if (perPage != null) params.set('per_page', String(perPage));
-	const query = params.toString();
-	return request(`/autodiscovery/ignores${query ? `?${query}` : ''}`);
-}
-
-export function createSoftwareIgnore(req: CreateSoftwareIgnoreRequest): Promise<SoftwareIgnoreResponse> {
-	return request('/autodiscovery/ignores', { method: 'POST', body: JSON.stringify(req) });
-}
-
-export function deleteSoftwareIgnore(id: string): Promise<void> {
-	return requestVoid(`/autodiscovery/ignores/${encodeURIComponent(id)}`, { method: 'DELETE' });
-}
-
 // Software items - update
 export async function updateSoftwareItem(id: string, data: UpdateSoftwareItemRequest): Promise<SoftwareItemResponse> {
 	return request<SoftwareItemResponse>(`/software-items/${encodeURIComponent(id)}`, {
@@ -781,47 +689,6 @@ export async function revokeApiToken(id: string): Promise<void> {
 // CA rotation
 export async function rotateCA(): Promise<RotateCaResponse> {
 	return request<RotateCaResponse>('/global-settings/ca/rotate', { method: 'POST' });
-}
-
-// Discovery allowlist — tenant-wide
-
-export async function listDiscoveryAllowlist(): Promise<TenantDiscoveryAllowlistEntry[]> {
-	return request<TenantDiscoveryAllowlistEntry[]>('/discovery-allowlist');
-}
-
-export async function addDiscoveryAllowlistEntry(
-	req: CreateDiscoveryAllowlistEntryRequest
-): Promise<TenantDiscoveryAllowlistEntry> {
-	return request<TenantDiscoveryAllowlistEntry>('/discovery-allowlist', {
-		method: 'POST',
-		body: JSON.stringify(req)
-	});
-}
-
-export async function deleteDiscoveryAllowlistEntry(id: string): Promise<void> {
-	return requestVoid(`/discovery-allowlist/${encodeURIComponent(id)}`, { method: 'DELETE' });
-}
-
-// Discovery allowlist — host-specific
-
-export async function listHostDiscoveryAllowlist(hostId: string): Promise<HostDiscoveryAllowlistEntry[]> {
-	return request<HostDiscoveryAllowlistEntry[]>(`/hosts/${encodeURIComponent(hostId)}/discovery-allowlist`);
-}
-
-export async function addHostDiscoveryAllowlistEntry(
-	hostId: string,
-	req: CreateDiscoveryAllowlistEntryRequest
-): Promise<HostDiscoveryAllowlistEntry> {
-	return request<HostDiscoveryAllowlistEntry>(`/hosts/${encodeURIComponent(hostId)}/discovery-allowlist`, {
-		method: 'POST',
-		body: JSON.stringify(req)
-	});
-}
-
-export async function deleteHostDiscoveryAllowlistEntry(hostId: string, entryId: string): Promise<void> {
-	return requestVoid(`/hosts/${encodeURIComponent(hostId)}/discovery-allowlist/${encodeURIComponent(entryId)}`, {
-		method: 'DELETE'
-	});
 }
 
 // Audit logs

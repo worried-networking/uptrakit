@@ -7,9 +7,9 @@
 		updatePluginConfig,
 		deletePluginConfig,
 		triggerPluginConfigDiscovery,
-		listDiscoveryAllowlist,
-		addDiscoveryAllowlistEntry,
-		deleteDiscoveryAllowlistEntry,
+		listTenantDiscoveryAllowlist,
+		addTenantDiscoveryAllowlistEntry,
+		removeTenantDiscoveryAllowlistEntry,
 		listPluginTypes,
 		batchPluginConfigs,
 		listPluginTypeSettings,
@@ -193,7 +193,8 @@
 		allowlistLoading = true;
 		allowlistError = null;
 		try {
-			allowlist = await listDiscoveryAllowlist();
+			const { data: allowlistData } = await listTenantDiscoveryAllowlist();
+			allowlist = allowlistData;
 		} catch (e) {
 			allowlistError = e instanceof Error ? e.message : 'Failed to load discovery allowlist';
 			showError(allowlistError);
@@ -704,7 +705,9 @@
 		}
 		allowlistPluginTypeError = '';
 		try {
-			const created = await addDiscoveryAllowlistEntry({ plugin_type: allowlistForm.plugin_type });
+			const { data: created } = await addTenantDiscoveryAllowlistEntry({
+				body: { plugin_type: allowlistForm.plugin_type }
+			});
 			if (!allowlist.some((e) => e.id === created.id)) {
 				allowlist = [...allowlist, created];
 			}
@@ -720,7 +723,7 @@
 		const { id } = allowlistDeleteConfirm;
 		allowlistDeleteConfirm = null;
 		try {
-			await deleteDiscoveryAllowlistEntry(id);
+			await removeTenantDiscoveryAllowlistEntry({ path: { id } });
 			allowlist = allowlist.filter((e) => e.id !== id);
 			showSuccess('Allowlist entry removed.');
 		} catch (e) {

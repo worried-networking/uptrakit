@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { getUser } from '$lib/auth.svelte';
-	import { getHosts, listServices, getSoftwareItems, listUpdateHistory } from '$lib/api';
+	import { listHosts, listServices, getSoftwareItems, listUpdateHistory } from '$lib/api';
 	import { formatDate } from '$lib/utils';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import { AdminEventType } from '$lib/sse';
@@ -76,7 +76,7 @@
 		if (canViewHosts) {
 			promises.push(
 				swallowOnBackground(
-					getHosts(1, 1).then((result) => {
+					listHosts({ query: { page: 1, per_page: 1 } }).then(({ data: result }) => {
 						totalHosts = result.total;
 					})
 				)
