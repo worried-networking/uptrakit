@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import { page } from '$app/state';
-	import { approveDeviceAuth, denyDeviceAuth, lookupDeviceAuth } from '$lib/api';
+	import { deviceAuthApprove, deviceAuthDeny, deviceAuthLookup } from '$lib/api';
 	import { getLoading, getUser } from '$lib/auth.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import ConsentPrompt from '$lib/components/ConsentPrompt.svelte';
@@ -57,7 +57,7 @@
 	$effect(() => {
 		if (codeValid && isLoggedIn && lookupPhase === 'idle') {
 			lookupPhase = 'loading';
-			lookupDeviceAuth(enteredCode)
+			deviceAuthLookup({ query: { user_code: enteredCode } })
 				.then(() => {
 					lookupPhase = 'done';
 				})
@@ -143,7 +143,7 @@
 		actionError = '';
 		processing = true;
 		try {
-			await approveDeviceAuth(enteredCode);
+			await deviceAuthApprove({ body: { user_code: enteredCode } });
 			success = true;
 		} catch (err) {
 			actionError = err instanceof Error ? err.message : 'Failed to authorize device';
@@ -157,7 +157,7 @@
 		actionError = '';
 		processing = true;
 		try {
-			await denyDeviceAuth(enteredCode);
+			await deviceAuthDeny({ body: { user_code: enteredCode } });
 			denied = true;
 		} catch (err) {
 			actionError = err instanceof Error ? err.message : 'Failed to deny device';

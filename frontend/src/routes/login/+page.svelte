@@ -2,7 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
-	import { getAuthMethods, extractErrorMessage, loginRaw, authenticatedFetch } from '$lib/api';
+	import { authMethods as fetchAuthMethods, extractErrorMessage, loginRaw, authenticatedFetch } from '$lib/api';
 	import {
 		getUser,
 		handleOidcCallback,
@@ -138,9 +138,9 @@
 	});
 
 	onMount(() => {
-		getAuthMethods()
-			.then((methods) => {
-				authMethods = methods;
+		fetchAuthMethods()
+			.then(({ data: methods }) => {
+				authMethods = methods as unknown as AuthMethodsResponse;
 			})
 			.catch(() => {
 				authMethods = {

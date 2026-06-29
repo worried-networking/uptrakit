@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { mfaStatus, mfaEnroll, mfaConfirm, mfaDisable, mfaRegenerateCodes } from '$lib/api';
+	import { mfaStatus, totpEnroll, totpConfirm, totpDisable, regenerateRecoveryCodes } from '$lib/api';
 	import type { MfaStatusResponse, TotpEnrollResponse } from '$lib/types';
 	import { SectionCard, Callout } from '$lib/components/ui';
 	import { FormFieldRow, Input } from '$lib/components/forms';
@@ -25,7 +25,8 @@
 
 	async function loadStatus() {
 		try {
-			status = await mfaStatus();
+			const { data } = await mfaStatus();
+			status = data as unknown as MfaStatusResponse;
 		} catch {
 			// Silently degrade — 2FA status is non-critical
 		}
@@ -39,7 +40,8 @@
 		loading = true;
 		errorMsg = '';
 		try {
-			enrollData = await mfaEnroll();
+			const { data } = await totpEnroll();
+			enrollData = data as unknown as TotpEnrollResponse;
 			phase = 'confirming';
 		} catch (e) {
 			errorMsg = e instanceof Error ? e.message : 'Enrollment failed';
@@ -53,7 +55,7 @@
 		loading = true;
 		errorMsg = '';
 		try {
-			const res = await mfaConfirm({ code: confirmCode });
+			const { data: res } = await totpConfirm({ body: { code: confirmCode } });
 			recoveryCodes = res.recovery_codes;
 			phase = 'codes_shown';
 			await loadStatus();
@@ -73,7 +75,7 @@
 		errorMsg = '';
 		successMsg = '';
 		try {
-			await mfaDisable(disablePassword ? { password: disablePassword } : { totp_code: disableTotpCode });
+			await totpDisable({ body: disablePassword ? { password: disablePassword } : { totp_code: disableTotpCode } });
 			showDisableForm = false;
 			disablePassword = '';
 			disableTotpCode = '';
@@ -94,7 +96,9 @@
 		loading = true;
 		errorMsg = '';
 		try {
-			const res = await mfaRegenerateCodes(regenPassword ? { password: regenPassword } : { totp_code: regenTotpCode });
+			const { data: res } = await regenerateRecoveryCodes({
+				body: regenPassword ? { password: regenPassword } : { totp_code: regenTotpCode }
+			});
 			newRecoveryCodes = res.recovery_codes;
 			showRegenForm = false;
 			regenPassword = '';

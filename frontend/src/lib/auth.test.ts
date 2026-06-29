@@ -20,7 +20,7 @@ vi.mock('./api', () => ({
 	login: vi.fn(),
 	register: vi.fn(),
 	logout: vi.fn(),
-	getOidcAuthorizeUrl: vi.fn(),
+	oidcAuthorize: vi.fn(),
 	oidcExchange: vi.fn(),
 	oidcCompleteRegistration: vi.fn(),
 	oidcLink: vi.fn()
@@ -60,7 +60,7 @@ beforeEach(() => {
 describe('initialize', () => {
 	it('refreshes when no access token and loads user', async () => {
 		vi.mocked(api.refreshAccessToken).mockResolvedValue(sampleRefresh);
-		vi.mocked(api.me).mockResolvedValue(sampleUser);
+		vi.mocked(api.me).mockResolvedValue({ data: sampleUser } as unknown as Awaited<ReturnType<typeof api.me>>);
 
 		await initialize();
 
@@ -85,7 +85,7 @@ describe('initialize', () => {
 
 	it('uses existing access token without refresh', async () => {
 		setAccessToken('existing-token');
-		vi.mocked(api.me).mockResolvedValue(sampleUser);
+		vi.mocked(api.me).mockResolvedValue({ data: sampleUser } as unknown as Awaited<ReturnType<typeof api.me>>);
 
 		await initialize();
 
@@ -99,7 +99,9 @@ describe('initialize', () => {
 
 describe('handleLogin', () => {
 	it('sets accessToken and user on success', async () => {
-		vi.mocked(api.login).mockResolvedValue(sampleAuthResponse);
+		vi.mocked(api.login).mockResolvedValue({ data: sampleAuthResponse } as unknown as Awaited<
+			ReturnType<typeof api.login>
+		>);
 
 		await handleLogin({ email: 'user@example.com', password: 'secret' });
 
@@ -121,7 +123,7 @@ describe('handleLogout', () => {
 	it('clears accessToken and user on success', async () => {
 		setAccessToken('some-token');
 		setUser(sampleUser);
-		vi.mocked(api.logout).mockResolvedValue(undefined);
+		vi.mocked(api.logout).mockResolvedValue({ data: undefined } as unknown as Awaited<ReturnType<typeof api.logout>>);
 
 		await handleLogout();
 
@@ -145,11 +147,13 @@ describe('handleLogout', () => {
 
 describe('handleOidcCallback', () => {
 	it('sets accessToken and user on successful oidcExchange', async () => {
-		vi.mocked(api.oidcExchange).mockResolvedValue(sampleAuthResponse);
+		vi.mocked(api.oidcExchange).mockResolvedValue({ data: sampleAuthResponse } as unknown as Awaited<
+			ReturnType<typeof api.oidcExchange>
+		>);
 
 		await handleOidcCallback('oidc-auth-code');
 
-		expect(api.oidcExchange).toHaveBeenCalledWith('oidc-auth-code');
+		expect(api.oidcExchange).toHaveBeenCalledWith({ body: { code: 'oidc-auth-code' } });
 		expect(getAccessToken()).toBe('auth-access-token');
 		expect(getUser()).toEqual(sampleUser);
 	});
