@@ -4,10 +4,10 @@ import type { HostResponse, PaginatedResponse } from '$lib/types';
 import { Permission } from '$lib/types';
 
 vi.mock('$lib/api', () => ({
-	getHosts: vi.fn(),
+	listHosts: vi.fn(),
 	updateHost: vi.fn(),
 	deactivateHost: vi.fn(),
-	triggerHostDiscovery: vi.fn(),
+	discoverHost: vi.fn(),
 	batchHosts: vi.fn(),
 	executeBatchChunked: vi.fn()
 }));
@@ -103,7 +103,9 @@ describe('Hosts Page', () => {
 	});
 
 	it('renders the page heading when a user is logged in', async () => {
-		vi.mocked(api.getHosts).mockResolvedValue(makePage([]));
+		vi.mocked(api.listHosts).mockResolvedValue({ data: makePage([]) } as unknown as Awaited<
+			ReturnType<typeof api.listHosts>
+		>);
 		render(HostsPage);
 		await waitFor(() => expect(screen.getByText('Hosts')).toBeInTheDocument());
 		expect(document.querySelector('[data-ui="page-shell"]')).toBeInTheDocument();
@@ -111,7 +113,9 @@ describe('Hosts Page', () => {
 	});
 
 	it('renders a host row after a successful API response', async () => {
-		vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
+		vi.mocked(api.listHosts).mockResolvedValue({ data: makePage([sampleHost]) } as unknown as Awaited<
+			ReturnType<typeof api.listHosts>
+		>);
 		render(HostsPage);
 		await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
 		expect(screen.getByText('prod-server')).toBeInTheDocument();
@@ -120,7 +124,9 @@ describe('Hosts Page', () => {
 	});
 
 	it('renders navigable software status badges for updates and errors', async () => {
-		vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost, errorHost]));
+		vi.mocked(api.listHosts).mockResolvedValue({ data: makePage([sampleHost, errorHost]) } as unknown as Awaited<
+			ReturnType<typeof api.listHosts>
+		>);
 		render(HostsPage);
 		await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
 
@@ -134,7 +140,9 @@ describe('Hosts Page', () => {
 	});
 
 	it('renders hosts stat cards with semantic value colors', async () => {
-		vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost, errorHost]));
+		vi.mocked(api.listHosts).mockResolvedValue({ data: makePage([sampleHost, errorHost]) } as unknown as Awaited<
+			ReturnType<typeof api.listHosts>
+		>);
 		render(HostsPage);
 		await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
 
@@ -155,13 +163,15 @@ describe('Hosts Page', () => {
 	});
 
 	it('shows the empty-state message when the host list is empty', async () => {
-		vi.mocked(api.getHosts).mockResolvedValue(makePage([]));
+		vi.mocked(api.listHosts).mockResolvedValue({ data: makePage([]) } as unknown as Awaited<
+			ReturnType<typeof api.listHosts>
+		>);
 		render(HostsPage);
 		await waitFor(() => expect(screen.getByText(/No hosts discovered yet/)).toBeInTheDocument());
 	});
 
 	it('shows an error message and a Retry button when the API call fails', async () => {
-		vi.mocked(api.getHosts).mockRejectedValue(new Error('Server unavailable'));
+		vi.mocked(api.listHosts).mockRejectedValue(new Error('Server unavailable'));
 		render(HostsPage);
 		await waitFor(() => expect(screen.getByText('Server unavailable')).toBeInTheDocument());
 		expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
@@ -175,7 +185,9 @@ describe('Hosts Page', () => {
 	});
 
 	it('displays a dash for unknown OS when os_type and os_version are both null', async () => {
-		vi.mocked(api.getHosts).mockResolvedValue(makePage([{ ...sampleHost, os_type: null, os_version: null }]));
+		vi.mocked(api.listHosts).mockResolvedValue({
+			data: makePage([{ ...sampleHost, os_type: null, os_version: null }])
+		} as unknown as Awaited<ReturnType<typeof api.listHosts>>);
 		render(HostsPage);
 		// The "—" dash for OS column should appear
 		await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
@@ -185,7 +197,9 @@ describe('Hosts Page', () => {
 	});
 
 	it('shows the actions button when the user has ManageHosts permission', async () => {
-		vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
+		vi.mocked(api.listHosts).mockResolvedValue({ data: makePage([sampleHost]) } as unknown as Awaited<
+			ReturnType<typeof api.listHosts>
+		>);
 		render(HostsPage);
 		await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
 		expect(screen.getByRole('button', { name: /actions for production server/i })).toBeInTheDocument();
@@ -196,14 +210,18 @@ describe('Hosts Page', () => {
 			...adminUser,
 			permissions: [Permission.TriggerChecks]
 		});
-		vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
+		vi.mocked(api.listHosts).mockResolvedValue({ data: makePage([sampleHost]) } as unknown as Awaited<
+			ReturnType<typeof api.listHosts>
+		>);
 		render(HostsPage);
 		await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
 		expect(screen.queryByRole('button', { name: /actions for/i })).not.toBeInTheDocument();
 	});
 
 	it('opens the context menu with Edit Name and Deactivate options when the actions button is clicked', async () => {
-		vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
+		vi.mocked(api.listHosts).mockResolvedValue({ data: makePage([sampleHost]) } as unknown as Awaited<
+			ReturnType<typeof api.listHosts>
+		>);
 		render(HostsPage);
 		await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
 
@@ -216,7 +234,9 @@ describe('Hosts Page', () => {
 	});
 
 	it('shows the Trigger Discovery menu item when the user has software management permissions', async () => {
-		vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
+		vi.mocked(api.listHosts).mockResolvedValue({ data: makePage([sampleHost]) } as unknown as Awaited<
+			ReturnType<typeof api.listHosts>
+		>);
 		render(HostsPage);
 		await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
 
@@ -231,7 +251,9 @@ describe('Hosts Page', () => {
 			...adminUser,
 			permissions: [Permission.UpdateHosts]
 		});
-		vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
+		vi.mocked(api.listHosts).mockResolvedValue({ data: makePage([sampleHost]) } as unknown as Awaited<
+			ReturnType<typeof api.listHosts>
+		>);
 		render(HostsPage);
 		await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
 
@@ -242,8 +264,12 @@ describe('Hosts Page', () => {
 	});
 
 	it('calls triggerHostDiscovery and shows a success notification when plugins are queued', async () => {
-		vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
-		vi.mocked(api.triggerHostDiscovery).mockResolvedValue({ plugins_queued: 2, message: 'ok' });
+		vi.mocked(api.listHosts).mockResolvedValue({ data: makePage([sampleHost]) } as unknown as Awaited<
+			ReturnType<typeof api.listHosts>
+		>);
+		vi.mocked(api.discoverHost).mockResolvedValue({ data: { plugins_queued: 2, message: 'ok' } } as unknown as Awaited<
+			ReturnType<typeof api.discoverHost>
+		>);
 		const { showSuccess } = await import('$lib/notifications.svelte');
 
 		render(HostsPage);
@@ -254,15 +280,19 @@ describe('Hosts Page', () => {
 
 		fireEvent.click(screen.getByRole('menuitem', { name: 'Trigger Discovery' }));
 
-		await waitFor(() => expect(vi.mocked(api.triggerHostDiscovery)).toHaveBeenCalledWith('host-001'));
+		await waitFor(() => expect(vi.mocked(api.discoverHost)).toHaveBeenCalledWith({ path: { id: 'host-001' } }));
 		await waitFor(() =>
 			expect(vi.mocked(showSuccess)).toHaveBeenCalledWith(expect.stringContaining('2 plugin(s) queued'))
 		);
 	});
 
 	it('calls triggerHostDiscovery and shows a no-plugins notification when nothing is queued', async () => {
-		vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
-		vi.mocked(api.triggerHostDiscovery).mockResolvedValue({ plugins_queued: 0, message: 'no plugins' });
+		vi.mocked(api.listHosts).mockResolvedValue({ data: makePage([sampleHost]) } as unknown as Awaited<
+			ReturnType<typeof api.listHosts>
+		>);
+		vi.mocked(api.discoverHost).mockResolvedValue({
+			data: { plugins_queued: 0, message: 'no plugins' }
+		} as unknown as Awaited<ReturnType<typeof api.discoverHost>>);
 		const { showSuccess } = await import('$lib/notifications.svelte');
 
 		render(HostsPage);
@@ -289,7 +319,9 @@ describe('Button primitive contract — hosts/+page.svelte', () => {
 	});
 
 	it('ellipsis trigger has no preset Skeleton class', async () => {
-		vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
+		vi.mocked(api.listHosts).mockResolvedValue({ data: makePage([sampleHost]) } as unknown as Awaited<
+			ReturnType<typeof api.listHosts>
+		>);
 		render(HostsPage);
 		await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
 
@@ -298,7 +330,7 @@ describe('Button primitive contract — hosts/+page.svelte', () => {
 	});
 
 	it('Retry button is not aria-busy when idle', async () => {
-		vi.mocked(api.getHosts).mockRejectedValue(new Error('network error'));
+		vi.mocked(api.listHosts).mockRejectedValue(new Error('network error'));
 		render(HostsPage);
 		await waitFor(() => expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument());
 
@@ -307,7 +339,9 @@ describe('Button primitive contract — hosts/+page.svelte', () => {
 	});
 
 	it('Edit modal Save button has static label "Save"', async () => {
-		vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
+		vi.mocked(api.listHosts).mockResolvedValue({ data: makePage([sampleHost]) } as unknown as Awaited<
+			ReturnType<typeof api.listHosts>
+		>);
 		render(HostsPage);
 		await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
 
@@ -320,7 +354,9 @@ describe('Button primitive contract — hosts/+page.svelte', () => {
 	});
 
 	it('Edit modal Cancel button has no preset Skeleton class', async () => {
-		vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
+		vi.mocked(api.listHosts).mockResolvedValue({ data: makePage([sampleHost]) } as unknown as Awaited<
+			ReturnType<typeof api.listHosts>
+		>);
 		render(HostsPage);
 		await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
 
@@ -334,7 +370,9 @@ describe('Button primitive contract — hosts/+page.svelte', () => {
 	});
 
 	it('no raw preset-filled or preset-tonal classes on any button', async () => {
-		vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
+		vi.mocked(api.listHosts).mockResolvedValue({ data: makePage([sampleHost]) } as unknown as Awaited<
+			ReturnType<typeof api.listHosts>
+		>);
 		const { container } = render(HostsPage);
 		await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
 

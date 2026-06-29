@@ -9,13 +9,13 @@ vi.mock('$lib/api', () => ({
 	listUpdateHistory: vi.fn(),
 	updateHost: vi.fn(),
 	deactivateHost: vi.fn(),
-	triggerHostDiscovery: vi.fn(),
+	discoverHost: vi.fn(),
 	invokeSurfaceInteraction: vi.fn(),
 	listPluginTypes: vi.fn(),
 	listHostDiscoveryAllowlist: vi.fn(),
 	addHostDiscoveryAllowlistEntry: vi.fn(),
-	deleteHostDiscoveryAllowlistEntry: vi.fn(),
-	getHostTags: vi.fn(),
+	removeHostDiscoveryAllowlistEntry: vi.fn(),
+	listHostTags: vi.fn(),
 	setHostTags: vi.fn(),
 	getSoftwareItems: vi.fn()
 }));
@@ -167,8 +167,12 @@ describe('Host Detail Page', () => {
 		vi.mocked(auth.getUser).mockReturnValue(adminUser);
 		vi.mocked(api.listUpdateHistory).mockResolvedValue(makeHistoryPage([]));
 		vi.mocked(api.listPluginTypes).mockResolvedValue([]);
-		vi.mocked(api.listHostDiscoveryAllowlist).mockResolvedValue([]);
-		vi.mocked(api.getHostTags).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 100, total_pages: 1 });
+		vi.mocked(api.listHostDiscoveryAllowlist).mockResolvedValue({ data: [] } as unknown as Awaited<
+			ReturnType<typeof api.listHostDiscoveryAllowlist>
+		>);
+		vi.mocked(api.listHostTags).mockResolvedValue({
+			data: { items: [], total: 0, page: 1, per_page: 100, total_pages: 1 }
+		} as unknown as Awaited<ReturnType<typeof api.listHostTags>>);
 		vi.mocked(api.getSoftwareItems).mockResolvedValue(makeSoftwareItemsPage());
 	});
 
@@ -177,7 +181,9 @@ describe('Host Detail Page', () => {
 	});
 
 	it('renders the host name and hostname from the API response', async () => {
-		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
+			ReturnType<typeof api.getHost>
+		>);
 		render(HostDetailPage);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Production Server' })).toBeInTheDocument());
 		expect(screen.getByText('prod-server')).toBeInTheDocument();
@@ -185,7 +191,7 @@ describe('Host Detail Page', () => {
 	});
 
 	it('shows a loading indicator before data arrives', () => {
-		vi.mocked(api.getHost).mockImplementation(() => new Promise(() => {}));
+		vi.mocked(api.getHost).mockImplementation(() => new Promise(() => {}) as ReturnType<typeof api.getHost>);
 		render(HostDetailPage);
 		expect(screen.getByText('Loading...')).toBeInTheDocument();
 	});
@@ -199,7 +205,9 @@ describe('Host Detail Page', () => {
 
 	it('renders nothing when no user is logged in', () => {
 		vi.mocked(auth.getUser).mockReturnValue(null);
-		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
+			ReturnType<typeof api.getHost>
+		>);
 		render(HostDetailPage);
 		expect(screen.queryByText('Loading...')).not.toBeInTheDocument();
 		expect(screen.queryByText('Production Server')).not.toBeInTheDocument();
@@ -208,7 +216,9 @@ describe('Host Detail Page', () => {
 	});
 
 	it('renders the back link to the hosts list', async () => {
-		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
+			ReturnType<typeof api.getHost>
+		>);
 		render(HostDetailPage);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Production Server' })).toBeInTheDocument());
 		const backLink = screen.getByRole('link', { name: /back to hosts/i });
@@ -216,7 +226,9 @@ describe('Host Detail Page', () => {
 	});
 
 	it('renders host metadata fields in the info grid', async () => {
-		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
+			ReturnType<typeof api.getHost>
+		>);
 		render(HostDetailPage);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Production Server' })).toBeInTheDocument());
 		expect(screen.getByText('Ubuntu 24.04')).toBeInTheDocument();
@@ -227,12 +239,14 @@ describe('Host Detail Page', () => {
 
 	it('shows dashes for missing optional fields', async () => {
 		vi.mocked(api.getHost).mockResolvedValue({
-			...sampleHost,
-			os_type: null,
-			os_version: null,
-			architecture: null,
-			ip_address: null
-		});
+			data: {
+				...sampleHost,
+				os_type: null,
+				os_version: null,
+				architecture: null,
+				ip_address: null
+			}
+		} as unknown as Awaited<ReturnType<typeof api.getHost>>);
 		render(HostDetailPage);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Production Server' })).toBeInTheDocument());
 		// os_version and os_type combine into one cell, so nulling all four optional
@@ -242,7 +256,9 @@ describe('Host Detail Page', () => {
 	});
 
 	it('renders connected agents with their status badges', async () => {
-		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
+			ReturnType<typeof api.getHost>
+		>);
 		render(HostDetailPage);
 		await waitFor(() => expect(screen.getByText('Main Agent')).toBeInTheDocument());
 		expect(screen.getByText('Backup Agent')).toBeInTheDocument();
@@ -251,13 +267,17 @@ describe('Host Detail Page', () => {
 	});
 
 	it('shows empty-state message when host has no agents', async () => {
-		vi.mocked(api.getHost).mockResolvedValue({ ...sampleHost, agents: [] });
+		vi.mocked(api.getHost).mockResolvedValue({ data: { ...sampleHost, agents: [] } } as unknown as Awaited<
+			ReturnType<typeof api.getHost>
+		>);
 		render(HostDetailPage);
 		await waitFor(() => expect(screen.getByText(/no agents connected/i)).toBeInTheDocument());
 	});
 
 	it('renders recent update history rows', async () => {
-		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
+			ReturnType<typeof api.getHost>
+		>);
 		vi.mocked(api.listUpdateHistory).mockResolvedValue(makeHistoryPage([sampleHistoryEntry]));
 		render(HostDetailPage);
 		await waitFor(() => expect(screen.getByText('nginx')).toBeInTheDocument());
@@ -267,14 +287,18 @@ describe('Host Detail Page', () => {
 	});
 
 	it('shows empty-state message when there is no update history', async () => {
-		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
+			ReturnType<typeof api.getHost>
+		>);
 		vi.mocked(api.listUpdateHistory).mockResolvedValue(makeHistoryPage([]));
 		render(HostDetailPage);
 		await waitFor(() => expect(screen.getByText(/no update history/i)).toBeInTheDocument());
 	});
 
 	it('renders a "View all" history link pointing to /history?host_id={id}', async () => {
-		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
+			ReturnType<typeof api.getHost>
+		>);
 		render(HostDetailPage);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Production Server' })).toBeInTheDocument());
 		const link = screen.getByRole('link', { name: /view all/i });
@@ -282,7 +306,9 @@ describe('Host Detail Page', () => {
 	});
 
 	it('shows Edit Name and Deactivate buttons when user has ManageHosts permission', async () => {
-		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
+			ReturnType<typeof api.getHost>
+		>);
 		render(HostDetailPage);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Production Server' })).toBeInTheDocument());
 		expect(screen.getByRole('button', { name: /edit name/i })).toBeInTheDocument();
@@ -294,7 +320,9 @@ describe('Host Detail Page', () => {
 			...adminUser,
 			permissions: [Permission.TriggerChecks]
 		});
-		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
+			ReturnType<typeof api.getHost>
+		>);
 		render(HostDetailPage);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Production Server' })).toBeInTheDocument());
 		expect(screen.queryByRole('button', { name: /edit name/i })).not.toBeInTheDocument();
@@ -302,7 +330,9 @@ describe('Host Detail Page', () => {
 	});
 
 	it('shows Trigger Discovery button when user has software management permissions', async () => {
-		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
+			ReturnType<typeof api.getHost>
+		>);
 		render(HostDetailPage);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Production Server' })).toBeInTheDocument());
 		expect(screen.getByRole('button', { name: /trigger discovery/i })).toBeInTheDocument();
@@ -313,15 +343,21 @@ describe('Host Detail Page', () => {
 			...adminUser,
 			permissions: [Permission.UpdateHosts]
 		});
-		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
+			ReturnType<typeof api.getHost>
+		>);
 		render(HostDetailPage);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Production Server' })).toBeInTheDocument());
 		expect(screen.queryByRole('button', { name: /trigger discovery/i })).not.toBeInTheDocument();
 	});
 
 	it('calls triggerHostDiscovery and shows a success notification when plugins are queued', async () => {
-		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
-		vi.mocked(api.triggerHostDiscovery).mockResolvedValue({ plugins_queued: 3, message: 'ok' });
+		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
+			ReturnType<typeof api.getHost>
+		>);
+		vi.mocked(api.discoverHost).mockResolvedValue({ data: { plugins_queued: 3, message: 'ok' } } as unknown as Awaited<
+			ReturnType<typeof api.discoverHost>
+		>);
 		const { showSuccess } = await import('$lib/notifications.svelte');
 
 		render(HostDetailPage);
@@ -329,12 +365,14 @@ describe('Host Detail Page', () => {
 
 		fireEvent.click(screen.getByRole('button', { name: /trigger discovery/i }));
 
-		await waitFor(() => expect(vi.mocked(api.triggerHostDiscovery)).toHaveBeenCalledWith('host-001'));
+		await waitFor(() => expect(vi.mocked(api.discoverHost)).toHaveBeenCalledWith({ path: { id: 'host-001' } }));
 		await waitFor(() => expect(vi.mocked(showSuccess)).toHaveBeenCalledWith(expect.stringContaining('3 plugin(s)')));
 	});
 
 	it('renders host-detail shared surfaces and preloads their read models', async () => {
-		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
+			ReturnType<typeof api.getHost>
+		>);
 
 		const surface = buildHostDetailSurface({
 			root_node: {
@@ -355,7 +393,9 @@ describe('Host Detail Page', () => {
 	});
 
 	it('omits host_detail.tabs when there is no surface content', async () => {
-		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
+			ReturnType<typeof api.getHost>
+		>);
 
 		vi.mocked(surfaceRegistry.getSurfacesBySlot).mockImplementation((slot: string) =>
 			slot === 'host_detail.tabs' ? [] : []
@@ -369,7 +409,9 @@ describe('Host Detail Page', () => {
 	});
 
 	it('renders targeted no-compatible-provider host_detail.tabs state with canonical empty copy', async () => {
-		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
+			ReturnType<typeof api.getHost>
+		>);
 
 		const surface = buildHostDetailSurface({ targeting: 'targeted' });
 		const read = buildHostDetailRead(surface);
@@ -401,7 +443,9 @@ describe('Host Detail Page', () => {
 	});
 
 	it('renders contract mismatch host_detail.tabs state from SurfaceReadPanel canonical handling', async () => {
-		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
+			ReturnType<typeof api.getHost>
+		>);
 
 		const surface = buildHostDetailSurface();
 		const baseRead = buildHostDetailRead(surface);
@@ -426,7 +470,9 @@ describe('Host Detail Page', () => {
 	});
 
 	it('renders hydration action failure host_detail.tabs state from SurfaceReadPanel canonical handling', async () => {
-		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
+			ReturnType<typeof api.getHost>
+		>);
 
 		const surface = buildHostDetailSurface({
 			root_node: {
@@ -469,7 +515,9 @@ describe('Host Detail Page', () => {
 	});
 
 	it('renders permission_denied host_detail.tabs state inside the host container', async () => {
-		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
+			ReturnType<typeof api.getHost>
+		>);
 
 		const gatedSurface = buildHostDetailSurface({
 			required_permission: Permission.ViewSettings
@@ -497,9 +545,13 @@ describe('Host Detail Page', () => {
 			...adminUser,
 			permissions: [...adminUser.permissions, Permission.ViewSoftware]
 		});
-		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
+			ReturnType<typeof api.getHost>
+		>);
 		vi.mocked(api.listPluginTypes).mockResolvedValue([]);
-		vi.mocked(api.listHostDiscoveryAllowlist).mockResolvedValue([]);
+		vi.mocked(api.listHostDiscoveryAllowlist).mockResolvedValue({ data: [] } as unknown as Awaited<
+			ReturnType<typeof api.listHostDiscoveryAllowlist>
+		>);
 		vi.mocked(api.getSoftwareItems).mockResolvedValue(makeSoftwareItemsPage());
 
 		render(HostDetailPage);
@@ -517,7 +569,9 @@ describe('Host Detail Page', () => {
 
 describe('Button primitive contract — hosts/[id]/+page.svelte', () => {
 	it('Edit Name uses secondary variant (md size, bg-raised border)', async () => {
-		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
+			ReturnType<typeof api.getHost>
+		>);
 		render(HostDetailPage);
 		await waitFor(() => screen.getByRole('button', { name: /edit name/i }));
 
@@ -528,7 +582,9 @@ describe('Button primitive contract — hosts/[id]/+page.svelte', () => {
 	});
 
 	it('Deactivate uses danger variant (error colors)', async () => {
-		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
+			ReturnType<typeof api.getHost>
+		>);
 		render(HostDetailPage);
 		await waitFor(() => screen.getByRole('button', { name: /^deactivate$/i }));
 
@@ -539,12 +595,14 @@ describe('Button primitive contract — hosts/[id]/+page.svelte', () => {
 	});
 
 	it('Trigger Discovery uses secondary variant and aria-busy while discovering', async () => {
-		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
-		let resolveTrigger!: (v: { plugins_queued: number; message: string }) => void;
-		vi.mocked(api.triggerHostDiscovery).mockReturnValue(
+		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
+			ReturnType<typeof api.getHost>
+		>);
+		let resolveTrigger!: (v: Awaited<ReturnType<typeof api.discoverHost>>) => void;
+		vi.mocked(api.discoverHost).mockReturnValue(
 			new Promise((res) => {
 				resolveTrigger = res;
-			})
+			}) as ReturnType<typeof api.discoverHost>
 		);
 
 		render(HostDetailPage);
@@ -563,14 +621,18 @@ describe('Button primitive contract — hosts/[id]/+page.svelte', () => {
 		// Static label — no text swap
 		expect(btn.textContent).toMatch(/trigger discovery/i);
 
-		resolveTrigger({ plugins_queued: 0, message: 'ok' });
+		resolveTrigger({ data: { plugins_queued: 0, message: 'ok' } } as unknown as Awaited<
+			ReturnType<typeof api.discoverHost>
+		>);
 		await waitFor(() =>
 			expect(screen.getByRole('button', { name: /trigger discovery/i })).not.toHaveAttribute('aria-busy')
 		);
 	});
 
 	it('Set Tags uses secondary sm variant', async () => {
-		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
+			ReturnType<typeof api.getHost>
+		>);
 		render(HostDetailPage);
 		await waitFor(() => screen.getByRole('button', { name: /set tags/i }));
 
@@ -581,7 +643,9 @@ describe('Button primitive contract — hosts/[id]/+page.svelte', () => {
 	});
 
 	it('Add Plugin Type uses primary sm variant', async () => {
-		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
+			ReturnType<typeof api.getHost>
+		>);
 		vi.mocked(auth.getUser).mockReturnValue({
 			...adminUser,
 			permissions: [...adminUser.permissions, Permission.ViewSoftware]
@@ -607,10 +671,14 @@ describe('Button primitive contract — hosts/[id]/+page.svelte', () => {
 	});
 
 	it('Edit modal Save has static label and loading wires to aria-busy', async () => {
-		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
+			ReturnType<typeof api.getHost>
+		>);
 
-		let resolveUpdate!: (v: typeof sampleHost) => void;
-		vi.mocked(api.updateHost).mockReturnValue(new Promise((res) => (resolveUpdate = res)));
+		let resolveUpdate!: (v: Awaited<ReturnType<typeof api.updateHost>>) => void;
+		vi.mocked(api.updateHost).mockReturnValue(
+			new Promise((res) => (resolveUpdate = res)) as ReturnType<typeof api.updateHost>
+		);
 
 		render(HostDetailPage);
 		await waitFor(() => screen.getByRole('button', { name: /edit name/i }));
@@ -635,13 +703,15 @@ describe('Button primitive contract — hosts/[id]/+page.svelte', () => {
 		await waitFor(() => expect(saveBtn).toHaveAttribute('aria-busy', 'true'));
 		expect(saveBtn.textContent?.trim()).toBe('Save');
 
-		resolveUpdate(sampleHost);
+		resolveUpdate({ data: sampleHost } as unknown as Awaited<ReturnType<typeof api.updateHost>>);
 		// After save completes, modal closes (button is removed) — modal gone proves loading ended
 		await waitFor(() => expect(screen.queryByRole('button', { name: /^save$/i })).not.toBeInTheDocument());
 	});
 
 	it('Edit modal Cancel uses secondary variant', async () => {
-		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
+			ReturnType<typeof api.getHost>
+		>);
 		render(HostDetailPage);
 		await waitFor(() => screen.getByRole('button', { name: /edit name/i }));
 		fireEvent.click(screen.getByRole('button', { name: /edit name/i }));
@@ -654,7 +724,9 @@ describe('Button primitive contract — hosts/[id]/+page.svelte', () => {
 	});
 
 	it('source has no preset-filled-* or preset-tonal-* classes in button elements', async () => {
-		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
+			ReturnType<typeof api.getHost>
+		>);
 		vi.mocked(auth.getUser).mockReturnValue({
 			...adminUser,
 			permissions: [...adminUser.permissions, Permission.ViewSoftware]

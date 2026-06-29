@@ -9,12 +9,12 @@
 		listUpdateHistory,
 		updateHost,
 		deactivateHost,
-		triggerHostDiscovery,
+		discoverHost,
 		listHostDiscoveryAllowlist,
 		addHostDiscoveryAllowlistEntry,
-		deleteHostDiscoveryAllowlistEntry,
+		removeHostDiscoveryAllowlistEntry,
 		listPluginTypes,
-		getHostTags,
+		listHostTags,
 		setHostTags,
 		getSoftwareItems
 	} from '$lib/api';
@@ -175,11 +175,11 @@
 			error = null;
 		}
 		try {
-			const [hostResult, historyResult] = await Promise.all([
-				getHost(id),
+			const [hostData, historyResult] = await Promise.all([
+				getHost({ path: { id } }),
 				listUpdateHistory({ host_id: id, per_page: 5 })
 			]);
-			host = hostResult;
+			host = hostData.data as unknown as HostResponse;
 			recentHistory = historyResult.items;
 			hostDetailReloadToken += 1;
 		} catch (e) {
@@ -211,7 +211,8 @@
 	async function loadHostAllowlist() {
 		hostAllowlistLoading = true;
 		try {
-			hostAllowlist = await listHostDiscoveryAllowlist(id);
+			const { data: allowlistData } = await listHostDiscoveryAllowlist({ path: { id } });
+			hostAllowlist = allowlistData;
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to load host discovery allowlist');
 		} finally {
@@ -236,8 +237,8 @@
 
 	async function loadAllTags() {
 		try {
-			const result = await getHostTags(1, 100);
-			allTags = result.items;
+			const { data: result } = await listHostTags({ query: { page: 1, per_page: 100 } });
+			allTags = result.items as unknown as HostTagResponse[];
 		} catch {
 			// Tags are non-critical — silently ignore
 		}
@@ -254,7 +255,10 @@
 		if (!host || submitting) return;
 		submitting = true;
 		try {
-			const updatedTags = await setHostTags(host.id, { tag_ids: [...selectedTagIds] });
+			const { data: updatedTags } = await setHostTags({
+				path: { id: host.id },
+				body: { tag_ids: [...selectedTagIds] }
+			});
 			host = { ...host, tags: updatedTags };
 			showSetTagsModal = false;
 			showSuccess('Tags updated');
@@ -281,7 +285,10 @@
 			return;
 		}
 		try {
-			const created = await addHostDiscoveryAllowlistEntry(id, { plugin_type: pluginType });
+			const { data: created } = await addHostDiscoveryAllowlistEntry({
+				path: { id },
+				body: { plugin_type: pluginType }
+			});
 			if (!hostAllowlist.some((e) => e.id === created.id)) {
 				hostAllowlist = [...hostAllowlist, created];
 			}
@@ -297,7 +304,7 @@
 		const { id: entryId } = allowlistDeleteConfirm;
 		allowlistDeleteConfirm = null;
 		try {
-			await deleteHostDiscoveryAllowlistEntry(id, entryId);
+			await removeHostDiscoveryAllowlistEntry({ path: { id, entry_id: entryId } });
 			hostAllowlist = hostAllowlist.filter((e) => e.id !== entryId);
 			showSuccess('Allowlist entry removed.');
 		} catch (e) {
@@ -318,8 +325,11 @@
 		if (!editHost || !host || submitting) return;
 		submitting = true;
 		try {
-			const updated = await updateHost(host.id, { friendly_name: editHost.friendlyName });
-			host = updated;
+			const { data: updated } = await updateHost({
+				path: { id: host.id },
+				body: { friendly_name: editHost.friendlyName }
+			});
+			host = updated as unknown as HostResponse;
 			editHost = null;
 			showSuccess('Host name updated');
 		} catch (e) {
@@ -334,7 +344,7 @@
 		confirmDeactivate = false;
 		submitting = true;
 		try {
-			await deactivateHost(host.id);
+			await deactivateHost({ path: { id: host.id } });
 			showSuccess(`Host "${host.friendly_name}" deactivated`);
 			goto('/hosts');
 		} catch (e) {
@@ -347,7 +357,7 @@
 		if (!host || discovering) return;
 		discovering = true;
 		try {
-			const result = await triggerHostDiscovery(host.id);
+			const { data: result } = await discoverHost({ path: { id: host.id } });
 			if (result.plugins_queued > 0) {
 				showSuccess(`Discovery triggered — ${result.plugins_queued} plugin(s) queued`);
 			} else {

@@ -12,7 +12,7 @@ vi.mock('$app/state', () => ({
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 
 vi.mock('$lib/api', () => ({
-	getHostTags: vi.fn(),
+	listHostTags: vi.fn(),
 	createHostTag: vi.fn(),
 	updateHostTag: vi.fn(),
 	deleteHostTag: vi.fn(),
@@ -58,8 +58,8 @@ describe('Host Tags Route', () => {
 			configurable: true
 		});
 		vi.mocked(auth.getUser).mockReturnValue(user);
-		vi.mocked(api.getHostTags).mockResolvedValue(
-			makePage([
+		vi.mocked(api.listHostTags).mockResolvedValue({
+			data: makePage([
 				{
 					id: 'tag-1',
 					name: 'production',
@@ -69,7 +69,7 @@ describe('Host Tags Route', () => {
 					created_at: '2026-03-01T10:00:00Z'
 				} as unknown as HostTagResponse
 			])
-		);
+		} as unknown as Awaited<ReturnType<typeof api.listHostTags>>);
 	});
 
 	afterEach(() => {
@@ -106,13 +106,17 @@ describe('Host Tags Route', () => {
 	});
 
 	it('query param is read from URL and passed to getHostTags', async () => {
-		vi.mocked(api.getHostTags).mockResolvedValue(makePage([]));
+		vi.mocked(api.listHostTags).mockResolvedValue({ data: makePage([]) } as unknown as Awaited<
+			ReturnType<typeof api.listHostTags>
+		>);
 		Object.defineProperty(page, 'url', {
 			value: new URL('http://localhost/host-tags?query=prod'),
 			configurable: true
 		});
 		render(HostTagsPage);
-		await waitFor(() => expect(vi.mocked(api.getHostTags)).toHaveBeenCalledWith(expect.anything(), undefined, 'prod'));
+		await waitFor(() =>
+			expect(vi.mocked(api.listHostTags)).toHaveBeenCalledWith({ query: expect.objectContaining({ search: 'prod' }) })
+		);
 	});
 });
 
@@ -123,7 +127,9 @@ describe('Button Migrations', () => {
 			configurable: true
 		});
 		vi.mocked(auth.getUser).mockReturnValue(user);
-		vi.mocked(api.getHostTags).mockResolvedValue(makePage([]));
+		vi.mocked(api.listHostTags).mockResolvedValue({ data: makePage([]) } as unknown as Awaited<
+			ReturnType<typeof api.listHostTags>
+		>);
 	});
 
 	afterEach(() => {
@@ -139,8 +145,8 @@ describe('Button Migrations', () => {
 	});
 
 	it('Row ellipsis trigger renders variant="ghost" size="sm" with EllipsisIcon and sr-only children', async () => {
-		vi.mocked(api.getHostTags).mockResolvedValue(
-			makePage([
+		vi.mocked(api.listHostTags).mockResolvedValue({
+			data: makePage([
 				{
 					id: 'tag-1',
 					name: 'prod',
@@ -151,7 +157,7 @@ describe('Button Migrations', () => {
 					host_count: 5
 				}
 			])
-		);
+		} as unknown as Awaited<ReturnType<typeof api.listHostTags>>);
 		render(HostTagsPage);
 		await waitFor(() => expect(screen.getByRole('button', { name: 'Actions for prod' })).toBeInTheDocument());
 		const btn = screen.getByRole('button', { name: 'Actions for prod' });
@@ -163,8 +169,8 @@ describe('Button Migrations', () => {
 	});
 
 	it('Row ellipsis trigger click opens context menu (stopPropagation + menu positioning)', async () => {
-		vi.mocked(api.getHostTags).mockResolvedValue(
-			makePage([
+		vi.mocked(api.listHostTags).mockResolvedValue({
+			data: makePage([
 				{
 					id: 'tag-1',
 					name: 'test',
@@ -175,7 +181,7 @@ describe('Button Migrations', () => {
 					host_count: 2
 				}
 			])
-		);
+		} as unknown as Awaited<ReturnType<typeof api.listHostTags>>);
 		render(HostTagsPage);
 		await waitFor(() => expect(screen.getByRole('button', { name: 'Actions for test' })).toBeInTheDocument());
 		const btn = screen.getByRole('button', { name: 'Actions for test' });
@@ -186,7 +192,7 @@ describe('Button Migrations', () => {
 	});
 
 	it('Error Retry button renders variant="primary" with async loading state', async () => {
-		vi.mocked(api.getHostTags).mockRejectedValueOnce(new Error('Network error'));
+		vi.mocked(api.listHostTags).mockRejectedValueOnce(new Error('Network error'));
 		render(HostTagsPage);
 		await waitFor(() => expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument());
 		const btn = screen.getByRole('button', { name: 'Retry' });
@@ -195,20 +201,22 @@ describe('Button Migrations', () => {
 		expect(btn).not.toHaveAttribute('disabled');
 
 		// Simulate click and verify recovery after success
-		vi.mocked(api.getHostTags).mockResolvedValueOnce(makePage([]));
+		vi.mocked(api.listHostTags).mockResolvedValueOnce({ data: makePage([]) } as unknown as Awaited<
+			ReturnType<typeof api.listHostTags>
+		>);
 		await userEvent.click(btn);
 		// After successful retry, error state clears and Retry button is removed
 		await waitFor(() => expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument());
 	});
 
 	it('Error Retry button clears loading state after rejection', async () => {
-		vi.mocked(api.getHostTags).mockRejectedValueOnce(new Error('Load failed'));
+		vi.mocked(api.listHostTags).mockRejectedValueOnce(new Error('Load failed'));
 		render(HostTagsPage);
 		await waitFor(() => expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument());
 		const btn = screen.getByRole('button', { name: 'Retry' });
 
 		// Mock rejection on retry click
-		vi.mocked(api.getHostTags).mockRejectedValueOnce(new Error('Retry failed'));
+		vi.mocked(api.listHostTags).mockRejectedValueOnce(new Error('Retry failed'));
 		try {
 			btn.click();
 		} catch {
@@ -260,17 +268,19 @@ describe('Button Migrations', () => {
 					setTimeout(
 						() =>
 							resolve({
-								id: 'tag-1',
-								name: 'new',
-								color: '',
-								description: '',
-								created_at: '2026-04-19T00:00:00Z',
-								updated_at: '2026-04-19T00:00:00Z',
-								host_count: 0
-							} as unknown as HostTagResponse),
+								data: {
+									id: 'tag-1',
+									name: 'new',
+									color: '',
+									description: '',
+									created_at: '2026-04-19T00:00:00Z',
+									updated_at: '2026-04-19T00:00:00Z',
+									host_count: 0
+								}
+							} as unknown as Awaited<ReturnType<typeof api.createHostTag>>),
 						100
 					)
-				)
+				) as ReturnType<typeof api.createHostTag>
 		);
 		render(HostTagsPage);
 		const createBtn = screen.getByRole('button', { name: 'Create Tag' });
@@ -286,8 +296,8 @@ describe('Button Migrations', () => {
 	});
 
 	it('Edit modal footer Save renders variant="primary" with loading={submitting} and disabled={!editTag?.name.trim()}', async () => {
-		vi.mocked(api.getHostTags).mockResolvedValue(
-			makePage([
+		vi.mocked(api.listHostTags).mockResolvedValue({
+			data: makePage([
 				{
 					id: 'tag-1',
 					name: 'prod',
@@ -298,7 +308,7 @@ describe('Button Migrations', () => {
 					host_count: 5
 				}
 			])
-		);
+		} as unknown as Awaited<ReturnType<typeof api.listHostTags>>);
 		render(HostTagsPage);
 		await waitFor(() => expect(screen.getByRole('button', { name: 'Actions for prod' })).toBeInTheDocument());
 		const ellipsisBtn = screen.getByRole('button', { name: 'Actions for prod' });
@@ -321,8 +331,8 @@ describe('Button Migrations', () => {
 	});
 
 	it('Edit modal footer Cancel renders variant="secondary"', async () => {
-		vi.mocked(api.getHostTags).mockResolvedValue(
-			makePage([
+		vi.mocked(api.listHostTags).mockResolvedValue({
+			data: makePage([
 				{
 					id: 'tag-1',
 					name: 'test',
@@ -333,7 +343,7 @@ describe('Button Migrations', () => {
 					host_count: 2
 				}
 			])
-		);
+		} as unknown as Awaited<ReturnType<typeof api.listHostTags>>);
 		render(HostTagsPage);
 		await waitFor(() => expect(screen.getByRole('button', { name: 'Actions for test' })).toBeInTheDocument());
 		const ellipsisBtn = screen.getByRole('button', { name: 'Actions for test' });
@@ -347,8 +357,8 @@ describe('Button Migrations', () => {
 	});
 
 	it('Out-of-scope regression: Edit/Delete ContextMenuItems remain unchanged and are not wrapped in Button', async () => {
-		vi.mocked(api.getHostTags).mockResolvedValue(
-			makePage([
+		vi.mocked(api.listHostTags).mockResolvedValue({
+			data: makePage([
 				{
 					id: 'tag-1',
 					name: 'prod',
@@ -359,7 +369,7 @@ describe('Button Migrations', () => {
 					host_count: 5
 				}
 			])
-		);
+		} as unknown as Awaited<ReturnType<typeof api.listHostTags>>);
 		render(HostTagsPage);
 		await waitFor(() => expect(screen.getByRole('button', { name: 'Actions for prod' })).toBeInTheDocument());
 		const ellipsisBtn = screen.getByRole('button', { name: 'Actions for prod' });

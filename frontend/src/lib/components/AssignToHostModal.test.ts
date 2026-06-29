@@ -7,7 +7,7 @@ import type { HostResponse, PluginConfigResponse, PluginTypeInfo, SoftwareItemDe
 
 vi.mock('$lib/api', () => ({
 	getSoftwareItem: vi.fn(),
-	getHosts: vi.fn(),
+	listHosts: vi.fn(),
 	assignHostsToSoftwareItem: vi.fn(),
 	unassignHostFromSoftwareItem: vi.fn(),
 	getPluginConfigs: vi.fn(),
@@ -142,7 +142,9 @@ function makePluginTypes(): PluginTypeInfo[] {
 
 function renderModal(hostItems: HostResponse[] = [makeHost('host-1', 'Host One')]) {
 	vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail([]));
-	vi.mocked(api.getHosts).mockResolvedValue(makeHostsPage(hostItems));
+	vi.mocked(api.listHosts).mockResolvedValue({ data: makeHostsPage(hostItems) } as unknown as Awaited<
+		ReturnType<typeof api.listHosts>
+	>);
 	vi.mocked(api.getPluginConfigs).mockResolvedValue({
 		items: makePluginConfigs(),
 		total: 2,

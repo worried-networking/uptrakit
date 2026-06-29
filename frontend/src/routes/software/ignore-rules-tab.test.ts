@@ -4,9 +4,9 @@ import type { PaginatedResponse, SoftwareIgnoreResponse } from '$lib/types';
 import { Permission } from '$lib/types';
 
 vi.mock('$lib/api', () => ({
-	getSoftwareIgnores: vi.fn(),
-	createSoftwareIgnore: vi.fn(),
-	deleteSoftwareIgnore: vi.fn(),
+	listAutodiscoveryIgnores: vi.fn(),
+	createAutodiscoveryIgnore: vi.fn(),
+	deleteAutodiscoveryIgnore: vi.fn(),
 	batchAutodiscoveryIgnores: vi.fn()
 }));
 
@@ -53,15 +53,15 @@ function deferred<T>() {
 describe('Software Ignore Rules Tab', () => {
 	beforeEach(() => {
 		vi.mocked(auth.getUser).mockReturnValue(managerUser);
-		vi.mocked(api.getSoftwareIgnores).mockResolvedValue(
-			makePage([
+		vi.mocked(api.listAutodiscoveryIgnores).mockResolvedValue({
+			data: makePage([
 				{
 					id: 'ignore-1',
 					name: 'Plex',
 					created_at: '2026-04-01T10:00:00Z'
 				}
 			])
-		);
+		} as unknown as Awaited<ReturnType<typeof api.listAutodiscoveryIgnores>>);
 		vi.mocked(api.batchAutodiscoveryIgnores).mockResolvedValue({
 			data: { succeeded: [], failed: [] }
 		} as unknown as Awaited<ReturnType<typeof api.batchAutodiscoveryIgnores>>);
@@ -82,13 +82,17 @@ describe('Software Ignore Rules Tab', () => {
 	});
 
 	it('uses shared loading and empty-state treatments', async () => {
-		const ignoresDeferred = deferred<PaginatedResponse<SoftwareIgnoreResponse>>();
-		vi.mocked(api.getSoftwareIgnores).mockReturnValue(ignoresDeferred.promise);
+		const ignoresDeferred = deferred<Awaited<ReturnType<typeof api.listAutodiscoveryIgnores>>>();
+		vi.mocked(api.listAutodiscoveryIgnores).mockReturnValue(
+			ignoresDeferred.promise as ReturnType<typeof api.listAutodiscoveryIgnores>
+		);
 
 		render(IgnoreRulesTab);
 
 		expect(screen.getByText('Loading...')).toBeInTheDocument();
-		ignoresDeferred.resolve(makePage([]));
+		ignoresDeferred.resolve({ data: makePage([]) } as unknown as Awaited<
+			ReturnType<typeof api.listAutodiscoveryIgnores>
+		>);
 
 		await waitFor(() => {
 			expect(document.querySelector('[data-ui="empty-state"]')).toBeInTheDocument();

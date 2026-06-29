@@ -8,7 +8,7 @@
 	import type { CheckboxListItem } from '$lib/components/forms';
 	import {
 		getSoftwareItem,
-		getHosts,
+		listHosts,
 		assignHostsToSoftwareItem,
 		unassignHostFromSoftwareItem,
 		getPluginConfigs,
@@ -156,13 +156,13 @@
 
 	onMount(async () => {
 		try {
-			const [detail, hostsResult, configsResult, typesResult] = await Promise.all([
+			const [detail, hostsData, configsResult, typesResult] = await Promise.all([
 				getSoftwareItem(softwareItemId),
-				getHosts(1, 200),
+				listHosts({ query: { page: 1, per_page: 200 } }),
 				getPluginConfigs(1, 500),
 				listPluginTypes()
 			]);
-			allHosts = hostsResult.items;
+			allHosts = hostsData.data.items as unknown as HostResponse[];
 			for (const h of detail.hosts) {
 				originalAssignedIds.add(h.host_id);
 				selectedIds.add(h.host_id);

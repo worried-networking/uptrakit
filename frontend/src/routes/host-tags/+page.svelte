@@ -5,7 +5,7 @@
 	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
 	import {
-		getHostTags,
+		listHostTags,
 		createHostTag,
 		updateHostTag,
 		deleteHostTag,
@@ -106,8 +106,8 @@
 	async function loadTags(pg: number, background = false) {
 		try {
 			if (!background) error = null;
-			const result = await getHostTags(pg, undefined, queryParam.value || undefined);
-			tags = result.items;
+			const { data: result } = await listHostTags({ query: { page: pg, search: queryParam.value || undefined } });
+			tags = result.items as unknown as HostTagResponse[];
 			totalPages = result.total_pages;
 			totalItems = result.total;
 			if (background) error = null;
@@ -170,9 +170,11 @@
 		try {
 			error = null;
 			await createHostTag({
-				name: createForm.name,
-				color: createForm.color || undefined,
-				description: createForm.description || undefined
+				body: {
+					name: createForm.name,
+					color: createForm.color || undefined,
+					description: createForm.description || undefined
+				}
 			});
 			showCreateModal = false;
 			showSuccess('Tag created');
@@ -189,12 +191,15 @@
 		submitting = true;
 		try {
 			error = null;
-			const updated = await updateHostTag(editTag.id, {
-				name: editTag.name,
-				color: editTag.color,
-				description: editTag.description || null
+			const { data: updated } = await updateHostTag({
+				path: { id: editTag.id },
+				body: {
+					name: editTag.name,
+					color: editTag.color,
+					description: editTag.description || null
+				}
 			});
-			tags = tags.map((t) => (t.id === editTag?.id ? updated : t));
+			tags = tags.map((t) => (t.id === editTag?.id ? (updated as unknown as HostTagResponse) : t));
 			editTag = null;
 			showSuccess('Tag updated');
 		} catch (e) {
@@ -211,7 +216,7 @@
 		submitting = true;
 		try {
 			error = null;
-			await deleteHostTag(tagId);
+			await deleteHostTag({ path: { id: tagId } });
 			showSuccess('Tag deleted');
 			await loadTags(currentPage);
 			const p = nextValidPage(currentPage, totalPages);
@@ -248,7 +253,9 @@
 		try {
 			let p = 1;
 			while (true) {
-				const result = await getHostTags(p, 100, queryParam.value || undefined);
+				const { data: result } = await listHostTags({
+					query: { page: p, per_page: 100, search: queryParam.value || undefined }
+				});
 				for (const tag of result.items) selectedIds.add(tag.id);
 				if (p >= result.total_pages) break;
 				p++;
