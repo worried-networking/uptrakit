@@ -3,7 +3,7 @@
 - **Date:** 2026-06-28
 - **Spec:** `docs/superpowers/specs/2026-06-28-frontend-openapi-client-codegen-design.md` (§8 R1/R7, §13 D1)
 - **Inputs:** `frontend/src/lib/api.ts` (152 exported fns), `frontend/src/lib/api/generated/sdk.gen.ts`
-  (170 operations), `frontend/src/lib/api/generated/types.gen.ts`, `frontend/src/lib/types.ts`,
+  (176 operations), `frontend/src/lib/api/generated/types.gen.ts`, `frontend/src/lib/types.ts`,
   `crates/ui/web-api/src/router.rs`, task-5 (S-A) + task-6 (R5) reports.
 - **Purpose:** decision gate for Plan C (the 103-site migration). This audit produces the explicit
   go/no-go and the per-delta triage Phase 2 is contingent on.
@@ -254,6 +254,11 @@ deltas are
 No sampled response field was **renamed** or had a value-shape the app depends on changed. No
 behavior-dependent non-enum delta found.
 
+**Residual risk (sampling):** a renamed or optionality-changed field in an _unsampled_ response type
+would be a behavior-dependent delta missed by sampling. With the count at 4 — one below the `> 5`
+gate — it would take 2+ such missed deltas to flip the verdict. Low likelihood given the
+serde-by-construction argument, but not zero.
+
 ### Enums — the only behavior-dependent drift
 
 Root cause (single): enums carrying an `Other(String)` wire-safe catch-all (the `wire_safe_enum!`
@@ -305,6 +310,13 @@ adds `software_item_lifecycle` + `enrich_installed_version`, additive). This aud
 finding: the Permission-class drift is **systematic** across all `Other(String)` catch-all enums
 (Permission, NotificationEventType, NotificationDeliveryStatus, PluginRole), one root cause, one fix.
 
+**R5 guard-coverage gap:** R5 (`enum-parity.test.ts`) guards only `Permission` and `PluginCapability`
+— the only two runtime `export enum`s in `types.ts`. The other three behavior-dependent enums
+(`NotificationEventType`, `NotificationDeliveryStatus`, `PluginRole`) are TypeScript `type` unions;
+`Object.values()` cannot enumerate them, so the `it.fails()` mechanism does not cover them. A green
+R5 after the backend fix proves `Permission` and `PluginCapability` are correct; it does **not** prove
+the remaining three collapsed. See the additional prerequisite in §(d).
+
 ## (d) Go / No-Go
 
 Classification recap (per the §13 / brief rule): mechanical = rename / additive-optional / enum
@@ -329,6 +341,16 @@ to Phase 2 — **conditioned on a single mandatory prerequisite**:
 > green (drop the `it.fails()` guards). Migrating against the current PascalCase enums would silently
 > break permission checks, notification-rule filtering, the plugin-role assignment UI, and
 > delivery-status badges — none reliably caught by E2E.
+
+**Additional prerequisite — R5 guard gap (must resolve before migrating `NotificationEventType` /
+`NotificationDeliveryStatus` / `PluginRole` call sites):** "Re-run R5 until green" is **not
+sufficient** to confirm all 4 drifts collapsed. R5 guards only `Permission` and `PluginCapability`
+(the two runtime `export enum`s in `types.ts`); the remaining three enums are TypeScript `type`
+unions not reachable by `Object.values()`. Before migrating any call site that touches
+`NotificationEventType`, `NotificationDeliveryStatus`, or `PluginRole`: either **extend the parity
+guard** to cover these three type-union enums (e.g. a literal-member parity check against a
+`KNOWN_VARIANTS` const array), **or manually verify** their post-fix generated values match the wire
+strings. This applies to Phase 2 call-site migration; it does not block the backend fix itself.
 
 Independent, non-blocking follow-ups: decide whether to add `PluginCapability`'s two new values and
 the `AccessMcp` permission to the frontend (additive); optionally pin `operation_id` to reduce the
