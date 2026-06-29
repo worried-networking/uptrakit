@@ -46,15 +46,17 @@ describe('Profile Route', () => {
 	beforeEach(() => {
 		vi.mocked(auth.getUser).mockReturnValue(user);
 		vi.mocked(api.listApiTokens).mockResolvedValue({
-			tokens: [
-				{
-					id: 'token-1',
-					name: 'Automation',
-					created_at: '2026-03-10T12:00:00Z',
-					revoked_at: null
-				}
-			]
-		});
+			data: {
+				tokens: [
+					{
+						id: 'token-1',
+						name: 'Automation',
+						created_at: '2026-03-10T12:00:00Z',
+						revoked_at: null
+					}
+				]
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listApiTokens>>);
 	});
 
 	afterEach(() => {
@@ -97,7 +99,9 @@ describe('Profile Route', () => {
 describe('Tab Navigation', () => {
 	beforeEach(() => {
 		vi.mocked(auth.getUser).mockReturnValue(user);
-		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
+		vi.mocked(api.listApiTokens).mockResolvedValue({ data: { tokens: [] } } as unknown as Awaited<
+			ReturnType<typeof api.listApiTokens>
+		>);
 	});
 
 	afterEach(() => {
@@ -132,15 +136,17 @@ describe('Button Migrations', () => {
 		vi.mocked(auth.getUser).mockReturnValue(user);
 		vi.mocked(auth.getAuthMethod).mockReturnValue('password');
 		vi.mocked(api.listApiTokens).mockResolvedValue({
-			tokens: [
-				{
-					id: 'token-1',
-					name: 'Automation',
-					created_at: '2026-03-10T12:00:00Z',
-					revoked_at: null
-				}
-			]
-		});
+			data: {
+				tokens: [
+					{
+						id: 'token-1',
+						name: 'Automation',
+						created_at: '2026-03-10T12:00:00Z',
+						revoked_at: null
+					}
+				]
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listApiTokens>>);
 	});
 
 	afterEach(() => {
@@ -162,7 +168,9 @@ describe('Button Migrations', () => {
 			created_at: '2026-04-19T00:00:00Z',
 			revoked_at: null
 		};
-		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [token] });
+		vi.mocked(api.listApiTokens).mockResolvedValue({ data: { tokens: [token] } } as unknown as Awaited<
+			ReturnType<typeof api.listApiTokens>
+		>);
 		render(ProfilePage);
 		await goToTokensTab();
 		await waitFor(() => expect(screen.getByRole('button', { name: 'Revoke' })).toBeInTheDocument());
@@ -198,7 +206,9 @@ describe('Button Migrations', () => {
 	});
 
 	it('New API Token modal Created state Copy button renders variant="secondary"', async () => {
-		vi.mocked(api.createApiToken).mockResolvedValue({ id: 'token-2', token: 'secret-token-123' });
+		vi.mocked(api.createApiToken).mockResolvedValue({
+			data: { id: 'token-2', token: 'secret-token-123' }
+		} as unknown as Awaited<ReturnType<typeof api.createApiToken>>);
 		render(ProfilePage);
 		await goToTokensTab();
 		const newTokenBtn = await screen.findByRole('button', { name: 'New Token' });
@@ -214,7 +224,9 @@ describe('Button Migrations', () => {
 	});
 
 	it('New API Token modal Created state Done button renders variant="primary"', async () => {
-		vi.mocked(api.createApiToken).mockResolvedValue({ id: 'token-3', token: 'secret-token-123' });
+		vi.mocked(api.createApiToken).mockResolvedValue({
+			data: { id: 'token-3', token: 'secret-token-123' }
+		} as unknown as Awaited<ReturnType<typeof api.createApiToken>>);
 		render(ProfilePage);
 		await goToTokensTab();
 		const newTokenBtn = await screen.findByRole('button', { name: 'New Token' });
@@ -230,7 +242,9 @@ describe('Button Migrations', () => {
 	});
 
 	it('New API Token modal Copy button invokes clipboard.writeText and surfaces success toast', async () => {
-		vi.mocked(api.createApiToken).mockResolvedValue({ id: 'token-4', token: 'secret-token-123' });
+		vi.mocked(api.createApiToken).mockResolvedValue({
+			data: { id: 'token-4', token: 'secret-token-123' }
+		} as unknown as Awaited<ReturnType<typeof api.createApiToken>>);
 		const writeTextMock = vi.fn().mockResolvedValue(undefined);
 		Object.defineProperty(navigator, 'clipboard', {
 			value: { writeText: writeTextMock },
@@ -259,7 +273,9 @@ describe('Button Migrations', () => {
 			created_at: '2026-04-19T00:00:00Z',
 			revoked_at: null
 		};
-		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [token] });
+		vi.mocked(api.listApiTokens).mockResolvedValue({ data: { tokens: [token] } } as unknown as Awaited<
+			ReturnType<typeof api.listApiTokens>
+		>);
 		render(ProfilePage);
 		await goToTokensTab();
 		await waitFor(() => expect(screen.getByRole('button', { name: 'Revoke' })).toBeInTheDocument());
@@ -275,19 +291,23 @@ describe('Create Token Modal — Post-reveal', () => {
 		vi.mocked(auth.getUser).mockReturnValue(user);
 		vi.mocked(auth.getAuthMethod).mockReturnValue('password');
 		vi.mocked(api.listApiTokens).mockResolvedValue({
-			tokens: [
-				{
-					id: 'existing-token',
-					name: 'Existing',
-					created_at: '2026-03-10T12:00:00Z',
-					revoked_at: null
-				}
-			]
-		});
+			data: {
+				tokens: [
+					{
+						id: 'existing-token',
+						name: 'Existing',
+						created_at: '2026-03-10T12:00:00Z',
+						revoked_at: null
+					}
+				]
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listApiTokens>>);
 		vi.mocked(api.createApiToken).mockResolvedValue({
-			id: 'token-1',
-			token: 'secret-token-abc'
-		});
+			data: {
+				id: 'token-1',
+				token: 'secret-token-abc'
+			}
+		} as unknown as Awaited<ReturnType<typeof api.createApiToken>>);
 	});
 
 	afterEach(() => {
@@ -334,21 +354,23 @@ describe('API Tokens Tab', () => {
 
 	it('filters out revoked tokens from the DataTable', async () => {
 		vi.mocked(api.listApiTokens).mockResolvedValue({
-			tokens: [
-				{
-					id: 'token-1',
-					name: 'Active Token',
-					created_at: '2026-01-01T00:00:00Z',
-					revoked_at: null
-				},
-				{
-					id: 'token-2',
-					name: 'Revoked Token',
-					created_at: '2026-01-02T00:00:00Z',
-					revoked_at: '2026-02-01T00:00:00Z'
-				}
-			]
-		});
+			data: {
+				tokens: [
+					{
+						id: 'token-1',
+						name: 'Active Token',
+						created_at: '2026-01-01T00:00:00Z',
+						revoked_at: null
+					},
+					{
+						id: 'token-2',
+						name: 'Revoked Token',
+						created_at: '2026-01-02T00:00:00Z',
+						revoked_at: '2026-02-01T00:00:00Z'
+					}
+				]
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listApiTokens>>);
 		render(ProfilePage);
 		await goToTokensTab();
 		await waitFor(() => expect(screen.getByText('Active Token')).toBeInTheDocument());
@@ -357,15 +379,17 @@ describe('API Tokens Tab', () => {
 
 	it('renders EmptyState when all tokens are revoked', async () => {
 		vi.mocked(api.listApiTokens).mockResolvedValue({
-			tokens: [
-				{
-					id: 'token-1',
-					name: 'Old Token',
-					created_at: '2026-01-01T00:00:00Z',
-					revoked_at: '2026-02-01T00:00:00Z'
-				}
-			]
-		});
+			data: {
+				tokens: [
+					{
+						id: 'token-1',
+						name: 'Old Token',
+						created_at: '2026-01-01T00:00:00Z',
+						revoked_at: '2026-02-01T00:00:00Z'
+					}
+				]
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listApiTokens>>);
 		render(ProfilePage);
 		await goToTokensTab();
 		await waitFor(() => expect(screen.getByText('No API tokens')).toBeInTheDocument());
@@ -373,7 +397,9 @@ describe('API Tokens Tab', () => {
 	});
 
 	it('renders EmptyState when token list is empty', async () => {
-		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
+		vi.mocked(api.listApiTokens).mockResolvedValue({ data: { tokens: [] } } as unknown as Awaited<
+			ReturnType<typeof api.listApiTokens>
+		>);
 		render(ProfilePage);
 		await goToTokensTab();
 		await waitFor(() => expect(screen.getByText('No API tokens')).toBeInTheDocument());
@@ -388,7 +414,9 @@ describe('Account Tab — Profile Card', () => {
 	it('shows "Change email" button for password auth', async () => {
 		vi.mocked(auth.getUser).mockReturnValue(user);
 		vi.mocked(auth.getAuthMethod).mockReturnValue('password');
-		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
+		vi.mocked(api.listApiTokens).mockResolvedValue({ data: { tokens: [] } } as unknown as Awaited<
+			ReturnType<typeof api.listApiTokens>
+		>);
 		render(ProfilePage);
 		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Profile' })).toBeInTheDocument());
 		expect(screen.getByRole('button', { name: 'Change email' })).toBeInTheDocument();
@@ -397,7 +425,9 @@ describe('Account Tab — Profile Card', () => {
 	it('hides "Change email" button for OIDC auth', async () => {
 		vi.mocked(auth.getUser).mockReturnValue(user);
 		vi.mocked(auth.getAuthMethod).mockReturnValue('oidc');
-		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
+		vi.mocked(api.listApiTokens).mockResolvedValue({ data: { tokens: [] } } as unknown as Awaited<
+			ReturnType<typeof api.listApiTokens>
+		>);
 		render(ProfilePage);
 		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Profile' })).toBeInTheDocument());
 		expect(screen.queryByRole('button', { name: 'Change email' })).not.toBeInTheDocument();
@@ -409,7 +439,9 @@ describe('Account Tab — Profile Card', () => {
 			has_pending_email_change: true
 		});
 		vi.mocked(auth.getAuthMethod).mockReturnValue('password');
-		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
+		vi.mocked(api.listApiTokens).mockResolvedValue({ data: { tokens: [] } } as unknown as Awaited<
+			ReturnType<typeof api.listApiTokens>
+		>);
 		render(ProfilePage);
 		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Profile' })).toBeInTheDocument());
 		expect(screen.getByText('Change pending')).toBeInTheDocument();
@@ -420,7 +452,9 @@ describe('Account Tab — Change Email Modal', () => {
 	beforeEach(() => {
 		vi.mocked(auth.getUser).mockReturnValue(user);
 		vi.mocked(auth.getAuthMethod).mockReturnValue('password');
-		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
+		vi.mocked(api.listApiTokens).mockResolvedValue({ data: { tokens: [] } } as unknown as Awaited<
+			ReturnType<typeof api.listApiTokens>
+		>);
 	});
 
 	afterEach(() => {
@@ -458,7 +492,9 @@ describe('Account Tab — Change Email Modal', () => {
 
 describe('Account Tab — Security Card', () => {
 	beforeEach(() => {
-		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
+		vi.mocked(api.listApiTokens).mockResolvedValue({ data: { tokens: [] } } as unknown as Awaited<
+			ReturnType<typeof api.listApiTokens>
+		>);
 	});
 
 	afterEach(() => {

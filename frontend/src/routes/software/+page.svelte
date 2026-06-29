@@ -340,7 +340,7 @@
 			}, 300_000);
 		}
 		listPluginTypes()
-			.then((types) => {
+			.then(({ data: types }) => {
 				pluginTypeNames = new Map(types.map((t) => [t.plugin_type, t.display_name]));
 				pluginTypeOptions = [...types].sort((a, b) => a.display_name.localeCompare(b.display_name));
 			})

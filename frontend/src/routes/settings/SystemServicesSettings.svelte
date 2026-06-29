@@ -4,9 +4,9 @@
 	import type {
 		SystemEnrollmentTokenResponse,
 		SystemEnrollmentTokenCreatedResponse,
-		PaginatedResponse,
+		PaginatedResponseSystemEnrollmentTokenResponse,
 		CreateSystemEnrollmentTokenRequest
-	} from '$lib/types';
+	} from '$lib/api';
 	import { copyToClipboard, formatDate } from '$lib/utils';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import {
@@ -30,7 +30,7 @@
 		onError: (msg: string) => void;
 	} = $props();
 
-	let tokens: PaginatedResponse<SystemEnrollmentTokenResponse> | null = $state(null);
+	let tokens: PaginatedResponseSystemEnrollmentTokenResponse | null = $state(null);
 	let loading: boolean = $state(false);
 	let loadError: string | null = $state(null);
 	let showCreateDialog: boolean = $state(false);
@@ -58,7 +58,8 @@
 		loading = true;
 		loadError = null;
 		try {
-			tokens = await listSystemEnrollmentTokens({ page });
+			const { data: tokensData } = await listSystemEnrollmentTokens({ query: { page } });
+			tokens = tokensData;
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Failed to load system enrollment tokens';
 			onError(loadError);
@@ -91,7 +92,8 @@
 					data.expires_in_seconds = parsed;
 				}
 			}
-			createdToken = await createSystemEnrollmentToken(data);
+			const { data: created } = await createSystemEnrollmentToken({ body: data });
+			createdToken = created;
 			showCreateDialog = false;
 			resetForm();
 			onSuccess('System enrollment token created.');
@@ -105,7 +107,7 @@
 
 	async function handleRevoke(id: string) {
 		try {
-			await revokeSystemEnrollmentToken(id);
+			await revokeSystemEnrollmentToken({ path: { id } });
 			onSuccess('System enrollment token revoked.');
 			createdToken = null;
 			await loadTokens();
@@ -342,7 +344,7 @@
 				{@const status = tokenStatus(token)}
 				<tr class="border-b border-[var(--border-subtle)] last:border-b-0 text-table-body">
 					<td class="table-cell-pad">{token.name}</td>
-					<td class="table-cell-pad">{formatUsage(token.current_uses, token.max_uses)}</td>
+					<td class="table-cell-pad">{formatUsage(token.current_uses, token.max_uses ?? null)}</td>
 					<td class="table-cell-pad">{token.expires_at ? formatDate(token.expires_at) : 'never'}</td>
 					<td class="table-cell-pad"><StatusBadge tone={statusTone(status)} label={status} /></td>
 					<td class="table-cell-pad">{formatDate(token.created_at)}</td>

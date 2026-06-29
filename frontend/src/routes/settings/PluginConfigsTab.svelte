@@ -2,11 +2,11 @@
 	import { onMount } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import {
-		getPluginConfigs,
+		listPluginConfigs,
 		createPluginConfig,
 		updatePluginConfig,
 		deletePluginConfig,
-		triggerPluginConfigDiscovery,
+		discoverPluginConfig,
 		listTenantDiscoveryAllowlist,
 		addTenantDiscoveryAllowlistEntry,
 		removeTenantDiscoveryAllowlistEntry,
@@ -38,17 +38,16 @@
 	} from '$lib/components/ui';
 	import { FormFieldRow, Input, Textarea, Checkbox, Select } from '$lib/components/forms';
 	import Button from '$lib/components/Button.svelte';
+	import type { FormField, SelectOption } from '$lib/types';
 	import type {
 		PluginConfigResponse,
 		TenantDiscoveryAllowlistEntry,
 		PluginTypeInfo,
 		PluginTypeSettingsResponse,
-		FormField,
-		SelectOption,
 		BatchActionResponse,
 		TestPluginConfigResponse,
 		InstancePluginSummary
-	} from '$lib/types';
+	} from '$lib/api';
 
 	const canViewConfigs = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
 	const canManageConfigs = $derived(getUser()?.permissions.includes(Permission.ManageCommands) ?? false);
@@ -123,6 +122,7 @@
 	let showInstancePluginConfigModal: boolean = $state(false);
 	let instancePluginFormValues: Record<string, string> = $state({});
 	let instancePluginFieldErrors: Record<string, string> = $state({});
+	let instancePluginModalFields: FormField[] = $state([]);
 
 	// Batch state — plugin configs
 	let configSelectedIds = new SvelteSet<string>();
@@ -154,7 +154,8 @@
 		instancePluginsLoading = true;
 		instancePluginsError = null;
 		try {
-			instancePlugins = await listInstancePlugins();
+			const { data } = await listInstancePlugins();
+			instancePlugins = data;
 		} catch (e) {
 			instancePluginsError = e instanceof Error ? e.message : 'Failed to load instance plugins';
 			showError(instancePluginsError);
@@ -165,7 +166,8 @@
 
 	async function loadPluginTypes() {
 		try {
-			pluginTypes = await listPluginTypes();
+			const { data: types } = await listPluginTypes();
+			pluginTypes = types;
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to load plugin types');
 		}
@@ -175,7 +177,7 @@
 		configsLoading = true;
 		configsError = null;
 		try {
-			const res = await getPluginConfigs(configsCurrentPage);
+			const { data: res } = await listPluginConfigs({ query: { page: configsCurrentPage } });
 			configs = res.items;
 			configsCurrentPage = res.page;
 			configsTotalPages = res.total_pages;
@@ -207,7 +209,8 @@
 		typeSettingsLoading = true;
 		typeSettingsError = null;
 		try {
-			typeSettings = await listPluginTypeSettings();
+			const { data: ts } = await listPluginTypeSettings();
+			typeSettings = ts;
 		} catch (e) {
 			typeSettingsError = e instanceof Error ? e.message : 'Failed to load plugin type settings';
 			showError(typeSettingsError);
@@ -223,7 +226,7 @@
 
 	function getFormFields(pluginType: string): FormField[] {
 		const t = pluginTypes.find((pt) => pt.plugin_type === pluginType);
-		return t?.config_form_fields ?? [];
+		return (t?.config_form_fields ?? []) as FormField[];
 	}
 
 	const currentFormFields = $derived(getFormFields(configForm.plugin_type));
@@ -378,7 +381,7 @@
 			config: JSON.stringify(config.config, null, 2),
 			enabled: config.enabled
 		};
-		formValues = flattenConfig(config.config, fields);
+		formValues = flattenConfig(config.config as Record<string, unknown>, fields);
 		showJsonEditor = false;
 		configTestResult = null;
 		clearConfigValidation();
@@ -448,19 +451,24 @@
 		}
 		try {
 			if (editingConfig) {
-				const updated = await updatePluginConfig(editingConfig.id, {
-					name: configForm.name || undefined,
-					config: parsedConfig,
-					enabled: configForm.enabled
+				const { data: updated } = await updatePluginConfig({
+					path: { id: editingConfig.id },
+					body: {
+						name: configForm.name || undefined,
+						config: parsedConfig,
+						enabled: configForm.enabled
+					}
 				});
 				configs = configs.map((c) => (c.id === editingConfig!.id ? updated : c));
 				showSuccess('Plugin config updated.');
 			} else {
-				const created = await createPluginConfig({
-					name: configForm.name,
-					plugin_type: configForm.plugin_type,
-					config: parsedConfig,
-					enabled: configForm.enabled
+				const { data: created } = await createPluginConfig({
+					body: {
+						name: configForm.name,
+						plugin_type: configForm.plugin_type,
+						config: parsedConfig,
+						enabled: configForm.enabled
+					}
 				});
 				configs = [...configs, created];
 				showSuccess('Plugin config created.');
@@ -477,7 +485,7 @@
 		const { id } = configDeleteConfirm;
 		configDeleteConfirm = null;
 		try {
-			await deletePluginConfig(id);
+			await deletePluginConfig({ path: { id } });
 			showSuccess('Plugin config deleted.');
 			await loadConfigs();
 		} catch (e) {
@@ -488,7 +496,7 @@
 	async function triggerDiscover(config: PluginConfigResponse) {
 		discoveringId = config.id;
 		try {
-			const res = await triggerPluginConfigDiscovery(config.id);
+			const { data: res } = await discoverPluginConfig({ path: { id: config.id } });
 			showSuccess(`Discovery triggered — ${res.plugins_queued} plugin(s) queued`);
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to trigger discovery');
@@ -512,15 +520,18 @@
 		configTesting = true;
 		configTestResult = null;
 		try {
-			configTestResult = await testPluginConfig({
-				plugin_type: configForm.plugin_type,
-				config: parsedConfig,
-				plugin_config_id: editingConfig?.id
+			const { data: testResult } = await testPluginConfig({
+				body: {
+					plugin_type: configForm.plugin_type,
+					config: parsedConfig,
+					plugin_config_id: editingConfig?.id
+				}
 			});
-			if (configTestResult.success) {
+			configTestResult = testResult;
+			if (testResult.success) {
 				showSuccess('Config test passed.');
 			} else {
-				showError(configTestResult.error ?? 'Config test failed.');
+				showError(testResult.error ?? 'Config test failed.');
 			}
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to test config');
@@ -581,11 +592,11 @@
 
 	function getTypeSettingsFields(pluginType: string): FormField[] {
 		const t = pluginTypes.find((pt) => pt.plugin_type === pluginType);
-		return t?.type_settings_form_fields ?? [];
+		return (t?.type_settings_form_fields ?? []) as FormField[];
 	}
 
 	function getTypeSettingsConfig(pluginType: string): Record<string, unknown> | null {
-		return typeSettings.find((s) => s.plugin_type === pluginType)?.config ?? null;
+		return (typeSettings.find((s) => s.plugin_type === pluginType)?.config ?? null) as Record<string, unknown> | null;
 	}
 
 	function openEditTypeSettings(pluginType: string) {
@@ -593,7 +604,7 @@
 		const fields = getTypeSettingsFields(pluginType);
 		const existing = getTypeSettingsConfig(pluginType);
 		const t = pluginTypes.find((pt) => pt.plugin_type === pluginType);
-		const sample = t?.type_settings_sample ?? {};
+		const sample = (t?.type_settings_sample ?? {}) as Record<string, unknown>;
 		typeSettingsFormValues = flattenConfig(existing ?? sample, fields);
 		typeSettingsFieldErrors = {};
 		showTypeSettingsModal = true;
@@ -614,7 +625,10 @@
 		}
 		const config = unflattenConfig(typeSettingsFormValues, fields);
 		try {
-			const updated = await upsertPluginTypeSettings(editingTypeSettingsType, config);
+			const { data: updated } = await upsertPluginTypeSettings({
+				path: { plugin_type: editingTypeSettingsType },
+				body: { config }
+			});
 			const idx = typeSettings.findIndex((s) => s.plugin_type === editingTypeSettingsType);
 			if (idx >= 0) {
 				typeSettings = typeSettings.map((s) => (s.plugin_type === editingTypeSettingsType ? updated : s));
@@ -633,7 +647,7 @@
 		const pluginType = typeSettingsResetConfirm;
 		typeSettingsResetConfirm = null;
 		try {
-			await deletePluginTypeSettings(pluginType);
+			await deletePluginTypeSettings({ path: { plugin_type: pluginType } });
 			typeSettings = typeSettings.filter((s) => s.plugin_type !== pluginType);
 			showSuccess('Type settings reset to defaults.');
 		} catch (e) {
@@ -646,7 +660,10 @@
 		const { plugin_type, display_name, next_enabled } = instancePluginToggleConfirm;
 		instancePluginToggleConfirm = null;
 		try {
-			const updated = await setInstancePluginEnabled(plugin_type, next_enabled);
+			const { data: updated } = await setInstancePluginEnabled({
+				path: { plugin_type },
+				body: { enabled: next_enabled }
+			});
 			instancePlugins = instancePlugins.map((p) => (p.plugin_type === plugin_type ? updated : p));
 			showSuccess(`${display_name} ${next_enabled ? 'enabled' : 'disabled'}. Restart the controller to apply.`);
 		} catch (e) {
@@ -658,7 +675,11 @@
 		editingInstancePluginType = pluginType;
 		const summary = instancePlugins.find((p) => p.plugin_type === pluginType);
 		if (!summary) return;
-		instancePluginFormValues = flattenConfig(summary.current_config, summary.instance_config_form_fields ?? []);
+		instancePluginModalFields = (summary.instance_config_form_fields ?? []) as FormField[];
+		instancePluginFormValues = flattenConfig(
+			summary.current_config as Record<string, unknown>,
+			instancePluginModalFields
+		);
 		instancePluginFieldErrors = {};
 		showInstancePluginConfigModal = true;
 	}
@@ -673,12 +694,15 @@
 		if (!editingInstancePluginType) return;
 		const summary = instancePlugins.find((p) => p.plugin_type === editingInstancePluginType);
 		if (!summary) return;
-		const fields = summary.instance_config_form_fields ?? [];
+		const fields = instancePluginModalFields;
 		instancePluginFieldErrors = requiredFieldErrors(fields, instancePluginFormValues);
 		if (Object.keys(instancePluginFieldErrors).length > 0) return;
 		const config = unflattenConfig(instancePluginFormValues, fields);
 		try {
-			const updated = await upsertInstancePluginConfig(editingInstancePluginType, config);
+			const { data: updated } = await upsertInstancePluginConfig({
+				path: { plugin_type: editingInstancePluginType },
+				body: { config }
+			});
 			instancePlugins = instancePlugins.map((p) => (p.plugin_type === editingInstancePluginType ? updated : p));
 			showSuccess('Instance plugin configuration saved.');
 			closeInstancePluginConfigModal();
@@ -866,7 +890,7 @@
 			maxWidth="max-w-2xl max-h-[90vh] overflow-y-auto"
 		>
 			<div class="space-y-4">
-				{#each summary.instance_config_form_fields ?? [] as field (field.key)}
+				{#each instancePluginModalFields as field (field.key)}
 					{#if isFieldVisible(field, instancePluginFormValues)}
 						<FormFieldRow
 							label={field.label}

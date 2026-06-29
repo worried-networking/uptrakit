@@ -1,13 +1,13 @@
 <script lang="ts">
 	import {
-		getOidcProviders,
-		createOidcProvider,
-		updateOidcProvider,
-		deleteOidcProvider,
-		activateOidcProvider,
-		deactivateOidcProvider
+		listProviders,
+		createProvider,
+		updateProvider,
+		deleteProvider,
+		activateProvider,
+		deactivateProvider
 	} from '$lib/api';
-	import type { OidcProviderResponse, CreateOidcProviderRequest, UpdateOidcProviderRequest } from '$lib/types';
+	import type { OidcProviderResponse, CreateOidcProviderRequest, UpdateOidcProviderRequest } from '$lib/api';
 	import { isValidLogoUrl } from '$lib/utils';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Modal from '$lib/components/Modal.svelte';
@@ -137,7 +137,7 @@
 				if (oidcForm.client_secret) data.client_secret = oidcForm.client_secret;
 				if (oidcForm.role_claim_path) data.role_claim_path = oidcForm.role_claim_path;
 
-				const updated = await updateOidcProvider(editingProvider.id, data);
+				const { data: updated } = await updateProvider({ path: { id: editingProvider.id }, body: data });
 				oidcProviders = oidcProviders.map((p) => (p.id === updated.id ? updated : p));
 				onSuccess('OIDC provider updated.');
 			} else {
@@ -155,7 +155,7 @@
 				if (oidcForm.logo_url) data.logo_url = oidcForm.logo_url;
 				if (oidcForm.role_claim_path) data.role_claim_path = oidcForm.role_claim_path;
 
-				const created = await createOidcProvider(data);
+				const { data: created } = await createProvider({ body: data });
 				oidcProviders = [...oidcProviders, created];
 				onSuccess('OIDC provider created.');
 			}
@@ -176,7 +176,7 @@
 		const { id } = deleteConfirm;
 		deleteConfirm = null;
 		try {
-			await deleteOidcProvider(id);
+			await deleteProvider({ path: { id } });
 			oidcProviders = oidcProviders.filter((p) => p.id !== id);
 			onSuccess('OIDC provider deleted.');
 		} catch (e) {
@@ -189,12 +189,15 @@
 		try {
 			let updated: OidcProviderResponse;
 			if (provider.is_active) {
-				updated = await deactivateOidcProvider(provider.id);
+				const { data: d } = await deactivateProvider({ path: { id: provider.id } });
+				updated = d;
 			} else {
-				updated = await activateOidcProvider(provider.id);
+				const { data: d } = await activateProvider({ path: { id: provider.id } });
+				updated = d;
 			}
 			// Activation may deactivate others, so reload all
-			oidcProviders = await getOidcProviders();
+			const { data: refreshed } = await listProviders();
+			oidcProviders = refreshed;
 			onSuccess(updated.is_active ? `${updated.name} activated.` : `${updated.name} deactivated.`);
 		} catch (e) {
 			onError(e instanceof Error ? e.message : 'Failed to update provider status');

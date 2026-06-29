@@ -5,18 +5,17 @@
 	import ConfirmDialog from './ConfirmDialog.svelte';
 	import { Input, Checkbox, Textarea, Select, type SelectItem } from '$lib/components/forms';
 	import { Callout, StatusBadge } from '$lib/components/ui';
-	import { getPluginConfigs, updateHostAssignment, deletePluginAssignment, listPluginTypes } from '$lib/api';
+	import { listPluginConfigs, updateHostAssignment, deletePluginAssignment, listPluginTypes } from '$lib/api';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import type {
 		FormField,
 		HostPluginRoleSummary,
-		PluginConfigResponse,
-		PluginTypeInfo,
 		SelectOption,
 		SoftwareItemDetailResponse,
 		UpdateHostAssignmentRequest
 	} from '$lib/types';
 	import { PluginCapability } from '$lib/types';
+	import type { PluginConfigResponse, PluginTypeInfo } from '$lib/api';
 
 	// ---------------------------------------------------------------------------
 	// Types
@@ -188,9 +187,12 @@
 
 	onMount(async () => {
 		try {
-			const [configsResult, typesResult] = await Promise.all([getPluginConfigs(1, 500), listPluginTypes()]);
-			pluginConfigs = configsResult.items;
-			pluginTypes = typesResult;
+			const [configsResult, typesResult] = await Promise.all([
+				listPluginConfigs({ query: { page: 1, per_page: 500 } }),
+				listPluginTypes()
+			]);
+			pluginConfigs = configsResult.data.items;
+			pluginTypes = typesResult.data;
 
 			// Initialise hook lists from existing plugins.
 			hookLists = makeInitialHookLists();
@@ -210,9 +212,9 @@
 				} else if (existing?.plugin_type) {
 					const pt = pluginTypes.find((t) => t.plugin_type === existing.plugin_type);
 					if (pt) {
-						const fields = pt.config_form_fields ?? [];
+						const fields = (pt.config_form_fields ?? []) as FormField[];
 						standardStates[role].overrideFormValues = flattenConfig(
-							(existing.config_override as Record<string, unknown>) ?? pt.sample_config,
+							(existing.config_override as Record<string, unknown>) ?? (pt.sample_config as Record<string, unknown>),
 							fields
 						);
 					}
@@ -238,9 +240,9 @@
 					} else if (existing?.plugin_type) {
 						const pt = pluginTypes.find((t) => t.plugin_type === existing.plugin_type);
 						if (pt) {
-							const fields = pt.config_form_fields ?? [];
+							const fields = (pt.config_form_fields ?? []) as FormField[];
 							hookLists[role][i].overrideFormValues = flattenConfig(
-								(existing.config_override as Record<string, unknown>) ?? pt.sample_config,
+								(existing.config_override as Record<string, unknown>) ?? (pt.sample_config as Record<string, unknown>),
 								fields
 							);
 						}
@@ -335,8 +337,8 @@
 			target.plugin_type = ptStr;
 			target.plugin_config_id = '';
 			const pt = pluginTypes.find((t) => t.plugin_type === ptStr);
-			const fields = pt?.config_form_fields ?? [];
-			target.overrideFormValues = flattenConfig(pt?.sample_config ?? {}, fields);
+			const fields = (pt?.config_form_fields ?? []) as FormField[];
+			target.overrideFormValues = flattenConfig((pt?.sample_config ?? {}) as Record<string, unknown>, fields);
 		} else {
 			target.plugin_type = '';
 			target.plugin_config_id = '';
@@ -349,7 +351,7 @@
 
 	function getFormFields(pluginType: string): FormField[] {
 		const t = pluginTypes.find((pt) => pt.plugin_type === pluginType);
-		return t?.config_form_fields ?? [];
+		return (t?.config_form_fields ?? []) as FormField[];
 	}
 
 	function resolvedOptions(field: FormField): SelectOption[] {

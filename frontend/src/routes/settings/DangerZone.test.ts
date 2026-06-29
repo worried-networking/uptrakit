@@ -34,28 +34,21 @@ describe('DangerZone button variants', () => {
 	it('inline Reset All Data button carries aria-busy=true while submitting', async () => {
 		let resolve!: () => void;
 		vi.mocked(api.resetData).mockReturnValue(
-			new Promise<{
-				deleted: {
-					hosts: number;
-					software_items: number;
-					plugin_configs: number;
-					host_tags: number;
-					update_history: number;
-					update_batches: number;
-				};
-			}>((r) => {
+			new Promise((r) => {
 				resolve = () =>
 					r({
-						deleted: {
-							hosts: 1,
-							software_items: 0,
-							plugin_configs: 0,
-							host_tags: 0,
-							update_history: 0,
-							update_batches: 0
+						data: {
+							deleted: {
+								hosts: 1,
+								software_items: 0,
+								plugin_configs: 0,
+								host_tags: 0,
+								update_history: 0,
+								update_batches: 0
+							}
 						}
-					});
-			})
+					} as unknown as Awaited<ReturnType<typeof api.resetData>>);
+			}) as unknown as ReturnType<typeof api.resetData>
 		);
 
 		render(DangerZone, props);
@@ -79,28 +72,21 @@ describe('DangerZone button variants', () => {
 	it('inline Reset All Data button text is static "Reset All Data" during loading', async () => {
 		let resolve!: () => void;
 		vi.mocked(api.resetData).mockReturnValue(
-			new Promise<{
-				deleted: {
-					hosts: number;
-					software_items: number;
-					plugin_configs: number;
-					host_tags: number;
-					update_history: number;
-					update_batches: number;
-				};
-			}>((r) => {
+			new Promise((r) => {
 				resolve = () =>
 					r({
-						deleted: {
-							hosts: 0,
-							software_items: 0,
-							plugin_configs: 0,
-							host_tags: 0,
-							update_history: 0,
-							update_batches: 0
+						data: {
+							deleted: {
+								hosts: 0,
+								software_items: 0,
+								plugin_configs: 0,
+								host_tags: 0,
+								update_history: 0,
+								update_batches: 0
+							}
 						}
-					});
-			})
+					} as unknown as Awaited<ReturnType<typeof api.resetData>>);
+			}) as unknown as ReturnType<typeof api.resetData>
 		);
 
 		render(DangerZone, props);

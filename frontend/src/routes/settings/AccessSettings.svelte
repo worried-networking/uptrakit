@@ -4,7 +4,7 @@
 	import { FormFieldRow, Checkbox, Input, RadioCardGroup } from '$lib/components/forms';
 	import Button from '$lib/components/Button.svelte';
 	import { createFormDraft } from '$lib/forms/draft.svelte';
-	import { getAccessSettings, updateAccessSettings } from '$lib/api/settings';
+	import { getAccessSettings, updateAccessSettings } from '$lib/api';
 	import type { UpdateAccessSettingsRequest } from '$lib/types';
 
 	let {
@@ -50,7 +50,7 @@
 
 	onMount(async () => {
 		try {
-			const data = await getAccessSettings();
+			const { data } = await getAccessSettings();
 			form.load({
 				mode: data.mode,
 				token: '',
@@ -77,7 +77,7 @@
 				if (form.draft.token) body.token = form.draft.token;
 				body.require_token_for_oidc = form.draft.requireTokenForOidc;
 			}
-			const data = await updateAccessSettings(body);
+			const { data } = await updateAccessSettings({ body });
 			form.commit({
 				mode: data.mode,
 				token: '',

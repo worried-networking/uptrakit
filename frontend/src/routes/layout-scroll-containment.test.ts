@@ -67,7 +67,7 @@ vi.mock('$lib/theme.svelte', () => ({
 	setThemeMode: vi.fn(),
 	initTheme: vi.fn()
 }));
-vi.mock('$lib/api', () => ({ getSystemAlerts: vi.fn(async () => ({ alerts: [] })) }));
+vi.mock('$lib/api', () => ({ getSystemAlerts: vi.fn(async () => ({ data: { alerts: [] } })) }));
 vi.mock('$lib/stores/network.svelte', () => ({ getIsOnline: vi.fn(() => true) }));
 vi.mock('$lib/stores/software-updates.svelte', () => ({
 	getUpdatableSoftwareCount: vi.fn(() => null),

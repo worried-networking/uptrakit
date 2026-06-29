@@ -11,7 +11,7 @@ import type {
 } from '$lib/types';
 
 vi.mock('$lib/api', () => ({
-	getPluginConfigs: vi.fn(),
+	listPluginConfigs: vi.fn(),
 	updateHostAssignment: vi.fn(),
 	deletePluginAssignment: vi.fn(),
 	listPluginTypes: vi.fn()
@@ -99,14 +99,18 @@ function makeDetail(): SoftwareItemDetailResponse {
 }
 
 function renderModal(existingPlugins: HostPluginRoleSummary[] = []) {
-	vi.mocked(api.getPluginConfigs).mockResolvedValue({
-		items: makePluginConfigs(),
-		total: 2,
-		page: 1,
-		per_page: 500,
-		total_pages: 1
-	});
-	vi.mocked(api.listPluginTypes).mockResolvedValue(makePluginTypes());
+	vi.mocked(api.listPluginConfigs).mockResolvedValue({
+		data: {
+			items: makePluginConfigs(),
+			total: 2,
+			page: 1,
+			per_page: 500,
+			total_pages: 1
+		}
+	} as unknown as Awaited<ReturnType<typeof api.listPluginConfigs>>);
+	vi.mocked(api.listPluginTypes).mockResolvedValue({ data: makePluginTypes() } as unknown as Awaited<
+		ReturnType<typeof api.listPluginTypes>
+	>);
 	vi.mocked(api.updateHostAssignment).mockResolvedValue({ data: makeDetail() } as unknown as Awaited<
 		ReturnType<typeof api.updateHostAssignment>
 	>);

@@ -168,7 +168,9 @@ describe('Host Detail Page', () => {
 		vi.mocked(api.listUpdateHistory).mockResolvedValue({ data: makeHistoryPage([]) } as unknown as Awaited<
 			ReturnType<typeof api.listUpdateHistory>
 		>);
-		vi.mocked(api.listPluginTypes).mockResolvedValue([]);
+		vi.mocked(api.listPluginTypes).mockResolvedValue({ data: [] } as unknown as Awaited<
+			ReturnType<typeof api.listPluginTypes>
+		>);
 		vi.mocked(api.listHostDiscoveryAllowlist).mockResolvedValue({ data: [] } as unknown as Awaited<
 			ReturnType<typeof api.listHostDiscoveryAllowlist>
 		>);
@@ -556,7 +558,9 @@ describe('Host Detail Page', () => {
 		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
 			ReturnType<typeof api.getHost>
 		>);
-		vi.mocked(api.listPluginTypes).mockResolvedValue([]);
+		vi.mocked(api.listPluginTypes).mockResolvedValue({ data: [] } as unknown as Awaited<
+			ReturnType<typeof api.listPluginTypes>
+		>);
 		vi.mocked(api.listHostDiscoveryAllowlist).mockResolvedValue({ data: [] } as unknown as Awaited<
 			ReturnType<typeof api.listHostDiscoveryAllowlist>
 		>);

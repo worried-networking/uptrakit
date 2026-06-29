@@ -2,12 +2,10 @@
 	import { getUser } from '$lib/auth.svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
-	import { getCombinedSettings, getOidcProviders } from '$lib/api';
-	import type {
-		AgentCertificateSettings as AgentCertSettingsData,
-		EnrollmentTokensSummary,
-		OidcProviderResponse
-	} from '$lib/types';
+	import { getCombinedSettings, listProviders } from '$lib/api';
+	import type { AgentCertificateSettingsResponse } from '$lib/api';
+	import type { EnrollmentTokensSummary } from '$lib/types';
+	import type { OidcProviderResponse } from '$lib/api';
 	import { Permission, hasAnyPermission, hasPermissionValue } from '$lib/types';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import SurfaceReadPanel from '$lib/components/surfaces/SurfaceReadPanel.svelte';
@@ -230,7 +228,7 @@
 	let loading: boolean = $state(true);
 
 	let oidcProviders: OidcProviderResponse[] | undefined = $state(undefined);
-	let agentCertSettings: AgentCertSettingsData | undefined = $state(undefined);
+	let agentCertSettings: AgentCertificateSettingsResponse | undefined = $state(undefined);
 	let enrollmentTokensSummary: EnrollmentTokensSummary | undefined = $state(undefined);
 	let multiTenancyEnabled: boolean = $state(false);
 
@@ -257,10 +255,10 @@
 		agentCertificateError = null;
 		enrollmentTokenError = null;
 
-		const results = await Promise.allSettled([getCombinedSettings(), getOidcProviders()]);
+		const results = await Promise.allSettled([getCombinedSettings(), listProviders()]);
 
 		if (results[0].status === 'fulfilled') {
-			const combined = results[0].value;
+			const combined = results[0].value.data;
 			agentCertSettings = combined.agent_certificates;
 			enrollmentTokensSummary = combined.enrollment_tokens;
 			multiTenancyEnabled = combined.multi_tenancy_enabled;
@@ -271,7 +269,7 @@
 		}
 
 		if (results[1].status === 'fulfilled') {
-			oidcProviders = results[1].value;
+			oidcProviders = results[1].value.data;
 		} else {
 			oidcProvidersError =
 				results[1].reason instanceof Error ? results[1].reason.message : 'Failed to load OIDC providers.';

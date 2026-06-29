@@ -1,23 +1,27 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 
-vi.mock('$lib/api/settings', () => ({
+vi.mock('$lib/api', () => ({
 	getAccessSettings: vi.fn(async () => ({
-		mode: 'open',
-		require_token_for_oidc: false,
-		password_auth_enabled: true,
-		two_factor_required: false
+		data: {
+			mode: 'open',
+			require_token_for_oidc: false,
+			password_auth_enabled: true,
+			two_factor_required: false
+		}
 	})),
 	updateAccessSettings: vi.fn(async () => ({
-		mode: 'open',
-		require_token_for_oidc: false,
-		password_auth_enabled: true,
-		two_factor_required: false
+		data: {
+			mode: 'open',
+			require_token_for_oidc: false,
+			password_auth_enabled: true,
+			two_factor_required: false
+		}
 	}))
 }));
 vi.mock('$lib/stores/network.svelte', () => ({ getIsOnline: vi.fn(() => true) }));
 
-import * as settingsApi from '$lib/api/settings';
+import * as api from '$lib/api';
 import AccessSettings from './AccessSettings.svelte';
 
 const defaultProps = { onSuccess: vi.fn(), onError: vi.fn() };
@@ -47,7 +51,7 @@ describe('AccessSettings', () => {
 		const btn = screen.getByRole('button', { name: 'Save' });
 		expect(btn).not.toBeDisabled();
 		await fireEvent.click(btn);
-		await waitFor(() => expect(settingsApi.updateAccessSettings).toHaveBeenCalled());
+		await waitFor(() => expect(api.updateAccessSettings).toHaveBeenCalled());
 	});
 
 	it('shows registration token field only in invite mode', async () => {

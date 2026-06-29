@@ -11,11 +11,11 @@ vi.mock('$lib/api', () => ({
 	revokeSystemEnrollmentToken: vi.fn(),
 	listNotificationLog: vi.fn(),
 	listNotificationChannels: vi.fn(),
-	getPluginConfigs: vi.fn(),
+	listPluginConfigs: vi.fn(),
 	createPluginConfig: vi.fn(),
 	updatePluginConfig: vi.fn(),
 	deletePluginConfig: vi.fn(),
-	triggerPluginConfigDiscovery: vi.fn(),
+	discoverPluginConfig: vi.fn(),
 	listTenantDiscoveryAllowlist: vi.fn(),
 	addTenantDiscoveryAllowlistEntry: vi.fn(),
 	removeTenantDiscoveryAllowlistEntry: vi.fn(),
@@ -56,19 +56,23 @@ function deferred<T>() {
 describe('settings panels design-language alignment', () => {
 	beforeEach(() => {
 		vi.mocked(api.listEnrollmentTokens).mockResolvedValue({
-			items: [],
-			total: 0,
-			page: 1,
-			per_page: 20,
-			total_pages: 1
-		});
+			data: {
+				items: [],
+				total: 0,
+				page: 1,
+				per_page: 20,
+				total_pages: 1
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listEnrollmentTokens>>);
 		vi.mocked(api.listSystemEnrollmentTokens).mockResolvedValue({
-			items: [],
-			total: 0,
-			page: 1,
-			per_page: 20,
-			total_pages: 1
-		});
+			data: {
+				items: [],
+				total: 0,
+				page: 1,
+				per_page: 20,
+				total_pages: 1
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listSystemEnrollmentTokens>>);
 		vi.mocked(api.listNotificationLog).mockResolvedValue({
 			items: [],
 			total: 0,
@@ -83,18 +87,24 @@ describe('settings panels design-language alignment', () => {
 			per_page: 50,
 			total_pages: 1
 		} as never);
-		vi.mocked(api.listPluginTypes).mockResolvedValue([]);
-		vi.mocked(api.getPluginConfigs).mockResolvedValue({
-			items: [],
-			total: 0,
-			page: 1,
-			per_page: 50,
-			total_pages: 1
-		});
+		vi.mocked(api.listPluginTypes).mockResolvedValue({ data: [] } as unknown as Awaited<
+			ReturnType<typeof api.listPluginTypes>
+		>);
+		vi.mocked(api.listPluginConfigs).mockResolvedValue({
+			data: {
+				items: [],
+				total: 0,
+				page: 1,
+				per_page: 50,
+				total_pages: 1
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listPluginConfigs>>);
 		vi.mocked(api.listTenantDiscoveryAllowlist).mockResolvedValue({ data: [] } as unknown as Awaited<
 			ReturnType<typeof api.listTenantDiscoveryAllowlist>
 		>);
-		vi.mocked(api.listPluginTypeSettings).mockResolvedValue([]);
+		vi.mocked(api.listPluginTypeSettings).mockResolvedValue({ data: [] } as unknown as Awaited<
+			ReturnType<typeof api.listPluginTypeSettings>
+		>);
 		vi.mocked(auth.getUser).mockReturnValue({
 			id: 'user-1',
 			email: 'settings@example.com',
@@ -119,24 +129,26 @@ describe('settings panels design-language alignment', () => {
 
 	it('uses shared form rows and inline required validation in enrollment token create dialog', async () => {
 		vi.mocked(api.listEnrollmentTokens).mockResolvedValue({
-			items: [
-				{
-					id: 'tok-1',
-					name: 'Deploy Token',
-					allowed_capabilities: [],
-					max_uses: 10,
-					current_uses: 1,
-					expires_at: null,
-					revoked_at: null,
-					created_at: '2026-04-01T10:00:00Z',
-					created_by_user_id: null
-				}
-			],
-			total: 2,
-			page: 1,
-			per_page: 1,
-			total_pages: 2
-		});
+			data: {
+				items: [
+					{
+						id: 'tok-1',
+						name: 'Deploy Token',
+						allowed_capabilities: [],
+						max_uses: 10,
+						current_uses: 1,
+						expires_at: null,
+						revoked_at: null,
+						created_at: '2026-04-01T10:00:00Z',
+						created_by_user_id: null
+					}
+				],
+				total: 2,
+				page: 1,
+				per_page: 1,
+				total_pages: 2
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listEnrollmentTokens>>);
 
 		render(EnrollmentTokenSettings, {
 			summary: undefined,
@@ -164,13 +176,7 @@ describe('settings panels design-language alignment', () => {
 	});
 
 	it('uses known-shape loading treatment while enrollment tokens are pending', async () => {
-		const tokensDeferred = deferred<{
-			items: Array<Record<string, unknown>>;
-			total: number;
-			page: number;
-			per_page: number;
-			total_pages: number;
-		}>();
+		const tokensDeferred = deferred<Awaited<ReturnType<typeof api.listEnrollmentTokens>>>();
 		vi.mocked(api.listEnrollmentTokens).mockReturnValue(tokensDeferred.promise as never);
 
 		render(EnrollmentTokenSettings, {
@@ -186,12 +192,14 @@ describe('settings panels design-language alignment', () => {
 		).toBeInTheDocument();
 
 		tokensDeferred.resolve({
-			items: [],
-			total: 0,
-			page: 1,
-			per_page: 20,
-			total_pages: 1
-		});
+			data: {
+				items: [],
+				total: 0,
+				page: 1,
+				per_page: 20,
+				total_pages: 1
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listEnrollmentTokens>>);
 
 		await waitFor(() => {
 			expect(document.querySelector('[data-ui="empty-state"]')).toBeInTheDocument();
@@ -200,16 +208,18 @@ describe('settings panels design-language alignment', () => {
 
 	it('uses shared success callout for created enrollment token reveal', async () => {
 		vi.mocked(api.createEnrollmentToken).mockResolvedValue({
-			id: 'created-token-1',
-			token: 'secret-enrollment-token',
-			name: 'Deploy Token',
-			allowed_capabilities: null,
-			max_uses: null,
-			current_uses: 0,
-			expires_at: null,
-			created_at: '2026-04-01T11:00:00Z',
-			created_by_user_id: null
-		});
+			data: {
+				id: 'created-token-1',
+				token: 'secret-enrollment-token',
+				name: 'Deploy Token',
+				allowed_capabilities: null,
+				max_uses: null,
+				current_uses: 0,
+				expires_at: null,
+				created_at: '2026-04-01T11:00:00Z',
+				created_by_user_id: null
+			}
+		} as unknown as Awaited<ReturnType<typeof api.createEnrollmentToken>>);
 
 		render(EnrollmentTokenSettings, {
 			summary: undefined,
@@ -230,52 +240,57 @@ describe('settings panels design-language alignment', () => {
 
 	it('shows error state when enrollment token page load fails (no Refresh button)', async () => {
 		let pageTwoAttempts = 0;
-		vi.mocked(api.listEnrollmentTokens).mockImplementation(async (page = 1) => {
+		vi.mocked(api.listEnrollmentTokens).mockImplementation((async (opts: { query?: { page?: number } } = {}) => {
+			const page = opts.query?.page ?? 1;
 			if (page === 2) {
 				pageTwoAttempts += 1;
 				if (pageTwoAttempts === 1) {
 					throw new Error('page two failed');
 				}
 				return {
+					data: {
+						items: [
+							{
+								id: 'tok-page-2',
+								name: 'Page Two Token',
+								allowed_capabilities: [],
+								max_uses: null,
+								current_uses: 0,
+								expires_at: null,
+								revoked_at: null,
+								created_at: '2026-04-01T11:00:00Z',
+								created_by_user_id: null
+							}
+						],
+						total: 2,
+						page: 2,
+						per_page: 1,
+						total_pages: 2
+					}
+				} as unknown as Awaited<ReturnType<typeof api.listEnrollmentTokens>>;
+			}
+			return {
+				data: {
 					items: [
 						{
-							id: 'tok-page-2',
-							name: 'Page Two Token',
+							id: 'tok-page-1',
+							name: 'Page One Token',
 							allowed_capabilities: [],
 							max_uses: null,
 							current_uses: 0,
 							expires_at: null,
 							revoked_at: null,
-							created_at: '2026-04-01T11:00:00Z',
+							created_at: '2026-04-01T10:00:00Z',
 							created_by_user_id: null
 						}
 					],
 					total: 2,
-					page: 2,
+					page: 1,
 					per_page: 1,
 					total_pages: 2
-				};
-			}
-			return {
-				items: [
-					{
-						id: 'tok-page-1',
-						name: 'Page One Token',
-						allowed_capabilities: [],
-						max_uses: null,
-						current_uses: 0,
-						expires_at: null,
-						revoked_at: null,
-						created_at: '2026-04-01T10:00:00Z',
-						created_by_user_id: null
-					}
-				],
-				total: 2,
-				page: 1,
-				per_page: 1,
-				total_pages: 2
-			};
-		});
+				}
+			} as unknown as Awaited<ReturnType<typeof api.listEnrollmentTokens>>;
+		}) as unknown as typeof api.listEnrollmentTokens);
 
 		render(EnrollmentTokenSettings, {
 			summary: undefined,
@@ -291,24 +306,26 @@ describe('settings panels design-language alignment', () => {
 
 	it('uses shared confirm dialog shell for enrollment token revoke flow', async () => {
 		vi.mocked(api.listEnrollmentTokens).mockResolvedValue({
-			items: [
-				{
-					id: 'tok-active-1',
-					name: 'Active Token',
-					allowed_capabilities: null,
-					max_uses: null,
-					current_uses: 0,
-					expires_at: null,
-					revoked_at: null,
-					created_at: '2026-04-01T10:00:00Z',
-					created_by_user_id: null
-				}
-			],
-			total: 1,
-			page: 1,
-			per_page: 20,
-			total_pages: 1
-		});
+			data: {
+				items: [
+					{
+						id: 'tok-active-1',
+						name: 'Active Token',
+						allowed_capabilities: null,
+						max_uses: null,
+						current_uses: 0,
+						expires_at: null,
+						revoked_at: null,
+						created_at: '2026-04-01T10:00:00Z',
+						created_by_user_id: null
+					}
+				],
+				total: 1,
+				page: 1,
+				per_page: 20,
+				total_pages: 1
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listEnrollmentTokens>>);
 
 		render(EnrollmentTokenSettings, {
 			summary: undefined,
@@ -327,23 +344,25 @@ describe('settings panels design-language alignment', () => {
 
 	it('uses shared form rows and inline required validation in system enrollment token create dialog', async () => {
 		vi.mocked(api.listSystemEnrollmentTokens).mockResolvedValue({
-			items: [
-				{
-					id: 'sys-tok-1',
-					name: 'Scheduler Token',
-					max_uses: 10,
-					current_uses: 2,
-					expires_at: null,
-					revoked_at: null,
-					created_at: '2026-04-01T10:00:00Z',
-					created_by_user_id: null
-				}
-			],
-			total: 2,
-			page: 1,
-			per_page: 1,
-			total_pages: 2
-		});
+			data: {
+				items: [
+					{
+						id: 'sys-tok-1',
+						name: 'Scheduler Token',
+						max_uses: 10,
+						current_uses: 2,
+						expires_at: null,
+						revoked_at: null,
+						created_at: '2026-04-01T10:00:00Z',
+						created_by_user_id: null
+					}
+				],
+				total: 2,
+				page: 1,
+				per_page: 1,
+				total_pages: 2
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listSystemEnrollmentTokens>>);
 
 		render(SystemServicesSettings, {
 			onSuccess: vi.fn(),
@@ -370,13 +389,7 @@ describe('settings panels design-language alignment', () => {
 	});
 
 	it('uses known-shape loading treatment while system enrollment tokens are pending', async () => {
-		const tokensDeferred = deferred<{
-			items: Array<Record<string, unknown>>;
-			total: number;
-			page: number;
-			per_page: number;
-			total_pages: number;
-		}>();
+		const tokensDeferred = deferred<Awaited<ReturnType<typeof api.listSystemEnrollmentTokens>>>();
 		vi.mocked(api.listSystemEnrollmentTokens).mockReturnValue(tokensDeferred.promise as never);
 
 		render(SystemServicesSettings, {
@@ -391,12 +404,14 @@ describe('settings panels design-language alignment', () => {
 		).toBeInTheDocument();
 
 		tokensDeferred.resolve({
-			items: [],
-			total: 0,
-			page: 1,
-			per_page: 20,
-			total_pages: 1
-		});
+			data: {
+				items: [],
+				total: 0,
+				page: 1,
+				per_page: 20,
+				total_pages: 1
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listSystemEnrollmentTokens>>);
 
 		await waitFor(() => {
 			expect(document.querySelector('[data-ui="empty-state"]')).toBeInTheDocument();
@@ -405,15 +420,17 @@ describe('settings panels design-language alignment', () => {
 
 	it('uses shared success callout for created system enrollment token reveal', async () => {
 		vi.mocked(api.createSystemEnrollmentToken).mockResolvedValue({
-			id: 'created-system-token-1',
-			token: 'secret-system-token',
-			name: 'Scheduler Token',
-			max_uses: null,
-			current_uses: 0,
-			expires_at: null,
-			created_at: '2026-04-01T11:00:00Z',
-			created_by_user_id: null
-		});
+			data: {
+				id: 'created-system-token-1',
+				token: 'secret-system-token',
+				name: 'Scheduler Token',
+				max_uses: null,
+				current_uses: 0,
+				expires_at: null,
+				created_at: '2026-04-01T11:00:00Z',
+				created_by_user_id: null
+			}
+		} as unknown as Awaited<ReturnType<typeof api.createSystemEnrollmentToken>>);
 
 		render(SystemServicesSettings, {
 			onSuccess: vi.fn(),
@@ -433,50 +450,55 @@ describe('settings panels design-language alignment', () => {
 
 	it('shows error state when system enrollment token page load fails (no Refresh button)', async () => {
 		let pageTwoAttempts = 0;
-		vi.mocked(api.listSystemEnrollmentTokens).mockImplementation(async ({ page = 1 } = {}) => {
+		vi.mocked(api.listSystemEnrollmentTokens).mockImplementation((async (opts: { query?: { page?: number } } = {}) => {
+			const page = opts.query?.page ?? 1;
 			if (page === 2) {
 				pageTwoAttempts += 1;
 				if (pageTwoAttempts === 1) {
 					throw new Error('page two failed');
 				}
 				return {
+					data: {
+						items: [
+							{
+								id: 'sys-tok-page-2',
+								name: 'System Page Two Token',
+								max_uses: null,
+								current_uses: 0,
+								expires_at: null,
+								revoked_at: null,
+								created_at: '2026-04-01T11:00:00Z',
+								created_by_user_id: null
+							}
+						],
+						total: 2,
+						page: 2,
+						per_page: 1,
+						total_pages: 2
+					}
+				} as unknown as Awaited<ReturnType<typeof api.listSystemEnrollmentTokens>>;
+			}
+			return {
+				data: {
 					items: [
 						{
-							id: 'sys-tok-page-2',
-							name: 'System Page Two Token',
+							id: 'sys-tok-page-1',
+							name: 'System Page One Token',
 							max_uses: null,
 							current_uses: 0,
 							expires_at: null,
 							revoked_at: null,
-							created_at: '2026-04-01T11:00:00Z',
+							created_at: '2026-04-01T10:00:00Z',
 							created_by_user_id: null
 						}
 					],
 					total: 2,
-					page: 2,
+					page: 1,
 					per_page: 1,
 					total_pages: 2
-				};
-			}
-			return {
-				items: [
-					{
-						id: 'sys-tok-page-1',
-						name: 'System Page One Token',
-						max_uses: null,
-						current_uses: 0,
-						expires_at: null,
-						revoked_at: null,
-						created_at: '2026-04-01T10:00:00Z',
-						created_by_user_id: null
-					}
-				],
-				total: 2,
-				page: 1,
-				per_page: 1,
-				total_pages: 2
-			};
-		});
+				}
+			} as unknown as Awaited<ReturnType<typeof api.listSystemEnrollmentTokens>>;
+		}) as unknown as typeof api.listSystemEnrollmentTokens);
 
 		render(SystemServicesSettings, {
 			onSuccess: vi.fn(),
@@ -687,35 +709,39 @@ describe('settings panels design-language alignment', () => {
 	});
 
 	it('keeps type defaults panel visible and uses its own shared empty state when no defaults are exposed', async () => {
-		vi.mocked(api.listPluginTypes).mockResolvedValue([
-			{
-				plugin_type: 'releases_github',
-				display_name: 'GitHub Releases',
-				supports_plugin_configs: true,
-				capabilities: [PluginCapability.DiscoverLocalSoftware],
-				sample_config: {},
-				config_form_fields: [],
-				type_settings_form_fields: []
-			} as never
-		]);
-		vi.mocked(api.getPluginConfigs).mockResolvedValue({
-			items: [
+		vi.mocked(api.listPluginTypes).mockResolvedValue({
+			data: [
 				{
-					id: 'cfg-1',
-					name: 'Main GitHub',
 					plugin_type: 'releases_github',
-					config: {},
-					enabled: true,
+					display_name: 'GitHub Releases',
+					supports_plugin_configs: true,
 					capabilities: [PluginCapability.DiscoverLocalSoftware],
-					created_at: '2026-04-01T11:00:00Z',
-					updated_at: '2026-04-01T11:00:00Z'
-				}
-			],
-			total: 2,
-			page: 1,
-			per_page: 1,
-			total_pages: 2
-		});
+					sample_config: {},
+					config_form_fields: [],
+					type_settings_form_fields: []
+				} as never
+			]
+		} as unknown as Awaited<ReturnType<typeof api.listPluginTypes>>);
+		vi.mocked(api.listPluginConfigs).mockResolvedValue({
+			data: {
+				items: [
+					{
+						id: 'cfg-1',
+						name: 'Main GitHub',
+						plugin_type: 'releases_github',
+						config: {},
+						enabled: true,
+						capabilities: [PluginCapability.DiscoverLocalSoftware],
+						created_at: '2026-04-01T11:00:00Z',
+						updated_at: '2026-04-01T11:00:00Z'
+					}
+				],
+				total: 2,
+				page: 1,
+				per_page: 1,
+				total_pages: 2
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listPluginConfigs>>);
 		vi.mocked(api.listTenantDiscoveryAllowlist).mockResolvedValue({
 			data: [
 				{
@@ -725,7 +751,9 @@ describe('settings panels design-language alignment', () => {
 				} as never
 			]
 		} as unknown as Awaited<ReturnType<typeof api.listTenantDiscoveryAllowlist>>);
-		vi.mocked(api.listPluginTypeSettings).mockResolvedValue([]);
+		vi.mocked(api.listPluginTypeSettings).mockResolvedValue({ data: [] } as unknown as Awaited<
+			ReturnType<typeof api.listPluginTypeSettings>
+		>);
 
 		render(PluginConfigsTab);
 
@@ -739,34 +767,30 @@ describe('settings panels design-language alignment', () => {
 	});
 
 	it('uses known-shape loading treatment while plugin settings tables are pending', async () => {
-		const configsDeferred = deferred<{
-			items: Array<Record<string, unknown>>;
-			total: number;
-			page: number;
-			per_page: number;
-			total_pages: number;
-		}>();
+		const configsDeferred = deferred<Awaited<ReturnType<typeof api.listPluginConfigs>>>();
 		const allowlistDeferred = deferred<Awaited<ReturnType<typeof api.listTenantDiscoveryAllowlist>>>();
-		const typeSettingsDeferred = deferred<Array<Record<string, unknown>>>();
+		const typeSettingsDeferred = deferred<Awaited<ReturnType<typeof api.listPluginTypeSettings>>>();
 
-		vi.mocked(api.listPluginTypes).mockResolvedValue([
-			{
-				plugin_type: 'releases_github',
-				display_name: 'GitHub Releases',
-				supports_plugin_configs: true,
-				capabilities: [PluginCapability.DiscoverLocalSoftware],
-				sample_config: {},
-				config_form_fields: [],
-				type_settings_form_fields: [
-					{
-						key: 'registry_url',
-						label: 'Registry URL',
-						field_type: 'text'
-					}
-				]
-			} as never
-		]);
-		vi.mocked(api.getPluginConfigs).mockReturnValue(configsDeferred.promise as never);
+		vi.mocked(api.listPluginTypes).mockResolvedValue({
+			data: [
+				{
+					plugin_type: 'releases_github',
+					display_name: 'GitHub Releases',
+					supports_plugin_configs: true,
+					capabilities: [PluginCapability.DiscoverLocalSoftware],
+					sample_config: {},
+					config_form_fields: [],
+					type_settings_form_fields: [
+						{
+							key: 'registry_url',
+							label: 'Registry URL',
+							field_type: 'text'
+						}
+					]
+				} as never
+			]
+		} as unknown as Awaited<ReturnType<typeof api.listPluginTypes>>);
+		vi.mocked(api.listPluginConfigs).mockReturnValue(configsDeferred.promise as never);
 		vi.mocked(api.listTenantDiscoveryAllowlist).mockReturnValue(
 			allowlistDeferred.promise as ReturnType<typeof api.listTenantDiscoveryAllowlist>
 		);
@@ -783,14 +807,16 @@ describe('settings panels design-language alignment', () => {
 		).toBeInTheDocument();
 
 		configsDeferred.resolve({
-			items: [],
-			total: 0,
-			page: 1,
-			per_page: 50,
-			total_pages: 1
-		});
+			data: {
+				items: [],
+				total: 0,
+				page: 1,
+				per_page: 50,
+				total_pages: 1
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listPluginConfigs>>);
 		allowlistDeferred.resolve({ data: [] } as unknown as Awaited<ReturnType<typeof api.listTenantDiscoveryAllowlist>>);
-		typeSettingsDeferred.resolve([]);
+		typeSettingsDeferred.resolve({ data: [] } as unknown as Awaited<ReturnType<typeof api.listPluginTypeSettings>>);
 
 		await waitFor(() => {
 			expect(document.querySelectorAll('[data-ui="known-shape-table-loading"]').length).toBe(0);
@@ -798,61 +824,70 @@ describe('settings panels design-language alignment', () => {
 	});
 
 	it('clears plugin config batch selection when changing pages', async () => {
-		vi.mocked(api.listPluginTypes).mockResolvedValue([
-			{
-				plugin_type: 'releases_github',
-				display_name: 'GitHub Releases',
-				supports_plugin_configs: true,
-				capabilities: [],
-				sample_config: {},
-				config_form_fields: [],
-				type_settings_form_fields: []
-			} as never
-		]);
-		vi.mocked(api.getPluginConfigs).mockImplementation(async (page = 1) => {
+		vi.mocked(api.listPluginTypes).mockResolvedValue({
+			data: [
+				{
+					plugin_type: 'releases_github',
+					display_name: 'GitHub Releases',
+					supports_plugin_configs: true,
+					capabilities: [],
+					sample_config: {},
+					config_form_fields: [],
+					type_settings_form_fields: []
+				} as never
+			]
+		} as unknown as Awaited<ReturnType<typeof api.listPluginTypes>>);
+		vi.mocked(api.listPluginConfigs).mockImplementation((async (opts: { query?: { page?: number } } = {}) => {
+			const page = opts.query?.page ?? 1;
 			if (page === 2) {
 				return {
+					data: {
+						items: [
+							{
+								id: 'cfg-2',
+								name: 'Config Two',
+								plugin_type: 'releases_github',
+								config: {},
+								enabled: true,
+								capabilities: [],
+								created_at: '2026-04-01T12:00:00Z',
+								updated_at: '2026-04-01T12:00:00Z'
+							}
+						],
+						total: 2,
+						page: 2,
+						per_page: 1,
+						total_pages: 2
+					}
+				} as unknown as Awaited<ReturnType<typeof api.listPluginConfigs>>;
+			}
+			return {
+				data: {
 					items: [
 						{
-							id: 'cfg-2',
-							name: 'Config Two',
+							id: 'cfg-1',
+							name: 'Config One',
 							plugin_type: 'releases_github',
 							config: {},
 							enabled: true,
 							capabilities: [],
-							created_at: '2026-04-01T12:00:00Z',
-							updated_at: '2026-04-01T12:00:00Z'
+							created_at: '2026-04-01T11:00:00Z',
+							updated_at: '2026-04-01T11:00:00Z'
 						}
 					],
 					total: 2,
-					page: 2,
+					page: 1,
 					per_page: 1,
 					total_pages: 2
-				};
-			}
-			return {
-				items: [
-					{
-						id: 'cfg-1',
-						name: 'Config One',
-						plugin_type: 'releases_github',
-						config: {},
-						enabled: true,
-						capabilities: [],
-						created_at: '2026-04-01T11:00:00Z',
-						updated_at: '2026-04-01T11:00:00Z'
-					}
-				],
-				total: 2,
-				page: 1,
-				per_page: 1,
-				total_pages: 2
-			};
-		});
+				}
+			} as unknown as Awaited<ReturnType<typeof api.listPluginConfigs>>;
+		}) as unknown as typeof api.listPluginConfigs);
 		vi.mocked(api.listTenantDiscoveryAllowlist).mockResolvedValue({ data: [] } as unknown as Awaited<
 			ReturnType<typeof api.listTenantDiscoveryAllowlist>
 		>);
-		vi.mocked(api.listPluginTypeSettings).mockResolvedValue([]);
+		vi.mocked(api.listPluginTypeSettings).mockResolvedValue({ data: [] } as unknown as Awaited<
+			ReturnType<typeof api.listPluginTypeSettings>
+		>);
 
 		render(PluginConfigsTab);
 
@@ -866,35 +901,41 @@ describe('settings panels design-language alignment', () => {
 	});
 
 	it('uses shared form-row rhythm and inline required validation in plugin config modal', async () => {
-		vi.mocked(api.listPluginTypes).mockResolvedValue([
-			{
-				plugin_type: 'releases_github',
-				display_name: 'GitHub Releases',
-				supports_plugin_configs: true,
-				capabilities: [PluginCapability.DiscoverLocalSoftware],
-				sample_config: {},
-				config_form_fields: [
-					{
-						key: 'api_token',
-						label: 'API Token',
-						field_type: 'text',
-						required: true
-					}
-				],
-				type_settings_form_fields: []
-			} as never
-		]);
-		vi.mocked(api.getPluginConfigs).mockResolvedValue({
-			items: [],
-			total: 0,
-			page: 1,
-			per_page: 50,
-			total_pages: 1
-		});
+		vi.mocked(api.listPluginTypes).mockResolvedValue({
+			data: [
+				{
+					plugin_type: 'releases_github',
+					display_name: 'GitHub Releases',
+					supports_plugin_configs: true,
+					capabilities: [PluginCapability.DiscoverLocalSoftware],
+					sample_config: {},
+					config_form_fields: [
+						{
+							key: 'api_token',
+							label: 'API Token',
+							field_type: 'text',
+							required: true
+						}
+					],
+					type_settings_form_fields: []
+				} as never
+			]
+		} as unknown as Awaited<ReturnType<typeof api.listPluginTypes>>);
+		vi.mocked(api.listPluginConfigs).mockResolvedValue({
+			data: {
+				items: [],
+				total: 0,
+				page: 1,
+				per_page: 50,
+				total_pages: 1
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listPluginConfigs>>);
 		vi.mocked(api.listTenantDiscoveryAllowlist).mockResolvedValue({ data: [] } as unknown as Awaited<
 			ReturnType<typeof api.listTenantDiscoveryAllowlist>
 		>);
-		vi.mocked(api.listPluginTypeSettings).mockResolvedValue([]);
+		vi.mocked(api.listPluginTypeSettings).mockResolvedValue({ data: [] } as unknown as Awaited<
+			ReturnType<typeof api.listPluginTypeSettings>
+		>);
 
 		render(PluginConfigsTab);
 
@@ -918,35 +959,41 @@ describe('settings panels design-language alignment', () => {
 	});
 
 	it('surfaces required schema validation while plugin config modal is in JSON mode', async () => {
-		vi.mocked(api.listPluginTypes).mockResolvedValue([
-			{
-				plugin_type: 'releases_github',
-				display_name: 'GitHub Releases',
-				supports_plugin_configs: true,
-				capabilities: [],
-				sample_config: {},
-				config_form_fields: [
-					{
-						key: 'api_token',
-						label: 'API Token',
-						field_type: 'text',
-						required: true
-					}
-				],
-				type_settings_form_fields: []
-			} as never
-		]);
-		vi.mocked(api.getPluginConfigs).mockResolvedValue({
-			items: [],
-			total: 0,
-			page: 1,
-			per_page: 50,
-			total_pages: 1
-		});
+		vi.mocked(api.listPluginTypes).mockResolvedValue({
+			data: [
+				{
+					plugin_type: 'releases_github',
+					display_name: 'GitHub Releases',
+					supports_plugin_configs: true,
+					capabilities: [],
+					sample_config: {},
+					config_form_fields: [
+						{
+							key: 'api_token',
+							label: 'API Token',
+							field_type: 'text',
+							required: true
+						}
+					],
+					type_settings_form_fields: []
+				} as never
+			]
+		} as unknown as Awaited<ReturnType<typeof api.listPluginTypes>>);
+		vi.mocked(api.listPluginConfigs).mockResolvedValue({
+			data: {
+				items: [],
+				total: 0,
+				page: 1,
+				per_page: 50,
+				total_pages: 1
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listPluginConfigs>>);
 		vi.mocked(api.listTenantDiscoveryAllowlist).mockResolvedValue({ data: [] } as unknown as Awaited<
 			ReturnType<typeof api.listTenantDiscoveryAllowlist>
 		>);
-		vi.mocked(api.listPluginTypeSettings).mockResolvedValue([]);
+		vi.mocked(api.listPluginTypeSettings).mockResolvedValue({ data: [] } as unknown as Awaited<
+			ReturnType<typeof api.listPluginTypeSettings>
+		>);
 
 		render(PluginConfigsTab);
 
@@ -963,35 +1010,41 @@ describe('settings panels design-language alignment', () => {
 	});
 
 	it('uses shared form-row rhythm and inline required validation in type defaults modal', async () => {
-		vi.mocked(api.listPluginTypes).mockResolvedValue([
-			{
-				plugin_type: 'releases_github',
-				display_name: 'GitHub Releases',
-				supports_plugin_configs: false,
-				capabilities: [],
-				sample_config: {},
-				config_form_fields: [],
-				type_settings_form_fields: [
-					{
-						key: 'registry_url',
-						label: 'Registry URL',
-						field_type: 'text',
-						required: true
-					}
-				]
-			} as never
-		]);
-		vi.mocked(api.getPluginConfigs).mockResolvedValue({
-			items: [],
-			total: 0,
-			page: 1,
-			per_page: 50,
-			total_pages: 1
-		});
+		vi.mocked(api.listPluginTypes).mockResolvedValue({
+			data: [
+				{
+					plugin_type: 'releases_github',
+					display_name: 'GitHub Releases',
+					supports_plugin_configs: false,
+					capabilities: [],
+					sample_config: {},
+					config_form_fields: [],
+					type_settings_form_fields: [
+						{
+							key: 'registry_url',
+							label: 'Registry URL',
+							field_type: 'text',
+							required: true
+						}
+					]
+				} as never
+			]
+		} as unknown as Awaited<ReturnType<typeof api.listPluginTypes>>);
+		vi.mocked(api.listPluginConfigs).mockResolvedValue({
+			data: {
+				items: [],
+				total: 0,
+				page: 1,
+				per_page: 50,
+				total_pages: 1
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listPluginConfigs>>);
 		vi.mocked(api.listTenantDiscoveryAllowlist).mockResolvedValue({ data: [] } as unknown as Awaited<
 			ReturnType<typeof api.listTenantDiscoveryAllowlist>
 		>);
-		vi.mocked(api.listPluginTypeSettings).mockResolvedValue([]);
+		vi.mocked(api.listPluginTypeSettings).mockResolvedValue({ data: [] } as unknown as Awaited<
+			ReturnType<typeof api.listPluginTypeSettings>
+		>);
 
 		render(PluginConfigsTab);
 
@@ -1012,18 +1065,24 @@ describe('settings panels design-language alignment', () => {
 	});
 
 	it('uses shared form-row rhythm and inline required validation in discovery allowlist modal', async () => {
-		vi.mocked(api.listPluginTypes).mockResolvedValue([]);
-		vi.mocked(api.getPluginConfigs).mockResolvedValue({
-			items: [],
-			total: 0,
-			page: 1,
-			per_page: 50,
-			total_pages: 1
-		});
+		vi.mocked(api.listPluginTypes).mockResolvedValue({ data: [] } as unknown as Awaited<
+			ReturnType<typeof api.listPluginTypes>
+		>);
+		vi.mocked(api.listPluginConfigs).mockResolvedValue({
+			data: {
+				items: [],
+				total: 0,
+				page: 1,
+				per_page: 50,
+				total_pages: 1
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listPluginConfigs>>);
 		vi.mocked(api.listTenantDiscoveryAllowlist).mockResolvedValue({ data: [] } as unknown as Awaited<
 			ReturnType<typeof api.listTenantDiscoveryAllowlist>
 		>);
-		vi.mocked(api.listPluginTypeSettings).mockResolvedValue([]);
+		vi.mocked(api.listPluginTypeSettings).mockResolvedValue({ data: [] } as unknown as Awaited<
+			ReturnType<typeof api.listPluginTypeSettings>
+		>);
 
 		render(PluginConfigsTab);
 
@@ -1041,34 +1100,42 @@ describe('settings panels design-language alignment', () => {
 	});
 
 	it('renders plugin config test results inside shared callout treatment', async () => {
-		vi.mocked(api.listPluginTypes).mockResolvedValue([
-			{
-				plugin_type: 'releases_github',
-				display_name: 'GitHub Releases',
-				supports_plugin_configs: true,
-				capabilities: [],
-				sample_config: {},
-				config_form_fields: [],
-				type_settings_form_fields: []
-			} as never
-		]);
-		vi.mocked(api.getPluginConfigs).mockResolvedValue({
-			items: [],
-			total: 0,
-			page: 1,
-			per_page: 50,
-			total_pages: 1
-		});
+		vi.mocked(api.listPluginTypes).mockResolvedValue({
+			data: [
+				{
+					plugin_type: 'releases_github',
+					display_name: 'GitHub Releases',
+					supports_plugin_configs: true,
+					capabilities: [],
+					sample_config: {},
+					config_form_fields: [],
+					type_settings_form_fields: []
+				} as never
+			]
+		} as unknown as Awaited<ReturnType<typeof api.listPluginTypes>>);
+		vi.mocked(api.listPluginConfigs).mockResolvedValue({
+			data: {
+				items: [],
+				total: 0,
+				page: 1,
+				per_page: 50,
+				total_pages: 1
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listPluginConfigs>>);
 		vi.mocked(api.listTenantDiscoveryAllowlist).mockResolvedValue({ data: [] } as unknown as Awaited<
 			ReturnType<typeof api.listTenantDiscoveryAllowlist>
 		>);
-		vi.mocked(api.listPluginTypeSettings).mockResolvedValue([]);
+		vi.mocked(api.listPluginTypeSettings).mockResolvedValue({ data: [] } as unknown as Awaited<
+			ReturnType<typeof api.listPluginTypeSettings>
+		>);
 		vi.mocked(api.testPluginConfig).mockResolvedValue({
-			success: true,
-			test_kind: 'version_check',
-			detected_version: '1.2.3',
-			duration_ms: 12
-		});
+			data: {
+				success: true,
+				test_kind: 'version_check',
+				detected_version: '1.2.3',
+				duration_ms: 12
+			}
+		} as unknown as Awaited<ReturnType<typeof api.testPluginConfig>>);
 
 		render(PluginConfigsTab);
 
@@ -1087,24 +1154,26 @@ describe('settings panels design-language alignment', () => {
 	});
 
 	it('renders shared table error states for plugin config list panels when fetches fail', async () => {
-		vi.mocked(api.listPluginTypes).mockResolvedValue([
-			{
-				plugin_type: 'releases_github',
-				display_name: 'GitHub Releases',
-				supports_plugin_configs: true,
-				capabilities: [PluginCapability.DiscoverLocalSoftware],
-				sample_config: {},
-				config_form_fields: [],
-				type_settings_form_fields: [
-					{
-						key: 'registry_url',
-						label: 'Registry URL',
-						field_type: 'text'
-					}
-				]
-			} as never
-		]);
-		vi.mocked(api.getPluginConfigs).mockRejectedValue(new Error('configs failed'));
+		vi.mocked(api.listPluginTypes).mockResolvedValue({
+			data: [
+				{
+					plugin_type: 'releases_github',
+					display_name: 'GitHub Releases',
+					supports_plugin_configs: true,
+					capabilities: [PluginCapability.DiscoverLocalSoftware],
+					sample_config: {},
+					config_form_fields: [],
+					type_settings_form_fields: [
+						{
+							key: 'registry_url',
+							label: 'Registry URL',
+							field_type: 'text'
+						}
+					]
+				} as never
+			]
+		} as unknown as Awaited<ReturnType<typeof api.listPluginTypes>>);
+		vi.mocked(api.listPluginConfigs).mockRejectedValue(new Error('configs failed'));
 		vi.mocked(api.listTenantDiscoveryAllowlist).mockRejectedValue(new Error('allowlist failed'));
 		vi.mocked(api.listPluginTypeSettings).mockRejectedValue(new Error('type settings failed'));
 

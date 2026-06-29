@@ -4,11 +4,11 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/svelte';
 vi.mock('$lib/api', () => ({ updateAgentCertificateSettings: vi.fn() }));
 
 import * as api from '$lib/api';
-import type { AgentCertificateSettings } from '$lib/types';
+import type { AgentCertificateSettingsResponse } from '$lib/api';
 import AgentCertificateSettingsComponent from './AgentCertificateSettings.svelte';
 
-const mockSettings: AgentCertificateSettings = {
-	lifetime_days: 7,
+const mockSettings: AgentCertificateSettingsResponse = {
+	lifetime_hours: 168,
 	renewal_window_hours_override: null,
 	effective_renewal_window_hours: 24
 };
@@ -52,27 +52,27 @@ describe('AgentCertificateSettings Save button', () => {
 	});
 
 	it('Save button carries aria-busy=true while saving', async () => {
-		let resolve!: (v: AgentCertificateSettings) => void;
+		let resolve!: (v: unknown) => void;
 		vi.mocked(api.updateAgentCertificateSettings).mockReturnValue(
-			new Promise<AgentCertificateSettings>((r) => {
-				resolve = r;
-			})
+			new Promise((r) => {
+				resolve = (v) => r(v as unknown as Awaited<ReturnType<typeof api.updateAgentCertificateSettings>>);
+			}) as unknown as ReturnType<typeof api.updateAgentCertificateSettings>
 		);
 		render(AgentCertificateSettingsComponent, props);
 		await makeFormDirty();
 		const btn = screen.getByRole('button', { name: 'Save' });
 		await fireEvent.click(btn);
 		await waitFor(() => expect(btn).toHaveAttribute('aria-busy', 'true'));
-		resolve(mockSettings);
+		resolve({ data: mockSettings });
 		await waitFor(() => expect(btn).not.toHaveAttribute('aria-busy'));
 	});
 
 	it('Save button text is static "Save" during loading — no text swap', async () => {
-		let resolve!: (v: AgentCertificateSettings) => void;
+		let resolve!: (v: unknown) => void;
 		vi.mocked(api.updateAgentCertificateSettings).mockReturnValue(
-			new Promise<AgentCertificateSettings>((r) => {
-				resolve = r;
-			})
+			new Promise((r) => {
+				resolve = (v) => r(v as unknown as Awaited<ReturnType<typeof api.updateAgentCertificateSettings>>);
+			}) as unknown as ReturnType<typeof api.updateAgentCertificateSettings>
 		);
 		render(AgentCertificateSettingsComponent, props);
 		await makeFormDirty();
@@ -80,7 +80,7 @@ describe('AgentCertificateSettings Save button', () => {
 		await fireEvent.click(btn);
 		await waitFor(() => expect(btn).toHaveAttribute('aria-busy', 'true'));
 		expect(btn).toHaveTextContent('Save');
-		resolve(mockSettings);
+		resolve({ data: mockSettings });
 	});
 });
 

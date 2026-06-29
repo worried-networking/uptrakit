@@ -5,7 +5,7 @@
 	import { Callout, SectionCard, StatusBadge } from '$lib/components/ui';
 	import Button from './Button.svelte';
 	import { X } from '@lucide/svelte';
-	import type { SystemAlert } from '$lib/types';
+	import type { SystemAlert } from '$lib/api';
 	import { portal } from '$lib/actions/portal';
 
 	let { alerts, onDismiss }: { alerts: SystemAlert[]; onDismiss: (id: string) => void } = $props();
@@ -332,7 +332,7 @@
 				badgeLabel: alert.severity,
 				message: alert.message,
 				alertId: alert.id,
-				action: alert.action
+				action: alert.action ?? undefined
 			});
 		}
 		return items;

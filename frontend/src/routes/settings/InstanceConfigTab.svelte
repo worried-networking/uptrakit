@@ -2,7 +2,7 @@
 	import { getUser } from '$lib/auth.svelte';
 	import { getConfigState, clearCoordinatorDegraded } from '$lib/api';
 	import { Permission, hasAnyPermission } from '$lib/types';
-	import type { ConfigStateResponse } from '$lib/types';
+	import type { ConfigStateResponse } from '$lib/api';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import { Callout, SectionCard } from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
@@ -19,7 +19,8 @@
 		loading = true;
 		error = null;
 		try {
-			configState = await getConfigState();
+			const { data: cs } = await getConfigState();
+			configState = cs;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load config state';
 		} finally {
@@ -30,7 +31,8 @@
 	async function clearDegraded() {
 		clearing = true;
 		try {
-			configState = await clearCoordinatorDegraded();
+			const { data: cs2 } = await clearCoordinatorDegraded();
+			configState = cs2;
 			showSuccess('Degraded state cleared');
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to clear degraded state');

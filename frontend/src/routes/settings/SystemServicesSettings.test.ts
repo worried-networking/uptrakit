@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/svelte';
 
 vi.mock('$lib/api', () => ({
-	listSystemEnrollmentTokens: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20, total_pages: 0 }),
+	listSystemEnrollmentTokens: vi
+		.fn()
+		.mockResolvedValue({ data: { items: [], total: 0, page: 1, per_page: 20, total_pages: 0 } }),
 	createSystemEnrollmentToken: vi.fn(),
 	revokeSystemEnrollmentToken: vi.fn()
 }));
@@ -32,23 +34,25 @@ describe('SystemServicesSettings button variants', () => {
 
 	it('Revoke button has danger class', async () => {
 		vi.mocked(api.listSystemEnrollmentTokens).mockResolvedValue({
-			items: [
-				{
-					id: 't1',
-					name: 'Active Token',
-					token: '',
-					current_uses: 0,
-					max_uses: null,
-					expires_at: null,
-					revoked_at: null,
-					created_at: new Date().toISOString()
-				} as never
-			],
-			total: 1,
-			page: 1,
-			per_page: 20,
-			total_pages: 1
-		});
+			data: {
+				items: [
+					{
+						id: 't1',
+						name: 'Active Token',
+						token: '',
+						current_uses: 0,
+						max_uses: null,
+						expires_at: null,
+						revoked_at: null,
+						created_at: new Date().toISOString()
+					} as never
+				],
+				total: 1,
+				page: 1,
+				per_page: 20,
+				total_pages: 1
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listSystemEnrollmentTokens>>);
 		render(SystemServicesSettings, props);
 		// Tokens auto-load on mount — wait for Revoke to appear
 		const revokeBtn = await screen.findByRole('button', { name: 'Revoke' });
@@ -57,15 +61,17 @@ describe('SystemServicesSettings button variants', () => {
 
 	it('Copy button has ghost class after token creation', async () => {
 		vi.mocked(api.createSystemEnrollmentToken).mockResolvedValue({
-			id: 't1',
-			name: 'My Token',
-			token: 'tok_abc',
-			current_uses: 0,
-			max_uses: null,
-			expires_at: null,
-			revoked_at: null,
-			created_at: new Date().toISOString()
-		} as never);
+			data: {
+				id: 't1',
+				name: 'My Token',
+				token: 'tok_abc',
+				current_uses: 0,
+				max_uses: null,
+				expires_at: null,
+				revoked_at: null,
+				created_at: new Date().toISOString()
+			}
+		} as unknown as Awaited<ReturnType<typeof api.createSystemEnrollmentToken>>);
 		render(SystemServicesSettings, props);
 		await fireEvent.click(screen.getByRole('button', { name: 'Create Token' }));
 		const nameInput = await screen.findByLabelText(/Name/i);
@@ -81,7 +87,7 @@ describe('SystemServicesSettings button variants', () => {
 		vi.mocked(api.createSystemEnrollmentToken).mockReturnValue(
 			new Promise((r) => {
 				resolve = r as unknown as (v: unknown) => void;
-			})
+			}) as unknown as ReturnType<typeof api.createSystemEnrollmentToken>
 		);
 		render(SystemServicesSettings, props);
 		// Open modal
@@ -94,14 +100,16 @@ describe('SystemServicesSettings button variants', () => {
 		await fireEvent.click(createBtn);
 		await waitFor(() => expect(createBtn).toHaveAttribute('aria-busy', 'true'));
 		resolve({
-			token: 'tok_abc',
-			id: 't1',
-			name: 'My Token',
-			created_at: new Date().toISOString(),
-			revoked_at: null,
-			expires_at: null,
-			max_uses: null,
-			use_count: 0
+			data: {
+				token: 'tok_abc',
+				id: 't1',
+				name: 'My Token',
+				created_at: new Date().toISOString(),
+				revoked_at: null,
+				expires_at: null,
+				max_uses: null,
+				use_count: 0
+			}
 		});
 		// Modal closes after success — button removed from DOM; verify not still busy
 		await waitFor(() => {
