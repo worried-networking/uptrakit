@@ -146,4 +146,6 @@ then `npm run gen:api` to regenerate the TypeScript client. Commit both `crates/
 and `frontend/src/lib/api/generated/`. CI gates on staleness of both paths — a stale generated client or
 spec will fail the build.
 
-The generated directory is excluded from ESLint, Prettier, and CodeScene analysis (see `.eslintignore`, `.prettierignore`, `.codescene/exclusions.json`).
+The generated directory is excluded from ESLint (`ignores` in `eslint.config.js`) and Prettier
+(`.prettierignore`). It is also excluded from CodeScene via the project's path-filter setting
+(pattern `**/api/generated/**`), configured in the CodeScene dashboard rather than a repo file.
