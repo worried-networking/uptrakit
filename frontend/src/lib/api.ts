@@ -4,6 +4,9 @@ import './api/client';
 // (after their local definitions are removed below) continue to resolve correctly.
 import { ApiError, extractErrorMessage } from './api/errors';
 import { apiClient } from './api/client';
+// Raw-Response escape hatch lives in api/raw.ts (routes through the configured client).
+// Imported for internal use by request()/requestVoid() and re-exported via the barrel.
+import { apiGet, authenticatedFetch, loginRaw } from './api/raw';
 
 // Generated SDK + types become reachable via `$lib/api` during migration.
 // Both the old hand-written functions (below) and the generated SDK names are
@@ -12,9 +15,10 @@ export * from './api/generated';
 export { ApiError, extractErrorMessage };
 export { extractApiError } from './api/errors';
 export { apiClient };
+export { apiGet, authenticatedFetch, loginRaw };
 export { executeBatchChunked } from './api/batch';
 
-import { getAccessToken, onTokenChange, setAccessToken, setSessionExpired } from './token-store.svelte';
+import { onTokenChange } from './token-store.svelte';
 import type {
 	BatchActionResponse,
 	AgentCertificateSettings,
@@ -204,13 +208,6 @@ async function extractApiError(res: Response): Promise<ApiError> {
 	return new ApiError(message, res.status, errorCode);
 }
 
-function authHeaders(): Record<string, string> {
-	const token = getAccessToken();
-	return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
-let refreshPromise: Promise<RefreshResponse> | null = null;
-
 /**
  * Error thrown when the token refresh endpoint returns a non-OK response.
  * Carries the HTTP status so callers can distinguish real auth failures (4xx)
@@ -223,13 +220,6 @@ class RefreshError extends Error {
 		super(`Refresh failed (${status})`);
 		this.name = 'RefreshError';
 		this.status = status;
-	}
-}
-
-class TwoFactorSetupRequiredError extends Error {
-	constructor() {
-		super('2fa_setup_required');
-		this.name = 'TwoFactorSetupRequiredError';
 	}
 }
 
@@ -247,126 +237,6 @@ export async function refreshAccessToken(): Promise<RefreshResponse> {
 	}
 
 	return res.json();
-}
-
-/**
- * Performs an authenticated fetch with automatic token refresh on 401.
- * Returns the raw Response for callers to handle body parsing.
- *
- * The `url` parameter must be the complete request URL (e.g. `/api/v1/foo` or
- * `/oauth/consent/xyz`). Unlike the internal `request`/`requestVoid` helpers,
- * this function does NOT prepend BASE — callers that use this export directly
- * are responsible for constructing the full path.
- */
-export async function authenticatedFetch(url: string, options: RequestInit = {}): Promise<Response> {
-	const timeoutSignal = AbortSignal.timeout(DEFAULT_TIMEOUT_MS);
-	const combinedSignal = options.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal;
-
-	const headers = new Headers({ 'Content-Type': 'application/json' });
-	const auth = authHeaders();
-	for (const [k, v] of Object.entries(auth)) headers.set(k, v);
-	if (options.headers !== undefined) {
-		for (const [k, v] of new Headers(options.headers).entries()) headers.set(k, v);
-	}
-
-	const res = await fetch(url, {
-		credentials: 'same-origin',
-		...options,
-		headers,
-		signal: combinedSignal
-	});
-
-	if (res.status === 401 && getAccessToken()) {
-		// Surface the session-expired banner immediately so the user sees
-		// feedback before the refresh round-trip completes.
-		setSessionExpired(true);
-
-		// Attempt token refresh, deduplicating concurrent attempts.
-		// The promise is cleared after it settles (not per-caller) so that
-		// concurrent 401 handlers share a single refresh cycle.
-		if (!refreshPromise) {
-			refreshPromise = refreshAccessToken();
-			refreshPromise.then(
-				() => {
-					refreshPromise = null;
-				},
-				() => {
-					refreshPromise = null;
-				}
-			);
-		}
-
-		try {
-			const refreshed = await refreshPromise;
-			setAccessToken(refreshed.access_token);
-
-			// Retry original request with new token
-			const retryTimeoutSignal = AbortSignal.timeout(DEFAULT_TIMEOUT_MS);
-			const retryCombinedSignal = options.signal
-				? AbortSignal.any([options.signal, retryTimeoutSignal])
-				: retryTimeoutSignal;
-
-			// The retry is returned (not awaited) so that retry errors propagate
-			// to request(), which maps them to the correct user-facing messages.
-			// The .finally() clears the banner after the retry settles regardless
-			// of whether it succeeds or fails.
-			const retryHeaders = new Headers({
-				'Content-Type': 'application/json',
-				Authorization: `Bearer ${refreshed.access_token}`
-			});
-			if (options.headers !== undefined) {
-				for (const [k, v] of new Headers(options.headers).entries()) retryHeaders.set(k, v);
-			}
-			return fetch(url, {
-				credentials: 'same-origin',
-				...options,
-				headers: retryHeaders,
-				signal: retryCombinedSignal
-			}).finally(() => {
-				setSessionExpired(false);
-			});
-		} catch (refreshErr) {
-			// Network/timeout errors — keep session, surface the error
-			if (
-				refreshErr instanceof DOMException &&
-				(refreshErr.name === 'TimeoutError' || refreshErr.name === 'AbortError')
-			) {
-				setSessionExpired(false);
-				throw new Error('Token refresh timed out. Please try again.');
-			}
-			if (refreshErr instanceof TypeError) {
-				setSessionExpired(false);
-				throw new Error('Network error during token refresh. Check your connection.');
-			}
-			// Server errors (5xx) — keep session, don't force logout
-			if (refreshErr instanceof RefreshError && refreshErr.status >= 500) {
-				setSessionExpired(false);
-				throw new Error('Server error during token refresh. Please try again later.');
-			}
-			// Real auth failures (4xx) — session is truly invalid.
-			// Show a non-blocking banner instead of hard-redirecting so the
-			// user can copy any unsaved form state before logging in again.
-			setAccessToken(null);
-			throw new Error('Session expired. Please log in again.');
-		}
-	}
-
-	if (res.status === 403) {
-		try {
-			const body = (await res.clone().json()) as Record<string, unknown>;
-			if (body?.error === '2fa_setup_required') {
-				if (typeof window !== 'undefined') {
-					window.location.href = '/profile#security';
-				}
-				throw new TwoFactorSetupRequiredError();
-			}
-		} catch (e) {
-			if (e instanceof TwoFactorSetupRequiredError) throw e;
-			// Not JSON or not the 2FA error — fall through
-		}
-	}
-
-	return res;
 }
 
 /** Performs an authenticated request and parses the JSON response body. */
@@ -432,17 +302,6 @@ export function register(data: RegisterRequest): Promise<AuthResponse> {
 
 export function login(data: LoginRequest): Promise<AuthResponse> {
 	return request('/auth/login', { method: 'POST', body: JSON.stringify(data) });
-}
-
-/** POST /auth/login — raw response so callers can inspect 202 MFA challenge. */
-export function loginRaw(data: LoginRequest): Promise<Response> {
-	return fetch(`${BASE}/auth/login`, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		credentials: 'same-origin',
-		body: JSON.stringify(data),
-		signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS)
-	});
 }
 
 export function logout(): Promise<void> {
@@ -1304,12 +1163,6 @@ export async function invokeSurfaceInteraction(
 			body: JSON.stringify(data)
 		}
 	);
-}
-
-/** Performs an authenticated GET request and returns the parsed JSON body. */
-export function apiGet<T = unknown>(path: string): Promise<T> {
-	const relativePath = path.startsWith(BASE) ? path.slice(BASE.length) : path;
-	return request<T>(relativePath);
 }
 
 // ── Notification Rules + Log ──
