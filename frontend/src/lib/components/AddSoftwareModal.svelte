@@ -44,7 +44,9 @@
 		submitting = true;
 		try {
 			const trimmedIcon = iconUrl.trim() || null;
-			const created = await createSoftwareItem({ name: trimmedName, featured, icon_url: trimmedIcon });
+			const { data: created } = await createSoftwareItem({
+				body: { name: trimmedName, featured, icon_url: trimmedIcon }
+			});
 			showSuccess('Software item registered.');
 			onsuccess(created);
 		} catch (e) {

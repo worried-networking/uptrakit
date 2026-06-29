@@ -8,8 +8,8 @@ import type { HostResponse, PluginConfigResponse, PluginTypeInfo, SoftwareItemDe
 vi.mock('$lib/api', () => ({
 	getSoftwareItem: vi.fn(),
 	listHosts: vi.fn(),
-	assignHostsToSoftwareItem: vi.fn(),
-	unassignHostFromSoftwareItem: vi.fn(),
+	assignHosts: vi.fn(),
+	unassignHost: vi.fn(),
 	getPluginConfigs: vi.fn(),
 	listPluginTypes: vi.fn()
 }));
@@ -141,7 +141,9 @@ function makePluginTypes(): PluginTypeInfo[] {
 }
 
 function renderModal(hostItems: HostResponse[] = [makeHost('host-1', 'Host One')]) {
-	vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail([]));
+	vi.mocked(api.getSoftwareItem).mockResolvedValue({ data: makeDetail([]) } as unknown as Awaited<
+		ReturnType<typeof api.getSoftwareItem>
+	>);
 	vi.mocked(api.listHosts).mockResolvedValue({ data: makeHostsPage(hostItems) } as unknown as Awaited<
 		ReturnType<typeof api.listHosts>
 	>);
@@ -153,8 +155,10 @@ function renderModal(hostItems: HostResponse[] = [makeHost('host-1', 'Host One')
 		total_pages: 1
 	});
 	vi.mocked(api.listPluginTypes).mockResolvedValue(makePluginTypes());
-	vi.mocked(api.assignHostsToSoftwareItem).mockResolvedValue(makeDetail([]));
-	vi.mocked(api.unassignHostFromSoftwareItem).mockResolvedValue();
+	vi.mocked(api.assignHosts).mockResolvedValue({ data: makeDetail([]) } as unknown as Awaited<
+		ReturnType<typeof api.assignHosts>
+	>);
+	vi.mocked(api.unassignHost).mockResolvedValue(undefined as unknown as Awaited<ReturnType<typeof api.unassignHost>>);
 
 	return render(AssignToHostModal, {
 		softwareItemId: 'software-1',
@@ -195,18 +199,19 @@ describe('AssignToHostModal', () => {
 		await user.click(screen.getByRole('button', { name: 'Save' }));
 
 		expect(screen.getByText('Select a plugin config for Detect Version.')).toBeInTheDocument();
-		expect(api.assignHostsToSoftwareItem).not.toHaveBeenCalled();
+		expect(api.assignHosts).not.toHaveBeenCalled();
 	});
 
 	it('shows saving state while assignment submit is in flight', async () => {
 		const user = userEvent.setup();
 		let resolveAssign: (() => void) | null = null;
 		renderModal();
-		vi.mocked(api.assignHostsToSoftwareItem).mockImplementation(
-			() =>
-				new Promise((resolve) => {
-					resolveAssign = () => resolve(makeDetail([]));
-				})
+		vi.mocked(api.assignHosts).mockImplementation(
+			(() =>
+				new Promise<Awaited<ReturnType<typeof api.assignHosts>>>((resolve) => {
+					resolveAssign = () =>
+						resolve({ data: makeDetail([]) } as unknown as Awaited<ReturnType<typeof api.assignHosts>>);
+				})) as unknown as typeof api.assignHosts
 		);
 
 		const hostCheckbox = await screen.findByRole('checkbox', { name: /Host One/i });
@@ -219,7 +224,7 @@ describe('AssignToHostModal', () => {
 
 		expect(resolveAssign).not.toBeNull();
 		resolveAssign!();
-		await waitFor(() => expect(api.assignHostsToSoftwareItem).toHaveBeenCalledTimes(1));
+		await waitFor(() => expect(api.assignHosts).toHaveBeenCalledTimes(1));
 	});
 
 	it('Cancel button renders variant="secondary"', async () => {

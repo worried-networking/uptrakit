@@ -166,11 +166,11 @@
 	function makeInitialHookLists(): Record<HookRoleKey, HookEntry[]> {
 		const result: Record<HookRoleKey, HookEntry[]> = { pre_update_hook: [], post_update_hook: [] };
 		for (const role of HOOK_ROLES) {
-			const hooks = existingPlugins.filter((p) => p.role === role).sort((a, b) => a.ordinal - b.ordinal);
-			origOrdinalsByRole[role] = hooks.map((h) => h.ordinal);
+			const hooks = existingPlugins.filter((p) => p.role === role).sort((a, b) => (a.ordinal ?? 0) - (b.ordinal ?? 0));
+			origOrdinalsByRole[role] = hooks.map((h) => h.ordinal ?? 0);
 			result[role] = hooks.map((h) => ({
 				localKey: nextKey(),
-				origOrdinal: h.ordinal,
+				origOrdinal: h.ordinal ?? null,
 				plugin_type: h.plugin_type,
 				plugin_config_id: h.plugin_config_id ?? '',
 				config_override_text: h.config_override ? JSON.stringify(h.config_override, null, 2) : '',
@@ -221,7 +221,9 @@
 
 			// Initialise override form values for hook entries.
 			for (const role of HOOK_ROLES) {
-				const hooks = existingPlugins.filter((p) => p.role === role).sort((a, b) => a.ordinal - b.ordinal);
+				const hooks = existingPlugins
+					.filter((p) => p.role === role)
+					.sort((a, b) => (a.ordinal ?? 0) - (b.ordinal ?? 0));
 				for (let i = 0; i < hookLists[role].length; i++) {
 					const existing = hooks[i];
 					if (existing?.plugin_config_id) {
@@ -628,10 +630,13 @@
 									return text ? (JSON.parse(text) as Record<string, unknown>) : null;
 								})()
 							}),
-					package_identifier: s.package_identifier.trim() || undefined,
+					package_identifier: s.package_identifier.trim(),
 					execution_site: s.execution_site
 				};
-				lastResult = await updateHostAssignment(softwareItemId, hostId, req);
+				({ data: lastResult } = await updateHostAssignment({
+					path: { id: softwareItemId, host_id: hostId },
+					body: req
+				}));
 			}
 
 			// --- Reconcile hooks ---
@@ -674,13 +679,18 @@
 									})()
 								})
 					};
-					lastResult = await updateHostAssignment(softwareItemId, hostId, req);
+					({ data: lastResult } = await updateHostAssignment({
+						path: { id: softwareItemId, host_id: hostId },
+						body: req
+					}));
 				}
 
 				// Delete ordinals that no longer appear in the desired list.
 				for (const ordinal of origOrdinals) {
 					if (!desiredOrdinals.has(ordinal)) {
-						lastResult = await deletePluginAssignment(softwareItemId, hostId, role, ordinal);
+						({ data: lastResult } = await deletePluginAssignment({
+							path: { id: softwareItemId, host_id: hostId, role, ordinal }
+						}));
 					}
 				}
 			}

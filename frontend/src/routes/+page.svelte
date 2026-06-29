@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { getUser } from '$lib/auth.svelte';
-	import { listHosts, listServices, getSoftwareItems, listUpdateHistory } from '$lib/api';
+	import { listHosts, listServices, listSoftwareItems, listUpdateHistory } from '$lib/api';
 	import { formatDate } from '$lib/utils';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import { AdminEventType } from '$lib/sse';
 	import { Permission } from '$lib/types';
-	import type { UpdateHistoryResponse, PaginatedResponse } from '$lib/types';
+	import type { UpdateHistoryResponse } from '$lib/types';
 	import type { ServiceResponse } from '$lib/api';
 	import { Callout, DataTable, PageShell, SectionCard, StatCard, StatusBadge } from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
@@ -97,7 +97,7 @@
 		if (canViewSoftware) {
 			promises.push(
 				swallowOnBackground(
-					getSoftwareItems(1, 1, true).then((result) => {
+					listSoftwareItems({ query: { page: 1, per_page: 1, featured: true } }).then(({ data: result }) => {
 						totalSoftwareItems = result.total;
 					})
 				)
@@ -105,7 +105,7 @@
 
 			promises.push(
 				swallowOnBackground(
-					getSoftwareItems(1, 1, false).then((result) => {
+					listSoftwareItems({ query: { page: 1, per_page: 1, featured: false } }).then(({ data: result }) => {
 						unfeaturedSoftwareCount = result.total;
 					})
 				)
@@ -113,7 +113,7 @@
 
 			promises.push(
 				swallowOnBackground(
-					listUpdateHistory({ page: 1, per_page: 5 }).then((result: PaginatedResponse<UpdateHistoryResponse>) => {
+					listUpdateHistory({ query: { page: 1, per_page: 5 } }).then(({ data: result }) => {
 						recentUpdates = result.items;
 						totalRecentUpdates = result.total;
 					})

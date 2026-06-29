@@ -290,14 +290,14 @@
 									class="font-mono text-button text-[var(--accent-bright)]"
 									title={versionTitle(
 										compactSingleHost.latest_version,
-										(compactSingleHost.latest_release_metadata?.display_version as string | null | undefined) ??
-											undefined
+										((compactSingleHost.latest_release_metadata as Record<string, unknown> | null | undefined)
+											?.display_version as string | null | undefined) ?? undefined
 									)}
 								>
 									↑ {versionLabel(
 										compactSingleHost.latest_version,
-										(compactSingleHost.latest_release_metadata?.display_version as string | null | undefined) ??
-											undefined
+										((compactSingleHost.latest_release_metadata as Record<string, unknown> | null | undefined)
+											?.display_version as string | null | undefined) ?? undefined
 									)}
 								</p>
 							{/if}
@@ -435,12 +435,14 @@
 											class="font-mono text-button text-[var(--accent-bright)]"
 											title={versionTitle(
 												host.latest_version,
-												(host.latest_release_metadata?.display_version as string | null | undefined) ?? undefined
+												((host.latest_release_metadata as Record<string, unknown> | null | undefined)
+													?.display_version as string | null | undefined) ?? undefined
 											)}
 										>
 											↑ {versionLabel(
 												host.latest_version,
-												(host.latest_release_metadata?.display_version as string | null | undefined) ?? undefined
+												((host.latest_release_metadata as Record<string, unknown> | null | undefined)
+													?.display_version as string | null | undefined) ?? undefined
 											)}
 										</p>
 									{/if}
@@ -603,7 +605,8 @@
 							<p class="truncate font-mono text-button text-[var(--accent-bright)]">
 								↑ {versionLabel(
 									compactSingleHost.latest_version,
-									(compactSingleHost.latest_release_metadata?.display_version as string | null | undefined) ?? undefined
+									((compactSingleHost.latest_release_metadata as Record<string, unknown> | null | undefined)
+										?.display_version as string | null | undefined) ?? undefined
 								)}
 							</p>
 						{/if}
@@ -695,7 +698,8 @@
 										<p class="font-mono text-button text-[var(--accent-bright)]">
 											↑ {versionLabel(
 												host.latest_version,
-												(host.latest_release_metadata?.display_version as string | null | undefined) ?? undefined
+												((host.latest_release_metadata as Record<string, unknown> | null | undefined)
+													?.display_version as string | null | undefined) ?? undefined
 											)}
 										</p>
 									{/if}

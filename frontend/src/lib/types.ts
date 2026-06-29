@@ -409,24 +409,24 @@ export interface PaginatedResponse<T> {
 }
 
 export interface HostPluginRoleSummary {
-	role: string;
+	role: 'detect_version' | 'fetch_releases' | 'execute_update' | 'pre_update_hook' | 'post_update_hook';
 	/** Ordinal for hook roles (0-based). Always 0 for non-hook roles. */
-	ordinal: number;
-	plugin_config_id: string | null;
-	plugin_config_name: string | null;
+	ordinal?: number;
+	plugin_config_id?: string | null;
+	plugin_config_name?: string | null;
 	plugin_type: string;
 	package_identifier: string;
-	config_override: Record<string, unknown> | null;
+	config_override?: Record<string, unknown> | null;
 	execution_site: string;
 }
 
 export interface HostPluginRoleAssignment {
-	role: string;
+	role: 'detect_version' | 'fetch_releases' | 'execute_update' | 'pre_update_hook' | 'post_update_hook';
 	/** Ordinal for hook roles; must be 0 for non-hook roles. Defaults to 0. */
 	ordinal?: number;
 	plugin_config_id?: string;
 	plugin_config?: CreatePluginConfigRequest;
-	package_identifier?: string;
+	package_identifier: string;
 	config_override?: Record<string, unknown> | null;
 	execution_site?: string;
 }
@@ -528,12 +528,12 @@ export interface SoftwareItemResponse {
 	name: string;
 	plugins: string[];
 	featured: boolean;
-	last_checked_at: string | null;
+	last_checked_at?: string | null;
 	host_count: number;
 	installed_version?: string | null;
 	installed_display_version?: string | null;
 	latest_version?: string | null;
-	latest_release_metadata?: Record<string, unknown> | null;
+	latest_release_metadata?: unknown;
 	update_available: boolean;
 	created_at: string;
 	updated_at: string;
@@ -591,15 +591,15 @@ export interface SoftwareItemHostSummary {
 	hostname: string;
 	friendly_name: string;
 	qualifier?: string | null;
-	installed_version: string | null;
-	installed_version_detected_at: string | null;
+	installed_version?: string | null;
+	installed_version_detected_at?: string | null;
 	installed_display_version?: string | null;
 	latest_version?: string | null;
-	latest_release_metadata?: Record<string, unknown> | null;
+	latest_release_metadata?: unknown;
 	update_available: boolean;
 	active_update_history_id?: string | null;
 	active_update_status?: string | null;
-	last_updated_at: string | null;
+	last_updated_at?: string | null;
 	linked_at: string;
 	plugins: HostPluginRoleSummary[];
 }
@@ -618,7 +618,7 @@ export interface AssignHostsRequest {
 }
 
 export interface UpdateHostAssignmentRequest {
-	role: string;
+	role: 'detect_version' | 'fetch_releases' | 'execute_update' | 'pre_update_hook' | 'post_update_hook';
 	/** Ordinal for hook roles; 0 for non-hook roles. Defaults to 0. */
 	ordinal?: number;
 	plugin_config_id?: string;
@@ -687,14 +687,14 @@ export interface UpdateHistoryResponse {
 	host_name: string;
 	software_item_id: string;
 	software_item_name: string;
-	from_version: string | null;
+	from_version?: string | null;
 	to_version: string;
 	status: UpdateHistoryStatus;
 	actor_type: string;
 	actor_id: string;
 	actor_name?: string | null;
 	started_at: string | null;
-	completed_at: string | null;
+	completed_at?: string | null;
 	output: string | null;
 	created_at: string;
 	/** Whether the update was dispatched in interactive mode (PTY allocated). */
@@ -730,9 +730,9 @@ export interface ScheduledTaskResponse {
 	enabled: boolean;
 	is_running: boolean;
 	run_count: number;
-	last_run_at: string | null;
+	last_run_at?: string | null;
 	next_run_at: string | null;
-	last_error: string | null;
+	last_error?: string | null;
 	created_at: string;
 	updated_at: string;
 }

@@ -6,14 +6,7 @@
 	import { Callout } from '$lib/components/ui';
 	import { Input, Checkbox, CheckboxList, Select, type SelectOption } from '$lib/components/forms';
 	import type { CheckboxListItem } from '$lib/components/forms';
-	import {
-		getSoftwareItem,
-		listHosts,
-		assignHostsToSoftwareItem,
-		unassignHostFromSoftwareItem,
-		getPluginConfigs,
-		listPluginTypes
-	} from '$lib/api';
+	import { getSoftwareItem, listHosts, assignHosts, unassignHost, getPluginConfigs, listPluginTypes } from '$lib/api';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import type { HostResponse, PluginConfigResponse, HostPluginRoleAssignment, PluginTypeInfo } from '$lib/types';
 
@@ -156,8 +149,8 @@
 
 	onMount(async () => {
 		try {
-			const [detail, hostsData, configsResult, typesResult] = await Promise.all([
-				getSoftwareItem(softwareItemId),
+			const [{ data: detail }, hostsData, configsResult, typesResult] = await Promise.all([
+				getSoftwareItem({ path: { id: softwareItemId } }),
 				listHosts({ query: { page: 1, per_page: 200 } }),
 				getPluginConfigs(1, 500),
 				listPluginTypes()
@@ -231,7 +224,7 @@
 						plugins.push({
 							role,
 							plugin_config_id: a.plugin_config_id,
-							package_identifier: a.package_identifier.trim() || undefined,
+							package_identifier: a.package_identifier.trim(),
 							execution_site: a.execution_site !== 'auto' ? a.execution_site : undefined
 						});
 					}
@@ -240,19 +233,20 @@
 				for (const role of HOOK_ROLES) {
 					hookLists[role].forEach((entry, idx) => {
 						if (entry.plugin_config_id) {
-							plugins.push({ role, ordinal: idx, plugin_config_id: entry.plugin_config_id });
+							plugins.push({ role, ordinal: idx, plugin_config_id: entry.plugin_config_id, package_identifier: '' });
 						}
 					});
 				}
 
 				tasks.push(
-					assignHostsToSoftwareItem(softwareItemId, {
-						host_assignments: pendingAdd.map((host_id) => ({ host_id, plugins }))
+					assignHosts({
+						path: { id: softwareItemId },
+						body: { host_assignments: pendingAdd.map((host_id) => ({ host_id, plugins })) }
 					})
 				);
 			}
 			for (const hostId of toRemove) {
-				tasks.push(unassignHostFromSoftwareItem(softwareItemId, hostId));
+				tasks.push(unassignHost({ path: { id: softwareItemId, host_id: hostId } }));
 			}
 			await Promise.all(tasks);
 			showSuccess('Host assignments updated.');

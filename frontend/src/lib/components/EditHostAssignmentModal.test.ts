@@ -107,8 +107,12 @@ function renderModal(existingPlugins: HostPluginRoleSummary[] = []) {
 		total_pages: 1
 	});
 	vi.mocked(api.listPluginTypes).mockResolvedValue(makePluginTypes());
-	vi.mocked(api.updateHostAssignment).mockResolvedValue(makeDetail());
-	vi.mocked(api.deletePluginAssignment).mockResolvedValue(makeDetail());
+	vi.mocked(api.updateHostAssignment).mockResolvedValue({ data: makeDetail() } as unknown as Awaited<
+		ReturnType<typeof api.updateHostAssignment>
+	>);
+	vi.mocked(api.deletePluginAssignment).mockResolvedValue({ data: makeDetail() } as unknown as Awaited<
+		ReturnType<typeof api.deletePluginAssignment>
+	>);
 
 	return render(EditHostAssignmentModal, {
 		softwareItemId: 'software-1',

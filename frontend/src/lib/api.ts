@@ -23,7 +23,6 @@ import { onTokenChange } from './token-store.svelte';
 import type {
 	AgentCertificateSettings,
 	ApiTokenListResponse,
-	AssignHostsRequest,
 	CombinedSettingsResponse,
 	CreateApiTokenRequest,
 	CreateApiTokenResponse,
@@ -35,29 +34,17 @@ import type {
 	PaginatedResponse,
 	PluginConfigResponse,
 	CreatePluginConfigRequest,
-	CreateSoftwareItemRequest,
 	NetworkSettings,
 	OidcProviderResponse,
 	RefreshResponse,
 	RenewServerCertResponse,
 	RotateCaResponse,
-	ScheduledTaskResponse,
-	SoftwareItemDetailResponse,
-	SoftwareItemResponse,
 	SystemAlertsResponse,
 	TriggerDiscoveryResponse,
-	TriggerScheduledTaskResponse,
-	TriggerUpdateRequest,
-	TriggerUpdateResponse,
-	TriggerVersionCheckResponse,
 	UpdateAgentCertificateSettings,
-	UpdateHistoryResponse,
-	UpdateHostAssignmentRequest,
 	UpdateNetworkSettings,
 	UpdateOidcProviderRequest,
 	UpdatePluginConfigRequest,
-	UpdateScheduledTaskRequest,
-	UpdateSoftwareItemRequest,
 	GitHubProviderSettingsResponse,
 	NatsSettingsResponse,
 	UpdateNatsSettingsRequest,
@@ -78,10 +65,6 @@ import type {
 	ResetDataResponse,
 	TestPluginConfigRequest,
 	TestPluginConfigResponse,
-	MergeSoftwareItemsExecuteRequest,
-	MergeSoftwareItemsExecuteResponse,
-	MergeSoftwareItemsPreviewRequest,
-	MergeSoftwareItemsPreviewResponse,
 	InstancePluginSummary,
 	ConfigStateResponse
 } from './types';
@@ -467,182 +450,6 @@ export function getPluginConfigs(page?: number, perPage?: number): Promise<Pagin
 	if (perPage != null) params.set('per_page', String(perPage));
 	const query = params.toString();
 	return request(`/plugin-configs${query ? `?${query}` : ''}`);
-}
-
-export function getSoftwareItems(
-	page?: number,
-	perPage?: number,
-	featured?: boolean,
-	hostId?: string,
-	updatable?: boolean,
-	pluginType?: string,
-	query?: string
-): Promise<PaginatedResponse<SoftwareItemResponse>> {
-	const params = new URLSearchParams();
-	if (page != null) params.set('page', String(page));
-	if (perPage != null) params.set('per_page', String(perPage));
-	if (featured != null) params.set('featured', String(featured));
-	if (hostId != null) params.set('host_id', hostId);
-	if (updatable != null) params.set('updatable', String(updatable));
-	if (pluginType != null) params.set('plugin_type', pluginType);
-	const normalizedQuery = query?.trim();
-	if (normalizedQuery) params.set('query', normalizedQuery);
-	const qs = params.toString();
-	return request(`/software-items${qs ? `?${qs}` : ''}`);
-}
-
-export function previewSoftwareItemMerge(
-	data: MergeSoftwareItemsPreviewRequest
-): Promise<MergeSoftwareItemsPreviewResponse> {
-	return request('/software-items/merge/preview', {
-		method: 'POST',
-		body: JSON.stringify(data)
-	});
-}
-
-export function executeSoftwareItemMerge(
-	data: MergeSoftwareItemsExecuteRequest
-): Promise<MergeSoftwareItemsExecuteResponse> {
-	return request('/software-items/merge/execute', {
-		method: 'POST',
-		body: JSON.stringify(data)
-	});
-}
-
-export function createSoftwareItem(data: CreateSoftwareItemRequest): Promise<SoftwareItemResponse> {
-	return request('/software-items', {
-		method: 'POST',
-		body: JSON.stringify({ name: data.name, featured: data.featured ?? true })
-	});
-}
-
-export function getSoftwareItem(id: string): Promise<SoftwareItemDetailResponse> {
-	return request(`/software-items/${encodeURIComponent(id)}`);
-}
-
-export function deleteSoftwareItem(id: string): Promise<void> {
-	return requestVoid(`/software-items/${encodeURIComponent(id)}`, { method: 'DELETE' });
-}
-
-export function assignHostsToSoftwareItem(id: string, data: AssignHostsRequest): Promise<SoftwareItemDetailResponse> {
-	return request(`/software-items/${encodeURIComponent(id)}/hosts`, {
-		method: 'POST',
-		body: JSON.stringify(data)
-	});
-}
-
-export function unassignHostFromSoftwareItem(itemId: string, hostId: string): Promise<void> {
-	return requestVoid(`/software-items/${encodeURIComponent(itemId)}/hosts/${encodeURIComponent(hostId)}`, {
-		method: 'DELETE'
-	});
-}
-
-export function updateHostAssignment(
-	itemId: string,
-	hostId: string,
-	data: UpdateHostAssignmentRequest
-): Promise<SoftwareItemDetailResponse> {
-	return request(`/software-items/${encodeURIComponent(itemId)}/hosts/${encodeURIComponent(hostId)}`, {
-		method: 'PUT',
-		body: JSON.stringify(data)
-	});
-}
-
-export function deletePluginAssignment(
-	itemId: string,
-	hostId: string,
-	role: string,
-	ordinal: number
-): Promise<SoftwareItemDetailResponse> {
-	return request(
-		`/software-items/${encodeURIComponent(itemId)}/hosts/${encodeURIComponent(hostId)}/plugins/${encodeURIComponent(role)}/${ordinal}`,
-		{ method: 'DELETE' }
-	);
-}
-
-export function checkSoftwareItemVersions(itemId: string): Promise<TriggerVersionCheckResponse> {
-	return request(`/software-items/${encodeURIComponent(itemId)}/check-versions`, { method: 'POST' });
-}
-
-// Software items - update
-export async function updateSoftwareItem(id: string, data: UpdateSoftwareItemRequest): Promise<SoftwareItemResponse> {
-	return request<SoftwareItemResponse>(`/software-items/${encodeURIComponent(id)}`, {
-		method: 'PUT',
-		body: JSON.stringify(data)
-	});
-}
-
-// Software items - trigger update on a specific host
-export async function triggerSoftwareUpdate(
-	itemId: string,
-	hostId: string,
-	req: TriggerUpdateRequest
-): Promise<TriggerUpdateResponse> {
-	return request<TriggerUpdateResponse>(
-		`/software-items/${encodeURIComponent(itemId)}/hosts/${encodeURIComponent(hostId)}/update`,
-		{
-			method: 'POST',
-			body: JSON.stringify(req)
-		}
-	);
-}
-
-// Software items - check versions on a specific host
-export async function checkSoftwareItemVersionsHost(
-	itemId: string,
-	hostId: string
-): Promise<TriggerVersionCheckResponse> {
-	return request<TriggerVersionCheckResponse>(
-		`/software-items/${encodeURIComponent(itemId)}/hosts/${encodeURIComponent(hostId)}/check-versions`,
-		{ method: 'POST' }
-	);
-}
-
-// Update history
-export async function listUpdateHistory(opts?: {
-	host_id?: string;
-	software_item_id?: string;
-	status?: string;
-	page?: number;
-	per_page?: number;
-}): Promise<PaginatedResponse<UpdateHistoryResponse>> {
-	const params = new URLSearchParams();
-	if (opts?.host_id) params.set('host_id', opts.host_id);
-	if (opts?.software_item_id) params.set('software_item_id', opts.software_item_id);
-	if (opts?.status) params.set('status', opts.status);
-	if (opts?.page) params.set('page', String(opts.page));
-	if (opts?.per_page) params.set('per_page', String(opts.per_page));
-	const qs = params.toString();
-	return request<PaginatedResponse<UpdateHistoryResponse>>(`/update-history${qs ? '?' + qs : ''}`);
-}
-
-export async function getUpdateHistoryEntry(id: string): Promise<UpdateHistoryResponse> {
-	return request<UpdateHistoryResponse>(`/update-history/${encodeURIComponent(id)}`);
-}
-
-// Scheduler tasks
-export async function listSchedulerTasks(): Promise<ScheduledTaskResponse[]> {
-	return request<ScheduledTaskResponse[]>('/scheduler/tasks');
-}
-
-export async function getSchedulerTask(id: string): Promise<ScheduledTaskResponse> {
-	return request<ScheduledTaskResponse>(`/scheduler/tasks/${encodeURIComponent(id)}`);
-}
-
-export async function updateSchedulerTask(
-	id: string,
-	data: UpdateScheduledTaskRequest
-): Promise<ScheduledTaskResponse> {
-	return request<ScheduledTaskResponse>(`/scheduler/tasks/${encodeURIComponent(id)}`, {
-		method: 'PUT',
-		body: JSON.stringify(data)
-	});
-}
-
-export async function triggerSchedulerTask(id: string): Promise<TriggerScheduledTaskResponse> {
-	return request<TriggerScheduledTaskResponse>(`/scheduler/tasks/${encodeURIComponent(id)}/trigger`, {
-		method: 'POST'
-	});
 }
 
 // Plugin configs - CRUD

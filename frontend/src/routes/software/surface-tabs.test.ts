@@ -24,19 +24,21 @@ vi.mock('$lib/auth.svelte', () => ({
 }));
 
 vi.mock('$lib/api', () => ({
-	getSoftwareItems: vi.fn(async () => ({
-		items: [],
-		page: 1,
-		per_page: 50,
-		total: 0,
-		total_pages: 1
+	listSoftwareItems: vi.fn(async () => ({
+		data: {
+			items: [],
+			page: 1,
+			per_page: 50,
+			total: 0,
+			total_pages: 1
+		}
 	})),
 	deleteSoftwareItem: vi.fn(async () => undefined),
-	checkSoftwareItemVersions: vi.fn(async () => undefined),
+	checkVersions: vi.fn(async () => undefined),
 	updateSoftwareItem: vi.fn(async () => undefined),
 	listPluginTypes: vi.fn(async () => []),
 	getSoftwareItem: vi.fn(async () => undefined),
-	triggerSoftwareUpdate: vi.fn(async () => undefined),
+	triggerUpdate: vi.fn(async () => undefined),
 	batchSoftwareItems: vi.fn(async () => undefined),
 	executeBatchChunked: vi.fn(async () => undefined),
 	previewSoftwareItemMerge: vi.fn(async () => undefined),
@@ -58,20 +60,23 @@ vi.mock('$lib/surfaces/registry.svelte', () => ({
 }));
 
 import SoftwarePage from './+page.svelte';
-import { getSoftwareItems } from '$lib/api';
+import { listSoftwareItems } from '$lib/api';
+import * as api from '$lib/api';
 import { page } from '$app/state';
 
 describe('/software shared-surface tabs', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		page.url = new URL('http://localhost/software') as typeof page.url;
-		vi.mocked(getSoftwareItems).mockResolvedValue({
-			items: [],
-			page: 1,
-			per_page: 50,
-			total: 0,
-			total_pages: 1
-		});
+		vi.mocked(listSoftwareItems).mockResolvedValue({
+			data: {
+				items: [],
+				page: 1,
+				per_page: 50,
+				total: 0,
+				total_pages: 1
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listSoftwareItems>>);
 	});
 
 	afterEach(() => {
@@ -88,13 +93,17 @@ describe('/software shared-surface tabs', () => {
 	});
 
 	it('shows a direct retry action when foreground software loading fails', async () => {
-		vi.mocked(getSoftwareItems).mockRejectedValueOnce(new Error('Foreground load failed')).mockResolvedValueOnce({
-			items: [],
-			page: 1,
-			per_page: 50,
-			total: 0,
-			total_pages: 1
-		});
+		vi.mocked(listSoftwareItems)
+			.mockRejectedValueOnce(new Error('Foreground load failed'))
+			.mockResolvedValueOnce({
+				data: {
+					items: [],
+					page: 1,
+					per_page: 50,
+					total: 0,
+					total_pages: 1
+				}
+			} as unknown as Awaited<ReturnType<typeof api.listSoftwareItems>>);
 
 		render(SoftwarePage);
 
@@ -104,7 +113,7 @@ describe('/software shared-surface tabs', () => {
 		await fireEvent.click(retryButton);
 
 		await waitFor(() => {
-			expect(vi.mocked(getSoftwareItems)).toHaveBeenCalledTimes(2);
+			expect(vi.mocked(listSoftwareItems)).toHaveBeenCalledTimes(2);
 		});
 	});
 });

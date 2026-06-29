@@ -10,14 +10,14 @@ import { Permission } from '$lib/types';
 
 vi.mock('$lib/api', () => ({
 	getSoftwareItem: vi.fn(),
-	getSoftwareItems: vi.fn(),
-	checkSoftwareItemVersions: vi.fn(),
-	checkSoftwareItemVersionsHost: vi.fn(),
-	triggerSoftwareUpdate: vi.fn(),
+	listSoftwareItems: vi.fn(),
+	checkVersions: vi.fn(),
+	checkVersionsHost: vi.fn(),
+	triggerUpdate: vi.fn(),
 	updateSoftwareItem: vi.fn(),
 	deleteSoftwareItem: vi.fn(),
-	unassignHostFromSoftwareItem: vi.fn(),
-	getUpdateHistoryEntry: vi.fn(),
+	unassignHost: vi.fn(),
+	getUpdateHistory: vi.fn(),
 	previewSoftwareItemMerge: vi.fn(),
 	executeSoftwareItemMerge: vi.fn(),
 	invokeSurfaceInteraction: vi.fn(() => Promise.resolve({}))
@@ -198,7 +198,9 @@ describe('Software Detail shared-surface slots', () => {
 			[hostContextSurface.surface_id, makeRenderableRead(hostContextSurface, 'load_host_context')]
 		]);
 
-		vi.mocked(api.getSoftwareItem).mockResolvedValue(item);
+		vi.mocked(api.getSoftwareItem).mockResolvedValue({ data: item } as unknown as Awaited<
+			ReturnType<typeof api.getSoftwareItem>
+		>);
 		vi.mocked(surfaceRegistry.getSurfacesBySlot).mockImplementation((slot: string) => {
 			if (slot === 'software_item.tabs') return [softwareItemTabSurface];
 			if (slot === 'software_item.host_context_menu') return [hostContextSurface];
@@ -240,7 +242,9 @@ describe('Software Detail shared-surface slots', () => {
 			[softwareItemTabSurface.surface_id, makeRenderableRead(softwareItemTabSurface, 'load_software_item_tab')]
 		]);
 
-		vi.mocked(api.getSoftwareItem).mockResolvedValue(item);
+		vi.mocked(api.getSoftwareItem).mockResolvedValue({ data: item } as unknown as Awaited<
+			ReturnType<typeof api.getSoftwareItem>
+		>);
 		vi.mocked(surfaceRegistry.getSurfacesBySlot).mockImplementation((slot: string) => {
 			if (slot === 'software_item.tabs') return [softwareItemTabSurface];
 			return [];
@@ -261,7 +265,9 @@ describe('Software Detail shared-surface slots', () => {
 
 	it('renders flat layout when no surfaces are registered', async () => {
 		const item = makeSoftwareItem([makeHost()]);
-		vi.mocked(api.getSoftwareItem).mockResolvedValue(item);
+		vi.mocked(api.getSoftwareItem).mockResolvedValue({ data: item } as unknown as Awaited<
+			ReturnType<typeof api.getSoftwareItem>
+		>);
 		vi.mocked(surfaceRegistry.getSurfacesBySlot).mockReturnValue([]);
 
 		render(SoftwareDetailPage);
@@ -292,7 +298,9 @@ describe('Software Detail shared-surface slots', () => {
 			[hostContextSurface.surface_id, makeRenderableRead(hostContextSurface, 'load_host_context')]
 		]);
 
-		vi.mocked(api.getSoftwareItem).mockResolvedValue(item);
+		vi.mocked(api.getSoftwareItem).mockResolvedValue({ data: item } as unknown as Awaited<
+			ReturnType<typeof api.getSoftwareItem>
+		>);
 
 		vi.mocked(surfaceRegistry.getSurfacesBySlot).mockImplementation((slot: string) => {
 			if (slot === 'software_item.tabs') {
@@ -356,7 +364,9 @@ describe('Software Detail host status badge', () => {
 		item.latest_version = '7.22.2';
 		item.update_available = false;
 
-		vi.mocked(api.getSoftwareItem).mockResolvedValue(item);
+		vi.mocked(api.getSoftwareItem).mockResolvedValue({ data: item } as unknown as Awaited<
+			ReturnType<typeof api.getSoftwareItem>
+		>);
 
 		render(SoftwareDetailPage);
 		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Demo App' })).toBeInTheDocument());
@@ -378,7 +388,9 @@ describe('Software Detail host status badge', () => {
 		item.latest_version = '7.22.2';
 		item.update_available = false;
 
-		vi.mocked(api.getSoftwareItem).mockResolvedValue(item);
+		vi.mocked(api.getSoftwareItem).mockResolvedValue({ data: item } as unknown as Awaited<
+			ReturnType<typeof api.getSoftwareItem>
+		>);
 
 		render(SoftwareDetailPage);
 		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Demo App' })).toBeInTheDocument());
@@ -399,7 +411,9 @@ describe('Software Detail host status badge', () => {
 		item.latest_version = null;
 		item.update_available = false;
 
-		vi.mocked(api.getSoftwareItem).mockResolvedValue(item);
+		vi.mocked(api.getSoftwareItem).mockResolvedValue({ data: item } as unknown as Awaited<
+			ReturnType<typeof api.getSoftwareItem>
+		>);
 
 		render(SoftwareDetailPage);
 		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Demo App' })).toBeInTheDocument());

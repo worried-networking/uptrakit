@@ -16,7 +16,7 @@
 		listPluginTypes,
 		listHostTags,
 		setHostTags,
-		getSoftwareItems
+		listSoftwareItems
 	} from '$lib/api';
 	import { formatDate, formatVersion, resolveDisplayVersion } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
@@ -175,12 +175,12 @@
 			error = null;
 		}
 		try {
-			const [hostData, historyResult] = await Promise.all([
+			const [hostData, { data: histResult }] = await Promise.all([
 				getHost({ path: { id } }),
-				listUpdateHistory({ host_id: id, per_page: 5 })
+				listUpdateHistory({ query: { host_id: id, per_page: 5 } })
 			]);
 			host = hostData.data as unknown as HostResponse;
-			recentHistory = historyResult.items;
+			recentHistory = histResult.items;
 			hostDetailReloadToken += 1;
 		} catch (e) {
 			if (!background) {
@@ -224,7 +224,7 @@
 		assignedSoftwareLoading = true;
 		assignedSoftwareError = null;
 		try {
-			const result = await getSoftwareItems(page, 20, undefined, id);
+			const { data: result } = await listSoftwareItems({ query: { page, per_page: 20, host_id: id } });
 			assignedSoftware = result.items;
 			assignedSoftwareTotal = result.total;
 			assignedSoftwarePage = page;
@@ -592,7 +592,8 @@
 										>{formatVersion(
 											resolveDisplayVersion(
 												item.latest_version,
-												item.latest_release_metadata?.display_version as string | undefined
+												(item.latest_release_metadata as Record<string, unknown> | null | undefined)
+													?.display_version as string | undefined
 											)
 										) ?? '—'}</td
 									>
