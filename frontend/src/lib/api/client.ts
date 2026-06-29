@@ -310,10 +310,13 @@ async function requestWithRefresh(options: RequestArgs): Promise<unknown> {
 	return unwrap(first);
 }
 
-// ── Exports ───────────────────────────────────────────────────────────────────
-// `apiClient` is the configured client with refresh-retry layered over every HTTP
-// method (and `request`). A Proxy forwards method calls through `requestWithRefresh`
-// while leaving non-call members (interceptors, setConfig, buildUrl, sse, …) intact.
+// ── Verb wrapping (singleton + apiClient) ───────────────────────────────────────
+// Both the default singleton `client` and the exported `apiClient` route their HTTP
+// verb calls through `requestWithRefresh` so every call gets 401 deduped refresh-retry.
+// `wrapVerb` is the single source of that wrapping. `client.request` (the base
+// primitive) is deliberately NOT wrapped: `requestWithRefresh` calls it internally,
+// so wrapping it would recurse (verb → requestWithRefresh → client.request → … ).
+// SSE (`client.sse`) is also left untouched.
 
 const HTTP_METHOD_VERBS: Readonly<Record<string, string>> = {
 	connect: 'CONNECT',
@@ -327,12 +330,36 @@ const HTTP_METHOD_VERBS: Readonly<Record<string, string>> = {
 	trace: 'TRACE'
 };
 
+type VerbMethod = Client['get'];
+
+/** A verb method (get/post/…) that injects its HTTP method and runs through refresh-retry. */
+function wrapVerb(verb: string): VerbMethod {
+	return ((options: Omit<RequestArgs, 'method'>) =>
+		requestWithRefresh({ ...options, method: verb } as RequestArgs)) as VerbMethod;
+}
+
+// Route the singleton's HTTP verb methods through refresh-retry so the DEFAULT call
+// path — generated SDK fns invoke `client.get/post/...` on this singleton — gets the
+// deduped 401 refresh-retry without callers passing `{ client: apiClient }`. The
+// interceptor behaviors (auth/etag/2fa/ApiError) are unaffected; only `request` and
+// `sse` are left as-is (see the note above on recursion).
+const singletonVerbs = client as unknown as Record<string, VerbMethod>;
+for (const [method, verb] of Object.entries(HTTP_METHOD_VERBS)) {
+	singletonVerbs[method] = wrapVerb(verb);
+}
+
+// ── Exports ───────────────────────────────────────────────────────────────────
+// `apiClient` is the configured client with refresh-retry layered over every HTTP
+// method (and `request`). A Proxy forwards method calls through `requestWithRefresh`
+// while leaving non-call members (interceptors, setConfig, buildUrl, sse, …) intact.
+// Retained because api/raw.ts and api/surfaces.ts consume `apiClient.*`; new code can
+// rely on the now-refresh-aware singleton directly.
+
 const apiClient: Client = new Proxy(client, {
 	get(target, prop, receiver) {
 		if (prop === 'request') return requestWithRefresh;
 		const verb = typeof prop === 'string' ? HTTP_METHOD_VERBS[prop] : undefined;
-		if (verb)
-			return (options: Omit<RequestArgs, 'method'>) => requestWithRefresh({ ...options, method: verb } as RequestArgs);
+		if (verb) return wrapVerb(verb);
 		return Reflect.get(target, prop, receiver);
 	}
 });

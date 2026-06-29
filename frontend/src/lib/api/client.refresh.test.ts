@@ -14,6 +14,10 @@ vi.mock('../token-store.svelte', () => {
 });
 
 import { apiClient } from './client';
+// The DEFAULT singleton that generated SDK fns call as `(options?.client ?? client).get(...)`.
+// Importing './client' first runs the module side effect that wraps this singleton's verbs.
+import { client } from './generated/client.gen';
+import { getAccessToken } from '../token-store.svelte';
 import { ApiError } from './errors';
 
 describe('S-A: refresh-retry + ApiError identity', () => {
@@ -66,5 +70,46 @@ describe('S-A: refresh-retry + ApiError identity', () => {
 		await expect(apiClient.get({ url: '/z' })).rejects.toSatisfy(
 			(e: unknown) => e instanceof ApiError && (e as ApiError).status === 422 && (e as ApiError).errorCode === 'c'
 		);
+	});
+});
+
+describe('S-A: DEFAULT singleton path is refresh-aware (Task 6.5)', () => {
+	beforeEach(() => vi.restoreAllMocks());
+
+	// Drive the singleton's verb methods directly — this is the exact call shape the
+	// generated SDK fns use (`client.get/post/...`) when no explicit client is passed.
+	// Order-independent: the first data request 401s for ANY current token; only a
+	// request bearing the freshly-rotated token succeeds.
+	it('on 401 via singleton client.get/post: refreshes once (deduped), retries, rotates token, succeeds', async () => {
+		let refreshCalls = 0;
+		const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+			const isRequest = input instanceof Request;
+			const url = isRequest ? input.url : String(input);
+
+			if (url.endsWith('/auth/refresh')) {
+				refreshCalls++;
+				return new Response(JSON.stringify({ access_token: 'rotated' }), { status: 200 });
+			}
+
+			const headers = isRequest ? input.headers : new Headers(init?.headers);
+			// Anything not yet carrying the rotated token gets a 401 → forces refresh-retry.
+			if (headers.get('authorization') !== 'Bearer rotated') {
+				return new Response('{}', { status: 401 });
+			}
+			return new Response(JSON.stringify({ ok: true }), { status: 200 });
+		});
+
+		// Two concurrent singleton calls → a single shared (deduped) refresh.
+		const [a, b] = await Promise.all([
+			client.get({ url: '/singleton-get' }),
+			client.post({ url: '/singleton-post', body: { n: 1 } })
+		]);
+
+		expect(refreshCalls).toBe(1);
+		expect(a.data ?? a).toBeTruthy();
+		expect(b.data ?? b).toBeTruthy();
+		// Token was rotated by the singleton path's refresh-retry.
+		expect(getAccessToken()).toBe('rotated');
+		expect(fetchSpy).toHaveBeenCalled();
 	});
 });
