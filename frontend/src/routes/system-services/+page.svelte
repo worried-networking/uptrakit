@@ -5,15 +5,15 @@
 	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
 	import {
-		getSystemServices,
+		listSystemServices,
 		approveSystemService,
 		rejectSystemService,
-		deleteSystemService,
+		deactivateSystemService,
 		updateSystemService,
 		batchSystemServices,
 		executeBatchChunked
 	} from '$lib/api';
-	import type { SystemServiceResponse, BatchActionResponse } from '$lib/types';
+	import type { SystemServiceResponse, BatchActionResponse } from '$lib/api';
 	import { Permission, hasAnyPermission } from '$lib/types';
 	import { formatDate, parseUrlPage, nextValidPage } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
@@ -146,9 +146,11 @@
 	async function loadServices(p: number, background = false, retry = false) {
 		try {
 			if (!background && !retry) error = null;
-			const result = await getSystemServices({
-				status: statusParam.value === 'all' ? undefined : statusParam.value,
-				page: p
+			const { data: result } = await listSystemServices({
+				query: {
+					status: statusParam.value === 'all' ? undefined : statusParam.value,
+					page: p
+				}
 			});
 			services = result.items;
 			for (const service of result.items) {
@@ -227,15 +229,15 @@
 		try {
 			error = null;
 			if (action === 'approve') {
-				const updated = await approveSystemService(serviceId);
+				const { data: updated } = await approveSystemService({ path: { id: serviceId } });
 				services = services.map((s) => (s.id === serviceId ? updated : s));
 			} else if (action === 'reject') {
-				await rejectSystemService(serviceId);
+				await rejectSystemService({ path: { id: serviceId } });
 				await loadServices(currentPage);
 				const p = nextValidPage(currentPage, totalPages);
 				if (p !== null) await loadServices(p);
 			} else if (action === 'delete') {
-				await deleteSystemService(serviceId);
+				await deactivateSystemService({ path: { id: serviceId } });
 				await loadServices(currentPage);
 				const p = nextValidPage(currentPage, totalPages);
 				if (p !== null) await loadServices(p);
@@ -271,8 +273,9 @@
 		submitting = true;
 		try {
 			error = null;
-			const updated = await updateSystemService(editPingService.id, {
-				ping_interval_seconds: val === '' ? 0 : seconds
+			const { data: updated } = await updateSystemService({
+				path: { id: editPingService.id },
+				body: { ping_interval_seconds: val === '' ? 0 : seconds }
 			});
 			services = services.map((s) => (s.id === updated.id ? updated : s));
 			editPingService = null;
@@ -318,10 +321,12 @@
 		try {
 			let p = 1;
 			while (true) {
-				const result = await getSystemServices({
-					status: statusParam.value === 'all' ? undefined : statusParam.value,
-					page: p,
-					perPage: 100
+				const { data: result } = await listSystemServices({
+					query: {
+						status: statusParam.value === 'all' ? undefined : statusParam.value,
+						page: p,
+						per_page: 100
+					}
 				});
 				for (const service of result.items) {
 					if (!canSelect(service)) continue;
@@ -344,7 +349,11 @@
 		batchConfirmAction = null;
 		submitting = true;
 		try {
-			const response = await executeBatchChunked(action, [...selectedIds], batchSystemServices);
+			const response = await executeBatchChunked(
+				action,
+				[...selectedIds],
+				async (a, i) => (await batchSystemServices({ body: { action: a, ids: i } })).data!
+			);
 			if (response.failed.length > 0) {
 				batchResult = response;
 			} else {

@@ -5,10 +5,10 @@ import { Permission } from '$lib/types';
 
 // vi.mock calls are hoisted before imports by vitest — set them up first.
 vi.mock('$lib/api', () => ({
-	getServices: vi.fn(),
+	listServices: vi.fn(),
 	approveService: vi.fn(),
 	rejectService: vi.fn(),
-	deleteService: vi.fn(),
+	deactivateService: vi.fn(),
 	mergeService: vi.fn(),
 	updateService: vi.fn(),
 	batchServices: vi.fn(),
@@ -88,7 +88,9 @@ describe('Services Page', () => {
 	});
 
 	it('renders the page heading when a user is logged in', async () => {
-		vi.mocked(api.getServices).mockResolvedValue(makePage([]));
+		vi.mocked(api.listServices).mockResolvedValue({ data: makePage([]) } as unknown as Awaited<
+			ReturnType<typeof api.listServices>
+		>);
 		render(ServicesPage);
 		await waitFor(() => expect(screen.getByText('Services')).toBeInTheDocument());
 		expect(document.querySelector('[data-ui="page-shell"]')).toBeInTheDocument();
@@ -96,7 +98,9 @@ describe('Services Page', () => {
 	});
 
 	it('renders a service row after a successful API response', async () => {
-		vi.mocked(api.getServices).mockResolvedValue(makePage([approvedAgent]));
+		vi.mocked(api.listServices).mockResolvedValue({ data: makePage([approvedAgent]) } as unknown as Awaited<
+			ReturnType<typeof api.listServices>
+		>);
 		render(ServicesPage);
 		await waitFor(() => expect(screen.getByText('prod-agent')).toBeInTheDocument());
 		expect(screen.getByText('prod-host')).toBeInTheDocument();
@@ -106,13 +110,15 @@ describe('Services Page', () => {
 	});
 
 	it('shows the empty-state message when the service list is empty', async () => {
-		vi.mocked(api.getServices).mockResolvedValue(makePage([]));
+		vi.mocked(api.listServices).mockResolvedValue({ data: makePage([]) } as unknown as Awaited<
+			ReturnType<typeof api.listServices>
+		>);
 		render(ServicesPage);
 		await waitFor(() => expect(screen.getByText(/No services registered yet/)).toBeInTheDocument());
 	});
 
 	it('shows an error message and a Retry button when the API call fails', async () => {
-		vi.mocked(api.getServices).mockRejectedValue(new Error('Connection refused'));
+		vi.mocked(api.listServices).mockRejectedValue(new Error('Connection refused'));
 		render(ServicesPage);
 		await waitFor(() => expect(screen.getByText('Connection refused')).toBeInTheDocument());
 		expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
@@ -126,21 +132,25 @@ describe('Services Page', () => {
 	});
 
 	it('displays the Pending status badge for a pending service', async () => {
-		vi.mocked(api.getServices).mockResolvedValue(makePage([{ ...approvedAgent, status: 'pending' }]));
+		vi.mocked(api.listServices).mockResolvedValue({
+			data: makePage([{ ...approvedAgent, status: 'pending' }])
+		} as unknown as Awaited<ReturnType<typeof api.listServices>>);
 		render(ServicesPage);
 		await waitFor(() => expect(screen.getByText('Pending')).toBeInTheDocument());
 		expect(document.querySelector('[data-ui="status-badge"]')).toBeInTheDocument();
 	});
 
 	it('displays the Approved status badge for an approved service', async () => {
-		vi.mocked(api.getServices).mockResolvedValue(makePage([approvedAgent]));
+		vi.mocked(api.listServices).mockResolvedValue({ data: makePage([approvedAgent]) } as unknown as Awaited<
+			ReturnType<typeof api.listServices>
+		>);
 		render(ServicesPage);
 		await waitFor(() => expect(screen.getByText('Approved')).toBeInTheDocument());
 	});
 
 	it('shows embedded badges and hides delete for embedded services', async () => {
-		vi.mocked(api.getServices).mockResolvedValue(
-			makePage([
+		vi.mocked(api.listServices).mockResolvedValue({
+			data: makePage([
 				{
 					...approvedAgent,
 					id: 'svc-embedded',
@@ -149,7 +159,7 @@ describe('Services Page', () => {
 					yielded_to: ['00000000-0000-0000-0000-000000000123']
 				}
 			])
-		);
+		} as unknown as Awaited<ReturnType<typeof api.listServices>>);
 		render(ServicesPage);
 
 		await waitFor(() => expect(screen.getByText('embedded-agent')).toBeInTheDocument());
@@ -164,7 +174,9 @@ describe('Services Page', () => {
 
 	describe('capability filter Select', () => {
 		beforeEach(() => {
-			vi.mocked(api.getServices).mockResolvedValue(makePage([]));
+			vi.mocked(api.listServices).mockResolvedValue({ data: makePage([]) } as unknown as Awaited<
+				ReturnType<typeof api.listServices>
+			>);
 		});
 
 		it('Select is present inside [data-ui="filter-bar"]', async () => {
@@ -182,14 +194,18 @@ describe('Services Page', () => {
 
 		it('initial load calls getServices with no capability filter', async () => {
 			render(ServicesPage);
-			await waitFor(() => expect(vi.mocked(api.getServices)).toHaveBeenCalled());
-			expect(vi.mocked(api.getServices)).toHaveBeenCalledWith(expect.objectContaining({ capability: undefined }));
+			await waitFor(() => expect(vi.mocked(api.listServices)).toHaveBeenCalled());
+			expect(vi.mocked(api.listServices)).toHaveBeenCalledWith(
+				expect.objectContaining({ query: expect.objectContaining({ capability: undefined }) })
+			);
 		});
 	});
 
 	describe('row ellipsis trigger', () => {
 		it('renders variant="ghost" size="sm" — bg-transparent and h-[19px]', async () => {
-			vi.mocked(api.getServices).mockResolvedValue(makePage([approvedAgent]));
+			vi.mocked(api.listServices).mockResolvedValue({ data: makePage([approvedAgent]) } as unknown as Awaited<
+				ReturnType<typeof api.listServices>
+			>);
 			render(ServicesPage);
 			await waitFor(() => expect(screen.getByRole('button', { name: /actions for prod-agent/i })).toBeInTheDocument());
 			const trigger = screen.getByRole('button', { name: /actions for prod-agent/i });
@@ -198,7 +214,9 @@ describe('Services Page', () => {
 		});
 
 		it('aria-label matches "Actions for {friendly_name}" including space in name', async () => {
-			vi.mocked(api.getServices).mockResolvedValue(makePage([{ ...approvedAgent, friendly_name: 'my prod agent' }]));
+			vi.mocked(api.listServices).mockResolvedValue({
+				data: makePage([{ ...approvedAgent, friendly_name: 'my prod agent' }])
+			} as unknown as Awaited<ReturnType<typeof api.listServices>>);
 			render(ServicesPage);
 			await waitFor(() =>
 				expect(screen.getByRole('button', { name: 'Actions for my prod agent' })).toBeInTheDocument()
@@ -206,7 +224,9 @@ describe('Services Page', () => {
 		});
 
 		it('clicking the trigger opens the context menu', async () => {
-			vi.mocked(api.getServices).mockResolvedValue(makePage([approvedAgent]));
+			vi.mocked(api.listServices).mockResolvedValue({ data: makePage([approvedAgent]) } as unknown as Awaited<
+				ReturnType<typeof api.listServices>
+			>);
 			render(ServicesPage);
 			await waitFor(() => expect(screen.getByRole('button', { name: /actions for prod-agent/i })).toBeInTheDocument());
 			fireEvent.click(screen.getByRole('button', { name: /actions for prod-agent/i }));
@@ -216,7 +236,7 @@ describe('Services Page', () => {
 
 	describe('Retry button', () => {
 		it('renders variant="primary" (md size) in error state', async () => {
-			vi.mocked(api.getServices).mockRejectedValue(new Error('fetch failed'));
+			vi.mocked(api.listServices).mockRejectedValue(new Error('fetch failed'));
 			render(ServicesPage);
 			await waitFor(() => expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument());
 			const retryBtn = screen.getByRole('button', { name: /retry/i });
@@ -225,14 +245,14 @@ describe('Services Page', () => {
 		});
 
 		it('sets aria-busy="true" during fetch and clears after rejection', async () => {
-			vi.mocked(api.getServices).mockRejectedValue(new Error('fetch failed'));
+			vi.mocked(api.listServices).mockRejectedValue(new Error('fetch failed'));
 			render(ServicesPage);
 			await waitFor(() => expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument());
 			let resolveReject!: () => void;
-			vi.mocked(api.getServices).mockReturnValue(
+			vi.mocked(api.listServices).mockReturnValue(
 				new Promise<never>((_, reject) => {
 					resolveReject = () => reject(new Error('still failing'));
-				})
+				}) as unknown as ReturnType<typeof api.listServices>
 			);
 			fireEvent.click(screen.getByRole('button', { name: /retry/i }));
 			await waitFor(() => expect(screen.getByRole('button', { name: /retry/i })).toHaveAttribute('aria-busy', 'true'));
@@ -241,10 +261,12 @@ describe('Services Page', () => {
 		});
 
 		it('clears aria-busy after successful retry and hides the Retry button', async () => {
-			vi.mocked(api.getServices).mockRejectedValue(new Error('fetch failed'));
+			vi.mocked(api.listServices).mockRejectedValue(new Error('fetch failed'));
 			render(ServicesPage);
 			await waitFor(() => expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument());
-			vi.mocked(api.getServices).mockResolvedValue(makePage([approvedAgent]));
+			vi.mocked(api.listServices).mockResolvedValue({ data: makePage([approvedAgent]) } as unknown as Awaited<
+				ReturnType<typeof api.listServices>
+			>);
 			fireEvent.click(screen.getByRole('button', { name: /retry/i }));
 			await waitFor(() => expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument());
 			expect(screen.getByText('prod-agent')).toBeInTheDocument();
@@ -253,7 +275,9 @@ describe('Services Page', () => {
 
 	describe('Merge modal footer', () => {
 		beforeEach(() => {
-			vi.mocked(api.getServices).mockResolvedValue(makePage([pendingAgent]));
+			vi.mocked(api.listServices).mockResolvedValue({ data: makePage([pendingAgent]) } as unknown as Awaited<
+				ReturnType<typeof api.listServices>
+			>);
 		});
 
 		async function openMergeModal() {
@@ -287,10 +311,12 @@ describe('Services Page', () => {
 		});
 
 		it('loading=true sets aria-busy and disables the Merge submit', async () => {
-			vi.mocked(api.mergeService).mockReturnValue(new Promise(() => {}));
-			vi.mocked(api.getServices).mockResolvedValue(
-				makePage([pendingAgent, { ...approvedAgent, id: 'svc-target', capabilities: ['software_discovery'] }])
+			vi.mocked(api.mergeService).mockReturnValue(
+				new Promise(() => {}) as unknown as ReturnType<typeof api.mergeService>
 			);
+			vi.mocked(api.listServices).mockResolvedValue({
+				data: makePage([pendingAgent, { ...approvedAgent, id: 'svc-target', capabilities: ['software_discovery'] }])
+			} as unknown as Awaited<ReturnType<typeof api.listServices>>);
 			await openMergeModal();
 			const select = document.querySelector('#merge-target') as HTMLSelectElement;
 			fireEvent.change(select, { target: { value: 'svc-target' } });
@@ -305,7 +331,9 @@ describe('Services Page', () => {
 
 	describe('Ping modal footer (services)', () => {
 		beforeEach(() => {
-			vi.mocked(api.getServices).mockResolvedValue(makePage([approvedAgent]));
+			vi.mocked(api.listServices).mockResolvedValue({ data: makePage([approvedAgent]) } as unknown as Awaited<
+				ReturnType<typeof api.listServices>
+			>);
 		});
 
 		async function openPingModal() {
@@ -331,7 +359,9 @@ describe('Services Page', () => {
 		});
 
 		it('Save shows aria-busy during submit and "Saving..." text never appears', async () => {
-			vi.mocked(api.updateService).mockReturnValue(new Promise(() => {}));
+			vi.mocked(api.updateService).mockReturnValue(
+				new Promise(() => {}) as unknown as ReturnType<typeof api.updateService>
+			);
 			await openPingModal();
 			fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
 			await waitFor(() => expect(screen.getByRole('button', { name: /^save$/i })).toHaveAttribute('aria-busy', 'true'));
@@ -340,7 +370,9 @@ describe('Services Page', () => {
 	});
 
 	it('ContextMenuItem entries are not wrapped in <Button> (scope guard for #3k)', async () => {
-		vi.mocked(api.getServices).mockResolvedValue(makePage([pendingAgent]));
+		vi.mocked(api.listServices).mockResolvedValue({ data: makePage([pendingAgent]) } as unknown as Awaited<
+			ReturnType<typeof api.listServices>
+		>);
 		render(ServicesPage);
 		await waitFor(() => expect(screen.getByRole('button', { name: /actions for pending-agent/i })).toBeInTheDocument());
 		fireEvent.click(screen.getByRole('button', { name: /actions for pending-agent/i }));

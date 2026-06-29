@@ -563,7 +563,7 @@
 		configBatchConfirmAction = null;
 		configBatchSubmitting = true;
 		try {
-			const response = await batchPluginConfigs('delete', [...configSelectedIds]);
+			const response = (await batchPluginConfigs({ body: { action: 'delete', ids: [...configSelectedIds] } })).data!;
 			if (response.failed.length > 0) {
 				configBatchResult = response;
 			} else {

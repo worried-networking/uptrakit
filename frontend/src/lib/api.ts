@@ -21,7 +21,6 @@ export { listSurfaces, listSurfaceProviders, getSurfaceRead, invokeSurfaceIntera
 
 import { onTokenChange } from './token-store.svelte';
 import type {
-	BatchActionResponse,
 	AgentCertificateSettings,
 	ApiTokenListResponse,
 	AssignHostsRequest,
@@ -46,7 +45,6 @@ import type {
 	RenewServerCertResponse,
 	RotateCaResponse,
 	ScheduledTaskResponse,
-	ServiceResponse,
 	SoftwareItemDetailResponse,
 	SoftwareItemResponse,
 	SystemAlertsResponse,
@@ -63,7 +61,6 @@ import type {
 	UpdateOidcProviderRequest,
 	UpdatePluginConfigRequest,
 	UpdateScheduledTaskRequest,
-	UpdateServiceRequest,
 	UpdateSoftwareItemRequest,
 	TenantDiscoveryAllowlistEntry,
 	HostDiscoveryAllowlistEntry,
@@ -74,8 +71,6 @@ import type {
 	UpdateGitHubProviderSettingsRequest,
 	ZeroconfSettingsResponse,
 	UpdateZeroconfSettingsRequest,
-	SystemServiceResponse,
-	UpdateSystemServiceRequest,
 	CreateSystemEnrollmentTokenRequest,
 	SystemEnrollmentTokenCreatedResponse,
 	SystemEnrollmentTokenResponse,
@@ -275,44 +270,6 @@ async function requestVoid(path: string, options: RequestInit = {}): Promise<voi
 	}
 }
 
-export function getServices(options?: {
-	capability?: string;
-	status?: string;
-	page?: number;
-	perPage?: number;
-}): Promise<PaginatedResponse<ServiceResponse>> {
-	const params = new URLSearchParams();
-	if (options?.capability) params.set('capability', options.capability);
-	if (options?.status) params.set('status', options.status);
-	if (options?.page != null) params.set('page', String(options.page));
-	if (options?.perPage != null) params.set('per_page', String(options.perPage));
-	const query = params.toString();
-	return request(`/services${query ? `?${query}` : ''}`);
-}
-
-export function approveService(id: string): Promise<ServiceResponse> {
-	return request(`/services/${encodeURIComponent(id)}/approve`, { method: 'POST' });
-}
-
-export function rejectService(id: string): Promise<ServiceResponse> {
-	return request(`/services/${encodeURIComponent(id)}/reject`, { method: 'POST' });
-}
-
-export function deleteService(id: string): Promise<MessageResponse> {
-	return request(`/services/${encodeURIComponent(id)}`, { method: 'DELETE' });
-}
-
-export function updateService(id: string, data: UpdateServiceRequest): Promise<ServiceResponse> {
-	return request(`/services/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(data) });
-}
-
-export function mergeService(targetId: string, sourceId: string): Promise<ServiceResponse> {
-	return request(`/services/${encodeURIComponent(targetId)}/merge`, {
-		method: 'POST',
-		body: JSON.stringify({ source_id: sourceId })
-	});
-}
-
 // --- Host APIs ---
 
 export function getHosts(page?: number, perPage?: number): Promise<PaginatedResponse<HostResponse>> {
@@ -368,10 +325,6 @@ export function deleteHostTag(id: string): Promise<void> {
 
 export function setHostTags(hostId: string, data: SetHostTagsRequest): Promise<HostTagSummary[]> {
 	return request(`/hosts/${encodeURIComponent(hostId)}/tags`, { method: 'PUT', body: JSON.stringify(data) });
-}
-
-export function batchHostTags(action: string, ids: string[]): Promise<BatchActionResponse> {
-	return request('/host-tags/batch', { method: 'POST', body: JSON.stringify({ action, ids }) });
 }
 
 // --- Settings APIs ---
@@ -496,42 +449,6 @@ export function getZeroconfSettings(): Promise<ZeroconfSettingsResponse> {
 
 export function updateZeroconfSettings(data: UpdateZeroconfSettingsRequest): Promise<ZeroconfSettingsResponse> {
 	return request('/global-settings/zeroconf', { method: 'PUT', body: JSON.stringify(data) });
-}
-
-// --- System Services APIs ---
-
-export function getSystemServices(options?: {
-	capability?: string;
-	status?: string;
-	page?: number;
-	perPage?: number;
-}): Promise<PaginatedResponse<SystemServiceResponse>> {
-	const params = new URLSearchParams();
-	if (options?.capability) params.set('capability', options.capability);
-	if (options?.status) params.set('status', options.status);
-	if (options?.page != null) params.set('page', String(options.page));
-	if (options?.perPage != null) params.set('per_page', String(options.perPage));
-	const query = params.toString();
-	return request(`/system-services${query ? `?${query}` : ''}`);
-}
-
-export function approveSystemService(id: string): Promise<SystemServiceResponse> {
-	return request(`/system-services/${encodeURIComponent(id)}/approve`, { method: 'POST' });
-}
-
-export function rejectSystemService(id: string): Promise<SystemServiceResponse> {
-	return request(`/system-services/${encodeURIComponent(id)}/reject`, { method: 'POST' });
-}
-
-export function deleteSystemService(id: string): Promise<void> {
-	return requestVoid(`/system-services/${encodeURIComponent(id)}`, { method: 'DELETE' });
-}
-
-export function updateSystemService(id: string, data: UpdateSystemServiceRequest): Promise<SystemServiceResponse> {
-	return request(`/system-services/${encodeURIComponent(id)}`, {
-		method: 'PUT',
-		body: JSON.stringify(data)
-	});
 }
 
 // --- System Enrollment Tokens APIs ---
@@ -943,32 +860,6 @@ export async function listSystemAuditLogs(params?: AuditLogListParams): Promise<
 	if (params?.per_page) p.set('per_page', String(params.per_page));
 	const qs = p.toString();
 	return request<PaginatedResponse<AuditLogEntry>>(`/system-audit-logs${qs ? '?' + qs : ''}`);
-}
-
-// ── Batch Actions ─────────────────────────────────────────────────────
-
-export function batchServices(action: string, ids: string[]): Promise<BatchActionResponse> {
-	return request('/services/batch', { method: 'POST', body: JSON.stringify({ action, ids }) });
-}
-
-export function batchSystemServices(action: string, ids: string[]): Promise<BatchActionResponse> {
-	return request('/system-services/batch', { method: 'POST', body: JSON.stringify({ action, ids }) });
-}
-
-export function batchSoftwareItems(action: string, ids: string[]): Promise<BatchActionResponse> {
-	return request('/software-items/batch', { method: 'POST', body: JSON.stringify({ action, ids }) });
-}
-
-export function batchHosts(action: string, ids: string[]): Promise<BatchActionResponse> {
-	return request('/hosts/batch', { method: 'POST', body: JSON.stringify({ action, ids }) });
-}
-
-export function batchSoftwareIgnores(action: string, ids: string[]): Promise<BatchActionResponse> {
-	return request('/autodiscovery/ignores/batch', { method: 'POST', body: JSON.stringify({ action, ids }) });
-}
-
-export function batchPluginConfigs(action: string, ids: string[]): Promise<BatchActionResponse> {
-	return request('/plugin-configs/batch', { method: 'POST', body: JSON.stringify({ action, ids }) });
 }
 
 export { sealedBoxEncrypt } from './api/crypto';

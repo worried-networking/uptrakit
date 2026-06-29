@@ -266,7 +266,11 @@
 		batchConfirmAction = null;
 		submitting = true;
 		try {
-			const response = await executeBatchChunked(action, [...selectedIds], batchHostTags);
+			const response = await executeBatchChunked(
+				action,
+				[...selectedIds],
+				async (a, i) => (await batchHostTags({ body: { action: a, ids: i } })).data!
+			);
 			if (response.failed.length > 0) {
 				batchResult = response;
 			} else {
