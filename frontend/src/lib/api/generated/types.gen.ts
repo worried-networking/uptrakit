@@ -1114,43 +1114,27 @@ export type NotificationChannelResponse = {
     updated_at: string;
 };
 
-/**
- * The delivery status of a notification.
- *
- * # Wire forward-compatibility
- *
- * `Other(String)` is a catch-all for status strings received from a newer
- * server. Serde deserialization is infallible: an unknown string becomes
- * `Other(...)` rather than a parse error.
- */
-export type NotificationDeliveryStatus = 'Pending' | 'Delivered' | 'Failed' | {
-    /**
-     * An unknown value received from a newer peer.
-     *
-     * The inner string is the raw value as it appeared on the wire.
-     */
-    Other: string;
-};
+export const NotificationDeliveryStatus = {
+    PENDING: 'pending',
+    DELIVERED: 'delivered',
+    FAILED: 'failed'
+} as const;
 
-/**
- * The type of event that triggers a notification.
- *
- * # Wire forward-compatibility
- *
- * `Other(String)` is a catch-all for event type strings received from a newer
- * server that this client does not yet recognise. Serde deserialization is
- * infallible: an unknown string becomes `Other(...)` rather than a parse error,
- * allowing older clients to survive rolling upgrades without dropping the
- * enclosing response.
- */
-export type NotificationEventType = 'UpdateAvailable' | 'UpdateCompleted' | 'UpdateFailed' | 'NewSoftwareDiscovered' | 'NewServiceEnrolled' | 'CaRotated' | 'BatchUpdateCompleted' | 'BatchUpdatePartiallyCompleted' | 'StdinAttention' | {
-    /**
-     * An unknown value received from a newer peer.
-     *
-     * The inner string is the raw value as it appeared on the wire.
-     */
-    Other: string;
-};
+export type NotificationDeliveryStatus = typeof NotificationDeliveryStatus[keyof typeof NotificationDeliveryStatus];
+
+export const NotificationEventType = {
+    UPDATE_AVAILABLE: 'update_available',
+    UPDATE_COMPLETED: 'update_completed',
+    UPDATE_FAILED: 'update_failed',
+    NEW_SOFTWARE_DISCOVERED: 'new_software_discovered',
+    NEW_SERVICE_ENROLLED: 'new_service_enrolled',
+    CA_ROTATED: 'ca_rotated',
+    BATCH_UPDATE_COMPLETED: 'batch_update_completed',
+    BATCH_UPDATE_PARTIALLY_COMPLETED: 'batch_update_partially_completed',
+    STDIN_ATTENTION: 'stdin_attention'
+} as const;
+
+export type NotificationEventType = typeof NotificationEventType[keyof typeof NotificationEventType];
 
 export type NotificationLogResponse = {
     action_taken?: string | null;
@@ -1190,20 +1174,19 @@ export type OAuthAuthorizationServerMetadata = {
     token_endpoint_auth_methods_supported: Array<string>;
 };
 
-/**
- * OAuth 2.0 error codes per RFC 6749 §5.2 and RFC 8628 §3.5.
- *
- * Wire-safe via `Other(String)` so the CLI tolerates new codes added
- * by a newer server.
- */
-export type OAuthErrorCode = 'AuthorizationPending' | 'SlowDown' | 'AccessDenied' | 'ExpiredToken' | 'InvalidRequest' | 'InvalidClient' | 'InvalidGrant' | 'UnsupportedGrantType' | 'ServerError' | {
-    /**
-     * An unknown value received from a newer peer.
-     *
-     * The inner string is the raw value as it appeared on the wire.
-     */
-    Other: string;
-};
+export const OAuthErrorCode = {
+    AUTHORIZATION_PENDING: 'authorization_pending',
+    SLOW_DOWN: 'slow_down',
+    ACCESS_DENIED: 'access_denied',
+    EXPIRED_TOKEN: 'expired_token',
+    INVALID_REQUEST: 'invalid_request',
+    INVALID_CLIENT: 'invalid_client',
+    INVALID_GRANT: 'invalid_grant',
+    UNSUPPORTED_GRANT_TYPE: 'unsupported_grant_type',
+    SERVER_ERROR: 'server_error'
+} as const;
+
+export type OAuthErrorCode = typeof OAuthErrorCode[keyof typeof OAuthErrorCode];
 
 /**
  * RFC 6749 §5.2 error response, with the uptrakit `interval` extension used
@@ -1915,26 +1898,46 @@ export type PaginatedResponseUpdateHistoryResponse = {
     total_pages: number;
 };
 
-/**
- * An authorization permission.
- *
- * Used in shared surface action descriptors (`SurfaceActionDescriptor.permission`) and
- * web API auth middleware to gate access to actions and endpoints.
- *
- * All variants serialize to / deserialize from `snake_case` strings.
- * Unknown strings received on the wire are preserved as [`Permission::Other`] so that
- * old binaries do not silently lose permissions added by newer builds.
- *
- */
-export type Permission = 'ViewServices' | 'ApproveServices' | 'RejectServices' | 'RemoveServices' | 'UpdateServices' | 'ViewSystemServices' | 'ApproveSystemServices' | 'RejectSystemServices' | 'RemoveSystemServices' | 'UpdateSystemServices' | 'ViewSoftware' | 'CreateSoftware' | 'UpdateSoftware' | 'DeleteSoftware' | 'TriggerChecks' | 'TriggerUpdates' | 'ManageScheduler' | 'ViewHosts' | 'UpdateHosts' | 'DeactivateHosts' | 'ViewSettings' | 'ManageAuthSettings' | 'ManageEnrollmentTokens' | 'ManageAgentCerts' | 'ManageGlobalSettings' | 'ManageCommands' | 'ViewNotifications' | 'ManageNotifications' | 'ViewAuditLogs' | 'ViewSystemAuditLogs' | 'ManageUsers' | 'ManageIgnores' | 'TestPluginConfigs' | 'AccessMcp' | 'ViewInstanceConfigState' | 'ManageInstanceConfigState' | {
-    /**
-     * An unknown permission received from a newer build.
-     *
-     * Preserved on the wire instead of being dropped, so old binaries
-     * never silently lose permissions added in newer builds.
-     */
-    Other: string;
-};
+export const Permission = {
+    VIEW_SERVICES: 'view_services',
+    APPROVE_SERVICES: 'approve_services',
+    REJECT_SERVICES: 'reject_services',
+    REMOVE_SERVICES: 'remove_services',
+    UPDATE_SERVICES: 'update_services',
+    VIEW_SYSTEM_SERVICES: 'view_system_services',
+    APPROVE_SYSTEM_SERVICES: 'approve_system_services',
+    REJECT_SYSTEM_SERVICES: 'reject_system_services',
+    REMOVE_SYSTEM_SERVICES: 'remove_system_services',
+    UPDATE_SYSTEM_SERVICES: 'update_system_services',
+    VIEW_SOFTWARE: 'view_software',
+    CREATE_SOFTWARE: 'create_software',
+    UPDATE_SOFTWARE: 'update_software',
+    DELETE_SOFTWARE: 'delete_software',
+    TRIGGER_CHECKS: 'trigger_checks',
+    TRIGGER_UPDATES: 'trigger_updates',
+    MANAGE_SCHEDULER: 'manage_scheduler',
+    VIEW_HOSTS: 'view_hosts',
+    UPDATE_HOSTS: 'update_hosts',
+    DEACTIVATE_HOSTS: 'deactivate_hosts',
+    VIEW_SETTINGS: 'view_settings',
+    MANAGE_AUTH_SETTINGS: 'manage_auth_settings',
+    MANAGE_ENROLLMENT_TOKENS: 'manage_enrollment_tokens',
+    MANAGE_AGENT_CERTS: 'manage_agent_certs',
+    MANAGE_GLOBAL_SETTINGS: 'manage_global_settings',
+    MANAGE_COMMANDS: 'manage_commands',
+    VIEW_NOTIFICATIONS: 'view_notifications',
+    MANAGE_NOTIFICATIONS: 'manage_notifications',
+    VIEW_AUDIT_LOGS: 'view_audit_logs',
+    VIEW_SYSTEM_AUDIT_LOGS: 'view_system_audit_logs',
+    MANAGE_USERS: 'manage_users',
+    MANAGE_IGNORES: 'manage_ignores',
+    TEST_PLUGIN_CONFIGS: 'test_plugin_configs',
+    ACCESS_MCP: 'access_mcp',
+    VIEW_INSTANCE_CONFIG_STATE: 'view_instance_config_state',
+    MANAGE_INSTANCE_CONFIG_STATE: 'manage_instance_config_state'
+} as const;
+
+export type Permission = typeof Permission[keyof typeof Permission];
 
 /**
  * Permission info for the listing endpoint.
@@ -2005,34 +2008,15 @@ export type PluginConfigResponse = {
     updated_at: string;
 };
 
-/**
- * Roles that a plugin can fulfill in the version-check / update lifecycle.
- *
- * Each `(host_id, software_item_id)` pair may have up to one plugin
- * assignment per role, enabling mix-and-match plugin configurations
- * (e.g., APT for detection, GitHub for release fetching).
- *
- * # Wire forward-compatibility
- *
- * `Other(String)` is a catch-all variant for role strings received from a
- * newer peer that this binary does not yet know about.  Serde deserialization
- * is infallible: an unknown string such as `"pre_update_hook"` becomes
- * `Other("pre_update_hook")` rather than a parse error, allowing older agents
- * and web-API clients to survive rolling upgrades without dropping entire
- * messages.
- *
- * `FromStr` retains its original error behaviour for *known-role* contexts
- * (API validation, URL parameters, database columns) where a caller
- * explicitly needs to distinguish known variants from unknown ones.
- */
-export type PluginRole = 'DetectVersion' | 'FetchReleases' | 'ExecuteUpdate' | 'PreUpdateHook' | 'PostUpdateHook' | {
-    /**
-     * An unknown plugin role received from a newer peer.
-     *
-     * The inner string is the raw snake_case value as it appeared on the wire.
-     */
-    Other: string;
-};
+export const PluginRole = {
+    DETECT_VERSION: 'detect_version',
+    FETCH_RELEASES: 'fetch_releases',
+    EXECUTE_UPDATE: 'execute_update',
+    PRE_UPDATE_HOOK: 'pre_update_hook',
+    POST_UPDATE_HOOK: 'post_update_hook'
+} as const;
+
+export type PluginRole = typeof PluginRole[keyof typeof PluginRole];
 
 /**
  * Opaque plugin type identifier — validated at the catalog boundary.

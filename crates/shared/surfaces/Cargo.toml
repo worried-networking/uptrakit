@@ -8,12 +8,21 @@ version = "0.0.2"
 publish = true
 description = "Shared surface contracts for built-in and provider UI integration"
 
+[features]
+# Emit `utoipa::ToSchema` impls for the wire-safe enums in this crate (via the
+# `wire_safe_enum!` macro). Off by default; no consumer currently generates an
+# OpenAPI spec from surface types, but the feature keeps the macro-emitted
+# `cfg(feature = "openapi")` a known cfg and stays consistent with the other
+# shared crates.
+openapi = ["dep:utoipa"]
+
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
+utoipa = { workspace = true, optional = true }
 uuid = { workspace = true, features = ["serde", "v4"] }
 
 [dev-dependencies]

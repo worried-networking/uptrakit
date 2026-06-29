@@ -155,7 +155,6 @@ macro_rules! impl_report_conversion {
 /// wire_safe_enum! {
 ///     /// Doc comment for the enum.
 ///     #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-///     #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 ///     pub enum MyEnum {
 ///         VariantOne => "variant_one",
 ///         VariantTwo => "variant_two",
@@ -163,6 +162,12 @@ macro_rules! impl_report_conversion {
 ///     parse_error = ParseMyEnumError("invalid my enum");
 /// }
 /// ```
+///
+/// Do **not** add `#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]`:
+/// the derive documents Rust variant identifiers (PascalCase), which do not match
+/// the serde wire strings. The macro instead emits a manual `utoipa::ToSchema`
+/// (gated on the invoking crate's `openapi` feature) that documents the
+/// `=> "wire"` strings — see generated item 9 below.
 ///
 /// The `parse_error` line specifies the name of the strict-parse error type and the
 /// human-readable error message used in its [`thiserror::Error`] impl.
@@ -183,6 +188,10 @@ macro_rules! impl_report_conversion {
 ///    `#[derive(Debug, thiserror::Error)]` and the provided `#[error(...)]` message.
 /// 8. `impl std::str::FromStr for MyEnum` — strict; returns `Err(ParseMyEnumError)`
 ///    for unknown strings.
+/// 9. `#[cfg(feature = "openapi")] impl utoipa::PartialSchema + ToSchema for MyEnum`
+///    — emits a `{ "type": "string", "enum": [...wire strings...] }` schema (the
+///    `=> "..."` RHS values, excluding `Other`). Only compiled when the invoking
+///    crate enables an `openapi` feature; inert (and `utoipa`-free) otherwise.
 ///
 /// # Constraints
 ///
@@ -278,6 +287,36 @@ macro_rules! wire_safe_enum {
                     $($wire => ::std::result::Result::Ok(Self::$variant),)+
                     _ => ::std::result::Result::Err($err_name),
                 }
+            }
+        }
+
+        // OpenAPI schema describing the *serde wire format* of this enum.
+        //
+        // The derived `utoipa::ToSchema` would document the Rust variant
+        // identifiers (PascalCase) because it is blind to the custom infallible
+        // serde impls above (which map each variant to its `=> "wire"` string).
+        // This manual impl emits the snake_case/lowercase wire strings instead,
+        // so the generated client matches the live API byte-for-byte.
+        //
+        // The `Other` catch-all is intentionally excluded: it is a decode-only
+        // forward-compatibility mechanism, not a documented, producible value.
+        //
+        // `cfg(feature = "openapi")` is evaluated in the *invoking* crate; crates
+        // without that feature (or without a `utoipa` dependency) simply omit it.
+        #[cfg(feature = "openapi")]
+        impl ::utoipa::PartialSchema for $name {
+            fn schema() -> ::utoipa::openapi::RefOr<::utoipa::openapi::schema::Schema> {
+                ::utoipa::openapi::ObjectBuilder::new()
+                    .schema_type(::utoipa::openapi::schema::Type::String)
+                    .enum_values(::std::option::Option::Some([$($wire),+]))
+                    .into()
+            }
+        }
+
+        #[cfg(feature = "openapi")]
+        impl ::utoipa::ToSchema for $name {
+            fn name() -> ::std::borrow::Cow<'static, str> {
+                ::std::borrow::Cow::Borrowed(::std::stringify!($name))
             }
         }
     };

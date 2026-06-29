@@ -13,7 +13,6 @@ use std::str::FromStr;
 ///
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, strum::EnumIter)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum Permission {
     // ── Services ─────────────────────────────────────────────────────────
     /// View tenant services and their status.
@@ -303,5 +302,34 @@ impl serde::Serialize for Permission {
 impl<'de> serde::Deserialize<'de> for Permission {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         String::deserialize(deserializer).map(Permission::from)
+    }
+}
+
+// OpenAPI schema describing the serde wire format of `Permission`.
+//
+// A derived `utoipa::ToSchema` would document the Rust variant identifiers
+// (PascalCase, e.g. `ViewServices`), which do not match the serde wire strings
+// emitted by the hand-written `Serialize`/`as_str` above (snake_case, e.g.
+// `view_services`). This manual impl documents the wire strings instead so the
+// generated client matches the live API byte-for-byte. The `Other` catch-all is
+// excluded: it is a decode-only forward-compatibility mechanism, not a
+// documented, producible value. Values are sourced from `Permission::all()` (the
+// `strum::EnumIter`, which excludes the `#[strum(disabled)]` `Other` variant) so
+// the schema can never drift from the variant set.
+#[cfg(feature = "openapi")]
+impl utoipa::PartialSchema for Permission {
+    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+        let values: Vec<String> = Self::all().iter().map(|p| p.as_str().to_string()).collect();
+        utoipa::openapi::ObjectBuilder::new()
+            .schema_type(utoipa::openapi::schema::Type::String)
+            .enum_values(Some(values))
+            .into()
+    }
+}
+
+#[cfg(feature = "openapi")]
+impl utoipa::ToSchema for Permission {
+    fn name() -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("Permission")
     }
 }

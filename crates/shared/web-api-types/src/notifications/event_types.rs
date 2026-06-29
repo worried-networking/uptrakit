@@ -18,7 +18,6 @@ wire_safe_enum! {
     /// allowing older clients to survive rolling upgrades without dropping the
     /// enclosing response.
     #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-    #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
     pub enum NotificationEventType {
         UpdateAvailable => "update_available",
         UpdateCompleted => "update_completed",
@@ -42,7 +41,6 @@ wire_safe_enum! {
     /// server. Serde deserialization is infallible: an unknown string becomes
     /// `Other(...)` rather than a parse error.
     #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-    #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
     pub enum NotificationDeliveryStatus {
         Pending => "pending",
         Delivered => "delivered",
