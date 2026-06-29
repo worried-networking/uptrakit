@@ -20,8 +20,10 @@ import type { Client, ResolvedRequestOptions } from './generated/client/types.ge
 
 const BASE_ENV: string = import.meta.env.VITE_API_BASE ?? '/api/v1';
 
-// Path portion only (used for ETag scope detection and stripping).
-const BASE_PATH: string = (() => {
+// Path portion only (used for ETag scope detection and stripping). Exported so
+// api/raw.ts's path-based apiGet can strip a redundant base prefix before routing
+// through the configured client (which re-prepends BASE).
+export const BASE_PATH: string = (() => {
 	if (BASE_ENV.startsWith('http://') || BASE_ENV.startsWith('https://')) {
 		return new URL(BASE_ENV).pathname;
 	}
@@ -29,7 +31,9 @@ const BASE_PATH: string = (() => {
 })();
 
 // Full absolute URL for client.setConfig (must be absolute for new Request()).
-const BASE: string = (() => {
+// Exported so the raw-Response escape hatch (api/raw.ts) shares the same origin
+// resolution for unauthenticated calls (e.g. loginRaw → `${BASE}/auth/login`).
+export const BASE: string = (() => {
 	if (BASE_ENV.startsWith('http://') || BASE_ENV.startsWith('https://')) return BASE_ENV;
 	const origin =
 		typeof globalThis.location !== 'undefined' && globalThis.location.origin !== 'null' && globalThis.location.origin
@@ -38,7 +42,8 @@ const BASE: string = (() => {
 	return origin ? `${origin}${BASE_PATH}` : BASE_ENV;
 })();
 
-const DEFAULT_TIMEOUT_MS = 30_000;
+// Exported so api/raw.ts applies the identical request timeout to its raw fetches.
+export const DEFAULT_TIMEOUT_MS = 30_000;
 const REFRESH_TIMEOUT_MS = 10_000;
 
 // ── Settings ETag auto-cache ──────────────────────────────────────────────────
@@ -144,7 +149,9 @@ function captureEtag(response: Response, requestUrl: string): void {
 	if (etag) settingsEtagCache[scope] = etag;
 }
 
-async function handle2faRedirect(response: Response): Promise<void> {
+// Exported so the raw-fetch escape hatch (api/raw.ts) reuses the SAME 2FA-redirect
+// rule rather than re-implementing the 403 → /profile#security branch.
+export async function handle2faRedirect(response: Response): Promise<void> {
 	if (response.status !== 403) return;
 	try {
 		const body = (await response.clone().json()) as Record<string, unknown>;
@@ -224,7 +231,9 @@ async function refreshAccessToken(): Promise<RefreshResult> {
 // refresh; the promise is cleared once it settles so the next cycle starts fresh.
 let refreshPromise: Promise<RefreshResult> | null = null;
 
-function dedupedRefresh(): Promise<RefreshResult> {
+// Exported so api/raw.ts's authenticatedFetch shares ONE in-flight refresh with the
+// configured client — concurrent 401s across both paths collapse to a single refresh.
+export function dedupedRefresh(): Promise<RefreshResult> {
 	if (!refreshPromise) {
 		refreshPromise = refreshAccessToken();
 		refreshPromise.then(
@@ -246,7 +255,9 @@ function isTimeoutOrAbort(err: unknown): boolean {
 // Ported from api.ts:338-360. Maps a refresh failure to a user-facing Error and
 // performs the matching session side effect. The default (real 4xx auth failure)
 // clears the token and leaves the session-expired banner raised.
-function mapRefreshFailure(refreshErr: unknown): Error {
+// Exported so api/raw.ts maps refresh failures to the SAME user-facing errors and
+// session side effects (single source of truth for the refresh-failure policy).
+export function mapRefreshFailure(refreshErr: unknown): Error {
 	if (isTimeoutOrAbort(refreshErr)) {
 		setSessionExpired(false);
 		return new Error('Token refresh timed out. Please try again.');
