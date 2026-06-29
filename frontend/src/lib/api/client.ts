@@ -211,7 +211,13 @@ async function refreshAccessToken(): Promise<RefreshResult> {
 		signal: AbortSignal.timeout(REFRESH_TIMEOUT_MS)
 	});
 	if (!res.ok) throw new RefreshError(res.status);
-	return res.json() as Promise<RefreshResult>;
+	// Validate the shape at runtime: a malformed 200 (missing access_token) must not
+	// silently become setAccessToken(undefined). Treat it as a refresh failure.
+	const data: unknown = await res.json();
+	if (typeof data !== 'object' || data === null || typeof (data as RefreshResult).access_token !== 'string') {
+		throw new RefreshError(res.status);
+	}
+	return data as RefreshResult;
 }
 
 // Deduped refresh (ported from api.ts:294-307): concurrent 401s share one in-flight

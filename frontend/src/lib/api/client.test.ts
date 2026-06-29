@@ -36,11 +36,10 @@ describe('client interceptors', () => {
 				status: 422
 			})
 		);
-		await expect(apiClient.get({ url: '/whatever' })).rejects.toMatchObject({
-			constructor: ApiError,
-			status: 422,
-			errorCode: 'y'
-		});
+		const err = await apiClient.get({ url: '/whatever' }).catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(ApiError);
+		expect((err as ApiError).status).toBe(422);
+		expect((err as ApiError).errorCode).toBe('y');
 	});
 
 	it('injects cached If-Match on settings PUT', async () => {
