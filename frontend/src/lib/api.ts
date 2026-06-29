@@ -1,3 +1,18 @@
+// Configure the client + interceptors as a side-effect on first import.
+import './api/client';
+// Named imports provide local bindings so internal uses of ApiError and extractErrorMessage
+// (after their local definitions are removed below) continue to resolve correctly.
+import { ApiError, extractErrorMessage } from './api/errors';
+import { apiClient } from './api/client';
+
+// Generated SDK + types become reachable via `$lib/api` during migration.
+// Both the old hand-written functions (below) and the generated SDK names are
+// exported simultaneously so call sites can migrate domain-by-domain (Tasks 7-12).
+export * from './api/generated';
+export { ApiError, extractErrorMessage };
+export { extractApiError } from './api/errors';
+export { apiClient };
+
 import { getAccessToken, onTokenChange, setAccessToken, setSessionExpired } from './token-store.svelte';
 import type {
 	BatchActionResponse,
@@ -164,32 +179,6 @@ onTokenChange((prev, next) => {
 
 function truncateError(msg: string): string {
 	return msg.length > MAX_ERROR_LENGTH ? msg.slice(0, MAX_ERROR_LENGTH) + '\u2026' : msg;
-}
-
-export async function extractErrorMessage(res: Response): Promise<string> {
-	const text = await res.text();
-	if (!text) return res.statusText;
-	try {
-		const parsed = JSON.parse(text);
-		if (typeof parsed === 'object' && parsed !== null && typeof parsed.error === 'string') {
-			return truncateError(parsed.error);
-		}
-	} catch {
-		/* Not JSON */
-	}
-	return truncateError(text);
-}
-
-export class ApiError extends Error {
-	public readonly errorCode: string | null;
-	public readonly status: number;
-
-	constructor(message: string, status: number, errorCode: string | null) {
-		super(message);
-		this.name = 'ApiError';
-		this.status = status;
-		this.errorCode = errorCode;
-	}
 }
 
 async function extractApiError(res: Response): Promise<ApiError> {
