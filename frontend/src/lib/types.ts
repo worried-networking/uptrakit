@@ -47,6 +47,8 @@ export enum Permission {
 	ManageIgnores = 'manage_ignores',
 	// Plugin config testing
 	TestPluginConfigs = 'test_plugin_configs',
+	// MCP
+	AccessMcp = 'access_mcp',
 	// Instance config state
 	ViewInstanceConfigState = 'view_instance_config_state',
 	ManageInstanceConfigState = 'manage_instance_config_state'

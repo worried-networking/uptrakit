@@ -10785,112 +10785,26 @@
         }
       },
       "NotificationDeliveryStatus": {
-        "oneOf": [
-          {
-            "type": "string",
-            "enum": [
-              "Pending"
-            ]
-          },
-          {
-            "type": "string",
-            "enum": [
-              "Delivered"
-            ]
-          },
-          {
-            "type": "string",
-            "enum": [
-              "Failed"
-            ]
-          },
-          {
-            "type": "object",
-            "description": "An unknown value received from a newer peer.\n\nThe inner string is the raw value as it appeared on the wire.",
-            "required": [
-              "Other"
-            ],
-            "properties": {
-              "Other": {
-                "type": "string",
-                "description": "An unknown value received from a newer peer.\n\nThe inner string is the raw value as it appeared on the wire."
-              }
-            }
-          }
-        ],
-        "description": "The delivery status of a notification.\n\n# Wire forward-compatibility\n\n`Other(String)` is a catch-all for status strings received from a newer\nserver. Serde deserialization is infallible: an unknown string becomes\n`Other(...)` rather than a parse error."
+        "type": "string",
+        "enum": [
+          "pending",
+          "delivered",
+          "failed"
+        ]
       },
       "NotificationEventType": {
-        "oneOf": [
-          {
-            "type": "string",
-            "enum": [
-              "UpdateAvailable"
-            ]
-          },
-          {
-            "type": "string",
-            "enum": [
-              "UpdateCompleted"
-            ]
-          },
-          {
-            "type": "string",
-            "enum": [
-              "UpdateFailed"
-            ]
-          },
-          {
-            "type": "string",
-            "enum": [
-              "NewSoftwareDiscovered"
-            ]
-          },
-          {
-            "type": "string",
-            "enum": [
-              "NewServiceEnrolled"
-            ]
-          },
-          {
-            "type": "string",
-            "enum": [
-              "CaRotated"
-            ]
-          },
-          {
-            "type": "string",
-            "enum": [
-              "BatchUpdateCompleted"
-            ]
-          },
-          {
-            "type": "string",
-            "enum": [
-              "BatchUpdatePartiallyCompleted"
-            ]
-          },
-          {
-            "type": "string",
-            "enum": [
-              "StdinAttention"
-            ]
-          },
-          {
-            "type": "object",
-            "description": "An unknown value received from a newer peer.\n\nThe inner string is the raw value as it appeared on the wire.",
-            "required": [
-              "Other"
-            ],
-            "properties": {
-              "Other": {
-                "type": "string",
-                "description": "An unknown value received from a newer peer.\n\nThe inner string is the raw value as it appeared on the wire."
-              }
-            }
-          }
-        ],
-        "description": "The type of event that triggers a notification.\n\n# Wire forward-compatibility\n\n`Other(String)` is a catch-all for event type strings received from a newer\nserver that this client does not yet recognise. Serde deserialization is\ninfallible: an unknown string becomes `Other(...)` rather than a parse error,\nallowing older clients to survive rolling upgrades without dropping the\nenclosing response."
+        "type": "string",
+        "enum": [
+          "update_available",
+          "update_completed",
+          "update_failed",
+          "new_software_discovered",
+          "new_service_enrolled",
+          "ca_rotated",
+          "batch_update_completed",
+          "batch_update_partially_completed",
+          "stdin_attention"
+        ]
       },
       "NotificationLogResponse": {
         "type": "object",
@@ -11054,76 +10968,18 @@
         }
       },
       "OAuthErrorCode": {
-        "oneOf": [
-          {
-            "type": "string",
-            "enum": [
-              "AuthorizationPending"
-            ]
-          },
-          {
-            "type": "string",
-            "enum": [
-              "SlowDown"
-            ]
-          },
-          {
-            "type": "string",
-            "enum": [
-              "AccessDenied"
-            ]
-          },
-          {
-            "type": "string",
-            "enum": [
-              "ExpiredToken"
-            ]
-          },
-          {
-            "type": "string",
-            "enum": [
-              "InvalidRequest"
-            ]
-          },
-          {
-            "type": "string",
-            "enum": [
-              "InvalidClient"
-            ]
-          },
-          {
-            "type": "string",
-            "enum": [
-              "InvalidGrant"
-            ]
-          },
-          {
-            "type": "string",
-            "enum": [
-              "UnsupportedGrantType"
-            ]
-          },
-          {
-            "type": "string",
-            "enum": [
-              "ServerError"
-            ]
-          },
-          {
-            "type": "object",
-            "description": "An unknown value received from a newer peer.\n\nThe inner string is the raw value as it appeared on the wire.",
-            "required": [
-              "Other"
-            ],
-            "properties": {
-              "Other": {
-                "type": "string",
-                "description": "An unknown value received from a newer peer.\n\nThe inner string is the raw value as it appeared on the wire."
-              }
-            }
-          }
-        ],
-        "description": "OAuth 2.0 error codes per RFC 6749 §5.2 and RFC 8628 §3.5.\n\nWire-safe via `Other(String)` so the CLI tolerates new codes added\nby a newer server."
+        "type": "string",
+        "enum": [
+          "authorization_pending",
+          "slow_down",
+          "access_denied",
+          "expired_token",
+          "invalid_request",
+          "invalid_client",
+          "invalid_grant",
+          "unsupported_grant_type",
+          "server_error"
+        ]
       },
       "OAuthErrorResponse": {
         "type": "object",
@@ -13142,274 +12998,45 @@
         }
       },
       "Permission": {
-        "oneOf": [
-          {
-            "type": "string",
-            "description": "View tenant services and their status.",
-            "enum": [
-              "ViewServices"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "Approve pending service enrollments.",
-            "enum": [
-              "ApproveServices"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "Reject pending service enrollments.",
-            "enum": [
-              "RejectServices"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "Deactivate/remove services.",
-            "enum": [
-              "RemoveServices"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "Update service settings (ping interval, freeze, merge).",
-            "enum": [
-              "UpdateServices"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "View system services (MQTT bridge, external scheduler).",
-            "enum": [
-              "ViewSystemServices"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "Approve pending system services.",
-            "enum": [
-              "ApproveSystemServices"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "Reject pending system services.",
-            "enum": [
-              "RejectSystemServices"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "Deactivate system services.",
-            "enum": [
-              "RemoveSystemServices"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "Update system service settings.",
-            "enum": [
-              "UpdateSystemServices"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "View software items, plugin configs, history.",
-            "enum": [
-              "ViewSoftware"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "Create software items and plugin configs.",
-            "enum": [
-              "CreateSoftware"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "Edit software items and plugin configs.",
-            "enum": [
-              "UpdateSoftware"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "Delete software items and plugin configs.",
-            "enum": [
-              "DeleteSoftware"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "Trigger version checks and autodiscovery.",
-            "enum": [
-              "TriggerChecks"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "Trigger update execution (single + batch).",
-            "enum": [
-              "TriggerUpdates"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "Manage scheduled tasks.",
-            "enum": [
-              "ManageScheduler"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "View hosts.",
-            "enum": [
-              "ViewHosts"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "Update host properties and tags.",
-            "enum": [
-              "UpdateHosts"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "Deactivate hosts.",
-            "enum": [
-              "DeactivateHosts"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "View all tenant settings (unified read).",
-            "enum": [
-              "ViewSettings"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "Manage registration, authentication, OIDC providers.",
-            "enum": [
-              "ManageAuthSettings"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "Manage tenant enrollment tokens.",
-            "enum": [
-              "ManageEnrollmentTokens"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "Manage agent certificate settings.",
-            "enum": [
-              "ManageAgentCerts"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "Manage global infrastructure settings.",
-            "enum": [
-              "ManageGlobalSettings"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "Controls the ability to modify command-bearing plugin config fields\n(shell commands, Docker `post_pull_command`, and custom hook `commands`\narrays). Granting this permission is equivalent to granting effective\ncode-execution authority on all managed hosts assigned to the affected\nsoftware items. Assign with the same care as granting root access.",
-            "enum": [
-              "ManageCommands"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "View notification channels, rules, log.",
-            "enum": [
-              "ViewNotifications"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "Create/modify notification channels and rules; SMTP settings.",
-            "enum": [
-              "ManageNotifications"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "View tenant-scoped audit log entries.",
-            "enum": [
-              "ViewAuditLogs"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "View system-level audit log entries.",
-            "enum": [
-              "ViewSystemAuditLogs"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "Manage user roles and access.",
-            "enum": [
-              "ManageUsers"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "Manage autodiscovery ignore rules.",
-            "enum": [
-              "ManageIgnores"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "Test plugin configurations against hosts (dry-run validation).",
-            "enum": [
-              "TestPluginConfigs"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "Access the MCP server endpoint (`/mcp`).\n\nGate to the MCP endpoint. Tools enforce their own additional\nfine-grained permission checks (`ViewSoftware`, `TriggerUpdates`).",
-            "enum": [
-              "AccessMcp"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "View the current config-reload coordinator state.",
-            "enum": [
-              "ViewInstanceConfigState"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "Manage (clear-degraded) the config-reload coordinator state.",
-            "enum": [
-              "ManageInstanceConfigState"
-            ]
-          },
-          {
-            "type": "object",
-            "description": "An unknown permission received from a newer build.\n\nPreserved on the wire instead of being dropped, so old binaries\nnever silently lose permissions added in newer builds.",
-            "required": [
-              "Other"
-            ],
-            "properties": {
-              "Other": {
-                "type": "string",
-                "description": "An unknown permission received from a newer build.\n\nPreserved on the wire instead of being dropped, so old binaries\nnever silently lose permissions added in newer builds."
-              }
-            }
-          }
-        ],
-        "description": "An authorization permission.\n\nUsed in shared surface action descriptors (`SurfaceActionDescriptor.permission`) and\nweb API auth middleware to gate access to actions and endpoints.\n\nAll variants serialize to / deserialize from `snake_case` strings.\nUnknown strings received on the wire are preserved as [`Permission::Other`] so that\nold binaries do not silently lose permissions added by newer builds.\n"
+        "type": "string",
+        "enum": [
+          "view_services",
+          "approve_services",
+          "reject_services",
+          "remove_services",
+          "update_services",
+          "view_system_services",
+          "approve_system_services",
+          "reject_system_services",
+          "remove_system_services",
+          "update_system_services",
+          "view_software",
+          "create_software",
+          "update_software",
+          "delete_software",
+          "trigger_checks",
+          "trigger_updates",
+          "manage_scheduler",
+          "view_hosts",
+          "update_hosts",
+          "deactivate_hosts",
+          "view_settings",
+          "manage_auth_settings",
+          "manage_enrollment_tokens",
+          "manage_agent_certs",
+          "manage_global_settings",
+          "manage_commands",
+          "view_notifications",
+          "manage_notifications",
+          "view_audit_logs",
+          "view_system_audit_logs",
+          "manage_users",
+          "manage_ignores",
+          "test_plugin_configs",
+          "access_mcp",
+          "view_instance_config_state",
+          "manage_instance_config_state"
+        ]
       },
       "PermissionInfo": {
         "type": "object",
@@ -13497,57 +13124,14 @@
         }
       },
       "PluginRole": {
-        "oneOf": [
-          {
-            "type": "string",
-            "description": "Detects the installed version on the agent host.",
-            "enum": [
-              "DetectVersion"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "Fetches the latest available version (controller-side for API plugins,\nagent-side for local package-index plugins).",
-            "enum": [
-              "FetchReleases"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "Executes the actual software update on the agent host.",
-            "enum": [
-              "ExecuteUpdate"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "Runs a lifecycle plugin before the update (ordered by `ordinal`).",
-            "enum": [
-              "PreUpdateHook"
-            ]
-          },
-          {
-            "type": "string",
-            "description": "Runs a lifecycle plugin after the update (ordered by `ordinal`).",
-            "enum": [
-              "PostUpdateHook"
-            ]
-          },
-          {
-            "type": "object",
-            "description": "An unknown plugin role received from a newer peer.\n\nThe inner string is the raw snake_case value as it appeared on the wire.",
-            "required": [
-              "Other"
-            ],
-            "properties": {
-              "Other": {
-                "type": "string",
-                "description": "An unknown plugin role received from a newer peer.\n\nThe inner string is the raw snake_case value as it appeared on the wire."
-              }
-            }
-          }
-        ],
-        "description": "Roles that a plugin can fulfill in the version-check / update lifecycle.\n\nEach `(host_id, software_item_id)` pair may have up to one plugin\nassignment per role, enabling mix-and-match plugin configurations\n(e.g., APT for detection, GitHub for release fetching).\n\n# Wire forward-compatibility\n\n`Other(String)` is a catch-all variant for role strings received from a\nnewer peer that this binary does not yet know about.  Serde deserialization\nis infallible: an unknown string such as `\"pre_update_hook\"` becomes\n`Other(\"pre_update_hook\")` rather than a parse error, allowing older agents\nand web-API clients to survive rolling upgrades without dropping entire\nmessages.\n\n`FromStr` retains its original error behaviour for *known-role* contexts\n(API validation, URL parameters, database columns) where a caller\nexplicitly needs to distinguish known variants from unknown ones."
+        "type": "string",
+        "enum": [
+          "detect_version",
+          "fetch_releases",
+          "execute_update",
+          "pre_update_hook",
+          "post_update_hook"
+        ]
       },
       "PluginTypeId": {
         "type": "string",

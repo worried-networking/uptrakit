@@ -23,7 +23,6 @@ use thiserror::Error;
 /// (API validation, URL parameters, database columns) where a caller
 /// explicitly needs to distinguish known variants from unknown ones.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[non_exhaustive]
 pub enum PluginRole {
     /// Detects the installed version on the agent host.
@@ -143,6 +142,38 @@ impl<'de> Deserialize<'de> for PluginRole {
         // Deserialize as a plain string, then convert via From<String>.
         // Unknown strings become Other(s) — this conversion is infallible.
         String::deserialize(deserializer).map(PluginRole::from)
+    }
+}
+
+// OpenAPI schema describing the serde wire format of `PluginRole`.
+//
+// A derived `utoipa::ToSchema` would document the Rust variant identifiers
+// (PascalCase, e.g. `DetectVersion`), which do not match the serde wire strings
+// emitted by the hand-written `Serialize`/`as_str` above (snake_case, e.g.
+// `detect_version`). This manual impl documents the wire strings instead so the
+// generated client matches the live API byte-for-byte. The `Other` catch-all is
+// excluded: it is a decode-only forward-compatibility mechanism, not a
+// documented, producible value.
+#[cfg(feature = "openapi")]
+impl utoipa::PartialSchema for PluginRole {
+    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+        utoipa::openapi::ObjectBuilder::new()
+            .schema_type(utoipa::openapi::schema::Type::String)
+            .enum_values(Some([
+                "detect_version",
+                "fetch_releases",
+                "execute_update",
+                "pre_update_hook",
+                "post_update_hook",
+            ]))
+            .into()
+    }
+}
+
+#[cfg(feature = "openapi")]
+impl utoipa::ToSchema for PluginRole {
+    fn name() -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("PluginRole")
     }
 }
 

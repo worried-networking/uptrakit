@@ -17,7 +17,6 @@ wire_safe_enum! {
     /// Wire-safe via `Other(String)` so the CLI tolerates new codes added
     /// by a newer server.
     #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-    #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
     pub enum OAuthErrorCode {
         AuthorizationPending => "authorization_pending",
         SlowDown             => "slow_down",
