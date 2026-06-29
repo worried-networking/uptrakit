@@ -38,8 +38,8 @@
 		if (!isConfirmed) return;
 		submitting = true;
 		try {
-			const response = await resetData({ confirm: confirmText });
-			result = response.deleted;
+			const { data } = await resetData({ body: { confirm: confirmText } });
+			result = data.deleted;
 			const total =
 				result.hosts +
 				result.software_items +

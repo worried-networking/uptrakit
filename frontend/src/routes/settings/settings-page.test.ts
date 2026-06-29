@@ -7,7 +7,7 @@ vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 vi.mock('$lib/auth.svelte', () => ({ getUser: vi.fn(() => null) }));
 vi.mock('$lib/api', () => ({
 	getCombinedSettings: vi.fn().mockRejectedValue(new Error('network error')),
-	getOidcProviders: vi.fn().mockRejectedValue(new Error('network error'))
+	listProviders: vi.fn().mockRejectedValue(new Error('network error'))
 }));
 vi.mock('$lib/notifications.svelte', () => ({
 	showSuccess: vi.fn(),

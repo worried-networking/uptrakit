@@ -34,10 +34,10 @@
 		ServiceStatus,
 		UpdateHistoryStatus,
 		HostDiscoveryAllowlistEntry,
-		PluginTypeInfo,
 		HostTagResponse,
 		SoftwareItemResponse
 	} from '$lib/types';
+	import type { PluginTypeInfo } from '$lib/api';
 	import Button from '$lib/components/Button.svelte';
 	import TagBadge from '$lib/components/TagBadge.svelte';
 	import { CheckboxList } from '$lib/components/forms';
@@ -202,7 +202,8 @@
 
 	async function loadPluginTypes() {
 		try {
-			pluginTypes = await listPluginTypes();
+			const { data } = await listPluginTypes();
+			pluginTypes = data;
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to load plugin types');
 		}

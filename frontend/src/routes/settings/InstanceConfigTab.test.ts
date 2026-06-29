@@ -51,7 +51,9 @@ const degradedState: ConfigStateResponse = {
 
 describe('InstanceConfigTab', () => {
 	beforeEach(() => {
-		vi.mocked(api.getConfigState).mockResolvedValue(idleState);
+		vi.mocked(api.getConfigState).mockResolvedValue({ data: idleState } as unknown as Awaited<
+			ReturnType<typeof api.getConfigState>
+		>);
 	});
 	afterEach(() => vi.clearAllMocks());
 
@@ -61,13 +63,17 @@ describe('InstanceConfigTab', () => {
 	});
 
 	it('shows degraded banner when state is degraded', async () => {
-		vi.mocked(api.getConfigState).mockResolvedValue(degradedState);
+		vi.mocked(api.getConfigState).mockResolvedValue({ data: degradedState } as unknown as Awaited<
+			ReturnType<typeof api.getConfigState>
+		>);
 		render(InstanceConfigTab);
 		await screen.findByText('Coordinator degraded');
 	});
 
 	it('clear degraded button hidden without manage permission', async () => {
-		vi.mocked(api.getConfigState).mockResolvedValue(degradedState);
+		vi.mocked(api.getConfigState).mockResolvedValue({ data: degradedState } as unknown as Awaited<
+			ReturnType<typeof api.getConfigState>
+		>);
 		vi.mocked(auth.getUser).mockReturnValue({
 			id: '1',
 			email: 'a@b.com',
@@ -82,7 +88,9 @@ describe('InstanceConfigTab', () => {
 	});
 
 	it('clear degraded button shown with manage permission', async () => {
-		vi.mocked(api.getConfigState).mockResolvedValue(degradedState);
+		vi.mocked(api.getConfigState).mockResolvedValue({ data: degradedState } as unknown as Awaited<
+			ReturnType<typeof api.getConfigState>
+		>);
 		vi.mocked(auth.getUser).mockReturnValue({
 			id: '1',
 			email: 'a@b.com',

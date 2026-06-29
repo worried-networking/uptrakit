@@ -26,23 +26,24 @@ vi.mock('$lib/auth.svelte', () => ({
 
 vi.mock('$lib/api', () => ({
 	getCombinedSettings: vi.fn(async () => ({
-		agent_certificates: {
-			lifetime_days: 365,
-			renewal_window_hours_override: null,
-			effective_renewal_window_hours: 73
-		},
-		enrollment_tokens: {},
-		multi_tenancy_enabled: false
+		data: {
+			agent_certificates: {
+				lifetime_hours: 8760,
+				renewal_window_hours_override: null,
+				effective_renewal_window_hours: 73
+			},
+			enrollment_tokens: {},
+			multi_tenancy_enabled: false
+		}
 	})),
-	getOidcProviders: vi.fn(async () => [])
-}));
-
-vi.mock('$lib/api/settings', () => ({
+	listProviders: vi.fn(async () => ({ data: [] })),
 	getAccessSettings: vi.fn(async () => ({
-		mode: 'open',
-		require_token_for_oidc: false,
-		password_auth_enabled: true,
-		two_factor_required: false
+		data: {
+			mode: 'open',
+			require_token_for_oidc: false,
+			password_auth_enabled: true,
+			two_factor_required: false
+		}
 	})),
 	updateAccessSettings: vi.fn()
 }));

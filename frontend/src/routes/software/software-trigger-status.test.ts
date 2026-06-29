@@ -171,7 +171,9 @@ describe('Software Page Trigger Status Handling', () => {
 		page.url.search = '';
 		mockEventSubscriptions.clear();
 		vi.mocked(auth.getUser).mockReturnValue(adminUser);
-		vi.mocked(api.listPluginTypes).mockResolvedValue([] as PluginTypeInfo[]);
+		vi.mocked(api.listPluginTypes).mockResolvedValue({ data: [] as PluginTypeInfo[] } as unknown as Awaited<
+			ReturnType<typeof api.listPluginTypes>
+		>);
 		vi.mocked(api.executeBatchChunked).mockResolvedValue(emptyBatchResponse);
 	});
 

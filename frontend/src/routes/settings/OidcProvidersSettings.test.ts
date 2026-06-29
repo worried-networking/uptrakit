@@ -2,12 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 
 vi.mock('$lib/api', () => ({
-	getOidcProviders: vi.fn(),
-	createOidcProvider: vi.fn(),
-	updateOidcProvider: vi.fn(),
-	deleteOidcProvider: vi.fn(),
-	activateOidcProvider: vi.fn(),
-	deactivateOidcProvider: vi.fn()
+	listProviders: vi.fn(),
+	createProvider: vi.fn(),
+	updateProvider: vi.fn(),
+	deleteProvider: vi.fn(),
+	activateProvider: vi.fn(),
+	deactivateProvider: vi.fn()
 }));
 vi.mock('$lib/auth.svelte', () => ({ getUser: vi.fn(() => null) }));
 vi.mock('$lib/notifications.svelte', () => ({
@@ -102,15 +102,17 @@ describe('OidcProvidersSettings — button variants', () => {
 
 	it('only the toggled row has aria-busy=true — other rows remain unaffected', async () => {
 		let resolveToggle!: () => void;
-		vi.mocked(api.deactivateOidcProvider).mockReturnValue(
+		vi.mocked(api.deactivateProvider).mockReturnValue(
 			new Promise((r) => {
-				resolveToggle = () => r(makeProvider('p1', 'Provider One', false));
-			})
+				resolveToggle = () =>
+					r({ data: makeProvider('p1', 'Provider One', false) } as unknown as Awaited<
+						ReturnType<typeof api.deactivateProvider>
+					>);
+			}) as unknown as ReturnType<typeof api.deactivateProvider>
 		);
-		vi.mocked(api.getOidcProviders).mockResolvedValue([
-			makeProvider('p1', 'Provider One', true),
-			makeProvider('p2', 'Provider Two', true)
-		]);
+		vi.mocked(api.listProviders).mockResolvedValue({
+			data: [makeProvider('p1', 'Provider One', true), makeProvider('p2', 'Provider Two', true)]
+		} as unknown as Awaited<ReturnType<typeof api.listProviders>>);
 
 		render(OidcProvidersSettings, {
 			...defaultProps,
@@ -130,10 +132,13 @@ describe('OidcProvidersSettings — button variants', () => {
 
 	it('modal submit shows Save text and carries aria-busy during save', async () => {
 		let resolve!: () => void;
-		vi.mocked(api.createOidcProvider).mockReturnValue(
+		vi.mocked(api.createProvider).mockReturnValue(
 			new Promise((r) => {
-				resolve = () => r(makeProvider('p-new', 'New Provider', false));
-			})
+				resolve = () =>
+					r({ data: makeProvider('p-new', 'New Provider', false) } as unknown as Awaited<
+						ReturnType<typeof api.createProvider>
+					>);
+			}) as unknown as ReturnType<typeof api.createProvider>
 		);
 
 		render(OidcProvidersSettings, defaultProps);

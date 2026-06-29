@@ -1,19 +1,20 @@
 <script lang="ts">
 	import { getUser } from '$lib/auth.svelte';
 	import {
-		getGitHubProviderSettings,
+		getGithubProviderSettings,
 		getSystemAlerts,
 		renewServerCertificate,
 		getNetworkSettings,
 		updateNetworkSettings,
 		getNatsSettings,
 		updateNatsSettings,
-		updateGitHubProviderSettings,
+		updateGithubProviderSettings,
 		getZeroconfSettings,
 		updateZeroconfSettings,
-		rotateCA
+		rotateCa
 	} from '$lib/api';
-	import { Permission, hasAnyPermission, hasPermissionValue, type SystemAlert } from '$lib/types';
+	import { Permission, hasAnyPermission, hasPermissionValue } from '$lib/types';
+	import type { SystemAlert } from '$lib/api';
 	import { showSuccess, showError, clearError } from '$lib/notifications.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import SystemServicesSettings from './SystemServicesSettings.svelte';
@@ -109,31 +110,31 @@
 			getSystemAlerts(),
 			getNatsSettings(),
 			getZeroconfSettings(),
-			getGitHubProviderSettings()
+			getGithubProviderSettings()
 		]);
 
 		if (results[0].status === 'fulfilled') {
-			const net = results[0].value;
+			const net = results[0].value.data;
 			trustedProxiesText = net.trusted_proxies.join('\n');
 			realIpHeader = net.real_ip_header;
 			sansText = net.sans.join('\n');
 			httpsAddr = net.https_addr;
 		}
 		if (results[1].status === 'fulfilled') {
-			tlsAlerts = results[1].value.alerts.filter(
+			tlsAlerts = results[1].value.data.alerts.filter(
 				(a) => a.id === 'server_cert_old_ca' || a.id === 'server_cert_expiring'
 			);
 		}
 		if (results[2].status === 'fulfilled') {
 			natsAvailable = true;
-			natsCurrentUrl = results[2].value.url ?? null;
+			natsCurrentUrl = results[2].value.data.url ?? null;
 		} else {
 			// 404 means the NATS feature is not compiled in — hide the section gracefully
 			natsAvailable = false;
 		}
 		if (results[3].status === 'fulfilled') {
 			zeroconfAvailable = true;
-			const zc = results[3].value;
+			const zc = results[3].value.data;
 			zeroconfEnabled = zc.enabled;
 			zeroconfCaFingerprint = zc.ca_fingerprint ?? null;
 			zeroconfUrlOverride = zc.url ?? '';
@@ -144,7 +145,7 @@
 		}
 		if (results[4].status === 'fulfilled') {
 			githubProviderAvailable = true;
-			const github = results[4].value;
+			const github = results[4].value.data;
 			githubProviderApiBaseUrl = github.api_base_url ?? '';
 			githubProviderAuthToken = github.auth_token ?? '';
 			githubProviderHasAuthToken = github.has_auth_token;
@@ -160,7 +161,7 @@
 		clearError();
 		natsSaving = true;
 		try {
-			const res = await updateNatsSettings({ url: natsUrlInput.trim() || null });
+			const { data: res } = await updateNatsSettings({ body: { url: natsUrlInput.trim() || null } });
 			natsCurrentUrl = res.url ?? null;
 			natsUrlInput = '';
 			showSuccess('NATS URL updated. Changes take effect after the controller is restarted.');
@@ -175,7 +176,7 @@
 		clearError();
 		natsClearing = true;
 		try {
-			const res = await updateNatsSettings({ url: null });
+			const { data: res } = await updateNatsSettings({ body: { url: null } });
 			natsCurrentUrl = res.url ?? null;
 			natsUrlInput = '';
 			showSuccess('NATS URL cleared. Changes take effect after the controller is restarted.');
@@ -191,9 +192,11 @@
 		clearError();
 		githubProviderSaving = true;
 		try {
-			const res = await updateGitHubProviderSettings({
-				auth_token: githubProviderAuthToken.trim(),
-				api_base_url: githubProviderApiBaseUrl.trim()
+			const { data: res } = await updateGithubProviderSettings({
+				body: {
+					auth_token: githubProviderAuthToken.trim(),
+					api_base_url: githubProviderApiBaseUrl.trim()
+				}
 			});
 			githubProviderApiBaseUrl = res.api_base_url ?? '';
 			githubProviderAuthToken = res.auth_token ?? '';
@@ -211,10 +214,12 @@
 		clearError();
 		zeroconfSaving = true;
 		try {
-			const res = await updateZeroconfSettings({
-				enabled: zeroconfEnabled,
-				url: zeroconfUrlOverride.trim() || undefined,
-				pki_addr: zeroconfPkiAddrOverride.trim() || undefined
+			const { data: res } = await updateZeroconfSettings({
+				body: {
+					enabled: zeroconfEnabled,
+					url: zeroconfUrlOverride.trim() || undefined,
+					pki_addr: zeroconfPkiAddrOverride.trim() || undefined
+				}
 			});
 			zeroconfEnabled = res.enabled;
 			zeroconfCaFingerprint = res.ca_fingerprint ?? null;
@@ -242,12 +247,14 @@
 				.split('\n')
 				.map((s) => s.trim())
 				.filter((s) => s.length > 0);
-			const res = await updateNetworkSettings({
-				trusted_proxies: proxies,
-				real_ip_header: realIpHeader,
-				sans: sans,
-				https_addr: httpsAddr,
-				regenerate_cert: regenerateCert || undefined
+			const { data: res } = await updateNetworkSettings({
+				body: {
+					trusted_proxies: proxies,
+					real_ip_header: realIpHeader,
+					sans: sans,
+					https_addr: httpsAddr,
+					regenerate_cert: regenerateCert || undefined
+				}
 			});
 			trustedProxiesText = res.trusted_proxies.join('\n');
 			realIpHeader = res.real_ip_header;
@@ -269,7 +276,7 @@
 		showRotateCaConfirm = false;
 		rotatingCa = true;
 		try {
-			await rotateCA();
+			await rotateCa();
 			showSuccess('CA certificate rotated. All agents must re-enroll.');
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to rotate CA certificate');

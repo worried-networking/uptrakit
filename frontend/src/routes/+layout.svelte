@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import type { Snippet } from 'svelte';
 	import type { LucideIcon } from '@lucide/svelte';
-	import type { SystemAlert } from '$lib/types';
+	import type { SystemAlert } from '$lib/api';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import {
@@ -107,8 +107,8 @@
 
 	async function fetchAlerts() {
 		try {
-			const res = await getSystemAlerts();
-			systemAlerts = res.alerts;
+			const { data } = await getSystemAlerts();
+			systemAlerts = data.alerts;
 		} catch {
 			// Silently ignore — alerts are non-critical
 		}

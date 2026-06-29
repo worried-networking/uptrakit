@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { updateAgentCertificateSettings } from '$lib/api';
-	import type { AgentCertificateSettings } from '$lib/types';
+	import type { AgentCertificateSettingsResponse } from '$lib/api';
 	import { SectionCard } from '$lib/components/ui';
 	import { FormFieldRow, Checkbox, Input } from '$lib/components/forms';
 	import Button from '$lib/components/Button.svelte';
@@ -11,7 +11,7 @@
 		onSuccess,
 		onError
 	}: {
-		settings: AgentCertificateSettings | undefined;
+		settings: AgentCertificateSettingsResponse | undefined;
 		onSuccess: (msg: string) => void;
 		onError: (msg: string) => void;
 	} = $props();
@@ -33,8 +33,8 @@
 	$effect(() => {
 		if (settings) {
 			form.load({
-				lifetimeDays: settings.lifetime_days,
-				useAutoRenewal: settings.renewal_window_hours_override === null,
+				lifetimeDays: Math.round(settings.lifetime_hours / 24),
+				useAutoRenewal: (settings.renewal_window_hours_override ?? null) === null,
 				renewalWindowHours: settings.renewal_window_hours_override ?? settings.effective_renewal_window_hours
 			});
 		}
@@ -45,13 +45,15 @@
 		try {
 			// Send 0 to reset to automatic, or the explicit value for a custom override.
 			const renewalHours = form.draft.useAutoRenewal ? 0 : form.draft.renewalWindowHours;
-			const res = await updateAgentCertificateSettings({
-				lifetime_days: form.draft.lifetimeDays,
-				renewal_window_hours: renewalHours
+			const { data: res } = await updateAgentCertificateSettings({
+				body: {
+					lifetime_hours: form.draft.lifetimeDays * 24,
+					renewal_window_hours: renewalHours
+				}
 			});
 			form.commit({
-				lifetimeDays: res.lifetime_days,
-				useAutoRenewal: res.renewal_window_hours_override === null,
+				lifetimeDays: Math.round(res.lifetime_hours / 24),
+				useAutoRenewal: (res.renewal_window_hours_override ?? null) === null,
 				renewalWindowHours: res.renewal_window_hours_override ?? res.effective_renewal_window_hours
 			});
 			onSuccess('Agent certificate settings saved.');

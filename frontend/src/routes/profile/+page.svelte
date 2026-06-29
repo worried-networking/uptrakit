@@ -14,7 +14,7 @@
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { formatDate } from '$lib/utils';
-	import type { ApiTokenResponse } from '$lib/types';
+	import type { ApiTokenResponse } from '$lib/api';
 	import {
 		Callout,
 		DataTable,
@@ -176,7 +176,7 @@
 	async function loadTokens() {
 		loading = true;
 		try {
-			const res = await listApiTokens();
+			const { data: res } = await listApiTokens();
 			tokens = res.tokens;
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to load API tokens');
@@ -201,7 +201,7 @@
 		if (!newTokenName.trim() || creating) return;
 		creating = true;
 		try {
-			const res = await createApiToken({ name: newTokenName.trim() });
+			const { data: res } = await createApiToken({ body: { name: newTokenName.trim() } });
 			tokens = [
 				...tokens,
 				{ id: res.id, name: newTokenName.trim(), revoked_at: null, created_at: new Date().toISOString() }
@@ -222,7 +222,7 @@
 		revokeConfirm = null;
 		revoking = true;
 		try {
-			await revokeApiToken(id);
+			await revokeApiToken({ path: { id } });
 			tokens = tokens.filter((t) => t.id !== id);
 			showSuccess('API token revoked.');
 		} catch (e) {

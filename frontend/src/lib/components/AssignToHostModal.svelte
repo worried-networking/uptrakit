@@ -6,9 +6,10 @@
 	import { Callout } from '$lib/components/ui';
 	import { Input, Checkbox, CheckboxList, Select, type SelectOption } from '$lib/components/forms';
 	import type { CheckboxListItem } from '$lib/components/forms';
-	import { getSoftwareItem, listHosts, assignHosts, unassignHost, getPluginConfigs, listPluginTypes } from '$lib/api';
+	import { getSoftwareItem, listHosts, assignHosts, unassignHost, listPluginConfigs, listPluginTypes } from '$lib/api';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
-	import type { HostResponse, PluginConfigResponse, HostPluginRoleAssignment, PluginTypeInfo } from '$lib/types';
+	import type { HostResponse, HostPluginRoleAssignment } from '$lib/types';
+	import type { PluginConfigResponse, PluginTypeInfo } from '$lib/api';
 
 	let {
 		softwareItemId,
@@ -152,7 +153,7 @@
 			const [{ data: detail }, hostsData, configsResult, typesResult] = await Promise.all([
 				getSoftwareItem({ path: { id: softwareItemId } }),
 				listHosts({ query: { page: 1, per_page: 200 } }),
-				getPluginConfigs(1, 500),
+				listPluginConfigs({ query: { page: 1, per_page: 500 } }),
 				listPluginTypes()
 			]);
 			allHosts = hostsData.data.items as unknown as HostResponse[];
@@ -160,9 +161,9 @@
 				originalAssignedIds.add(h.host_id);
 				selectedIds.add(h.host_id);
 			}
-			pluginConfigs = configsResult.items;
-			pluginTypes = typesResult;
-			const firstStandardId = configsResult.items.find((c) => !isHookPluginType(c.plugin_type))?.id ?? '';
+			pluginConfigs = configsResult.data.items;
+			pluginTypes = typesResult.data;
+			const firstStandardId = configsResult.data.items.find((c) => !isHookPluginType(c.plugin_type))?.id ?? '';
 			standardAssignments = {
 				detect_version: {
 					enabled: true,

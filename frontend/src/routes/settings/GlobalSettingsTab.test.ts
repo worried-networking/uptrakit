@@ -17,17 +17,17 @@ vi.mock('$lib/surfaces/read-model', () => ({
 	shouldUseSurfaceRoute: vi.fn(() => false)
 }));
 vi.mock('$lib/api', () => ({
-	getGitHubProviderSettings: vi.fn(),
+	getGithubProviderSettings: vi.fn(),
 	getSystemAlerts: vi.fn(),
 	renewServerCertificate: vi.fn(),
 	getNetworkSettings: vi.fn(),
 	updateNetworkSettings: vi.fn(),
 	getNatsSettings: vi.fn(),
 	updateNatsSettings: vi.fn(),
-	updateGitHubProviderSettings: vi.fn(),
+	updateGithubProviderSettings: vi.fn(),
 	getZeroconfSettings: vi.fn(),
 	updateZeroconfSettings: vi.fn(),
-	rotateCA: vi.fn()
+	rotateCa: vi.fn()
 }));
 
 import * as api from '$lib/api';
@@ -35,19 +35,29 @@ import GlobalSettingsTab from './GlobalSettingsTab.svelte';
 
 function stubAllApis() {
 	vi.mocked(api.getNetworkSettings).mockResolvedValue({
-		trusted_proxies: [],
-		real_ip_header: 'X-Forwarded-For',
-		sans: [],
-		https_addr: '[::]:8443'
-	});
-	vi.mocked(api.getSystemAlerts).mockResolvedValue({ alerts: [] });
-	vi.mocked(api.getNatsSettings).mockResolvedValue({ url: 'nats://host:4222', has_url: true });
+		data: {
+			trusted_proxies: [],
+			real_ip_header: 'X-Forwarded-For',
+			sans: [],
+			https_addr: '[::]:8443'
+		}
+	} as unknown as Awaited<ReturnType<typeof api.getNetworkSettings>>);
+	vi.mocked(api.getSystemAlerts).mockResolvedValue({ data: { alerts: [] } } as unknown as Awaited<
+		ReturnType<typeof api.getSystemAlerts>
+	>);
+	vi.mocked(api.getNatsSettings).mockResolvedValue({
+		data: { url: 'nats://host:4222', has_url: true }
+	} as unknown as Awaited<ReturnType<typeof api.getNatsSettings>>);
 	vi.mocked(api.getZeroconfSettings).mockResolvedValue({
-		enabled: false
-	});
-	vi.mocked(api.getGitHubProviderSettings).mockResolvedValue({
-		has_auth_token: false
-	});
+		data: {
+			enabled: false
+		}
+	} as unknown as Awaited<ReturnType<typeof api.getZeroconfSettings>>);
+	vi.mocked(api.getGithubProviderSettings).mockResolvedValue({
+		data: {
+			has_auth_token: false
+		}
+	} as unknown as Awaited<ReturnType<typeof api.getGithubProviderSettings>>);
 }
 
 describe('GlobalSettingsTab button variants', () => {
@@ -131,7 +141,11 @@ describe('GlobalSettingsTab loading states', () => {
 		// Stall the save — aria-busy must appear while in-flight
 		let resolveSave!: () => void;
 		vi.mocked(api.updateNatsSettings).mockReturnValue(
-			new Promise((res) => (resolveSave = () => res({ has_url: false })))
+			new Promise(
+				(res) =>
+					(resolveSave = () =>
+						res({ data: { has_url: false } } as unknown as Awaited<ReturnType<typeof api.updateNatsSettings>>))
+			) as unknown as ReturnType<typeof api.updateNatsSettings>
 		);
 		fireEvent.click(saveBtn);
 		await waitFor(() => expect(saveBtn).toHaveAttribute('aria-busy', 'true'));

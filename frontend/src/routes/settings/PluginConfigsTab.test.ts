@@ -2,21 +2,23 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 
 vi.mock('$lib/api', () => ({
-	getPluginConfigs: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20, pages: 0 }),
+	listPluginConfigs: vi
+		.fn()
+		.mockResolvedValue({ data: { items: [], total: 0, page: 1, per_page: 20, total_pages: 0 } }),
 	createPluginConfig: vi.fn(),
 	updatePluginConfig: vi.fn(),
 	deletePluginConfig: vi.fn(),
-	triggerPluginConfigDiscovery: vi.fn(),
+	discoverPluginConfig: vi.fn(),
 	listTenantDiscoveryAllowlist: vi.fn().mockResolvedValue({ data: [] }),
 	addTenantDiscoveryAllowlistEntry: vi.fn(),
 	removeTenantDiscoveryAllowlistEntry: vi.fn(),
-	listPluginTypes: vi.fn().mockResolvedValue([]),
+	listPluginTypes: vi.fn().mockResolvedValue({ data: [] }),
 	batchPluginConfigs: vi.fn(),
-	listPluginTypeSettings: vi.fn().mockResolvedValue([]),
+	listPluginTypeSettings: vi.fn().mockResolvedValue({ data: [] }),
 	upsertPluginTypeSettings: vi.fn(),
 	deletePluginTypeSettings: vi.fn(),
 	testPluginConfig: vi.fn(),
-	listInstancePlugins: vi.fn().mockResolvedValue([]),
+	listInstancePlugins: vi.fn().mockResolvedValue({ data: [] }),
 	setInstancePluginEnabled: vi.fn(),
 	upsertInstancePluginConfig: vi.fn()
 }));
@@ -100,7 +102,9 @@ describe('PluginConfigsTab — Instance Plugins section', () => {
 	};
 
 	it('renders the section when user has ManageGlobalSettings', async () => {
-		vi.mocked(api.listInstancePlugins).mockResolvedValue([dashboardIconsPlugin]);
+		vi.mocked(api.listInstancePlugins).mockResolvedValue({ data: [dashboardIconsPlugin] } as unknown as Awaited<
+			ReturnType<typeof api.listInstancePlugins>
+		>);
 		render(PluginConfigsTab);
 		expect(await screen.findByText('Instance Plugins')).toBeTruthy();
 		expect(await screen.findByText('Dashboard Icons')).toBeTruthy();
@@ -121,7 +125,9 @@ describe('PluginConfigsTab — Instance Plugins section', () => {
 				Permission.TestPluginConfigs
 			]
 		} as ReturnType<typeof auth.getUser>);
-		vi.mocked(api.listInstancePlugins).mockResolvedValue([dashboardIconsPlugin]);
+		vi.mocked(api.listInstancePlugins).mockResolvedValue({ data: [dashboardIconsPlugin] } as unknown as Awaited<
+			ReturnType<typeof api.listInstancePlugins>
+		>);
 		render(PluginConfigsTab);
 		await waitFor(() => {
 			expect(screen.queryByText('Instance Plugins')).toBeNull();
@@ -129,19 +135,23 @@ describe('PluginConfigsTab — Instance Plugins section', () => {
 	});
 
 	it('shows "Pending restart" badge when stored enabled differs from running_enabled', async () => {
-		vi.mocked(api.listInstancePlugins).mockResolvedValue([
-			{
-				...dashboardIconsPlugin,
-				enabled: true,
-				running_enabled: false
-			}
-		]);
+		vi.mocked(api.listInstancePlugins).mockResolvedValue({
+			data: [
+				{
+					...dashboardIconsPlugin,
+					enabled: true,
+					running_enabled: false
+				}
+			]
+		} as unknown as Awaited<ReturnType<typeof api.listInstancePlugins>>);
 		render(PluginConfigsTab);
 		expect(await screen.findByText('Pending restart')).toBeTruthy();
 	});
 
 	it('hides the Edit Settings button when has_instance_config is false', async () => {
-		vi.mocked(api.listInstancePlugins).mockResolvedValue([dashboardIconsPlugin]);
+		vi.mocked(api.listInstancePlugins).mockResolvedValue({ data: [dashboardIconsPlugin] } as unknown as Awaited<
+			ReturnType<typeof api.listInstancePlugins>
+		>);
 		render(PluginConfigsTab);
 		// Wait for the plugin row to render before asserting absence.
 		await screen.findByText('Dashboard Icons');
@@ -149,7 +159,9 @@ describe('PluginConfigsTab — Instance Plugins section', () => {
 	});
 
 	it('toggle button opens confirm dialog with restart-required copy', async () => {
-		vi.mocked(api.listInstancePlugins).mockResolvedValue([dashboardIconsPlugin]);
+		vi.mocked(api.listInstancePlugins).mockResolvedValue({ data: [dashboardIconsPlugin] } as unknown as Awaited<
+			ReturnType<typeof api.listInstancePlugins>
+		>);
 		render(PluginConfigsTab);
 		const enableButton = await screen.findByRole('button', { name: 'Enable' });
 		await fireEvent.click(enableButton);

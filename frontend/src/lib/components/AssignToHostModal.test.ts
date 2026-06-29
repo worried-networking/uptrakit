@@ -10,7 +10,7 @@ vi.mock('$lib/api', () => ({
 	listHosts: vi.fn(),
 	assignHosts: vi.fn(),
 	unassignHost: vi.fn(),
-	getPluginConfigs: vi.fn(),
+	listPluginConfigs: vi.fn(),
 	listPluginTypes: vi.fn()
 }));
 
@@ -147,14 +147,18 @@ function renderModal(hostItems: HostResponse[] = [makeHost('host-1', 'Host One')
 	vi.mocked(api.listHosts).mockResolvedValue({ data: makeHostsPage(hostItems) } as unknown as Awaited<
 		ReturnType<typeof api.listHosts>
 	>);
-	vi.mocked(api.getPluginConfigs).mockResolvedValue({
-		items: makePluginConfigs(),
-		total: 2,
-		page: 1,
-		per_page: 500,
-		total_pages: 1
-	});
-	vi.mocked(api.listPluginTypes).mockResolvedValue(makePluginTypes());
+	vi.mocked(api.listPluginConfigs).mockResolvedValue({
+		data: {
+			items: makePluginConfigs(),
+			total: 2,
+			page: 1,
+			per_page: 500,
+			total_pages: 1
+		}
+	} as unknown as Awaited<ReturnType<typeof api.listPluginConfigs>>);
+	vi.mocked(api.listPluginTypes).mockResolvedValue({ data: makePluginTypes() } as unknown as Awaited<
+		ReturnType<typeof api.listPluginTypes>
+	>);
 	vi.mocked(api.assignHosts).mockResolvedValue({ data: makeDetail([]) } as unknown as Awaited<
 		ReturnType<typeof api.assignHosts>
 	>);

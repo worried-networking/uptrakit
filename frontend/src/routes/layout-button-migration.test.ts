@@ -61,7 +61,7 @@ vi.mock('$lib/theme.svelte', () => ({
 }));
 
 vi.mock('$lib/api', () => ({
-	getSystemAlerts: vi.fn(async () => ({ alerts: [] }))
+	getSystemAlerts: vi.fn(async () => ({ data: { alerts: [] } }))
 }));
 
 vi.mock('$lib/stores/network.svelte', () => ({
