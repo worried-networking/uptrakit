@@ -7,7 +7,7 @@ vi.mock('$lib/api', () => ({
 	getSoftwareIgnores: vi.fn(),
 	createSoftwareIgnore: vi.fn(),
 	deleteSoftwareIgnore: vi.fn(),
-	batchSoftwareIgnores: vi.fn()
+	batchAutodiscoveryIgnores: vi.fn()
 }));
 
 vi.mock('$lib/auth.svelte', () => ({
@@ -62,7 +62,9 @@ describe('Software Ignore Rules Tab', () => {
 				}
 			])
 		);
-		vi.mocked(api.batchSoftwareIgnores).mockResolvedValue({ succeeded: [], failed: [] });
+		vi.mocked(api.batchAutodiscoveryIgnores).mockResolvedValue({
+			data: { succeeded: [], failed: [] }
+		} as unknown as Awaited<ReturnType<typeof api.batchAutodiscoveryIgnores>>);
 	});
 
 	afterEach(() => {

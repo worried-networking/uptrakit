@@ -1,12 +1,13 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { getUser } from '$lib/auth.svelte';
-	import { getHosts, getServices, getSoftwareItems, listUpdateHistory } from '$lib/api';
+	import { getHosts, listServices, getSoftwareItems, listUpdateHistory } from '$lib/api';
 	import { formatDate } from '$lib/utils';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import { AdminEventType } from '$lib/sse';
 	import { Permission } from '$lib/types';
-	import type { ServiceResponse, UpdateHistoryResponse, PaginatedResponse } from '$lib/types';
+	import type { UpdateHistoryResponse, PaginatedResponse } from '$lib/types';
+	import type { ServiceResponse } from '$lib/api';
 	import { Callout, DataTable, PageShell, SectionCard, StatCard, StatusBadge } from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
 
@@ -85,7 +86,7 @@
 		if (canViewAgents) {
 			promises.push(
 				swallowOnBackground(
-					getServices({ page: 1, perPage: 100 }).then((result: PaginatedResponse<ServiceResponse>) => {
+					listServices({ query: { page: 1, per_page: 100 } }).then(({ data: result }) => {
 						services = result.items;
 						totalServices = result.total;
 					})

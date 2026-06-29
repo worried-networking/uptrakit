@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
-	import { getSoftwareIgnores, createSoftwareIgnore, deleteSoftwareIgnore, batchSoftwareIgnores } from '$lib/api';
+	import { getSoftwareIgnores, createSoftwareIgnore, deleteSoftwareIgnore, batchAutodiscoveryIgnores } from '$lib/api';
 	import { formatDate, nextValidPage } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
@@ -124,7 +124,8 @@
 		ignoreBatchConfirmAction = null;
 		ignoreBatchSubmitting = true;
 		try {
-			const response = await batchSoftwareIgnores('delete', [...ignoreSelectedIds]);
+			const response = (await batchAutodiscoveryIgnores({ body: { action: 'delete', ids: [...ignoreSelectedIds] } }))
+				.data!;
 			if (response.failed.length > 0) {
 				ignoreBatchResult = response;
 			} else {

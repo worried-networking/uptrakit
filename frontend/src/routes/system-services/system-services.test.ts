@@ -3,10 +3,10 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/sve
 import { Permission, type PaginatedResponse, type SystemServiceResponse } from '$lib/types';
 
 vi.mock('$lib/api', () => ({
-	getSystemServices: vi.fn(),
+	listSystemServices: vi.fn(),
 	approveSystemService: vi.fn(),
 	rejectSystemService: vi.fn(),
-	deleteSystemService: vi.fn(),
+	deactivateSystemService: vi.fn(),
 	updateSystemService: vi.fn(),
 	batchSystemServices: vi.fn(),
 	executeBatchChunked: vi.fn()
@@ -51,8 +51,8 @@ function makePage(items: SystemServiceResponse[]): PaginatedResponse<SystemServi
 describe('System Services Route', () => {
 	beforeEach(() => {
 		vi.mocked(auth.getUser).mockReturnValue(user);
-		vi.mocked(api.getSystemServices).mockResolvedValue(
-			makePage([
+		vi.mocked(api.listSystemServices).mockResolvedValue({
+			data: makePage([
 				{
 					id: 'sys-1',
 					friendly_name: 'scheduler-service',
@@ -65,7 +65,7 @@ describe('System Services Route', () => {
 					capabilities: []
 				} as unknown as SystemServiceResponse
 			])
-		);
+		} as unknown as Awaited<ReturnType<typeof api.listSystemServices>>);
 	});
 
 	afterEach(() => {
@@ -86,8 +86,8 @@ describe('System Services Route', () => {
 	});
 
 	it('stacks multiple status badges with shared spacing', async () => {
-		vi.mocked(api.getSystemServices).mockResolvedValue(
-			makePage([
+		vi.mocked(api.listSystemServices).mockResolvedValue({
+			data: makePage([
 				{
 					id: 'sys-embedded',
 					friendly_name: 'embedded-scheduler',
@@ -100,7 +100,7 @@ describe('System Services Route', () => {
 					capabilities: []
 				} as unknown as SystemServiceResponse
 			])
-		);
+		} as unknown as Awaited<ReturnType<typeof api.listSystemServices>>);
 
 		render(SystemServicesPage);
 
@@ -114,7 +114,9 @@ describe('System Services Route', () => {
 
 	describe('status filter Select', () => {
 		beforeEach(() => {
-			vi.mocked(api.getSystemServices).mockResolvedValue(makePage([]));
+			vi.mocked(api.listSystemServices).mockResolvedValue({ data: makePage([]) } as unknown as Awaited<
+				ReturnType<typeof api.listSystemServices>
+			>);
 		});
 
 		it('Select is present inside [data-ui="filter-bar"]', async () => {
@@ -134,8 +136,10 @@ describe('System Services Route', () => {
 
 		it('initial load calls getSystemServices with no status filter', async () => {
 			render(SystemServicesPage);
-			await waitFor(() => expect(vi.mocked(api.getSystemServices)).toHaveBeenCalled());
-			expect(vi.mocked(api.getSystemServices)).toHaveBeenCalledWith(expect.objectContaining({ status: undefined }));
+			await waitFor(() => expect(vi.mocked(api.listSystemServices)).toHaveBeenCalled());
+			expect(vi.mocked(api.listSystemServices)).toHaveBeenCalledWith(
+				expect.objectContaining({ query: expect.objectContaining({ status: undefined }) })
+			);
 		});
 	});
 
@@ -151,8 +155,8 @@ describe('System Services Route', () => {
 		});
 
 		it('aria-label matches "Actions for {friendly_name}" including space in name', async () => {
-			vi.mocked(api.getSystemServices).mockResolvedValue(
-				makePage([
+			vi.mocked(api.listSystemServices).mockResolvedValue({
+				data: makePage([
 					{
 						id: 'sys-space',
 						friendly_name: 'my system svc',
@@ -165,7 +169,7 @@ describe('System Services Route', () => {
 						capabilities: []
 					} as unknown as SystemServiceResponse
 				])
-			);
+			} as unknown as Awaited<ReturnType<typeof api.listSystemServices>>);
 			render(SystemServicesPage);
 			await waitFor(() =>
 				expect(screen.getByRole('button', { name: 'Actions for my system svc' })).toBeInTheDocument()
@@ -184,7 +188,7 @@ describe('System Services Route', () => {
 
 	describe('Retry button', () => {
 		it('renders variant="primary" (md default size) in error state', async () => {
-			vi.mocked(api.getSystemServices).mockRejectedValue(new Error('network error'));
+			vi.mocked(api.listSystemServices).mockRejectedValue(new Error('network error'));
 			render(SystemServicesPage);
 			await waitFor(() => expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument());
 			const retryBtn = screen.getByRole('button', { name: /retry/i });
@@ -193,14 +197,14 @@ describe('System Services Route', () => {
 		});
 
 		it('sets aria-busy="true" during fetch and clears after rejection', async () => {
-			vi.mocked(api.getSystemServices).mockRejectedValue(new Error('network error'));
+			vi.mocked(api.listSystemServices).mockRejectedValue(new Error('network error'));
 			render(SystemServicesPage);
 			await waitFor(() => expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument());
 			let resolveReject!: () => void;
-			vi.mocked(api.getSystemServices).mockReturnValue(
+			vi.mocked(api.listSystemServices).mockReturnValue(
 				new Promise<never>((_, reject) => {
 					resolveReject = () => reject(new Error('still failing'));
-				})
+				}) as unknown as ReturnType<typeof api.listSystemServices>
 			);
 			fireEvent.click(screen.getByRole('button', { name: /retry/i }));
 			await waitFor(() => expect(screen.getByRole('button', { name: /retry/i })).toHaveAttribute('aria-busy', 'true'));
@@ -221,10 +225,12 @@ describe('System Services Route', () => {
 				capabilities: []
 			} as unknown as SystemServiceResponse;
 
-			vi.mocked(api.getSystemServices).mockRejectedValue(new Error('network error'));
+			vi.mocked(api.listSystemServices).mockRejectedValue(new Error('network error'));
 			render(SystemServicesPage);
 			await waitFor(() => expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument());
-			vi.mocked(api.getSystemServices).mockResolvedValue(makePage([approvedSvc]));
+			vi.mocked(api.listSystemServices).mockResolvedValue({ data: makePage([approvedSvc]) } as unknown as Awaited<
+				ReturnType<typeof api.listSystemServices>
+			>);
 			fireEvent.click(screen.getByRole('button', { name: /retry/i }));
 			await waitFor(() => expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument());
 			expect(screen.getByText('recovered-svc')).toBeInTheDocument();
@@ -245,7 +251,9 @@ describe('System Services Route', () => {
 		} as unknown as SystemServiceResponse;
 
 		beforeEach(() => {
-			vi.mocked(api.getSystemServices).mockResolvedValue(makePage([approvedSystemSvc]));
+			vi.mocked(api.listSystemServices).mockResolvedValue({ data: makePage([approvedSystemSvc]) } as unknown as Awaited<
+				ReturnType<typeof api.listSystemServices>
+			>);
 		});
 
 		async function openPingModal() {
@@ -273,7 +281,9 @@ describe('System Services Route', () => {
 		});
 
 		it('Save shows aria-busy during submit and "Saving..." text never appears', async () => {
-			vi.mocked(api.updateSystemService).mockReturnValue(new Promise(() => {}));
+			vi.mocked(api.updateSystemService).mockReturnValue(
+				new Promise(() => {}) as unknown as ReturnType<typeof api.updateSystemService>
+			);
 			await openPingModal();
 			fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
 			await waitFor(() => expect(screen.getByRole('button', { name: /^save$/i })).toHaveAttribute('aria-busy', 'true'));

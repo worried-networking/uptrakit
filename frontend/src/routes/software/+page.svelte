@@ -1020,7 +1020,11 @@
 					showSuccess(`Update triggered for ${totalTriggered} host(s) across ${itemsWithUpdates.length} item(s).`);
 				if (totalFailed > 0) showError(`Failed to trigger update for ${totalFailed} host(s).`);
 			} else {
-				const response = await executeBatchChunked(action, ids, batchSoftwareItems);
+				const response = await executeBatchChunked(
+					action,
+					ids,
+					async (a, i) => (await batchSoftwareItems({ body: { action: a, ids: i } })).data!
+				);
 				if (response.failed.length > 0) {
 					batchResult = response;
 				} else {
