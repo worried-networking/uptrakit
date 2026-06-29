@@ -17,6 +17,7 @@ export { extractApiError } from './api/errors';
 export { apiClient };
 export { apiGet, authenticatedFetch, loginRaw };
 export { executeBatchChunked } from './api/batch';
+export { listSurfaces, listSurfaceProviders, getSurfaceRead, invokeSurfaceInteraction } from './api/surfaces';
 
 import { onTokenChange } from './token-store.svelte';
 import type {
@@ -116,12 +117,6 @@ import type {
 	RegenerateRecoveryCodesRequest,
 	RegenerateRecoveryCodesResponse
 } from './types';
-import type {
-	InvokeSurfaceInteractionRequest,
-	SurfaceProviderInfo,
-	SurfaceReadResponse,
-	SurfaceResponse
-} from './surfaces/contract';
 
 const BASE: string = import.meta.env.VITE_API_BASE || '/api/v1';
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -1134,36 +1129,6 @@ export function batchPluginConfigs(action: string, ids: string[]): Promise<Batch
 }
 
 export { sealedBoxEncrypt } from './api/crypto';
-
-export async function listSurfaces(options?: { slot?: string; page?: string }): Promise<SurfaceResponse[]> {
-	const params = new URLSearchParams();
-	if (options?.slot) params.set('slot', options.slot);
-	if (options?.page) params.set('page', options.page);
-	const query = params.toString();
-	return request<SurfaceResponse[]>(`/surfaces${query ? `?${query}` : ''}`);
-}
-
-export async function listSurfaceProviders(surfaceId: string): Promise<SurfaceProviderInfo[]> {
-	return request<SurfaceProviderInfo[]>(`/surfaces/${encodeURIComponent(surfaceId)}/providers`);
-}
-
-export async function getSurfaceRead(surfaceId: string): Promise<SurfaceReadResponse> {
-	return request<SurfaceReadResponse>(`/surfaces/${encodeURIComponent(surfaceId)}/read`);
-}
-
-export async function invokeSurfaceInteraction(
-	surfaceId: string,
-	interactionId: string,
-	data: InvokeSurfaceInteractionRequest
-): Promise<unknown> {
-	return request<unknown>(
-		`/surfaces/${encodeURIComponent(surfaceId)}/interactions/${encodeURIComponent(interactionId)}`,
-		{
-			method: 'POST',
-			body: JSON.stringify(data)
-		}
-	);
-}
 
 // ── Notification Rules + Log ──
 
