@@ -37,9 +37,13 @@ describe('S-A: refresh-retry + ApiError identity', () => {
 				return new Response('{}', { status: 401 });
 			}
 
-			// retry carries the new token AND the reconstructed original body
+			// retry carries the new token AND the reconstructed original body — assert the
+			// SPECIFIC payload per URL (the R3 invariant: each retry sends its own call's body)
 			const body = isRequest ? await input.clone().text() : String(init?.body ?? '');
-			expect(body).toBeTruthy();
+			const parsed = JSON.parse(body);
+			if (url.endsWith('/x')) expect(parsed).toEqual({ a: 1 });
+			else if (url.endsWith('/y')) expect(parsed).toEqual({ b: 2 });
+			else throw new Error(`unexpected retry url: ${url}`);
 			return new Response(JSON.stringify({ ok: true }), { status: 200 });
 		});
 
