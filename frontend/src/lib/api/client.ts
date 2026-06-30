@@ -315,6 +315,20 @@ async function refreshAndRetry(options: RequestArgs): Promise<unknown> {
 	}
 }
 
+// A 401 with no access token to refresh: convert it to ApiError. The response body
+// is already consumed by the generated client (it parsed `first.error` from it), so
+// build ApiError from `first.error` directly rather than re-reading the Response.
+function unauthorizedApiError(response: Response, body: unknown): ApiError {
+	let message = response.statusText || 'Unauthorized';
+	let errorCode: string | null = null;
+	if (typeof body === 'object' && body !== null) {
+		const b = body as Record<string, unknown>;
+		if (typeof b.error === 'string') message = b.error;
+		if (typeof b.error_code === 'string') errorCode = b.error_code;
+	}
+	return new ApiError(message, response.status, errorCode);
+}
+
 async function requestWithRefresh(options: RequestArgs): Promise<unknown> {
 	let first: FieldsResult;
 	try {
@@ -329,23 +343,8 @@ async function requestWithRefresh(options: RequestArgs): Promise<unknown> {
 		throw translateFetchError(first.error);
 	}
 	if (first.response?.status === 401) {
-		if (getAccessToken()) {
-			return refreshAndRetry(options);
-		}
-		// No token available for refresh — convert 401 to ApiError.
-		// The response body is already consumed by the generated client (it parsed
-		// first.error from it), so we build ApiError from first.error directly.
-		const status = (first.response as Response).status;
-		const statusText = (first.response as Response).statusText;
-		const body = first.error;
-		let message = statusText || 'Unauthorized';
-		let errorCode: string | null = null;
-		if (typeof body === 'object' && body !== null) {
-			const b = body as Record<string, unknown>;
-			if (typeof b.error === 'string') message = b.error;
-			if (typeof b.error_code === 'string') errorCode = b.error_code;
-		}
-		throw new ApiError(message, status, errorCode);
+		if (getAccessToken()) return refreshAndRetry(options);
+		throw unauthorizedApiError(first.response, first.error);
 	}
 	return unwrap(first);
 }
