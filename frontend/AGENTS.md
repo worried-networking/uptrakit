@@ -45,8 +45,17 @@ frontend/
 ├── static/                 # Static assets served as-is
 └── src/
     └── lib/
-        ├── api.ts                   # Typed API client — all HTTP calls go here
-        ├── api.test.ts              # Unit tests for api.ts
+        ├── api/                     # API client (see "Regenerating the API client" below)
+        │   ├── index.ts             # `$lib/api` barrel — re-exports the generated SDK + the helpers below
+        │   ├── generated/           # @hey-api/openapi-ts output from openapi.json (committed; do not hand-edit)
+        │   ├── client.ts            # configured hey-api client + interceptors (auth, 401 refresh-retry, ETag, 2FA, ApiError)
+        │   ├── errors.ts            # ApiError + Response→message/ApiError mappers
+        │   ├── raw.ts               # raw-Response escape hatch (authenticatedFetch/apiGet/loginRaw) over the configured client
+        │   ├── surfaces.ts          # non-spec surface endpoints (0 utoipa paths) over the configured client
+        │   ├── crypto.ts            # sealed-box encryption (Web Crypto)
+        │   ├── batch.ts             # executeBatchChunked (client-side 100-id chunking)
+        │   ├── oauth.ts             # OAuth client/consent shim (paths outside /api/v1)
+        │   └── local-types.ts       # frontend-only types with no generated equivalent
         ├── auth.svelte.ts           # Auth state store (current user, session)
         ├── auth.test.ts             # Unit tests for auth.svelte.ts
         ├── interactive.ts           # Interactive update session utilities
@@ -54,7 +63,6 @@ frontend/
         ├── sse.ts                   # Low-level SSE connection utilities
         ├── theme.svelte.ts          # Dark/light theme store
         ├── token-store.svelte.ts    # API token management store
-        ├── types.ts                 # Shared TypeScript types mirroring web-api-types
         ├── utils.ts                 # General utility functions
         ├── utils.test.ts            # Unit tests for utils.ts
         ├── surfaces/                # Shared surface runtime store, read models, interactions
@@ -100,15 +108,26 @@ src/routes/
 
 ## Rules for AI agents
 
-1. **All API calls go through `src/lib/api.ts`.** Do not call `fetch` directly for API endpoints;
-   the client mirrors the `uptrakit-openapi-client` Rust crate's endpoint set.
-   - **OpenAPI placement rule:** the frontend↔backend contract is the committed
-     `crates/ui/web-api/openapi.json` (dumped + drift-gated in CI). For an endpoint to appear in it,
-     the backend handler MUST be registered via `.routes(routes!(...))` **before**
+1. **API calls use the generated SDK via `$lib/api`.** Do not call `fetch` directly for API
+   endpoints. Import the generated operation (e.g. `listServices`) from `$lib/api` and call it with
+   option-object args (`{ path, query, body }`, snake_case keys), destructuring `{ data }`; the
+   configured client adds bearer auth, deduped 401 refresh-retry, ETag `If-Match`, the 2FA redirect,
+   and `ApiError` mapping. Generated types come from `$lib/api` too (no hand-maintained mirror).
+   Non-spec endpoints (surfaces) and escape hatches live in the hand-written `api/*` modules listed
+   in the tree above. The source of truth for the frontend client is the committed spec
+   `crates/ui/web-api/openapi.json`; after any backend route change run `./scripts/regen-api.sh` and
+   commit both `openapi.json` and `src/lib/api/generated/`.
+   - **Scope (honest):** today only the **frontend** client is generated from / gated against the
+     spec. The Rust `uptrakit-openapi-client` crate is **not yet** generated from this spec — that
+     is a planned follow-up — so the spec is not yet a workspace-wide source of truth.
+   - **OpenAPI placement rule:** for an endpoint to appear in `openapi.json` (and thus the generated
+     client), the backend handler MUST be registered via `.routes(routes!(...))` **before**
      `split_for_parts()` in `crates/ui/web-api/src/router.rs` — handlers added via raw `.route()`
-     after the split are silently absent from the spec (and, once codegen lands, the generated
-     client). See `router.rs` (placement comment) +
-     `integration_tests/openapi_spec.rs::openapi_spec_eligible_endpoints_present`.
+     after the split are silently absent from the spec and the generated client. See `router.rs`
+     (placement comment) +
+     `integration_tests/openapi_spec.rs::openapi_spec_eligible_endpoints_present`. List endpoints
+     should expose their query filters via `params(<IntoParamsStruct>)` (not a hand-maintained
+     `params(...)` list) so the spec can't silently drop a filter the handler accepts.
 2. **Use existing shared components first.** Before creating a new UI component, check
    `src/lib/components/` for: `AddSoftwareModal`, `AssignToHostModal`, `BatchActionBar`,
    `BatchResultDialog`, `CheckboxList`, `ConfirmDialog`, `ContextMenu`, `EditHostAssignmentModal`,
