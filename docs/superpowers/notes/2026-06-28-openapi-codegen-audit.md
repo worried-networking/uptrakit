@@ -411,3 +411,9 @@ two highest-traffic ones (`client.ts`, `errors.ts`) are green and the rest are o
   `list_audit_logs`, `list_system_audit_logs`, `list_hosts`, `list_host_tags`,
   `list_enrollment_tokens`, `list_system_enrollment_tokens`, `list_batches`, `list_update_history`,
   `list_system_services`. Converting each to `params(<Struct>)` would make them drift-proof.
+- `PluginRole`'s manual `PartialSchema` impl hardcodes its 5 wire strings inline (unlike `Permission`,
+  which sources from `Self::all()`, and the `wire_safe_enum!` macro, which sources from `$wire`). A
+  future 6th variant would be silently omitted from the schema, and `openapi_json_is_up_to_date`
+  would not catch it. Source it from `as_str()` over the known variants, or add a unit test asserting
+  the schema enum == the `as_str()` set. Low likelihood; same silent-drift class as the Task 10
+  `list_software_items` regression. (Surfaced by the final whole-branch review.)
