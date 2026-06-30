@@ -32,20 +32,7 @@ pub use uptrakit_web_api_types::pagination::PaginatedResponse;
 #[utoipa::path(
     get,
     path = "/api/v1/audit-logs",
-    params(
-        ("page" = Option<u64>, Query, description = "Page number (1-indexed, default 1)"),
-        ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)"),
-        ("actor_type" = Option<String>, Query, description = "Filter by actor type: user, api_token, oidc, service, system"),
-        ("action_type" = Option<String>, Query, description = "Filter by semantic action type"),
-        ("outcome" = Option<String>, Query, description = "Filter by action outcome"),
-        ("target_type" = Option<String>, Query, description = "Filter by semantic target type"),
-        ("target_id" = Option<String>, Query, description = "Filter by semantic target id"),
-        ("from" = Option<String>, Query, description = "Lower bound timestamp (inclusive), RFC 3339"),
-        ("to" = Option<String>, Query, description = "Upper bound timestamp (inclusive), RFC 3339"),
-        ("actor_id" = Option<uuid::Uuid>, Query, description = "Filter by actor UUID"),
-        ("correlation_id" = Option<uuid::Uuid>, Query, description = "Filter by correlation UUID"),
-        ("action_kind" = Option<String>, Query, description = "Filter by action kind: stateful, event")
-    ),
+    params(AuditLogListParams),
     responses(
         (status = 200, description = "Paginated list of tenant audit log entries", body = PaginatedResponse<AuditLogResponse>),
         (status = 400, description = "Invalid filter parameter"),
@@ -70,20 +57,7 @@ pub async fn list_audit_logs(
 #[utoipa::path(
     get,
     path = "/api/v1/system-audit-logs",
-    params(
-        ("page" = Option<u64>, Query, description = "Page number (1-indexed, default 1)"),
-        ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)"),
-        ("actor_type" = Option<String>, Query, description = "Filter by actor type: user, api_token, oidc, service, system"),
-        ("action_type" = Option<String>, Query, description = "Filter by semantic action type"),
-        ("outcome" = Option<String>, Query, description = "Filter by action outcome"),
-        ("target_type" = Option<String>, Query, description = "Filter by semantic target type"),
-        ("target_id" = Option<String>, Query, description = "Filter by semantic target id"),
-        ("from" = Option<String>, Query, description = "Lower bound timestamp (inclusive), RFC 3339"),
-        ("to" = Option<String>, Query, description = "Upper bound timestamp (inclusive), RFC 3339"),
-        ("actor_id" = Option<uuid::Uuid>, Query, description = "Filter by actor UUID"),
-        ("correlation_id" = Option<uuid::Uuid>, Query, description = "Filter by correlation UUID"),
-        ("action_kind" = Option<String>, Query, description = "Filter by action kind: stateful, event")
-    ),
+    params(AuditLogListParams),
     responses(
         (status = 200, description = "Paginated list of system audit log entries", body = PaginatedResponse<SystemAuditLogResponse>),
         (status = 400, description = "Invalid filter parameter"),

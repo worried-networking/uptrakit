@@ -3436,53 +3436,53 @@ export type ListAuditLogsData = {
     path?: never;
     query?: {
         /**
-         * Page number (1-indexed, default 1)
+         * Page number (1-based). Defaults to 1.
          */
-        page?: number;
+        page?: number | null;
         /**
-         * Items per page (default 20, max 1000)
+         * Items per page. Defaults to 20, max 1000.
          */
-        per_page?: number;
+        per_page?: number | null;
         /**
-         * Filter by actor type: user, api_token, oidc, service, system
+         * Filter by actor type: `"user"`, `"api_token"`, `"oidc"`, `"service"`, `"system"`.
          */
-        actor_type?: string;
+        actor_type?: string | null;
         /**
-         * Filter by semantic action type
+         * Filter by semantic action type.
          */
-        action_type?: string;
+        action_type?: string | null;
         /**
-         * Filter by action outcome
+         * Filter by action outcome.
          */
-        outcome?: string;
+        outcome?: string | null;
         /**
-         * Filter by semantic target type
+         * Filter by semantic target type.
          */
-        target_type?: string;
+        target_type?: string | null;
         /**
-         * Filter by semantic target id
+         * Filter by semantic target id.
          */
-        target_id?: string;
+        target_id?: string | null;
         /**
-         * Lower bound timestamp (inclusive), RFC 3339
+         * Lower bound timestamp (inclusive), RFC 3339 format.
          */
-        from?: string;
+        from?: string | null;
         /**
-         * Upper bound timestamp (inclusive), RFC 3339
+         * Upper bound timestamp (inclusive), RFC 3339 format.
          */
-        to?: string;
+        to?: string | null;
         /**
-         * Filter by actor UUID
+         * Filter entries by a specific actor UUID.
          */
-        actor_id?: string;
+        actor_id?: string | null;
         /**
-         * Filter by correlation UUID
+         * Filter entries by correlation UUID.
          */
-        correlation_id?: string;
+        correlation_id?: string | null;
         /**
-         * Filter by action kind: stateful, event
+         * Filter by action kind: `"stateful"` or `"event"`.
          */
-        action_kind?: string;
+        action_kind?: string | null;
     };
     url: '/api/v1/audit-logs';
 };
@@ -4188,13 +4188,13 @@ export type ListAutodiscoveryIgnoresData = {
     path?: never;
     query?: {
         /**
-         * Page number (1-indexed, default 1)
+         * Page number (1-indexed). Defaults to 1.
          */
-        page?: number;
+        page?: number | null;
         /**
-         * Items per page (default 20, max 1000)
+         * Items per page. Defaults to 20, max 1000.
          */
-        per_page?: number;
+        per_page?: number | null;
     };
     url: '/api/v1/autodiscovery/ignores';
 };
@@ -4393,13 +4393,13 @@ export type ListEnrollmentTokensData = {
     path?: never;
     query?: {
         /**
-         * Page number (1-indexed, default 1)
+         * Page number (1-indexed). Defaults to 1.
          */
-        page?: number;
+        page?: number | null;
         /**
-         * Items per page (default 20, max 1000)
+         * Items per page. Defaults to 20, max 1000.
          */
-        per_page?: number;
+        per_page?: number | null;
     };
     url: '/api/v1/enrollment-tokens';
 };
@@ -4884,17 +4884,17 @@ export type ListHostTagsData = {
     path?: never;
     query?: {
         /**
-         * Page number (1-indexed, default 1)
+         * Page number (1-indexed). Defaults to 1.
          */
-        page?: number;
+        page?: number | null;
         /**
-         * Items per page (default 20, max 1000)
+         * Items per page. Defaults to 20, max 1000.
          */
-        per_page?: number;
+        per_page?: number | null;
         /**
-         * Filter by name (contains)
+         * Filter by name (contains).
          */
-        search?: string;
+        search?: string | null;
     };
     url: '/api/v1/host-tags';
 };
@@ -5106,13 +5106,13 @@ export type ListHostsData = {
     path?: never;
     query?: {
         /**
-         * Page number (1-indexed, default 1)
+         * Page number (1-indexed). Defaults to 1.
          */
-        page?: number;
+        page?: number | null;
         /**
-         * Items per page (default 20, max 1000)
+         * Items per page. Defaults to 20, max 1000.
          */
-        per_page?: number;
+        per_page?: number | null;
     };
     url: '/api/v1/hosts';
 };
@@ -5686,13 +5686,13 @@ export type ListChannelsData = {
     path?: never;
     query?: {
         /**
-         * Page number (1-indexed, default 1)
+         * Page number (1-indexed). Defaults to 1.
          */
-        page?: number;
+        page?: number | null;
         /**
-         * Items per page (default 20, max 1000)
+         * Items per page. Defaults to 20, max 1000.
          */
-        per_page?: number;
+        per_page?: number | null;
     };
     url: '/api/v1/notifications/channels';
 };
@@ -5901,13 +5901,13 @@ export type ListLogData = {
     path?: never;
     query?: {
         /**
-         * Page number (1-indexed, default 1)
+         * Page number (1-indexed). Defaults to 1.
          */
-        page?: number;
+        page?: number | null;
         /**
-         * Items per page (default 20, max 1000)
+         * Items per page. Defaults to 20, max 1000.
          */
-        per_page?: number;
+        per_page?: number | null;
     };
     url: '/api/v1/notifications/log';
 };
@@ -5937,21 +5937,21 @@ export type ListRulesData = {
     path?: never;
     query?: {
         /**
-         * Filter by channel ID
+         * Filter by channel ID.
          */
-        channel_id?: string;
+        channel_id?: string | null;
         /**
-         * Filter by event type
+         * Filter by event type.
          */
-        event_type?: string;
+        event_type?: string | null;
         /**
-         * Page number (1-indexed, default 1)
+         * Page number (1-indexed). Defaults to 1.
          */
-        page?: number;
+        page?: number | null;
         /**
-         * Items per page (default 20, max 1000)
+         * Items per page. Defaults to 20, max 1000.
          */
-        per_page?: number;
+        per_page?: number | null;
     };
     url: '/api/v1/notifications/rules';
 };
@@ -6201,17 +6201,17 @@ export type ListPluginConfigsData = {
     path?: never;
     query?: {
         /**
-         * Page number (1-indexed, default 1)
+         * Page number (1-indexed, default 1).
          */
-        page?: number;
+        page?: number | null;
         /**
-         * Items per page (default 20, max 1000)
+         * Items per page (default 20, max 1000).
          */
-        per_page?: number;
+        per_page?: number | null;
         /**
-         * Filter by plugin type identifier
+         * Filter by plugin type (e.g. `infrastructure_proxmox`). Returns all types when absent.
          */
-        plugin_type?: string;
+        plugin_type?: string | null;
     };
     url: '/api/v1/plugin-configs';
 };
@@ -6772,21 +6772,21 @@ export type ListServicesData = {
     path?: never;
     query?: {
         /**
-         * Filter by capability (software_discovery, update_tracking, ssh_remote, scheduler)
+         * Filter by capability.
          */
-        capability?: string;
+        capability?: string | null;
         /**
-         * Filter by status (pending, approved, rejected, deactivated)
+         * Filter by status: `pending`, `approved`, `rejected`, `deactivated`.
          */
-        status?: string;
+        status?: null | ServiceStatus;
         /**
-         * Page number (1-indexed, default 1)
+         * Page number (1-indexed). Defaults to 1.
          */
-        page?: number;
+        page?: number | null;
         /**
-         * Items per page (default 20, max 1000)
+         * Items per page. Defaults to 20, max 1000.
          */
-        per_page?: number;
+        per_page?: number | null;
     };
     url: '/api/v1/services';
 };
@@ -8075,53 +8075,53 @@ export type ListSystemAuditLogsData = {
     path?: never;
     query?: {
         /**
-         * Page number (1-indexed, default 1)
+         * Page number (1-based). Defaults to 1.
          */
-        page?: number;
+        page?: number | null;
         /**
-         * Items per page (default 20, max 1000)
+         * Items per page. Defaults to 20, max 1000.
          */
-        per_page?: number;
+        per_page?: number | null;
         /**
-         * Filter by actor type: user, api_token, oidc, service, system
+         * Filter by actor type: `"user"`, `"api_token"`, `"oidc"`, `"service"`, `"system"`.
          */
-        actor_type?: string;
+        actor_type?: string | null;
         /**
-         * Filter by semantic action type
+         * Filter by semantic action type.
          */
-        action_type?: string;
+        action_type?: string | null;
         /**
-         * Filter by action outcome
+         * Filter by action outcome.
          */
-        outcome?: string;
+        outcome?: string | null;
         /**
-         * Filter by semantic target type
+         * Filter by semantic target type.
          */
-        target_type?: string;
+        target_type?: string | null;
         /**
-         * Filter by semantic target id
+         * Filter by semantic target id.
          */
-        target_id?: string;
+        target_id?: string | null;
         /**
-         * Lower bound timestamp (inclusive), RFC 3339
+         * Lower bound timestamp (inclusive), RFC 3339 format.
          */
-        from?: string;
+        from?: string | null;
         /**
-         * Upper bound timestamp (inclusive), RFC 3339
+         * Upper bound timestamp (inclusive), RFC 3339 format.
          */
-        to?: string;
+        to?: string | null;
         /**
-         * Filter by actor UUID
+         * Filter entries by a specific actor UUID.
          */
-        actor_id?: string;
+        actor_id?: string | null;
         /**
-         * Filter by correlation UUID
+         * Filter entries by correlation UUID.
          */
-        correlation_id?: string;
+        correlation_id?: string | null;
         /**
-         * Filter by action kind: stateful, event
+         * Filter by action kind: `"stateful"` or `"event"`.
          */
-        action_kind?: string;
+        action_kind?: string | null;
     };
     url: '/api/v1/system-audit-logs';
 };
@@ -8155,13 +8155,13 @@ export type ListSystemEnrollmentTokensData = {
     path?: never;
     query?: {
         /**
-         * Page number (1-indexed, default 1)
+         * Page number (1-indexed). Defaults to 1.
          */
-        page?: number;
+        page?: number | null;
         /**
-         * Items per page (default 20, max 1000)
+         * Items per page. Defaults to 20, max 1000.
          */
-        per_page?: number;
+        per_page?: number | null;
     };
     url: '/api/v1/system-enrollment-tokens';
 };
@@ -8294,21 +8294,21 @@ export type ListSystemServicesData = {
     path?: never;
     query?: {
         /**
-         * Filter by capability (update_tracking, scheduler)
+         * Filter by capability.
          */
-        capability?: string;
+        capability?: string | null;
         /**
-         * Filter by status (pending, approved, rejected, deactivated)
+         * Filter by status: `pending`, `approved`, `rejected`, `deactivated`.
          */
-        status?: string;
+        status?: null | ServiceStatus;
         /**
-         * Page number (1-indexed, default 1)
+         * Page number (1-indexed). Defaults to 1.
          */
-        page?: number;
+        page?: number | null;
         /**
-         * Items per page (default 20, max 1000)
+         * Items per page. Defaults to 20, max 1000.
          */
-        per_page?: number;
+        per_page?: number | null;
     };
     url: '/api/v1/system-services';
 };
@@ -8584,17 +8584,17 @@ export type ListBatchesData = {
     path?: never;
     query?: {
         /**
-         * Filter by batch status (in_progress, completed, partially_completed)
+         * Filter by batch status.
          */
-        status?: string;
+        status?: string | null;
         /**
-         * Page number (1-indexed, default 1)
+         * Page number (1-indexed). Defaults to 1.
          */
-        page?: number;
+        page?: number | null;
         /**
-         * Items per page (default 20, max 1000)
+         * Items per page. Defaults to 20, max 1000.
          */
-        per_page?: number;
+        per_page?: number | null;
     };
     url: '/api/v1/update-batches';
 };
@@ -8694,25 +8694,25 @@ export type ListUpdateHistoryData = {
     path?: never;
     query?: {
         /**
-         * Filter by host UUID
+         * Filter by host UUID.
          */
-        host_id?: string;
+        host_id?: string | null;
         /**
-         * Filter by software item UUID
+         * Filter by software item UUID.
          */
-        software_item_id?: string;
+        software_item_id?: string | null;
         /**
-         * Filter by status (pending, in_progress, completed, failed)
+         * Filter by status (pending, in_progress, completed, failed).
          */
-        status?: string;
+        status?: null | UpdateStatus;
         /**
-         * Page number (1-indexed, default 1)
+         * Page number (1-indexed). Defaults to 1.
          */
-        page?: number;
+        page?: number | null;
         /**
-         * Items per page (default 20, max 1000)
+         * Items per page. Defaults to 20, max 1000.
          */
-        per_page?: number;
+        per_page?: number | null;
     };
     url: '/api/v1/update-history';
 };

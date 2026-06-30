@@ -135,8 +135,11 @@ impl Validate for SetHostTagsRequest {
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::IntoParams))]
 pub struct ListHostTagsQuery {
+    /// Page number (1-indexed). Defaults to 1.
     pub page: Option<u64>,
+    /// Items per page. Defaults to 20, max 1000.
     pub per_page: Option<u64>,
+    /// Filter by name (contains).
     pub search: Option<String>,
 }
 

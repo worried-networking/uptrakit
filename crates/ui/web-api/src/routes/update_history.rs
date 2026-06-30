@@ -34,13 +34,7 @@ pub use uptrakit_web_api_types::update_history::{
 #[utoipa::path(
     get,
     path = "/api/v1/update-history",
-    params(
-        ("host_id" = Option<String>, Query, description = "Filter by host UUID"),
-        ("software_item_id" = Option<String>, Query, description = "Filter by software item UUID"),
-        ("status" = Option<String>, Query, description = "Filter by status (pending, in_progress, completed, failed)"),
-        ("page" = Option<u64>, Query, description = "Page number (1-indexed, default 1)"),
-        ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)")
-    ),
+    params(UpdateHistoryQuery),
     responses(
         (status = 200, description = "Paginated list of update history records", body = PaginatedResponse<UpdateHistoryResponse>),
         (status = 401, description = "Not authenticated"),

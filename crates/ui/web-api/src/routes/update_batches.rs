@@ -347,11 +347,7 @@ pub async fn trigger_item_batch_update(
 #[utoipa::path(
     get,
     path = "/api/v1/update-batches",
-    params(
-        ("status" = Option<String>, Query, description = "Filter by batch status (in_progress, completed, partially_completed)"),
-        ("page" = Option<u64>, Query, description = "Page number (1-indexed, default 1)"),
-        ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)")
-    ),
+    params(UpdateBatchListQuery),
     responses(
         (status = 200, description = "Paginated list of update batches", body = PaginatedResponse<UpdateBatchSummaryResponse>),
         (status = 401, description = "Not authenticated"),

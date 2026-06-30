@@ -36,10 +36,7 @@ pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams
 #[utoipa::path(
     get,
     path = "/api/v1/autodiscovery/ignores",
-    params(
-        ("page" = Option<u64>, Query, description = "Page number (1-indexed, default 1)"),
-        ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)"),
-    ),
+    params(ListIgnoresParams),
     extensions(("x-required-permission" = json!("view_software"))),
     responses(
         (status = 200, description = "Paginated list of ignore rules", body = PaginatedResponse<SoftwareIgnoreResponse>),
@@ -481,9 +478,11 @@ pub async fn batch_autodiscovery_ignores(
     (StatusCode::OK, Json(response)).into_response()
 }
 
-#[derive(serde::Deserialize, Default)]
+#[derive(serde::Deserialize, Default, utoipa::IntoParams)]
 pub struct ListIgnoresParams {
+    /// Page number (1-indexed). Defaults to 1.
     pub page: Option<u64>,
+    /// Items per page. Defaults to 20, max 1000.
     pub per_page: Option<u64>,
 }
 
