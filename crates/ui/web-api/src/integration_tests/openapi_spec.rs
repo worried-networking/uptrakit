@@ -35,14 +35,14 @@ async fn openapi_json_is_up_to_date() {
 
     let committed = std::fs::read_to_string(&path).unwrap_or_else(|_| {
         panic!(
-            "missing {}; run UPDATE_OPENAPI=1 cargo test -p uptrakit-web-api --all-features openapi_",
+            "missing {}; regenerate the spec + frontend client with: ./scripts/regen-api.sh",
             path.display()
         )
     });
     assert_eq!(
         committed.trim_end(),
         generated.trim_end(),
-        "openapi.json is stale; regenerate with: UPDATE_OPENAPI=1 cargo test -p uptrakit-web-api --all-features openapi_"
+        "openapi.json is stale; regenerate the spec + frontend client with: ./scripts/regen-api.sh"
     );
 }
 
