@@ -355,7 +355,7 @@ pub async fn create_plugin_config(
 }
 
 /// Query parameters for listing plugin configurations.
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize, utoipa::IntoParams)]
 pub struct ListPluginConfigsParams {
     /// Page number (1-indexed, default 1).
     pub page: Option<u64>,
@@ -378,11 +378,7 @@ impl From<&ListPluginConfigsParams> for PaginationParams {
 #[utoipa::path(
     get,
     path = "/api/v1/plugin-configs",
-    params(
-        ("page" = Option<u64>, Query, description = "Page number (1-indexed, default 1)"),
-        ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)"),
-        ("plugin_type" = Option<String>, Query, description = "Filter by plugin type identifier")
-    ),
+    params(ListPluginConfigsParams),
     extensions(("x-required-permission" = json!("view_software"))),
     responses(
         (status = 200, description = "Paginated list of plugin configs", body = PaginatedResponse<PluginConfigResponse>),

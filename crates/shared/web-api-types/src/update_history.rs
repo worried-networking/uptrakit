@@ -63,8 +63,11 @@ impl std::str::FromStr for UpdateStatus {
 #[derive(Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema, utoipa::IntoParams))]
 pub struct UpdateHistoryQuery {
+    /// Filter by host UUID.
     pub host_id: Option<Uuid>,
+    /// Filter by software item UUID.
     pub software_item_id: Option<Uuid>,
+    /// Filter by status (pending, in_progress, completed, failed).
     pub status: Option<UpdateStatus>,
     /// Page number (1-indexed). Defaults to 1.
     pub page: Option<u64>,

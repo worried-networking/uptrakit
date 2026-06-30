@@ -232,10 +232,7 @@ pub async fn create_enrollment_token(
 #[utoipa::path(
     get,
     path = "/api/v1/enrollment-tokens",
-    params(
-        ("page" = Option<u64>, Query, description = "Page number (1-indexed, default 1)"),
-        ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)")
-    ),
+    params(ListEnrollmentTokensQuery),
     responses(
         (status = 200, description = "Paginated list of enrollment tokens", body = PaginatedResponse<EnrollmentTokenResponse>),
         (status = 401, description = "Not authenticated"),

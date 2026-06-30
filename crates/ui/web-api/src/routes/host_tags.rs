@@ -36,11 +36,7 @@ pub use uptrakit_web_api_types::pagination::PaginatedResponse;
 #[utoipa::path(
     get,
     path = "/api/v1/host-tags",
-    params(
-        ("page" = Option<u64>, Query, description = "Page number (1-indexed, default 1)"),
-        ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)"),
-        ("search" = Option<String>, Query, description = "Filter by name (contains)")
-    ),
+    params(ListHostTagsQuery),
     responses(
         (status = 200, description = "Paginated list of host tags", body = PaginatedResponse<HostTagResponse>),
         (status = 401, description = "Not authenticated"),

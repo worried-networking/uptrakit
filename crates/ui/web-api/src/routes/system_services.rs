@@ -71,12 +71,7 @@ fn batch_action_to_audit_action(action: &str) -> Option<uptrakit_audit_log::Regi
 #[utoipa::path(
     get,
     path = "/api/v1/system-services",
-    params(
-        ("capability" = Option<String>, Query, description = "Filter by capability (update_tracking, scheduler)"),
-        ("status" = Option<String>, Query, description = "Filter by status (pending, approved, rejected, deactivated)"),
-        ("page" = Option<u64>, Query, description = "Page number (1-indexed, default 1)"),
-        ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)")
-    ),
+    params(ListSystemServicesQuery),
     responses(
         (status = 200, description = "Paginated list of system services", body = PaginatedResponse<SystemServiceResponse>),
         (status = 401, description = "Not authenticated"),

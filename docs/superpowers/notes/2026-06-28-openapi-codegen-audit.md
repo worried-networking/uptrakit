@@ -406,11 +406,13 @@ two highest-traffic ones (`client.ts`, `errors.ts`) are green and the rest are o
 
 ### Deferred follow-up (noted, not blocking)
 
-- 8 web-api list handlers still use a manual `params(...)` block that matches their `IntoParams`
-  struct field-count _today_ but could silently drift later (the bug class Task 10 hit):
-  `list_audit_logs`, `list_system_audit_logs`, `list_hosts`, `list_host_tags`,
-  `list_enrollment_tokens`, `list_system_enrollment_tokens`, `list_batches`, `list_update_history`,
-  `list_system_services`. Converting each to `params(<Struct>)` would make them drift-proof.
+- **RESOLVED:** all 14 web-api **list** handlers that used a manual `params(...)` block were converted
+  to `params(<IntoParamsStruct>)` (drift-proof), eliminating the class for list endpoints. Two
+  remaining **non-list** query handlers still use manual `params(...)` blocks with a backing
+  `Query<Struct>` extractor — the same drift class, left as a follow-up: `oidc_callback`
+  (`Query<OidcCallbackParams>`) and `delete_host_assignment`'s `ignore` query
+  (`Query<DeleteHostAssignmentParams>`). Convert them the same way (add `IntoParams` + `params(<Struct>)`)
+  when convenient.
 - `PluginRole`'s manual `PartialSchema` impl hardcodes its 5 wire strings inline (unlike `Permission`,
   which sources from `Self::all()`, and the `wire_safe_enum!` macro, which sources from `$wire`). A
   future 6th variant would be silently omitted from the schema, and `openapi_json_is_up_to_date`

@@ -34,11 +34,15 @@ pub use uptrakit_web_api_types::pagination::PaginatedResponse;
 // Query params
 // ---------------------------------------------------------------------------
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::IntoParams)]
 pub struct ListRulesQuery {
+    /// Filter by channel ID.
     pub channel_id: Option<Uuid>,
+    /// Filter by event type.
     pub event_type: Option<String>,
+    /// Page number (1-indexed). Defaults to 1.
     pub page: Option<u64>,
+    /// Items per page. Defaults to 20, max 1000.
     pub per_page: Option<u64>,
 }
 
@@ -324,10 +328,7 @@ pub async fn create_channel(
 #[utoipa::path(
     get,
     path = "/api/v1/notifications/channels",
-    params(
-        ("page" = Option<u64>, Query, description = "Page number (1-indexed, default 1)"),
-        ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)")
-    ),
+    params(PaginationParams),
     responses(
         (status = 200, description = "Paginated list of channels", body = PaginatedResponse<NotificationChannelResponse>),
         (status = 401, description = "Not authenticated"),
@@ -1007,12 +1008,7 @@ pub async fn create_rule(
 #[utoipa::path(
     get,
     path = "/api/v1/notifications/rules",
-    params(
-        ("channel_id" = Option<Uuid>, Query, description = "Filter by channel ID"),
-        ("event_type" = Option<String>, Query, description = "Filter by event type"),
-        ("page" = Option<u64>, Query, description = "Page number (1-indexed, default 1)"),
-        ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)")
-    ),
+    params(ListRulesQuery),
     responses(
         (status = 200, description = "Paginated list of rules", body = PaginatedResponse<NotificationRuleResponse>),
         (status = 401, description = "Not authenticated"),
@@ -1360,10 +1356,7 @@ pub async fn delete_rule(
 #[utoipa::path(
     get,
     path = "/api/v1/notifications/log",
-    params(
-        ("page" = Option<u64>, Query, description = "Page number (1-indexed, default 1)"),
-        ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)")
-    ),
+    params(PaginationParams),
     responses(
         (status = 200, description = "Paginated list of log entries", body = PaginatedResponse<NotificationLogResponse>),
         (status = 401, description = "Not authenticated"),

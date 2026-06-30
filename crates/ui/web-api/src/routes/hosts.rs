@@ -42,10 +42,7 @@ pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams
 #[utoipa::path(
     get,
     path = "/api/v1/hosts",
-    params(
-        ("page" = Option<u64>, Query, description = "Page number (1-indexed, default 1)"),
-        ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)")
-    ),
+    params(PaginationParams),
     responses(
         (status = 200, description = "Paginated list of hosts", body = PaginatedResponse<HostResponse>),
         (status = 401, description = "Not authenticated"),

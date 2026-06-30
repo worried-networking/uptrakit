@@ -85,10 +85,13 @@
           {
             "name": "page",
             "in": "query",
-            "description": "Page number (1-indexed, default 1)",
+            "description": "Page number (1-based). Defaults to 1.",
             "required": false,
             "schema": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64",
               "minimum": 0
             }
@@ -96,10 +99,13 @@
           {
             "name": "per_page",
             "in": "query",
-            "description": "Items per page (default 20, max 1000)",
+            "description": "Items per page. Defaults to 20, max 1000.",
             "required": false,
             "schema": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64",
               "minimum": 0
             }
@@ -107,93 +113,123 @@
           {
             "name": "actor_type",
             "in": "query",
-            "description": "Filter by actor type: user, api_token, oidc, service, system",
+            "description": "Filter by actor type: `\"user\"`, `\"api_token\"`, `\"oidc\"`, `\"service\"`, `\"system\"`.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "action_type",
             "in": "query",
-            "description": "Filter by semantic action type",
+            "description": "Filter by semantic action type.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "outcome",
             "in": "query",
-            "description": "Filter by action outcome",
+            "description": "Filter by action outcome.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "target_type",
             "in": "query",
-            "description": "Filter by semantic target type",
+            "description": "Filter by semantic target type.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "target_id",
             "in": "query",
-            "description": "Filter by semantic target id",
+            "description": "Filter by semantic target id.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "from",
             "in": "query",
-            "description": "Lower bound timestamp (inclusive), RFC 3339",
+            "description": "Lower bound timestamp (inclusive), RFC 3339 format.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "to",
             "in": "query",
-            "description": "Upper bound timestamp (inclusive), RFC 3339",
+            "description": "Upper bound timestamp (inclusive), RFC 3339 format.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "actor_id",
             "in": "query",
-            "description": "Filter by actor UUID",
+            "description": "Filter entries by a specific actor UUID.",
             "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "format": "uuid"
             }
           },
           {
             "name": "correlation_id",
             "in": "query",
-            "description": "Filter by correlation UUID",
+            "description": "Filter entries by correlation UUID.",
             "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "format": "uuid"
             }
           },
           {
             "name": "action_kind",
             "in": "query",
-            "description": "Filter by action kind: stateful, event",
+            "description": "Filter by action kind: `\"stateful\"` or `\"event\"`.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         ],
@@ -1170,10 +1206,13 @@
           {
             "name": "page",
             "in": "query",
-            "description": "Page number (1-indexed, default 1)",
+            "description": "Page number (1-indexed). Defaults to 1.",
             "required": false,
             "schema": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64",
               "minimum": 0
             }
@@ -1181,10 +1220,13 @@
           {
             "name": "per_page",
             "in": "query",
-            "description": "Items per page (default 20, max 1000)",
+            "description": "Items per page. Defaults to 20, max 1000.",
             "required": false,
             "schema": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64",
               "minimum": 0
             }
@@ -1476,10 +1518,13 @@
           {
             "name": "page",
             "in": "query",
-            "description": "Page number (1-indexed, default 1)",
+            "description": "Page number (1-indexed). Defaults to 1.",
             "required": false,
             "schema": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64",
               "minimum": 0
             }
@@ -1487,10 +1532,13 @@
           {
             "name": "per_page",
             "in": "query",
-            "description": "Items per page (default 20, max 1000)",
+            "description": "Items per page. Defaults to 20, max 1000.",
             "required": false,
             "schema": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64",
               "minimum": 0
             }
@@ -2130,10 +2178,13 @@
           {
             "name": "page",
             "in": "query",
-            "description": "Page number (1-indexed, default 1)",
+            "description": "Page number (1-indexed). Defaults to 1.",
             "required": false,
             "schema": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64",
               "minimum": 0
             }
@@ -2141,10 +2192,13 @@
           {
             "name": "per_page",
             "in": "query",
-            "description": "Items per page (default 20, max 1000)",
+            "description": "Items per page. Defaults to 20, max 1000.",
             "required": false,
             "schema": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64",
               "minimum": 0
             }
@@ -2152,10 +2206,13 @@
           {
             "name": "search",
             "in": "query",
-            "description": "Filter by name (contains)",
+            "description": "Filter by name (contains).",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         ],
@@ -2439,10 +2496,13 @@
           {
             "name": "page",
             "in": "query",
-            "description": "Page number (1-indexed, default 1)",
+            "description": "Page number (1-indexed). Defaults to 1.",
             "required": false,
             "schema": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64",
               "minimum": 0
             }
@@ -2450,10 +2510,13 @@
           {
             "name": "per_page",
             "in": "query",
-            "description": "Items per page (default 20, max 1000)",
+            "description": "Items per page. Defaults to 20, max 1000.",
             "required": false,
             "schema": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64",
               "minimum": 0
             }
@@ -3277,10 +3340,13 @@
           {
             "name": "page",
             "in": "query",
-            "description": "Page number (1-indexed, default 1)",
+            "description": "Page number (1-indexed). Defaults to 1.",
             "required": false,
             "schema": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64",
               "minimum": 0
             }
@@ -3288,10 +3354,13 @@
           {
             "name": "per_page",
             "in": "query",
-            "description": "Items per page (default 20, max 1000)",
+            "description": "Items per page. Defaults to 20, max 1000.",
             "required": false,
             "schema": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64",
               "minimum": 0
             }
@@ -3572,10 +3641,13 @@
           {
             "name": "page",
             "in": "query",
-            "description": "Page number (1-indexed, default 1)",
+            "description": "Page number (1-indexed). Defaults to 1.",
             "required": false,
             "schema": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64",
               "minimum": 0
             }
@@ -3583,10 +3655,13 @@
           {
             "name": "per_page",
             "in": "query",
-            "description": "Items per page (default 20, max 1000)",
+            "description": "Items per page. Defaults to 20, max 1000.",
             "required": false,
             "schema": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64",
               "minimum": 0
             }
@@ -3629,29 +3704,38 @@
           {
             "name": "channel_id",
             "in": "query",
-            "description": "Filter by channel ID",
+            "description": "Filter by channel ID.",
             "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "format": "uuid"
             }
           },
           {
             "name": "event_type",
             "in": "query",
-            "description": "Filter by event type",
+            "description": "Filter by event type.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "page",
             "in": "query",
-            "description": "Page number (1-indexed, default 1)",
+            "description": "Page number (1-indexed). Defaults to 1.",
             "required": false,
             "schema": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64",
               "minimum": 0
             }
@@ -3659,10 +3743,13 @@
           {
             "name": "per_page",
             "in": "query",
-            "description": "Items per page (default 20, max 1000)",
+            "description": "Items per page. Defaults to 20, max 1000.",
             "required": false,
             "schema": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64",
               "minimum": 0
             }
@@ -4002,10 +4089,13 @@
           {
             "name": "page",
             "in": "query",
-            "description": "Page number (1-indexed, default 1)",
+            "description": "Page number (1-indexed, default 1).",
             "required": false,
             "schema": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64",
               "minimum": 0
             }
@@ -4013,10 +4103,13 @@
           {
             "name": "per_page",
             "in": "query",
-            "description": "Items per page (default 20, max 1000)",
+            "description": "Items per page (default 20, max 1000).",
             "required": false,
             "schema": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64",
               "minimum": 0
             }
@@ -4024,10 +4117,13 @@
           {
             "name": "plugin_type",
             "in": "query",
-            "description": "Filter by plugin type identifier",
+            "description": "Filter by plugin type (e.g. `infrastructure_proxmox`). Returns all types when absent.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         ],
@@ -4851,28 +4947,41 @@
           {
             "name": "capability",
             "in": "query",
-            "description": "Filter by capability (software_discovery, update_tracking, ssh_remote, scheduler)",
+            "description": "Filter by capability.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "status",
             "in": "query",
-            "description": "Filter by status (pending, approved, rejected, deactivated)",
+            "description": "Filter by status: `pending`, `approved`, `rejected`, `deactivated`.",
             "required": false,
             "schema": {
-              "type": "string"
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/components/schemas/ServiceStatus"
+                }
+              ]
             }
           },
           {
             "name": "page",
             "in": "query",
-            "description": "Page number (1-indexed, default 1)",
+            "description": "Page number (1-indexed). Defaults to 1.",
             "required": false,
             "schema": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64",
               "minimum": 0
             }
@@ -4880,10 +4989,13 @@
           {
             "name": "per_page",
             "in": "query",
-            "description": "Items per page (default 20, max 1000)",
+            "description": "Items per page. Defaults to 20, max 1000.",
             "required": false,
             "schema": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64",
               "minimum": 0
             }
@@ -6827,10 +6939,13 @@
           {
             "name": "page",
             "in": "query",
-            "description": "Page number (1-indexed, default 1)",
+            "description": "Page number (1-based). Defaults to 1.",
             "required": false,
             "schema": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64",
               "minimum": 0
             }
@@ -6838,10 +6953,13 @@
           {
             "name": "per_page",
             "in": "query",
-            "description": "Items per page (default 20, max 1000)",
+            "description": "Items per page. Defaults to 20, max 1000.",
             "required": false,
             "schema": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64",
               "minimum": 0
             }
@@ -6849,93 +6967,123 @@
           {
             "name": "actor_type",
             "in": "query",
-            "description": "Filter by actor type: user, api_token, oidc, service, system",
+            "description": "Filter by actor type: `\"user\"`, `\"api_token\"`, `\"oidc\"`, `\"service\"`, `\"system\"`.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "action_type",
             "in": "query",
-            "description": "Filter by semantic action type",
+            "description": "Filter by semantic action type.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "outcome",
             "in": "query",
-            "description": "Filter by action outcome",
+            "description": "Filter by action outcome.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "target_type",
             "in": "query",
-            "description": "Filter by semantic target type",
+            "description": "Filter by semantic target type.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "target_id",
             "in": "query",
-            "description": "Filter by semantic target id",
+            "description": "Filter by semantic target id.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "from",
             "in": "query",
-            "description": "Lower bound timestamp (inclusive), RFC 3339",
+            "description": "Lower bound timestamp (inclusive), RFC 3339 format.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "to",
             "in": "query",
-            "description": "Upper bound timestamp (inclusive), RFC 3339",
+            "description": "Upper bound timestamp (inclusive), RFC 3339 format.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "actor_id",
             "in": "query",
-            "description": "Filter by actor UUID",
+            "description": "Filter entries by a specific actor UUID.",
             "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "format": "uuid"
             }
           },
           {
             "name": "correlation_id",
             "in": "query",
-            "description": "Filter by correlation UUID",
+            "description": "Filter entries by correlation UUID.",
             "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "format": "uuid"
             }
           },
           {
             "name": "action_kind",
             "in": "query",
-            "description": "Filter by action kind: stateful, event",
+            "description": "Filter by action kind: `\"stateful\"` or `\"event\"`.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         ],
@@ -6979,10 +7127,13 @@
           {
             "name": "page",
             "in": "query",
-            "description": "Page number (1-indexed, default 1)",
+            "description": "Page number (1-indexed). Defaults to 1.",
             "required": false,
             "schema": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64",
               "minimum": 0
             }
@@ -6990,10 +7141,13 @@
           {
             "name": "per_page",
             "in": "query",
-            "description": "Items per page (default 20, max 1000)",
+            "description": "Items per page. Defaults to 20, max 1000.",
             "required": false,
             "schema": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64",
               "minimum": 0
             }
@@ -7167,28 +7321,41 @@
           {
             "name": "capability",
             "in": "query",
-            "description": "Filter by capability (update_tracking, scheduler)",
+            "description": "Filter by capability.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "status",
             "in": "query",
-            "description": "Filter by status (pending, approved, rejected, deactivated)",
+            "description": "Filter by status: `pending`, `approved`, `rejected`, `deactivated`.",
             "required": false,
             "schema": {
-              "type": "string"
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/components/schemas/ServiceStatus"
+                }
+              ]
             }
           },
           {
             "name": "page",
             "in": "query",
-            "description": "Page number (1-indexed, default 1)",
+            "description": "Page number (1-indexed). Defaults to 1.",
             "required": false,
             "schema": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64",
               "minimum": 0
             }
@@ -7196,10 +7363,13 @@
           {
             "name": "per_page",
             "in": "query",
-            "description": "Items per page (default 20, max 1000)",
+            "description": "Items per page. Defaults to 20, max 1000.",
             "required": false,
             "schema": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64",
               "minimum": 0
             }
@@ -7567,19 +7737,25 @@
           {
             "name": "status",
             "in": "query",
-            "description": "Filter by batch status (in_progress, completed, partially_completed)",
+            "description": "Filter by batch status.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "page",
             "in": "query",
-            "description": "Page number (1-indexed, default 1)",
+            "description": "Page number (1-indexed). Defaults to 1.",
             "required": false,
             "schema": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64",
               "minimum": 0
             }
@@ -7587,10 +7763,13 @@
           {
             "name": "per_page",
             "in": "query",
-            "description": "Items per page (default 20, max 1000)",
+            "description": "Items per page. Defaults to 20, max 1000.",
             "required": false,
             "schema": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64",
               "minimum": 0
             }
@@ -7726,37 +7905,55 @@
           {
             "name": "host_id",
             "in": "query",
-            "description": "Filter by host UUID",
+            "description": "Filter by host UUID.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
             }
           },
           {
             "name": "software_item_id",
             "in": "query",
-            "description": "Filter by software item UUID",
+            "description": "Filter by software item UUID.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
             }
           },
           {
             "name": "status",
             "in": "query",
-            "description": "Filter by status (pending, in_progress, completed, failed)",
+            "description": "Filter by status (pending, in_progress, completed, failed).",
             "required": false,
             "schema": {
-              "type": "string"
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/components/schemas/UpdateStatus"
+                }
+              ]
             }
           },
           {
             "name": "page",
             "in": "query",
-            "description": "Page number (1-indexed, default 1)",
+            "description": "Page number (1-indexed). Defaults to 1.",
             "required": false,
             "schema": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64",
               "minimum": 0
             }
@@ -7764,10 +7961,13 @@
           {
             "name": "per_page",
             "in": "query",
-            "description": "Items per page (default 20, max 1000)",
+            "description": "Items per page. Defaults to 20, max 1000.",
             "required": false,
             "schema": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64",
               "minimum": 0
             }

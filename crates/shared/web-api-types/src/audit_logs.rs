@@ -106,7 +106,7 @@ pub struct SystemAuditLogResponse {
 pub struct AuditLogListParams {
     /// Page number (1-based). Defaults to 1.
     pub page: Option<u64>,
-    /// Number of entries per page. Defaults to 25, maximum 200.
+    /// Items per page. Defaults to 20, max 1000.
     pub per_page: Option<u64>,
     /// Filter by actor type: `"user"`, `"api_token"`, `"oidc"`, `"service"`, `"system"`.
     pub actor_type: Option<String>,
