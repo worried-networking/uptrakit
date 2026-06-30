@@ -13,7 +13,7 @@
 		updateZeroconfSettings,
 		rotateCa
 	} from '$lib/api';
-	import { Permission, hasAnyPermission, hasPermissionValue } from '$lib/types';
+	import { Permission, hasAnyPermission, hasPermissionValue } from '$lib/api';
 	import type { SystemAlert } from '$lib/api';
 	import { showSuccess, showError, clearError } from '$lib/notifications.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
@@ -85,10 +85,10 @@
 	const canManageSystemServices = $derived(
 		hasAnyPermission(
 			getUser(),
-			Permission.ApproveSystemServices,
-			Permission.RejectSystemServices,
-			Permission.RemoveSystemServices,
-			Permission.UpdateSystemServices
+			Permission.APPROVE_SYSTEM_SERVICES,
+			Permission.REJECT_SYSTEM_SERVICES,
+			Permission.REMOVE_SYSTEM_SERVICES,
+			Permission.UPDATE_SYSTEM_SERVICES
 		)
 	);
 

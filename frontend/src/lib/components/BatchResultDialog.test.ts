@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import BatchResultDialog from './BatchResultDialog.svelte';
-import type { BatchActionResponse } from '$lib/types';
+import type { BatchActionResponse } from '$lib/api';
 
 afterEach(() => {
 	cleanup();

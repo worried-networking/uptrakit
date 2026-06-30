@@ -47,9 +47,9 @@
 		AttestationStatus,
 		BatchActionResponse,
 		MergeSoftwareItemSummary
-	} from '$lib/types';
+	} from '$lib/api';
 	import SurfaceReadPanel from '$lib/components/surfaces/SurfaceReadPanel.svelte';
-	import { Permission, hasAnyPermission, hasPermissionValue } from '$lib/types';
+	import { Permission, hasAnyPermission, hasPermissionValue } from '$lib/api';
 	import {
 		getSurfaceReadLoading,
 		getSurfaceReadModel,
@@ -168,22 +168,22 @@
 			: undefined
 	);
 
-	const canView = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
+	const canView = $derived(getUser()?.permissions.includes(Permission.VIEW_SOFTWARE) ?? false);
 	const canManage = $derived(
 		hasAnyPermission(
 			getUser(),
-			Permission.CreateSoftware,
-			Permission.UpdateSoftware,
-			Permission.DeleteSoftware,
-			Permission.TriggerChecks,
-			Permission.TriggerUpdates
+			Permission.CREATE_SOFTWARE,
+			Permission.UPDATE_SOFTWARE,
+			Permission.DELETE_SOFTWARE,
+			Permission.TRIGGER_CHECKS,
+			Permission.TRIGGER_UPDATES
 		)
 	);
-	const canTriggerChecks = $derived(getUser()?.permissions.includes(Permission.TriggerChecks) ?? false);
-	const canTriggerUpdates = $derived(getUser()?.permissions.includes(Permission.TriggerUpdates) ?? false);
+	const canTriggerChecks = $derived(getUser()?.permissions.includes(Permission.TRIGGER_CHECKS) ?? false);
+	const canTriggerUpdates = $derived(getUser()?.permissions.includes(Permission.TRIGGER_UPDATES) ?? false);
 	const canMergeSoftware = $derived(
-		(getUser()?.permissions.includes(Permission.UpdateSoftware) ?? false) &&
-			(getUser()?.permissions.includes(Permission.DeleteSoftware) ?? false)
+		(getUser()?.permissions.includes(Permission.UPDATE_SOFTWARE) ?? false) &&
+			(getUser()?.permissions.includes(Permission.DELETE_SOFTWARE) ?? false)
 	);
 	const itemsEmptyState = $derived.by(() => {
 		if (updatable.value) {

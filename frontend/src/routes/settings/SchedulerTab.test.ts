@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/svelte';
 
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api')>()),
 	listScheduledTasks: vi.fn().mockResolvedValue({
 		data: [
 			{
@@ -37,7 +38,7 @@ vi.mock('$lib/auth.svelte', () => ({
 vi.mock('$lib/notifications.svelte', () => ({ showSuccess: vi.fn(), showError: vi.fn() }));
 
 import * as api from '$lib/api';
-import { Permission } from '$lib/types';
+import { Permission } from '$lib/api';
 import * as auth from '$lib/auth.svelte';
 import SchedulerTab from './SchedulerTab.svelte';
 
@@ -50,7 +51,7 @@ function makeUser() {
 		first_name: 'A',
 		last_name: 'B',
 		has_pending_email_change: false,
-		permissions: [Permission.ManageScheduler]
+		permissions: [Permission.MANAGE_SCHEDULER]
 	} as ReturnType<typeof auth.getUser>;
 }
 

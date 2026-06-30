@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import type { MergeSoftwareItemSummary } from '$lib/types';
+import type { MergeSoftwareItemSummary } from '$lib/api';
 
 vi.mock('$lib/notifications.svelte', () => ({
 	showError: vi.fn(),

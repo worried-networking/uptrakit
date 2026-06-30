@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 
-vi.mock('$lib/api', () => ({ resetData: vi.fn() }));
+vi.mock('$lib/api', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api')>()),
+	resetData: vi.fn()
+}));
 vi.mock('$lib/stores/network.svelte', () => ({ getIsOnline: vi.fn(() => true) }));
 
 import * as api from '$lib/api';

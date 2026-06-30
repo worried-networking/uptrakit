@@ -24,7 +24,7 @@
 	import { AdminEventType } from '$lib/sse';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
-	import { Permission, PluginCapability, hasAnyPermission, hasPermissionValue } from '$lib/types';
+	import { Permission, PluginCapability, hasAnyPermission, hasPermissionValue } from '$lib/api';
 	import SurfaceReadPanel from '$lib/components/surfaces/SurfaceReadPanel.svelte';
 	import { getSurfaceReadModel, getSurfacesBySlot, loadSurfaceReadModels } from '$lib/surfaces/registry.svelte';
 	import type {
@@ -36,7 +36,7 @@
 		HostDiscoveryAllowlistEntry,
 		HostTagResponse,
 		SoftwareItemResponse
-	} from '$lib/types';
+	} from '$lib/api';
 	import type { PluginTypeInfo } from '$lib/api';
 	import Button from '$lib/components/Button.svelte';
 	import TagBadge from '$lib/components/TagBadge.svelte';
@@ -70,7 +70,7 @@
 	// Plugin types (loaded lazily when canViewSoftware)
 	let pluginTypes: PluginTypeInfo[] = $state([]);
 	const discoveryPluginTypes = $derived(
-		pluginTypes.filter((t) => t.capabilities.includes(PluginCapability.DiscoverLocalSoftware))
+		pluginTypes.filter((t) => t.capabilities.includes(PluginCapability.DISCOVER_LOCAL_SOFTWARE))
 	);
 
 	// Discovery allowlist state
@@ -96,18 +96,18 @@
 	let assignedSoftwareError: string | null = $state(null);
 	const assignedSoftwareTotalPages = $derived(Math.ceil(assignedSoftwareTotal / 20));
 
-	const canManage = $derived(hasAnyPermission(getUser(), Permission.UpdateHosts, Permission.DeactivateHosts));
+	const canManage = $derived(hasAnyPermission(getUser(), Permission.UPDATE_HOSTS, Permission.DEACTIVATE_HOSTS));
 	const canManageSoftware = $derived(
 		hasAnyPermission(
 			getUser(),
-			Permission.CreateSoftware,
-			Permission.UpdateSoftware,
-			Permission.DeleteSoftware,
-			Permission.TriggerChecks,
-			Permission.TriggerUpdates
+			Permission.CREATE_SOFTWARE,
+			Permission.UPDATE_SOFTWARE,
+			Permission.DELETE_SOFTWARE,
+			Permission.TRIGGER_CHECKS,
+			Permission.TRIGGER_UPDATES
 		)
 	);
-	const canViewSoftware = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
+	const canViewSoftware = $derived(getUser()?.permissions.includes(Permission.VIEW_SOFTWARE) ?? false);
 	const hostDetailSlotSurfaces = $derived(getSurfacesBySlot('host_detail.tabs'));
 	const hostDetailSlotRenderableSurfaces = $derived(
 		hostDetailSlotSurfaces.filter((surface) => hasPermissionValue(getUser(), surface.required_permission))
@@ -248,7 +248,7 @@
 	function openSetTagsModal() {
 		if (!host) return;
 		selectedTagIds.clear();
-		for (const t of host.tags) selectedTagIds.add(t.id);
+		for (const t of host.tags ?? []) selectedTagIds.add(t.id);
 		showSetTagsModal = true;
 	}
 
@@ -520,11 +520,11 @@
 							<Button variant="secondary" size="sm" onclick={openSetTagsModal}>Set Tags</Button>
 						{/if}
 					</div>
-					{#if host.tags.length === 0}
+					{#if (host.tags ?? []).length === 0}
 						<p class="text-sm text-[var(--text-muted)]">No tags assigned to this host.</p>
 					{:else}
 						<div class="flex flex-wrap gap-2">
-							{#each host.tags as tag (tag.id)}
+							{#each host.tags ?? [] as tag (tag.id)}
 								<TagBadge name={tag.name} color={tag.color} />
 							{/each}
 						</div>

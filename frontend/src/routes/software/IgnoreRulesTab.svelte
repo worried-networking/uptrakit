@@ -16,10 +16,10 @@
 	import { FormFieldRow, Input, Checkbox } from '$lib/components/forms';
 	import Button from '$lib/components/Button.svelte';
 	import { getUser } from '$lib/auth.svelte';
-	import { Permission } from '$lib/types';
-	import type { SoftwareIgnoreResponse, BatchActionResponse } from '$lib/types';
+	import { Permission } from '$lib/api';
+	import type { SoftwareIgnoreResponse, BatchActionResponse } from '$lib/api';
 
-	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageIgnores) ?? false);
+	const canManage = $derived(getUser()?.permissions.includes(Permission.MANAGE_IGNORES) ?? false);
 
 	let ignores: SoftwareIgnoreResponse[] = $state([]);
 	let ignoresLoading: boolean = $state(true);

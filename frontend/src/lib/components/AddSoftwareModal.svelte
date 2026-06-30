@@ -6,7 +6,7 @@
 	import { createSoftwareItem } from '$lib/api';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { isValidLogoUrl } from '$lib/utils';
-	import type { SoftwareItemResponse } from '$lib/types';
+	import type { SoftwareItemResponse } from '$lib/api';
 
 	let {
 		onclose,

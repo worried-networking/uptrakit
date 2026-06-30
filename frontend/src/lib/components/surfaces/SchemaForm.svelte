@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { FormField, SelectOption } from '$lib/types';
+	import type { FormField, SelectOption } from '$lib/api';
 	import { apiGet } from '$lib/api';
 	import { showError } from '$lib/notifications.svelte';
 	import { SvelteSet } from 'svelte/reactivity';

@@ -2,7 +2,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { page } from '$app/state';
 
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api')>()),
 	authMethods: vi.fn(),
 	deviceAuthApprove: vi.fn(),
 	deviceAuthDeny: vi.fn(),

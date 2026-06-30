@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import SurfaceRenderer from './SurfaceRenderer.svelte';
 
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api')>()),
 	invokeSurfaceInteraction: vi.fn(),
 	sealedBoxEncrypt: vi.fn()
 }));

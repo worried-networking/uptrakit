@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/svelte';
-import { Permission, type PaginatedResponse, type ServiceResponse, type UpdateHistoryResponse } from '$lib/types';
+import { Permission, type PaginatedResponse, type ServiceResponse, type UpdateHistoryResponse } from '$lib/api';
 import homeSource from './+page.svelte?raw';
 
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api')>()),
 	listHosts: vi.fn(),
 	listServices: vi.fn(),
 	listSoftwareItems: vi.fn(),
@@ -28,7 +29,7 @@ const user = {
 	first_name: 'Home',
 	last_name: 'User',
 	has_pending_email_change: false,
-	permissions: [Permission.ViewHosts, Permission.ViewServices, Permission.ViewSoftware]
+	permissions: [Permission.VIEW_HOSTS, Permission.VIEW_SERVICES, Permission.VIEW_SOFTWARE]
 };
 
 function makeServices(items: ServiceResponse[]): PaginatedResponse<ServiceResponse> {

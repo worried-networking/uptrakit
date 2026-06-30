@@ -16,7 +16,8 @@ vi.mock('$lib/surfaces/read-model', () => ({
 	filterSurfacesByPermission: vi.fn(() => []),
 	shouldUseSurfaceRoute: vi.fn(() => false)
 }));
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api')>()),
 	getGithubProviderSettings: vi.fn(),
 	getSystemAlerts: vi.fn(),
 	renewServerCertificate: vi.fn(),

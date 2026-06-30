@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api')>()),
 	listPluginConfigs: vi
 		.fn()
 		.mockResolvedValue({ data: { items: [], total: 0, page: 1, per_page: 20, total_pages: 0 } }),
@@ -45,7 +46,7 @@ vi.mock('$lib/stores/events.svelte', () => ({
 	getLastEvent: vi.fn(() => null)
 }));
 
-import { Permission, type InstancePluginSummary } from '$lib/types';
+import { Permission, type InstancePluginSummary } from '$lib/api';
 import * as auth from '$lib/auth.svelte';
 import * as api from '$lib/api';
 import PluginConfigsTab from './PluginConfigsTab.svelte';
@@ -59,12 +60,12 @@ describe('PluginConfigsTab button variants', () => {
 			last_name: 'B',
 			has_pending_email_change: false,
 			permissions: [
-				Permission.ViewSoftware,
-				Permission.ManageCommands,
-				Permission.TriggerChecks,
-				Permission.UpdateSoftware,
-				Permission.ManageGlobalSettings,
-				Permission.TestPluginConfigs
+				Permission.VIEW_SOFTWARE,
+				Permission.MANAGE_COMMANDS,
+				Permission.TRIGGER_CHECKS,
+				Permission.UPDATE_SOFTWARE,
+				Permission.MANAGE_GLOBAL_SETTINGS,
+				Permission.TEST_PLUGIN_CONFIGS
 			]
 		} as ReturnType<typeof auth.getUser>);
 		const { container } = render(PluginConfigsTab);
@@ -118,11 +119,11 @@ describe('PluginConfigsTab — Instance Plugins section', () => {
 			last_name: 'B',
 			has_pending_email_change: false,
 			permissions: [
-				Permission.ViewSoftware,
-				Permission.ManageCommands,
-				Permission.TriggerChecks,
-				Permission.UpdateSoftware,
-				Permission.TestPluginConfigs
+				Permission.VIEW_SOFTWARE,
+				Permission.MANAGE_COMMANDS,
+				Permission.TRIGGER_CHECKS,
+				Permission.UPDATE_SOFTWARE,
+				Permission.TEST_PLUGIN_CONFIGS
 			]
 		} as ReturnType<typeof auth.getUser>);
 		vi.mocked(api.listInstancePlugins).mockResolvedValue({ data: [dashboardIconsPlugin] } as unknown as Awaited<

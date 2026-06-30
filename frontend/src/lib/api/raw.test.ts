@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiGet, authenticatedFetch, loginRaw } from './raw';
 import { getAccessToken, setAccessToken, setSessionExpired } from '../token-store.svelte';
-import type { RefreshResponse, User } from '../types';
+import type { RefreshResponse, User } from '$lib/api';
 
 // raw.ts (via ./client) imports token state from '../token-store.svelte'; client.ts
 // also registers an onTokenChange listener at module-init time — provide it.

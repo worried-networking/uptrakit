@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/svelte';
 
-vi.mock('$lib/api', () => ({ updateAgentCertificateSettings: vi.fn() }));
+vi.mock('$lib/api', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api')>()),
+	updateAgentCertificateSettings: vi.fn()
+}));
 
 import * as api from '$lib/api';
 import type { AgentCertificateSettingsResponse } from '$lib/api';

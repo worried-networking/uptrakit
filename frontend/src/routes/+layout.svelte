@@ -16,7 +16,7 @@
 	import { getThemeMode, setThemeMode, initTheme, type ThemeMode } from '$lib/theme.svelte';
 	import { getSystemAlerts } from '$lib/api';
 	import { getIsOnline } from '$lib/stores/network.svelte';
-	import { Permission, hasPermissionValue } from '$lib/types';
+	import { Permission, hasPermissionValue } from '$lib/api';
 	import {
 		loadSurfaceRegistry,
 		clearSurfaceRegistry,
@@ -151,7 +151,7 @@
 	});
 
 	$effect(() => {
-		if (getUser()?.permissions.includes(Permission.ManageGlobalSettings)) {
+		if (getUser()?.permissions.includes(Permission.MANAGE_GLOBAL_SETTINGS)) {
 			void fetchAlerts();
 		}
 	});
@@ -166,7 +166,7 @@
 	});
 
 	$effect(() => {
-		if (getUser()?.permissions.includes(Permission.ViewSoftware)) {
+		if (getUser()?.permissions.includes(Permission.VIEW_SOFTWARE)) {
 			void fetchUpdatableSoftwareCount();
 		}
 	});
@@ -188,7 +188,7 @@
 			label: 'System Services',
 			priority: 300,
 			icon: ServerCog,
-			permission: Permission.ViewSystemServices
+			permission: Permission.VIEW_SYSTEM_SERVICES
 		},
 		{ href: '/hosts', label: 'Hosts', priority: 400, icon: HardDrive },
 		{
@@ -196,28 +196,28 @@
 			label: 'Tags',
 			priority: 450,
 			icon: Tags,
-			permission: Permission.ViewHosts
+			permission: Permission.VIEW_HOSTS
 		},
 		{
 			href: '/software',
 			label: 'Software',
 			priority: 500,
 			icon: Package,
-			permission: Permission.ViewSoftware
+			permission: Permission.VIEW_SOFTWARE
 		},
 		{
 			href: '/history',
 			label: 'History',
 			priority: 800,
 			icon: History,
-			permission: Permission.ViewSoftware
+			permission: Permission.VIEW_SOFTWARE
 		},
 		{
 			href: '/audit-logs',
 			label: 'Audit Logs',
 			priority: 900,
 			icon: ScrollText,
-			permission: Permission.ViewAuditLogs
+			permission: Permission.VIEW_AUDIT_LOGS
 		},
 		{
 			href: '/settings',
@@ -225,16 +225,16 @@
 			priority: 1000,
 			icon: Settings,
 			permission: [
-				Permission.ViewSettings,
-				Permission.ManageAuthSettings,
-				Permission.ManageEnrollmentTokens,
-				Permission.ManageAgentCerts,
-				Permission.ViewSoftware,
-				Permission.CreateSoftware,
-				Permission.UpdateSoftware,
-				Permission.DeleteSoftware,
-				Permission.ManageScheduler,
-				Permission.ManageGlobalSettings
+				Permission.VIEW_SETTINGS,
+				Permission.MANAGE_AUTH_SETTINGS,
+				Permission.MANAGE_ENROLLMENT_TOKENS,
+				Permission.MANAGE_AGENT_CERTS,
+				Permission.VIEW_SOFTWARE,
+				Permission.CREATE_SOFTWARE,
+				Permission.UPDATE_SOFTWARE,
+				Permission.DELETE_SOFTWARE,
+				Permission.MANAGE_SCHEDULER,
+				Permission.MANAGE_GLOBAL_SETTINGS
 			]
 		}
 	];

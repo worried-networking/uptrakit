@@ -9,7 +9,8 @@ vi.mock('$lib/notifications.svelte', () => ({
 vi.mock('$lib/utils', () => ({
 	formatDate: (d: string) => d
 }));
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api')>()),
 	getConfigState: vi.fn(),
 	clearCoordinatorDegraded: vi.fn()
 }));
@@ -17,8 +18,8 @@ vi.mock('$lib/api', () => ({
 import * as api from '$lib/api';
 import * as auth from '$lib/auth.svelte';
 import InstanceConfigTab from './InstanceConfigTab.svelte';
-import type { ConfigStateResponse } from '$lib/types';
-import { Permission } from '$lib/types';
+import type { ConfigStateResponse } from '$lib/api';
+import { Permission } from '$lib/api';
 
 const idleState: ConfigStateResponse = {
 	coordinator_state: 'idle',
@@ -79,7 +80,7 @@ describe('InstanceConfigTab', () => {
 			email: 'a@b.com',
 			first_name: 'A',
 			last_name: 'B',
-			permissions: [Permission.ViewInstanceConfigState],
+			permissions: [Permission.VIEW_INSTANCE_CONFIG_STATE],
 			has_pending_email_change: false
 		});
 		render(InstanceConfigTab);
@@ -96,7 +97,7 @@ describe('InstanceConfigTab', () => {
 			email: 'a@b.com',
 			first_name: 'A',
 			last_name: 'B',
-			permissions: [Permission.ViewInstanceConfigState, Permission.ManageInstanceConfigState],
+			permissions: [Permission.VIEW_INSTANCE_CONFIG_STATE, Permission.MANAGE_INSTANCE_CONFIG_STATE],
 			has_pending_email_change: false
 		});
 		render(InstanceConfigTab);

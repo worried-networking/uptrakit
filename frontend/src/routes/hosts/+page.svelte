@@ -4,8 +4,8 @@
 	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
 	import { listHosts, updateHost, deactivateHost, discoverHost, batchHosts, executeBatchChunked } from '$lib/api';
-	import type { HostResponse, BatchActionResponse } from '$lib/types';
-	import { Permission, hasAnyPermission } from '$lib/types';
+	import type { HostResponse, BatchActionResponse } from '$lib/api';
+	import { Permission, hasAnyPermission } from '$lib/api';
 	import { formatDate, parseUrlPage, nextValidPage } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
@@ -291,17 +291,17 @@
 		}
 	}
 
-	const canManage = $derived(hasAnyPermission(getUser(), Permission.UpdateHosts, Permission.DeactivateHosts));
-	const canViewSoftware = $derived(hasAnyPermission(getUser(), Permission.ViewSoftware));
+	const canManage = $derived(hasAnyPermission(getUser(), Permission.UPDATE_HOSTS, Permission.DEACTIVATE_HOSTS));
+	const canViewSoftware = $derived(hasAnyPermission(getUser(), Permission.VIEW_SOFTWARE));
 	const canManageSoftware = $derived(
 		hasAnyPermission(
 			getUser(),
-			Permission.ViewSoftware,
-			Permission.CreateSoftware,
-			Permission.UpdateSoftware,
-			Permission.DeleteSoftware,
-			Permission.TriggerChecks,
-			Permission.TriggerUpdates
+			Permission.VIEW_SOFTWARE,
+			Permission.CREATE_SOFTWARE,
+			Permission.UPDATE_SOFTWARE,
+			Permission.DELETE_SOFTWARE,
+			Permission.TRIGGER_CHECKS,
+			Permission.TRIGGER_UPDATES
 		)
 	);
 

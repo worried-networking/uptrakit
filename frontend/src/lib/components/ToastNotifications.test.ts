@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte';
 import ToastNotifications from './ToastNotifications.svelte';
-import type { SystemAlert } from '$lib/types';
+import type { SystemAlert } from '$lib/api';
 
 const notificationState = vi.hoisted(() => ({
 	successMessage: null as string | null,

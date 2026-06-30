@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
-import { Permission, type UpdateHistoryResponse } from '$lib/types';
+import { Permission, type UpdateHistoryResponse } from '$lib/api';
 import { page } from '$app/state';
 import { goto } from '$app/navigation';
 
@@ -12,7 +12,8 @@ const interactiveMocks = vi.hoisted(() => ({
 
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api')>()),
 	listUpdateHistory: vi.fn(),
 	triggerUpdate: vi.fn(),
 	listSoftwareItems: vi.fn(),
@@ -52,7 +53,7 @@ const user = {
 	first_name: 'History',
 	last_name: 'User',
 	has_pending_email_change: false,
-	permissions: [Permission.ViewSoftware, Permission.TriggerUpdates]
+	permissions: [Permission.VIEW_SOFTWARE, Permission.TRIGGER_UPDATES]
 };
 
 const queuedItem = {
@@ -72,7 +73,8 @@ const queuedItem = {
 	actor_type: 'user',
 	actor_id: 'actor-1',
 	actor_name: 'Alice Smith',
-	created_at: '2026-02-01T10:00:00Z'
+	created_at: '2026-02-01T10:00:00Z',
+	update_category: 'unknown'
 } satisfies UpdateHistoryResponse;
 
 const completedItem = {
@@ -92,7 +94,8 @@ const completedItem = {
 	actor_type: 'user',
 	actor_id: 'actor-5',
 	actor_name: 'Bob Jones',
-	created_at: '2026-02-01T08:00:00Z'
+	created_at: '2026-02-01T08:00:00Z',
+	update_category: 'unknown'
 } satisfies UpdateHistoryResponse;
 
 const failedItem = {
@@ -112,7 +115,8 @@ const failedItem = {
 	actor_type: 'user',
 	actor_id: 'actor-2',
 	actor_name: 'Carol Lee',
-	created_at: '2026-01-31T09:30:00Z'
+	created_at: '2026-01-31T09:30:00Z',
+	update_category: 'unknown'
 } satisfies UpdateHistoryResponse;
 
 const inProgressItem = {
@@ -132,7 +136,8 @@ const inProgressItem = {
 	actor_type: 'user',
 	actor_id: 'actor-3',
 	actor_name: 'Dave Kim',
-	created_at: '2026-01-30T08:00:00Z'
+	created_at: '2026-01-30T08:00:00Z',
+	update_category: 'unknown'
 } satisfies UpdateHistoryResponse;
 
 const pendingItem = {
@@ -152,7 +157,8 @@ const pendingItem = {
 	actor_type: 'user',
 	actor_id: 'actor-4',
 	actor_name: 'Eve Park',
-	created_at: '2026-01-30T12:00:00Z'
+	created_at: '2026-01-30T12:00:00Z',
+	update_category: 'unknown'
 } satisfies UpdateHistoryResponse;
 
 const interruptedItem = {
@@ -172,7 +178,8 @@ const interruptedItem = {
 	actor_type: 'user',
 	actor_id: 'actor-6',
 	actor_name: 'Frank Ng',
-	created_at: '2026-01-30T07:00:00Z'
+	created_at: '2026-01-30T07:00:00Z',
+	update_category: 'unknown'
 } satisfies UpdateHistoryResponse;
 
 describe('interrupted status helpers', () => {

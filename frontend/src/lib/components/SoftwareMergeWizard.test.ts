@@ -8,7 +8,7 @@ import type {
 	MergeSoftwareItemsExecuteResponse,
 	MergeSoftwareItemsPreviewRequest,
 	MergeSoftwareItemsPreviewResponse
-} from '$lib/types';
+} from '$lib/api';
 import SoftwareMergeWizard from './SoftwareMergeWizard.svelte';
 
 vi.mock('$lib/notifications.svelte', () => ({

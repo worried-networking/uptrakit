@@ -4,9 +4,9 @@
 	import { goto } from '$app/navigation';
 	import { getCombinedSettings, listProviders } from '$lib/api';
 	import type { AgentCertificateSettingsResponse } from '$lib/api';
-	import type { EnrollmentTokensSummary } from '$lib/types';
+	import type { EnrollmentTokensSummary } from '$lib/api';
 	import type { OidcProviderResponse } from '$lib/api';
-	import { Permission, hasAnyPermission, hasPermissionValue } from '$lib/types';
+	import { Permission, hasAnyPermission, hasPermissionValue } from '$lib/api';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import SurfaceReadPanel from '$lib/components/surfaces/SurfaceReadPanel.svelte';
 	import {
@@ -53,30 +53,32 @@
 	const canManageSettings = $derived(
 		hasAnyPermission(
 			getUser(),
-			Permission.ManageAuthSettings,
-			Permission.ManageEnrollmentTokens,
-			Permission.ManageAgentCerts
+			Permission.MANAGE_AUTH_SETTINGS,
+			Permission.MANAGE_ENROLLMENT_TOKENS,
+			Permission.MANAGE_AGENT_CERTS
 		)
 	);
-	const canManageOAuthClients = $derived(hasPermissionValue(getUser(), Permission.ManageAuthSettings));
-	const canViewSoftware = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
+	const canManageOAuthClients = $derived(hasPermissionValue(getUser(), Permission.MANAGE_AUTH_SETTINGS));
+	const canViewSoftware = $derived(getUser()?.permissions.includes(Permission.VIEW_SOFTWARE) ?? false);
 	const canViewTypeSettings = $derived(
-		hasAnyPermission(getUser(), Permission.ViewSettings, Permission.ManageGlobalSettings)
+		hasAnyPermission(getUser(), Permission.VIEW_SETTINGS, Permission.MANAGE_GLOBAL_SETTINGS)
 	);
 	const canManageSoftware = $derived(
 		hasAnyPermission(
 			getUser(),
-			Permission.CreateSoftware,
-			Permission.UpdateSoftware,
-			Permission.DeleteSoftware,
-			Permission.TriggerChecks,
-			Permission.TriggerUpdates,
-			Permission.ManageScheduler
+			Permission.CREATE_SOFTWARE,
+			Permission.UPDATE_SOFTWARE,
+			Permission.DELETE_SOFTWARE,
+			Permission.TRIGGER_CHECKS,
+			Permission.TRIGGER_UPDATES,
+			Permission.MANAGE_SCHEDULER
 		)
 	);
-	const canManageGlobalSettings = $derived(getUser()?.permissions.includes(Permission.ManageGlobalSettings) ?? false);
-	const canViewNotifications = $derived(getUser()?.permissions.includes(Permission.ViewNotifications) ?? false);
-	const canViewInstanceConfig = $derived(getUser()?.permissions.includes(Permission.ViewInstanceConfigState) ?? false);
+	const canManageGlobalSettings = $derived(getUser()?.permissions.includes(Permission.MANAGE_GLOBAL_SETTINGS) ?? false);
+	const canViewNotifications = $derived(getUser()?.permissions.includes(Permission.VIEW_NOTIFICATIONS) ?? false);
+	const canViewInstanceConfig = $derived(
+		getUser()?.permissions.includes(Permission.VIEW_INSTANCE_CONFIG_STATE) ?? false
+	);
 	const hasAnyTabPermission = $derived(
 		canManageSettings ||
 			canManageOAuthClients ||

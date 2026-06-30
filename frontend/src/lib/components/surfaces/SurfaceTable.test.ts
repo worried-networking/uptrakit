@@ -3,7 +3,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import SurfaceTable from './SurfaceTable.svelte';
 import type { DataSourceDescriptor, InteractionDescriptor, SurfaceNode } from '$lib/surfaces/contract';
 
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api')>()),
 	invokeSurfaceInteraction: vi.fn(),
 	sealedBoxEncrypt: vi.fn()
 }));

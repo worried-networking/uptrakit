@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { getUser } from '$lib/auth.svelte';
 	import { getConfigState, clearCoordinatorDegraded } from '$lib/api';
-	import { Permission, hasAnyPermission } from '$lib/types';
+	import { Permission, hasAnyPermission } from '$lib/api';
 	import type { ConfigStateResponse } from '$lib/api';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import { Callout, SectionCard } from '$lib/components/ui';
@@ -13,7 +13,7 @@
 	let error: string | null = $state(null);
 	let clearing: boolean = $state(false);
 
-	const canManage = $derived(hasAnyPermission(getUser(), Permission.ManageInstanceConfigState));
+	const canManage = $derived(hasAnyPermission(getUser(), Permission.MANAGE_INSTANCE_CONFIG_STATE));
 
 	async function load() {
 		loading = true;

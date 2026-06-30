@@ -1,4 +1,4 @@
-import type { User, RegisterRequest, LoginRequest, OidcLinkRequest } from './types';
+import type { User, RegisterRequest, LoginRequest, OidcLinkRequest } from '$lib/api';
 import * as api from './api';
 import { getAccessToken, setAccessToken, getSessionExpired, setSessionExpired } from './token-store.svelte';
 

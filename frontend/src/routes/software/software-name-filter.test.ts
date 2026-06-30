@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/svelte';
-import { Permission } from '$lib/types';
+import { Permission } from '$lib/api';
 
 vi.mock('$app/state', () => ({
 	page: {
@@ -10,7 +10,8 @@ vi.mock('$app/state', () => ({
 
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 vi.mock('$lib/auth.svelte', () => ({ getUser: vi.fn(() => null) }));
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api')>()),
 	listSoftwareItems: vi.fn(async () => ({ data: { items: [], page: 1, per_page: 50, total: 0, total_pages: 1 } })),
 	deleteSoftwareItem: vi.fn(async () => undefined),
 	checkVersions: vi.fn(async () => undefined),
@@ -48,7 +49,7 @@ const viewUser = {
 	first_name: 'Test',
 	last_name: 'User',
 	has_pending_email_change: false,
-	permissions: [Permission.ViewSoftware]
+	permissions: [Permission.VIEW_SOFTWARE]
 };
 
 describe('Software page — URL-reactive filter state', () => {

@@ -12,8 +12,8 @@
 		batchHostTags,
 		executeBatchChunked
 	} from '$lib/api';
-	import type { HostTagResponse, BatchActionResponse } from '$lib/types';
-	import { Permission, hasAnyPermission } from '$lib/types';
+	import type { HostTagResponse, BatchActionResponse } from '$lib/api';
+	import { Permission, hasAnyPermission } from '$lib/api';
 	import { formatDate, parseUrlPage, nextValidPage } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
@@ -300,7 +300,7 @@
 		}
 	}
 
-	const canManage = $derived(hasAnyPermission(getUser(), Permission.UpdateHosts, Permission.DeactivateHosts));
+	const canManage = $derived(hasAnyPermission(getUser(), Permission.UPDATE_HOSTS, Permission.DEACTIVATE_HOSTS));
 </script>
 
 <svelte:window onclick={handleWindowClick} />

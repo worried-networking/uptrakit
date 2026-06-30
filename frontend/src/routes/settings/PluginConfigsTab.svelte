@@ -26,7 +26,7 @@
 	import BatchActionBar from '$lib/components/BatchActionBar.svelte';
 	import BatchResultDialog from '$lib/components/BatchResultDialog.svelte';
 	import { getUser } from '$lib/auth.svelte';
-	import { Permission, PluginCapability, hasAnyPermission } from '$lib/types';
+	import { Permission, PluginCapability, hasAnyPermission } from '$lib/api';
 	import {
 		Callout,
 		DataTable,
@@ -38,7 +38,7 @@
 	} from '$lib/components/ui';
 	import { FormFieldRow, Input, Textarea, Checkbox, Select } from '$lib/components/forms';
 	import Button from '$lib/components/Button.svelte';
-	import type { FormField, SelectOption } from '$lib/types';
+	import type { FormField, SelectOption } from '$lib/api';
 	import type {
 		PluginConfigResponse,
 		TenantDiscoveryAllowlistEntry,
@@ -49,21 +49,21 @@
 		InstancePluginSummary
 	} from '$lib/api';
 
-	const canViewConfigs = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
-	const canManageConfigs = $derived(getUser()?.permissions.includes(Permission.ManageCommands) ?? false);
-	const canTriggerDiscovery = $derived(getUser()?.permissions.includes(Permission.TriggerChecks) ?? false);
-	const canManageAllowlist = $derived(getUser()?.permissions.includes(Permission.UpdateSoftware) ?? false);
+	const canViewConfigs = $derived(getUser()?.permissions.includes(Permission.VIEW_SOFTWARE) ?? false);
+	const canManageConfigs = $derived(getUser()?.permissions.includes(Permission.MANAGE_COMMANDS) ?? false);
+	const canTriggerDiscovery = $derived(getUser()?.permissions.includes(Permission.TRIGGER_CHECKS) ?? false);
+	const canManageAllowlist = $derived(getUser()?.permissions.includes(Permission.UPDATE_SOFTWARE) ?? false);
 	const canViewTypeSettings = $derived(
-		hasAnyPermission(getUser(), Permission.ViewSettings, Permission.ManageGlobalSettings)
+		hasAnyPermission(getUser(), Permission.VIEW_SETTINGS, Permission.MANAGE_GLOBAL_SETTINGS)
 	);
-	const canManageGlobalSettings = $derived(getUser()?.permissions.includes(Permission.ManageGlobalSettings) ?? false);
-	const canTest = $derived(getUser()?.permissions.includes(Permission.TestPluginConfigs) ?? false);
+	const canManageGlobalSettings = $derived(getUser()?.permissions.includes(Permission.MANAGE_GLOBAL_SETTINGS) ?? false);
+	const canTest = $derived(getUser()?.permissions.includes(Permission.TEST_PLUGIN_CONFIGS) ?? false);
 
 	// Plugin types
 	let pluginTypes: PluginTypeInfo[] = $state([]);
 	const configurablePluginTypes = $derived(pluginTypes.filter((t) => t.supports_plugin_configs));
 	const discoveryPluginTypes = $derived(
-		pluginTypes.filter((t) => t.capabilities.includes(PluginCapability.DiscoverLocalSoftware))
+		pluginTypes.filter((t) => t.capabilities.includes(PluginCapability.DISCOVER_LOCAL_SOFTWARE))
 	);
 
 	// Plugin configs state
@@ -1119,7 +1119,7 @@
 									{#if canManageConfigs}
 										<Button variant="secondary" size="sm" onclick={() => openEditConfig(config)}>Edit</Button>
 									{/if}
-									{#if canTriggerDiscovery && config.capabilities.includes(PluginCapability.DiscoverLocalSoftware)}
+									{#if canTriggerDiscovery && config.capabilities.includes(PluginCapability.DISCOVER_LOCAL_SOFTWARE)}
 										<Button
 											variant="secondary"
 											size="sm"

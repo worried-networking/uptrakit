@@ -23,7 +23,8 @@ vi.mock('$lib/auth.svelte', () => ({
 	}))
 }));
 
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api')>()),
 	listSoftwareItems: vi.fn(async () => ({
 		data: {
 			items: [],

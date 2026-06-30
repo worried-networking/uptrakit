@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { listLog, listChannels } from '$lib/api';
-	import type { NotificationLogEntry, NotificationChannelSummary, NotificationEventType } from '$lib/types';
+	import type { NotificationLogResponse, NotificationChannelResponse, NotificationEventType } from '$lib/api';
 	import {
 		DataTable,
 		SectionCard,
@@ -23,8 +23,8 @@
 		stdin_attention: 'Input Attention Required'
 	};
 
-	let entries: NotificationLogEntry[] = $state([]);
-	let channels: NotificationChannelSummary[] = $state([]);
+	let entries: NotificationLogResponse[] = $state([]);
+	let channels: NotificationChannelResponse[] = $state([]);
 	let channelMap: Map<string, string> = $derived(new Map(channels.map((c) => [c.id, c.name])));
 	let loading: boolean = $state(true);
 	let error: string | null = $state(null);
@@ -45,9 +45,7 @@
 				listLog({ query: { page: currentPage } }),
 				listChannels({ query: { page: 1, per_page: 1000 } })
 			]);
-			// Bridge generated rows (optional nullable fields) to the hand-written
-			// NotificationLogEntry shape the table/template are built around.
-			entries = logRes.items as unknown as NotificationLogEntry[];
+			entries = logRes.items;
 			totalPages = logRes.total_pages;
 			totalItems = logRes.total;
 			channels = channelsRes.items;
@@ -58,7 +56,7 @@
 		}
 	}
 
-	function formatDate(iso: string | null): string {
+	function formatDate(iso: string | null | undefined): string {
 		if (!iso) return '—';
 		return new Date(iso).toLocaleString();
 	}
@@ -168,10 +166,10 @@
 			{error}
 			emptyTitle="No notification log entries."
 			emptyDescription="Notifications will appear here once delivery attempts occur."
-			rowKey={(row) => (row as unknown as NotificationLogEntry).id}
+			rowKey={(row) => (row as unknown as NotificationLogResponse).id}
 		>
 			{#snippet row(rowValue, _index)}
-				{@const entry = rowValue as unknown as NotificationLogEntry}
+				{@const entry = rowValue as unknown as NotificationLogResponse}
 				<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
 					<td class="table-cell-pad"
 						>{EVENT_TYPE_LABELS[entry.event_type as NotificationEventType] ?? entry.event_type}</td

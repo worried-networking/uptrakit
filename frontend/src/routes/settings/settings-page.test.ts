@@ -5,7 +5,8 @@ import { render, waitFor } from '@testing-library/svelte';
 vi.mock('$app/state', () => ({ page: { url: { searchParams: { get: () => null } } } }));
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 vi.mock('$lib/auth.svelte', () => ({ getUser: vi.fn(() => null) }));
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api')>()),
 	getCombinedSettings: vi.fn().mockRejectedValue(new Error('network error')),
 	listProviders: vi.fn().mockRejectedValue(new Error('network error'))
 }));
@@ -27,7 +28,7 @@ vi.mock('$lib/surfaces/read-model', () => ({
 }));
 
 import * as auth from '$lib/auth.svelte';
-import { Permission } from '$lib/types';
+import { Permission } from '$lib/api';
 import SettingsPage from './+page.svelte';
 
 function makeUser() {
@@ -37,7 +38,7 @@ function makeUser() {
 		first_name: 'A',
 		last_name: 'B',
 		has_pending_email_change: false,
-		permissions: [Permission.ManageAuthSettings]
+		permissions: [Permission.MANAGE_AUTH_SETTINGS]
 	};
 }
 

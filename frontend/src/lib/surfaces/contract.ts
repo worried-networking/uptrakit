@@ -1,4 +1,4 @@
-import type { FormField } from '$lib/types';
+import type { FormField } from '$lib/api';
 import type { SurfaceEntityType } from './entity-routes';
 
 export type SurfaceId = string;

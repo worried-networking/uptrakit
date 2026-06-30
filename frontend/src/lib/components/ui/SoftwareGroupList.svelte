@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
-	import type { SoftwareItemDetailResponse, SoftwareItemHostSummary, SoftwareItemResponse } from '$lib/types';
+	import type { SoftwareItemDetailResponse, SoftwareItemHostSummary, SoftwareItemResponse } from '$lib/api';
 	import { formatVersion, isValidLogoUrl, resolveDisplayVersion } from '$lib/utils';
 	import { ActionBadge, PillBadge, StatusBadge, TableFooterBar } from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';

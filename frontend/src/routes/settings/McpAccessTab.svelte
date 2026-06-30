@@ -10,7 +10,7 @@
 	} from '$lib/api/oauth';
 	import type { OAuthClient, OAuthSettingsResponse } from '$lib/api/oauth';
 	import { getUser } from '$lib/auth.svelte';
-	import { hasPermissionValue, Permission } from '$lib/types';
+	import { hasPermissionValue, Permission } from '$lib/api';
 	import {
 		Callout,
 		DataTable,
@@ -26,8 +26,8 @@
 	import RegisterClientDialog from './RegisterClientDialog.svelte';
 
 	const user = getUser();
-	const canManage = hasPermissionValue(user, Permission.ManageAuthSettings);
-	const canManageGlobalSettings = hasPermissionValue(user, Permission.ManageGlobalSettings);
+	const canManage = hasPermissionValue(user, Permission.MANAGE_AUTH_SETTINGS);
+	const canManageGlobalSettings = hasPermissionValue(user, Permission.MANAGE_GLOBAL_SETTINGS);
 
 	let clients: OAuthClient[] = $state([]);
 	let loading: boolean = $state(true);

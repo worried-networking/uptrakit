@@ -6,10 +6,11 @@ import type {
 	SoftwareItemHostSummary,
 	SoftwareItemResponse,
 	UpdateHistoryResponse
-} from '$lib/types';
-import { Permission } from '$lib/types';
+} from '$lib/api';
+import { Permission } from '$lib/api';
 
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api')>()),
 	listUpdateHistory: vi.fn(),
 	triggerUpdate: vi.fn(),
 	listSoftwareItems: vi.fn(),
@@ -50,7 +51,7 @@ const adminUser = {
 	first_name: 'Admin',
 	last_name: 'User',
 	has_pending_email_change: false,
-	permissions: [Permission.ViewSoftware, Permission.TriggerUpdates]
+	permissions: [Permission.VIEW_SOFTWARE, Permission.TRIGGER_UPDATES]
 };
 
 function makeHistoryPage(items: UpdateHistoryResponse[]): PaginatedResponse<UpdateHistoryResponse> {
@@ -98,7 +99,8 @@ function makeHostSummary(): SoftwareItemHostSummary {
 		active_update_history_id: null,
 		last_updated_at: null,
 		linked_at: '2024-01-01T00:00:00Z',
-		plugins: []
+		plugins: [],
+		update_category: 'unknown'
 	};
 }
 
@@ -131,6 +133,7 @@ function makeHistoryEntry(overrides: Partial<UpdateHistoryResponse> = {}): Updat
 		pre_update_protection_status: null,
 		pre_update_protection_summary: null,
 		recovery_hint: null,
+		update_category: 'unknown',
 		...overrides
 	};
 }

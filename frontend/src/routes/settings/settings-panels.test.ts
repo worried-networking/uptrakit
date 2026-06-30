@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
-import { Permission, PluginCapability } from '$lib/types';
+import { Permission, PluginCapability } from '$lib/api';
 
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api')>()),
 	listEnrollmentTokens: vi.fn(),
 	createEnrollmentToken: vi.fn(),
 	revokeEnrollmentToken: vi.fn(),
@@ -104,13 +105,13 @@ describe('settings panels design-language alignment', () => {
 			last_name: 'User',
 			has_pending_email_change: false,
 			permissions: [
-				Permission.ViewSoftware,
-				Permission.ManageCommands,
-				Permission.TriggerChecks,
-				Permission.UpdateSoftware,
-				Permission.ViewSettings,
-				Permission.ManageGlobalSettings,
-				Permission.TestPluginConfigs
+				Permission.VIEW_SOFTWARE,
+				Permission.MANAGE_COMMANDS,
+				Permission.TRIGGER_CHECKS,
+				Permission.UPDATE_SOFTWARE,
+				Permission.VIEW_SETTINGS,
+				Permission.MANAGE_GLOBAL_SETTINGS,
+				Permission.TEST_PLUGIN_CONFIGS
 			]
 		});
 	});
@@ -700,7 +701,7 @@ describe('settings panels design-language alignment', () => {
 					plugin_type: 'releases_github',
 					display_name: 'GitHub Releases',
 					supports_plugin_configs: true,
-					capabilities: [PluginCapability.DiscoverLocalSoftware],
+					capabilities: [PluginCapability.DISCOVER_LOCAL_SOFTWARE],
 					sample_config: {},
 					config_form_fields: [],
 					type_settings_form_fields: []
@@ -716,7 +717,7 @@ describe('settings panels design-language alignment', () => {
 						plugin_type: 'releases_github',
 						config: {},
 						enabled: true,
-						capabilities: [PluginCapability.DiscoverLocalSoftware],
+						capabilities: [PluginCapability.DISCOVER_LOCAL_SOFTWARE],
 						created_at: '2026-04-01T11:00:00Z',
 						updated_at: '2026-04-01T11:00:00Z'
 					}
@@ -762,7 +763,7 @@ describe('settings panels design-language alignment', () => {
 					plugin_type: 'releases_github',
 					display_name: 'GitHub Releases',
 					supports_plugin_configs: true,
-					capabilities: [PluginCapability.DiscoverLocalSoftware],
+					capabilities: [PluginCapability.DISCOVER_LOCAL_SOFTWARE],
 					sample_config: {},
 					config_form_fields: [],
 					type_settings_form_fields: [
@@ -892,7 +893,7 @@ describe('settings panels design-language alignment', () => {
 					plugin_type: 'releases_github',
 					display_name: 'GitHub Releases',
 					supports_plugin_configs: true,
-					capabilities: [PluginCapability.DiscoverLocalSoftware],
+					capabilities: [PluginCapability.DISCOVER_LOCAL_SOFTWARE],
 					sample_config: {},
 					config_form_fields: [
 						{
@@ -1145,7 +1146,7 @@ describe('settings panels design-language alignment', () => {
 					plugin_type: 'releases_github',
 					display_name: 'GitHub Releases',
 					supports_plugin_configs: true,
-					capabilities: [PluginCapability.DiscoverLocalSoftware],
+					capabilities: [PluginCapability.DISCOVER_LOCAL_SOFTWARE],
 					sample_config: {},
 					config_form_fields: [],
 					type_settings_form_fields: [

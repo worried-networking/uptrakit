@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import SchemaForm from './SchemaForm.svelte';
-import type { FormField } from '$lib/types';
+import type { FormField } from '$lib/api';
 
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api')>()),
 	apiGet: vi.fn()
 }));
 

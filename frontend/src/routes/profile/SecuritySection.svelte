@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { mfaStatus, totpEnroll, totpConfirm, totpDisable, regenerateRecoveryCodes } from '$lib/api';
-	import type { MfaStatusResponse, TotpEnrollResponse } from '$lib/types';
+	import type { MfaStatusResponse, TotpEnrollResponse } from '$lib/api';
 	import { SectionCard, Callout } from '$lib/components/ui';
 	import { FormFieldRow, Input } from '$lib/components/forms';
 	import Button from '$lib/components/Button.svelte';

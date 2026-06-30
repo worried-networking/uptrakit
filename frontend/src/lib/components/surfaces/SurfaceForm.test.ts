@@ -4,7 +4,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import SurfaceForm from './SurfaceForm.svelte';
 import type { InteractionDescriptor } from '$lib/surfaces/contract';
 
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api')>()),
 	invokeSurfaceInteraction: vi.fn()
 }));
 
