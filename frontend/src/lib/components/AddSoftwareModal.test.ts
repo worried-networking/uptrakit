@@ -2,9 +2,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import AddSoftwareModal from './AddSoftwareModal.svelte';
-import type { SoftwareItemResponse } from '$lib/types';
+import type { SoftwareItemResponse } from '$lib/api';
 
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api')>()),
 	createSoftwareItem: vi.fn()
 }));
 

@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/svelte';
 
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api')>()),
 	listSystemEnrollmentTokens: vi
 		.fn()
 		.mockResolvedValue({ data: { items: [], total: 0, page: 1, per_page: 20, total_pages: 0 } }),

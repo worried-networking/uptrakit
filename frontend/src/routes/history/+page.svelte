@@ -1,5 +1,5 @@
 <script lang="ts" module>
-	import type { UpdateHistoryStatus } from '$lib/types';
+	import type { UpdateHistoryStatus } from '$lib/api';
 
 	export function statusBadgeTone(status: UpdateHistoryStatus): 'neutral' | 'info' | 'success' | 'warning' | 'danger' {
 		switch (status) {
@@ -76,8 +76,8 @@
 	import { connectInteractiveSession } from '$lib/interactive';
 	import type { InteractiveConnectionState } from '$lib/interactive';
 	import { connectEventStream, AdminEventType } from '$lib/sse';
-	import { Permission } from '$lib/types';
-	import type { UpdateHistoryResponse, SoftwareItemResponse } from '$lib/types';
+	import { Permission } from '$lib/api';
+	import type { UpdateHistoryResponse, SoftwareItemResponse } from '$lib/api';
 	import Button from '$lib/components/Button.svelte';
 	import {
 		Callout,
@@ -142,8 +142,8 @@
 	let releaseUrl: string = $state('');
 	let triggering: boolean = $state(false);
 
-	const canManage = $derived(getUser()?.permissions.includes(Permission.TriggerUpdates) ?? false);
-	const canView = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
+	const canManage = $derived(getUser()?.permissions.includes(Permission.TRIGGER_UPDATES) ?? false);
+	const canView = $derived(getUser()?.permissions.includes(Permission.VIEW_SOFTWARE) ?? false);
 
 	const selectedItem = $derived(softwareItems.find((i) => i.id === selectedItemId));
 	const groupedHistory = $derived.by<HistoryDateGroup[]>(() => {

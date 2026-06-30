@@ -8,7 +8,7 @@
 	import type { CheckboxListItem } from '$lib/components/forms';
 	import { getSoftwareItem, listHosts, assignHosts, unassignHost, listPluginConfigs, listPluginTypes } from '$lib/api';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
-	import type { HostResponse, HostPluginRoleAssignment } from '$lib/types';
+	import type { HostResponse, HostPluginRoleAssignment } from '$lib/api';
 	import type { PluginConfigResponse, PluginTypeInfo } from '$lib/api';
 
 	let {

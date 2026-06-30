@@ -61,7 +61,8 @@ vi.mock('$lib/theme.svelte', () => ({
 	initTheme: vi.fn()
 }));
 
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api')>()),
 	getSystemAlerts: vi.fn(async () => ({ data: { alerts: [] } }))
 }));
 

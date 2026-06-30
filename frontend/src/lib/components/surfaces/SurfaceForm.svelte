@@ -7,7 +7,7 @@
 	import { Textarea } from '$lib/components/forms';
 	import { buildSurfaceInteractionRequest, type SurfaceEncryptionContext } from '$lib/surfaces/interactions';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
-	import type { SelectOption } from '$lib/types';
+	import type { SelectOption } from '$lib/api';
 	import type { InteractionDescriptor } from '$lib/surfaces/contract';
 
 	let {

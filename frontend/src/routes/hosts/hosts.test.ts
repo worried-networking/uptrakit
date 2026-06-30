@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
-import type { HostResponse, PaginatedResponse } from '$lib/types';
-import { Permission } from '$lib/types';
+import type { HostResponse, PaginatedResponse } from '$lib/api';
+import { Permission } from '$lib/api';
 
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api')>()),
 	listHosts: vi.fn(),
 	updateHost: vi.fn(),
 	deactivateHost: vi.fn(),
@@ -41,14 +42,14 @@ const adminUser = {
 	last_name: 'User',
 	has_pending_email_change: false,
 	permissions: [
-		Permission.UpdateHosts,
-		Permission.DeactivateHosts,
-		Permission.ViewSoftware,
-		Permission.CreateSoftware,
-		Permission.UpdateSoftware,
-		Permission.DeleteSoftware,
-		Permission.TriggerChecks,
-		Permission.TriggerUpdates
+		Permission.UPDATE_HOSTS,
+		Permission.DEACTIVATE_HOSTS,
+		Permission.VIEW_SOFTWARE,
+		Permission.CREATE_SOFTWARE,
+		Permission.UPDATE_SOFTWARE,
+		Permission.DELETE_SOFTWARE,
+		Permission.TRIGGER_CHECKS,
+		Permission.TRIGGER_UPDATES
 	]
 };
 
@@ -208,7 +209,7 @@ describe('Hosts Page', () => {
 	it('does not show the actions button when the user lacks host management permissions', async () => {
 		vi.mocked(auth.getUser).mockReturnValue({
 			...adminUser,
-			permissions: [Permission.TriggerChecks]
+			permissions: [Permission.TRIGGER_CHECKS]
 		});
 		vi.mocked(api.listHosts).mockResolvedValue({ data: makePage([sampleHost]) } as unknown as Awaited<
 			ReturnType<typeof api.listHosts>
@@ -249,7 +250,7 @@ describe('Hosts Page', () => {
 	it('does not show Trigger Discovery when the user lacks software management permissions', async () => {
 		vi.mocked(auth.getUser).mockReturnValue({
 			...adminUser,
-			permissions: [Permission.UpdateHosts]
+			permissions: [Permission.UPDATE_HOSTS]
 		});
 		vi.mocked(api.listHosts).mockResolvedValue({ data: makePage([sampleHost]) } as unknown as Awaited<
 			ReturnType<typeof api.listHosts>

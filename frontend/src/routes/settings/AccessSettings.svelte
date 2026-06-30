@@ -5,7 +5,7 @@
 	import Button from '$lib/components/Button.svelte';
 	import { createFormDraft } from '$lib/forms/draft.svelte';
 	import { getAccessSettings, updateAccessSettings } from '$lib/api';
-	import type { UpdateAccessSettingsRequest } from '$lib/types';
+	import type { UpdateAccessSettingsRequest } from '$lib/api';
 
 	let {
 		onSuccess,

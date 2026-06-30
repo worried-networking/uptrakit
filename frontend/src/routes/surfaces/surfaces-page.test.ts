@@ -51,7 +51,8 @@ vi.mock('$lib/surfaces/registry.svelte', () => ({
 	getSurfaceProviders: vi.fn(() => buildSurfacePageParity().providers)
 }));
 
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api')>()),
 	invokeSurfaceInteraction: vi.fn()
 }));
 
@@ -347,7 +348,10 @@ describe('/surfaces/[id] handlePageChange URL management', () => {
 			loadSurfaceReadModels: vi.fn(async () => {}),
 			getSurfaceProviders: vi.fn(() => buildSurfacePageParity().providers)
 		}));
-		vi.doMock('$lib/api', () => ({ invokeSurfaceInteraction: vi.fn() }));
+		vi.doMock('$lib/api', async (importOriginal) => ({
+			...(await importOriginal<typeof import('$lib/api')>()),
+			invokeSurfaceInteraction: vi.fn()
+		}));
 
 		const { default: SurfacesPageIsolated } = await import('./[id]/+page.svelte');
 		const { goto: gotoMock } = await import('$app/navigation');
@@ -395,7 +399,10 @@ describe('/surfaces/[id] handlePageChange URL management', () => {
 			loadSurfaceReadModels: vi.fn(async () => {}),
 			getSurfaceProviders: vi.fn(() => buildSurfacePageParity().providers)
 		}));
-		vi.doMock('$lib/api', () => ({ invokeSurfaceInteraction: vi.fn() }));
+		vi.doMock('$lib/api', async (importOriginal) => ({
+			...(await importOriginal<typeof import('$lib/api')>()),
+			invokeSurfaceInteraction: vi.fn()
+		}));
 
 		const { default: SurfacesPageIsolated } = await import('./[id]/+page.svelte');
 		const { goto: gotoMock } = await import('$app/navigation');

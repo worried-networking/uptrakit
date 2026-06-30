@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
-import { Permission, type HostTagResponse, type PaginatedResponse } from '$lib/types';
+import { Permission, type HostTagResponse, type PaginatedResponse } from '$lib/api';
 
 vi.mock('$app/state', () => ({
 	page: {
@@ -11,7 +11,8 @@ vi.mock('$app/state', () => ({
 
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api')>()),
 	listHostTags: vi.fn(),
 	createHostTag: vi.fn(),
 	updateHostTag: vi.fn(),
@@ -44,7 +45,7 @@ const user = {
 	first_name: 'Host',
 	last_name: 'Tags',
 	has_pending_email_change: false,
-	permissions: [Permission.UpdateHosts, Permission.DeactivateHosts]
+	permissions: [Permission.UPDATE_HOSTS, Permission.DEACTIVATE_HOSTS]
 };
 
 function makePage(items: HostTagResponse[]): PaginatedResponse<HostTagResponse> {

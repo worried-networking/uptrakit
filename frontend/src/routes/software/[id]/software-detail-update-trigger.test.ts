@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import type { SoftwareItemDetailResponse, SoftwareItemHostSummary } from '$lib/types';
-import { Permission } from '$lib/types';
+import type { SoftwareItemDetailResponse, SoftwareItemHostSummary } from '$lib/api';
+import { Permission } from '$lib/api';
 import { ApiError } from '$lib/api';
 
 const interactiveMocks = vi.hoisted(() => ({
@@ -13,6 +13,7 @@ const interactiveMocks = vi.hoisted(() => ({
 vi.mock('$lib/api', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('$lib/api')>();
 	return {
+		...actual,
 		getSoftwareItem: vi.fn(),
 		listSoftwareItems: vi.fn(),
 		checkVersions: vi.fn(),
@@ -87,18 +88,18 @@ const adminUser = {
 	last_name: 'User',
 	has_pending_email_change: false,
 	permissions: [
-		Permission.ViewSoftware,
-		Permission.CreateSoftware,
-		Permission.UpdateSoftware,
-		Permission.DeleteSoftware,
-		Permission.TriggerChecks,
-		Permission.TriggerUpdates
+		Permission.VIEW_SOFTWARE,
+		Permission.CREATE_SOFTWARE,
+		Permission.UPDATE_SOFTWARE,
+		Permission.DELETE_SOFTWARE,
+		Permission.TRIGGER_CHECKS,
+		Permission.TRIGGER_UPDATES
 	]
 };
 
 const viewOnlyUser = {
 	...adminUser,
-	permissions: [Permission.ViewSoftware]
+	permissions: [Permission.VIEW_SOFTWARE]
 };
 
 function makeHost({
@@ -128,7 +129,8 @@ function makeHost({
 		active_update_status: null,
 		last_updated_at: null,
 		linked_at: '2024-01-01T00:00:00Z',
-		plugins: []
+		plugins: [],
+		update_category: 'unknown'
 	};
 }
 
@@ -140,10 +142,7 @@ function makeSoftwareItem(hosts: SoftwareItemHostSummary[]): SoftwareItemDetailR
 		featured: false,
 		last_checked_at: null,
 		host_count: hosts.length,
-		installed_version: null,
-		installed_display_version: null,
 		latest_version: '1.1.0',
-		latest_release_metadata: null,
 		update_available: true,
 		created_at: '2024-01-01T00:00:00Z',
 		updated_at: '2024-01-01T00:00:00Z',

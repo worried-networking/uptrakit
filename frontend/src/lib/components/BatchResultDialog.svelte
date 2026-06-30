@@ -1,7 +1,7 @@
 <script lang="ts">
 	import Modal from './Modal.svelte';
 	import Button from './Button.svelte';
-	import type { BatchActionResponse } from '$lib/types';
+	import type { BatchActionResponse } from '$lib/api';
 
 	let {
 		title,

@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
-import type { ApiTokenResponse } from '$lib/types';
+import type { ApiTokenResponse } from '$lib/api';
 
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api')>()),
 	listApiTokens: vi.fn(),
 	createApiToken: vi.fn(),
 	revokeApiToken: vi.fn(),

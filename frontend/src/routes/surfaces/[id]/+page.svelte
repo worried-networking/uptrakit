@@ -13,7 +13,7 @@
 		loadSurfaceReadModels
 	} from '$lib/surfaces/registry.svelte';
 	import { isSurfaceTabPending } from '$lib/surfaces/read-model';
-	import { hasPermissionValue } from '$lib/types';
+	import { hasPermissionValue } from '$lib/api';
 	import { Callout, PageShell } from '$lib/components/ui';
 
 	let surfaceId = $derived(page.params.id as string);

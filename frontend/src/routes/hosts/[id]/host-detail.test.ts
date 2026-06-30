@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import type { HostResponse, PaginatedResponse, UpdateHistoryResponse } from '$lib/types';
-import { Permission } from '$lib/types';
+import type { HostResponse, PaginatedResponse, UpdateHistoryResponse } from '$lib/api';
+import { Permission } from '$lib/api';
 import type { SurfaceReadResponse, SurfaceResponse } from '$lib/surfaces/contract';
 
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api')>()),
 	getHost: vi.fn(),
 	listUpdateHistory: vi.fn(),
 	updateHost: vi.fn(),
@@ -58,13 +59,13 @@ const adminUser = {
 	last_name: 'User',
 	has_pending_email_change: false,
 	permissions: [
-		Permission.UpdateHosts,
-		Permission.DeactivateHosts,
-		Permission.CreateSoftware,
-		Permission.UpdateSoftware,
-		Permission.DeleteSoftware,
-		Permission.TriggerChecks,
-		Permission.TriggerUpdates
+		Permission.UPDATE_HOSTS,
+		Permission.DEACTIVATE_HOSTS,
+		Permission.CREATE_SOFTWARE,
+		Permission.UPDATE_SOFTWARE,
+		Permission.DELETE_SOFTWARE,
+		Permission.TRIGGER_CHECKS,
+		Permission.TRIGGER_UPDATES
 	]
 };
 
@@ -151,10 +152,11 @@ const sampleHistoryEntry: UpdateHistoryResponse = {
 	actor_id: 'user-001',
 	started_at: '2024-06-01T11:55:00Z',
 	completed_at: '2024-06-01T12:00:00Z',
-	output: null,
+	output: '',
 	created_at: '2024-06-01T11:54:00Z',
 	interactive: false,
-	output_truncated: false
+	output_truncated: false,
+	update_category: 'unknown'
 };
 
 // ---------------------------------------------------------------------------
@@ -328,7 +330,7 @@ describe('Host Detail Page', () => {
 	it('hides Edit Name and Deactivate buttons when user lacks host management permissions', async () => {
 		vi.mocked(auth.getUser).mockReturnValue({
 			...adminUser,
-			permissions: [Permission.TriggerChecks]
+			permissions: [Permission.TRIGGER_CHECKS]
 		});
 		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
 			ReturnType<typeof api.getHost>
@@ -351,7 +353,7 @@ describe('Host Detail Page', () => {
 	it('hides Trigger Discovery button when user lacks software management permissions', async () => {
 		vi.mocked(auth.getUser).mockReturnValue({
 			...adminUser,
-			permissions: [Permission.UpdateHosts]
+			permissions: [Permission.UPDATE_HOSTS]
 		});
 		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
 			ReturnType<typeof api.getHost>
@@ -530,14 +532,14 @@ describe('Host Detail Page', () => {
 		>);
 
 		const gatedSurface = buildHostDetailSurface({
-			required_permission: Permission.ViewSettings
+			required_permission: Permission.VIEW_SETTINGS
 		});
 		vi.mocked(surfaceRegistry.getSurfacesBySlot).mockImplementation((slot: string) =>
 			slot === 'host_detail.tabs' ? [gatedSurface] : []
 		);
 		vi.mocked(auth.getUser).mockReturnValue({
 			...adminUser,
-			permissions: [Permission.UpdateHosts]
+			permissions: [Permission.UPDATE_HOSTS]
 		});
 
 		render(HostDetailPage);
@@ -553,7 +555,7 @@ describe('Host Detail Page', () => {
 	it('does not submit allowlist entry when plugin type is empty', async () => {
 		vi.mocked(auth.getUser).mockReturnValue({
 			...adminUser,
-			permissions: [...adminUser.permissions, Permission.ViewSoftware]
+			permissions: [...adminUser.permissions, Permission.VIEW_SOFTWARE]
 		});
 		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
 			ReturnType<typeof api.getHost>
@@ -662,7 +664,7 @@ describe('Button primitive contract — hosts/[id]/+page.svelte', () => {
 		>);
 		vi.mocked(auth.getUser).mockReturnValue({
 			...adminUser,
-			permissions: [...adminUser.permissions, Permission.ViewSoftware]
+			permissions: [...adminUser.permissions, Permission.VIEW_SOFTWARE]
 		});
 		render(HostDetailPage);
 		await waitFor(() => screen.getByRole('button', { name: /add plugin type/i }));
@@ -743,7 +745,7 @@ describe('Button primitive contract — hosts/[id]/+page.svelte', () => {
 		>);
 		vi.mocked(auth.getUser).mockReturnValue({
 			...adminUser,
-			permissions: [...adminUser.permissions, Permission.ViewSoftware]
+			permissions: [...adminUser.permissions, Permission.VIEW_SOFTWARE]
 		});
 		render(HostDetailPage);
 		await waitFor(() => screen.getByRole('button', { name: /edit name/i }));

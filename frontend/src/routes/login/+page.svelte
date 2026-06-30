@@ -13,7 +13,7 @@
 	import { setAccessToken, setSessionExpired } from '$lib/token-store.svelte';
 	import { setUser } from '$lib/auth.svelte';
 	import { getIsOnline } from '$lib/stores/network.svelte';
-	import type { AuthMethodsResponse, MfaChallengeResponse, AuthResponse } from '$lib/types';
+	import type { AuthMethodsResponse, MfaChallengeResponse, AuthResponse } from '$lib/api';
 	import { isValidLogoUrl, safeRedirect as safeRedirectFn } from '$lib/utils';
 	import MfaStep from '$lib/components/mfa/MfaStep.svelte';
 	import { Callout } from '$lib/components/ui';

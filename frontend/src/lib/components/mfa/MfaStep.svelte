@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { mfaVerify, mfaSendEmail } from '$lib/api';
-	import type { MfaMethod, AuthResponse } from '$lib/types';
+	import type { MfaMethod, AuthResponse } from '$lib/api';
 	import { FormFieldRow, Input } from '$lib/components/forms';
 	import Button from '$lib/components/Button.svelte';
 

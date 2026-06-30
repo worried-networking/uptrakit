@@ -5,8 +5,8 @@
 	import { formatDate } from '$lib/utils';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import { AdminEventType } from '$lib/sse';
-	import { Permission } from '$lib/types';
-	import type { UpdateHistoryResponse } from '$lib/types';
+	import { Permission } from '$lib/api';
+	import type { UpdateHistoryResponse } from '$lib/api';
 	import type { ServiceResponse } from '$lib/api';
 	import { Callout, DataTable, PageShell, SectionCard, StatCard, StatusBadge } from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
@@ -32,9 +32,9 @@
 	const hasAttentionItems = $derived(pendingServices > 0 || failedUpdates > 0);
 
 	// --- Permissions ---
-	const canViewHosts = $derived(getUser()?.permissions.includes(Permission.ViewHosts) ?? false);
-	const canViewAgents = $derived(getUser()?.permissions.includes(Permission.ViewServices) ?? false);
-	const canViewSoftware = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
+	const canViewHosts = $derived(getUser()?.permissions.includes(Permission.VIEW_HOSTS) ?? false);
+	const canViewAgents = $derived(getUser()?.permissions.includes(Permission.VIEW_SERVICES) ?? false);
+	const canViewSoftware = $derived(getUser()?.permissions.includes(Permission.VIEW_SOFTWARE) ?? false);
 
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 	let unsubscribers: (() => void)[] = [];

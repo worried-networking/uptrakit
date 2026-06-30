@@ -12,7 +12,7 @@ import {
 	setLoading,
 	setUser
 } from './auth.svelte';
-import type { AuthResponse, RefreshResponse, User } from './types';
+import type { AuthResponse, RefreshResponse, User } from '$lib/api';
 
 vi.mock('./api', () => ({
 	me: vi.fn(),

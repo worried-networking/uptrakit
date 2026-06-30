@@ -9,7 +9,8 @@ vi.mock('$lib/surfaces/registry.svelte', () => ({
 	getSurfaceProviders: vi.fn(() => [])
 }));
 
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api')>()),
 	invokeSurfaceInteraction: vi.fn(),
 	apiGet: vi.fn(async (path: string) => {
 		const res = await fetch(path);

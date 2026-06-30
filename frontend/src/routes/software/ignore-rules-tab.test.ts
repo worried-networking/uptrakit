@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
-import type { PaginatedResponse, SoftwareIgnoreResponse } from '$lib/types';
-import { Permission } from '$lib/types';
+import type { PaginatedResponse, SoftwareIgnoreResponse } from '$lib/api';
+import { Permission } from '$lib/api';
 
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api')>()),
 	listAutodiscoveryIgnores: vi.fn(),
 	createAutodiscoveryIgnore: vi.fn(),
 	deleteAutodiscoveryIgnore: vi.fn(),
@@ -29,7 +30,7 @@ const managerUser = {
 	first_name: 'Ignore',
 	last_name: 'Manager',
 	has_pending_email_change: false,
-	permissions: [Permission.ManageIgnores]
+	permissions: [Permission.MANAGE_IGNORES]
 };
 
 function makePage(items: SoftwareIgnoreResponse[]): PaginatedResponse<SoftwareIgnoreResponse> {

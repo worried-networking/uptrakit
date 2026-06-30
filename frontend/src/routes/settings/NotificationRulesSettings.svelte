@@ -8,7 +8,7 @@
 		type CreateNotificationRuleRequest,
 		type UpdateNotificationRuleRequest
 	} from '$lib/api';
-	import type { NotificationChannelSummary, NotificationRuleResponse, NotificationEventType } from '$lib/types';
+	import type { NotificationChannelResponse, NotificationRuleResponse, NotificationEventType } from '$lib/api';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import { DataTable, SectionCard, StatusBadge, TableFooterBar, type DataTableColumn } from '$lib/components/ui';
@@ -36,7 +36,7 @@
 	};
 
 	let rules: NotificationRuleResponse[] = $state([]);
-	let channels: NotificationChannelSummary[] = $state([]);
+	let channels: NotificationChannelResponse[] = $state([]);
 	let channelMap: Map<string, string> = $derived(new Map(channels.map((c) => [c.id, c.name])));
 	let loading: boolean = $state(true);
 	let currentPage: number = $state(1);
@@ -67,9 +67,7 @@
 				listRules({ query: { page: currentPage } }),
 				listChannels({ query: { page: 1, per_page: 1000 } })
 			]);
-			// Bridge generated rows (optional nullable fields) to the hand-written
-			// NotificationRuleResponse shape the table/template are built around.
-			rules = rulesRes.items as unknown as NotificationRuleResponse[];
+			rules = rulesRes.items;
 			totalPages = rulesRes.total_pages;
 			totalCount = rulesRes.total;
 			channels = channelsRes.items;

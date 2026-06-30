@@ -2,7 +2,7 @@ import { cleanup, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import SoftwareGroupList from './SoftwareGroupList.svelte';
-import type { SoftwareItemDetailResponse, SoftwareItemHostSummary, SoftwareItemResponse } from '$lib/types';
+import type { SoftwareItemDetailResponse, SoftwareItemHostSummary, SoftwareItemResponse } from '$lib/api';
 
 afterEach(() => {
 	cleanup();
@@ -16,10 +16,7 @@ function makeItem(id: string, hostCount: number): SoftwareItemResponse {
 		featured: false,
 		last_checked_at: null,
 		host_count: hostCount,
-		installed_version: null,
-		installed_display_version: null,
 		latest_version: null,
-		latest_release_metadata: null,
 		update_available: false,
 		created_at: '2024-01-01T00:00:00Z',
 		updated_at: '2024-01-01T00:00:00Z',
@@ -43,7 +40,8 @@ function makeHost(rowId: string, hostId: string): SoftwareItemHostSummary {
 		active_update_history_id: null,
 		last_updated_at: null,
 		linked_at: '2024-01-01T00:00:00Z',
-		plugins: []
+		plugins: [],
+		update_category: 'unknown'
 	};
 }
 

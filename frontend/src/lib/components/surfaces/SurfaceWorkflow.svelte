@@ -11,7 +11,7 @@
 	import { buildSurfaceInteractionRequest, type SurfaceEncryptionContext } from '$lib/surfaces/interactions';
 	import type { LabelDisplay } from '$lib/surfaces/label-display';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
-	import type { SelectOption } from '$lib/types';
+	import type { SelectOption } from '$lib/api';
 	import type { InteractionDescriptor, WorkflowStepDescriptor } from '$lib/surfaces/contract';
 	import { SvelteMap } from 'svelte/reactivity';
 

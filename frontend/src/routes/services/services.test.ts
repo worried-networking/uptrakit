@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import type { PaginatedResponse, ServiceResponse } from '$lib/types';
-import { Permission } from '$lib/types';
+import type { PaginatedResponse, ServiceResponse } from '$lib/api';
+import { Permission } from '$lib/api';
 
 // vi.mock calls are hoisted before imports by vitest — set them up first.
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api')>()),
 	listServices: vi.fn(),
 	approveService: vi.fn(),
 	rejectService: vi.fn(),
@@ -39,10 +40,10 @@ const adminUser = {
 	last_name: 'User',
 	has_pending_email_change: false,
 	permissions: [
-		Permission.ApproveServices,
-		Permission.RejectServices,
-		Permission.RemoveServices,
-		Permission.UpdateServices
+		Permission.APPROVE_SERVICES,
+		Permission.REJECT_SERVICES,
+		Permission.REMOVE_SERVICES,
+		Permission.UPDATE_SERVICES
 	]
 };
 

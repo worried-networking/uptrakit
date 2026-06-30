@@ -13,8 +13,8 @@
 		SelectOption,
 		SoftwareItemDetailResponse,
 		UpdateHostAssignmentRequest
-	} from '$lib/types';
-	import { PluginCapability } from '$lib/types';
+	} from '$lib/api';
+	import { PluginCapability } from '$lib/api';
 	import type { PluginConfigResponse, PluginTypeInfo } from '$lib/api';
 
 	// ---------------------------------------------------------------------------
@@ -271,7 +271,7 @@
 	}
 
 	function hookPluginTypes(): PluginTypeInfo[] {
-		return pluginTypes.filter((t) => t.capabilities.includes(PluginCapability.UpdateLifecycle));
+		return pluginTypes.filter((t) => t.capabilities.includes(PluginCapability.UPDATE_LIFECYCLE));
 	}
 
 	function savedConfigsForType(pluginType: string): PluginConfigResponse[] {

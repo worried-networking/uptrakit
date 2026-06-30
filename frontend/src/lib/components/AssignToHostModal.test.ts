@@ -2,10 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import AssignToHostModal from './AssignToHostModal.svelte';
-import { PluginCapability } from '$lib/types';
-import type { HostResponse, PluginConfigResponse, PluginTypeInfo, SoftwareItemDetailResponse } from '$lib/types';
+import { PluginCapability } from '$lib/api';
+import type { HostResponse, PluginConfigResponse, PluginTypeInfo, SoftwareItemDetailResponse } from '$lib/api';
 
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api')>()),
 	getSoftwareItem: vi.fn(),
 	listHosts: vi.fn(),
 	assignHosts: vi.fn(),
@@ -58,10 +59,7 @@ function makeDetail(hostIds: string[] = []): SoftwareItemDetailResponse {
 		featured: true,
 		last_checked_at: null,
 		host_count: hostIds.length,
-		installed_version: null,
-		installed_display_version: null,
 		latest_version: null,
-		latest_release_metadata: null,
 		update_available: false,
 		created_at: '2024-01-01T00:00:00Z',
 		updated_at: '2024-01-01T00:00:00Z',
@@ -81,7 +79,8 @@ function makeDetail(hostIds: string[] = []): SoftwareItemDetailResponse {
 			active_update_history_id: null,
 			last_updated_at: null,
 			linked_at: '2024-01-01T00:00:00Z',
-			plugins: []
+			plugins: [],
+			update_category: 'unknown'
 		}))
 	};
 }
@@ -95,9 +94,9 @@ function makePluginConfigs(): PluginConfigResponse[] {
 			config: {},
 			enabled: true,
 			capabilities: [
-				PluginCapability.VersionDetection,
-				PluginCapability.ReleaseFetching,
-				PluginCapability.UpdateExecution
+				PluginCapability.VERSION_DETECTION,
+				PluginCapability.RELEASE_FETCHING,
+				PluginCapability.UPDATE_EXECUTION
 			],
 			created_at: '2024-01-01T00:00:00Z',
 			updated_at: '2024-01-01T00:00:00Z'
@@ -108,7 +107,7 @@ function makePluginConfigs(): PluginConfigResponse[] {
 			plugin_type: 'plugin_hook',
 			config: {},
 			enabled: true,
-			capabilities: [PluginCapability.UpdateLifecycle],
+			capabilities: [PluginCapability.UPDATE_LIFECYCLE],
 			created_at: '2024-01-01T00:00:00Z',
 			updated_at: '2024-01-01T00:00:00Z'
 		}
@@ -122,9 +121,9 @@ function makePluginTypes(): PluginTypeInfo[] {
 			display_name: 'Standard',
 			supports_plugin_configs: true,
 			capabilities: [
-				PluginCapability.VersionDetection,
-				PluginCapability.ReleaseFetching,
-				PluginCapability.UpdateExecution
+				PluginCapability.VERSION_DETECTION,
+				PluginCapability.RELEASE_FETCHING,
+				PluginCapability.UPDATE_EXECUTION
 			],
 			sample_config: {},
 			config_form_fields: []
@@ -133,7 +132,7 @@ function makePluginTypes(): PluginTypeInfo[] {
 			plugin_type: 'plugin_hook',
 			display_name: 'Hook',
 			supports_plugin_configs: true,
-			capabilities: [PluginCapability.UpdateLifecycle],
+			capabilities: [PluginCapability.UPDATE_LIFECYCLE],
 			sample_config: {},
 			config_form_fields: []
 		}

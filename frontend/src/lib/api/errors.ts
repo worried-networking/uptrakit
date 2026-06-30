@@ -1,5 +1,5 @@
-// Ported verbatim from frontend/src/lib/api.ts lines 109, 165-215.
-// api.ts itself stays UNTOUCHED; this module is reused by client.ts (Task 4)
+// Ported verbatim from the original hand-written api barrel (lines 109, 165-215).
+// That barrel now lives as api/index.ts; this module is reused by client.ts (Task 4)
 // and, in Plan C, by all call sites.
 
 export const MAX_ERROR_LENGTH = 500;

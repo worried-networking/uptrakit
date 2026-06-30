@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { resetData } from '$lib/api';
-	import type { ResetDeletedCounts } from '$lib/types';
+	import type { ResetDeletedCounts } from '$lib/api';
 	import { getIsOnline } from '$lib/stores/network.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import { SectionCard } from '$lib/components/ui';

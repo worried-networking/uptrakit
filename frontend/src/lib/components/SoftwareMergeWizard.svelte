@@ -11,7 +11,7 @@
 		MergeSoftwareItemsExecuteResponse,
 		MergeSoftwareItemsPreviewRequest,
 		MergeSoftwareItemsPreviewResponse
-	} from '$lib/types';
+	} from '$lib/api';
 
 	type PreviewMergeFn = (request: MergeSoftwareItemsPreviewRequest) => Promise<MergeSoftwareItemsPreviewResponse>;
 	type ExecuteMergeFn = (request: MergeSoftwareItemsExecuteRequest) => Promise<MergeSoftwareItemsExecuteResponse>;

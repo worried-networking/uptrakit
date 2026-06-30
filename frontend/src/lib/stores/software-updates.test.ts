@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { PaginatedResponse, SoftwareItemResponse } from '$lib/types';
+import type { PaginatedResponse, SoftwareItemResponse } from '$lib/api';
 
 function makeResponse(total: number): { data: PaginatedResponse<SoftwareItemResponse> } {
 	return { data: { items: [], total, page: 1, per_page: 1, total_pages: total } };

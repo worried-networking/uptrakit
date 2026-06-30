@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
-import { Permission, type PaginatedResponse, type SystemServiceResponse } from '$lib/types';
+import { Permission, type PaginatedResponse, type SystemServiceResponse } from '$lib/api';
 
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api')>()),
 	listSystemServices: vi.fn(),
 	approveSystemService: vi.fn(),
 	rejectSystemService: vi.fn(),
@@ -36,11 +37,11 @@ const user = {
 	last_name: 'User',
 	has_pending_email_change: false,
 	permissions: [
-		Permission.ViewSystemServices,
-		Permission.ApproveSystemServices,
-		Permission.RejectSystemServices,
-		Permission.RemoveSystemServices,
-		Permission.UpdateSystemServices
+		Permission.VIEW_SYSTEM_SERVICES,
+		Permission.APPROVE_SYSTEM_SERVICES,
+		Permission.REJECT_SYSTEM_SERVICES,
+		Permission.REMOVE_SYSTEM_SERVICES,
+		Permission.UPDATE_SYSTEM_SERVICES
 	]
 };
 

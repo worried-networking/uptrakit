@@ -5,10 +5,11 @@ import type {
 	SoftwareItemHostSummary,
 	SurfaceReadResponse,
 	SurfaceResponse
-} from '$lib/types';
-import { Permission } from '$lib/types';
+} from '$lib/api';
+import { Permission } from '$lib/api';
 
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api')>()),
 	getSoftwareItem: vi.fn(),
 	listSoftwareItems: vi.fn(),
 	checkVersions: vi.fn(),
@@ -72,12 +73,12 @@ const adminUser = {
 	last_name: 'User',
 	has_pending_email_change: false,
 	permissions: [
-		Permission.ViewSoftware,
-		Permission.CreateSoftware,
-		Permission.UpdateSoftware,
-		Permission.DeleteSoftware,
-		Permission.TriggerChecks,
-		Permission.TriggerUpdates
+		Permission.VIEW_SOFTWARE,
+		Permission.CREATE_SOFTWARE,
+		Permission.UPDATE_SOFTWARE,
+		Permission.DELETE_SOFTWARE,
+		Permission.TRIGGER_CHECKS,
+		Permission.TRIGGER_UPDATES
 	]
 };
 
@@ -97,7 +98,8 @@ function makeHost(): SoftwareItemHostSummary {
 		active_update_history_id: null,
 		last_updated_at: null,
 		linked_at: '2024-01-01T00:00:00Z',
-		plugins: []
+		plugins: [],
+		update_category: 'unknown'
 	};
 }
 
@@ -109,10 +111,7 @@ function makeSoftwareItem(hosts: SoftwareItemHostSummary[]): SoftwareItemDetailR
 		featured: false,
 		last_checked_at: null,
 		host_count: hosts.length,
-		installed_version: null,
-		installed_display_version: null,
 		latest_version: '1.1.0',
-		latest_release_metadata: null,
 		update_available: true,
 		created_at: '2024-01-01T00:00:00Z',
 		updated_at: '2024-01-01T00:00:00Z',
@@ -185,13 +184,13 @@ describe('Software Detail shared-surface slots', () => {
 			'software.item.tab.surface',
 			'software_item.tabs',
 			'Software Item Diagnostics',
-			Permission.ViewSoftware
+			Permission.VIEW_SOFTWARE
 		);
 		const hostContextSurface = makeSurface(
 			'software.item.host.context.surface',
 			'software_item.host_context_menu',
 			'Host Context Action',
-			Permission.UpdateSoftware
+			Permission.UPDATE_SOFTWARE
 		);
 		const reads = new Map<string, SurfaceReadResponse>([
 			[softwareItemTabSurface.surface_id, makeRenderableRead(softwareItemTabSurface, 'load_software_item_tab')],
@@ -236,7 +235,7 @@ describe('Software Detail shared-surface slots', () => {
 			'software.item.tab.surface',
 			'software_item.tabs',
 			'Software Item Diagnostics',
-			Permission.ViewSoftware
+			Permission.VIEW_SOFTWARE
 		);
 		const reads = new Map<string, SurfaceReadResponse>([
 			[softwareItemTabSurface.surface_id, makeRenderableRead(softwareItemTabSurface, 'load_software_item_tab')]
@@ -285,13 +284,13 @@ describe('Software Detail shared-surface slots', () => {
 			'software.item.tab.surface',
 			'software_item.tabs',
 			'Software Item Diagnostics',
-			Permission.ViewSoftware
+			Permission.VIEW_SOFTWARE
 		);
 		const hostContextSurface = makeSurface(
 			'software.item.host.context.surface',
 			'software_item.host_context_menu',
 			'Run Host Action',
-			Permission.UpdateSoftware
+			Permission.UPDATE_SOFTWARE
 		);
 		const reads = new Map<string, SurfaceReadResponse>([
 			[softwareItemTabSurface.surface_id, makeRenderableRead(softwareItemTabSurface, 'load_software_item_tab')],
