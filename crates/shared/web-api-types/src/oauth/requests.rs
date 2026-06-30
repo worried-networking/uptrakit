@@ -16,13 +16,21 @@ use crate::validation::{Validate, ValidationError};
 /// indicator.
 #[non_exhaustive]
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::IntoParams))]
 pub struct AuthorizeRequest {
+    /// Must be "code".
     pub response_type: String,
+    /// Client identifier.
     pub client_id: String,
+    /// Registered redirect URI.
     pub redirect_uri: String,
+    /// Requested scope.
     pub scope: String,
+    /// CSRF state value.
     pub state: String,
+    /// PKCE code challenge.
     pub code_challenge: String,
+    /// Must be "S256".
     pub code_challenge_method: String,
     /// RFC 8707 resource indicator. Optional — when absent, the server defaults
     /// to its primary MCP resource (`https://<canonical_host>/mcp`).

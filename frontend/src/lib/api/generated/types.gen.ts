@@ -3697,7 +3697,7 @@ export type ConfirmEmailChangeData = {
     path?: never;
     query: {
         /**
-         * One-time email change confirmation token
+         * One-time email change confirmation token.
          */
         token: string;
     };
@@ -4013,17 +4013,17 @@ export type OidcCallbackData = {
     path?: never;
     query?: {
         /**
-         * Authorization code
+         * Authorization code.
          */
-        code?: string;
+        code?: string | null;
         /**
-         * CSRF state
+         * CSRF state.
          */
-        state?: string;
+        state?: string | null;
         /**
-         * Error from provider
+         * Error from provider.
          */
-        error?: string;
+        error?: string | null;
     };
     url: '/api/v1/auth/oidc/callback';
 };
@@ -7891,9 +7891,9 @@ export type UnassignHostData = {
     };
     query?: {
         /**
-         * If true, permanently suppress items with this name from future autodiscovery runs
+         * If true, permanently suppress items with this name from future autodiscovery runs.
          */
-        ignore?: boolean;
+        ignore?: boolean | null;
     };
     url: '/api/v1/software-items/{id}/hosts/{host_id}';
 };

@@ -524,7 +524,7 @@
           {
             "name": "token",
             "in": "query",
-            "description": "One-time email change confirmation token",
+            "description": "One-time email change confirmation token.",
             "required": true,
             "schema": {
               "type": "string"
@@ -946,28 +946,37 @@
           {
             "name": "code",
             "in": "query",
-            "description": "Authorization code",
+            "description": "Authorization code.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "state",
             "in": "query",
-            "description": "CSRF state",
+            "description": "CSRF state.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "error",
             "in": "query",
-            "description": "Error from provider",
+            "description": "Error from provider.",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         ],
@@ -6711,10 +6720,13 @@
           {
             "name": "ignore",
             "in": "query",
-            "description": "If true, permanently suppress items with this name from future autodiscovery runs",
+            "description": "If true, permanently suppress items with this name from future autodiscovery runs.",
             "required": false,
             "schema": {
-              "type": "boolean"
+              "type": [
+                "boolean",
+                "null"
+              ]
             }
           }
         ],

@@ -51,10 +51,13 @@ pub use uptrakit_web_api_types::oidc_auth::{
     OidcExchangeRequest, OidcLinkRequest, OidcProviderInfo,
 };
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::IntoParams)]
 pub struct OidcCallbackParams {
+    /// Authorization code.
     pub code: Option<String>,
+    /// CSRF state.
     pub state: Option<String>,
+    /// Error from provider.
     pub error: Option<String>,
 }
 
@@ -596,11 +599,7 @@ pub async fn oidc_authorize(
 #[utoipa::path(
     get,
     path = "/api/v1/auth/oidc/callback",
-    params(
-        ("code" = Option<String>, Query, description = "Authorization code"),
-        ("state" = Option<String>, Query, description = "CSRF state"),
-        ("error" = Option<String>, Query, description = "Error from provider")
-    ),
+    params(OidcCallbackParams),
     responses(
         (status = 302, description = "Redirect to frontend"),
     ),
