@@ -374,4 +374,46 @@ mod tests {
             assert_eq!(pr.as_str(), pr.to_string());
         }
     }
+
+    /// Guards the hand-written `PartialSchema` `enum_values` array against drifting
+    /// from the serde wire strings (`as_str`). `PluginRole` carries an `Other(String)`
+    /// catch-all, so it cannot derive `strum::EnumIter`; the known variants are listed
+    /// explicitly here (same pattern as the other wire-safe enums). If the schema array
+    /// is edited inconsistently with `as_str`, this fails.
+    #[cfg(feature = "openapi")]
+    #[test]
+    fn plugin_role_schema_enum_values_match_wire_strings() {
+        use utoipa::PartialSchema;
+
+        // Excludes `Other` — it is a decode-only forward-compat value, never produced.
+        const KNOWN: [PluginRole; 5] = [
+            PluginRole::DetectVersion,
+            PluginRole::FetchReleases,
+            PluginRole::ExecuteUpdate,
+            PluginRole::PreUpdateHook,
+            PluginRole::PostUpdateHook,
+        ];
+        let expected: Vec<String> = KNOWN.iter().map(|r| r.as_str().to_string()).collect();
+
+        let utoipa::openapi::RefOr::T(utoipa::openapi::schema::Schema::Object(obj)) =
+            PluginRole::schema()
+        else {
+            panic!("PluginRole schema should be an inline Object");
+        };
+        let actual: Vec<String> = obj
+            .enum_values
+            .expect("PluginRole schema should declare enum_values")
+            .into_iter()
+            .map(|v| {
+                v.as_str()
+                    .expect("each enum value should be a string")
+                    .to_string()
+            })
+            .collect();
+
+        assert_eq!(
+            actual, expected,
+            "PluginRole PartialSchema enum_values drifted from as_str()"
+        );
+    }
 }
