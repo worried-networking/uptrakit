@@ -57,4 +57,23 @@ describe('client interceptors', () => {
 		const putReq = spy.mock.calls[1][0] as Request;
 		expect(putReq.headers.get('if-match')).toBe('W/"v1"');
 	});
+
+	// Regression guard for the /api/v1 double-prefix bug: generated SDK op urls carry
+	// the full `/api/v1/...` path. The client baseUrl must therefore be origin-only so
+	// that buildUrl yields a SINGLE `/api/v1`, never `origin/api/v1/api/v1/...`.
+	it('does not double-prefix /api/v1 when building a generated op url', () => {
+		const built = apiClient.buildUrl({ url: '/api/v1/auth/me' });
+		expect(built).not.toContain('/api/v1/api/v1/');
+		expect(built).toContain('/api/v1/auth/me');
+	});
+
+	// The same guard exercised through the real fetch path (request URL the client
+	// actually issues), proving auth bootstrap calls hit `/api/v1/auth/me` once.
+	it('issues a single /api/v1 prefix on a generated op request', async () => {
+		vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 200 }));
+		await apiClient.get({ url: '/api/v1/auth/me' });
+		const req = vi.mocked(fetch).mock.calls[0][0] as Request;
+		expect(req.url).not.toContain('/api/v1/api/v1/');
+		expect(req.url).toContain('/api/v1/auth/me');
+	});
 });
