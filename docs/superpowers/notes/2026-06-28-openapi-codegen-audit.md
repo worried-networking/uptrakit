@@ -365,3 +365,49 @@ the class of drift full codegen exists to eliminate permanently. The bounded pre
 fix + regen) does not change the D1 cost comparison; full codegen still pays off via drift-elimination
 and the Rust-client follow-on. Were the count to exceed 5, the §13 re-cost against the targeted
 refactor would be triggered here — it is not.
+
+---
+
+## Plan C outcome (2026-06-30) — call-site migration & teardown complete
+
+Plan C implemented in a worktree across 14 tasks (+ one controller-inserted prereq, Task 6.5).
+All 103 call sites migrated to the generated SDK; `api.ts` → `api/index.ts` pure barrel;
+`types.ts`, `api.test.ts`, `enum-parity.test.ts`, `api/settings.ts` removed; non-spec
+remainder refactored into focused modules over the configured client.
+
+### §5.4 success criterion — per-module CodeScene `code_health_review` (all NON-RED)
+
+| module               | score              | notes                                                                                                                                                  |
+| -------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `api/index.ts`       | n/a (too small)    | pure re-export barrel; 0 hand-written functions                                                                                                        |
+| `api/client.ts`      | **9.09 (Green)**   | configured client + interceptors + deduped 401 refresh-retry; `requestWithRefresh` cc=10 (extracted `unauthorizedApiError` to restore green from 8.85) |
+| `api/errors.ts`      | **9.68 (Green)**   | ApiError + Response→message/ApiError mappers                                                                                                           |
+| `api/raw.ts`         | **10.0 (Optimal)** | authenticatedFetch/apiGet/loginRaw over the configured client                                                                                          |
+| `api/surfaces.ts`    | **10.0 (Optimal)** | non-spec surfaces (0 utoipa paths) over apiClient                                                                                                      |
+| `api/crypto.ts`      | **10.0 (Optimal)** | sealed-box (Web Crypto)                                                                                                                                |
+| `api/batch.ts`       | **10.0 (Optimal)** | executeBatchChunked                                                                                                                                    |
+| `api/oauth.ts`       | **10.0 (Optimal)** | permanent hand-written OAuth shim (non-/api/v1 paths)                                                                                                  |
+| `api/local-types.ts` | **10.0 (Optimal)** | survivor types with no generated equivalent (`PaginatedResponse<T>`, form-schema, surface-contract re-exports, AuditLogEntry, permission helpers)      |
+
+The old `api.ts` 5.57/YELLOW hotspot no longer exists. Every hand-written module is non-red; the
+two highest-traffic ones (`client.ts`, `errors.ts`) are green and the rest are optimal.
+
+### Deltas applied beyond pure rename (deliberate, behavior-preserving)
+
+- **Backend ToSchema fix (Task 1):** `wire_safe_enum!` macro + `Permission`/`PluginRole` now emit
+  serde snake_case wire strings in the OpenAPI schema (was Rust PascalCase); collapsed all 4
+  behavior-dependent enum drifts; regenerated spec + client.
+- **Refresh convention (Task 6.5, user-approved):** the generated singleton client's HTTP verbs
+  route through `requestWithRefresh`, so call sites get 401 deduped refresh-retry via the clean
+  `await fn({ … })` pattern (no per-call `{ client: apiClient }`).
+- **Regression caught + fixed (Task 10):** `list_software_items` `#[utoipa::path]` used a manual
+  `params(...)` list omitting `query`+`plugin_type` (the shipped name-filter feature). Fixed to
+  `params(ListSoftwareItemsParams)` (IntoParams derive, drift-proof) + regen + frontend restore.
+
+### Deferred follow-up (noted, not blocking)
+
+- 8 web-api list handlers still use a manual `params(...)` block that matches their `IntoParams`
+  struct field-count _today_ but could silently drift later (the bug class Task 10 hit):
+  `list_audit_logs`, `list_system_audit_logs`, `list_hosts`, `list_host_tags`,
+  `list_enrollment_tokens`, `list_system_enrollment_tokens`, `list_batches`, `list_update_history`,
+  `list_system_services`. Converting each to `params(<Struct>)` would make them drift-proof.
