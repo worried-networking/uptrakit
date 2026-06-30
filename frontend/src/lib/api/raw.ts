@@ -77,15 +77,22 @@ export async function authenticatedFetch(url: string, options: RequestInit = {})
 	return res;
 }
 
+// Normalize an arbitrary input (full URL, `/api/v1/...` path, or bare `/...` path)
+// to a ROOT-RELATIVE path that includes BASE_PATH exactly once. The configured
+// client's baseUrl is the ORIGIN only and op urls carry `/api/v1`, so apiGet must
+// pass a `/api/v1`-prefixed path (NOT a bare one) to land on a single `/api/v1`.
+function normalizeApiPath(path: string): string {
+	if (path.startsWith('http://') || path.startsWith('https://')) {
+		const u = new URL(path);
+		return `${u.pathname}${u.search}`;
+	}
+	if (path.startsWith(`${BASE_PATH}/`) || path === BASE_PATH) return path;
+	return path.startsWith('/') ? `${BASE_PATH}${path}` : `${BASE_PATH}/${path}`;
+}
+
 /** Performs an authenticated GET routed through the configured client; returns parsed JSON. */
 export async function apiGet<T = unknown>(path: string): Promise<T> {
-	// The client re-prepends BASE, so strip a redundant base prefix to avoid doubling.
-	const relativePath = path.startsWith(BASE)
-		? path.slice(BASE.length)
-		: path.startsWith(BASE_PATH)
-			? path.slice(BASE_PATH.length)
-			: path;
-	const { data } = await apiClient.get({ url: relativePath });
+	const { data } = await apiClient.get({ url: normalizeApiPath(path) });
 	return data as T;
 }
 

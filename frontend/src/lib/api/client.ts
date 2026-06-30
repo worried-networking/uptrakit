@@ -30,9 +30,9 @@ export const BASE_PATH: string = (() => {
 	return BASE_ENV.startsWith('/') ? BASE_ENV : `/${BASE_ENV}`;
 })();
 
-// Full absolute URL for client.setConfig (must be absolute for new Request()).
-// Exported so the raw-Response escape hatch (api/raw.ts) shares the same origin
-// resolution for unauthenticated calls (e.g. loginRaw → `${BASE}/auth/login`).
+// Full absolute URL for the raw-fetch escape hatch (api/raw.ts) — shares the same
+// origin resolution for unauthenticated calls (e.g. loginRaw → `${BASE}/auth/login`).
+// NOTE: this is the ORIGIN + BASE_PATH and is NOT the generated client's baseUrl.
 export const BASE: string = (() => {
 	if (BASE_ENV.startsWith('http://') || BASE_ENV.startsWith('https://')) return BASE_ENV;
 	const origin =
@@ -40,6 +40,24 @@ export const BASE: string = (() => {
 			? globalThis.location.origin
 			: '';
 	return origin ? `${origin}${BASE_PATH}` : BASE_ENV;
+})();
+
+// Origin (scheme+host, NO path) used as the generated client's `baseUrl`. The
+// generated op urls already carry the full `/api/v1/...` path (the Rust
+// `#[utoipa::path]` paths include `/api/v1`), and hey-api's getUrl does a naive
+// `baseUrl + pathUrl` concat. So the client baseUrl MUST be the origin only —
+// otherwise every generated call double-prefixes to `origin/api/v1/api/v1/...`.
+// For a relative VITE_API_BASE we resolve against location.origin (guarding the
+// jsdom 'null'/empty case → ''); for an absolute one we take its origin.
+export const ORIGIN: string = (() => {
+	if (BASE_ENV.startsWith('http://') || BASE_ENV.startsWith('https://')) {
+		return new URL(BASE_ENV).origin;
+	}
+	return typeof globalThis.location !== 'undefined' &&
+		globalThis.location.origin !== 'null' &&
+		globalThis.location.origin
+		? globalThis.location.origin
+		: '';
 })();
 
 // Exported so api/raw.ts applies the identical request timeout to its raw fetches.
@@ -105,7 +123,7 @@ onTokenChange((prev, next) => {
 // setConfig MERGES into existing config, so the codegen-baked `throwOnError: true`
 // is preserved. Re-stating it here is the runtime switch that makes the client throw.
 
-client.setConfig({ baseUrl: BASE, throwOnError: true });
+client.setConfig({ baseUrl: ORIGIN, throwOnError: true });
 
 // ── Request helpers ───────────────────────────────────────────────────────────
 
