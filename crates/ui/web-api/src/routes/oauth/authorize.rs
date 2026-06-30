@@ -39,16 +39,7 @@ use uptrakit_web_api_auth::auth::rate_limit::RateLimitStore;
 #[utoipa::path(
     get,
     path = "/oauth/authorize",
-    params(
-        ("response_type" = String, Query, description = "Must be \"code\""),
-        ("client_id" = String, Query, description = "Client identifier"),
-        ("redirect_uri" = String, Query, description = "Registered redirect URI"),
-        ("scope" = String, Query, description = "Requested scope"),
-        ("state" = String, Query, description = "CSRF state value"),
-        ("code_challenge" = String, Query, description = "PKCE code challenge"),
-        ("code_challenge_method" = String, Query, description = "Must be \"S256\""),
-        ("resource" = String, Query, description = "RFC 8707 resource indicator"),
-    ),
+    params(AuthorizeRequest),
     responses(
         (status = 302, description = "Redirect to login, consent, or redirect_uri"),
         (status = 400, description = "Invalid request"),

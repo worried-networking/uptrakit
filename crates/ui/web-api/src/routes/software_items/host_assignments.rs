@@ -206,8 +206,9 @@ pub async fn assign_hosts(
     }
 }
 
-#[derive(serde::Deserialize, Default)]
+#[derive(serde::Deserialize, Default, utoipa::IntoParams)]
 pub struct DeleteHostAssignmentParams {
+    /// If true, permanently suppress items with this name from future autodiscovery runs.
     pub ignore: Option<bool>,
 }
 
@@ -223,7 +224,7 @@ pub struct DeleteHostAssignmentParams {
     params(
         ("id" = Uuid, Path, description = "Software item UUID"),
         ("host_id" = Uuid, Path, description = "Host UUID"),
-        ("ignore" = Option<bool>, Query, description = "If true, permanently suppress items with this name from future autodiscovery runs")
+        DeleteHostAssignmentParams
     ),
     extensions(("x-required-permission" = json!("update_software"))),
     responses(

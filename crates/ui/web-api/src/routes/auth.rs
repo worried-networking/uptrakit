@@ -1761,15 +1761,20 @@ mod tests {
     }
 }
 
+/// Query parameters for the email-change confirmation endpoint.
+#[derive(serde::Deserialize, utoipa::IntoParams)]
+pub struct ConfirmEmailChangeQuery {
+    /// One-time email change confirmation token.
+    pub token: String,
+}
+
 /// Confirm an email change via a one-time token.
 ///
 /// `GET /api/v1/auth/email-change/confirm?token=<token>` — public, no auth required.
 #[utoipa::path(
     get,
     path = "/api/v1/auth/email-change/confirm",
-    params(
-        ("token" = String, Query, description = "One-time email change confirmation token")
-    ),
+    params(ConfirmEmailChangeQuery),
     responses(
         (status = 200, description = "Email changed; all sessions invalidated. Sign in again.", body = uptrakit_web_api_types::agents::MessageResponse),
         (status = 400, description = "Missing token parameter"),
@@ -1782,17 +1787,14 @@ mod tests {
 #[tracing::instrument(skip_all)]
 pub async fn confirm_email_change(
     State(state): State<Arc<AppState>>,
-    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+    axum::extract::Query(params): axum::extract::Query<ConfirmEmailChangeQuery>,
 ) -> Response {
     use sea_orm::{
         ActiveModelTrait, ColumnTrait, EntityTrait as _, QueryFilter, Set, TransactionTrait,
     };
     use uptrakit_shared_db::entity::{email_change_request, prelude::*};
 
-    let raw_token = match params.get("token") {
-        Some(t) => t.clone(),
-        None => return error_response(StatusCode::BAD_REQUEST, "Missing token"),
-    };
+    let raw_token = params.token;
 
     let token_hash = crate::auth::token::hash_token(&raw_token);
     let now = time::OffsetDateTime::now_utc();
