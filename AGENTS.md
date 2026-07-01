@@ -1696,7 +1696,7 @@ projection (`EncryptedString` excluded at compile time; `MaskedUrl`/`MaskedEmail
 ### Coverage gate
 
 `crates/shared/audit-log/audit-catalog.toml` catalogs every state-changing site with either an `action` or a `skip`
-reason. `cargo run -p audit-coverage-check` runs in CI and fails on uncatalogued sites or dead registered actions.
+reason. `cargo xtask audit-coverage-check` runs in CI and fails on uncatalogued sites or dead registered actions.
 
 ### Key crates
 
@@ -1705,7 +1705,7 @@ reason. `cargo run -p audit-coverage-check` runs in CI and fails on uncatalogued
 | `crates/shared/audit-log/`                                          | `AuditActionType`, `AuditEntry<K>`, `AuditEmitter`, dispatcher, backends                             |
 | `crates/shared/audit-log-derive/`                                   | `AuditView` derive, `audit_actions!` proc-macro                                                      |
 | `crates/shared/audit-log/audit-catalog.toml`                        | Action coverage catalog                                                                              |
-| `crates/shared/audit-log/tools/audit-coverage-check/`               | Static-analysis CI gate                                                                              |
+| `xtask/`                                                            | Static-analysis CI gate (`cargo xtask audit-coverage-check`)                                         |
 | `crates/shared/db/src/entity/audit_log.rs`                          | SeaORM entity for `audit_logs` (tenant-scoped)                                                       |
 | `crates/shared/db/src/entity/system_audit_log.rs`                   | SeaORM entity for `system_audit_logs`                                                                |
 | `crates/ui/web-api/src/routes/service_ws/handler/mod.rs`            | Service-forwarded event ingestion (Event-class only; Stateful forwarding rejected)                   |

@@ -420,7 +420,7 @@ Two tables: `audit_logs` (tenant-scoped, no FK on `tenant_id` for compliance) an
 optional separate DB (`--audit-log-db-url`) isolates audit storage.
 
 **Coverage enforcement:** `crates/shared/audit-log/audit-catalog.toml` catalogs every state-changing site in the
-codebase with either an `action` (mapped to a registered action) or a `skip` (justified exclusion). `cargo run -p
+codebase with either an `action` (mapped to a registered action) or a `skip` (justified exclusion). `cargo xtask
 audit-coverage-check` runs in CI and fails the build on uncatalogued sites or dead registered actions.
 
 See [Audit Logs Development](docs/development/audit-logs.md) and [Audit Logs Security](docs/security/audit-logs.md).

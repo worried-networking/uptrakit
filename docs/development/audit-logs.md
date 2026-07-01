@@ -224,11 +224,10 @@ alongside the handler change.
 
 ## The `audit-coverage-check` tool
 
-The static-analysis gate lives at `crates/shared/audit-log/tools/audit-coverage-check/` and
-runs in CI as:
+The static-analysis gate lives at `xtask/` and runs in CI as:
 
 ```shell
-cargo run -p audit-coverage-check
+cargo xtask audit-coverage-check
 ```
 
 It runs in the same CI job as `cargo deny`. Failure is a build break.
@@ -344,7 +343,7 @@ These patterns are banned in V2. Violating them is either a compile error or a C
 | `crates/shared/audit-log/`                                          | `AuditActionType`, `AuditEntry<K>`, `AuditOutcome`, `AuditEmitter`, `RuntimeAuditEmitter`, dispatcher, backends |
 | `crates/shared/audit-log-derive/`                                   | `AuditView` derive macro, `audit_actions!` proc-macro                                                           |
 | `crates/shared/audit-log/audit-catalog.toml`                        | Action coverage catalog                                                                                         |
-| `crates/shared/audit-log/tools/audit-coverage-check/`               | Static-analysis CI gate                                                                                         |
+| `xtask/`                                                            | Static-analysis CI gate (`cargo xtask audit-coverage-check`)                                                    |
 | `crates/shared/db/src/entity/audit_log.rs`                          | Tenant-scoped semantic rows                                                                                     |
 | `crates/shared/db/src/entity/system_audit_log.rs`                   | System-scoped semantic rows                                                                                     |
 | `crates/ui/web-api/src/routes/*`                                    | HTTP mutation producers                                                                                         |
