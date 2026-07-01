@@ -335,6 +335,9 @@ The `UptrakitClient` provides these internal HTTP methods used by endpoint modul
 4. Add a unit test for request serialization if the endpoint takes a request body or query params.
 5. Update the CLI command to use the new typed method.
 6. Update this documentation to list the new method.
+7. Verify the coverage guard passes: `cargo xtask openapi-client-check`.
+   The new method and its `paths.rs` constant must be present, or add a reviewed
+   ledger entry in `xtask/src/openapi_client_check/ledgers.rs`.
 
 ## Keeping the client in sync
 
@@ -343,6 +346,34 @@ The openapi-client must mirror the web API:
 - **New endpoint** in `web-api` -> add a corresponding client method.
 - **Changed request/response types** -> update the client method signature.
 - **Removed endpoint** -> remove the client method.
+
+### Coverage guard (`cargo xtask openapi-client-check`)
+
+`cargo xtask openapi-client-check` `syn`-parses the client source and reads `openapi.json`, asserting
+bidirectional coverage between spec operations and client methods. CI (`backend-lint`) runs this check
+and fails on drift. Ledgers live in `xtask/src/openapi_client_check/ledgers.rs`.
+See [ADR 0026](../adr/0026-openapi-client-drift-guard.md).
+
+**Four ledgers** control the assertions:
+
+| Ledger              | Meaning                                                                           |
+| ------------------- | --------------------------------------------------------------------------------- |
+| `RENAME_MAP`        | Maps a spec `operationId` to the Rust method name when they differ (~33 entries). |
+| `SPEC_ONLY`         | Operations that exist in the spec but intentionally have no client method (~23).  |
+| `CLIENT_ONLY`       | Client methods with no operationId counterpart (e.g. `list_all_*` helpers) (~12). |
+| `PATHS_CLIENT_ONLY` | `paths.rs` constants that have no direct spec path match (~8).                    |
+
+**Both-lists hard error:** an operationId that appears in both `RENAME_MAP` and `SPEC_ONLY` is a
+configuration conflict — the tool fails immediately with a clear message, because the same operation
+cannot be simultaneously renamed and excluded.
+
+**`{param}` normalization:** spec paths use `{param}` placeholders (e.g. `/api/v1/hosts/{id}`). The
+tool normalises these to a canonical form before comparing against `paths.rs` constants, so path
+matching is not sensitive to the placeholder syntax.
+
+**`check_paths` skip rule:** when every operation on a spec path is listed in `SPEC_ONLY`,
+`check_paths` skips that path entirely (no `paths.rs` constant is needed for it). The per-operation
+assertion in assertion 1 still runs for each operation individually regardless.
 
 ## Path constants (`paths` module)
 
