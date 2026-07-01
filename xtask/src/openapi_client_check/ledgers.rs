@@ -2,31 +2,118 @@
 
 /// `operationId` -> client method name, for legitimate name divergences.
 pub const RENAME_MAP: &[(&str, &str)] = &[
-    ("token", "oauth_token"),
+    // OIDC provider management: spec uses short names, client adds `oidc_` prefix for clarity
+    ("activate_provider", "activate_oidc_provider"),
+    ("add_tenant_discovery_allowlist_entry", "add_discovery_allowlist_entry"),
+    // Autodiscovery ignores: client uses "software_ignores" terminology
+    ("batch_autodiscovery_ignores", "batch_software_ignores"),
+    ("create_autodiscovery_ignore", "create_software_ignore"),
+    // Notifications: spec uses short names, client adds `notification_` prefix
+    ("create_channel", "create_notification_channel"),
+    ("create_provider", "create_oidc_provider"),
+    ("create_rule", "create_notification_rule"),
+    ("deactivate_provider", "deactivate_oidc_provider"),
+    // Services: spec says "deactivate", client says "remove" for UX clarity
     ("deactivate_service", "remove_service"),
-    // … populated in Task 9 (~30 entries).
+    // System services: same rename rationale as deactivate_service above
+    ("deactivate_system_service", "remove_system_service"),
+    ("delete_autodiscovery_ignore", "delete_software_ignore"),
+    ("delete_channel", "delete_notification_channel"),
+    ("delete_provider", "delete_oidc_provider"),
+    ("delete_rule", "delete_notification_rule"),
+    // OAuth device authorization: client adds `oauth_` prefix
+    ("device_authorization", "oauth_device_authorization"),
+    // OAuth AS metadata: spec name is ambiguous, client is explicit
+    ("get_as_metadata", "oauth_authorization_server_metadata"),
+    ("get_batch", "get_update_batch"),
+    ("get_channel", "get_notification_channel"),
+    ("get_provider", "get_oidc_provider"),
+    ("get_rule", "get_notification_rule"),
+    ("list_autodiscovery_ignores", "list_software_ignores"),
+    ("list_batches", "list_update_batches"),
+    ("list_channels", "list_notification_channels"),
+    ("list_log", "list_notification_log"),
+    ("list_providers", "list_oidc_providers"),
+    ("list_rules", "list_notification_rules"),
+    ("list_tenant_discovery_allowlist", "list_discovery_allowlist"),
+    ("remove_tenant_discovery_allowlist_entry", "remove_discovery_allowlist_entry"),
+    ("test_channel", "test_notification_channel"),
+    // OAuth token: client uses descriptive name with `oauth_` prefix
+    ("token", "oauth_token"),
+    ("update_channel", "update_notification_channel"),
+    ("update_provider", "update_oidc_provider"),
+    ("update_rule", "update_notification_rule"),
 ];
 
 /// operationIds intentionally without a client method.
 pub const SPEC_ONLY: &[&str] = &[
+    // Email change — multi-step browser flow; CLI does not implement it
+    "cancel_email_change",
+    // Password and profile changes — interactive browser forms not exposed in CLI client
+    "change_password",
+    // Instance-admin operations not yet implemented in the typed client
+    "clear_coordinator_degraded",
+    // Email-change confirmation is a redirect link; not a typed API call
+    "confirm_email_change",
+    "get_config_state",
+    "get_instance_plugin",
+    // OAuth and Zeroconf global settings not yet wired in the CLI client
+    "get_oauth_settings",
+    "get_zeroconf_settings",
+    "initiate_email_change",
+    "list_instance_plugins",
+    // MFA / 2FA flows are browser-interactive; not in the typed API client
+    "mfa_send_email",
+    "mfa_status",
+    "mfa_verify",
+    // OIDC callback is a browser redirect endpoint, not a typed client call
     "oidc_callback",
-    // … populated in Task 9 (~20 entries).
+    "regenerate_recovery_codes",
+    "set_instance_plugin_enabled",
+    "totp_confirm",
+    "totp_disable",
+    "totp_enroll",
+    "update_oauth_settings",
+    "update_profile",
+    "update_zeroconf_settings",
+    "upsert_instance_plugin_config",
 ];
 
 /// Client methods intentionally without a spec operation.
 pub const CLIENT_ONLY: &[&str] = &[
-    "raw_request",
-    "stream_update_output",
-    "stream_events",
-    "stream_batch_progress",
+    // PKI downloads: binary DER/PEM responses not described in the OpenAPI spec
+    "ca_cert",
+    "ca_crl",
+    // Health check: intentionally outside the /api/v1 prefix, excluded from spec
     "healthz",
-    // … populated in Task 9. `list_all_*` are NOT listed (see `is_list_all_companion`).
+    // Surfaces: runtime UI extension points served by plugins, not in the core spec
+    "invoke_surface_interaction",
+    "list_surface_providers",
+    "list_surfaces",
+    "read_surface",
+    // Raw helpers and streaming methods have no single spec operation counterpart
+    "raw_request",
+    "stream_batch_progress",
+    "stream_events",
+    "stream_update_output",
+    // Composite helper: removes host assignment and creates autodiscovery ignore atomically
+    "unassign_host_with_ignore",
 ];
 
 /// Normalized path templates present in `paths.rs` but absent from the spec.
 pub const PATHS_CLIENT_ONLY: &[&str] = &[
+    // SSE event stream — not described in the OpenAPI spec
+    "/api/v1/events/stream",
+    // PKI binary downloads — outside the typed API spec
+    "/api/v1/pki/ca.crt",
+    "/api/v1/pki/ca.crl",
+    // Surfaces — runtime extension-point paths not in the core spec
+    "/api/v1/surfaces",
+    "/api/v1/surfaces/{}/interactions/{}",
+    "/api/v1/surfaces/{}/providers",
+    "/api/v1/surfaces/{}/read",
+    // Health check — intentionally outside the /api/v1 versioned prefix
     "/healthz",
-    // … populated in Task 9 (events stream, surfaces path fns).
 ];
 
 /// True if `method` is a `list_all_<x>` whose `list_<x>` sibling exists.
