@@ -320,6 +320,10 @@ build environments.
   - `cargo test -p uptrakit-integration-tests -- --ignored`
 - **REST API contract**: after any backend route or REST-contract change, run `./scripts/regen-api.sh` and commit
   `crates/ui/web-api/openapi.json` + `frontend/src/lib/api/generated/`; CI gates on staleness of both.
+- **OpenAPI param authoring** (drift-proof): author query/request params via `params(<IntoParamsStruct>)`, never a
+  hand-maintained `params(("field" = …, Query, …))` list — see `docs/development/coding-standards.md`
+  ("OpenAPI parameter & schema authoring") + [ADR-0025](docs/adr/0025-drift-proof-openapi-params.md); enforced by
+  `ci/verify_no_inline_query_params.sh`.
 - **Architecture is enforced by CI and existing gates**, not by a per-session MCP tool.
   The blocking gates are `cargo deny check` and `python3 ci/check_plugin_semantic_boundary.py`;
   `cargo machete` (unused dependencies) runs **advisory** in CI. Behavioral health — hotspots,

@@ -69,6 +69,7 @@ jobs:
       - run: python3 ci/check_plugin_semantic_boundary.py
       - run: bash ci/verify_no_security_audit.sh
       - run: bash ci/verify_typed_audit_actions.sh
+      - run: bash ci/verify_no_inline_query_params.sh
 
   backend-lint:
     runs-on:

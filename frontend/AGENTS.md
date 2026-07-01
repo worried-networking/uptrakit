@@ -127,7 +127,9 @@ src/routes/
      (placement comment) +
      `integration_tests/openapi_spec.rs::openapi_spec_eligible_endpoints_present`. List endpoints
      should expose their query filters via `params(<IntoParamsStruct>)` (not a hand-maintained
-     `params(...)` list) so the spec can't silently drop a filter the handler accepts.
+     `params(...)` list) so the spec can't silently drop a filter the handler accepts. Canonical rule +
+     rationale: `docs/development/coding-standards.md` ("OpenAPI parameter & schema authoring") +
+     `docs/adr/0025-drift-proof-openapi-params.md` (enforced by `ci/verify_no_inline_query_params.sh`).
 2. **Use existing shared components first.** Before creating a new UI component, check
    `src/lib/components/` for: `AddSoftwareModal`, `AssignToHostModal`, `BatchActionBar`,
    `BatchResultDialog`, `CheckboxList`, `ConfirmDialog`, `ContextMenu`, `EditHostAssignmentModal`,
