@@ -87,7 +87,7 @@ jobs:
       - name: Check legacy error-match patterns
         run: ./scripts/check_legacy_error_matches.sh
       - name: Audit coverage check
-        run: cargo run -p audit-coverage-check
+        run: cargo xtask audit-coverage-check
       - name: openapi-client coverage (spec ↔ client)
         run: cargo xtask openapi-client-check
 
