@@ -1,4 +1,5 @@
-//! `audit-coverage-check` binary entry point.
+//! `cargo xtask audit-coverage-check` — ensure every state-changing site has an
+//! audit-catalog decision.
 //!
 //! Runs three static-analysis passes over the workspace source tree:
 //!
@@ -8,31 +9,32 @@
 //!    must refer to a registered action constant.
 //! 3. **Emit sweep**: every registered `Stateful` action must have at least one
 //!    `emit` call site in the source tree.
-//!
-//! Exits with code `0` on success, `1` when coverage violations are found, or
-//! `2` when a fatal I/O or parse error prevents the analysis from running.
 
+pub mod catalog;
+pub mod emit_sweep;
+pub mod registry;
+pub mod walker;
+
+use std::path::Path;
 use std::process::ExitCode;
 
-fn main() -> ExitCode {
-    let workspace_root = match std::env::current_dir() {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("failed to get cwd: {e}");
-            return ExitCode::from(2);
-        }
-    };
-    let catalog_path = workspace_root.join("crates/shared/audit-log/audit-catalog.toml");
-    let action_type_path = workspace_root.join("crates/shared/audit-log/src/action_type.rs");
+/// Subcommand entry point: run the three coverage passes against `root`.
+///
+/// Exits with code `0` on success, `1` when coverage violations are found, or
+/// `2` when a fatal I/O or parse error prevents the analysis from running.
+#[must_use]
+pub fn cli(root: &Path) -> ExitCode {
+    let catalog_path = root.join("crates/shared/audit-log/audit-catalog.toml");
+    let action_type_path = root.join("crates/shared/audit-log/src/action_type.rs");
 
-    let catalog = match audit_coverage_check::catalog::load(&catalog_path) {
+    let catalog = match catalog::load(&catalog_path) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("failed to read catalog: {e}");
             return ExitCode::from(2);
         }
     };
-    let registry = match audit_coverage_check::registry::load(&action_type_path) {
+    let registry = match registry::load(&action_type_path) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("failed to read registry: {e}");
@@ -42,7 +44,7 @@ fn main() -> ExitCode {
 
     let mut failed = false;
 
-    match audit_coverage_check::walker::scan(&workspace_root, &catalog, &registry) {
+    match walker::scan(root, &catalog, &registry) {
         Ok(report) => {
             for s in &report.missing_catalog_entry {
                 eprintln!("missing catalog entry: {s}");
@@ -63,7 +65,7 @@ fn main() -> ExitCode {
         }
     }
 
-    match audit_coverage_check::emit_sweep::scan(&workspace_root, &registry) {
+    match emit_sweep::scan(root, &registry) {
         Ok(report) => {
             for a in &report.stateful_actions_without_emit_site {
                 eprintln!("registered Stateful action with no emit call site: {a}");

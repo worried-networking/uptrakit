@@ -3,7 +3,6 @@ resolver = "3"
 members = [
     "crates/core/*",
     "crates/shared/*",
-    "crates/shared/audit-log/tools/audit-coverage-check",
     "crates/ui/*",
     "crates/plugins/*/*",
     "crates/plugins/hooks/*",

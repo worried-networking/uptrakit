@@ -1,5 +1,5 @@
-use audit_coverage_check::catalog;
 use std::io::Write;
+use xtask::audit_coverage_check::catalog;
 
 #[test]
 fn catalog_round_trip() {
