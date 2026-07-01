@@ -1,0 +1,29 @@
+[package]
+name = "xtask"
+description = "Repo dev-tooling: static-analysis gates run via `cargo xtask <command>`"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version = "0.0.1"
+
+[lib]
+name = "xtask"
+path = "src/lib.rs"
+
+[[bin]]
+name = "xtask"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true }
+syn = { workspace = true, features = ["full", "visit", "extra-traits"] }
+proc-macro2 = { workspace = true }
+walkdir = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

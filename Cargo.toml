@@ -9,6 +9,7 @@ members = [
     "crates/plugins/hooks/*",
     "crates/plugins/notifications/*",
     "frontend",
+    "xtask",
 ]
 
 [workspace.package]
