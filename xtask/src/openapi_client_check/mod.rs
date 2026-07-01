@@ -1,5 +1,8 @@
 //! `cargo xtask openapi-client-check` — assert the client tracks the OpenAPI spec.
 
+pub mod normalize;
+pub mod spec;
+
 use std::path::Path;
 use std::process::ExitCode;
 
