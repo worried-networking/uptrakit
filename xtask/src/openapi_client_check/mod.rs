@@ -1,5 +1,6 @@
 //! `cargo xtask openapi-client-check` — assert the client tracks the OpenAPI spec.
 
+pub mod client;
 pub mod normalize;
 pub mod spec;
 
