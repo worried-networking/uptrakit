@@ -108,6 +108,10 @@ pub fn collect_path_templates(client_src_dir: &Path) -> Result<Vec<String>, Stri
 
 /// Walk `client_src_dir` for `*.rs` and union all client method names.
 ///
+/// Note: a future `#[cfg(test)]`/`mock.rs` `impl UptrakitClient` block would surface its
+/// `pub async fn`s as phantom client-only violations. Add such methods to `CLIENT_ONLY` in
+/// `ledgers.rs` if that happens.
+///
 /// # Errors
 /// Returns an error string if the directory cannot be walked or a file cannot be read.
 pub fn collect_methods(client_src_dir: &Path) -> Result<Vec<String>, String> {

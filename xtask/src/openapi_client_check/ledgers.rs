@@ -135,15 +135,27 @@ pub fn is_list_all_companion(method: &str, all_methods: &[String]) -> bool {
     all_methods.contains(&sibling)
 }
 
-/// Fail if a `CLIENT_ONLY` name also appears in `RENAME_MAP` values or `SPEC_ONLY`.
+/// Fail if any ledger entry contradicts another.
+///
+/// Two conditions are checked:
+/// 1. A `CLIENT_ONLY` name also appears in `RENAME_MAP` values or `SPEC_ONLY`.
+/// 2. A `RENAME_MAP` key also appears in `SPEC_ONLY` (rename says "map to method",
+///    spec-only says "no method" — a direct contradiction).
 ///
 /// # Errors
-/// Returns an error string naming the first double-booked entry.
+/// Returns an error string naming the first double-booked or contradicting entry.
 pub fn validate_no_double_booking() -> Result<(), String> {
     for name in CLIENT_ONLY {
         if RENAME_MAP.iter().any(|(_, method)| method == name) || SPEC_ONLY.contains(name) {
             return Err(format!(
                 "ledger double-booking: '{name}' is in CLIENT_ONLY and another ledger"
+            ));
+        }
+    }
+    for (id, _) in RENAME_MAP {
+        if SPEC_ONLY.contains(id) {
+            return Err(format!(
+                "ledger contradiction: operationId '{id}' is in both RENAME_MAP and SPEC_ONLY"
             ));
         }
     }
