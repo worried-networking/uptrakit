@@ -4,7 +4,10 @@
 pub const RENAME_MAP: &[(&str, &str)] = &[
     // OIDC provider management: spec uses short names, client adds `oidc_` prefix for clarity
     ("activate_provider", "activate_oidc_provider"),
-    ("add_tenant_discovery_allowlist_entry", "add_discovery_allowlist_entry"),
+    (
+        "add_tenant_discovery_allowlist_entry",
+        "add_discovery_allowlist_entry",
+    ),
     // Autodiscovery ignores: client uses "software_ignores" terminology
     ("batch_autodiscovery_ignores", "batch_software_ignores"),
     ("create_autodiscovery_ignore", "create_software_ignore"),
@@ -35,8 +38,14 @@ pub const RENAME_MAP: &[(&str, &str)] = &[
     ("list_log", "list_notification_log"),
     ("list_providers", "list_oidc_providers"),
     ("list_rules", "list_notification_rules"),
-    ("list_tenant_discovery_allowlist", "list_discovery_allowlist"),
-    ("remove_tenant_discovery_allowlist_entry", "remove_discovery_allowlist_entry"),
+    (
+        "list_tenant_discovery_allowlist",
+        "list_discovery_allowlist",
+    ),
+    (
+        "remove_tenant_discovery_allowlist_entry",
+        "remove_discovery_allowlist_entry",
+    ),
     ("test_channel", "test_notification_channel"),
     // OAuth token: client uses descriptive name with `oauth_` prefix
     ("token", "oauth_token"),

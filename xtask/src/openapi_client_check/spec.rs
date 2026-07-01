@@ -24,7 +24,9 @@ pub fn load(json: &str) -> Result<Vec<SpecOp>, String> {
     };
     let mut ops = Vec::new();
     for (path, item) in paths {
-        let Some(item_obj) = item.as_object() else { continue };
+        let Some(item_obj) = item.as_object() else {
+            continue;
+        };
         for method in METHODS {
             let Some(op) = item_obj.get(*method).and_then(Value::as_object) else {
                 continue;
