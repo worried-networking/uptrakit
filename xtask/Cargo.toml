@@ -21,6 +21,8 @@ syn = { workspace = true, features = ["full", "visit", "extra-traits"] }
 proc-macro2 = { workspace = true }
 walkdir = { workspace = true }
 serde_json = { workspace = true }
+toml = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }

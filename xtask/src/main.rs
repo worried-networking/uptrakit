@@ -18,6 +18,9 @@ enum Command {
     /// Assert uptrakit-openapi-client tracks the OpenAPI spec.
     #[command(name = "openapi-client-check")]
     OpenapiClient,
+    /// Ensure every state-changing site has an audit-catalog decision.
+    #[command(name = "audit-coverage-check")]
+    AuditCoverage,
 }
 
 fn main() -> ExitCode {
@@ -31,5 +34,6 @@ fn main() -> ExitCode {
     };
     match cli.command {
         Command::OpenapiClient => xtask::openapi_client_check::cli(&root),
+        Command::AuditCoverage => xtask::audit_coverage_check::cli(&root),
     }
 }

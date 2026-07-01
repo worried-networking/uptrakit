@@ -12,7 +12,7 @@
 
 use std::path::Path;
 
-use crate::registry::{Kind, Registry};
+use super::registry::{Kind, Registry};
 
 /// Results from sweeping the source tree for stateful action emit sites.
 #[derive(Debug)]
@@ -34,8 +34,8 @@ pub struct EmitReport {
 ///
 /// Returns a descriptive string if the workspace tree cannot be traversed.
 pub fn scan(root: &Path, registry: &Registry) -> Result<EmitReport, String> {
-    let files = crate::walker::collect_rust_sources(root);
-    let stateful: Vec<&crate::registry::RegistryEntry> = registry
+    let files = super::walker::collect_rust_sources(root);
+    let stateful: Vec<&super::registry::RegistryEntry> = registry
         .actions
         .values()
         .filter(|e| e.kind == Kind::Stateful)

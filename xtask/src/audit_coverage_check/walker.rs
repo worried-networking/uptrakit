@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 
 use syn::visit::Visit;
 
-use crate::{catalog::Catalog, registry::Registry};
+use super::{catalog::Catalog, registry::Registry};
 
 /// Results from scanning the source tree for audit call-site coverage.
 #[derive(Debug)]
