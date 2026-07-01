@@ -3,7 +3,7 @@
 #   action = "<action-key>"   — site is audited via the named registered action
 #   skip   = "<reason>"       — site is intentionally not audited
 #
-# Run `cargo run -p audit-coverage-check` to verify coverage.
+# Run `cargo xtask audit-coverage-check` to verify coverage.
 
 # ---------------------------------------------------------------------------
 # Integration test infrastructure — not user-driven state changes
