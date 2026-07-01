@@ -26,6 +26,16 @@ Thanks for helping improve Uptrakit. Focus on boring, testable, and well-reviewe
   [Setup — Pre-commit hooks](docs/development/setup.md#pre-commit-hooks) for bypass options.
 - Update documentation under `docs/` whenever behavior, config, or UI changes.
 
+## Adding an API client endpoint
+
+Use `crates/shared/openapi-client/src/hosts.rs` as the template: one method per operation, `&Uuid`
+for IDs, internal helpers from `lib.rs`, and a unit test for any request body or query params.
+Run `cargo xtask openapi-client-check` before committing — the check runs in CI (`backend-lint`)
+and fails if the new method or its `paths.rs` constant is missing from both the client and the
+reviewed ledger at `xtask/src/openapi_client_check/ledgers.rs`.
+
+See [OpenAPI Client](docs/development/openapi-client.md) for the full guide.
+
 ## Testing and PRs
 
 - Use the commands in [docs/development/testing.md](docs/development/testing.md) before opening a PR.
