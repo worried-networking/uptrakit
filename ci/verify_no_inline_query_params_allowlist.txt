@@ -1,0 +1,16 @@
+# Allowlist for ci/verify_no_inline_query_params.sh
+#
+# The guard forbids hand-maintained inline `#[utoipa::path(params(("name" = Type,
+# Query, ...)))]` tuples, because they duplicate the handler's `Query<Struct>`
+# extractor fields and can silently drift from it (the golden test can't catch it).
+# The fix is almost always to derive the params: `params(SomeStruct)` where
+# `SomeStruct: utoipa::IntoParams`.
+#
+# Add an entry ONLY for a genuinely non-`Query<Struct>`-backed inline query param
+# that cannot be expressed as an IntoParams struct. One row per exemption:
+#
+#   crates/ui/web-api/src/routes/<file>.rs|<text-regex matching the offending line>
+#
+# Blank lines and lines starting with `#` are ignored.
+#
+# (empty — the convention is fully migrated; no exemptions today)

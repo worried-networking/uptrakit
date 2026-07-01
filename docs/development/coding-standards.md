@@ -1255,9 +1255,12 @@ instead of an error.
 ```rust
 use uuid::Uuid;
 
-#[derive(Deserialize)]
+// Derive IntoParams so the OpenAPI params come from THIS struct — never a
+// hand-maintained duplicate (see "OpenAPI parameter & schema authoring" below).
+#[derive(Deserialize, utoipa::IntoParams)]
 struct MyQuery {
-    // Axum returns 422 automatically for malformed UUIDs
+    /// Filter by plugin config UUID.
+    // Axum returns 422 automatically for malformed UUIDs.
     plugin_config_id: Option<Uuid>,
 }
 
@@ -1266,7 +1269,9 @@ struct MyQuery {
 
 ### utoipa annotations
 
-Declare `Option<Uuid>` in utoipa `params(…)` so the OpenAPI schema emits `format: uuid`:
+Reference the query struct with `params(MyQuery)` (mixed with any inline Path tuples) — do NOT
+re-declare a query field the struct already owns. `IntoParams` still emits `format: uuid` for the
+`Option<Uuid>` field, and the field's `///` doc-comment becomes the OpenAPI description:
 
 ```rust
 #[utoipa::path(
@@ -1274,7 +1279,7 @@ Declare `Option<Uuid>` in utoipa `params(…)` so the OpenAPI schema emits `form
     path = "/api/v1/hosts/{id}/discovered",
     params(
         ("id" = Uuid, Path, description = "Host UUID"),
-        ("plugin_config_id" = Option<Uuid>, Query, description = "Filter by plugin config UUID"),
+        MyQuery,
     ),
     ...
 )]
@@ -1294,6 +1299,43 @@ let id = params.plugin_config_id.as_deref().and_then(|s| Uuid::parse_str(s).ok()
 ```
 
 See also: [Typed Path Extractors](#typed-path-extractors) for the equivalent rule on path parameters.
+
+## OpenAPI parameter & schema authoring (drift-proof)
+
+The OpenAPI spec (`crates/ui/web-api/openapi.json`) is generated from the `#[utoipa::path]` and
+`#[derive(...)]` annotations, then drives the frontend client. Any schema value that is
+**hand-maintained separately from its source of truth** can silently drift from it. The
+`openapi_json_is_up_to_date` golden test (`integration_tests/openapi_spec.rs`) does **not** catch this
+class: it only proves the committed spec equals what the annotations regenerate — if an annotation is
+wrong, both are wrong and the test passes while the generated client is broken. This once dropped the
+software-items name filter. Follow these rules; see
+[ADR-0025](../adr/0025-drift-proof-openapi-params.md) for the full rationale.
+
+- **Query / request params: derive, don't hand-list.** Author them as `params(<IntoParamsStruct>)` over
+  the handler's `Query<Struct>` extractor — never a `params(("field" = …, Query, …))` list that
+  duplicates struct fields. Field `///` doc-comments become the param descriptions. Enforced by
+  `ci/verify_no_inline_query_params.sh` (fails on any inline `Query` tuple; allowlist a genuine
+  non-`Query<Struct>`-backed exception). Examples: `list_software_items`
+  (`routes/software_items/crud.rs`), `list_audit_logs` (`routes/audit_logs.rs`).
+- **`IntoParams` derive gating.** Structs in **`uptrakit-web-api-types`** use
+  `#[cfg_attr(feature = "openapi", derive(utoipa::IntoParams))]` (the crate is reusable without OpenAPI).
+  Structs **local to `uptrakit-web-api` route files** use an **unconditional** `#[derive(utoipa::IntoParams)]`
+  — `web-api` has no `openapi` feature and `utoipa` is a non-optional dependency, so a `cfg_attr` gate
+  would never fire and fail to compile. E.g. `ListSoftwareItemsParams` (types) vs `OidcCallbackParams`
+  (local, in `routes/oidc_auth.rs`).
+- **Path params stay inline; mixed Path + Query go in one block.** Single/few path params are fine as
+  inline tuples. When a handler has both, keep the Path tuples inline and add the `IntoParams` struct as
+  a further entry — `unassign_host` (`routes/software_items/host_assignments.rs`):
+  `params(("id" = Uuid, Path, …), ("host_id" = Uuid, Path, …), DeleteHostAssignmentParams)`.
+- **Enum schemas: source `enum_values` from one place.** A manual `utoipa::PartialSchema` must derive its
+  values from the same source as the serde wire format — `Self::all()` (via `strum::EnumIter`) for plain
+  enums (`Permission`, `crates/shared/types/src/permissions.rs`), or the `wire_safe_enum!` macro's `$wire`
+  list (`crates/shared/macros/src/lib.rs`). For an enum with an `Other(String)` catch-all (which can't
+  derive `EnumIter`), hardcoding is unavoidable — pair it with a guard test asserting the schema equals
+  the `as_str()` set (`PluginRole` + `plugin_role_schema_enum_values_match_wire_strings`,
+  `crates/shared/types/src/plugin_role.rs`).
+- **Regenerate + commit both artifacts** after any change — see the "REST API contract staleness gates"
+  section in [quality-gates.md](quality-gates.md) (`./scripts/regen-api.sh`).
 
 ## Tenant-Safe Database Queries
 

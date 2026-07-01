@@ -44,7 +44,9 @@ directly for API endpoints.
    added after the split are absent from the spec (and the generated client).
 2. For list endpoints, expose query filters with `params(<IntoParamsStruct>)` rather than a
    hand-maintained `params(("page", Query, …), …)` list — the manual form silently drops any struct
-   field it forgets, which removed the software name-filter once.
+   field it forgets, which removed the software name-filter once. Canonical rule + rationale:
+   [coding-standards.md](coding-standards.md) ("OpenAPI parameter & schema authoring") +
+   [ADR-0025](../adr/0025-drift-proof-openapi-params.md); enforced by `ci/verify_no_inline_query_params.sh`.
 3. Regenerate the spec and the client in one step, then commit both artifacts:
 
    ```sh
