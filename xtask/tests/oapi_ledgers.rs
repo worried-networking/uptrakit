@@ -4,7 +4,10 @@ use xtask::openapi_client_check::ledgers;
 fn list_all_companion_detected_only_with_sibling() {
     let methods = vec!["list_hosts".to_string(), "list_all_hosts".to_string()];
     assert!(ledgers::is_list_all_companion("list_all_hosts", &methods));
-    assert!(!ledgers::is_list_all_companion("list_all_orphans", &methods));
+    assert!(!ledgers::is_list_all_companion(
+        "list_all_orphans",
+        &methods
+    ));
     assert!(!ledgers::is_list_all_companion("list_hosts", &methods));
 }
 

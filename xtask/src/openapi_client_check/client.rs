@@ -68,14 +68,23 @@ fn first_str_literal(tokens: proc_macro2::TokenStream) -> Option<String> {
 
 impl<'ast> Visit<'ast> for PathCollector {
     fn visit_item_const(&mut self, node: &'ast syn::ItemConst) {
-        if let syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(s), .. }) = &*node.expr {
-            self.templates.push(super::normalize::normalize_path(&s.value()));
+        if let syn::Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Str(s),
+            ..
+        }) = &*node.expr
+        {
+            self.templates
+                .push(super::normalize::normalize_path(&s.value()));
         }
         visit::visit_item_const(self, node);
     }
 
     fn visit_macro(&mut self, node: &'ast syn::Macro) {
-        if node.path.segments.last().is_some_and(|s| s.ident == "format")
+        if node
+            .path
+            .segments
+            .last()
+            .is_some_and(|s| s.ident == "format")
             && let Some(tpl) = first_str_literal(node.tokens.clone())
         {
             self.templates.push(super::normalize::normalize_path(&tpl));

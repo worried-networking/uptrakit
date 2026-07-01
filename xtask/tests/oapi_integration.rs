@@ -13,5 +13,8 @@ fn client_tracks_openapi_spec_in_workspace() {
         .current_dir(workspace_root)
         .status()
         .expect("run xtask");
-    assert!(status.success(), "openapi-client drift detected; run `cargo xtask openapi-client-check`");
+    assert!(
+        status.success(),
+        "openapi-client drift detected; run `cargo xtask openapi-client-check`"
+    );
 }

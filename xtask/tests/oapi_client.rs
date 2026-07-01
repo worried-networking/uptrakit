@@ -15,11 +15,14 @@ fn extracts_and_normalizes_path_templates() {
     "#;
     let mut t = client::path_templates_in_source(src);
     t.sort();
-    assert_eq!(t, vec![
-        "/api/v1/hosts".to_string(),
-        "/api/v1/hosts/{}".to_string(),
-        "/api/v1/services/{}/merge".to_string(),
-    ]);
+    assert_eq!(
+        t,
+        vec![
+            "/api/v1/hosts".to_string(),
+            "/api/v1/hosts/{}".to_string(),
+            "/api/v1/services/{}/merge".to_string(),
+        ]
+    );
 }
 
 #[test]

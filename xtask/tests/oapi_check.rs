@@ -1,7 +1,11 @@
 use xtask::openapi_client_check::{check, spec::SpecOp};
 
 fn op(id: &str) -> SpecOp {
-    SpecOp { operation_id: id.into(), path: "/x".into(), method: "get".into() }
+    SpecOp {
+        operation_id: id.into(),
+        path: "/x".into(),
+        method: "get".into(),
+    }
 }
 
 #[test]
@@ -14,14 +18,26 @@ fn flags_spec_op_with_no_method_and_orphan_method() {
     ];
     let v = check::check_names(&ops, &methods);
     let d: Vec<_> = v.iter().map(|x| x.detail.clone()).collect();
-    assert!(d.iter().any(|x| x.contains("get_host")), "missing method not flagged");
-    assert!(d.iter().any(|x| x.contains("orphan_method")), "orphan method not flagged");
-    assert!(!d.iter().any(|x| x.contains("list_all_hosts")), "companion wrongly flagged");
+    assert!(
+        d.iter().any(|x| x.contains("get_host")),
+        "missing method not flagged"
+    );
+    assert!(
+        d.iter().any(|x| x.contains("orphan_method")),
+        "orphan method not flagged"
+    );
+    assert!(
+        !d.iter().any(|x| x.contains("list_all_hosts")),
+        "companion wrongly flagged"
+    );
 }
 
 #[test]
 fn flags_dead_const_and_unrouted_path() {
-    let spec_paths = vec!["/api/v1/hosts".to_string(), "/api/v1/services/{}".to_string()];
+    let spec_paths = vec![
+        "/api/v1/hosts".to_string(),
+        "/api/v1/services/{}".to_string(),
+    ];
     let client = vec![
         "/api/v1/hosts".to_string(),
         "/healthz".to_string(),
@@ -29,9 +45,18 @@ fn flags_dead_const_and_unrouted_path() {
     ];
     let v = check::check_paths(&spec_paths, &client);
     let d: Vec<_> = v.iter().map(|x| x.detail.clone()).collect();
-    assert!(d.iter().any(|x| x.contains("/api/v1/dead")), "dead const not flagged");
-    assert!(d.iter().any(|x| x.contains("/api/v1/services/{}")), "unrouted path not flagged");
-    assert!(!d.iter().any(|x| x.contains("/healthz")), "PATHS_CLIENT_ONLY wrongly flagged");
+    assert!(
+        d.iter().any(|x| x.contains("/api/v1/dead")),
+        "dead const not flagged"
+    );
+    assert!(
+        d.iter().any(|x| x.contains("/api/v1/services/{}")),
+        "unrouted path not flagged"
+    );
+    assert!(
+        !d.iter().any(|x| x.contains("/healthz")),
+        "PATHS_CLIENT_ONLY wrongly flagged"
+    );
 }
 
 #[test]
