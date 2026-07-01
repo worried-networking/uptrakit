@@ -63,3 +63,78 @@ pub fn check_names(ops: &[SpecOp], methods: &[String]) -> Vec<Violation> {
     }
     violations
 }
+
+/// Assertion 2: `paths.rs` templates ↔ spec paths (normalized), minus
+/// `PATHS_CLIENT_ONLY`. Deduplicates before comparing.
+#[must_use]
+pub fn check_paths(spec_paths: &[String], client_templates: &[String]) -> Vec<Violation> {
+    let spec_set: HashSet<&str> = spec_paths.iter().map(String::as_str).collect();
+    let client_set: HashSet<&str> = client_templates.iter().map(String::as_str).collect();
+    let mut violations = Vec::new();
+
+    for &t in &client_set {
+        if !spec_set.contains(t) && !ledgers::PATHS_CLIENT_ONLY.contains(&t) {
+            violations.push(Violation {
+                kind: "dead-path-const",
+                detail: format!("paths.rs template '{t}' matches no spec path"),
+            });
+        }
+    }
+    for &p in &spec_set {
+        if !client_set.contains(p) {
+            violations.push(Violation {
+                kind: "unrouted-path",
+                detail: format!("spec path '{p}' has no paths.rs template"),
+            });
+        }
+    }
+    violations
+}
+
+/// Flag ledger entries that no longer correspond to anything in the spec or
+/// client, so removing an endpoint cannot leave a dead ledger row.
+#[must_use]
+pub fn check_stale_ledgers(
+    ops: &[SpecOp],
+    methods: &[String],
+    templates: &[String],
+) -> Vec<Violation> {
+    let op_ids: HashSet<&str> = ops.iter().map(|o| o.operation_id.as_str()).collect();
+    let method_set: HashSet<&str> = methods.iter().map(String::as_str).collect();
+    let template_set: HashSet<&str> = templates.iter().map(String::as_str).collect();
+    let mut v = Vec::new();
+
+    for &(id, _) in ledgers::RENAME_MAP {
+        if !op_ids.contains(id) {
+            v.push(Violation {
+                kind: "stale-ledger",
+                detail: format!("RENAME_MAP operationId '{id}' no longer in spec"),
+            });
+        }
+    }
+    for &id in ledgers::SPEC_ONLY {
+        if !op_ids.contains(id) {
+            v.push(Violation {
+                kind: "stale-ledger",
+                detail: format!("SPEC_ONLY '{id}' no longer in spec"),
+            });
+        }
+    }
+    for &m in ledgers::CLIENT_ONLY {
+        if !method_set.contains(m) {
+            v.push(Violation {
+                kind: "stale-ledger",
+                detail: format!("CLIENT_ONLY '{m}' no longer a client method"),
+            });
+        }
+    }
+    for &t in ledgers::PATHS_CLIENT_ONLY {
+        if !template_set.contains(t) {
+            v.push(Violation {
+                kind: "stale-ledger",
+                detail: format!("PATHS_CLIENT_ONLY '{t}' no longer a paths.rs template"),
+            });
+        }
+    }
+    v
+}
