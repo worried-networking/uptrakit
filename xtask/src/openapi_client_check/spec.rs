@@ -4,11 +4,24 @@ use serde_json::Value;
 
 /// One OpenAPI operation carrying an `operationId`.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct SpecOp {
     pub operation_id: String,
     /// Placeholder-normalized path template (see `super::normalize::normalize_path`).
     pub path: String,
     pub method: String,
+}
+
+impl SpecOp {
+    /// Construct a `SpecOp`. `path` is stored as given (callers normalize first).
+    #[must_use]
+    pub fn new(operation_id: String, path: String, method: String) -> Self {
+        Self {
+            operation_id,
+            path,
+            method,
+        }
+    }
 }
 
 const METHODS: &[&str] = &["get", "put", "post", "delete", "patch", "head", "options"];

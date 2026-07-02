@@ -1,11 +1,7 @@
 use xtask::openapi_client_check::{check, spec::SpecOp};
 
 fn op(id: &str) -> SpecOp {
-    SpecOp {
-        operation_id: id.into(),
-        path: "/x".into(),
-        method: "get".into(),
-    }
+    SpecOp::new(id.into(), "/x".into(), "get".into())
 }
 
 #[test]

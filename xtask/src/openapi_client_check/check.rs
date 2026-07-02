@@ -6,6 +6,7 @@ use std::fmt;
 
 /// A single coverage failure.
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct Violation {
     pub kind: &'static str,
     pub detail: String,
@@ -49,9 +50,18 @@ pub fn check_names(ops: &[SpecOp], methods: &[String]) -> Vec<Violation> {
         }
     }
 
+    // A `list_all_<x>` pagination companion is exempt only when its `list_<x>` sibling
+    // is itself spec-covered (resolves to an operationId, i.e. is in `expected`) — not
+    // merely present in the client. This prevents a `list_all_<x>` companion of a
+    // spec-absent `CLIENT_ONLY` `list_<x>` from being silently auto-exempted.
+    let covered: Vec<String> = methods
+        .iter()
+        .filter(|m| expected.contains(m.as_str()))
+        .cloned()
+        .collect();
     for m in methods {
         if ledgers::CLIENT_ONLY.contains(&m.as_str())
-            || ledgers::is_list_all_companion(m, methods)
+            || ledgers::is_list_all_companion(m, &covered)
             || expected.contains(m.as_str())
         {
             continue;
