@@ -77,6 +77,12 @@ bash ci/verify_typed_audit_actions.sh
 echo "[pre-push] Running no-inline-query-params check..."
 bash ci/verify_no_inline_query_params.sh
 
+echo "[pre-push] Running audit coverage check..."
+cargo xtask audit-coverage-check
+
+echo "[pre-push] Running openapi-client coverage check..."
+cargo xtask openapi-client-check
+
 echo "[pre-push] Running cargo test (db-sqlite)..."
 if command -v cargo-nextest >/dev/null 2>&1; then
   cargo nextest run --no-default-features --features db-sqlite
