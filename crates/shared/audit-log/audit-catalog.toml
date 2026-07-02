@@ -19,18 +19,6 @@ skip = "integration-test OCSP responder stub; infrastructure only, no security e
 # ---------------------------------------------------------------------------
 
 [[entries]]
-site = "uptrakit_web_api::router::cancel_email_change"
-skip = "no AuditEntry call; cancels pending email-change request, covered by user.update on confirm"
-
-[[entries]]
-site = "uptrakit_web_api::router::change_password"
-action = "user.update"
-
-[[entries]]
-site = "uptrakit_web_api::router::initiate_email_change"
-skip = "no AuditEntry call; initiates email-change flow, covered by user.update on confirm"
-
-[[entries]]
 site = "uptrakit_web_api::router::invoke_surface_interaction"
 action = "surface_action.invoke"
 
@@ -412,27 +400,27 @@ action = "oidc_provider.update"
 # ---------------------------------------------------------------------------
 
 [[entries]]
-site = "uptrakit_web_api::routes::plugin_configs::batch_plugin_configs"
+site = "uptrakit_web_api::routes::plugin_configs::batch::batch_plugin_configs"
 action = "plugin_config.delete"
 
 [[entries]]
-site = "uptrakit_web_api::routes::plugin_configs::create_plugin_config"
+site = "uptrakit_web_api::routes::plugin_configs::crud::create_plugin_config"
 action = "plugin_config.create"
 
 [[entries]]
-site = "uptrakit_web_api::routes::plugin_configs::delete_plugin_config"
+site = "uptrakit_web_api::routes::plugin_configs::crud::delete_plugin_config"
 action = "plugin_config.delete"
 
 [[entries]]
-site = "uptrakit_web_api::routes::plugin_configs::discover_plugin_config"
+site = "uptrakit_web_api::routes::plugin_configs::discover::discover_plugin_config"
 skip = "read-only discovery probe; no state change, no AuditEntry emit"
 
 [[entries]]
-site = "uptrakit_web_api::routes::plugin_configs::test_plugin_config"
+site = "uptrakit_web_api::routes::plugin_configs::test_action::test_plugin_config"
 skip = "test probe; no state change, no AuditEntry emit"
 
 [[entries]]
-site = "uptrakit_web_api::routes::plugin_configs::update_plugin_config"
+site = "uptrakit_web_api::routes::plugin_configs::crud::update_plugin_config"
 action = "plugin_config.update"
 
 # ---------------------------------------------------------------------------
@@ -472,31 +460,31 @@ action = "system.server_certificate.renew"
 # ---------------------------------------------------------------------------
 
 [[entries]]
-site = "uptrakit_web_api::routes::services::approve_service"
+site = "uptrakit_web_api::routes::services::lifecycle::approve_service"
 action = "service.approve"
 
 [[entries]]
-site = "uptrakit_web_api::routes::services::batch_services"
+site = "uptrakit_web_api::routes::services::batch::batch_services"
 action = "service.approve"
 
 [[entries]]
-site = "uptrakit_web_api::routes::services::deactivate_service"
+site = "uptrakit_web_api::routes::services::lifecycle::deactivate_service"
 action = "service.deactivate"
 
 [[entries]]
-site = "uptrakit_web_api::routes::services::merge_service"
+site = "uptrakit_web_api::routes::services::merge::merge_service"
 action = "service.merge"
 
 [[entries]]
-site = "uptrakit_web_api::routes::services::reject_service"
+site = "uptrakit_web_api::routes::services::lifecycle::reject_service"
 action = "service.reject"
 
 [[entries]]
-site = "uptrakit_web_api::routes::services::set_update_freeze"
+site = "uptrakit_web_api::routes::services::lifecycle::set_update_freeze"
 action = "service.update_freeze.enable"
 
 [[entries]]
-site = "uptrakit_web_api::routes::services::update_service"
+site = "uptrakit_web_api::routes::services::crud::update_service"
 action = "service.update"
 
 # ---------------------------------------------------------------------------
@@ -576,59 +564,59 @@ action = "global_setting.update"
 # ---------------------------------------------------------------------------
 
 [[entries]]
-site = "uptrakit_web_api::routes::software_items::approve_software_item"
+site = "uptrakit_web_api::routes::software_items::crud::approve_software_item"
 action = "software_item.approve"
 
 [[entries]]
-site = "uptrakit_web_api::routes::software_items::assign_hosts"
+site = "uptrakit_web_api::routes::software_items::host_assignments::assign_hosts"
 action = "software_item.assign_hosts"
 
 [[entries]]
-site = "uptrakit_web_api::routes::software_items::batch_software_items"
+site = "uptrakit_web_api::routes::software_items::batch::batch_software_items"
 action = "software_item.batch"
 
 [[entries]]
-site = "uptrakit_web_api::routes::software_items::check_versions"
+site = "uptrakit_web_api::routes::software_items::version_check::check_versions"
 action = "software.version_check.triggered"
 
 [[entries]]
-site = "uptrakit_web_api::routes::software_items::check_versions_host"
+site = "uptrakit_web_api::routes::software_items::version_check::check_versions_host"
 action = "software.version_check.triggered"
 
 [[entries]]
-site = "uptrakit_web_api::routes::software_items::create_software_item"
+site = "uptrakit_web_api::routes::software_items::crud::create_software_item"
 action = "software_item.create"
 
 [[entries]]
-site = "uptrakit_web_api::routes::software_items::delete_plugin_assignment"
+site = "uptrakit_web_api::routes::software_items::host_assignments::delete_plugin_assignment"
 action = "software_item.delete_plugin_assignment"
 
 [[entries]]
-site = "uptrakit_web_api::routes::software_items::delete_software_item"
+site = "uptrakit_web_api::routes::software_items::crud::delete_software_item"
 action = "software_item.delete"
 
 [[entries]]
-site = "uptrakit_web_api::routes::software_items::execute_software_item_merge"
+site = "uptrakit_web_api::routes::software_items::merge::execute_software_item_merge"
 action = "software_item.merge"
 
 [[entries]]
-site = "uptrakit_web_api::routes::software_items::preview_software_item_merge"
+site = "uptrakit_web_api::routes::software_items::merge::preview_software_item_merge"
 skip = "preview only; no state change, no AuditEntry emit"
 
 [[entries]]
-site = "uptrakit_web_api::routes::software_items::trigger_update"
+site = "uptrakit_web_api::routes::software_items::updates::trigger_update"
 action = "software.update.triggered"
 
 [[entries]]
-site = "uptrakit_web_api::routes::software_items::unassign_host"
+site = "uptrakit_web_api::routes::software_items::host_assignments::unassign_host"
 action = "software_item.unassign_host"
 
 [[entries]]
-site = "uptrakit_web_api::routes::software_items::update_host_assignment"
+site = "uptrakit_web_api::routes::software_items::host_assignments::update_host_assignment"
 action = "software_item.update_host_assignment"
 
 [[entries]]
-site = "uptrakit_web_api::routes::software_items::update_software_item"
+site = "uptrakit_web_api::routes::software_items::crud::update_software_item"
 action = "software_item.update"
 
 # ---------------------------------------------------------------------------
@@ -682,6 +670,18 @@ action = "software.batch_update.triggered"
 # ---------------------------------------------------------------------------
 # Users
 # ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::users::cancel_email_change"
+skip = "no AuditEntry call; cancels pending email-change request, covered by user.update on confirm"
+
+[[entries]]
+site = "uptrakit_web_api::routes::users::change_password"
+action = "user.update"
+
+[[entries]]
+site = "uptrakit_web_api::routes::users::initiate_email_change"
+skip = "no AuditEntry call; initiates email-change flow, covered by user.update on confirm"
 
 [[entries]]
 site = "uptrakit_web_api::routes::users::update_profile"
