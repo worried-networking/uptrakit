@@ -7,6 +7,189 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.6](https://github.com/worried-networking/uptrakit/compare/uptrakit-controller-standalone-v0.0.5...uptrakit-controller-standalone-v0.0.6) - 2026-07-06
+
+### Added
+
+- *(web-api)* route reconnect-orphan updates to Interrupted not Failed
+- *(web-api)* spawn absolute-deadline update reaper at boot
+- *(frontend)* 401 refresh-retry with ApiError identity (spike S-A)
+- *(frontend)* configure hey-api client + cross-cutting interceptors
+- *(frontend)* standalone ApiError module for generated client
+- *(frontend)* generate committed OpenAPI client + analysis exclusions
+- *(frontend)* render interrupted update status in history
+- *(frontend)* short-SHA fallback in formatVersion
+- *(frontend)* hide embedded services from merge dialog + surface reason codes
+- *(agent-ssh)* add russh client keepalive (15s/4x)
+- *(backoff)* [**breaking**] rewrite API with consuming guard pattern
+- *(web-api)* annotate email-change/password endpoints into OpenAPI
+- *(web-api)* typed-slot dispatch for InstalledVersionEnricher
+- *(web-api)* apply_version_update_to_db accepts display override
+- *(plugin-infra)* add InstalledVersionEnricherSlot + RoleCreators field
+- *(web-api/providers)* implement list_recent_commit_dates_for_path
+- *(web-api)* thread GlobalProviderLookup into controller fetch jobs
+- *(web-api)* redirect-aware bearer auth + rekey_resolved audit
+- *(web-api)* route-level 400 for embedded merge with ValidationFailed audit
+- *(web-api)* typed errors for embedded-merge ban + invariant violation
+- *(web-api-queries)* reap_overdue_updates marks stuck updates Interrupted
+- *(web-api-queries)* add consolidate_protection_output query
+- *(web-api-queries)* tenant-scoped plugin_types_for_role lookup
+- *(web-api-queries)* embedded-merge ban + redirect upsert + invariant assert
+- *(plugin-infra)* declare_plugin! supports installed_version_enricher_create
+- *(plugin-infra)* add InstalledVersionEnricher trait + context
+- *(proxmox)* stream protection start-time errors to update output
+- *(plugins/skills)* register InstalledVersionEnricher role
+- *(plugins/skills)* implement InstalledVersionEnricher
+- *(plugins/skills)* emit commit-date display_version from batch_fetch
+
+### Fixed
+
+- *(build-info)* align --version with binary crate via build_info! macro
+- *(controller)* correct too_many_arguments expect feature gate
+- *(controller)* use additive nats gating in boot::components
+- *(controller-core)* consolidate protection output on pre-dispatch failure
+- *(web-api-queries)* stop clobbering output on pre-dispatch failure, carry real summary
+- *(frontend)* set client baseUrl to origin to stop /api/v1 double-prefix
+- *(web-api)* annotate software-items query+plugin_type params (restore name filter)
+- *(web-api-types)* emit serde wire strings in ToSchema for catch-all enums
+- *(frontend)* harden refresh shape-check + strengthen client test assertions
+- *(frontend)* regenerate client to steady-state gen:api formatting
+- *(frontend)* consume refresh rejection in dedup clear (no floating rejection)
+- *(web-api)* verify fixes — feature-gate golden spec test, annotation accuracy, AGENTS placement rule
+- *(update-liveness)* verify-pass fixes for Interrupted terminal handling
+- *(agent-ssh)* enforce update timeout on interactive PTY loop
+- *(web-api)* correct embedded test homing and remove run_embedded arg-count suppression
+- *(web-api)* treat Interrupted as terminal in log-stream and batch projections
+- *(plugin-infra)* verify-pass cleanups for enricher role
+- *(web-api)* let a late agent result upgrade a reaped Interrupted update
+- *(web-api-queries)* map DB Interrupted to API Interrupted explicitly
+- *(proxmox)* reject non-UPID responses from PVE task endpoints
+- *(plugins/skills)* route fetch_releases to controller
+
+### Other
+
+- *(controller)* use config-reload canonical digest; drop duplicates
+- *(controller)* unify startup/ into boot/init/
+- *(controller)* extract boot::serve phase; run_server now ~40 lines
+- *(controller)* extract boot::recovery phase
+- *(controller)* extract boot::reload + boot::app_state
+- *(controller)* extract boot::components + boot::nats
+- *(controller)* extract boot::identity sub-module
+- *(controller)* extract boot::listeners phase (FD-atomic)
+- *(controller)* extract boot::settings phase
+- *(controller)* extract boot::persistence phase
+- *(controller)* extract boot::directories phase
+- *(controller)* extract boot::crypto phase
+- *(controller)* extract boot::config phase
+- *(controller)* introduce boot/ module, move run_server
+- *(controller)* pre-decomposition latent fixes
+- *(web-api-queries)* cover list path; docs(controller-core): autocommit invariant at call sites
+- update Cargo.toml dependencies
+- *(web-api)* guard + document drift-proof OpenAPI param authoring (+ ADR-0025)
+- *(web-api)* drift-proof remaining query handlers via params(<IntoParamsStruct>)
+- *(web-api)* convert list handlers to params(<IntoParamsStruct>) (drift-proof)
+- *(frontend)* update AGENTS for generated API client; add runbook
+- *(frontend)* extract unauthorizedApiError to restore client.ts to green
+- *(frontend)* migrate audit/notifications/profile; api.ts→api/index.ts barrel; remove types.ts
+- *(frontend)* migrate audit/notifications/profile; reduce api.ts to a pure barrel
+- *(frontend)* migrate plugins/settings/tokens; delete settings.ts
+- *(frontend)* migrate software-items/scheduler/history call sites
+- *(frontend)* migrate hosts/host-tags/discovery call sites
+- *(frontend)* migrate services/system-services/batch call sites
+- *(frontend)* migrate auth/mfa/oidc call sites to generated SDK
+- *(frontend)* route generated singleton client through 401 refresh-retry
+- *(frontend)* extract surfaces.ts (non-spec) over configured client
+- *(frontend)* extract raw.ts over configured client; migrate importers
+- *(frontend)* extract batch.ts (executeBatchChunked)
+- *(frontend)* extract crypto.ts (sealed-box) from api client
+- *(frontend)* make api.ts the transitional barrel (generated SDK + client)
+- *(frontend)* correct generated-dir exclusion mechanisms in AGENTS
+- *(frontend)* evolve openapi staleness gate to cover generated client
+- *(frontend)* golden enum value-parity guard (spike R5)
+- *(frontend)* add @hey-api/openapi-ts codegen config + regen script
+- *(frontend)* drop libc fields auto-cleaned by npm on darwin
+- *(frontend)* allow 2% cross-host pixel drift in parity snapshots
+- *(frontend)* run Playwright e2e on every push
+- *(frontend)* scope auth e2e selectors to form
+- *(deps)* refresh frontend npm deps to latest
+- *(agent-core)* migrate version_check retry to backon
+- *(backoff)* [**breaking**] drop AttemptGuard, ship plain methods
+- *(mqtt-runtime)* migrate reconnect backoff to backon builder
+- *(doctests)* honor doctest=false opt-out; add doctest gate to pre-push
+- *(web-api-types)* guard PluginRole schema drift; point staleness msg to regen-api.sh
+- *(web-api)* fix clippy let_underscore in openapi_spec test
+- *(web-api)* guard spec-eligible endpoints against post-split drift
+- *(web-api)* golden-file gate for committed openapi.json
+- *(web-api)* expose assembled OpenAPI from build_router
+- *(web-api)* order plugin_configs facade mod decls before re-exports
+- *(web-api)* extract plugin_configs test-action handler; facade wiring-only
+- *(web-api)* extract plugin_configs batch handler into batch.rs
+- *(web-api)* extract plugin_configs discovery handler into discover.rs
+- *(web-api)* extract plugin_configs CRUD handlers into crud.rs
+- *(web-api)* extract plugin_configs audit context + risk summary
+- *(web-api)* extract plugin_configs command-safety helpers
+- *(web-api)* extract plugin_configs test module into tests.rs
+- *(web-api)* create plugin_configs facade via git mv
+- *(web-api)* extract services merge + batch handlers; facade wiring-only
+- *(web-api)* extract services lifecycle handlers into lifecycle.rs
+- *(web-api)* extract services CRUD handlers into crud.rs
+- *(web-api)* extract services audit-emit helpers into audit.rs
+- *(web-api)* move services test module into services/tests.rs
+- *(web-api)* relocate services.rs into services/ facade dir
+- *(web-api)* consolidate software_items facade re-exports; drop redundant Sized bound
+- *(web-api)* de-dup version_check precondition-error impls via shared trait
+- *(web-api)* extract software_items trigger_update handler; facade now wiring-only
+- *(web-api)* extract software_items batch handler
+- *(web-api)* extract software_items merge handlers
+- *(web-api)* extract software_items version-check handlers
+- *(web-api)* extract software_items host/plugin assignment handlers
+- *(web-api)* extract software_items CRUD handlers to crud.rs
+- *(web-api)* extract software_items audit helpers to audit.rs
+- *(web-api)* move software_items test modules to tests.rs/audit_tests.rs
+- *(web-api)* route messages submodule imports through facade (drop crate::routes::)
+- *(web-api)* de-dup renew-certificate dual path and messages tests
+- *(web-api)* extract messages/restart_progression, finalize facade
+- *(web-api)* extract messages/plugin_config submodule
+- *(web-api)* extract messages/discovery submodule
+- *(web-api)* extract messages/version_check submodule
+- *(web-api)* extract messages/hosts submodule
+- *(web-api)* extract messages/certificate submodule
+- *(web-api)* extract messages/shared submodule (ping + inventory audit)
+- *(web-api)* convert messages.rs to messages/ facade, move tests
+- *(web-api)* extract fail_dispatch_target_load from queued-dispatch loop
+- *(web-api)* finalize updates facade module
+- *(web-api)* move updates test module to updates/tests.rs
+- *(web-api)* extract updates stdin submodule
+- *(web-api)* extract updates batch submodule; name audit-summary predicates
+- *(web-api)* extract updates result submodule; share installed-version setter
+- *(web-api)* extract updates dispatch submodule
+- *(web-api)* extract updates started + output submodules
+- *(web-api)* extract updates replay submodule; flatten per-record loop
+- *(web-api)* extract updates audit submodule with shared display helper
+- *(web-api)* unify post-update finalization into finalize module
+- *(web-api)* extract updates ownership + lookups submodules
+- *(web-api)* move updates.rs into updates/mod.rs
+- *(web-api)* finalize handler-split verification artifacts
+- *(web-api)* reduce service_ws handler mod.rs to facade
+- *(web-api)* extract handler session_enrolled module
+- *(web-api)* extract handler session_authenticated module
+- *(web-api)* collapse duplicated run_embedded_* wrappers
+- *(web-api)* extract handler embedded module
+- *(web-api)* gather cross-cluster handler tests into tests.rs
+- *(web-api)* extract handler message_processor module
+- *(web-api)* collapse duplicated emit_service_* audit helpers
+- *(web-api)* extract handler audit_service module
+- *(web-api)* extract handler audit_surface module
+- *(web-api)* extract handler surface_wire module
+- *(web-api)* extract handler test_support fixtures
+- *(web-api)* hoist HandlerError/Result + consts to shared_types
+- *(web-api)* migrate NATS consumer backoff to backon
+- *(web-api-queries)* share RECOVERY_HINT constant across reaper and reconnect
+- *(web-api-queries)* assert active indexes match UpdateStatus sets
+- *(architecture)* document output-authoritative contract for pre-dispatch failures
+- *(web-api-queries)* add truncation-aware line loader
+- *(npm)* migrate release fetch retry to backon
+
 ## [0.0.5](https://github.com/worried-networking/uptrakit/compare/uptrakit-controller-standalone-v0.0.4...uptrakit-controller-standalone-v0.0.5) - 2026-06-05
 
 ### Fixed
