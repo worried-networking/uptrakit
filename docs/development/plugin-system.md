@@ -128,6 +128,49 @@ When Uptrakit needs to check or update a software item on a host, it:
 5. Runs the relevant method (`detect_installed_version`, `fetch_releases`,
    `execute_update`, etc.) on the returned role trait object.
 
+### Two-Tier Config Model: Type Settings vs. Plugin Configs
+
+Plugin configuration splits into two tiers. **Type settings** are tenant-level defaults per plugin
+type -- discovery preferences and behavioral defaults (e.g. APT `discovery_filter`, Homebrew
+`package_type`) that apply to all instances of a plugin type within a tenant. **Plugin configs**
+are named configuration profiles storing credentials, API endpoints, and other per-profile
+settings that vary between configurations.
+
+The `plugin_type_settings` table (`crates/shared/db/src/entity/plugin_type_setting.rs`) stores one
+row per `(tenant_id, plugin_type)` pair with a JSON `config` column. When no row exists, the
+plugin type's built-in defaults apply. This is the broadest layer in the three-layer merge
+performed by `resolve_effective_config()` (step 2 above): type settings, then profile config, then
+per-assignment config, each shallow-merged on top of the previous so narrower layers override
+matching fields from broader ones.
+
+All plugin configs implement the `PluginConfig` trait (unified form schema + secret masking,
+replacing the old separate `ConfigFormSchema` and `SecretMasking` traits). Plugins that support
+type settings additionally implement the `TypeSettings` trait:
+
+- `type_settings_form_schema() -> Vec<FormField>` -- form field definitions for the type settings
+  UI (e.g. `discovery_filter` for APT, `package_type` for Homebrew).
+- `type_settings_sample() -> serde_json::Value` -- sample/default JSON for the type settings.
+
+The `declare_plugin!` macro (with `type_settings: true`) wires `TypeSettings` into the
+`PluginDescriptor`, plus the `PluginOps` trait methods `type_settings_form_schema_str()` and
+`type_settings_sample_for_str()` for trait-object dispatch. The `PluginTypeInfo` response (from
+`GET /api/v1/plugin-types`) includes `type_settings_form_fields` and `type_settings_sample` fields
+so the frontend can render a settings form.
+
+Type settings have their own CRUD surface, scoped to the tenant and keyed by plugin type rather
+than by config ID:
+
+| Method   | Path                                        | Behavior                                         |
+| :------- | :------------------------------------------ | :----------------------------------------------- |
+| `GET`    | `/api/v1/plugin-type-settings`              | List all plugin types with active type settings. |
+| `GET`    | `/api/v1/plugin-type-settings/:plugin_type` | Get the current type settings for a plugin type. |
+| `PUT`    | `/api/v1/plugin-type-settings/:plugin_type` | Upsert type settings (create or update).         |
+| `DELETE` | `/api/v1/plugin-type-settings/:plugin_type` | Reset to built-in defaults (deletes the row).    |
+
+All endpoints require the `update_software` permission. Handlers live in
+`crates/ui/web-api/src/routes/plugin_type_settings.rs`; the merge itself is implemented in
+`crates/ui/web-api-queries/src/queries/plugin_configs.rs`.
+
 ### Per-Host Latest Version Tracking
 
 The `available_versions` table has been removed. Latest version information is now tracked

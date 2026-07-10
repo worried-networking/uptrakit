@@ -14,6 +14,9 @@ Uptrakit.
 | [Error Handling](error-handling.md)                        | rootcause/thiserror patterns, decision guide, anti-patterns, and approved exceptions.                        |
 | [PR Process](pr-process.md)                                | Pull request requirements, review expectations, and merge readiness checklist.                               |
 | [Dependency Policy](dependency-policy.md)                  | Dependency introduction/update rules and `cargo deny` policy.                                                |
+| [Feature Flags](feature-flags.md)                          | Controller and web-api Cargo feature flags: defaults, effects, and propagation.                              |
+| [Autodiscovery Internals](autodiscovery-internals.md)      | Autodiscovery invariants: triggers, DiscoveryTarget catalog, allowlists, capabilities, batch traits.         |
+| [Directory Management](directories.md)                     | Cross-platform config/state directory resolution, CLI flags, and secure permission helpers.                  |
 | [Plugin Guidelines](plugin-guidelines.md)                  | Plugin architecture expectations, capabilities, host compatibility detection, and lifecycle hooks.           |
 | [Plugin System](plugin-system.md)                          | Plugin system architecture, discovery flow, and capability extension model.                                  |
 | [AI Guidelines](ai-guidelines.md)                          | Policy for using AI tools in project development.                                                            |

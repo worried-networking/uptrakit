@@ -210,6 +210,11 @@ pub type Result<T> = std::result::Result<T, Report<MyError>>;
 Real example: [`crates/ui/web-api-auth/src/auth/error.rs`](../../crates/ui/web-api-auth/src/auth/error.rs) (`AuthError`),
 [`crates/core/controller/src/db/error.rs`](../../crates/core/controller/src/db/error.rs) (`DbError`).
 
+**`Result<T>` alias coverage:** The `pub type Result<T>` alias must cover **all** functions in a query module,
+including simple read-only functions that only fail with `sea_orm::DbErr`. Do not use a bare
+`std::result::Result<T, SomeError>` signature for "simple" functions — use the module's unified `Result<T>` so every
+function in the boundary shares one error type and conversion path.
+
 ### Pattern 2: Implement `ReportConversion` for cross-boundary error conversion
 
 When your module calls code that returns a different error type, implement `ReportConversion` so that `.context_to()`

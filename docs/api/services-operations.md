@@ -47,6 +47,36 @@ is omitted from JSON when the service uses the global default).
 See also: [PKI and Certificate Lifecycle](../security/pki-certificates.md) for renewal window details and
 the per-service override section.
 
+### Ping interval mechanics
+
+The ping interval is controller-managed and per-service configurable. The `services` DB table has a
+nullable `ping_interval_seconds INTEGER` column. The controller reads this value per-service and falls
+back to profile-based defaults, derived from `ServiceProfile::default_ping_interval_secs()`, when the
+column is `NULL`:
+
+| Profile         | Default ping interval        | Services                |
+| --------------- | ---------------------------- | ----------------------- |
+| `UpdateTracker` | 15s (MQTT lease heartbeat)   | MQTT bridge             |
+| `Scheduler`     | 60s (less latency-sensitive) | External task scheduler |
+| `Agent`         | 300s (5 minutes)             | Local agent, SSH agent  |
+
+The `ServiceResponse.ping_interval_seconds` field mirrors the same optionality: `None` means the
+service is using the profile-based default rather than a per-service override.
+
+- **Wire protocol**: `ServiceSettingsPayload.ping_interval` is a required `Duration` field serialized as
+  a whole-second `u32` via `#[serde(with = "duration_seconds")]`. The `duration_seconds` module in
+  `uptrakit-internal-wire` converts between `std::time::Duration` and `u32` seconds on the wire.
+  `ServiceSettingsPayload.tenant_id` is an `Option<Uuid>` present for tenant-scoped services (agents, SSH
+  agents) and absent for system services.
+- **SDK event loop**: The ping timer starts as `None` and is created when the first `ServiceSettings`
+  message arrives with the controller-provided `ping_interval`. The `ServiceHandler::ping_interval()`
+  trait method has been removed — services no longer declare their own interval.
+- **CLI**: `uptrakit services update <id> --ping-interval <seconds>` (and the system-service equivalent,
+  `uptrakit system-services update <id> --ping-interval <seconds>`). `0` clears the override.
+- **OpenAPI client**: `update_service(&self, id: &Uuid, req: &UpdateServiceRequest) -> Result<ServiceResponse>`
+  in `crates/shared/openapi-client/src/services.rs`.
+- **Frontend**: Service page context menu includes an "Edit Ping Interval" dialog.
+
 ## MQTT Service
 
 > **Note:** The MQTT bridge binary (`uptrakit-mqtt`) now enrolls as a **system service** and is
@@ -163,11 +193,11 @@ These rows carry `is_embedded: true` in the response.
 
 The `POST /api/v1/services/{target_id}/merge` endpoint returns the following error codes:
 
-| Status | Code                      | Description                                                                           |
-| ------ | ------------------------- | ------------------------------------------------------------------------------------- |
-| 400    | `service.embedded_target` | Target service is embedded; merging into embedded services is not permitted.          |
-| 400    | `service.embedded_source` | Source service is embedded; embedded services cannot be merged away.                  |
-| 500    | `service.merge_invariant` | Redirect-chain invariant violated; service merge state is inconsistent.               |
+| Status | Code                      | Description                                                                  |
+| ------ | ------------------------- | ---------------------------------------------------------------------------- |
+| 400    | `service.embedded_target` | Target service is embedded; merging into embedded services is not permitted. |
+| 400    | `service.embedded_source` | Source service is embedded; embedded services cannot be merged away.         |
+| 500    | `service.merge_invariant` | Redirect-chain invariant violated; service merge state is inconsistent.      |
 
 ### Yield state
 

@@ -2,17 +2,17 @@
 
 System services are tenant-agnostic infrastructure components (MQTT bridge, external scheduler) that
 operate across all tenants. Unlike regular tenant services, they are stored in a dedicated
-`system_services` table and authenticated via a single global enrollment token rather than per-tenant
-enrollment tokens.
+`system_services` table and authenticated via named system enrollment tokens
+(`system_enrollment_tokens` table) rather than per-tenant enrollment tokens.
 
 ## Overview
 
 The controller supports two service tiers:
 
-| Tier            | Table             | Scoped to                   | Enrollment token                                  | Example services                         |
-| --------------- | ----------------- | --------------------------- | ------------------------------------------------- | ---------------------------------------- |
-| Tenant services | `services`        | Tenant (`tenant_id` column) | Per-tenant Argon2id tokens in `enrollment_tokens` | Agents, SSH agents, MQTT bridge (legacy) |
-| System services | `system_services` | Global (no `tenant_id`)     | Single global plaintext token (encrypted at rest) | MQTT bridge, external scheduler          |
+| Tier            | Table             | Scoped to                   | Enrollment token                                    | Example services                         |
+| --------------- | ----------------- | --------------------------- | --------------------------------------------------- | ---------------------------------------- |
+| Tenant services | `services`        | Tenant (`tenant_id` column) | Per-tenant Argon2id tokens in `enrollment_tokens`   | Agents, SSH agents, MQTT bridge (legacy) |
+| System services | `system_services` | Global (no `tenant_id`)     | Named Argon2id tokens in `system_enrollment_tokens` | MQTT bridge, external scheduler          |
 
 The MQTT bridge and external scheduler must serve all tenants simultaneously. Placing them in a
 per-tenant `services` table would require associating them with an arbitrary tenant or duplicating
@@ -118,42 +118,40 @@ capability intersection is correct by construction.
 
 ## Enrollment Flow
 
-### Token comparison
+### System enrollment tokens
 
-The system services enrollment token is stored encrypted at rest in the `settings` table under
-`SettingKey::SystemServicesEnrollmentToken`. It is a single global plaintext token (not Argon2id
-hashed, unlike per-tenant enrollment tokens).
+Multiple named system enrollment tokens are stored in the `system_enrollment_tokens` table
+(`crates/shared/db/src/entity/system_enrollment_token.rs`), superseding the earlier single
+global plaintext token that was stored under `SettingKey::SystemServicesEnrollmentToken` in the
+`settings` table. Tokens are backend-generated random secrets, Argon2id-hashed at rest, and shown
+only once at creation (in the `token` field of `SystemEnrollmentTokenCreatedResponse`). Each token
+supports an optional usage limit (`max_uses`) and TTL (`expires_at`).
 
-At enrollment time:
+At enrollment time, if the service provides a token:
 
-1. The controller reads the stored token from the in-memory `SettingsSnapshot`.
-2. The provided token is compared with direct string equality against the stored value.
-3. If they match, the service is enrolled with `Approved` status immediately.
-4. If the stored token is set but the provided value does not match, the enrollment is rejected with
-   `Forbidden`.
-5. If no token is configured, the service is enrolled with `Pending` status and must be manually
-   approved via the REST API.
-6. If no token is provided and no token is configured, the service is enrolled with `Pending` status.
+1. `find_active_system_tokens()` retrieves all non-revoked, non-expired tokens with remaining uses.
+2. `password::verify_password()` performs Argon2id verification against each candidate.
+3. On match, `current_uses` is atomically incremented and `system_enrollment_token_id` is recorded
+   on the `system_services` row. This link is audit-only (no FK constraint), so a token can be
+   revoked or deleted after the service has enrolled without affecting the service record.
+4. A matching token produces `Approved` status; no match produces `Forbidden`; no token provided
+   produces `Pending`.
 
-This design avoids the Argon2id cost used for per-tenant tokens because:
-
-- The system enrollment token is a long-lived operator secret, not a user-facing credential.
-- The token is intentionally returned in plaintext by `GET /api/v1/settings/system-services` so
-  operators can copy it into deployment configurations.
-- The comparison is done in memory from the already-decrypted snapshot; timing differences are not
-  meaningful here.
+REST API: `POST/GET /api/v1/system-enrollment-tokens`, `GET/DELETE
+/api/v1/system-enrollment-tokens/{id}` (requires `manage_system_services`). OpenAPI client:
+`crates/shared/openapi-client/src/system_enrollment_tokens.rs`. CLI: `uptrakit
+system-enrollment-tokens list|create|show|revoke`. Full request/response shapes and the
+enrollment-behaviour table are documented in
+[HTTP Web API](../api/http-web-api.md#system-enrollment-token-endpoints).
 
 ### Auto-approve vs Pending
 
 ```text
 enrollment_token provided?
-  yes → stored token configured?
-          yes, match   → Approved
-          yes, no match → Forbidden (enrollment rejected)
-          no            → Pending
-  no  → stored token configured?
-          yes           → Pending
-          no            → Pending
+  yes → matches an active, non-expired, non-revoked token with uses remaining?
+          yes → Approved
+          no  → Forbidden (enrollment rejected)
+  no  → Pending
 ```
 
 After enrollment, if the service is immediately `Approved`, the controller sends `Enrolled` followed
@@ -234,25 +232,31 @@ when a `service_id` query parameter is present.
               │  tenant_id FK    │  │    table)        │
               │  per-tenant      │  │  global,         │
               │  enrollment      │  │  no tenant_id    │
-              │  tokens          │  │  single global   │
-              │  (Argon2id)      │  │  token (direct)  │
+              │  tokens          │  │  named tokens    │
+              │  (Argon2id)      │  │  (Argon2id)      │
               └──────────────────┘  └──────────────────┘
               REST: /api/v1/services   REST: /api/v1/system-services
 ```
 
-| Property                     | Tenant services                      | System services                     |
-| ---------------------------- | ------------------------------------ | ----------------------------------- |
-| Database table               | `services`                           | `system_services`                   |
-| `tenant_id`                  | Required                             | None                                |
-| `enrollment_token_id`        | FK to `enrollment_tokens`            | None                                |
-| Enrollment token storage     | Argon2id hash in `enrollment_tokens` | AES-256-GCM encrypted in `settings` |
-| Token comparison             | Argon2id verify                      | Direct string equality              |
-| Token returned to operator   | No (hash only)                       | Yes (plaintext in GET response)     |
-| Certificate table            | `service_certificates`               | `system_service_certificates`       |
-| Merge support                | Yes                                  | No                                  |
-| REST path prefix             | `/api/v1/services`                   | `/api/v1/system-services`           |
-| Required permission (view)   | `view_agents`                        | `view_system_services`              |
-| Required permission (manage) | `manage_agents`                      | `manage_system_services`            |
+| Property                     | Tenant services                      | System services                                       |
+| ---------------------------- | ------------------------------------ | ----------------------------------------------------- |
+| Database table               | `services`                           | `system_services`                                     |
+| `tenant_id`                  | Required                             | None                                                  |
+| `enrollment_token_id`        | FK to `enrollment_tokens`            | None                                                  |
+| `system_enrollment_token_id` | None                                 | Audit-only link to `system_enrollment_tokens` (no FK) |
+| Enrollment token storage     | Argon2id hash in `enrollment_tokens` | Argon2id hash in `system_enrollment_tokens`           |
+| Token comparison             | Argon2id verify                      | Argon2id verify                                       |
+| Token returned to operator   | No (hash only)                       | Yes, once, at creation (plaintext)                    |
+| Certificate table            | `service_certificates`               | `system_service_certificates`                         |
+| Merge support                | Yes                                  | No                                                    |
+| REST path prefix             | `/api/v1/services`                   | `/api/v1/system-services`                             |
+| Required permission (view)   | `view_agents`                        | `view_system_services`                                |
+| Required permission (manage) | `manage_agents`                      | `manage_system_services`                              |
+
+## Frontend
+
+The frontend filters services by capability instead of type and displays `service_label` instead
+of `service_type`.
 
 ## Related Documentation
 

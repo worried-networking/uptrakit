@@ -103,7 +103,10 @@ In service handlers:
 4. Respond with `ServiceMessage::SurfaceActionResponse`.
 
 Service-initiated action calls are supported via `ServiceMessage::SurfaceActionRequest`, with
-correlated `ControllerMessage::SurfaceActionResponse`.
+correlated `ControllerMessage::SurfaceActionResponse`. `ServiceSurfaceProxy`
+(`crates/shared/service-sdk/src/surface_proxy.rs`) implements the service-side oneshot-correlation
+pattern for these session-scoped messages: each outbound request is tracked by a generated
+correlation ID mapped to a `tokio::sync::oneshot::Sender`, and the matching response resolves it.
 
 ## Plugin integration pattern
 

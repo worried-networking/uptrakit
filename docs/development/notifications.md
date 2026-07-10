@@ -382,7 +382,8 @@ slack = ["uptrakit-notification-plugin-slack"]       # <-- new
 all = ["webhook", "telegram", "email", "slack"]      # <-- update
 ```
 
-In the registry module, add the descriptor behind its feature gate:
+In the `all_descriptors()` function (`crates/plugins/infrastructure/registry/src/registry.rs`), add the
+descriptor behind its feature gate:
 
 ```rust
 #[cfg(feature = "slack")]
@@ -491,6 +492,14 @@ pub enum NotificationEventDetails {
 Only `UpdateAvailable` is actionable (produces `MessageAction` buttons via `event.action_params()`). Action parameters
 require both `host_id` and `software_item_id` to be present.
 
+`NotificationEventDetails` also carries `BatchUpdateCompleted`, `BatchUpdatePartiallyCompleted`, and
+`StdinAttention` variants (added after the table above was last updated -- see
+`crates/plugins/notifications/delivery/src/event.rs` for the current field list). The `stdin_attention`
+event fires when an interactive update appears to be waiting for stdin input. The full set of wire-level
+event-type strings lives in the `NotificationEventType` enum
+(`crates/shared/web-api-types/src/notifications/event_types.rs`); do not hardcode the variant count here --
+check that file for the authoritative list.
+
 ### Dispatcher flow
 
 The dispatcher (`crates/ui/web-api/src/notifications/dispatcher.rs`) runs a fire-and-forget
@@ -540,13 +549,15 @@ the Telegram and email plugin implementations for consistency.
 Event hooks are wired into existing handlers. Each call site constructs a `NotificationEvent` and calls
 `state.notification_dispatcher.dispatch(...)`:
 
-| Event                              | File                                    | Handler                          |
-| ---------------------------------- | --------------------------------------- | -------------------------------- |
-| `UpdateAvailable`                  | `routes/service_ws/handler/messages.rs` | `handle_version_check_results()` |
-| `NewSoftwareDiscovered`            | `routes/service_ws/handler/messages.rs` | `handle_discovery_results()`     |
-| `UpdateCompleted` / `UpdateFailed` | `routes/service_ws/handler/updates.rs`  | `handle_update_result()`         |
-| `NewServiceEnrolled`               | `routes/services.rs`                    | `approve_service()`              |
-| `CaRotated`                        | `routes/settings_ca.rs`                 | `rotate_ca()`                    |
+| Event                                                    | File                                         | Handler                                                                     |
+| -------------------------------------------------------- | -------------------------------------------- | --------------------------------------------------------------------------- |
+| `UpdateAvailable`                                        | `routes/service_ws/handler/messages.rs`      | `handle_version_check_results()`                                            |
+| `NewSoftwareDiscovered`                                  | `routes/service_ws/handler/messages.rs`      | `handle_discovery_results()`                                                |
+| `UpdateCompleted` / `UpdateFailed`                       | `routes/service_ws/handler/updates.rs`       | `handle_update_result()`                                                    |
+| `NewServiceEnrolled`                                     | `routes/services.rs`                         | `approve_service()`                                                         |
+| `CaRotated`                                              | `routes/settings_ca.rs`                      | `rotate_ca()`                                                               |
+| `BatchUpdateCompleted` / `BatchUpdatePartiallyCompleted` | `routes/service_ws/handler/updates/batch.rs` | batch completion handling                                                   |
+| `StdinAttention`                                         | `routes/service_ws/handler/updates/stdin.rs` | dispatched when an interactive update appears to be waiting for stdin input |
 
 Example pattern:
 
@@ -586,6 +597,12 @@ return masked configs (secrets replaced with `"***"`) via the descriptor's `conf
 which delegates to the typed `PluginConfig::with_secrets_masked()`.
 
 ## REST API endpoints
+
+Route handlers enforce the `view_notifications` / `manage_notifications` permission strings below via typed
+extractors. The corresponding `Permission` enum variants (`ViewNotifications`, `ManageNotifications`) are defined
+in `crates/shared/types/src/permissions.rs` alongside the full set of platform permissions -- see that file for
+the authoritative variant list rather than hardcoding a count here. For the roles/presets that grant these
+permissions, see [Authentication and Authorization](../security/auth-and-authorization.md).
 
 ### Channels
 
@@ -803,32 +820,35 @@ action.
 
 ## Key files
 
-| File                                                      | Purpose                                                                                              |
-| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `crates/plugins/infrastructure/core/src/roles.rs`         | `PluginMeta` trait, `NotificationTransport` role trait                                               |
-| `crates/plugins/infrastructure/core/src/plugin_config.rs` | `PluginConfig` trait (validate, mask, restore, form schema)                                          |
-| `crates/plugins/infrastructure/core/src/descriptor.rs`    | `PluginDescriptor`, `PluginFamily`, `ConfigModel`, `CatalogConfig`, `CreateTransportFn`, `ConfigOps` |
-| `crates/plugins/infrastructure/core/src/macros.rs`        | `declare_plugin!` macro                                                                              |
-| `crates/plugins/notifications/core/src/lib.rs`            | `DeliveryMessage`, `MessageAction`, `NotificationPluginError`, `escape_html()`                       |
-| `crates/plugins/notifications/core/src/list_channels.rs`  | Shared `list_channels` helper (behind `extensions` feature)                                          |
-| `crates/plugins/infrastructure/registry/src/registry.rs`  | `PluginCatalog` with descriptor-driven registration; `transport()` lookup                            |
-| `crates/plugins/notifications/webhook/src/plugin.rs`      | Webhook plugin (`declare_plugin!`, `NotificationTransport` impl, HMAC-SHA256 signing)                |
-| `crates/plugins/notifications/webhook/src/config.rs`      | `WebhookChannelConfig` implementing `PluginConfig`                                                   |
-| `crates/plugins/notifications/webhook/src/surfaces.rs`    | Webhook surface action handler                                                                       |
-| `crates/plugins/notifications/telegram/src/plugin.rs`     | Telegram plugin (`declare_plugin!`, inline keyboard)                                                 |
-| `crates/plugins/notifications/telegram/src/config.rs`     | `TelegramChannelConfig` implementing `PluginConfig`                                                  |
-| `crates/plugins/notifications/telegram/src/surfaces.rs`   | Telegram surface action handler (including callback handling)                                        |
-| `crates/plugins/notifications/email/src/plugin.rs`        | Email plugin (`declare_plugin!`, SMTP via mail-send, multipart/alternative)                          |
-| `crates/plugins/notifications/email/src/config.rs`        | `EmailChannelConfig` implementing `PluginConfig`                                                     |
-| `crates/plugins/notifications/email/src/surfaces.rs`      | Email surface action handler (including SMTP settings CRUD)                                          |
-| `crates/shared/web-api-types/src/notifications/mod.rs`    | Shared request/response types, `Validate` impls                                                      |
-| `crates/ui/web-api/src/notifications/dispatcher.rs`       | Fire-and-forget generic background dispatcher loop                                                   |
-| `crates/ui/web-api/src/notifications/events.rs`           | `NotificationEvent`, `NotificationEventDetails`, `ActionParams`                                      |
-| `crates/ui/web-api/src/notifications/message_builder.rs`  | Event-to-`DeliveryMessage` translation                                                               |
-| `crates/ui/web-api-queries/src/queries/notifications.rs`  | DB query helpers, `ChannelQueryError`, `RuleQueryError`                                              |
-| `crates/ui/web-api/src/routes/notifications.rs`           | REST route handlers, generic notification callback                                                   |
-| `crates/ui/web-api-auth/src/settings_store.rs`            | Raw-key settings store functions (`upsert_setting_raw`, `load_settings_by_prefix`, etc.)             |
-| `crates/ui/surface-proxy/src/proxy.rs`                    | Shared-surface interaction dispatch to plugin `handle_surface_action()`                              |
+| File                                                      | Purpose                                                                                                                                                                                  |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `crates/plugins/infrastructure/core/src/roles.rs`         | `PluginMeta` trait, `NotificationTransport` role trait                                                                                                                                   |
+| `crates/plugins/infrastructure/core/src/plugin_config.rs` | `PluginConfig` trait (validate, mask, restore, form schema)                                                                                                                              |
+| `crates/plugins/infrastructure/core/src/descriptor.rs`    | `PluginDescriptor`, `PluginFamily`, `ConfigModel`, `CatalogConfig`, `CreateTransportFn`, `ConfigOps`                                                                                     |
+| `crates/plugins/infrastructure/core/src/macros.rs`        | `declare_plugin!` macro                                                                                                                                                                  |
+| `crates/plugins/notifications/core/src/lib.rs`            | `DeliveryMessage`, `MessageAction`, `NotificationPluginError`, `escape_html()`                                                                                                           |
+| `crates/plugins/notifications/core/src/list_channels.rs`  | Shared `list_channels` helper (behind `extensions` feature)                                                                                                                              |
+| `crates/plugins/infrastructure/registry/src/registry.rs`  | `PluginCatalog` with descriptor-driven registration; `transport()` lookup                                                                                                                |
+| `crates/plugins/notifications/webhook/src/plugin.rs`      | Webhook plugin (`declare_plugin!`, `NotificationTransport` impl, HMAC-SHA256 signing)                                                                                                    |
+| `crates/plugins/notifications/webhook/src/config.rs`      | `WebhookChannelConfig` implementing `PluginConfig`                                                                                                                                       |
+| `crates/plugins/notifications/webhook/src/surfaces.rs`    | Webhook surface action handler                                                                                                                                                           |
+| `crates/plugins/notifications/telegram/src/plugin.rs`     | Telegram plugin (`declare_plugin!`, inline keyboard)                                                                                                                                     |
+| `crates/plugins/notifications/telegram/src/config.rs`     | `TelegramChannelConfig` implementing `PluginConfig`                                                                                                                                      |
+| `crates/plugins/notifications/telegram/src/surfaces.rs`   | Telegram surface action handler (including callback handling)                                                                                                                            |
+| `crates/plugins/notifications/email/src/plugin.rs`        | Email plugin (`declare_plugin!`, SMTP via mail-send, multipart/alternative)                                                                                                              |
+| `crates/plugins/notifications/email/src/config.rs`        | `EmailChannelConfig` implementing `PluginConfig`                                                                                                                                         |
+| `crates/plugins/notifications/email/src/surfaces.rs`      | Email surface action handler (including SMTP settings CRUD)                                                                                                                              |
+| `crates/shared/web-api-types/src/notifications/mod.rs`    | Shared request/response types, `Validate` impls                                                                                                                                          |
+| `crates/ui/web-api/src/notifications/dispatcher.rs`       | Fire-and-forget generic background dispatcher loop                                                                                                                                       |
+| `crates/ui/web-api/src/notifications/events.rs`           | `NotificationEvent`, `NotificationEventDetails`, `ActionParams`                                                                                                                          |
+| `crates/ui/web-api/src/notifications/message_builder.rs`  | Event-to-`DeliveryMessage` translation                                                                                                                                                   |
+| `crates/ui/web-api-queries/src/queries/notifications.rs`  | DB query helpers, `ChannelQueryError`, `RuleQueryError`                                                                                                                                  |
+| `crates/ui/web-api/src/routes/notifications.rs`           | REST route handlers, generic notification callback                                                                                                                                       |
+| `crates/shared/db/src/raw_settings.rs`                    | Raw-key settings store functions (`upsert_setting_raw`, `upsert_global_setting_raw`, `load_settings_by_prefix`, `load_global_settings_by_prefix`); used directly by notification plugins |
+| `crates/ui/web-api-auth/src/settings_store.rs`            | Typed settings store using the `SettingKey` enum; delegates raw-key functions to `uptrakit_shared_db::raw_settings` for non-notification settings                                        |
+| `crates/shared/openapi-client/src/notifications.rs`       | Typed HTTP client methods for the notifications REST API                                                                                                                                 |
+| `crates/ui/cli/src/commands/notifications.rs`             | CLI `notifications` command group                                                                                                                                                        |
+| `crates/ui/surface-proxy/src/proxy.rs`                    | Shared-surface interaction dispatch to plugin `handle_surface_action()`                                                                                                                  |
 
 ## Shared surface integration
 
@@ -907,7 +927,8 @@ token, and updates the notification log entry.
 
 ### Raw-key settings store functions
 
-Plugins use raw-key settings store functions instead of `SettingKey` enum variants:
+Plugins use raw-key settings store functions (defined in `crates/shared/db/src/raw_settings.rs`) instead of
+`SettingKey` enum variants:
 
 - `upsert_setting_raw(db, tenant_id, key, value)` -- write a tenant setting by string key
 - `upsert_global_setting_raw(db, key, value)` -- write a global setting by string key
@@ -941,6 +962,10 @@ API calls, following the same pattern as MQTT and OIDC settings.
 - [Notifications API](../api/notifications.md)
 - [Notifications Security](../security/notifications-security.md)
 - [Notifications End-User Guide](../end-user/notifications.md)
+- [Authentication and Authorization](../security/auth-and-authorization.md) -- permission model, roles, and access
+  presets that gate `view_notifications` / `manage_notifications`
+- [User Management API](../api/user-management.md) -- endpoint reference for managing which users hold the
+  notification permissions
 - [Coding Standards](coding-standards.md)
 - [Error Handling](error-handling.md)
 - [Testing](testing.md)

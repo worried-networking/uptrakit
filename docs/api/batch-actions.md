@@ -108,6 +108,11 @@ transactional patterns and trigger the same WebSocket and admin event broadcasts
 
 ## Shared Surface Batch Actions
 
+Surface providers can expose selection-driven interactions through the same shared surface
+contracts used for single-item actions. Keep batch-style UX aligned with the shared renderer
+patterns and explicit permission gates below rather than building bespoke selection UI per
+provider.
+
 Surface actions can be marked as batch-capable by calling `.batch()` on
 `SurfaceActionDescriptor` (which sets `batch_action: true` in the serialized definition).
 When multiple rows are selected in a DataTable, batch-capable actions appear in the batch
@@ -119,27 +124,14 @@ receives the full list and is responsible for processing each item. See
 
 ## Frontend Integration
 
-The frontend provides a multi-select UI for batch actions on all supported list pages. See
+The frontend adds multi-select checkboxes to all list pages backed by the endpoints above
+(services, system-services, software, hosts, plugin-configs, software ignores) as well as
+provider-backed surface tables. Selection uses `SvelteSet<string>` (required by the
+`svelte/prefer-svelte-reactivity` ESLint rule); a shared `BatchActionBar` appears once items
+are selected and `BatchResultDialog` shows partial-success results. See
+[Batch action components](../development/frontend-components.md#batch-action-components) for
+component props and the page integration pattern, and
 [End-user batch actions](../end-user/batch-actions.md) for the user-facing documentation.
-
-### Shared components
-
-| Component                  | Purpose                                                                                                                                         |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `BatchActionBar.svelte`    | Fixed-position toolbar at the viewport bottom. Shows selected count, action buttons (styled per `destructive` flag), and a deselect-all button. |
-| `BatchResultDialog.svelte` | Modal that displays partial-success results with per-item error messages. Only shown when failures occur; pure success uses a toast instead.    |
-
-### Page integration pattern
-
-Each page follows the same pattern:
-
-1. A `SvelteSet<string>` tracks selected IDs (using `SvelteSet` for Svelte 5 reactivity).
-2. A select-all checkbox in `<thead>` supports checked, indeterminate, and unchecked states.
-3. Per-row checkboxes are only visible when the user has the required manage permission.
-4. `BatchActionBar` renders when `selectedIds.size > 0`.
-5. Destructive actions show a `ConfirmDialog` before executing.
-6. On success, a toast is shown and the page reloads. On partial failure, `BatchResultDialog`
-   displays the results.
 
 ### Shared surface tables
 

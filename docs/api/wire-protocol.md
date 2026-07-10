@@ -1217,8 +1217,9 @@ fields are included in the config hash computation for change detection.
 ## `software_states` Payload
 
 The controller pushes this message to all locally connected update-tracking services for a tenant whenever version
-data changes. It is also published to NATS (when configured) for cross-controller delivery (contains no
-credentials). Update-tracking services filter by `tenant_id`.
+data changes. It is also published to NATS (when configured) with `target_capability = "update_tracking"` for
+cross-controller delivery (contains no credentials), so only update-tracking services receive it. Update-tracking
+services filter by `tenant_id`.
 
 **Push triggers:**
 

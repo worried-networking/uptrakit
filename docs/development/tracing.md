@@ -7,7 +7,8 @@ and `RUST_LOG` usage, see [Logging](logging.md).
 ## Subscriber Architecture
 
 All binaries use a **registry-based** tracing subscriber so that adding an OpenTelemetry
-exporter layer later is a one-line change:
+exporter layer later is a one-line change. This registry setup is centralized inside
+`TracingBuilder::init()` (see below) rather than hand-rolled per binary:
 
 ```rust
 use tracing_subscriber::prelude::*;
@@ -17,9 +18,52 @@ tracing_subscriber::registry()
     .init();
 ```
 
-Each binary owns its own `init_tracing()` function in `src/main.rs`. The controller has
-its own setup (with an optional journald layer). The service-sdk does not provide tracing
-initialization — libraries must not configure the global dispatcher.
+**Libraries must never configure the global tracing dispatcher.** Only binary `main()`
+functions may call `tracing_subscriber::fmt().init()` or any equivalent. Configuring the
+global subscriber from a library causes a panic if anything else in the process has
+already set it (e.g. test harness, another library).
+
+### Centralized initialization — `uptrakit-tracing-init`
+
+All tracing initialisation lives in `crates/shared/tracing-init/src/lib.rs`
+(`uptrakit-tracing-init`). Do not add per-binary `init_tracing()` helpers — every binary
+calls into this crate instead:
+
+- **`uptrakit-service-sdk`** re-exports the full public surface (`TracingBuilder`,
+  `init_cli_tracing`, `init_test_tracing`, `BoxedLayer`), so service daemons use the
+  `uptrakit_service_sdk::` path.
+- **Controller, CLI, and integration-tests** depend on `uptrakit-tracing-init` directly
+  (to avoid pulling in the full service SDK) and use `uptrakit_tracing_init::` paths.
+
+The controller additionally attaches an optional `journald` layer via
+`TracingBuilder::extra_layer()` when built with the `journald` feature.
+
+**Pattern:**
+
+```rust
+// Service daemons (via uptrakit-service-sdk re-export)
+uptrakit_service_sdk::TracingBuilder::new()
+    .verbosity(args.common.verbose)
+    .init();
+
+// Controller (depends on uptrakit-tracing-init directly)
+uptrakit_tracing_init::TracingBuilder::new()
+    .verbosity(args.verbose)
+    .init();
+
+// CLI (depends on uptrakit-tracing-init directly; stderr, no subscriber at v=0)
+uptrakit_tracing_init::init_cli_tracing(cli.verbose);
+
+// Tests (depends on uptrakit-tracing-init directly)
+uptrakit_tracing_init::init_test_tracing();
+```
+
+**Compile-time directives** (the programmatic `(target, level)` pairs built into the
+builder) use `.expect("BUG: …")` — they are programmer-controlled constants.
+**`RUST_LOG` directives** are parsed leniently: invalid segments print an `eprintln!`
+warning and are skipped; valid ones are appended after the programmatic directives so
+`RUST_LOG` wins for same-target matches. See [Logging](logging.md) for the full
+verbosity mapping and `RUST_LOG` precedence rules.
 
 ## Span Naming Conventions
 
@@ -132,7 +176,7 @@ Adding OpenTelemetry requires:
 
 1. Add `tracing-opentelemetry` and an exporter (e.g., `opentelemetry-otlp`) to
    workspace dependencies.
-2. In each binary's subscriber setup, add the OTel layer:
+2. In `TracingBuilder::init()` (the single centralized subscriber setup), add the OTel layer:
 
    ```rust
    .with(tracing_opentelemetry::layer().with_tracer(tracer))

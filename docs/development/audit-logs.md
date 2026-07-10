@@ -349,6 +349,16 @@ These patterns are banned in V2. Violating them is either a compile error or a C
 | `crates/ui/web-api/src/routes/*`                                    | HTTP mutation producers                                                                                         |
 | `crates/ui/web-api/src/routes/service_ws/handler/mod.rs`            | Service-forwarded audit event ingestion and scope validation                                                    |
 | `crates/shared/scheduler-engine/src/executors/audit_log_cleanup.rs` | Retention cleanup and runtime audit emission                                                                    |
+| `crates/ui/web-api-queries/src/queries/audit_logs.rs`               | `list_tenant_audit_logs` + `list_system_audit_logs`                                                             |
+| `crates/ui/web-api/src/routes/audit_logs.rs`                        | `GET /api/v1/audit-logs` + `GET /api/v1/system-audit-logs`                                                      |
+| `crates/shared/web-api-types/src/audit_logs.rs`                     | `AuditLogResponse` (V2 fields: `action_kind`, `before_snapshot`, `after_snapshot`, `correlation_id`)            |
+| `crates/ui/cli/src/commands/audit_logs.rs`                          | `audit-logs list`, `audit-logs show`, `audit-logs system list`                                                  |
+
+## V3 deferred
+
+Not yet implemented; do not build against these: workflow timeline view, per-entity audit
+history, analytics dashboards, per-action-kind retention, legal-hold archive, agent-side
+stateful emit.
 
 ## Persistence model
 
