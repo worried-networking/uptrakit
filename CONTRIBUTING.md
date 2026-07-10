@@ -2,6 +2,8 @@
 
 Thanks for helping improve Uptrakit. Focus on boring, testable, and well-reviewed changes.
 
+Read [CONTEXT.md](CONTEXT.md) for the project's controlled vocabulary; use its terms in code, docs, and commit messages.
+
 ## Key links
 
 - Development setup: [docs/development/setup.md](docs/development/setup.md)

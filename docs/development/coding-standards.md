@@ -1817,9 +1817,9 @@ _ => unreachable!("unknown ServiceProfile variant"),
 
 ## Parameter Struct Pattern
 
-Functions must not require `#[allow(clippy::too_many_arguments)]`. No Clippy suppression is approved in this codebase (AGENTS.md invariant 13). When a
-function's non-`self` parameter count exceeds Clippy's threshold (7), introduce a named grouped struct to batch related scalar or reference
-parameters:
+Functions must not require `#[allow(clippy::too_many_arguments)]`. No Clippy suppression is approved in this codebase
+(AGENTS.md rule "Do not add any `#[allow()]`"). When a function's non-`self` parameter count exceeds Clippy's
+threshold (7), introduce a named grouped struct to batch related scalar or reference parameters:
 
 ```rust
 struct ProcessDiscoveryArgs<'a> {

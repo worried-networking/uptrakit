@@ -19,7 +19,8 @@ pub enum UpdateStatus {
     /// applies to both batch items waiting for a preceding update on the same
     /// host, and to single (non-batch) updates triggered when the host already
     /// had an active update. Not an active state — no in-progress work on the
-    /// host. Terminal states are [`Self::Completed`] and [`Self::Failed`].
+    /// host. Terminal states are [`Self::Completed`], [`Self::Failed`], and
+    /// [`Self::Interrupted`].
     #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "queued"))]
     Queued,
     /// The update is waiting to be dispatched.

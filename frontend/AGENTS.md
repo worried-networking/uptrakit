@@ -30,7 +30,8 @@ architecture invariants, Rust crate layout, and quality gates, **read the root
 | `npm run format:check`  | Prettier read-only check (used in CI)                                 |
 
 > Run `lint`, `format:check`, `check`, and `build` before committing frontend changes. These four
-> are enforced by the root quality gates.
+> are enforced by the root quality gates. The canonical source for all quality-gate commands
+> (backend and frontend) is [`docs/development/quality-gates.md`](../docs/development/quality-gates.md).
 
 ## File structure
 
@@ -92,11 +93,14 @@ Route directories under `src/routes/`:
 ```text
 src/routes/
 ├── audit-logs/       # /audit-logs — tenant and system audit log viewer
+├── auth/             # /auth — email-change confirmation flow
+├── dev/              # /dev — component preview pages (buttons, form primitives, surfaces); dev-only
 ├── device/           # /device — device authorization flow
 ├── history/          # /history — update history with filters and SSE output
 ├── host-tags/        # /host-tags — host tag management
 ├── hosts/            # /hosts — host list, detail, discovery
 ├── login/            # /login — password and OIDC login
+├── oauth/            # /oauth — OAuth consent prompt for authorizing third-party clients
 ├── profile/          # /profile — account info and API token management
 ├── register/         # /register — first-user registration
 ├── services/         # /services — tenant service management

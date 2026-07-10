@@ -3,6 +3,8 @@
 This file provides structured context for AI coding agents working on the Uptrakit codebase. Read this first before
 making any changes.
 
+Read [CONTEXT.md](CONTEXT.md) — controlled vocabulary; use its terms in code, docs, commits.
+
 ## Project summary
 
 Uptrakit is an agent-based update tracking toolkit for self-hosted Linux environments. It tracks installed software
@@ -12,40 +14,41 @@ auto-updater.
 Key components:
 
 - **Controller** (server): API, Web UI, optional embedded scheduler, upstream version checking.
-- **External Scheduler** (standalone binary): enrolls as a system service, receives DB/NATS/master-key credentials via
-  WebSocket, runs scheduled tasks across all tenants independently.
-- **MQTT Service** (standalone binary): MQTT/Home Assistant integration with surface-based client
-  management via the service config store.
-- **Agents**: lightweight daemons on each managed host; outbound-only secure WebSocket to the controller; local version
-  detection and update execution via sudo allowlists.
-- **Plugins**: first-party plugin modules that detect, report, and update software; each crate uses the
-  `declare_plugin!` macro to export a `PluginDescriptor` static (metadata + role trait impls) and is listed in
-  `all_descriptors()` inside the unified `PluginCatalog` (`uptrakit-plugin-infrastructure-registry`).
+- **External Scheduler** (bin): enrolls as a system service, receives DB/NATS/master-key credentials via WebSocket, runs
+  scheduled tasks across all tenants independently.
+- **MQTT Service** (bin): MQTT/Home Assistant integration with surface-based client management.
+- **Agents**: unprivileged daemons on each managed host; outbound-only secure WebSocket; local version detection and
+  update execution via sudo allowlists.
+- **Plugins**: first-party modules that detect, report, and update software; each crate uses `declare_plugin!` to export
+  a `PluginDescriptor` static, listed in `all_descriptors()` inside the unified `PluginCatalog`.
 
-For full project context, see [README.md](README.md). For contribution rules, see [CONTRIBUTING.md](CONTRIBUTING.md).
-For system design and technology choices, see [ARCHITECTURE.md](ARCHITECTURE.md). For security policy and cryptographic
-details, see [SECURITY.md](SECURITY.md). For the documentation catalogue, see [docs/README.md](docs/README.md).
+For full project context, see [README.md](README.md); contribution rules, [CONTRIBUTING.md](CONTRIBUTING.md); system
+design, [ARCHITECTURE.md](ARCHITECTURE.md); security policy, [SECURITY.md](SECURITY.md). The full documentation
+catalogue lives at [docs/README.md](docs/README.md).
 
 ## Quick-start commands
+
+Canonical source for Rust command definitions: [docs/development/quality-gates.md](docs/development/quality-gates.md).
 
 ### Rust / backend
 
 ```sh
 cargo fmt --all                                                      # Format
-cargo check --no-default-features --features db-sqlite               # Lint with minimal features-set
+cargo check --no-default-features --features db-sqlite               # Lint with minimal feature-set
 cargo check --all-features                                           # Lint
-cargo clippy --all-targets --no-default-features --features db-sqlite # Lint with Clippy over minimal features-set
-cargo clippy --all-targets --all-features                            # Lint with Clippy
+cargo clippy --all-targets --no-default-features --features db-sqlite # Clippy over minimal feature-set
+cargo clippy --all-targets --all-features                            # Clippy
 cargo test --all-features                                            # Tests
 cargo deny check                                                     # Validate new dependencies
-bash ci/verify_no_security_audit.sh                                  # No legacy security_audit or raw semantic action literals
-bash ci/verify_typed_audit_actions.sh                                # Dynamic audit action parsing/building stays at explicit boundaries
+bash ci/verify_no_security_audit.sh                                  # No legacy security_audit / raw action literals
+bash ci/verify_typed_audit_actions.sh                                # Audit action parsing/building at explicit boundaries
 bash ci/verify_handler_state_contract.sh                             # No handler mixes State<Arc<AppState>> with sub-state
 python3 ci/verify_db_access_policy.py                                # db_access_policy.toml consistent with routes/
+bash ci/verify_agents_md_budget.sh                                   # AGENTS.md size budget gate
 ```
 
-> **Note:** `--all-features` includes `embed-frontend`, which requires `frontend/build/` to exist.
-> Build the frontend first (`cd frontend && npm ci && npm run build`) before running `--all-features` checks.
+> **Note:** `--all-features` includes `embed-frontend`, which requires `frontend/build/`. Build the frontend first
+> (`cd frontend && npm ci && npm run build`) before running `--all-features` checks.
 
 ### Frontend
 
@@ -54,58 +57,22 @@ cd frontend
 npm run lint          # ESLint
 npm run format:check  # Prettier — read-only
 npm run check         # Svelte type-check via svelte-check
-npm run build         # SvelteKit build — required before `cargo build` with `embed-frontend` feature
+npm run build         # SvelteKit build — required before `cargo build` with `embed-frontend`
 ```
 
-### Markdown
+### Markdown and integration tests (Docker)
 
 ```sh
-markdownlint --config .markdownlint.json '**/*.md'
+markdownlint --config .markdownlint.json '**/*.md'                       # Lint Markdown
+cargo test -p uptrakit-integration-tests --test reverse_proxy -- --ignored # Reverse-proxy changes
+cargo test -p uptrakit-integration-tests --test database -- --ignored   # DB/migration/REST changes
+docker build -f docker/Dockerfile.test -t uptrakit-test:latest .        # Build image, then:
+cargo test -p uptrakit-integration-tests -- --ignored                   # Enrollment/wire/lifecycle changes
 ```
 
-### Integration tests (require Docker)
-
-```sh
-# Reverse proxy behavior changes
-cargo test -p uptrakit-integration-tests --test reverse_proxy -- --ignored
-
-# Database queries, migrations, or REST API behavior changes
-cargo test -p uptrakit-integration-tests --test database -- --ignored
-
-# Enrollment, wire protocol, service lifecycle, or inter-component communication changes
-docker build -f docker/Dockerfile.test -t uptrakit-test:latest .
-cargo test -p uptrakit-integration-tests -- --ignored
-```
-
-Run integration tests only when changes touch the triggering areas listed in the [Quality Gates](#quality-gates) section below.
-
-## Documentation split
-
-- **End-user docs** ([`docs/end-user/`](docs/end-user/)): overview, manual update workflow, Home Assistant/MQTT
-  integration, deployment map, CLI usage guide, plugin configurations, update history, user management
-  ([user-management.md](docs/end-user/user-management.md)), profile and API tokens, and autodiscovery
-  (including [docs/end-user/deployment/reverse-proxy.md](docs/end-user/deployment/reverse-proxy.md)).
-- **API & protocol docs** ([`docs/api/`](docs/api/)): AsyncAPI/wire protocol
-  ([wire-protocol.md](docs/api/wire-protocol.md)), REST API endpoints ([http-web-api.md](docs/api/http-web-api.md)),
-  user management API ([user-management.md](docs/api/user-management.md)),
-  settings reconciliation ([settings-runtime.md](docs/api/settings-runtime.md)), auth flows
-  ([auth-flows.md](docs/api/auth-flows.md)), and service/tenant operations
-  ([services-operations.md](docs/api/services-operations.md)).
-- **Security docs** (`docs/security/`): architecture, cryptography, PKI/certificates, auth/permissions,
-  secrets/encryption, reverse proxy security, TOFU/TLS, filesystem/dependency hardening, and secure development
-  guidance.
-- **Architecture docs** ([`docs/architecture/`](docs/architecture/)): entity-level design for multi-tenancy, hosts,
-  software items, and update history.
-- **Development docs** (`docs/development/`): setup, testing, coding standards, PR process, dependency policy, plugin
-  guidelines ([plugin-guidelines.md](docs/development/plugin-guidelines.md)), plugin system architecture
-  ([plugin-system.md](docs/development/plugin-system.md)), AI usage expectations, database migration authoring
-  ([database-migrations.md](docs/development/database-migrations.md)), and the generic service config store
-  ([service-config-store.md](docs/development/service-config-store.md)).
-- **Deployment guides**: reverse proxy deployment and per-proxy guides live under
-  [`docs/end-user/deployment/`](docs/end-user/deployment/). Reverse proxy security model is at
-  [`docs/security/reverse-proxy-security.md`](docs/security/reverse-proxy-security.md). Docker deployment guide at
-  [`docs/end-user/deployment/docker.md`](docs/end-user/deployment/docker.md). Human documentation must link
-  into those files rather than [AGENTS.md](AGENTS.md).
+Run integration tests only when changes touch the triggering areas. After any backend route or REST-contract change,
+run `./scripts/regen-api.sh` and commit `crates/ui/web-api/openapi.json` + `frontend/src/lib/api/generated/` — CI gates
+on staleness of both.
 
 ## Codebase layout
 
@@ -114,1831 +81,320 @@ uptrakit/
 ├── Cargo.toml                          # Workspace root (resolver = "3", members = "crates/*/*")
 ├── crates/
 │   ├── core/
-│   │   ├── agent/                      # uptrakit-agent                         (bin)  — agent daemon
-│   │   ├── agent-ssh/                  # uptrakit-agent-ssh                     (bin)  — SSH-backed agent binary; thin CLI shell that constructs `AgentSshHandler` (from `uptrakit-agent-ssh-runtime`) in `Binary` mode and calls `run_lifecycle_and_handle_errors`; subcommand dispatch (host management). All business logic, DB entities, migrations, and surface runtime live in `uptrakit-agent-ssh-runtime` (see ADR-0005). Parallel per-host version checks and updates over SSH (per-host concurrency guard + forwarder task + aggregate mpsc channel); host management CLI, SSH transport (russh), SshTarget parser, ~/.ssh/config resolution, remote host info collection & ReportHosts; SshStdioTunnel (bidirectional byte-stream over russh channel for Docker proxy); ExecuteBatchUpdate handler with freeze check; UI surface `ssh-agent.hosts` (list-hosts, bootstrap, sync-host, remove-host, list-discovered-guests, bootstrap-proxmox-guest actions; primary_actions: bootstrap + bootstrap-proxmox-guest; ECIES E2E encryption for sensitive params in bootstrap and sync-host; sync-host supports optional auth override via form (password/private_key, custom username) for connecting as a privileged user; bootstrap-proxmox-guest auto-detects PVE host from guest's proxmox_node and auto-fills hostname from guest metadata); ServiceSurfaceProxy for invoking controller-side plugin actions (proxmox.hosts/list-all-unmatched, proxmox.hosts/match); PVE node auto-detection during bootstrap with cluster deduplication (check_pve_token_exists → PveTokenStatus) + tenant-scoped PVE credentials (uptrakit-{tenant_id}@pve) + ReportPluginConfig; SurfaceRuntimeContext struct bundles handler state (db, state_dir, private_key_der, service_id, tenant_id, bg_tx, surface_proxy); remote_exec.rs (SshRemoteExecutor, PveGuestExecutor implementing RemoteExecutor); bootstrap_proxmox.rs (guest bootstrap via PVE exec); bootstrap and sync-host operations load persisted tenant_id from service.json for PVE operations; client.rs and surface_runtime.rs accept `&mut dyn ServiceTransport` for transport-generic operation (standalone WS + embedded mpsc)
-│   │   ├── controller/                 # uptrakit-controller                    (bin)  — central server; migration runner delegates to `uptrakit_shared_db::migration`
-│   │   │   ├── src/db_migrate/         #   `db-migrate` subcommand: copies all data between DB backends; error.rs (DbMigrateError + Report<> Result), tables.rs (migrate_table<E>, copy_all, clean_all, verify_all for all 49 app tables), mod.rs (run() orchestrator)
-│   │   │   ├── src/embedded/            #   Unified embedded service infrastructure: EmbeddedServiceHost, auto-provisioning, coexistence policy, in-process mpsc transport
-│   │   │   ├── src/scheduler/          #   (cfg: embedded-scheduler) Embedded scheduler using uptrakit-scheduler-engine, wired through EmbeddedServiceHost::add()
-│   │   │   ├── src/agent/              #   (cfg: embedded-agent) Embedded agent using uptrakit-agent-core, wired through EmbeddedServiceHost::add(); manages the controller host (discovery, updates); yields to external agent with same machine_id
-│   │   │   ├── src/ssh_agent/          #   (cfg: embedded-ssh-agent) Embedded SSH agent: constructs `uptrakit_agent_ssh_runtime::AgentSshHandler` in `Embedded` mode and dispatches via `uptrakit_service_sdk::run_embedded_service`, wired through `EmbeddedServiceHost::add`; manages remote hosts over SSH; YieldOnSameAppName coexistence; ephemeral ECIES P-256 keypair (from `uptrakit_service_sdk::generate_p256_keypair_for_ecies`); uses controller's shared DB (SSH migrations contributed at startup via `AgentSshHandler::service_migrations()`)
-│   │   │   └── src/embedded_frontend.rs #  (cfg: embed-frontend) Serves frontend from binary via rust-embed
-│   │   ├── mqtt/                       # uptrakit-mqtt                          (bin)  — standalone MQTT service
-│   │   ├── scheduler/                  # uptrakit-scheduler                     (bin)  — external scheduler binary; enrolls as a system service (system_service + scheduler + database_access + nats_access + master_key_access + graceful_shutdown), receives credentials, runs scheduled tasks across all tenants via direct DB + NATS
-│   │   └── integration-tests/          # uptrakit-integration-tests             (test) — Docker-based integration tests: (1) reverse-proxy tests (real nginx/haproxy/traefik/caddy/envoy containers, CRL/OCSP revocation); (2) system integration tests (uptrakit-test:latest image, verifies enrollment and inter-component communication)
-│   ├── plugins/
+│   │   ├── agent/                      # uptrakit-agent            (bin) — agent daemon
+│   │   ├── agent-ssh/                  # uptrakit-agent-ssh        (bin) — thin CLI shell; logic lives in uptrakit-agent-ssh-runtime (ADR-0005)
+│   │   ├── controller/                 # uptrakit-controller       (bin) — central server; embedded-service infra under src/{embedded,scheduler,agent,ssh_agent}
+│   │   ├── mqtt/                       # uptrakit-mqtt             (bin) — standalone MQTT service
+│   │   ├── mqtt-runtime/               # uptrakit-mqtt-runtime     (lib) — shared MQTT runtime (tenant manager, HA discovery, state publisher)
+│   │   ├── scheduler/                  # uptrakit-scheduler       (bin) — external scheduler; enrolls as a system service
+│   │   └── integration-tests/          # uptrakit-integration-tests (test) — Docker-based reverse-proxy + system integration tests
+│   ├── plugins/                        # See crates/plugins/AGENTS.md for authoring rules
 │   │   ├── infrastructure/
-│   │   │   ├── core/                   # uptrakit-plugin-infrastructure-core                   (lib)  — plugin descriptor + role traits + catalog; key modules: `descriptor.rs` (`PluginDescriptor` static metadata struct), `catalog.rs` (`PluginCatalog` — unified registry for all plugin types incl. notifications), `roles.rs` (narrow role traits: `Discoverer`, `VersionDetector`, `ReleaseFetcher`, `PackageIndexer`, `UpdateExecutor`, `LifecycleHook`, `NotificationTransport`, `SoftwareItemLifecycle`, `HostLifecycle`, `HostReport`, `GuestExec`), `macros.rs` (`declare_plugin!` macro — replaces `impl_plugin_base_config!`), `plugin_config.rs` (`PluginConfig` trait — unified config form schema + secret masking; `TypeSettings` trait for type-settings-capable plugins), `host_runtime.rs` (`HostRuntime` trait, `PosixHostRuntime`, `ControllerRuntime`), `host_requirements.rs` (`HostRequirements`, `RoleKey`, `HostCompatibilityError`); re-exports tokio::sync::mpsc; defines PluginCapability, HostCompatibility, UpdateHookContext, PreUpdateHookResult; batch types: BatchDetectItem/Result, BatchFetchItem/Result, BatchUpdateItem/Result; `InfraBundle` + `InfraSlot` for infrastructure plugins (Proxmox); `CatalogConfig` with `allow_private_urls`, `http_client`, `cancellation_token` (last two gated on `catalog` Cargo feature — enables heavy deps); `http_client.rs` (feature `http-client`): `SsrfMode` enum, `PluginHttpClientConfig<'a>` struct, `build_plugin_http_client(cfg)` — central HTTP client constructor (SSRF, TLS, timeouts) used by github/gitlab/forgejo/docker/npm/cargo plugins; `command.rs`: `execute_and_capture(executor, cmd, context) -> Result<String, PluginError>` — shared helper for all package-manager plugins: calls `execute_quiet`, maps errors to `PluginError::PluginInternal` with context label, maps non-zero exit to `PluginError::CommandFailed`; re-exported via `pub use command::execute_and_capture` in `lib.rs` — use this instead of inline execute+map_err boilerplate; `form_schema.rs` kept only as a re-export module (delegates to `plugin_config.rs`); `testing.rs` (feature `testing`): `FixedOutputExecutor` (`::success(output)`, `::failure(exit_code)`, `::new(output, code)`) and `RoutedOutputExecutor` (`::success(pairs)`, `::new(triples)`) for use by package-manager plugin test modules instead of local mock structs; `test_runtime()` and `test_runtime_with_executor(executor)` — canonical `Arc<dyn HostRuntime>` factories for unit tests (replace any locally defined helpers); `helpers.rs`: shared update helpers for all package-manager plugins — `require_package_identifier`, `execute_command_update`/`CommandUpdateParams`, `execute_batch_versioned_command`/`BatchVersionedParams` (version-embedded args, e.g., `pkg@ver`), `execute_batch_names_command`/`BatchNamesParams` (names-only batch), `refresh_package_index_command`, `ValidatorFn` type alias — all re-exported from crate root; new package-manager plugins MUST use these helpers instead of hand-rolling command execution or validation boilerplate
-│   │   │   ├── registry/              # uptrakit-plugin-infrastructure-registry               (lib)  — plugin dispatch & validation; `daemon` feature (default) enables Docker local ops
-│   │   │   └── proxmox/              # uptrakit-plugin-infrastructure-proxmox                (lib)  — Proxmox VE infrastructure plugin: unified `ProxmoxPlugin` struct (`new(config, executor)` for controller, `new_agent()` for agent); returns `InfraBundle` with `InfraSlot`s for its narrow role traits; controller-side REST API client for PVE (incl. guest agent file-read for machine_id), VM/CT discovery with best-effort machine_id collection (QEMU only), semi-automatic host matching with inline suggestions (MatchConfidence: High/Medium/Low, signals: machine_id, hostname+IP, hostname, IP, name), manual matching, surface manifests (proxmox.hosts page + proxmox.host-info panel), surface action handlers (list, discover, test-connection, match, approve-match, unmatch, get-info, list-all-unmatched); DB table: proxmox_host_mappings (incl. machine_id column); agent-side (feature `agent-infra`): narrow trait impls (`HostLifecycle`, `HostReport`, `GuestExec`) on ProxmoxPlugin, agent surface actions (list-discovered-guests, bootstrap-proxmox-guest), agent DB tables (proxmox_host_state, proxmox_pending_matches); agent-side modules: pve_setup (PVE detection, cluster dedup via check_pve_token_exists → PveTokenStatus enum, tenant-scoped API credential creation via pveum with pve_user_realm(tenant_id)), guest_exec (command execution inside LXC/QEMU guests via pct exec / qm guest exec)
-│   │   ├── releases/
-│   │   │   ├── docker/                 # uptrakit-plugin-releases-docker                 (lib)  — Docker/OCI plugin: tag tracking, SHA digest tracking, image pull via bollard, container autodiscovery; `daemon` feature (default) gates bollard + local Docker ops; Docker-over-SSH via StdioTunnel proxy (unix socket bridge to `docker system dial-stdio`)
-│   │   │   ├── github/                 # uptrakit-plugin-releases-github                 (lib)  — GitHub Releases plugin: controller-side fetch_releases only; owner/repo parsed from package_identifier at call time (format "owner/repo"); exports validate_identifier
-│   │   │   ├── gitlab/                 # uptrakit-plugin-releases-gitlab                 (lib)  — GitLab Releases plugin: controller-side fetch_releases; supports nested namespaces (group/subgroup/project); project path percent-encoded for Projects API; upcoming_release:true skipped unless include_prereleases; PRIVATE-TOKEN auth header; exports validate_identifier (parse_project_path)
-│   │   │   └── forgejo/                # uptrakit-plugin-releases-forgejo                (lib)  — Forgejo/Gitea Releases plugin: controller-side fetch_releases; api_base_url required (no default); Forgejo API (Authorization: token); same owner/repo format as GitHub; used by PHS discovery plugin with api_base_url="https://codeberg.org" for Codeberg-hosted PHS items; exports validate_identifier (parse_owner_repo)
-│   │   ├── generic/
-│   │   │   └── shell/                  # uptrakit-plugin-generic-shell                  (lib)  — generic agent-side plugin: version_command (detect_installed_version) + update_command (execute_update); supports {package_identifier}, {version}, {tag} placeholders; at least one field required
-│   │   ├── package-managers/
-│   │   │   ├── homebrew/               # uptrakit-plugin-package-manager-homebrew               (lib)  — Homebrew formulae/cask plugin; `HomebrewPackageType` enum: `Both` (default — discovers formulae + casks), `Formula`, `Cask`; implements DetectHostCompatibility (checks `which brew`); native batch_detect_installed_version + batch_fetch_releases (single `brew info --json=v2` call for all packages); DiscoveryTarget always emitted with `{"package_type": "formula"|"cask"}` in both plugin_config and config_override
-│   │   │   ├── apt/                    # uptrakit-plugin-package-manager-apt                    (lib)  — APT (Debian/Ubuntu) plugin (discovery via dpkg/apt-mark, version detection via dpkg-query, latest via apt-cache madison, updates via sudo apt-get install); implements DetectHostCompatibility (checks `which apt-get`); native batch_detect_installed_version (dpkg-query with all packages) + batch_fetch_releases (apt-cache madison with all packages)
-│   │   │   ├── npm/                    # uptrakit-plugin-package-manager-npm                    (lib)  — npm global-package plugin; ControllerSideFetchReleases (queries registry.npmjs.org); discovery via `npm list -g --json`; updates via `sudo npm install -g <pkg>@<version>`; implements DetectHostCompatibility (checks `which npm`); validate_identifier exported for registry; native batch_detect_installed_version (single `npm list -g --depth=0 --json` call, filtered in memory)
-│   │   │   ├── mas/                    # uptrakit-plugin-package-manager-mas                    (lib)  — Mac App Store plugin via `mas` CLI; agent-side only (no ControllerSideFetchReleases); discovery via `mas list`; version detection + release fetch via `mas list` + `mas outdated`; updates via `mas upgrade <id>`; implements DetectHostCompatibility (checks `which mas`); package_identifier = numeric App Store ID (digits only, max 15 chars); no sudo needed; native batch_detect_installed_version + batch_fetch_releases (single `mas list` + `mas outdated` calls, mapped in memory)
-│   │   │   ├── pacman/                 # uptrakit-plugin-package-manager-pacman                 (lib)  — Arch Linux Pacman plugin; detection via `pacman -Q`; latest version via `pacman -Si`; updates via `sudo pacman -S --noconfirm`; database sync via `sudo pacman -Sy`; discovery via `pacman -Q` (all) or `pacman -Qe` (explicit); implements DetectHostCompatibility (checks `which pacman`); no PostUpdateHook (no /var/run/reboot-required on Arch); needs_setenv=false in sudoers; validate_identifier: lowercase [a-z0-9@._+-], starts with [a-z0-9], max 128 chars; batch_detect_installed_version (single `pacman -Q` call) + batch_fetch_releases (single `pacman -Si` call, output parsed as blank-line-separated blocks)
-│   │   │   ├── pkg/                    # uptrakit-plugin-package-manager-pkg                    (lib)  — BSD pkg (pkgng) plugin for FreeBSD, TrueNAS SCALE, OPNsense, pfSense, DragonFly BSD; discovery via `pkg query -a "%n\t%v"` (all) or `pkg query -a "%a\t%n\t%v"` filtered by auto-flag==0 (manual); version detection via `pkg query "%v" <name>`; upstream version via `pkg rquery "%v" <name>` (local repo DB); updates via `sudo pkg install -y <name>`; index refresh via `sudo pkg update -q`; implements DetectHostCompatibility (checks `which pkg`); native batch_detect_installed_version (single `pkg query -a` call, filtered in memory) + batch_fetch_releases (single `pkg rquery "%n\t%v"` call); no PostUpdateHook; needs_setenv=false
-│   │   │   ├── apk/                    # uptrakit-plugin-package-manager-apk                    (lib)  — APK (Alpine Linux) plugin; discovery via `apk list --installed` (all mode) or `/etc/apk/world` (world mode); version detection via `apk info -v`; latest version via `apk version`; updates via `sudo apk add <pkg>=<ver>`; implements DetectHostCompatibility (checks `which apk`) and RefreshPackageIndex (`sudo apk update`); package_identifier = Alpine package name (lowercase+digits+._+-, min 2 chars, max 100 chars, no `..`); native batch_detect_installed_version + batch_fetch_releases (single `apk info -v` / `apk version` call for all packages)
-│   │   │   ├── dnf/                    # uptrakit-plugin-package-manager-dnf                    (lib)  — DNF/RPM plugin for Fedora, RHEL, CentOS, AlmaLinux, Rocky Linux; discovery via `rpm -qa` (all mode) or `dnf repoquery --userinstalled` (user_installed mode, controlled by `discovery_filter` config field); version detection via `rpm -q --queryformat`; latest version via `dnf repoquery --queryformat` (local repo metadata); updates via `sudo dnf install -y <pkg>-<ver>`; implements DetectHostCompatibility (checks `which dnf`), RefreshPackageIndex (`sudo dnf makecache -q`); native batch_detect_installed_version (single `rpm -qa` call) + batch_fetch_releases (single `dnf repoquery` call) + execute_batch_update (single `dnf install -y` with all `pkg-ver` args via `execute_batch_versioned_command`); package_identifier: alphanumeric + `._-`, starts with alphanumeric, 1–128 chars, no `..`; no PostUpdateHook; needs_setenv=false
-│   │   │   ├── snap/                   # uptrakit-plugin-package-manager-snap                   (lib)  — Snap (snapd) plugin for Linux; agent-side only; discovery via `snap list` (excludes system snaps: core*, snapd, bare); version detection via `snap list <name>`; batch_detect_installed_version via single `snap list` parsed into map; release fetch via `snap info <name>` (channels: section parsing); updates via `sudo snap refresh <name>` (optional --channel=); native execute_batch_update (single `snap refresh name1 name2 ...`); implements DetectHostCompatibility (checks `which snap`); package_identifier = snap name (lowercase, digits, hyphens, 2-40 chars); requires sudo for refresh; no package index refresh step (snapd manages cache internally)
-│   │   │   └── cargo/                  # uptrakit-plugin-package-manager-cargo                  (lib)  — Cargo install plugin; tracks Rust binaries installed via `cargo install`; discovery + version detection via `cargo install --list` (parse non-indented `<name> v<version>:` headers); ControllerSideFetchReleases via crates.io sparse index (`https://index.crates.io/{prefix}/{name}`, `tame-index` for URL/parsing); batch_fetch_releases bounded to 10 concurrent requests via `buffer_unordered(10)`; updates via `cargo install <name> --version <ver> --locked` (default, controlled by `use_locked` type setting) (no sudo, installs to `~/.cargo/bin`); implements DetectHostCompatibility (checks `which cargo` exit code); package_identifier = crate name (1–64 chars, starts with letter/underscore, `[A-Za-z0-9_-]`); DiscoveryTarget always emitted; type_settings_form_schema() for include_prereleases, registry_url, and use_locked; custom registry_url uses SsrfSafeResolver::permissive(), default uses SsrfSafeResolver::new()
-│   │   ├── hooks/
-│   │   │   ├── systemd/                # uptrakit-plugin-hook-systemd            (lib)  — Systemd hook plugin: stops/starts a systemd service around updates; UpdateLifecycle capability; pre-hook runs `systemctl stop`, post-hook runs `systemctl start` (always, to restore state); declares sudo commands for systemctl stop/start; validates service_name [a-zA-Z0-9._@:-]
-│   │   │   └── shell/                  # uptrakit-plugin-hook-shell              (lib)  — Shell hook plugin: runs arbitrary shell commands before/after updates; UpdateLifecycle capability; pre_command (abort on non-zero exit), post_command (respects on_failure flag); supports bash/sh shell types with fail-early settings; max command length 4096; no sudo requirements
-│   │   ├── notifications/
-│   │   │   ├── core/                   # uptrakit-notification-plugin-core       (lib)  — DeliveryMessage, MessageAction, NotificationPluginError, escape_html()
-│   │   │   ├── webhook/               # uptrakit-notification-plugin-webhook    (lib)  — Webhook plugin (SSRF validation + header blocklist + HMAC-SHA256 signing)
-│   │   │   ├── telegram/              # uptrakit-notification-plugin-telegram   (lib)  — Telegram plugin with inline keyboard (feature-gated)
-│   │   │   ├── email/                 # uptrakit-notification-plugin-email      (lib)  — Email plugin (SMTP via mail-send, internal SMTP merge from settings bag); surfaces.rs: channel management + SMTP settings CRUD (global and per-tenant) via raw-key settings store (feature-gated)
-│   │   │   # (registry removed — notification plugins now registered in unified PluginCatalog via declare_plugin! + all_descriptors())
-│   │   ├── enhancements/
-│   │   │   └── dashboard-icons/         # uptrakit-plugin-enhancement-dashboard-icons (lib)  — Dashboard Icons enhancement plugin; `SoftwareItemLifecycle` trait impl; caches icon slugs from homarr-labs/dashboard-icons GitHub tree (6h refresh via CancellationToken); slugify() converts software names to icon slugs; CDN URL: cdn.jsdelivr.net; feature-gated (`dashboard-icons` on controller/web-api/registry); tenant-scoped type setting `enabled` on plugin type `enhancement_dashboard_icons` (enabled by default when unset)
-│   │   └── discovery/
-│   │       └── proxmox-helper-scripts/ # uptrakit-plugin-discovery-proxmox-helper-scripts (lib)  — PVE helper-scripts plugin (discovery-only: fetches CT scripts, analyzes for GitHub/Codeberg/npm/APT upstream; emits ReleasesGithub+GenericShell targets for GitHub-managed items, ReleasesForgejo+GenericShell targets for Codeberg-managed items (api_base_url="https://codeberg.org"; uses Forgejo plugin since Codeberg runs Forgejo), PackageManagerNpm target for npm-managed items, PackageManagerApt target for APT-managed items)
+│   │   │   ├── core/                   # uptrakit-plugin-infrastructure-core     (lib) — descriptor + role traits + PluginCatalog + shared helpers
+│   │   │   ├── registry/               # uptrakit-plugin-infrastructure-registry (lib) — plugin dispatch & validation
+│   │   │   └── proxmox/                # uptrakit-plugin-infrastructure-proxmox  (lib) — Proxmox VE infrastructure plugin
+│   │   ├── releases/                   # docker, github, gitlab, forgejo release-source plugins
+│   │   ├── generic/shell/              # uptrakit-plugin-generic-shell           (lib) — version/update via shell commands
+│   │   ├── package-managers/           # homebrew, apt, npm, mas, pacman, pkg, apk, dnf, snap, cargo
+│   │   ├── hooks/                      # systemd, shell update-lifecycle hook plugins
+│   │   ├── notifications/              # core, webhook, telegram, email notification plugins
+│   │   ├── enhancements/dashboard-icons/ # uptrakit-plugin-enhancement-dashboard-icons (lib) — icon-URL assignment
+│   │   └── discovery/proxmox-helper-scripts/ # PVE helper-scripts discovery plugin
 │   ├── shared/
-│   │   ├── agent-core/                 # uptrakit-agent-core                    (lib)  — shared agent logic: version check, update execution, batch updates; spawn_background()/send_background_result() for non-blocking event loop; run_check_versions/run_discover_software/run_execute_batch_update (compute-only); handle_execute_update/handle_graceful_shutdown; start_update() for per-host parallel use by SSH agent; batch_check_versions() groups assignments by (`PluginTypeId`, effective_config), calls batch_detect_installed_version in parallel, refreshes package index once per fetch group, then calls batch_fetch_releases in parallel; uses `PluginCatalog` for plugin lookup and dispatch
-│   │   ├── command/                    # uptrakit-command                       (lib)  — CommandExecutor trait + LocalCommandExecutor; SudoAwareCommandExecutor (wraps any executor, prepends sudo based on SudoContext); SudoPolicy enum (auto/force_with/force_without); CommandSpec.privileged flag; StdioTunnel trait (bidirectional byte-stream tunnel for remote command I/O); RemoteExecutor trait + RemoteCommandResult (transport-agnostic remote command execution for SSH and PVE guest exec)
-│   │   ├── crypto/                     # uptrakit-crypto                        (lib)  — AES-256-GCM at-rest encryption with envelope encryption (KEK wraps DEKs); EncryptedString, init_master_key, DataKeyRing; ENC:v1/v2/v3 formats (v3 = current default with DEK + AAD); column AAD registry (register_column_aad); DEK wrap/unwrap; O(1) master key rotation support
-│   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities (hosts, host_tags, host_tag_assignments, software_items, host_software_items, software_ignores, update_history, plugin_type_settings, etc.); `migration` feature flag exposes `uptrakit_shared_db::migration::{Migrator, run_migrations}`; `migration::helpers` module provides reusable SQLite table-recreation helpers (set_foreign_keys, check_crash_recovery, drop_original, rename_temp, is_sqlite)
-│   │   ├── directories/                # uptrakit-directories                   (lib)  — cross-platform directory management
-│   │   ├── surfaces/                   # uptrakit-surfaces                       (lib)  — shared UI surface contract types: slots, descriptors, interactions, data sources, registration protocol, and validation helpers
-│   │   ├── macros/                     # uptrakit-shared-macros                 (lib)  — shared macros (impl_report_conversion!)
-│   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types (PluginRole, `PluginTypeId` newtype, `OsFamily`, `HostFeature`, `HostCapabilities`, `plugin_ids` module with compile-time plugin ID constants, etc.); `PluginTypeId` lives here (not in `plugin-infrastructure-core`) because it is part of the REST API contract; network::is_private_host()/is_private_ip() for SSRF validation; ssrf::SsrfSafeResolver (feature `http-ssrf`) for DNS rebinding protection; `PackageIdentifierRules` struct (`min_len`, `max_len`, `first_char_valid`, `char_valid`, `reject_double_dot`) in `package_identifier.rs` — all 8 package-manager plugins define a `const IDENTIFIER_RULES: PackageIdentifierRules` and call `IDENTIFIER_RULES.validate(value)` instead of duplicating inline validation; feature-gated: sea-orm, openapi, http-ssrf
-│   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
-│   │   ├── openapi-client/             # uptrakit-openapi-client                (lib)  — typed HTTP client; full REST API + SSE streaming coverage; re-exports web-api-types, reqwest::Error; feature `mock` adds MockApiServer+MockEndpoint for integration testing; sse.rs provides lightweight SSE parser; update_output_stream.rs provides typed stream_update_output() method; device_auth_stream.rs provides SSE-first device auth; events_stream.rs provides typed admin event SSE client
-│   │   ├── nats/                       # uptrakit-nats                          (lib)  — shared NATS primitives: NatsEventEnvelope, NatsConnection, subject routing, stream setup
-│   │   ├── scheduler-engine/           # uptrakit-scheduler-engine              (lib)  — scheduler core: poll loop, claim mechanism, interval+jitter scheduling (interval.rs: compute_next_run_at), TaskExecutor trait, SchedulerNotifier trait, 6 built-in executors (AuthCleanup, StaleLeaseCleanup, DetectVersion, FetchReleases, ServiceCertCheck, CrlRenewal); tasks categorised as internal (CrlRenewal, CaRotationCheck, ServiceCertCheck — embedded scheduler only) vs external (AuthCleanup, StaleLeaseCleanup, FetchReleases, DetectVersion — deferrable to external scheduler); `should_yield_external: Box<dyn Fn() -> bool>` closure skips external tasks when returning true; FetchReleasesExecutor Phase B sends fetch assignments for host_software_items so that latest_version is populated; `software_states.rs` — **canonical** `load_software_states_for_tenant(&TenantDb)` (all items, single page) and `load_software_states_page_for_tenant(&TenantDb, host_page, page_size)` (paginated: up to `STATES_HOST_PAGE_SIZE` hosts per page, ordered by host.id); canonical owner is now `web-api-queries/software_states.rs`
-│   │   ├── tracing-init/               # uptrakit-tracing-init                  (lib)  — `TracingBuilder`, `BoxedLayer`, `init_cli_tracing` (feature `cli`), `init_test_tracing` (feature `test-support`); depends only on `tracing` + `tracing-subscriber`; re-exported wholesale by `uptrakit-service-sdk`; the controller depends on this crate directly
-│   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — service lifecycle, SDK-managed event loop, signal handling, enrollment, identity (ServiceIdentityState: service_id + enrollment_secret + tenant_id in service.json), TLS, CA bootstrap, main helpers; default_resolve_shutdown(); `decrypt_sensitive_params<T>()` generic ECIES sealed-box decryption for surface sensitive params; re-exports `uptrakit-tracing-init` public surface (`TracingBuilder`, `BoxedLayer`, `init_cli_tracing`, `init_test_tracing`); `zeroconf` feature (default): mDNS/DNS-SD discovery module (browse for `_uptrakit._tcp.local.`, cache in `discovery.json` with 0o600 permissions); when `--url` omitted + feature enabled, auto-discovers controller on LAN
-│   │   ├── audit-log/                  # uptrakit-audit-log                      (lib)  — semantic audit domain (`AuditActionType`, `AuditOutcome`, `AuditEntry`), emitters (`AuditEmitter`, `RuntimeAuditEmitter`), dispatcher (`AuditLogDispatcher`), filter types, backends: NoopBackend, DatabaseBackend (cfg db), JournaldBackend (cfg journald), MultiplexBackend
-│   │   ├── update-hooks/               # uptrakit-config-merge                  (lib)  — config merge utilities: resolve_effective_config(), merge_config(), shallow_merge_into()
-│   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol; `Capability` enum + capability negotiation; `ServiceProfile` enum + from_capabilities(); `duration_seconds` serde module for Duration↔u32 fields; report pagination (`paginate.rs` Paginatable trait + `report_tracker.rs` ReportTracker); re-exports `uptrakit-surfaces` as `surfaces` module
-│   └── ui/
-│       ├── cli/                        # uptrakit-cli                           (bin+lib) — CLI interface; uses openapi-client for all API calls (hosts, host-tags, services, software-items, plugin-configs, software-ignores, checks, updates, batch-updates, history, scheduler, settings); `update trigger --follow` and `history tail` use SSE streaming; `update batch-host/batch-item --follow` and `update-batches follow` use batch progress SSE; lib target exposes modules for integration tests
-│       ├── web-api/                    # uptrakit-web-api                       (lib)  — HTTP API layer; routes, middleware (security_headers, request_id, request_log, resolve_ip, rate_limit, resolve_proxy_headers, require_auth, audit_log, permission, tenant_context), AppState (with five focused substates via FromRef<Arc<AppState>>: `db: DbState`, `cert: CertState`, `auth: AuthState`, `broadcast: BroadcastState`, `oidc: OidcState`), router; route handlers declare only needed sub-states — not full AppState; SessionSvc/ApiTokenSvc typed extractors (extract.rs) eliminate manual Service::new() calls; db_access_policy.toml classifies every handler as tenant-agnostic/tenant-scoped/no-db/full-state; /healthz (liveness) + /readyz (readiness: DB + CA checks); event_broadcaster.rs (per-tenant admin event SSE), device_flow_broadcaster.rs (device auth SSE); extract.rs (`ClientIp`, `ProxyIp`, `ServiceIdentity`, `ExternalBaseUrl`, `Validated<T>` — JSON deserialise + `Validate::validate()` inline, returns 400 on failure); re-exports auth/queries from sibling crates; test_harness/ shared integration test fixtures (TestApp, TestClient, DB/HTTP helpers); integration_tests/ REST API + WebSocket integration tests (#[cfg(all(test, feature = "db-sqlite"))])
-│       ├── web-api-auth/               # uptrakit-web-api-auth                  (lib)  — authentication subsystem: auth module (JWT, sessions, OIDC, tokens, permissions), SettingKey, settings_store
-│       └── web-api-queries/            # uptrakit-web-api-queries               (lib)  — database query logic: all query modules, ServiceNotifier trait; `TenantDb` is now defined in `shared-db` and re-exported here via `pub use uptrakit_shared_db::TenantDb`
-├── frontend/                           # SvelteKit SPA (Skeleton UI v4 + Tailwind CSS v4)
-│   ├── src/
-│   │   ├── lib/                        # Shared modules: api client, auth store, types, utils, notifications, sse.ts (SSE: update output + admin events); stores/events.svelte.ts (centralized admin event SSE store)
-│   │   │   └── components/             # Shared UI: ConfirmDialog, ModalBackdrop (focus-trapped), ContextMenu (viewport-aware, keyboard-navigable), Pagination (page numbers + ellipsis + total count), TerminalOutput (xterm.js wrapper with dark/light theme)
-│   │   └── routes/                     # SvelteKit file-based routes
-│   │       ├── profile/                #   /profile — account info + API token management (create/revoke)
-│   │       ├── history/                #   /history — update history with filters (host, software item, status) + trigger update button
-│   │       ├── scheduler/              #   /scheduler — scheduler task management (edit interval/jitter, enable/disable, trigger now)
-│   │       ├── plugin-configs/         #   /plugin-configs — plugin config CRUD + autodiscovery ignore rules management
-│   │       ├── software/               #   /software — software item list; Pending tab for discovered items; Edit action (name/enabled)
-│   │       └── settings/               #   Settings sub-components (Registration, Auth, MQTT, OIDC, Certs, Enrollment); global CA rotation; MQTT client limit
-│   ├── package.json                    # npm scripts: build, check, lint, format, format:check
-│   ├── svelte.config.js                # SvelteKit config (static adapter)
-│   ├── tsconfig.json
-│   ├── vite.config.ts
-│   └── vitest.config.ts
-├── docker/
-│   ├── .dockerignore                   # Docker build context exclusions
-│   ├── Dockerfile                      # Multi-stage build (ARG PACKAGE/BINARY/FEATURES)
-│   └── Dockerfile.test                 # Multi-binary test image (all 5 binaries, no ENTRYPOINT)
-├── docker-compose.yml                  # Compose with profiles: postgres, mqtt, ssh, scheduler, full
-├── .env.example                        # Template for docker-compose environment
-├── .github/
-│   ├── workflows/ci.yml                # CI: fmt check, clippy, tests, reverse-proxy Docker tests, system integration tests, frontend lint + format + check + build
-│   ├── workflows/docker.yml            # CI: multi-arch Docker image builds, push to GHCR
-│   ├── workflows/release-please.yml    # Release: version bumps, changelog, binary artifact builds + attestation
-│   ├── release-please-config.json      # release-please package configuration
-│   ├── .release-please-manifest.json   # Current version tracked by release-please
-│   └── dependabot.yml                  # Weekly Cargo + npm dependency updates
-├── Cross.toml                          # cross-compilation config for ARM64 Linux (aws-lc-sys deps)
+│   │   ├── agent-core/                 # uptrakit-agent-core       (lib) — shared agent logic: version check, update, batch
+│   │   ├── command/                    # uptrakit-command          (lib) — CommandExecutor, sudo-aware execution, StdioTunnel, RemoteExecutor
+│   │   ├── crypto/                     # uptrakit-crypto           (lib) — AES-256-GCM at-rest encryption, envelope encryption, EncryptedString
+│   │   ├── db/                         # uptrakit-shared-db        (lib) — SeaORM entities, TenantDb, migrations (feature `migration`)
+│   │   ├── directories/               # uptrakit-directories      (lib) — cross-platform directory management
+│   │   ├── surfaces/                   # uptrakit-surfaces         (lib) — shared UI surface contract types
+│   │   ├── macros/                     # uptrakit-shared-macros    (lib) — impl_report_conversion!
+│   │   ├── types/                      # uptrakit-shared-types     (lib) — shared value types, PluginTypeId, SSRF helpers, PackageIdentifierRules
+│   │   ├── web-api-types/              # uptrakit-web-api-types    (lib) — shared HTTP request/response types
+│   │   ├── openapi-client/            # uptrakit-openapi-client   (lib) — typed HTTP client + SSE streaming
+│   │   ├── nats/                       # uptrakit-nats             (lib) — shared NATS primitives
+│   │   ├── scheduler-engine/          # uptrakit-scheduler-engine (lib) — poll loop, claim mechanism, built-in executors
+│   │   ├── tracing-init/              # uptrakit-tracing-init     (lib) — TracingBuilder + init helpers (canonical tracing setup)
+│   │   ├── service-sdk/               # uptrakit-service-sdk      (lib) — service lifecycle, event loop, enrollment, identity, zeroconf
+│   │   ├── audit-log/                 # uptrakit-audit-log        (lib) — semantic audit domain, emitters, dispatcher, backends
+│   │   ├── update-hooks/             # uptrakit-config-merge     (lib) — resolve_effective_config(), merge_config()
+│   │   ├── backoff/                   # uptrakit-backoff          (lib) — exponential backoff (reconnect_backoff_builder)
+│   │   └── wire/                       # uptrakit-internal-wire    (lib) — service↔controller wire protocol, Capability, ServiceProfile
+│   └── ui/                             # See crates/ui/web-api/AGENTS.md for web-api handler conventions
+│       ├── cli/                        # uptrakit-cli             (bin+lib) — CLI over openapi-client; SSE for --follow
+│       ├── web-api/                    # uptrakit-web-api         (lib) — HTTP API: routes, middleware, AppState + sub-states, service WS
+│       ├── web-api-auth/              # uptrakit-web-api-auth    (lib) — JWT, sessions, OIDC, tokens, permissions, settings store
+│       └── web-api-queries/           # uptrakit-web-api-queries (lib) — DB query modules, ServiceNotifier; re-exports TenantDb
+├── frontend/                           # SvelteKit SPA (Skeleton UI v4 + Tailwind v4)
+│                                       # See frontend/AGENTS.md for toolchain + Svelte/TypeScript conventions
+├── docker/                             # Dockerfile, Dockerfile.test (multi-binary test image)
+├── docker-compose.yml                  # Compose profiles: postgres, mqtt, ssh, scheduler, full
+├── .github/workflows/                  # ci.yml, docker.yml, release-please.yml
+├── Cross.toml                          # ARM64 Linux cross-compilation config
 ├── CONTRIBUTING.md
 ├── README.md
 └── AGENTS.md                           # This file
 ```
 
-All crates use **edition = "2024"**. Some specify `rust-version = "1.91"`.
+All crates use **edition = "2024"**; some specify `rust-version = "1.91"`.
 
-### Controller feature flags
-
-| Feature                  | Default | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| ------------------------ | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `db-sqlite`              | Yes     | SQLite backend                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `db-postgres`            | No      | PostgreSQL backend                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `db-all`                 | No      | All database backends (SQLite + PostgreSQL)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `oidc`                   | Yes     | OpenID Connect authentication support. Disabling removes the `openidconnect` crate and all OIDC routes/stores, significantly reducing compile-time dependencies. Propagates to `uptrakit-web-api/oidc`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `embedded-scheduler`     | Yes     | Embeds the scheduler engine in the controller process via `EmbeddedServiceHost::add()`. Uses `CoexistencePolicy::YieldAlways` to defer external tasks when an external scheduler connects; internal tasks (CRL renewal, CA rotation, service cert check) always run. The yield check queries `EmbeddedServiceNotifier::is_capability_yielded(Scheduler)`. Adds `uptrakit-scheduler-engine` dependency.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `embedded-agent`         | No      | Embeds a local agent in the controller process via `EmbeddedServiceHost::add()` for single-tenant deployments. Manages the controller host (software discovery, version checks, updates). Uses `CoexistencePolicy::YieldAlways` with a custom `yield_check` that yields only when an external agent reports the same `machine_id`. Provisioned as a tenant service (not system) under `AppState.default_tenant_id`. Reuses all business logic from `uptrakit-agent-core`. Propagates `interactive` feature as `uptrakit-agent-core?/interactive`. Freeze file at `<state_dir>/embedded-agent/update-freeze`. Rate limits updates to 5-second cooldown.                                                                                                                                                                                                                                                                                                                                                                     |
-| `embedded-ssh-agent`     | No      | Embeds the SSH-backed agent in the controller process via `EmbeddedServiceHost::add()` for single-tenant deployments that manage remote hosts over SSH. Uses `CoexistencePolicy::YieldOnSameAppName` — yields when an external `uptrakit-agent-ssh` connects. Provisioned as a tenant service under `AppState.default_tenant_id`. Reuses all business logic from the `uptrakit-agent-ssh-runtime` library crate; the controller dispatches via `uptrakit_service_sdk::run_embedded_service<AgentSshHandler>`. Uses the controller's shared database; SSH migrations are contributed at startup through `AgentSshHandler::service_migrations()`. Ephemeral ECIES P-256 keypair for surface parameter decryption (via `uptrakit_service_sdk::generate_p256_keypair_for_ecies`). Propagates `interactive` as `uptrakit-agent-ssh-runtime?/interactive` and `reset-data` as `uptrakit-agent-ssh-runtime?/reset-data`. Freeze file at `<state_dir>/embedded-ssh-agent/update-freeze`. Rate limits updates to 5-second cooldown. |
-| `nats`                   | No      | Enables NATS JetStream transport for cross-controller messaging. Propagates to `uptrakit-web-api/nats`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `swagger-ui`             | No      | Swagger UI at `/swagger-ui`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `embed-frontend`         | Yes     | Embeds the SvelteKit frontend build into the binary via `rust-embed`. Requires `frontend/build/` to exist at compile time. Removes the `--static-dir` CLI argument. See [Embedded Frontend](docs/development/embedded-frontend.md).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `notifications-all`      | Yes     | Enables all optional notification plugins (Telegram, email). Expands to `notifications-telegram` + `notifications-email` + `uptrakit-web-api/notifications-all`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `notifications-telegram` | No      | Telegram notification plugin (enabled transitively via `notifications-all`). Propagates to `uptrakit-web-api/notifications-telegram`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `notifications-email`    | No      | Email notification plugin via SMTP (enabled transitively via `notifications-all`). Propagates to `uptrakit-web-api/notifications-email`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `interactive`            | Yes     | Interactive (PTY-based) update sessions with stdin forwarding. Propagates to `uptrakit-web-api/interactive`. Adds the interactive WebSocket endpoint and `InteractiveSessionRegistry`. See [Interactive Updates](docs/development/interactive-updates.md).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `zeroconf`               | Yes     | mDNS/DNS-SD zero-configuration advertising. Enables the `--zeroconf` CLI flag and the advertiser module. Uses the `mdns-sd` crate. See [Zeroconf Discovery](docs/development/zeroconf-discovery.md).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `dashboard-icons`        | Yes     | Dashboard Icons enhancement plugin. Automatically assigns icon URLs to software items from the [Dashboard Icons](https://github.com/homarr-labs/dashboard-icons) project. Propagates to `uptrakit-web-api/dashboard-icons` + `uptrakit-plugin-infrastructure-registry/dashboard-icons`. Uses tenant-scoped plugin type settings on `enhancement_dashboard_icons`; `enabled` defaults to `true` when unset. See [Dashboard Icons](docs/development/dashboard-icons.md).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `reset-data`             | Yes     | Destructive data reset endpoint (`POST /api/v1/settings/reset-data`). Propagates to `uptrakit-web-api/reset-data`. Requires `CanManageGlobalSettings` permission and `confirm: "RESET"` in the request body. Broadcasts `ResetData` to connected services after clearing tenant data.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-
-### Web-API feature flags
-
-| Feature       | Default | Description                                                                                                                                                                                                                                                                                                                                                            |
-| ------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `oidc`        | Yes     | OpenID Connect authentication. Propagates to `uptrakit-web-api-auth/oidc`. Gates the `openidconnect` dependency and all OIDC-specific modules (`oidc_auth`, `oidc_providers`, `oidc_state`), routes, OpenAPI schemas, rate limit entries, and `AppState` stores. Non-OIDC types (`AuthMethod::Oidc`, `require_token_for_oidc`, OIDC DB entities) remain unconditional. |
-| `swagger-ui`  | No      | Swagger UI at `/swagger-ui`                                                                                                                                                                                                                                                                                                                                            |
-| `db-sqlite`   | No      | SQLite backend. Propagates to `uptrakit-web-api-queries/db-sqlite`.                                                                                                                                                                                                                                                                                                    |
-| `db-postgres` | No      | PostgreSQL backend. Propagates to `uptrakit-web-api-queries/db-postgres`.                                                                                                                                                                                                                                                                                              |
-| `db-all`      | No      | All database backends (SQLite + PostgreSQL). Propagates to `uptrakit-web-api-queries/db-all`.                                                                                                                                                                                                                                                                          |
-| `interactive` | No      | Interactive update WebSocket endpoint (`/api/v1/update-history/{id}/interactive`), `InteractiveSessionRegistry`. Propagates to `uptrakit-command/interactive` via `uptrakit-agent-core`.                                                                                                                                                                               |
-| `reset-data`  | No      | Registers the `POST /api/v1/settings/reset-data` route and the transactional data-reset query logic. No additional dependencies.                                                                                                                                                                                                                                       |
-
-### Build profiles
-
-| Profile         | Usage                                | Notes                                                                                                                                                     |
-| --------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `dev` (default) | `cargo build`                        | `debug = "line-tables-only"`, deps at `opt-level = 1`, `aws-lc-sys` at `opt-level = 3`. macOS uses `split-debuginfo=unpacked` (via `.cargo/config.toml`). |
-| `release`       | `cargo build --release`              | `lto = "fat"`, `codegen-units = 1`, `strip = true`. Production-grade but slow to build.                                                                   |
-| `release-fast`  | `cargo build --profile release-fast` | Inherits `release` with `lto = false`, `codegen-units = 16`, `strip = false`. For iterative release testing — not production.                             |
-
-See [Build Speed Optimizations](docs/development/setup.md#build-speed-optimizations) for details.
-
-### Release workflow
-
-Releases are automated via [release-please](https://github.com/googleapis/release-please). Pushing
-conventional commits to `main` triggers a release PR. Merging the PR creates a GitHub release with
-a `v0.0.x` tag, which triggers binary artifact builds (7 binaries x 4 targets) and Docker image
-builds.
-
-Key files:
-
-- `.github/release-please-config.json` — release-please configuration
-- `.github/.release-please-manifest.json` — current version tracker
-- `.github/workflows/release-please.yml` — release + artifact build workflow
-- `Cross.toml` — ARM64 Linux cross-compilation settings
-
-See [docs/development/releases.md](docs/development/releases.md) for full details.
+**Feature flags, build profiles, release workflow:** controller/web-api feature-flag reference lives in
+[docs/development/feature-flags.md](docs/development/feature-flags.md); build profiles and build-speed settings in
+[docs/development/setup.md](docs/development/setup.md#build-speed-optimizations); the release-please workflow in
+[docs/development/releases.md](docs/development/releases.md).
 
 ## General MUST FOLLOW Rules for AI Coding Agents
 
 ### Quality Gates
 
-All changes must pass defined quality gates. See [docs/development/quality-gates.md](docs/development/quality-gates.md) for details.
+All changes must pass the defined quality gates — see [docs/development/quality-gates.md](docs/development/quality-gates.md).
+Git hooks (via `husky-rs`) enforce a subset on commit/push, auto-installed on first `cargo build`/`cargo test`
+(`NO_HUSKY_HOOKS=1` to skip). Run the gates relevant to what you touched; do not add exceptions to `.markdownlintignore`
+or `.markdownlint.json` without approval.
 
-Git hooks (managed by [`husky-rs`](https://crates.io/crates/husky-rs)) enforce a subset of these
-gates locally on commit and push. They auto-install via `core.hooksPath = .husky` on the first
-`cargo build`/`cargo test` run. Set `NO_HUSKY_HOOKS=1` to prevent installation in CI or hermetic
-build environments.
+**OpenAPI param authoring:** author query/request params via `params(<IntoParamsStruct>)`, never a hand-maintained
+`params(("field" = …, Query, …))` list ([ADR-0025](docs/adr/0025-drift-proof-openapi-params.md); enforced by
+`ci/verify_no_inline_query_params.sh`). See `docs/development/coding-standards.md`.
 
-#### AI execution guidance
-
-- Always run quality gates relevant to modified areas before finalizing.
-- **Lint Markdown when `.md` files are changed** with `markdownlint --config .markdownlint.json '**/*.md'`.
-  The `.markdownlintignore` file excludes `node_modules/`, `target/`, `.claude/`, and `CODEREVIEW.md`.
-  Do not add exceptions to `.markdownlintignore` or `.markdownlint.json` without explicit approval.
-- Scope-based execution is allowed for local iteration:
-  - frontend-only changes: run frontend checks (`npm run lint`, `npm run format:check`, `npm run check`, `npm run build`).
-  - Rust/backend-only changes: run Rust checks/tests/linters.
-  - markdown changes: run `markdownlint --config .markdownlint.json '**/*.md'`.
-  - mixed changes: run all relevant gates for every area touched.
-- If anything related to reverse proxy behavior changes, run ignored reverse proxy integration tests:
-  - `cargo test -p uptrakit-integration-tests --test reverse_proxy -- --ignored`
-- Treat the reverse proxy trigger list broadly, including (non-exhaustive):
-  - mTLS and certificate forwarding/extraction
-  - auth behavior behind proxies
-  - IP detection / `ClientIp`, forwarded headers, trusted-proxy logic
-  - reverse proxy middleware/settings and related TLS behavior
-- If anything related to database queries, migrations, or REST API behavior changes, run the
-  database integration tests (requires Docker for PG):
-  - `cargo test -p uptrakit-integration-tests --test database -- --ignored`
-- If anything related to enrollment, wire protocol, service lifecycle, or inter-component
-  communication changes, run the system integration tests (requires Docker and pre-built image):
-  - `docker build -f docker/Dockerfile.test -t uptrakit-test:latest .`
-  - `cargo test -p uptrakit-integration-tests -- --ignored`
-- **REST API contract**: after any backend route or REST-contract change, run `./scripts/regen-api.sh` and commit
-  `crates/ui/web-api/openapi.json` + `frontend/src/lib/api/generated/`; CI gates on staleness of both.
-- **OpenAPI param authoring** (drift-proof): author query/request params via `params(<IntoParamsStruct>)`, never a
-  hand-maintained `params(("field" = …, Query, …))` list — see `docs/development/coding-standards.md`
-  ("OpenAPI parameter & schema authoring") + [ADR-0025](docs/adr/0025-drift-proof-openapi-params.md); enforced by
-  `ci/verify_no_inline_query_params.sh`.
-- **Architecture is enforced by CI and existing gates**, not by a per-session MCP tool.
-  The blocking gates are `cargo deny check` and `python3 ci/check_plugin_semantic_boundary.py`;
-  `cargo machete` (unused dependencies) runs **advisory** in CI. Behavioral health — hotspots,
-  change-coupling, code-health grade — lives in the **CodeScene** dashboard (advisory, not a gate),
-  which auto-analyses on push via the GitHub App webhook.
-- **Do not regress architecture quality.** A task is not complete if it introduces a dependency
-  cycle, leaks a plugin/production boundary (caught by `check_plugin_semantic_boundary.py`), or
-  adds unused dependencies without reason.
+**Do not regress architecture quality.** Architecture is enforced by CI gates (`cargo deny check`,
+`python3 ci/check_plugin_semantic_boundary.py`). A task is incomplete if it introduces a dependency cycle, leaks a
+plugin/production boundary, or adds unused dependencies without reason.
 
 ### Dependency registration
 
-All new dependencies — external third-party crates and internal workspace crates alike — must be
-added to `[workspace.dependencies]` in the root `Cargo.toml` **first**. Individual crate
-`Cargo.toml` files must reference them via `workspace = true`. Never pin a version number or path
-locally inside a crate's own `Cargo.toml`.
+All new dependencies (third-party and internal workspace crates) go in `[workspace.dependencies]` in the root
+`Cargo.toml` **first**; crate manifests reference them via `workspace = true`. Never pin a version or path locally. See
+[docs/development/dependency-policy.md](docs/development/dependency-policy.md).
 
-```toml
-# ✅ Correct
-[dependencies]
-serde = { workspace = true }
-uptrakit-internal-wire = { workspace = true }
+### Commit messages
 
-# ❌ Wrong — do not do this
-serde = "1"
-uptrakit-internal-wire = { path = "../../shared/wire" }
-```
-
-See [docs/development/dependency-policy.md](docs/development/dependency-policy.md) for the full
-policy including feature specification rules and optional dependency guidelines.
-
-### Commit Messages
-
-Conventional Commits are required. See [docs/development/commit-messages.md](docs/development/commit-messages.md) for details.
+Conventional Commits are required — see [docs/development/commit-messages.md](docs/development/commit-messages.md).
 
 ### Architecture rules and invariants
 
 These are non-negotiable design constraints. Do not violate them.
 
-1. **Updates are never automatic.** The scheduler triggers version _checks_ only. Update execution requires explicit
-   user action (via UI, CLI, or MQTT/Home Assistant).
-1. **Agents initiate outbound-only connections.** Agents connect to the controller via secure WebSocket
-   (`/api/v1/ws/service`). They never listen on any port or accept inbound connections.
-1. **Agents run unprivileged.** They run as a dedicated user (e.g. `uptrakit`). Only the specific commands declared
-   by registered plugins via `required_sudo_commands()` are granted `NOPASSWD` sudo access — not blanket `ALL`.
-   Sudoers files are generated by the bootstrap and sync-host wizard operations and contain one entry per resolved command.
-   See [Sudoers Management](docs/security/sudoers-management.md).
-1. **Plugin split and role-based assignment.** Each `(host, software_item)` pair has per-role plugin assignments
-   stored in the `host_software_item_plugins` table. Three roles exist: `detect_version`, `fetch_releases`, and
-   `execute_update` (see `PluginRole` enum in `crates/shared/types/src/plugin_role.rs`). Each assignment carries an
-   `execution_site` column (`auto`, `agent`, or `controller`) that determines where the operation runs. Plugins
-   declaring the `ControllerSideFetchReleases` capability (e.g. GitHub, Docker, npm) have their `fetch_releases`
-   executed on the controller by default; local package-index plugins (Homebrew, APT) run agent-side via
-   `RefreshPackageIndex` + `fetch_releases()` and report `latest_version` in `VersionCheckResult`. Per-host version
-   tracking (`installed_version`, `latest_version`) lives on `host_software_items` for all items (both featured
-   and non-featured). The old centralised `available_versions` table has been removed. Keep this boundary clear.
-1. **No shell injection.** Any path that constructs or executes shell commands must validate inputs. Custom scripts are
-   treated as untrusted input.
-1. **No secrets in logs.** Never log tokens, passwords, API keys, or other credentials. All secret fields in HTTP API
-   types (`uptrakit-web-api-types`) must use `SecretString` instead of `String`. See
-   [Secrets Handling](docs/security/secrets-and-encryption.md).
-1. **Logging goes to journald or stdout.** No internal log storage. Full command output is not captured internally --
-   only high-level summaries are retained for display.
-1. **Tracing spans use `skip_all`.** All `#[tracing::instrument]` annotations must use `skip_all` and explicitly
-   list relevant fields. Never auto-capture function arguments. HTTP handlers inherit from the `http.request`
-   span created by the request-id middleware. Wire protocol envelopes carry `TraceContext` for distributed tracing.
-   See [Tracing Conventions](docs/development/tracing.md).
-1. **No overlapping update actions per host.** At most one active (`Pending` or `InProgress`) update may run on a
-   host at any time. All update types share the single `update_history` table. This is enforced by:
-   - **Application-layer check** — `validate_update_preconditions` queries `update_history` and returns
-     `TriggerUpdateError::HostUpdateInProgress` (HTTP 409) if any active row exists.
-   - **DB-layer constraint** — a partial unique index `uix_update_history_host_active` on
-     `update_history(host_id) WHERE status IN ('pending', 'in_progress')` prevents duplicate active rows
-     even under concurrent controller processes (belt-and-suspenders against the application-layer check).
-   - **Batch sequential dispatch** — batch items beyond the first per host are inserted as `Queued` (excluded from
-     the unique index). `dispatch_next_in_batch` promotes them to `Pending` via a CAS UPDATE (`WHERE status =
-'queued'`), so two controllers cannot double-dispatch the same item. `UpdateStatus::Queued` is NOT a terminal
-     state; terminal states are `Completed` and `Failed`.
-1. **No raw SQL.** Use the structures and methods provided by Sea ORM and sea_query builders everywhere, including
-   migrations. Partial unique indexes use `Index::create().and_where()`, composite foreign keys use
-   `ForeignKey::create().from_tbl().from_col().to_col()`, and `INSERT...SELECT` uses `Query::insert().select_from()`.
-   **Approved exceptions** (each must have an inline comment naming the limitation):
-   - Rate limiter (`crates/ui/web-api-auth/src/auth/rate_limit.rs`): `CASE WHEN` in `ON CONFLICT DO UPDATE` — SeaORM's
-     `on_conflict` builder doesn't support conditional expressions. Fully parameterized (no injection risk).
-   - SQLite-specific functions (`strftime`, `typeof`) in migrations — no sea_query equivalent.
-   - `PRAGMA foreign_keys` in migrations — SQLite-specific pragma with no sea_query equivalent
-     (use `helpers::set_foreign_keys()` from `migration::helpers`).
-   - `CREATE TABLE new AS SELECT * FROM old` in tests — SQLite-specific shorthand for crash simulation.
-   - `CASE` expressions in `INSERT...SELECT` during table recreation — sea_query's builder
-     does not support `CASE` in the SELECT column list.
-   - `INSERT...WHERE NOT EXISTS` for idempotent permission inserts — sea_query's
-     `on_conflict(do_nothing)` does not generate correct syntax for all backends.
-     See [database-migrations.md](docs/development/database-migrations.md) for the full exceptions table
-     and the table recreation guide with shared helpers.
-1. **Cover new logic with tests.** Cover success and failure paths.
-1. **Document everything.** Any code change must be properly documented either in the code, or in the separate
-   documentation. Any changes to the agent-controller wire protocol must be documented in
-   `crates/shared/wire/asyncapi.yaml` and reflected in [docs/api/wire-protocol.md](docs/api/wire-protocol.md).
-1. **Wire protocol payloads must implement `WireValidate`.** Any new wire protocol payload struct with `Vec<T>` or
-   `String` fields must implement the `WireValidate` trait in `crates/shared/wire/src/wire_validate_impls.rs`. The
-   trait validates per-field and per-collection size limits after deserialization. Add limit constants in
-   `crates/shared/wire/src/limits.rs`. Use `check_vec_len()`, `check_string_len()`, and `check_opt_string_len()`
-   helpers. See [Wire Protocol — Payload Size Limits](docs/api/wire-protocol.md#payload-size-limits).
-1. **Large report payloads must use `send_auto_paginate()`.** When sending `DiscoveryResults`,
-   `VersionCheckResults`, `ReportHosts`, or `BatchUpdateResult` from a service, always use
-   `conn.send_auto_paginate(msg)` instead of `conn.send(msg)`. This automatically splits payloads exceeding
-   768 KB into pages. New paginatable types must implement the `Paginatable` trait in
-   `crates/shared/wire/src/paginate.rs`. See [Wire Protocol — Report Pagination](docs/api/wire-protocol.md#report-pagination).
-1. **Command-bearing plugin config fields must be validated.** Plugin configs with command strings
-   (`version_command`, `update_command`, `post_pull_command`, hook `commands` arrays) must validate command length
-   via `validate_command_length()` from `uptrakit-shared-types::command_validation`. Hook command counts must be
-   checked against `MAX_HOOK_COMMANDS_PER_PHASE`.
-1. **Version/build metadata contract is unified.** All workspace binaries (`uptrakit-controller`, `uptrakit-agent`,
-   `uptrakit-agent-ssh`, `uptrakit-mqtt`, `uptrakit-scheduler`, `uptrakit`) must expose consistent `--version`
-   metadata output. Enabled features are derived at
-   build time from `CARGO_CFG_FEATURE` via `uptrakit_build_info::emit_enabled_features_env()` and passed through
-   `UPTRAKIT_BUILD_ENABLED_FEATURES`; do not hardcode feature lists per binary.
-1. **Do not add any `#[allow()]`** without explicit confirmation. Workspace lints (`[workspace.lints]` in root
-   `Cargo.toml`) enforce `warnings = "deny"` and `clippy::all = "deny"` across all crates via `[lints] workspace = true`.
-   All previously allowed lints have been resolved via parameter structs, `FromStr` implementations, or dead code removal.
-   **One approved exception:** `#[allow(dead_code)]` (and analogous lint suppressions such as `#[allow(unused)]`) are
-   permitted when a function, type, field, or constant is only reachable through a `#[cfg(feature = "X")]` additive block
-   and genuinely appears unused when that feature is disabled. Each such suppression **must** include a detailed inline
-   comment that: (a) names the feature that gates the sole caller/user, (b) explains why the item cannot be removed or
-   restructured to avoid the suppression. No other `#[allow()]` exceptions are permitted without explicit approval.
-   See [Feature Flags — Lint Suppressions for Feature-Gated Items](docs/development/coding-standards.md#lint-suppressions-for-feature-gated-items).
-1. **Feature flags are additive only.** `#[cfg(not(feature = "X"))]` is **prohibited**. This attribute makes feature
-   `X` subtract from the binary, breaking additive semantics and producing incorrect builds when features are combined.
-   Use the `cfg!()` macro in expression position instead: `if !cfg!(feature = "embed-frontend") { ... }`. The expression
-   form compiles all code paths regardless of enabled features; the dead branch is eliminated by the optimizer. The sole
-   allowed exception is `#[cfg(feature = "X")]` (without `not`) on purely additive blocks — code that only exists when
-   the feature is enabled. See [Feature Flags](docs/development/coding-standards.md#feature-flags) in the coding
-   standards for patterns and examples.
-1. **Use `FromStr` for all string-to-type conversions.** Do not add ad-hoc `parse(&str)` methods. Follow the pattern in
-   [docs/development/coding-standards.md](docs/development/coding-standards.md) (section "String-to-Type Conversions"):
-   typed `Parse{TypeName}Error`, `impl FromStr`, and `s.parse::<MyType>()` at call sites. Route handlers accepting
-   UUID path parameters must use `Path<Uuid>` (not `Path<String>` with manual `Uuid::parse_str`). See
-   [Coding Standards](docs/development/coding-standards.md) (section "Typed Path Extractors").
-1. **Keep the openapi-client in sync with web-api endpoints.** Any web-api endpoint addition or change
-   must be reflected in the `uptrakit-openapi-client` crate: new endpoints get client methods, changed
-   signatures/response types are updated, removed endpoints have their client methods removed. Excluded
-   endpoints: WebSocket, OIDC browser callback, OCSP binary protocol. The SSE streaming endpoint
-   (`GET /api/v1/update-history/{id}/output/stream`) is included — see `update_output_stream.rs` and
-   `sse.rs`. All entity ID parameters must use `&Uuid` (not `&str`), and all response ID fields must be
-   `Uuid` (not `String`) — the only exception is `SystemAlert::id` which uses hardcoded string
-   identifiers. See
-   [docs/development/openapi-client.md](docs/development/openapi-client.md) for the full method reference.
-1. **Do not use `unsafe`, `unwrap` or `panic!`.** Always prefer safe and graceful solutions. Follow the error handling
-   requirements in [docs/development/coding-standards.md](docs/development/coding-standards.md): define typed errors
-   with `thiserror` and attach/propagate context with `rootcause` (including match-with-fallback and serialization
-   helper patterns where applicable).
-   Use `parking_lot::Mutex` and `parking_lot::RwLock` (workspace dependency) in all async code.
-   Never use `std::sync::Mutex`, `std::sync::RwLock`, `tokio::sync::Mutex`, or `tokio::sync::RwLock`.
-   `parking_lot` primitives return the guard directly with no `Result`, and guards must always be
-   dropped before any `.await` point (clone/copy the value out first). See
-   [Coding Standards — Synchronous Locks in Async Code](docs/development/coding-standards.md#synchronous-locks-in-async-code).
-1. **Use `StatusCode` for HTTP status codes.** Never compare against numeric literals (`== 404`, `>= 400`). Use
-   `reqwest::StatusCode` variants (`StatusCode::NOT_FOUND`, `StatusCode::FORBIDDEN`) and helper methods
-   (`.is_client_error()`, `.is_success()`). Store status codes as `StatusCode`, not `u16`, in error enums and structs.
-   See [Coding Standards](docs/development/coding-standards.md).
-1. **Use `SsrfSafeResolver` for all outbound HTTP clients.** Any `reqwest::Client` that sends requests to
-   user-controlled URLs (plugin API base URLs, webhook URLs, registry endpoints) must use
-   `.dns_resolver(Arc::new(SsrfSafeResolver::new()))` to prevent DNS rebinding attacks. For self-hosted deployments
-   that intentionally allow private URLs, use `SsrfSafeResolver::permissive()` instead. The resolver is in
-   `uptrakit_shared_types::ssrf` behind the `http-ssrf` feature. See
-   [Secure Development — SSRF Protection](docs/security/secure-development.md#ssrf-protection).
-1. **Use typed permission extractors for route authorization.** Never call `user.has_permission(...)` directly in
-   handler bodies. Instead, declare the required permission via an Axum extractor in the handler signature (e.g.
-   `CanViewHosts(_user): CanViewHosts`). There are 32 granular extractors (e.g. `CanViewServices`,
-   `CanApproveServices`, `CanCreateSoftware`, `CanTriggerUpdates`, `CanManageUsers`). The extractors are defined in
-   `crates/ui/web-api/src/middleware/permission.rs` via the `permission_extractor!` macro. Each protected endpoint
-   must also carry the matching `x-required-permission` OpenAPI extension in its `#[utoipa::path]` annotation (e.g.
-   `extensions(("x-required-permission" = json!("view_hosts")))`). **Approved exception:** handlers that perform
-   custom token extraction (e.g., reading `?token=` query param for WebSocket connections) may call
-   `auth_user.has_permission(perm)` inline — mark these with a `// APPROVED: custom auth path` comment. See
-   [Authentication and Authorization](docs/security/auth-and-authorization.md).
-1. **Surface permissions are enforced at read/invoke time.** `required_permission` on registered surface descriptors
-   and interactions is checked server-side by the surface routes before dispatching reads or interactions. New
-   provider-backed surfaces that modify state or expose sensitive data must set explicit
-   `required_permission` values. The permission check applies to both plugin-backed and service-backed surfaces. See
-   [Surface Security](docs/security/surfaces.md#action-level-permissions).
-1. **Do not test upstream crate behavior.** Tests must verify internal logic only -- not the behavior of dependencies
-   like `thiserror` formatting, `serde` roundtrips on plain derives, or `argon2` salt randomness. See the decision
-   table in [Testing Expectations](docs/development/testing.md).
-1. **Time-dependent tests must use `start_paused = true` — never real sleeps.** A test is
-   _time-dependent_ when it calls any of `tokio::time::sleep()`, `tokio::time::timeout()`,
-   `tokio::time::advance()`, `tokio::time::Instant::now()`, or `tokio::time::interval()` inside the
-   test body. Such tests must use virtual time via `#[tokio::test(start_paused = true)]` and
-   `tokio::time::advance()` for deterministic, fast execution. Tests that do not call any Tokio time
-   API do **not** need `start_paused = true` — adding it to non-time-dependent tests is incorrect.
-   Do not call `tokio::time::pause()` explicitly inside the test body; the attribute starts the runtime
-   paused from the very beginning.
-   **Exception 1:** Docker-based integration tests (`#[ignore]`) that wait for real external processes.
-   **Exception 2:** Tests that use SQLx/SeaORM database connections must NOT use `start_paused = true` —
-   Tokio's auto-advance fires pool-internal timers prematurely, causing spurious
-   `ConnectionAcquire(Timeout)` failures under stress (nextest `--stress-count`). See
+1. **Updates are never automatic.** The scheduler triggers version _checks_ only; update execution requires explicit user action (UI, CLI, or
+   MQTT/Home Assistant).
+1. **Agents initiate outbound-only connections.** Agents connect to the controller via secure WebSocket (`/api/v1/ws/service`); they never listen
+   on any port or accept inbound connections.
+1. **Agents run unprivileged.** They run as a dedicated user; only commands declared by plugins via `required_sudo_commands()` get `NOPASSWD` sudo
+   — never blanket `ALL`. See [Sudoers Management](docs/security/sudoers-management.md).
+1. **Plugin split and role-based assignment.** Each `(host, software_item)` pair has per-role assignments (`detect_version`, `fetch_releases`,
+   `execute_update`) in `host_software_item_plugins`, each with an `execution_site` column (`auto`/`agent`/`controller`). Per-host version tracking
+   lives on `host_software_items`. See `PluginRole` (`crates/shared/types/src/plugin_role.rs`).
+1. **No shell injection.** Any path that constructs or executes shell commands must validate inputs; custom scripts are untrusted input.
+1. **No secrets in logs.** Never log tokens, passwords, API keys, or credentials. Secret fields in `uptrakit-web-api-types` must use
+   `SecretString`, not `String`. See [Secrets Handling](docs/security/secrets-and-encryption.md).
+1. **Logging goes to journald or stdout.** No internal log storage; full command output is not captured internally, only high-level summaries are
+   retained for display. See [Logging](docs/development/logging.md).
+1. **Tracing spans use `skip_all`.** All `#[tracing::instrument]` must use `skip_all` and explicitly list relevant fields — never auto-capture
+   arguments. Wire envelopes carry `TraceContext`. See [Tracing Conventions](docs/development/tracing.md).
+1. **No overlapping update actions per host.** At most one active (`Pending`/`InProgress`) update per host (all types share `update_history`),
+   enforced by `validate_update_preconditions` (HTTP 409) and the partial unique index `uix_update_history_host_active`. Terminal states are
+   `Completed`, `Failed`, `Interrupted` (ADR-0024); `Queued` is not terminal. See [Update History
+   Entity](docs/architecture/update-history-entity.md).
+1. **No raw SQL.** Use SeaORM and `sea_query` builders everywhere, including migrations. The approved exceptions (each needing an inline comment
+   naming the limitation) and the table-recreation guide live in [database-migrations.md](docs/development/database-migrations.md).
+1. **Cover new logic with tests.** Cover both success and failure paths. See [Testing](docs/development/testing.md).
+1. **Document everything.** Any code change must be documented in code or docs. Wire-protocol changes must be documented in
+   `crates/shared/wire/asyncapi.yaml` and reflected in [wire-protocol.md](docs/api/wire-protocol.md).
+1. **Wire protocol payloads must implement `WireValidate`.** Any new wire payload with `Vec<T>` or `String` fields must implement `WireValidate` in
+   `wire_validate_impls.rs` (add limit constants in `limits.rs`). See [Payload Size Limits](docs/api/wire-protocol.md#payload-size-limits).
+1. **Large report payloads must use `send_auto_paginate()`.** When sending `DiscoveryResults`, `VersionCheckResults`, `ReportHosts`, or
+   `BatchUpdateResult`, call `conn.send_auto_paginate(msg)`; new paginatable types implement `Paginatable`. See [Report
+   Pagination](docs/api/wire-protocol.md#report-pagination).
+1. **Command-bearing plugin config fields must be validated.** Configs with command strings (`version_command`, `update_command`, hook `commands`)
+   must validate length via `validate_command_length()` (`uptrakit-shared-types::command_validation`); hook counts against
+   `MAX_HOOK_COMMANDS_PER_PHASE`.
+1. **Version/build metadata contract is unified.** All workspace binaries expose consistent `--version` output; enabled features are derived at
+   build time via `uptrakit_build_info::emit_enabled_features_env()` — never hardcode per-binary.
+1. **Do not add any `#[allow()]`** without explicit confirmation. Workspace lints enforce `warnings = "deny"` and `clippy::all = "deny"`. Sole
+   exception (feature-gated dead code with an inline comment): [Lint
+   Suppressions](docs/development/coding-standards.md#lint-suppressions-for-feature-gated-items).
+1. **Feature flags are additive only.** `#[cfg(not(feature = "X"))]` is prohibited; use `cfg!(feature = "X")` in expression position.
+   `#[cfg(feature = "X")]` (without `not`) is allowed only on purely additive blocks. See [Feature
+   Flags](docs/development/coding-standards.md#feature-flags).
+1. **Use `FromStr` for all string-to-type conversions.** No ad-hoc `parse(&str)` methods: define a typed `Parse{TypeName}Error`, `impl FromStr`,
+   call `s.parse::<MyType>()`. UUID path params use `Path<Uuid>`. See [Coding Standards](docs/development/coding-standards.md).
+1. **Keep the openapi-client in sync with web-api endpoints.** Any endpoint addition/change/removal must be reflected in `uptrakit-openapi-client`
+   (excluding WebSocket, OIDC browser callback, OCSP). See [OpenAPI Client](docs/development/openapi-client.md).
+1. **Do not use `unsafe`, `unwrap` or `panic!`.** Prefer typed errors with `thiserror`, context via `rootcause`. Use `parking_lot::Mutex`/`RwLock`
+   in all async code (never `std`/`tokio` variants); drop guards before any `.await`. See [Synchronous Locks in Async
+   Code](docs/development/coding-standards.md#synchronous-locks-in-async-code).
+1. **Use `StatusCode` for HTTP status codes.** Never compare numeric literals; use `reqwest::StatusCode` variants and helper methods, and store
+   status as `StatusCode` (not `u16`). See [Coding Standards](docs/development/coding-standards.md).
+1. **Use `SsrfSafeResolver` for all outbound HTTP clients.** Any `reqwest::Client` sending to user-controlled URLs must set
+   `.dns_resolver(Arc::new(SsrfSafeResolver::new()))` (or `::permissive()` for self-hosted; in `uptrakit_shared_types::ssrf` behind `http-ssrf`).
+   See [SSRF Protection](docs/security/secure-development.md#ssrf-protection).
+1. **Use typed permission extractors for route authorization.** Never call `user.has_permission(...)` in handler bodies; declare the permission via
+   an Axum extractor (generated by `permission_extractor!` in `crates/ui/web-api/src/middleware/permission.rs`) carrying the matching
+   `x-required-permission` extension. See [Authentication and Authorization](docs/security/auth-and-authorization.md).
+1. **Surface permissions are enforced at read/invoke time.** `required_permission` on surface descriptors and interactions is checked server-side
+   before dispatch, for both plugin- and service-backed surfaces. See [Surface Security](docs/security/surfaces.md#action-level-permissions).
+1. **Do not test upstream crate behavior.** Tests verify internal logic only, not dependency behavior (`thiserror` formatting, `serde` roundtrips
+   on plain derives, `argon2` randomness). See the decision table in [Testing](docs/development/testing.md).
+1. **Time-dependent tests must use `start_paused = true` — never real sleeps.** A test is time-dependent when it calls a `tokio::time::*` API; use
+   `#[tokio::test(start_paused = true)]` + `tokio::time::advance()`. Tests with no Tokio time API must NOT add it. Exceptions are documented in
    [Testing](docs/development/testing.md).
-   **Exception 3:** Code that calls `OffsetDateTime::now_utc()` (wall-clock time, not Tokio time)
-   cannot use `start_paused = true` — it has no effect on real wall-clock time. Instead, inject a
-   `Arc<dyn Fn() -> OffsetDateTime + Send + Sync>` clock and advance it in tests using
-   `parking_lot::Mutex<OffsetDateTime>`. See `RateLimitStore::with_clock` for the canonical pattern and
-   [Testing § Wall-Clock Time Injection](docs/development/testing.md#wall-clock-time-injection).
-1. **New API endpoint tests must use the shared `TestApp` harness.** The `test_harness/` module
-   (`crates/ui/web-api/src/test_harness/`) provides `TestApp` (in-memory SQLite + migrated schema +
-   seeded tenant + fully wired Axum router), `TestClient` (ergonomic HTTP client via `tower::oneshot`),
-   and fixture helpers (`register_user`, `insert_service`, `seed_permissions_for_owner`, etc.). Never
-   duplicate `test_state()` or `build_test_state()` inline. All integration tests live in
-   `integration_tests/` and are gated behind `#[cfg(all(test, feature = "db-sqlite"))]`. See
-   [Testing § REST API Integration Tests](docs/development/testing.md#rest-api-integration-tests).
-1. **Use `TenantDb` helpers for all tenant-scoped queries.** `TenantDb` is defined in `uptrakit-shared-db`
-   (`crates/shared/db/src/tenant_db.rs`) and re-exported from `uptrakit-web-api-queries`. It is also available
-   in `scheduler-engine` (which depends on `shared-db`). Never call `Entity::find().all(tenant_db.db())`
-   directly on a `TenantScoped` entity — `tenant_db.db()` carries no tenant filter and loads all tenants' data.
-   For entities that implement `TenantScoped`, always use `tenant_db.find::<E>()`, `.find_by_id::<E>(id)`,
-   `.update_many::<E>()`, or `.delete_many::<E>()`. For join-table entities without `tenant_id`
-   (e.g. `service_host`), use `tenant_db.find_via_tenant_join::<Target, Scoped>(relation)` which enforces
-   isolation by JOINing through a `TenantScoped` parent entity. See [Coding Standards](docs/development/coding-standards.md)
-   (section "Tenant-Safe Database Queries").
-1. **Batch queries instead of per-item loops.** Never issue a SELECT (or UPDATE) per item inside a loop — this is an
-   N+1 anti-pattern. Load collections with `.is_in(ids)`, then join in memory with `HashMap`. For bulk updates, use
-   `Entity::update_many().filter(Column::Id.is_in(ids)).col_expr(...).exec(db)` in a single statement. See
-   [Coding Standards](docs/development/coding-standards.md) (section "Tenant-Safe Database Queries", Rule 4).
-
-### Autodiscovery subsystem
-
-Autodiscovery automatically detects software installed on agent hosts and surfaces them as **pending** software items
-for user review. Key invariants:
-
-1. **Discovery is event-driven and periodic.** It triggers on new host registration, via explicit API calls
-   (`POST /api/v1/hosts/{id}/discover`, `POST /api/v1/plugin-configs/{id}/discover`), and automatically
-   every 6 hours via the `discover_software` scheduled task (`DiscoverSoftwareExecutor`).
-   The periodic task sends `DiscoverSoftware` to every active agent-backed host and soft-deletes
-   (`deactivated_at`) any `host_software_items` junction rows absent from the latest discovery snapshot.
-
-2. **No approval workflow.** All discovered items are created immediately with `enabled: true`. The
-   `featured` flag controls visibility: featured items appear individually in the Software list,
-   non-featured items appear as aggregated per-host summaries.
-   **Invariant:** Periodic re-discovery (`find_or_create_software_item` Phase 1) only updates
-   `installed_version` on `host_software_item` rows for items that were originally created by
-   autodiscovery. Items with manually assigned plugin configs are skipped -- their version detection
-   is handled by the `DetectVersion` scheduled task using the user's assigned plugin config.
-
-3. **Ignore list is separate from deletion.** `DELETE /api/v1/software-items/{id}/hosts/{host_id}?ignore=true`
-   removes the host assignment and creates a `software_ignores` row keyed on the software item's
-   `(tenant_id, name)`. A single name-based ignore rule suppresses all future discoveries for that
-   name across all plugin configs and targets. Without `?ignore=true`, unassigning is a plain delete
-   with no ignore rule. Deleting a software item (`DELETE /api/v1/software-items/{id}`) never creates
-   ignore rules.
-
-4. **Plugin-driven discovery targets.** Discovery results use structured `DiscoveryTarget` values
-   (`crates/shared/types/src/discovery_target.rs`) instead of opaque `extra` metadata. Each
-   `DiscoveredSoftware` item can carry a `targets: Vec<DiscoveryTarget>` that tells the controller
-   exactly which plugin configs and role assignments to create — no plugin-specific synthesis logic
-   in the web-API.
-
-   The controller processes discovery results generically via two paths:
-   - **Target-based** (non-empty `targets`): for each target, find-or-create the plugin config and
-     create role assignments per the target's `roles` list.
-   - **Config-ID-based** (empty `targets`, `plugin_config_id` set): use the discovering plugin's own
-     config for all three roles.
-
-   **PHS (Proxmox Helper Scripts)** always emits `DiscoveryTarget` values. During discovery, it
-   fetches each container's CT script from `raw.githubusercontent.com` and analyzes it:
-   - GitHub-managed apps emit **two** `DiscoveryTarget` values:
-     1. `plugin_type: ReleasesGithub`, roles `[FetchReleases]`, config without `owner`/`repo`
-        (only `tag_strip_prefix`, `include_prereleases`, `asset_patterns`), and
-        `package_identifier: Some("owner/repo")` override.
-     2. `plugin_type: GenericShell`, roles `[DetectVersion, ExecuteUpdate]`, config with
-        `version_command` (`sudo /usr/local/bin/uptrakit-phs-version {package_identifier}`),
-        `update_command` (`sudo PHS_SILENT=1 TERM=xterm /usr/bin/update`), and
-        `prefer_interactive: true`. `sudo` is embedded because the Shell plugin uses
-        `CommandSpec::shell()`, where `privileged` has no effect. `prefer_interactive: true`
-        causes the controller to automatically set `interactive: true` in `ExecuteUpdatePayload`
-        (see `config_prefers_interactive` in `update_dispatch.rs`), allocating a PTY so
-        `/dev/tty` is available for prompts that `PHS_SILENT=1` does not suppress (e.g. the
-        low-storage warning `read -r prompt < /dev/tty`).
-        The PHS shell constants live in `crates/plugins/discovery/proxmox-helper-scripts/src/plugin.rs`.
-   - Codeberg-managed apps (detected via `check_for_codeberg_release` or `CODEBERG_REPO=`) emit **two**
-     `DiscoveryTarget` values:
-     1. `plugin_type: ReleasesForgejo`, roles `[FetchReleases]`, config with
-        `api_base_url: "https://codeberg.org"` (Codeberg runs the Forgejo platform),
-        `tag_strip_prefix: "v"`, and `package_identifier: Some("owner/repo")` override.
-        The plugin config name is `"Codeberg Releases"` to distinguish it from generic Forgejo instances.
-     2. `plugin_type: GenericShell`, roles `[DetectVersion, ExecuteUpdate]` — same PHS Shell target
-        as for GitHub-managed items.
-   - npm-managed apps emit **two** `DiscoveryTarget` values:
-     1. `plugin_type: PackageManagerNpm`, roles `[DetectVersion, FetchReleases]` (no `ExecuteUpdate`),
-        config `{}`, name `"NPM (auto)"`, and `package_identifier: Some("<npm-package>")`.
-     2. `plugin_type: GenericShell`, roles `[ExecuteUpdate]`, same PHS Shell config as GitHub/Codeberg
-        items (`version_command` + `update_command`), name `"PHS Shell"`, no `package_identifier`.
-        Updates always go through `/usr/bin/update`, not `npm install -g`.
-   - APT-managed apps emit **two** `DiscoveryTarget` values:
-     1. `plugin_type: PackageManagerApt`, roles `[DetectVersion, FetchReleases]` (no `ExecuteUpdate`),
-        config `{}`, name `"APT (auto)"`, no `package_identifier`.
-     2. `plugin_type: GenericShell`, roles `[ExecuteUpdate]`, same PHS Shell config as above.
-        Updates always go through `/usr/bin/update`, not `apt-get install`.
-   - Apps whose scripts contain neither GitHub nor Codeberg patterns nor a specific `apt install` line are skipped.
-     The PHS plugin config itself (`discovery_proxmox_helper_scripts`, always `{}`) is retained as an anchor for
-     discovery runs but never linked directly to `SoftwareItem` host assignments.
-
-   **Homebrew** always emits per-item `DiscoveryTarget` values
-   with `plugin_type: PackageManagerHomebrew` and config `{"package_type": "formula"}` or `{"package_type": "cask"}`,
-   plus display names `"Homebrew (Formulae)"` and `"Homebrew (Casks)"`.
-
-   **Docker** always emits one `DiscoveryTarget` per discovered item with `plugin_type: ReleasesDocker`,
-   config `{}`, name `"Docker"`, and all three roles.
-
-   **APT** always emits one `DiscoveryTarget` per discovered item with `plugin_type: PackageManagerApt`,
-   config `{}`, name `"APT"`, and all three roles. (`discovery_filter` in type settings controls whether
-   discovery reports all installed packages or only manually-installed ones.)
-
-   **Cargo** always emits one `DiscoveryTarget` per discovered crate with `plugin_type: PackageManagerCargo`,
-   config `{}`, name `"cargo"`, and all three roles.
-
-   **npm** always emits one `DiscoveryTarget` per discovered package with `plugin_type: PackageManagerNpm`,
-   config `{}`, name `"npm"`, and all three roles.
-
-   **Snap** always emits one `DiscoveryTarget` per discovered snap with `plugin_type: PackageManagerSnap`,
-   config `{}`, name `"Snap"`, and all three roles.
-
-   The `extra` field on `DiscoveredSoftware` is purely informational metadata (e.g. Docker's
-   `{"containers": ["web-server"]}`) — the controller never interprets it for config synthesis.
-
-5. **Discovery capability is derived from the catalog.** Call `state.plugin_ops.discovery_plugin_types()`
-   (or `PluginCatalog::discovery_plugin_types()` statically) to get the current list of discovery-capable
-   plugin types. This is derived automatically from each plugin's `capabilities()` method via the catalog —
-   no static list is maintained separately.
-
-6. **Package identifier validation goes through `PluginCatalog`.** Plugin-specific constraints on the
-   `package_identifier` field (e.g. Homebrew's allowed character set) must be implemented as:
-   (a) a crate-level `pub fn validate_identifier(value: &str) -> std::result::Result<(), String>` in the plugin crate,
-   (b) an associated function on the config struct that delegates to it:
-   `impl MyConfig { pub fn validate_identifier(value: &str) -> std::result::Result<(), String> { crate::validate_identifier(value) } }`.
-   Plugins with no identifier constraints must still implement the associated function as a no-op returning `Ok(())`.
-   The `declare_plugin!` macro wires each config struct's associated function into the `PluginDescriptor`;
-   `PluginCatalog` dispatches through the descriptor list — no manual match arm is required.
-   The `PluginOps` convenience alias (composed of `PluginMetadataOps + PluginConfigOps + PluginSurfaceActionOps +
-PluginSurfaceOps + NotificationOps + SoftwareItemLifecycleOps`, defined in `infrastructure-core` behind the
-   `plugin-ops` feature, re-exported by `infrastructure-registry`) exposes this as
-   `validate_package_identifier_str(plugin_type: &str,
-value: &str)` for trait-object dispatch. Crates that only need `PluginOps` (e.g. `web-api-queries`) should
-   depend on `infrastructure-core` with `features = ["plugin-ops"]` rather than the full registry.
-   Never add plugin-specific validation logic directly to web API query helpers or route
-   handlers. See [Plugin Guidelines](docs/development/plugin-guidelines.md) for the full surface/action pattern.
-
-7. **Plugins declare required sudo commands via `required_sudo_commands()`.** Any plugin that needs root-level
-   command execution must override `required_sudo_commands() -> Vec<SudoCommandEntry>` on its `Plugin` impl.
-   Each `SudoCommandEntry` carries a bare command name (or display identifier for helper scripts), a human-readable
-   explanation, and an optional `args_suffix`. For most commands, **never hardcode absolute paths** — they are
-   resolved on the target host via `command -v` at bootstrap time.
-
-   **Restricting subcommands:** When a command needs only specific subcommands (e.g. `systemctl stop` and
-   `systemctl start` but not `systemctl disable`), set `args_suffix: Some("stop *")`. The resolved path
-   becomes `/usr/bin/systemctl stop *` in the sudoers file — positional matching prevents other subcommands.
-
-   **Helper scripts:** When a simple sudoers command would be too broad (e.g. granting `cat` would allow
-   reading any file), use `SudoCommandEntry::new(command, explanation).with_helper_script(SudoHelperScript::new(install_path, content))`.
-   Bootstrap installs the script at `install_path` with mode `0755` and uses that path as the sudoers command; the
-   script itself validates arguments to enforce the least-privilege contract that sudoers wildcards cannot safely
-   express (`*` matches `/` in sudoers).
-
-   **Never hardcode `sudo` in `CommandSpec`** — instead call `.privileged()`
-   on the spec. Shell-mode commands (`CommandSpec::shell`) must embed `sudo` in the command string directly because
-   `.privileged()` has no effect on shell mode. `PluginCatalog::all_required_sudo_commands()` aggregates all
-   declarations for use by the SSH agent's sudoers generation logic. See
-   [Plugin Guidelines](docs/development/plugin-guidelines.md) and [Sudoers Management](docs/security/sudoers-management.md).
-
-8. **Plugin capabilities.** The `PluginCapability` enum is defined in
-   `crates/shared/types/src/plugin_capability.rs` and has 16 variants.
-
-   **Role-assignment capabilities** (used by the UI `EditHostAssignmentModal` to filter plugin
-   configs for each standard-role dropdown via `GET /api/v1/plugin-types`):
-   - `VersionDetection` — the plugin implements `detect_installed_version()` and can be assigned to
-     the `detect_version` role on a host software assignment. Serializes as `"version_detection"`.
-     Implemented by all package-manager plugins and `ShellPlugin` (`generic_shell`).
-   - `ReleaseFetching` — the plugin implements `fetch_releases()` and can be assigned to the
-     `fetch_releases` role. Serializes as `"release_fetching"`. Implemented by all package-manager
-     plugins and all releases plugins (`github`, `gitlab`, `forgejo`, `docker`). Note: `gitlab` and
-     `forgejo` do not declare `UpdateExecution` because they have no `execute_update` implementation.
-   - `UpdateExecution` — the plugin implements `execute_update()` and can be assigned to the
-     `execute_update` role. Serializes as `"update_execution"`. Implemented by all package-manager
-     plugins, `ShellPlugin`, `github`, and `docker`.
-
-   **Autodiscovery capabilities:**
-   - `DiscoverLocalSoftware` — the plugin can discover locally installed software.
-   - `RefreshPackageIndex` — the plugin can refresh/sync a local package index from remote sources.
-   - `DetectHostCompatibility` — the plugin implements `detect_host_compatibility()` which returns a
-     `HostCompatibility` enum (`Compatible` or `Incompatible { reason: String }`). Both
-     `HostCompatibility` and `PluginError` carry `#[non_exhaustive]`; `PluginError::is_retryable()`
-     classifies transient errors (command spawn/wait, timeouts, capture failures, internal errors)
-     for the version check retry logic in `crates/shared/agent-core/src/version_check.rs`.
-     External match sites must include a wildcard arm (see `coding-standards.md` § Public Enum
-     Extensibility). Implemented by:
-     `AptPlugin` (checks `which apt-get`) and `HomebrewPlugin` (checks `which brew`).
-
-   **Update lifecycle and hooks:**
-   - `UpdateLifecycle` — the plugin implements the `LifecycleHook` narrow trait (via
-     `as_update_lifecycle()` accessor). Provides `execute_pre_hook()` (returns `PreUpdateHookResult`:
-     proceed or abort with reason) and `execute_post_hook()` (non-fatal, errors logged as warnings).
-     The `UpdateLifecycleContext` contains `package_identifier`, `to_version`, `from_version`,
-     `release_info`, and `update_succeeded` (`None` during pre-hooks, `Some(bool)` during post-hooks).
-     Implemented by `SystemdHookPlugin` and `ShellHookPlugin`.
-   - `ControllerSideFetchReleases` — the plugin's `fetch_releases()` requires no local system state
-     and can run on the controller instead of the agent. Implemented by `GitHubPlugin`, `DockerPlugin`,
-     `NpmPlugin`, and `CargoPlugin`. This capability interacts with the `execution_site` field on
-     `host_software_item_plugins`: `auto` (default) delegates to the controller when this capability
-     is present, `agent` forces agent-side execution, `controller` forces controller-side execution.
-
-   **Other capabilities:**
-   - `NotificationDelivery` — the plugin delivers notifications via a transport channel.
-   - `HostLifecycle` — the plugin manages infrastructure host lifecycle (bootstrap, sync).
-   - `HostReport` — the plugin receives host report callbacks from the agent.
-   - `GuestExec` — the plugin provides guest execution capabilities (e.g. run commands inside VMs).
-   - `ServiceMigrations` — the plugin contributes service-side database migrations.
-   - `ControllerMigrations` — the plugin contributes controller-side database migrations.
-   - `ConfigTest` — the plugin supports dry-run configuration testing via
-     `POST /api/v1/plugin-configs/test`. Declared by all 17 plugins (10 package managers,
-     4 release plugins, 2 hook plugins, generic shell). Controller-side plugins
-     (`ControllerSideFetchReleases`) test connectivity without a host; agent-side plugins
-     require a `host_id` and run tests on the target host. The proxy pattern
-     (`ConfigTestProxy` in `crates/ui/web-api/src/config_test_proxy.rs`) mirrors
-     `ServiceSurfaceProxy`. Wire messages: `TestPluginConfig` / `TestPluginConfigResult`
-     (session-targeted, not NATS-publishable). Gated by `Permission::TestPluginConfigs`.
-
-   Update lifecycle hooks are standalone plugin assignments with roles `PreUpdateHook` and
-   `PostUpdateHook` on `host_software_item_plugins`, ordered by `ordinal`. See
-   [Update Lifecycle Plugins](docs/development/update-hooks.md).
-
-   **Batch trait methods** (all have default sequential fallbacks; override for efficiency):
-   - `batch_detect_installed_version(&[BatchDetectItem]) -> Result<Vec<BatchDetectResult>>` — detect
-     installed versions for multiple packages. Default calls `detect_installed_version` per item.
-     Override when the package manager accepts a list in one command (APT: `dpkg-query pkg1 pkg2`;
-     Homebrew: `brew info --json=v2 pkg1 pkg2`; npm: `npm list -g --depth=0 --json` + memory filter).
-   - `batch_fetch_releases(&[BatchFetchItem]) -> Result<Vec<BatchFetchResult>>` — fetch upstream
-     releases for multiple packages. Default calls `fetch_releases` per item. Override when the local
-     package index supports multi-package queries (APT: `apt-cache madison pkg1 pkg2`; Homebrew:
-     `brew info --json=v2 pkg1 pkg2`). Do **not** override for API-based plugins with per-package
-     HTTP endpoints (GitHub, GitLab, npm registry).
-   - `execute_batch_update(&[BatchUpdateItem], output_tx) -> Result<Vec<BatchUpdateResult>>` —
-     update multiple packages in one command. Default calls `execute_update` per item. Implemented by
-     APT, Homebrew, and npm.
-
-   Agent-core `batch_check_versions()` groups `VersionCheckAssignment`s by `(PluginTypeId,
-effective_config_json)` and calls these batch methods once per group via `join_all`.
-   `RefreshPackageIndex` is called at most once per unique fetch group (before `batch_fetch_releases`
-   runs); it is not called for detect-only groups. Scheduler Phase A groups by `plugin_config_id`
-   only and calls `batch_fetch_releases` once per config.
-
-9. **Discovery allowlist controls which plugin types run.** Two tables, `tenant_discovery_allowlist`
-   and `host_discovery_allowlist`, gate which discovery plugin types execute during
-   `trigger_discovery_for_agent_host()`:
-   - **Unconfigured (no entries for the tenant):** all discovery-capable plugin types run (backward-compatible default).
-   - **Tenant-wide entries exist:** only the listed plugin types run tenant-wide.
-   - **Host-specific entries exist for the target host:** those entries fully override the tenant list for that
-     host (the host list replaces — not extends — the tenant list).
-
-   This applies to auto-discovery on new host registration and to `POST /api/v1/hosts/{id}/discover`.
-   It does **not** apply to `POST /api/v1/plugin-configs/{id}/discover` (explicit plugin-config invocation bypasses
-   the allowlist intentionally). Duplicate entries are idempotent — the server returns the existing entry
-   rather than erroring. Only plugin types that have the `DiscoverLocalSoftware` capability and are not
-   unknown `PluginTypeId` values (i.e., strings not present in the catalog) can be added to the allowlist;
-   all other types are rejected with HTTP 400. (`PluginTypeId::new(...)` always accepts any string;
-   validation against known plugins happens via catalog lookup.)
-
-10. **Partial unique indexes.** `software_items` uses a partial unique index
-    `(tenant_id, name) WHERE deactivated_at IS NULL` — prevents duplicate item names within a tenant while
-    allowing re-creation after soft-delete. `host_software_item_plugins` uses a unique index
-    `(host_id, software_item_id, role, ordinal)` — prevents duplicate role assignments for the same
-    host-software-item pair.
-
-#### Key files
-
-| File                                                           | Purpose                                                                                             |
-| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `crates/shared/types/src/plugin_role.rs`                       | `PluginRole` enum (`DetectVersion`, `FetchReleases`, `ExecuteUpdate`, `Other`)                      |
-| `crates/shared/types/src/update_category.rs`                   | `UpdateCategory` enum (`Security`, `Bugfix`, `Feature`, `Unknown`) — classifies available updates   |
-| `crates/shared/types/src/discovered_software.rs`               | `DiscoveredSoftware` type (with `targets: Vec<DiscoveryTarget>`)                                    |
-| `crates/shared/types/src/discovery_target.rs`                  | `DiscoveryTarget` struct (plugin type, config, name, roles, overrides)                              |
-| `crates/shared/db/src/entity/host_software_item_plugin.rs`     | SeaORM entity for role-based plugin assignments                                                     |
-| `crates/shared/db/src/entity/software_ignore.rs`               | SeaORM entity for ignore rules                                                                      |
-| `crates/shared/agent-core/src/client.rs`                       | `run_discover_software()` / `spawn_background()` agent-side discovery logic                         |
-| `crates/ui/web-api-queries/src/queries/autodiscovery.rs`       | DB helpers + `process_discovery_results()`                                                          |
-| `crates/ui/web-api/src/routes/autodiscovery.rs`                | Ignore list CRUD routes (at `/autodiscovery/ignores/*`)                                             |
-| `crates/ui/web-api/src/routes/service_ws/handler/discovery.rs` | `trigger_discovery_for_agent_host()` helper — applies allowlist before dispatching                  |
-| `crates/shared/db/src/entity/tenant_discovery_allowlist.rs`    | SeaORM entity for tenant-wide discovery allowlist                                                   |
-| `crates/shared/db/src/entity/host_discovery_allowlist.rs`      | SeaORM entity for per-host discovery allowlist                                                      |
-| `crates/ui/web-api-queries/src/queries/discovery_allowlist.rs` | DB helpers: list, add, remove, and `load_*_allowlist_set()` for filter lookups                      |
-| `crates/ui/web-api/src/routes/discovery_allowlist.rs`          | Route handlers for tenant/host allowlist CRUD                                                       |
-| `docs/api/autodiscovery.md`                                    | Full API reference for autodiscovery endpoints                                                      |
-| `docs/api/discovery-allowlist.md`                              | Full API reference for discovery allowlist endpoints                                                |
-| `docs/end-user/autodiscovery.md`                               | End-user guide (discovery workflow, review, ignore list, allowlist)                                 |
-| `docs/end-user/plugin-configs.md`                              | End-user guide for plugin config CRUD and discovery                                                 |
-| `docs/end-user/cli-usage.md`                                   | CLI command reference including `plugin-configs`, `autodiscovery`, and `discovery-allowlist` groups |
-
-### Plugin type settings (two-tier config model)
-
-Plugin configuration uses a **two-tier model**: **type settings** (tenant-level defaults per plugin type) and
-**plugin configs** (named configuration profiles with credentials/endpoints). Type settings store discovery
-preferences and behavioral defaults (e.g. APT `discovery_filter`, Homebrew `package_type`) that apply to all
-instances of a plugin type within a tenant. Plugin configs store credentials, API endpoints, and per-profile
-settings that vary between configurations.
-
-The `plugin_type_settings` table (`crates/shared/db/src/entity/plugin_type_setting.rs`) stores one row per
-`(tenant_id, plugin_type)` pair with a JSON `config` column. When no row exists, the plugin type's built-in
-defaults apply.
-
-**Three-layer config merge.** When the system needs the effective configuration for a plugin operation,
-`resolve_effective_config()` (`crates/ui/web-api-queries/src/queries/plugin_configs.rs`) merges three layers:
-
-1. **Type settings** (tenant-level defaults from `plugin_type_settings`) -- broadest scope.
-2. **Profile config** (from the `plugin_configs` row) -- named configuration.
-3. **Assignment config** (per-host override from `host_software_item_plugins.config`) -- narrowest scope.
-
-Each layer's JSON is shallow-merged on top of the previous one. Fields present in a narrower layer override
-the same field from a broader layer.
-
-**`PluginConfig` and `TypeSettings` traits.** All plugin configs implement the `PluginConfig` trait
-(unified form schema + secret masking, replacing the old separate `ConfigFormSchema` and `SecretMasking`
-traits). Plugins that support type settings additionally implement the `TypeSettings` trait with two methods:
-
-- `type_settings_form_schema() -> Vec<FormField>` -- returns the form field definitions for the type settings
-  UI (e.g. `discovery_filter` for APT, `package_type` for Homebrew).
-- `type_settings_sample() -> serde_json::Value` -- returns a sample/default JSON for the type settings.
-
-The `declare_plugin!` macro (with `type_settings: true`) wires `TypeSettings` into the `PluginDescriptor`;
-`PluginCatalog` dispatches through the descriptor list, plus the `PluginOps` trait methods
-`type_settings_form_schema_str()` and `type_settings_sample_for_str()` for trait-object dispatch.
-
-The `PluginTypeInfo` response (from `GET /api/v1/plugin-types`) includes `type_settings_form_fields` and
-`type_settings_sample` fields so the frontend can render a settings form.
-
-**REST API endpoints:**
-
-- `GET /api/v1/plugin-type-settings` -- list all plugin types with active type settings for the tenant.
-- `GET /api/v1/plugin-type-settings/:plugin_type` -- get the current type settings for a plugin type.
-- `PUT /api/v1/plugin-type-settings/:plugin_type` -- upsert type settings (create or update).
-- `DELETE /api/v1/plugin-type-settings/:plugin_type` -- reset to built-in defaults (deletes the row).
-
-All endpoints require `update_software` permission.
-
-Key files:
-
-| File                                                      | Purpose                                                                                                            |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `crates/shared/db/src/entity/plugin_type_setting.rs`      | SeaORM entity for `plugin_type_settings` table                                                                     |
-| `crates/plugins/infrastructure/core/src/plugin_config.rs` | `PluginConfig` trait (form schema + secret masking) and `TypeSettings` trait; `form_schema.rs` is a re-export shim |
-| `crates/ui/web-api-queries/src/queries/plugin_configs.rs` | `resolve_effective_config()` three-layer merge                                                                     |
-| `crates/ui/web-api/src/routes/plugin_type_settings.rs`    | Route handlers for type settings CRUD                                                                              |
-
-### Home Assistant MQTT discovery
-
-The MQTT service can publish [Home Assistant MQTT Discovery](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery)
-topics for each tracked software item, creating `update` entities in HA — one per `(software_item, host)` pair.
-It also publishes **per-host summary entities** summarising all non-featured software items for that host.
-
-Key invariants:
-
-1. **HA Discovery is opt-in per MQTT client.** The `ha_discovery` and `ha_discovery_prefix` fields
-   on each client config (stored in `tenant_service_config` / `global_service_config`, delivered
-   via `ServiceConfigDelivery`) control this. The flag controls **only** the publication of
-   `{ha_prefix}/update/.../config` discovery topics. State and version topics under
-   `{topic_prefix}` are always published for all connected, enabled clients.
-2. **State push is controller-initiated.** The controller sends `SoftwareStates` (wire type
-   `software_states`) to MQTT services whenever version data changes. Push triggers: version check
-   completed, update triggered (REST/MQTT/scheduler), `update_started` received from agent, update
-   result received, batch update triggered or completed. The `update_in_progress` field in each
-   host entry reflects whether a `Pending` or `InProgress` update exists at query time. The MQTT
-   service stores the states in memory and publishes state, `latest_version`, and `attributes` (JSON
-   `in_progress` flag) retained topics to the broker for **all** connected clients, plus HA discovery
-   config topics for HA-enabled clients.
-3. **`SoftwareStates` is safe for cross-controller delivery.** It contains no credentials and is published
-   to NATS (when configured) with `target_capability = "update_tracking"` so only update-tracking services receive it.
-4. **Reconnect resilience.** On every `ConnAck` the MQTT service emits a `Reconnected` event, causing
-   `TenantManager` to republish all state/version topics (for all clients) and HA discovery config topics
-   (for HA-enabled clients) from the in-memory cache.
-5. **HA restart resilience.** HA publishes `"online"` to `{ha_discovery_prefix}/status` on startup
-   (birth message). The MQTT service subscribes to this topic and republishes **only** the HA discovery
-   config topics when `"online"` is received (`HaOnline` event). State and version topics are retained on
-   the broker and do not need re-sending after an HA restart.
-6. **Updates triggered via MQTT (software items).** When a user presses Install in HA on a software-item
-   entity, HA publishes `"install"` to the entity's command topic. The MQTT service resolves `to_version`
-   from the in-memory state cache and sends `ServiceMessage::ServiceTriggerUpdate` to the controller. The
-   controller validates the request and dispatches `execute_update` to the agent. On failure the
-   controller sends `error` back (soft error — WebSocket is not closed).
-7. **Updates triggered via MQTT (host batch).** When a user presses Install in HA on the per-host
-   packages entity or the security updates entity, the MQTT service sends
-   `ServiceMessage::ServiceTriggerHostBatchUpdate` to the controller (with `security_only = true` for
-   the security entity). The controller finds all qualifying outdated non-featured items, creates an
-   `update_batch`, and dispatches `execute_batch_update` to the agent. On completion
-   the controller pushes `software_states`
-   again to reflect the updated `installed_version` values and `update_in_progress = false`.
-8. **Actor attribution.** Updates triggered via MQTT have `actor_type = "mqtt"` and
-   `actor_id = <actor_service_id>` in the `update_history` record, where `actor_service_id` is the
-   UUID of the MQTT service instance that received the command.
-9. **Workload claim protocol.** The MQTT service uses the `WorkloadClaims` capability to exclusively
-   own config keys (e.g. `clients.{uuid}`) across service instances. After receiving
-   `ServiceConfigDelivery`, the service sends `WorkloadClaim` with the desired config keys. The
-   controller grants or rejects each key via `WorkloadClaimResult` -- only granted config keys have
-   their MQTT clients started. On disconnect, all claims held by the service are released
-   automatically and become available for other instances to claim.
-
-#### MQTT topic scheme
-
-All topics use the MQTT client's `topic_prefix` field. All host-scoped topics share the
-`{prefix}/hosts/{host_id}` prefix (implemented via `host_topic_prefix()` in `ha_discovery.rs`).
-
-**Per-host identity and metadata topics** (`{h}` = host UUID):
-
-| Topic                                              | Retained | Direction | Purpose                                                                 |
-| -------------------------------------------------- | :------: | --------- | ----------------------------------------------------------------------- |
-| `{prefix}/hosts/{host_id}/hostname`                |    ✓     | publish   | Raw hostname string                                                     |
-| `{prefix}/hosts/{host_id}/friendly_name`           |    ✓     | publish   | User-defined display name                                               |
-| `{prefix}/hosts/{host_id}/info`                    |    ✓     | publish   | JSON: `{"os_type":…,"os_version":…,"architecture":…}`                   |
-| `{prefix}/hosts/{host_id}/tags`                    |    ✓     | publish   | JSON array of tag name strings                                          |
-| `{prefix}/hosts/{host_id}/agent`                   |    ✓     | publish   | JSON: `{"last_seen":…,"version":…}`                                     |
-| `{prefix}/hosts/{host_id}/connectivity/state`      |    ✓     | publish   | `"online"` or `"offline"` (event-driven, via `HostConnectivityUpdated`) |
-| `{prefix}/hosts/{host_id}/connectivity/attributes` |    ✓     | publish   | JSON: `{"last_seen":…,"version":…}`                                     |
-
-**Software item topics** (`{t}` = tenant UUID hex, `{i}` = item UUID hex, `{h}` = host UUID hex):
-
-| Topic                                                     | Retained | Direction | Purpose                                                                            |
-| --------------------------------------------------------- | :------: | --------- | ---------------------------------------------------------------------------------- |
-| `{prefix}/hosts/{host_id}/items/{item_id}/state`          |    ✓     | publish   | Installed version string                                                           |
-| `{prefix}/hosts/{host_id}/items/{item_id}/latest_version` |    ✓     | publish   | Latest available version string                                                    |
-| `{prefix}/hosts/{host_id}/items/{item_id}/attributes`     |    ✓     | publish   | JSON: `{"in_progress":…,"update_category":…,"release_date":…,"last_checked_at":…}` |
-| `{prefix}/hosts/{host_id}/items/{item_id}/set`            |    —     | subscribe | Receives `"install"` from HA                                                       |
-| `{ha_prefix}/update/uptrakit/{t}_{h}_{i}/config`          |    ✓     | publish   | HA discovery config (JSON)                                                         |
-| `{ha_prefix}/status`                                      |    —     | subscribe | HA birth/will (`"online"` / `"offline"`)                                           |
-
-**Host package topics** (`{t}` = tenant UUID hex, `{h}` = host UUID hex):
-
-| Topic                                                    | Retained | Direction | Purpose                                                                                        |
-| -------------------------------------------------------- | :------: | --------- | ---------------------------------------------------------------------------------------------- |
-| `{prefix}/hosts/{host_id}/state`                         |    ✓     | publish   | `"unknown"` when updates pending, `"up-to-date"` otherwise                                     |
-| `{prefix}/hosts/{host_id}/latest_version`                |    ✓     | publish   | `"N available"` when updates pending, `"up-to-date"` otherwise                                 |
-| `{prefix}/hosts/{host_id}/attributes`                    |    ✓     | publish   | JSON: `{"in_progress":…,"pending_count":N,"total_count":N,"bugfix_count":N,"feature_count":N}` |
-| `{prefix}/hosts/{host_id}/set`                           |    —     | subscribe | Receives `"install"` → triggers batch update (all non-featured items)                          |
-| `{ha_prefix}/update/uptrakit/{t}_{h}_pkgs/config`        |    ✓     | publish   | HA discovery config for host summary entity (disabled by default)                              |
-| `{prefix}/hosts/{host_id}/security/state`                |    ✓     | publish   | `"unknown"` when security updates pending, `"up-to-date"` otherwise                            |
-| `{prefix}/hosts/{host_id}/security/latest_version`       |    ✓     | publish   | `"N available"` when security updates pending, `"up-to-date"` otherwise                        |
-| `{prefix}/hosts/{host_id}/security/attributes`           |    ✓     | publish   | JSON: `{"in_progress": bool, "pending_count": N}`                                              |
-| `{prefix}/hosts/{host_id}/security/set`                  |    —     | subscribe | Receives `"install"` → triggers security-only batch update                                     |
-| `{ha_prefix}/update/uptrakit/{t}_{h}_sec/config`         |    ✓     | publish   | HA discovery config for security updates entity (disabled by default)                          |
-| `{ha_prefix}/binary_sensor/uptrakit/{t}_{h}_conn/config` |    ✓     | publish   | HA discovery config for connectivity `binary_sensor` (enabled by default)                      |
-
-All entities for a given host share a single HA device: `uptrakit_host_{t}_{h}` (name = `friendly_name`).
-
-Software item entities: unique*id `uptrakit*{t}_{h}_{i}`, entity name = `{item*name}`,
-`default_entity_id`=`update.uptrakit*{fn*slug}*{item_slug}`.
-
-Host summary entities: unique*id `uptrakit*{t}_{h}\_pkgs`,
-entity name `"{friendly_name} packages"`, `default_entity_id`=`update.uptrakit_{fn_slug}\_packages`.
-Both host summary entities are **disabled by default** in HA (`"enabled_by_default": false`).
-
-Security update entities: unique*id `uptrakit*{t}_{h}\_sec`,
-entity name `"{friendly_name} security updates"`,
-`default_entity_id`=`update.uptrakit_{fn_slug}\_security_updates`. Install triggers a `security_only = true` batch.
-
-Connectivity sensor: unique*id `uptrakit*{t}\_{h}\_conn`, entity name `"{friendly_name} agent"`,
-platform `binary_sensor`, `device_class = "connectivity"`. **Enabled by default** in HA.
-Published immediately on agent connect/disconnect via `ControllerMessage::HostConnectivityUpdated`
-(NATS-routed to all MQTT services, not computed from a DB scan).
-
-#### Key files
-
-| File                                                          | Purpose                                                                                                                                                                                                                                                                                                                             |
-| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `crates/core/mqtt-runtime/src/ha_discovery/`                  | Pure HA topic/config helpers for software items, host summaries, security entities, metadata topics, and connectivity `binary_sensor`; `parse_command_topic`, `parse_host_packages_command_topic`, `parse_host_security_command_topic`                                                                                              |
-| `crates/core/mqtt-runtime/src/tenant_manager.rs`              | `TenantManager` struct, event handlers, in-memory state caches (software state + host summary + host metadata + connectivity)                                                                                                                                                                                                       |
-| `crates/core/mqtt-runtime/src/client_manager.rs`              | `MqttClientHandle`, `ParsedMqttClientConfig`, `build_config_from_parsed`, `compute_config_hash`                                                                                                                                                                                                                                     |
-| `crates/core/mqtt-runtime/src/surface_runtime.rs`             | MQTT shared-surface registration, interaction library (`list-clients`, `create-client`, `update-client`, `delete-client`, `test-connection`), and surface action handler                                                                                                                                                            |
-| `crates/core/mqtt-runtime/src/state_publisher.rs`             | All `publish_*` and `cleanup_*` methods (`publish_host_metadata`, `publish_connectivity_for_host`, `handle_host_connectivity_updated`; `publish_or_abort!` macro)                                                                                                                                                                   |
-| `crates/core/mqtt-runtime/src/mqtt_client.rs`                 | `MqttServiceEvent` enum, `publish_retained` (5 s `OPERATION_TIMEOUT`), `subscribe_topic` (5 s timeout), `shutdown` (5 s timeout on offline publish + disconnect), HA status topic handling; timeouts prevent indefinite blocking when broker connection is down                                                                     |
-| `crates/core/mqtt-runtime/src/lib.rs`                         | Shared MQTT runtime: event dispatch, `ControllerMessage::SoftwareStates`, `HostConnectivityUpdated`, `ServiceConfigDelivery`, `ServiceConfigUpdated`, `SurfaceActionRequest`, workload claims, and shutdown                                                                                                                         |
-| `crates/core/mqtt/src/main.rs`                                | Thin standalone adapter and CLI/bootstrap entry point for `uptrakit-mqtt`                                                                                                                                                                                                                                                           |
-| `crates/ui/web-api-queries/src/queries/software_states.rs`    | **Canonical** `load_software_states_for_tenant(&TenantDb)` (single page, all hosts) and `load_software_states_page_for_tenant(&TenantDb, host_page, page_size)` (paginated, ≤ `STATES_HOST_PAGE_SIZE` hosts per page, ordered by `host.id`). Both functions now accept `&TenantDb` (from `shared-db`) instead of `(db, tenant_id)`. |
-| `crates/ui/web-api-queries/src/queries/software_states.rs`    | Canonical `load_software_states_for_tenant` and `load_software_states_page_for_tenant`; adds `AgentConnectivityInfo` + `load_agent_connectivity_for_tenant`                                                                                                                                                                         |
-| `crates/ui/web-api/src/notification_service.rs`               | `push_software_states_paginated_for_tenant` (loops over `load_software_states_page_for_tenant`, delivers each page immediately); `send_connectivity_update` (wraps `HostConnectivityUpdated`, local broadcast + NATS)                                                                                                               |
-| `crates/ui/web-api/src/routes/service_ws/handler/mqtt.rs`     | `ServiceTriggerUpdate` and `ServiceTriggerHostBatchUpdate` handlers                                                                                                                                                                                                                                                                 |
-| `crates/ui/web-api-queries/src/queries/update_dispatch.rs`    | Shared update-dispatch primitives: `validate_update_preconditions`, `create_update_history_record`, `dispatch_update_to_agent`, `TriggerUpdateError`, `ValidatedUpdateTarget`, `config_prefers_interactive`; used by both `update_triggers.rs` and `update_batches/`                                                                |
-| `crates/ui/web-api-queries/src/queries/update_triggers.rs`    | `trigger_update_for_host` convenience wrapper (calls all three dispatch layers); shared by REST and MQTT handlers; resolves `interactive` flag (caller + `config_prefers_interactive`) before `create_update_history_record` so the column is persisted accurately                                                                  |
-| `crates/ui/web-api-queries/src/queries/update_batches.rs`     | Batch update logic: `find_outdated_items_for_host`, `create_batch`, `dispatch_next_in_batch`, `trigger_all_host_batch_updates_for_host`                                                                                                                                                                                             |
-| `crates/ui/web-api/src/routes/update_batches.rs`              | Batch update route handlers + SSE batch progress endpoint                                                                                                                                                                                                                                                                           |
-| `crates/ui/web-api/src/batch_progress_broadcaster.rs`         | `BatchProgressBroadcaster`: per-batch `broadcast` channels for SSE streaming                                                                                                                                                                                                                                                        |
-| `crates/shared/web-api-types/src/update_batches.rs`           | Batch API types (`HostBatchUpdateRequest`, `ItemBatchUpdateRequest`, `BatchUpdateResponse`, etc.)                                                                                                                                                                                                                                   |
-| `crates/shared/db/src/entity/update_batch.rs`                 | `UpdateBatch` SeaORM entity with `BatchStatus` enum                                                                                                                                                                                                                                                                                 |
-| `crates/shared/openapi-client/src/update_batches.rs`          | Typed HTTP client methods for batch endpoints                                                                                                                                                                                                                                                                                       |
-| `crates/shared/openapi-client/src/batch_progress_stream.rs`   | SSE streaming client for batch progress events                                                                                                                                                                                                                                                                                      |
-| `crates/ui/cli/src/commands/batch_update.rs`                  | CLI batch update commands                                                                                                                                                                                                                                                                                                           |
-| `docs/end-user/home-assistant-mqtt.md`                        | Full end-user setup guide including host summary entities, metadata topics, and connectivity sensor                                                                                                                                                                                                                                 |
-| `docs/api/wire-protocol.md`                                   | `software_states`, `host_connectivity_updated`, `service_trigger_update`, `service_trigger_host_batch_update`, and generic service config message docs                                                                                                                                                                              |
-| `docs/development/service-config-store.md`                    | Generic service config store architecture, DB schema, SDK usage, and security model                                                                                                                                                                                                                                                 |
-| `crates/ui/web-api/src/workload_claims.rs`                    | `WorkloadClaimRegistry` (global claim state, conflict resolution, pending desires for proactive re-grant)                                                                                                                                                                                                                           |
-| `crates/ui/web-api/src/routes/service_ws/handler/workload.rs` | WebSocket handlers for `WorkloadClaim` and `WorkloadRelease` messages                                                                                                                                                                                                                                                               |
-| `crates/ui/web-api/src/event_delivery.rs`                     | NATS delivery with tenant-scoped routing via claim registry                                                                                                                                                                                                                                                                         |
-| `crates/ui/web-api/src/notification_service.rs`               | Tenant-scoped `SoftwareStates` delivery using claim registry for service routing                                                                                                                                                                                                                                                    |
-| `crates/shared/wire/asyncapi.yaml`                            | AsyncAPI schemas for all messages and schemas                                                                                                                                                                                                                                                                                       |
+1. **New API endpoint tests must use the shared `TestApp` harness.** `crates/ui/web-api/src/test_harness/` provides `TestApp`, `TestClient`, and
+   fixture helpers; never duplicate `test_state()`/`build_test_state()` inline. See [REST API Integration
+   Tests](docs/development/testing.md#rest-api-integration-tests).
+1. **Use `TenantDb` helpers for all tenant-scoped queries.** `TenantDb` (`crates/shared/db/src/tenant_db.rs`) enforces the tenant filter — never
+   call `Entity::find().all(tenant_db.db())` on a `TenantScoped` entity. Use `.find::<E>()` etc.; for join tables without `tenant_id`, use
+   `find_via_tenant_join::<Target, Scoped>(relation)`. See [Coding Standards](docs/development/coding-standards.md) (Tenant-Safe Database Queries).
+1. **Batch queries instead of per-item loops.** Never SELECT/UPDATE per item in a loop (N+1). Load with `.is_in(ids)` then join in memory; for bulk
+   updates use a single `update_many().filter(Column::Id.is_in(ids))`. See [Coding Standards](docs/development/coding-standards.md).
+
+## Subsystem contracts
+
+Each stub below states the load-bearing invariants; follow the link for mechanics and file inventories.
+
+### Autodiscovery
+
+Autodiscovery detects installed software on agent hosts and surfaces it as pending software items. Invariants: discovery is event-driven + periodic
+(every 6h); **no approval workflow** — items are created immediately with `enabled: true`; periodic re-discovery only updates versions for
+autodiscovery-created items; the ignore list is separate from deletion (name-based `software_ignores`, only `?ignore=true` creates one); targets are
+structured `DiscoveryTarget` values (not opaque `extra`); discovery capability and `package_identifier` validation both derive from `PluginCatalog`;
+`tenant_discovery_allowlist`/`host_discovery_allowlist` tables gate which plugin types run (host overrides tenant; unconfigured = all). Full catalog,
+PHS emissions, sudo/batch detail: [docs/development/autodiscovery-internals.md](docs/development/autodiscovery-internals.md).
+
+### Plugin system
+
+Two-tier config model: **type settings** (tenant-level defaults per plugin type, `plugin_type_settings` table) and **plugin configs** (named
+credential/endpoint profiles). Effective config is a three-layer shallow merge via `resolve_effective_config()` — type settings → profile config →
+per-host override (narrowest wins). Configs implement `PluginConfig`; type-settings-capable plugins add `TypeSettings` via
+`declare_plugin!(type_settings: true)`. See [plugin-system.md](docs/development/plugin-system.md) and [plugin-guidelines.md](docs/development/plugin-guidelines.md).
+
+### MQTT / Home Assistant discovery
+
+The MQTT service publishes HA MQTT Discovery topics and per-host summary entities. Invariants: **HA discovery is opt-in per MQTT client**
+(`ha_discovery` gates only `.../config` topics; state/version topics always publish); **state push is controller-initiated** (`SoftwareStates` on
+version/update changes); `SoftwareStates` carries no credentials, NATS-published with `target_capability = "update_tracking"`; MQTT-triggered updates
+set `actor_type = "mqtt"`; the service uses `WorkloadClaims` to exclusively own config keys across instances. Topic scheme, naming, resilience:
+[docs/end-user/home-assistant-mqtt.md](docs/end-user/home-assistant-mqtt.md); wire detail: [docs/api/wire-protocol.md](docs/api/wire-protocol.md).
 
 ### Service ping interval
 
-The ping interval is controller-managed and per-service configurable. The `services` DB table has a nullable
-`ping_interval_seconds INTEGER` column. The controller reads this value per-service and falls back to
-profile-based defaults (300s for `Agent` profile, 15s for `UpdateTracker` profile) when the column is `NULL`.
-Defaults are provided by `ServiceProfile::default_ping_interval_secs()`.
-
-Key integration points:
-
-- **Wire protocol**: `ServiceSettingsPayload.ping_interval` is a required `Duration` field serialized as `u32` seconds
-  via `#[serde(with = "duration_seconds")]`. The `duration_seconds` module in `uptrakit-internal-wire` converts between
-  `std::time::Duration` and `u32` seconds on the wire. `ServiceSettingsPayload.tenant_id` is an `Option<Uuid>` present
-  for tenant-scoped services (agents, SSH agents) and absent for system services.
-- **SDK event loop**: The ping timer starts as `None` and is created when the first `ServiceSettings` message arrives
-  with the controller-provided `ping_interval`. The `ServiceHandler::ping_interval()` trait method has been removed.
-- **REST API**: `PUT /api/v1/services/{id}` accepts `UpdateServiceRequest { ping_interval_seconds: Option<u32> }`.
-  Set to `0` to clear the override, positive value to override, omit to keep current.
-- **CLI**: `uptrakit services update <id> --ping-interval <seconds>`.
-- **OpenAPI client**: `update_service(&self, id: &Uuid, req: &UpdateServiceRequest) -> Result<ServiceResponse>`.
-- **Frontend**: Service page context menu includes "Edit Ping Interval" dialog.
-- **`ServiceResponse`**: Includes `ping_interval_seconds: Option<u32>` (`None` means the profile-based default is used).
+Controller-managed and per-service configurable via the nullable `services.ping_interval_seconds` column, falling back to
+`ServiceProfile::default_ping_interval_secs()` per profile when `NULL`. The wire field `ServiceSettingsPayload.ping_interval` is a `Duration`
+serialized as `u32` seconds; the SDK creates the ping timer only when the first `ServiceSettings` arrives. See
+[docs/api/services-operations.md](docs/api/services-operations.md#ping-interval-mechanics).
 
 ### Capability-based service identity
 
-Services are identified by their **capability set** rather than a fixed type enum. The former `ServiceType` enum
-(`Agent`, `Mqtt`, `SshAgent`) and its backing file `crates/shared/types/src/service_type.rs` have been removed.
-
-#### Capability set
-
-Each service declares a `BTreeSet<Capability>` at enrollment time. The set is persisted as a JSON array string in the
-`services.capabilities` DB column.
-
-| Capability           | Wire String           | Agent | SSH Agent | MQTT | Scheduler | Controller |
-| -------------------- | --------------------- | :---: | :-------: | :--: | :-------: | :--------: |
-| `SoftwareDiscovery`  | `software_discovery`  |  yes  |    yes    |  --  |    --     |    yes     |
-| `UpdateHooks`        | `update_hooks`        |  yes  |    yes    |  --  |    --     |    yes     |
-| `GracefulShutdown`   | `graceful_shutdown`   |  yes  |    yes    | yes  |    yes    |    yes     |
-| `UpdateTracking`     | `update_tracking`     |  --   |    --     | yes  |    --     |    yes     |
-| `SshRemote`          | `ssh_remote`          |  --   |    yes    |  --  |    --     |    yes     |
-| `SystemService`      | `system_service`      |  --   |    --     | yes  |    yes    |    yes     |
-| `Scheduler`          | `scheduler`           |  --   |    --     |  --  |    yes    |    yes     |
-| `DatabaseAccess`     | `database_access`     |  --   |    --     |  --  |    yes    |    yes     |
-| `NatsAccess`         | `nats_access`         |  --   |    --     |  --  |    yes    |    yes     |
-| `MasterKeyAccess`    | `master_key_access`   |  --   |    --     |  --  |    yes    |    yes     |
-| `CaManagement`       | `ca_management`       |  --   |    --     |  --  |    --     |    yes     |
-| `InteractiveUpdates` | `interactive_updates` |  yes  |    yes    |  --  |    --     |    yes     |
-| `ResetData`          | `reset_data`          |  --   |    yes    |  --  |    --     |    yes     |
-| `WorkloadClaims`     | `workload_claims`     |  --   |    --     | yes  |    --     |    yes     |
-| `Other(String)`      | _(unknown)_           |  --   |    --     |  --  |    --     |     --     |
-
-The `interactive` Cargo feature is now a default feature on all three binary crates (agent, agent-ssh, controller).
-The `reset-data` Cargo feature is a default feature on the controller and agent-ssh crates.
-
-`Other(String)` is a forward-compat catch-all received from newer peers; it never participates in intersection
-(`Capability::is_known()` returns `false` for it).
-
-#### ServiceProfile (derived, never stored)
-
-`ServiceProfile` is a runtime-only enum derived from capabilities via `ServiceProfile::from_capabilities()`. It drives
-behavioral defaults (ping interval, shutdown timeout, human-readable label). It is **never persisted** in the database.
-
-| Profile         | Key capability                  | Services               | Default ping | Shutdown timeout |
-| --------------- | ------------------------------- | ---------------------- | ------------ | ---------------- |
-| `UpdateTracker` | `Capability::UpdateTracking`    | MQTT service           | 15 s         | None             |
-| `Scheduler`     | `Capability::Scheduler`         | External scheduler     | 60 s         | 30 s             |
-| `Agent`         | `Capability::SoftwareDiscovery` | Local agent, SSH agent | 300 s        | 120 s            |
-| `Unknown`       | (none of the above)             | Unrecognized           | 300 s        | 120 s            |
-
-`ServiceProfile::service_label(has_ssh_remote)` provides the human-readable label: "Agent", "SSH Agent",
-"Update Tracker", "Scheduler", or "Unknown".
-
-#### Capability negotiation (wire protocol)
-
-1. Controller sends `service_settings` with `capabilities: [...]` after mTLS authentication.
-2. Service sends `report_hosts` / `register` with its own `capabilities: [...]`.
-3. Each side computes `agreed = intersection(controller_caps, service_caps)` excluding `Other` values.
-4. The agreed set is stored on the connection via `ControllerConnection::set_agreed_capabilities()`.
-
-#### Enrollment tokens
-
-Multiple named enrollment tokens are stored in the `enrollment_tokens` table (`crates/shared/db/src/entity/enrollment_token.rs`).
-Each token supports capability scoping, usage limits (`max_uses`), and TTL (`expires_at`). The former single-token model
-(`SettingKey::EnrollmentTokenHash`, `service_enrollment.token_hash`) has been removed entirely.
-
-REST API: `POST/GET /api/v1/enrollment-tokens`, `GET/DELETE /api/v1/enrollment-tokens/{id}` (requires `ManageAgents`).
-OpenAPI client: `crates/shared/openapi-client/src/enrollment_tokens.rs`.
-CLI: `uptrakit enrollment-tokens list|create|show|revoke`.
-
-During enrollment, the controller iterates all active tokens for the tenant and verifies the provided secret against each
-Argon2id hash. On match, it checks capability intersection and atomically increments `current_uses`. The `enrollment_token_id`
-FK on the `services` table provides an audit trail of which token enrolled each service.
-
-#### Wire protocol changes
-
-`EnrollPayload` carries `capabilities: BTreeSet<Capability>` instead of the former `service_type: ServiceType`.
-The `ServiceHandler::SERVICE_TYPE` constant has been removed from the service SDK trait.
-
-#### Service connections
-
-`service_connections.rs` provides a single `register()` method (replacing `register_agent()`,
-`register_ssh_agent()`, `register_mqtt()`) and `broadcast_by_capability()` (replacing `broadcast_by_type()`).
-`force_disconnect()` cancels the session's `CancellationToken` and removes the connection entry,
-used by deactivate/reject/merge routes for immediate WebSocket session termination.
-
-#### Background message processing
-
-Each authenticated WebSocket connection spawns a `MessageProcessor` task
-(`crates/ui/web-api/src/routes/service_ws/handler/message_processor.rs`; the main
-loop lives in `handler/session_authenticated.rs`). The main loop reads
-the WebSocket stream and handles fast-path messages inline (Ping→Pong, Disconnecting,
-rate limiting, unknown messages). All other messages are forwarded to the processor
-via a bounded MPSC channel (`PROCESSOR_CHANNEL_CAPACITY = 32`). The processor
-dispatches handlers sequentially (preserving message ordering) and returns
-`ProcessorResponse` values through a response channel (`RESPONSE_CHANNEL_CAPACITY = 32`).
-The main loop serializes replies with `out_seq` (keeping sequence number ownership
-in one place) and writes them to the sink.
-
-This architecture decouples DB-heavy handler work from the WebSocket read loop,
-preventing slow handlers from blocking message reception and ping/pong keepalives.
-
-Handlers return `ProcessorResponse` (defined in `handler/shared_types.rs`) instead of
-writing directly to the sink. `ProcessorResponse` contains a `Vec<ControllerMessage>`
-of replies and a `ProcessorAction` (Continue, Break, or CloseWithReason). Shared
-mutable state (`linked_host_ids`) uses `Arc<parking_lot::Mutex<HashSet<Uuid>>>`.
-
-The service SDK (`crates/shared/service-sdk/src/connection.rs`) uses a complementary
-split-stream architecture: the WebSocket is split into read/write halves, with a
-background writer task draining a bounded channel (`WRITE_CHANNEL_CAPACITY = 128`).
-`send()` serializes and pushes to the channel (non-blocking), `send_best_effort()`
-uses `try_send()` (drop on full), and error signaling uses `Arc<AtomicBool>`.
-
-#### Controller events
-
-The `controller_events` DB table has been dropped. Cross-controller event routing now uses NATS JetStream
-(feature-gated behind the `nats` Cargo feature). When NATS is not configured, the controller operates in
-single-instance mode with local-only delivery.
-
-The NATS server URL is persisted in the global `settings` table under key `nats.url` (AES-256-GCM encrypted).
-It is reconciled with the `--nats-url` CLI flag at startup using the standard 5-case priority. Changing the
-URL via `PUT /api/v1/settings/nats` or `uptrakit settings nats set` requires a controller restart to take
-effect. The `SettingsSnapshot.nats_url` field is a `MaskedUrl` that redacts the password in all
-serialized/logged output. See `crates/ui/web-api-auth/src/setting_key.rs` (`NatsUrl` variant) and
-`docs/development/nats-integration.md` for full details.
-
-Zeroconf settings (`zeroconf.enabled`, `zeroconf.url`, `zeroconf.pki_addr`) are persisted in the global `settings`
-table and reconciled with CLI flags (`--zeroconf`, `--zeroconf-url`, `--zeroconf-pki-addr`) at startup using the
-standard 5-case priority. The in-memory cache is `ZeroconfSnapshot` (in `SettingsSnapshot`). REST API:
-`GET/PUT /api/v1/global-settings/zeroconf`. See `docs/development/zeroconf-discovery.md` for full details.
-
-#### REST API
-
-`ServiceResponse` contains `capabilities: Vec<String>` and `service_label: String` instead of the former
-`service_type: ServiceType`. The list endpoint filter parameter is `?capability=` instead of `?type=`.
-
-Both `ServiceResponse` and `SystemServiceResponse` include `is_embedded: bool` and
-`yielded_to: Option<Vec<Uuid>>`. The `is_embedded` flag identifies controller-embedded services
-(auto-provisioned, cannot be deactivated or merged — returns 409 CONFLICT). The `yielded_to` field
-lists external service IDs that caused the embedded service to yield its responsibilities
-(refreshed every 30 seconds from `embedded_service_runtime_states`).
+Services are identified by their **capability set** (`BTreeSet<Capability>`, persisted as a JSON array in `services.capabilities`), not a fixed type
+enum. `ServiceProfile` derives from capabilities via `from_capabilities()` and is **never persisted**. Each side computes `agreed =
+intersection(controller, service)` excluding forward-compat `Other(String)` values. Enrollment uses named `enrollment_tokens` (Argon2id-hashed,
+capability-scoped, usage/TTL-limited). Capability matrix, negotiation flow, connection internals: [docs/api/wire-protocol.md](docs/api/wire-protocol.md).
 
 ### Two-tier service model
 
-The controller manages two independent service tiers:
+The controller manages two independent tiers: **tenant services** (`services`, `tenant_id`-scoped, `/api/v1/services`) and **system services**
+(`system_services`, global, `/api/v1/system-services`), routed at enrollment by `Capability::SystemService`. A **credential guard** requires
+`system_service` alongside any of `database_access`, `nats_access`, `master_key_access`, `ca_management` — rejecting tenant services requesting infra
+secrets. System enrollment uses `system_enrollment_tokens` (Argon2id-hashed, shown once). See [system-services.md](docs/architecture/system-services.md).
 
-| Tier            | Table             | Scoped to   | REST path                 |
-| --------------- | ----------------- | ----------- | ------------------------- |
-| Tenant services | `services`        | `tenant_id` | `/api/v1/services`        |
-| System services | `system_services` | Global      | `/api/v1/system-services` |
+### Batch actions
 
-Enrollment is routed by the presence of `Capability::SystemService` (`"system_service"`) in
-`EnrollPayload.capabilities`. When present, `enroll_service()` calls `do_enroll_system_service()`
-and writes to `system_services`; otherwise it calls `do_enroll()` and writes to `services`.
-
-The `is_system: bool` flag derived at enrollment threads through every subsequent WebSocket
-operation: certificate lookup (tries `service_certificates` then `system_service_certificates`),
-activity recording, status checks, credential delivery, and registered-connection management.
-
-The MQTT bridge now enrolls as a system service
-(`system_service + update_tracking + graceful_shutdown + workload_claims + ui_surfaces`
-wire string for `UiSurfaces`)
-and appears in `/api/v1/system-services`, not `/api/v1/services`.
-
-#### System services key files
-
-| File                                                                | Purpose                                                                                                       |
-| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `crates/shared/db/src/entity/system_service.rs`                     | SeaORM entity for `system_services` table                                                                     |
-| `crates/shared/db/src/entity/system_service_certificate.rs`         | SeaORM entity for `system_service_certificates` table                                                         |
-| `crates/shared/db/src/entity/system_enrollment_token.rs`            | SeaORM entity for `system_enrollment_tokens` table                                                            |
-| `crates/ui/web-api-queries/src/queries/system_services.rs`          | DB query helpers (list, get, approve, reject, deactivate, update)                                             |
-| `crates/ui/web-api-queries/src/queries/system_enrollment_tokens.rs` | DB query helpers for system enrollment tokens                                                                 |
-| `crates/ui/web-api/src/routes/system_services.rs`                   | Route handlers for `/api/v1/system-services`                                                                  |
-| `crates/ui/web-api/src/routes/system_enrollment_tokens.rs`          | Route handlers for `/api/v1/system-enrollment-tokens`                                                         |
-| `crates/shared/web-api-types/src/system_services.rs`                | `SystemServiceResponse`, `UpdateSystemServiceRequest`, `ListSystemServicesQuery`                              |
-| `crates/shared/web-api-types/src/system_enrollment_tokens.rs`       | `CreateSystemEnrollmentTokenRequest`, `SystemEnrollmentTokenCreatedResponse`, `SystemEnrollmentTokenResponse` |
-| `crates/shared/openapi-client/src/system_services.rs`               | Typed HTTP client methods for system service endpoints                                                        |
-| `crates/shared/openapi-client/src/system_enrollment_tokens.rs`      | Typed HTTP client methods for system enrollment token endpoints                                               |
-| `crates/ui/cli/src/commands/system_services.rs`                     | CLI `system-services` subcommand                                                                              |
-| `crates/ui/cli/src/commands/system_enrollment_tokens.rs`            | CLI `system-enrollment-tokens` subcommand                                                                     |
-| `docs/architecture/system-services.md`                              | Full architecture documentation                                                                               |
-
-#### Credential guard
-
-Four capabilities (`database_access`, `nats_access`, `master_key_access`, `ca_management`) require
-`system_service` to be present in the same capability set. The guard runs in `do_enroll()` before
-any DB write and rejects with `AgentRouteError::Forbidden` if a service requests system credentials
-without `system_service`. This prevents tenant services from receiving infrastructure secrets.
-
-#### System enrollment tokens
-
-Multiple named system enrollment tokens are stored in the `system_enrollment_tokens` table
-(`crates/shared/db/src/entity/system_enrollment_token.rs`). Tokens are backend-generated random
-secrets, Argon2id-hashed at rest, and shown only once at creation. Each token supports optional
-usage limits (`max_uses`) and TTL (`expires_at`).
-
-At enrollment, if the service provides a token, `find_active_system_tokens()` retrieves all
-non-revoked, non-expired tokens with remaining uses, then `password::verify_password()` performs
-Argon2id verification. On match, `current_uses` is atomically incremented and
-`system_enrollment_token_id` is recorded on the `system_services` row (audit-only, no FK
-constraint — tokens can be revoked/deleted after the service has enrolled). A matching token
-produces `Approved` status; no match produces `Forbidden`; no token produces `Pending`.
-
-REST API: `POST/GET /api/v1/system-enrollment-tokens`, `GET/DELETE /api/v1/system-enrollment-tokens/{id}`
-(requires `manage_system_services`).
-OpenAPI client: `crates/shared/openapi-client/src/system_enrollment_tokens.rs`.
-CLI: `uptrakit system-enrollment-tokens list|create|show|revoke`.
-
-#### Frontend
-
-The frontend filters services by capability instead of type and displays `service_label` instead of `service_type`.
-
-#### Key files
-
-| File                                                                            | Purpose                                                                                                                                                                                                                             |
-| ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `crates/shared/wire/src/capabilities.rs`                                        | `Capability` enum, serde, `is_known()`                                                                                                                                                                                              |
-| `crates/shared/wire/src/payloads.rs`                                            | `EnrollPayload` with `capabilities` field                                                                                                                                                                                           |
-| `crates/shared/wire/src/service_profile.rs`                                     | `ServiceProfile` enum, `from_capabilities()`, `parse_capabilities()`, `serialize_capabilities()`                                                                                                                                    |
-| `crates/ui/web-api/src/service_connections.rs`                                  | `register()`, `broadcast_by_capability()`                                                                                                                                                                                           |
-| `crates/shared/db/src/entity/enrollment_token.rs`                               | `enrollment_tokens` SeaORM entity                                                                                                                                                                                                   |
-| `crates/ui/web-api/src/routes/enrollment_tokens.rs`                             | Enrollment token REST endpoints                                                                                                                                                                                                     |
-| `crates/ui/web-api-queries/src/queries/enrollment_tokens.rs`                    | Enrollment token DB queries                                                                                                                                                                                                         |
-| `crates/shared/service-sdk/src/connection.rs`                                   | Split-stream WS architecture: `OutboundFrame`, background writer task, `send()`/`send_best_effort()`/`recv()`/`close()`, `agreed_capabilities` field + accessors                                                                    |
-| `crates/shared/service-sdk/src/event_loop.rs`                                   | Capability intersection in `ServiceSettings` handler                                                                                                                                                                                |
-| `crates/ui/web-api/src/routes/service_ws/handler/mod.rs`                        | Thin facade — module declarations + `pub(crate)` re-exports of the handler public surface (`handle_authenticated_loop`, `handle_enrolled_loop`, `run_embedded_*`, `dispatch_next_batch_update`, `trigger_discovery_for_agent_host`) |
-| `crates/ui/web-api/src/routes/service_ws/handler/message_processor.rs`          | `MessageProcessor`, `ProcessorMessage`, `ProcessorChannels`, `LoopAction`, `spawn_message_processor`, `dispatch` (per-connection processor task)                                                                                    |
-| `crates/ui/web-api/src/routes/service_ws/handler/session_authenticated.rs`      | `handle_authenticated_loop` (post-cert operational loop, 4-arm select), authenticated-session setup/cleanup/finalize, `send_ws_with_timeout`                                                                                        |
-| `crates/ui/web-api/src/routes/service_ws/handler/session_enrolled.rs`           | `handle_enrolled_loop` (pre-cert enrollment loop), enrolled-session setup/cleanup, `upgrade_service_capabilities`                                                                                                                   |
-| `crates/ui/web-api/src/routes/service_ws/handler/embedded.rs`                   | Embedded-mode handlers: `run_embedded_message_handler`, `run_embedded_system_message_handler`                                                                                                                                       |
-| `crates/ui/web-api/src/routes/service_ws/handler/audit_service.rs`              | Service-lifecycle audit: `ingest_service_audit_event`, `emit_service_*_audit_event` (enrollment/certificate)                                                                                                                        |
-| `crates/ui/web-api/src/routes/service_ws/handler/audit_surface.rs`              | Surface-interaction audit: `emit_surface_*_audit_event`, `classify_surface_*`                                                                                                                                                       |
-| `crates/ui/web-api/src/routes/service_ws/handler/surface_wire.rs`               | Surface↔wire conversions: `register_surface_provider`, `surface_*_to_wire`, `action_error_code`                                                                                                                                     |
-| `crates/ui/web-api/src/routes/service_ws/handler/shared_types.rs`               | `ProcessorResponse`, `ProcessorAction`, `HandlerError`, `HandlerResult`, `ServiceAuditCtx`, `load_linked_host_ids`, cross-cutting helpers/consts                                                                                    |
-| crates/ui/web-api/src/routes/service_ws/handler/messages/mod.rs                 | Facade for common message handlers — module wiring + re-exports (return `ProcessorResponse`)                                                                                                                                        |
-| crates/ui/web-api/src/routes/service_ws/handler/messages/shared.rs              | `handle_ping` + `emit_service_inventory_audit` — pong/activity + inventory audit helper                                                                                                                                             |
-| crates/ui/web-api/src/routes/service_ws/handler/messages/certificate.rs         | `handle_renew_certificate` + renew-failure audit (return `ProcessorResponse`)                                                                                                                                                       |
-| crates/ui/web-api/src/routes/service_ws/handler/messages/hosts.rs               | `handle_report_hosts` + host linking/notify (`link_reported_hosts`, `notify_reported_hosts_online`)                                                                                                                                 |
-| crates/ui/web-api/src/routes/service_ws/handler/messages/version_check.rs       | `handle_version_check_results` + enrichment/apply/finalize helpers (return `ProcessorResponse`)                                                                                                                                     |
-| crates/ui/web-api/src/routes/service_ws/handler/messages/discovery.rs           | `handle_discovery_results` + page processing/enrichment (`process_discovery_page_for_host`, `enrich_discovered_items`)                                                                                                              |
-| crates/ui/web-api/src/routes/service_ws/handler/messages/plugin_config.rs       | `handle_report_plugin_config` + config-report audit (return `ProcessorResponse`)                                                                                                                                                    |
-| crates/ui/web-api/src/routes/service_ws/handler/messages/restart_progression.rs | `trigger_host_progression_after_awaiting_restart` — post-restart host progression                                                                                                                                                   |
-| crates/ui/web-api/src/routes/service_ws/handler/messages/tests.rs               | Unit tests for the messages submodules                                                                                                                                                                                              |
-| crates/ui/web-api/src/routes/service_ws/handler/updates/mod.rs                  | Facade for the update-lifecycle handlers — module wiring + re-exports + shared consts/types (`RECOVERY_FINALIZATION_TIMEOUT`, `ReconnectSuccessorDispatchMode`, `ReplayPreparationNotifier`)                                        |
-| crates/ui/web-api/src/routes/service_ws/handler/updates/ownership.rs            | `validate_host_link_visibility` — host-link ownership check for incoming update messages                                                                                                                                            |
-| crates/ui/web-api/src/routes/service_ws/handler/updates/lookups.rs              | `resolve_software_item_name` / `resolve_host_name` — best-effort display-name lookups                                                                                                                                               |
-| crates/ui/web-api/src/routes/service_ws/handler/updates/finalize.rs             | `finalize_post_update_best_effort` — post-update hook scale-down + protection finalize (optional reconnect recovery-timeout)                                                                                                        |
-| crates/ui/web-api/src/routes/service_ws/handler/updates/audit.rs                | Update-lifecycle audit emission (`emit_update_finalized_audit`, `emit_batch_update_finalized_audit`, `emit_stdin_attention_audit`)                                                                                                  |
-| crates/ui/web-api/src/routes/service_ws/handler/updates/replay.rs               | Reconnect recovery + pending replay (`recover_owned_updates_on_connect_with_dispatch_mode`, `prepare_pending_replay_messages`, `build_execute_payload`)                                                                             |
-| crates/ui/web-api/src/routes/service_ws/handler/updates/dispatch.rs             | Successor dispatch for batch/queue (`dispatch_next_batch_update`, `dispatch_next_queued_update`, `notify_failed_reconnect_update`)                                                                                                  |
-| crates/ui/web-api/src/routes/service_ws/handler/updates/started.rs              | `handle_update_started` + `broadcast_update_started_events` (return `ProcessorResponse`)                                                                                                                                            |
-| crates/ui/web-api/src/routes/service_ws/handler/updates/output.rs               | `handle_update_output` — owner-safe output persist + broadcast (return `ProcessorResponse`)                                                                                                                                         |
-| crates/ui/web-api/src/routes/service_ws/handler/updates/result.rs               | `handle_update_result` — finalize, output selection, side-effects (return `ProcessorResponse`)                                                                                                                                      |
-| crates/ui/web-api/src/routes/service_ws/handler/updates/batch.rs                | `handle_batch_update_result` + batch progress/completion (return `ProcessorResponse`)                                                                                                                                               |
-| crates/ui/web-api/src/routes/service_ws/handler/updates/stdin.rs                | `handle_stdin_attention` — stdin-attention broadcast + notify + audit (return `ProcessorResponse`)                                                                                                                                  |
-| `crates/ui/web-api/src/routes/service_ws/handler/mqtt.rs`                       | MQTT-specific handlers (return `ProcessorResponse`)                                                                                                                                                                                 |
-| `crates/ui/web-api/src/routes/service_ws/handler/test_support.rs`               | `#[cfg(test)]` shared test fixtures (DB inserts, state builders, mocks) used across handler module test suites                                                                                                                      |
-| `crates/ui/web-api/src/routes/service_ws/handler/tests.rs`                      | `#[cfg(test)]` cross-cluster end-to-end tests (surface-action/registration emit-audit-row, scope-violation) spanning `message_processor` + `audit_*`                                                                                |
-| `crates/ui/web-api/src/routes/service_ws/protocol.rs`                           | `controller_capabilities()`, `ServiceSettingsPayload` construction, `CertIdentity` (Clone)                                                                                                                                          |
-| `crates/ui/web-api/src/nats_transport.rs`                                       | NATS JetStream transport (feature-gated)                                                                                                                                                                                            |
-| `crates/ui/web-api/src/event_delivery.rs`                                       | Shared delivery routing logic                                                                                                                                                                                                       |
-| `crates/shared/wire/asyncapi.yaml`                                              | Schema for `capabilities` arrays in messages                                                                                                                                                                                        |
-| `docs/api/wire-protocol.md`                                                     | Full capability negotiation documentation                                                                                                                                                                                           |
-
-### Batch actions (group operations)
-
-All management endpoints support batch operations via `POST /api/v1/{resource}/batch`. The request body
-contains an `action` string and a `ids` UUID array (max 100). Responses use partial-success semantics:
-each item independently succeeds or fails.
-
-Endpoints: services, system-services, software-items, hosts, hosts/{host_id}/packages,
-autodiscovery/ignores, plugin-configs. Full endpoint table and side-effect documentation in
+All management endpoints support batch operations via `POST /api/v1/{resource}/batch` with an `action` string and a `ids` UUID array (max 100,
+enforced by `BatchActionRequest`'s `Validate` impl). Responses use partial-success semantics (each item independently succeeds/fails). Surface
+providers can expose selection-driven interactions with explicit permission gates. Endpoint list and side effects:
 [docs/api/batch-actions.md](docs/api/batch-actions.md).
 
-Surface providers can expose selection-driven interactions through shared surface contracts. Keep
-batch-style UX aligned with shared renderer patterns and explicit permission gates.
+### Error handling
 
-The frontend adds multi-select checkboxes to all list pages (services, system-services, software,
-hosts, plugin-configs, software ignores) and provider-backed surface tables. Selection
-uses `SvelteSet<string>` (required by `svelte/prefer-svelte-reactivity` ESLint rule). A shared
-`BatchActionBar` appears when items are selected; `BatchResultDialog` shows partial-success
-results. See [docs/development/frontend-components.md](docs/development/frontend-components.md)
-for component details.
-
-#### Key files
-
-| File                                                                         | Purpose                                                                                                                |
-| ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `crates/shared/web-api-types/src/batch_actions.rs`                           | `BatchActionRequest`, `BatchActionResponse`, `BatchActionSuccess`, `BatchActionFailure`; `Validate` impl (max 100 IDs) |
-| `crates/ui/web-api-queries/src/queries/services.rs`                          | `batch_approve_services`, `batch_reject_services`, `batch_deactivate_services`                                         |
-| `crates/ui/web-api-queries/src/queries/system_services.rs`                   | `batch_approve_system_services`, `batch_reject_system_services`, `batch_deactivate_system_services`                    |
-| `crates/ui/web-api-queries/src/queries/software_items/mod.rs`                | Shared types, `SoftwareItemQueryError`, `Result<T>`, `HostAssignmentData`, re-exports (`batch_delete_software_items`)  |
-| `crates/ui/web-api-queries/src/queries/software_items/crud.rs`               | CRUD operations (create, list, get, update, delete, batch)                                                             |
-| `crates/ui/web-api-queries/src/queries/software_items/host_assignments.rs`   | Host assignment management (`assign_host`, `unassign_host`, `update_assignment`)                                       |
-| `crates/ui/web-api-queries/src/queries/software_items/plugin_assignments.rs` | Plugin assignment queries (`delete_plugin_assignment`, `load_plugin_assignments`)                                      |
-| `crates/ui/web-api-queries/src/queries/hosts.rs`                             | `batch_deactivate_hosts`                                                                                               |
-| `crates/ui/web-api-queries/src/queries/software_ignores.rs`                  | `batch_delete_ignore_rules`                                                                                            |
-| `crates/ui/web-api-queries/src/queries/plugin_configs.rs`                    | `batch_delete_plugin_configs`                                                                                          |
-| `crates/ui/web-api/src/routes/services/mod.rs`                               | Service route facade (module wiring + handler re-exports)                                                              |
-| `crates/ui/web-api/src/routes/services/audit.rs`                             | `AuditContext` + service audit-emit helpers                                                                            |
-| `crates/ui/web-api/src/routes/services/crud.rs`                              | List / get / update service handlers                                                                                   |
-| `crates/ui/web-api/src/routes/services/lifecycle.rs`                         | Approve / reject / deactivate / set-update-freeze handlers                                                             |
-| `crates/ui/web-api/src/routes/services/merge.rs`                             | Service merge handler                                                                                                  |
-| `crates/ui/web-api/src/routes/services/batch.rs`                             | Batch service-action handler                                                                                           |
-| `crates/ui/web-api/src/routes/services/tests.rs`                             | Unit tests for the services submodules                                                                                 |
-| `crates/ui/web-api/src/routes/system_services.rs`                            | `batch_system_services` handler                                                                                        |
-| `crates/ui/web-api/src/routes/software_items/mod.rs`                         | Software-item route facade (module wiring + handler re-exports)                                                        |
-| `crates/ui/web-api/src/routes/software_items/audit.rs`                       | Audit-action consts, `AuditContext`, audit-emit helpers                                                                |
-| `crates/ui/web-api/src/routes/software_items/crud.rs`                        | CRUD handlers (create/list/get/update/delete/approve) + create lifecycle hook                                          |
-| `crates/ui/web-api/src/routes/software_items/merge.rs`                       | Merge preview/execute handlers                                                                                         |
-| `crates/ui/web-api/src/routes/software_items/host_assignments.rs`            | Host + plugin assignment handlers                                                                                      |
-| `crates/ui/web-api/src/routes/software_items/version_check.rs`               | Version-check handlers + precondition/agent-service helpers                                                            |
-| `crates/ui/web-api/src/routes/software_items/updates.rs`                     | Update-trigger handler                                                                                                 |
-| `crates/ui/web-api/src/routes/software_items/batch.rs`                       | Batch-action handler                                                                                                   |
-| `crates/ui/web-api/src/routes/software_items/tests.rs`                       | Unit tests for the software_items submodules                                                                           |
-| `crates/ui/web-api/src/routes/software_items/audit_tests.rs`                 | Audit-emission unit tests for the software_items submodules                                                            |
-| `crates/ui/web-api/src/routes/software_items/controller_fetch.rs`            | `ControllerFetchJob`, `collect_and_run_controller_fetches`                                                             |
-| `crates/ui/web-api/src/routes/software_items/version_check_dispatch.rs`      | `VersionCheckContext`, `load_version_check_context`, `dispatch_agent_version_checks`                                   |
-| `crates/ui/web-api/src/routes/hosts.rs`                                      | `batch_hosts` handler                                                                                                  |
-| `crates/ui/web-api/src/routes/autodiscovery.rs`                              | `batch_software_ignores` handler                                                                                       |
-| `crates/ui/web-api/src/routes/plugin_configs/mod.rs`                         | Plugin-config route facade (module wiring + handler re-exports)                                                        |
-| `crates/ui/web-api/src/routes/plugin_configs/audit.rs`                       | `AuditContext`, `CommandRiskSummary`, semantic audit-emit helpers                                                      |
-| `crates/ui/web-api/src/routes/plugin_configs/command_safety.rs`              | Dangerous-pattern / command-field detection + rejection messages                                                       |
-| `crates/ui/web-api/src/routes/plugin_configs/crud.rs`                        | List-types / create / list / get / update / delete handlers                                                            |
-| `crates/ui/web-api/src/routes/plugin_configs/discover.rs`                    | Discover plugin-config handler                                                                                         |
-| `crates/ui/web-api/src/routes/plugin_configs/batch.rs`                       | Batch plugin-config-action handler                                                                                     |
-| `crates/ui/web-api/src/routes/plugin_configs/test_action.rs`                 | Test-plugin-config handler + active-agent-service loader                                                               |
-| `crates/ui/web-api/src/routes/plugin_configs/tests.rs`                       | Unit tests for the plugin_configs submodules                                                                           |
-| `crates/shared/openapi-client/src/paths.rs`                                  | `BATCH` path constants for all resources                                                                               |
-| `frontend/src/lib/types.ts`                                                  | `BatchActionRequest`, `BatchActionResponse` TypeScript types                                                           |
-| `frontend/src/lib/api.ts`                                                    | `batchServices`, `batchHosts`, etc. API client functions                                                               |
-| `frontend/src/lib/components/BatchActionBar.svelte`                          | Shared batch action toolbar (fixed-position, selected count + action buttons)                                          |
-| `frontend/src/lib/components/BatchResultDialog.svelte`                       | Shared partial-success results dialog                                                                                  |
-| `frontend/src/lib/components/surfaces/SurfaceTable.svelte`                   | Shared surface table renderer used by provider-backed pages                                                            |
-
-### Error handling quick reference
-
-Every boundary (crate or module) must define its own typed error enum. Here is the minimal setup and decision guide.
-Full reference with 19 patterns, anti-patterns, error chain diagrams, and a complete real-world example:
+Every boundary defines its own typed error enum plus `pub type Result<T> = std::result::Result<T, Report<MyError>>;` (the alias must cover **all**
+functions in a query module, including read-only ones). Use `rootcause` (`report!()` / `bail!()`, never `Report::new()`) and `impl_report_conversion!`
+for cross-boundary conversions. Approved `Mutex::lock().unwrap()` is safe under `panic = "abort"`. Decision table, patterns, exceptions:
 [docs/development/error-handling.md](docs/development/error-handling.md).
-
-**Required imports:**
-
-```rust
-use rootcause::prelude::*;      // Report, markers, report!, bail!, ResultExt, IteratorExt, handlers, IntoRootcause
-use thiserror::Error;            // #[derive(Debug, Error)]
-use uptrakit_shared_macros::impl_report_conversion;  // cross-boundary conversions
-```
-
-**Boundary checklist:**
-
-1. Define `#[derive(Debug, Error)] pub enum MyError { ... }`
-1. Define `pub type Result<T> = std::result::Result<T, Report<MyError>>;`
-1. Add `impl_report_conversion!` for every foreign error type your boundary encounters.
-
-**`#[from]` vs `impl_report_conversion!`:** Omit `#[from]` on DB/foreign-error variants when the return type is
-`Report<T>`. The `From` impl generated by `#[from]` is never called — the `?` operator cannot see through
-`Report<T>`. Use `impl_report_conversion!` as the sole conversion mechanism and omit `#[from]` to avoid dead code.
-
-**`Result<T>` alias coverage:** The `pub type Result<T>` alias must cover **all** functions in a query module,
-including simple read-only functions that only fail with `sea_orm::DbErr`. Do not use a bare
-`std::result::Result<T, SomeError>` signature for "simple" functions — use the module's unified `Result<T>`.
-
-**Complete minimal example:**
-
-```rust
-use rootcause::prelude::*;
-use thiserror::Error;
-use uptrakit_shared_macros::impl_report_conversion;
-
-#[derive(Debug, Error)]
-pub enum WidgetError {
-    #[error("database error: {0}")]
-    Database(sea_orm::DbErr),
-    #[error("widget not found: {0}")]
-    NotFound(uuid::Uuid),
-}
-
-pub type Result<T> = std::result::Result<T, Report<WidgetError>>;
-
-impl_report_conversion!(sea_orm::DbErr => WidgetError::Database);
-
-pub async fn get_widget(db: &DatabaseConnection, id: uuid::Uuid) -> Result<Widget> {
-    Widget::find_by_id(id)
-        .one(db).await.context_to()?
-        .ok_or_else(|| report!(WidgetError::NotFound(id)))
-}
-```
-
-**`bail!()` vs `report!()`:**
-
-- `bail!(MyError::Variant(...))` — use for guard-clause early returns (replaces `return Err(report!(...))`).
-- `report!(MyError::Variant(...))` — use inside `.ok_or_else()`, `.map_err()`, or when building a `Report` without
-  returning.
-- Do **not** use `Report::new()` directly; always use the `report!()` macro.
-
-**Decision table — which context method to use:**
-
-| Scenario                                     | Method                          | Effect                                        |
-| -------------------------------------------- | ------------------------------- | --------------------------------------------- |
-| Foreign error has `ReportConversion` impl    | `.context_to()`                 | Delegates to impl                             |
-| Wrap low-level error with high-level meaning | `.context(Higher::Variant)`     | Adds new parent node; original stays as child |
-| Change error type in-place (1:1 mapping)     | `.context_transform(\|e\| ...)` | Replaces context type; children preserved     |
-| One-off conversion, no impl needed           | `.map_err(\|e\| report!(...))`  | Manual wrap                                   |
-| Guard clause / early return                  | `bail!(...)`                    | Return immediately                            |
-
-**Approved exceptions:**
-
-- `Mutex::lock().unwrap()`, `RwLock::read().unwrap()`, `RwLock::write().unwrap()` — safe because `panic = "abort"` in
-  release.
-- String-based error variants for external types that don't impl `std::error::Error` (e.g. `aws_lc_rs::Unspecified`):
-  `.map_err(|e| report!(Err::Variant(e.to_string())))`.
-- Clap `value_parser` functions — `Result<T, String>` is required by the clap API (Pattern 14).
-- HTTP input validation helpers — thin functions producing user-facing HTTP 400 error messages where the string goes
-  directly into `error_response()` (Pattern 15).
-- Display fallbacks — `unwrap_or_else` / `unwrap_or_default` for non-critical display/formatting (Pattern 16).
 
 ### Tracing initialization
 
-**Libraries must never configure the global tracing dispatcher.**
-Only binary `main()` functions may call `tracing_subscriber::fmt().init()` or any equivalent. Configuring the global
-subscriber from a library causes a panic if anything else in the process has already set it (e.g. test harness,
-another library).
-
-**All tracing initialisation lives in `crates/shared/tracing-init/src/lib.rs` (`uptrakit-tracing-init`).**
-`uptrakit-service-sdk` re-exports the full public surface so service daemons use the
-`uptrakit_service_sdk::` path. The controller, CLI, and integration-tests depend on `uptrakit-tracing-init`
-directly (to avoid pulling in the full service SDK) and use `uptrakit_tracing_init::` paths. Do not add
-per-binary `init_tracing()` helpers.
-
-**Pattern:**
-
-```rust
-// Service daemons (via uptrakit-service-sdk re-export)
-uptrakit_service_sdk::TracingBuilder::new()
-    .verbosity(args.common.verbose)
-    .init();
-
-// Controller (depends on uptrakit-tracing-init directly)
-uptrakit_tracing_init::TracingBuilder::new()
-    .verbosity(args.verbose)
-    .init();
-
-// CLI (depends on uptrakit-tracing-init directly; stderr, no subscriber at v=0)
-uptrakit_tracing_init::init_cli_tracing(cli.verbose);
-
-// Tests (depends on uptrakit-tracing-init directly)
-uptrakit_tracing_init::init_test_tracing();
-```
-
-**Compile-time directives** (the programmatic `(target, level)` pairs built into the builder) use `.expect("BUG: …")`
-— they are programmer-controlled constants. **`RUST_LOG` directives** are parsed leniently: invalid segments print an
-`eprintln!` warning and are skipped; valid ones are appended after the programmatic directives so `RUST_LOG` wins for
-same-target matches. See `docs/development/logging.md` for the full verbosity mapping and `RUST_LOG` precedence rules.
+**Libraries must never configure the global tracing dispatcher** — only binary `main()` may. All tracing init lives in `uptrakit-tracing-init`
+(`TracingBuilder`, `init_cli_tracing`, `init_test_tracing`); `uptrakit-service-sdk` re-exports it for daemons. Do not add per-binary
+`init_tracing()` helpers. See [docs/development/tracing.md](docs/development/tracing.md).
 
 ### Directory management
 
-All binaries (controller, agent, MQTT service, scheduler) use the `uptrakit-directories` crate for cross-platform directory
-resolution. The crate uses the `directories` crate (`ProjectDirs`) to follow platform conventions:
-
-| Platform | Config directory                                    | State directory                                     |
-| -------- | --------------------------------------------------- | --------------------------------------------------- |
-| Linux    | `~/.config/{app}/` (XDG)                            | `~/.local/state/{app}/` (XDG)                       |
-| macOS    | `~/Library/Application Support/org.uptrakit.{app}/` | `~/Library/Application Support/org.uptrakit.{app}/` |
-| Windows  | `{FOLDERID_RoamingAppData}\uptrakit\{app}\`         | `{FOLDERID_LocalAppData}\uptrakit\{app}\`           |
-
-Where `{app}` is one of: `controller`, `agent`, `agent-ssh`, `mqtt`, `scheduler`.
-
-#### Config vs state separation
-
-| Directory  | Contents                                  | Characteristics                                                          |
-| ---------- | ----------------------------------------- | ------------------------------------------------------------------------ |
-| **Config** | Rarely-changing, persistent configuration | External CA certificates, user-provided TLS certs                        |
-| **State**  | Runtime state that may change frequently  | SQLite DB, JWT keys, service identity, private keys, issued certificates |
-
-**Controller:**
-
-- Config: External CA certificate/key (if configured), server TLS certificate/key
-- State: SQLite database (includes managed CA history, JWT signing key)
-
-**Agent/MQTT Service:**
-
-- Config: Controller's CA certificate
-- State: Service ID, private key, issued certificate
-
-**SSH Agent:**
-
-- Config: Controller's CA certificate
-- State: Service ID, private key, issued certificate, local SQLite DB (`agent-ssh.db` with encrypted SSH credentials)
-- Runtime: `SshAgentHandler` holds `in_flight_update: Option<InFlightUpdate>` to enforce one-update-at-a-time; the SSH
-  agent is feature-complete for version checks and updates over SSH (delegates to `uptrakit-agent-core`)
-
-#### CLI directory flags
-
-All binaries support `--config-dir` and `--state-dir` CLI flags (and corresponding `UPTRAKIT_CONFIG_DIR` /
-`UPTRAKIT_STATE_DIR` environment variables) to override the platform defaults. Both support `~` expansion for home
-directory paths.
-
-#### CLI authentication environment variables
-
-The `uptrakit` CLI binary also supports:
-
-| Variable           | Description                                                                                                                                    |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `UPTRAKIT_SERVER`  | Controller URL (equivalent to `--server`)                                                                                                      |
-| `UPTRAKIT_TOKEN`   | API token (equivalent to `--token`)                                                                                                            |
-| `UPTRAKIT_TIMEOUT` | API request timeout in seconds (equivalent to `--timeout`; default: 30). Useful for CI pipelines or operations that may take longer than 30 s. |
-
-**Priority:** CLI flag > environment variable > stored credentials file. Using `UPTRAKIT_TOKEN` is preferred over
-`--token` in automation to avoid exposing tokens in process listings.
-
-#### Secure permissions
-
-All created files and directories use secure permissions:
-
-- **Directories**: 0o700 (owner read/write/execute only)
-- **Files**: 0o600 (owner read/write only)
-
-The `uptrakit-directories` crate provides helper functions (permissions are set **atomically at creation time** on
-Unix, eliminating TOCTOU windows):
-
-- `create_secure_dir(path)` -- async; creates directory with 0o700 permissions using `tokio::fs`
-- `write_secure_file(path, data)` / `write_secure_file_str(path, str)` -- async; atomically writes file with 0o600
-  permissions (write-to-temp-then-rename on same filesystem)
-- `AppDirs::resolve(app_kind, config_override, state_override)` -- resolves directories for an application
-- `AppDirs::config_path(name)` / `AppDirs::state_path(name)` -- returns `Result<PathBuf>` after validating `name`
-  against path traversal (rejects path separators, `..`, `.`, empty strings, absolute paths)
-- `AppDirs::ensure_config_dir()` -- async; creates config directory with secure permissions
-- `AppDirs::ensure_state_dir()` -- async; creates state directory with secure permissions
-- `AppDirs::ensure_dirs()` -- async; creates both directories with secure permissions
-
-All crates writing sensitive files (private keys, certificates, CA bundles) **must** use these helpers instead of raw
-`fs::write` / `tokio::fs::write`.
-
-#### Key files
-
-| File                                   | Purpose                                                                  |
-| -------------------------------------- | ------------------------------------------------------------------------ |
-| `crates/shared/directories/src/lib.rs` | Cross-platform directory resolution and secure file/directory operations |
-
-## Notification subsystem
-
-The controller includes a channel-agnostic notification subsystem. Event producers emit `NotificationEvent` values
-(internal, never exposed to channels). A fire-and-forget `NotificationDispatcher` matches events against
-tenant-scoped rules, builds a `DeliveryMessage`, and hands it to the appropriate channel for delivery.
-The dispatcher uses a **bounded** `mpsc::channel(DISPATCHER_CHANNEL_CAPACITY)` (capacity 4096); events that
-overflow are dropped with a `tracing::warn!` rather than causing unbounded heap growth.
-
-### Key crates and modules
-
-| Crate/module                                             | Purpose                                                                                                                                                                                                   |
-| -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `crates/plugins/infrastructure/core/src/roles.rs`        | Narrow role traits including `NotificationTransport` (with `channel_type()`, `deliver(config, settings, message)`); `PluginMeta` trait                                                                    |
-| `crates/plugins/infrastructure/core/src/descriptor.rs`   | `PluginDescriptor` static metadata struct; `declare_plugin!` macro output target                                                                                                                          |
-| `crates/plugins/notifications/core/`                     | `DeliveryMessage` (`#[non_exhaustive]`, `::new()`), `MessageAction` (`#[non_exhaustive]`, `::new()`), `NotificationPluginError`, `escape_html()`; shared `list_channels` helper (feature `channel_admin`) |
-| `crates/plugins/notifications/webhook/`                  | Webhook plugin (SSRF validation + header blocklist + HMAC-SHA256 signing); `surfaces.rs` action handler; uses `declare_plugin!` + implements `NotificationTransport` role trait                           |
-| `crates/plugins/notifications/telegram/`                 | Telegram plugin with inline keyboard; `surfaces.rs` action handler (including callback verification); uses `declare_plugin!` + implements `NotificationTransport` role trait                              |
-| `crates/plugins/notifications/email/`                    | Email plugin (SMTP via mail-send, internal SMTP merge); `surfaces.rs` action handler (SMTP settings CRUD); uses `declare_plugin!` + implements `NotificationTransport` role trait                         |
-| `crates/plugins/infrastructure/registry/`                | Unified `PluginCatalog` built from `all_descriptors()` list, `CatalogConfig`; `notification_transport()` lookup; `notification_supported_types()`; implements `NotificationOps` trait                     |
-| `crates/shared/web-api-types/src/notifications.rs`       | Shared request/response types, `NotificationEventType`, `NotificationDeliveryStatus` enums; `channel_type` is `String` (not an enum)                                                                      |
-| `crates/ui/web-api/src/notifications/`                   | Internal `NotificationEvent`, `NotificationDispatcher` (generic, no channel-type blocks), `message_builder`                                                                                               |
-| `crates/ui/web-api/src/routes/notifications.rs`          | REST API route handlers (channels, rules, log, generic notification callback)                                                                                                                             |
-| `crates/ui/web-api-queries/src/queries/notifications.rs` | CRUD query helpers using `TenantDb`                                                                                                                                                                       |
-| `crates/shared/db/src/raw_settings.rs`                   | Raw-key settings store functions (`upsert_setting_raw`, `upsert_global_setting_raw`, `load_settings_by_prefix`, `load_global_settings_by_prefix`); used by notification plugins and `web-api-auth`        |
-| `crates/ui/web-api-auth/src/settings_store.rs`           | Typed settings store using `SettingKey` enum; delegates raw-key functions to `uptrakit_shared_db::raw_settings`                                                                                           |
-| `crates/shared/openapi-client/src/notifications.rs`      | Typed HTTP client methods                                                                                                                                                                                 |
-| `crates/ui/cli/src/commands/notifications.rs`            | CLI `notifications` command group                                                                                                                                                                         |
-
-### Feature flags
-
-| Feature                  | Crate                          | Default | Notes                                                                                                |
-| ------------------------ | ------------------------------ | ------- | ---------------------------------------------------------------------------------------------------- |
-| `webhook`                | plugin-infrastructure-registry | yes     | Always compiled                                                                                      |
-| `telegram`               | plugin-infrastructure-registry | no      | Requires `teloxide-core`                                                                             |
-| `email`                  | plugin-infrastructure-registry | no      | SMTP via mail-send (rustls)                                                                          |
-| `notifications-telegram` | web-api, controller            | no      | Propagated to plugin-infrastructure-registry                                                         |
-| `notifications-email`    | web-api, controller            | no      | Propagated to plugin-infrastructure-registry; SMTP settings managed via email plugin surface actions |
-
-### Event types
-
-`update_available`, `update_completed`, `update_failed`, `new_software_discovered`, `new_service_enrolled`,
-`ca_rotated`, `batch_update_completed`, `batch_update_partially_completed`, `stdin_attention`.
-Events are wired into existing WebSocket handlers (`messages/`, `updates/`), `services.rs`,
-and `settings_ca.rs`. The `stdin_attention` event is dispatched when an interactive update appears
-to be waiting for stdin input.
-
-### Permissions
-
-`ViewNotifications` (view channels, rules, log) and `ManageNotifications` (create/edit/delete channels and rules).
-
-### User management
-
-The system uses 33 granular permissions grouped into 8 built-in roles (`viewer`, `operator`,
-`service_manager`, `software_manager`, `host_manager`, `settings_manager`, `command_manager`,
-`system_administrator`). Five access presets (`read_only`, `operator`, `manager`, `administrator`,
-`owner`) provide convenient role bundles. The first registered user receives all 8 roles (owner preset);
-subsequent users receive only `viewer`.
-
-User management endpoints (`/api/v1/users`, `/api/v1/roles`, `/api/v1/permissions`,
-`/api/v1/access-presets`) require the `ManageUsers` permission. Lockout prevention rejects
-changes that would leave no user with `manage_users`.
-
-Key files: `crates/shared/types/src/permissions.rs` (32 `Permission` variants),
-`crates/shared/types/src/access_preset.rs` (`AccessPreset` enum),
-`crates/ui/web-api/src/routes/users.rs`, `crates/ui/web-api/src/routes/access_presets.rs`,
-`crates/shared/web-api-types/src/users.rs`, `crates/shared/web-api-types/src/access_presets.rs`,
-`crates/ui/web-api-queries/src/queries/users/oidc_sync.rs` — `#[cfg(feature = "oidc")]`; contains
-`find_active_provider` and `build_fake_claims_for_sync`; OIDC-specific DB helpers extracted from
-`oidc_auth.rs`.
-
-See [Authentication and Authorization](docs/security/auth-and-authorization.md) for the full
-permission model and [User Management API](docs/api/user-management.md) for the endpoint reference.
-
-### Adding a new channel
-
-1. Create a new crate under `crates/plugins/notifications/<name>/`
-2. Use `declare_plugin!` macro to export a `PluginDescriptor` static; implement the `NotificationTransport` role trait from `uptrakit-plugin-infrastructure-core`
-3. Add `surfaces.rs` with `handle_surface_action()` for settings CRUD, channel listing (`list_channels` helper), and callback handling
-4. Add the descriptor to the `all_descriptors()` list in `PluginCatalog` behind `#[cfg(feature = "...")]`
-5. Add feature in `crates/plugins/infrastructure/registry/Cargo.toml`
-6. Propagate feature: `web-api/Cargo.toml` -> `controller/Cargo.toml`
-7. HTML-escape all user-controlled values in `body_html` via `uptrakit_notification_plugin_core::escape_html()`
-
-No changes to `NotificationChannelType` are needed -- channel types are plain strings validated
-at runtime via `notification_supported_types()`.
-
-See [Notifications Development](docs/development/notifications.md) for full details.
-
-## Audit log subsystem
-
-V2 semantic audit log subsystem. Producers emit kind-typed entries via `AuditEmitter`.
-
-### Action kinds
-
-Two compile-time-enforced classes:
-
-- **Stateful** — entity transition. Requires a `before`/`after` snapshot pair (enforced by typestate builder).
-  Written inside the mutation's `DatabaseTransaction`; commits or rolls back atomically.
-- **Event** — discrete workflow fact. Snapshots forbidden. Fire-and-forget through `AuditLogDispatcher`.
-
-### Emit paths
-
-- `audit.emit_stateful(&tx, entry)` — Stateful actions only. Synchronous DB INSERT inside the caller's transaction.
-  Requires `BEGIN IMMEDIATE`. Call `AuditCommitHook::flush_after_commit()` after `tx.commit()` for journald mirror.
-- `audit.emit_event(entry)` — Event actions only. Async fire-and-forget dispatcher (unchanged from V1).
-
-### `AuditView` derive macro
-
-Domain entities that are snapshot targets derive `AuditView`. The macro generates a deterministic, secret-safe JSON
-projection (`EncryptedString` excluded at compile time; `MaskedUrl`/`MaskedEmail` self-mask). Attributes:
-`#[audit(target_type)]`, `#[audit(skip)]`, `#[audit(include)]`, `#[audit(project_with = "<fn>")]`,
-`#[audit(id_field = "...")]`, `#[audit(display_field = "...")]`, `#[audit(truncatable)]` (last-resort 16 KB cap).
-
-### Coverage gate
-
-`crates/shared/audit-log/audit-catalog.toml` catalogs every state-changing site with either an `action` or a `skip`
-reason. `cargo xtask audit-coverage-check` runs in CI and fails on uncatalogued sites or dead registered actions.
-
-### Key crates
-
-| Crate/module                                                        | Purpose                                                                                              |
-| ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `crates/shared/audit-log/`                                          | `AuditActionType`, `AuditEntry<K>`, `AuditEmitter`, dispatcher, backends                             |
-| `crates/shared/audit-log-derive/`                                   | `AuditView` derive, `audit_actions!` proc-macro                                                      |
-| `crates/shared/audit-log/audit-catalog.toml`                        | Action coverage catalog                                                                              |
-| `xtask/`                                                            | Static-analysis CI gate (`cargo xtask audit-coverage-check`)                                         |
-| `crates/shared/db/src/entity/audit_log.rs`                          | SeaORM entity for `audit_logs` (tenant-scoped)                                                       |
-| `crates/shared/db/src/entity/system_audit_log.rs`                   | SeaORM entity for `system_audit_logs`                                                                |
-| `crates/ui/web-api/src/routes/service_ws/handler/mod.rs`            | Service-forwarded event ingestion (Event-class only; Stateful forwarding rejected)                   |
-| `crates/ui/web-api-queries/src/queries/audit_logs.rs`               | `list_tenant_audit_logs` + `list_system_audit_logs`                                                  |
-| `crates/ui/web-api/src/routes/audit_logs.rs`                        | `GET /api/v1/audit-logs` + `GET /api/v1/system-audit-logs`                                           |
-| `crates/shared/web-api-types/src/audit_logs.rs`                     | `AuditLogResponse` (V2 fields: `action_kind`, `before_snapshot`, `after_snapshot`, `correlation_id`) |
-| `crates/ui/cli/src/commands/audit_logs.rs`                          | `audit-logs list`, `audit-logs show`, `audit-logs system list`                                       |
-| `crates/shared/scheduler-engine/src/executors/audit_log_cleanup.rs` | Retention cleanup (default 90 days)                                                                  |
-
-### V3 deferred
-
-Workflow timeline view, per-entity audit history, analytics dashboards, per-action-kind retention, legal-hold archive,
-agent-side stateful emit.
-
-### Banned patterns
-
-- No `target: "security_audit"` tracing producers (V1 CI gate still active).
-- No raw `action_type` string literals outside registry, tests, fixtures, migrations.
-- No service-forwarded Stateful events (rejected at controller ingress).
-- No `emit_best_effort` (removed in V2).
-
-See [Audit Logs Development](docs/development/audit-logs.md) and [Audit Logs Security](docs/security/audit-logs.md).
-
-## Shared Surface Runtime
-
-Connected services and plugins extend the web UI through the shared surface runtime. Providers
-register surface contracts (services at runtime, plugins at startup), and the controller enforces
-admission, routing, permissions, and rollout state.
-
-### Key files
-
-| File                                             | Purpose                                                                                               |
-| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
-| `crates/shared/surfaces/src/lib.rs`              | Shared surface contract types (`SurfaceRegistration`, descriptors, interactions, data sources, slots) |
-| `crates/shared/wire/src/surfaces.rs`             | Wire barrel re-export for service/controller transport                                                |
-| `crates/ui/web-api/src/surface_registry.rs`      | Runtime registry and admission policy (provider/surface catalog)                                      |
-| `crates/ui/web-api/src/surface_proxy.rs`         | Controller-side request routing, correlation, idempotency, cancellation, timeouts                     |
-| `crates/ui/web-api/src/routes/surfaces.rs`       | REST endpoints: list, providers, read, invoke, runtime status                                         |
-| `crates/shared/service-sdk/src/surface_proxy.rs` | Service-side proxy for invoking controller/plugin surface interactions                                |
-| `crates/shared/service-sdk/src/shared_types.rs`  | `ServiceHandler` surface hooks (`on_surface_action_request` / `on_surface_action_response`)           |
-| `crates/shared/service-sdk/src/event_loop.rs`    | Event loop dispatch for `SurfaceRegistration` and surface action messages                             |
-| `crates/shared/openapi-client/src/surfaces.rs`   | Typed surface API client helpers                                                                      |
-| `frontend/src/lib/surfaces/registry.svelte.ts`   | Frontend runtime registry/cache for provider-backed surfaces                                          |
-| `frontend/src/lib/components/surfaces/`          | Shared renderer components (`SurfaceRenderer`, `SurfaceForm`, `SurfaceTable`, etc.)                   |
-
-### Capability
-
-Surface registration and interaction messaging require the `UiSurfaces` capability.
-
-### Route and rendering model
-
-Provider-backed pages are routed through `/surfaces/{surface_id}` and rendered by shared surface
-components. Built-in and provider-backed surfaces use the same rendering path and UI conventions.
-
-### Bidirectional invocation
-
-Services can invoke controller-side plugin interactions via `ServiceMessage::SurfaceActionRequest`.
-The controller responds with `ControllerMessage::SurfaceActionResponse`. `ServiceSurfaceProxy`
-provides the oneshot-correlation pattern for these session-scoped messages.
-
-See [Shared Surface Runtime Development](docs/development/surfaces.md),
-[Shared Surface Runtime Architecture](docs/architecture/surfaces.md), and
-[Surface Runtime Security](docs/security/surfaces.md) for full details.
-
-## Detailed Documentation References
-
-For more in-depth information on specific topics, refer to the following documents:
-
-### Security
-
-- [PKI and Certificate Lifecycle](docs/security/pki-certificates.md)
-- [Secrets Handling and Encryption](docs/security/secrets-and-encryption.md) (includes master key verification for HA safety)
-- [TOFU and TLS Hardening](docs/security/tofu-tls.md)
-- [Authentication and Authorization](docs/security/auth-and-authorization.md)
-- [Cryptography](docs/security/cryptography.md)
-- [Security Architecture](docs/security/security-architecture.md)
-- [Filesystem and Dependency Security](docs/security/filesystem-dependency-security.md)
-- [Reverse Proxy Security](docs/security/reverse-proxy-security.md)
-- [SSH Agent Secrets](docs/security/ssh-agent-secrets.md)
-- [Sudoers Management](docs/security/sudoers-management.md)
-- [Notifications Security](docs/security/notifications-security.md)
-- [Audit Logs Security](docs/security/audit-logs.md)
-- [Surface Runtime Security](docs/security/surfaces.md)
-
-### End-user Guides
-
-- [CLI Usage Guide](docs/end-user/cli-usage.md)
-- [Plugin Configurations](docs/end-user/plugin-configs.md)
-- [Update History](docs/end-user/update-history.md)
-- [Profile and API Tokens](docs/end-user/profile-tokens.md)
-- [Autodiscovery](docs/end-user/autodiscovery.md)
-- [Update Workflow](docs/end-user/update-workflow.md)
-- [Home Assistant and MQTT Integration](docs/end-user/home-assistant-mqtt.md)
-- [Shared Surface Runtime](docs/end-user/surfaces.md)
-
-### Development Guidelines
-
-- [Quality Gates](docs/development/quality-gates.md)
-- [Commit Messages](docs/development/commit-messages.md)
-- [CLI Output Formatting](docs/development/cli-output.md)
-- [Graceful Restart](docs/development/graceful-restart.md)
-- [Cross-Controller Communication](docs/development/cross-controller-comm.md)
-- [NATS Integration](docs/development/nats-integration.md)
-- [Coding Standards](docs/development/coding-standards.md)
-- [Error Handling](docs/development/error-handling.md)
-- [Testing Expectations](docs/development/testing.md)
-- [Plugin Guidelines](docs/development/plugin-guidelines.md)
-- [Plugin System Architecture](docs/development/plugin-system.md)
-- [Command Executor](docs/development/command-executor.md)
-- [Update Lifecycle Plugins](docs/development/update-hooks.md)
-- [Service Lifecycle](docs/development/service-lifecycle.md)
-- [OpenAPI Client](docs/development/openapi-client.md)
-- [Embedded Frontend](docs/development/embedded-frontend.md)
-- [Logging](docs/development/logging.md)
-- [Tracing Conventions](docs/development/tracing.md)
-- [Notifications](docs/development/notifications.md)
-- [Audit Logs](docs/development/audit-logs.md)
-- [Docker](docs/development/docker.md)
-- [Shared Surface Runtime](docs/development/surfaces.md)
-- [Proxmox Bootstrap Privileges](docs/development/proxmox-bootstrap.md)
-
-### Architecture
-
-- [Multi-Tenancy](docs/architecture/multi-tenancy.md)
-- [Host Entity](docs/architecture/host-entity.md)
-- [Software Item Entity](docs/architecture/software-item-entity.md)
-- [Update History Entity](docs/architecture/update-history-entity.md)
-- [Embedded Services](docs/architecture/embedded-services.md)
-- [Scheduler](docs/architecture/scheduler.md)
-- [Scheduler Engine](docs/development/scheduler-engine.md)
-- [External Scheduler Deployment](docs/end-user/deployment/external-scheduler.md)
-- [SSH Agent](docs/architecture/ssh-agent.md)
-- [Shared Surface Runtime](docs/architecture/surfaces.md)
-- [Host Tags](docs/architecture/host-tags.md)
-
-### API and Protocol
-
-- [Wire Protocol](docs/api/wire-protocol.md)
-- [Authentication Flows](docs/api/auth-flows.md)
-- [Settings Runtime](docs/api/settings-runtime.md)
-- [HTTP Web API](docs/api/http-web-api.md)
-- [Services and Operations](docs/api/services-operations.md)
-- [Autodiscovery](docs/api/autodiscovery.md)
-- [Shared Surface API](docs/api/surfaces.md)
-- [Host Tags](docs/api/host-tags.md)
+All binaries use `uptrakit-directories` for cross-platform config/state resolution (XDG on Linux, `ProjectDirs` elsewhere), overridable via
+`--config-dir`/`--state-dir` or `UPTRAKIT_CONFIG_DIR`/`UPTRAKIT_STATE_DIR`. Config holds rarely-changing data (external certs); state holds the SQLite
+DB, keys, and identity. All secret-file writes **must** use the crate's secure helpers (`create_secure_dir` 0o700, `write_secure_file` 0o600) instead
+of raw `fs::write`. See [docs/development/directories.md](docs/development/directories.md).
+
+### Notifications
+
+Channel-agnostic subsystem: producers emit internal `NotificationEvent` values; a fire-and-forget `NotificationDispatcher` (bounded `mpsc`, overflow
+dropped with a warn) matches tenant-scoped rules and hands a `DeliveryMessage` to the channel. Channels are plugins under
+`crates/plugins/notifications/` (`declare_plugin!` + `NotificationTransport` role trait); `channel_type` is a runtime-validated string, never an enum.
+HTML-escape all user-controlled values via `escape_html()`. See [docs/development/notifications.md](docs/development/notifications.md); platform-wide
+RBAC (variants in `crates/shared/types/src/permissions.rs`) is in [docs/security/auth-and-authorization.md](docs/security/auth-and-authorization.md).
+
+### Audit log subsystem
+
+V2 semantic audit log. Two compile-time-enforced action classes: **Stateful** (entity transition, requires `before`/`after` snapshot, in-transaction
+via `emit_stateful` under `BEGIN IMMEDIATE` + `flush_after_commit()`) and **Event** (discrete fact, snapshots forbidden, async via `emit_event`).
+Snapshot targets derive `AuditView` (secret-safe JSON). Every state-changing site must appear in `audit-catalog.toml` with an `action`/`skip`
+(enforced by `cargo xtask audit-coverage-check`). Banned: `target: "security_audit"` producers, raw `action_type` literals, service-forwarded
+Stateful events, `emit_best_effort`. See [docs/development/audit-logs.md](docs/development/audit-logs.md) and
+[docs/security/audit-logs.md](docs/security/audit-logs.md).
+
+### Shared surface runtime
+
+Connected services and plugins extend the web UI via the shared surface runtime. Providers register surface contracts (services at runtime, plugins
+at startup); the controller enforces admission, routing, permissions, and rollout state. Registration and interaction messaging require the
+`UiSurfaces` capability; built-in and provider-backed surfaces share one rendering path (`/surfaces/{surface_id}`). Services invoke controller-side
+plugin interactions via `ServiceMessage::SurfaceActionRequest` → `ControllerMessage::SurfaceActionResponse` (oneshot-correlated by
+`ServiceSurfaceProxy`). See [surfaces.md](docs/development/surfaces.md) and [security/surfaces.md](docs/security/surfaces.md).
+
+## Detailed documentation references
+
+Every other topic (security, end-user guides, development standards, architecture, API/protocol) is indexed in
+[docs/README.md](docs/README.md).
 
 ## Maintaining this file
 
-### Philosophy
+`AGENTS.md` is the AI agent's entry point: an index of invariants and pointers, not a mirror of the codebase. Its value
+is density and accuracy — every fact has exactly one canonical home, and this file links to it rather than copying it.
 
-`AGENTS.md` is the single source of truth for AI coding agents working on this codebase. It must
-contain everything an agent needs to work correctly without asking clarifying questions, and nothing
-that would be better placed in the detailed docs under `docs/`. Its value is density and authority:
-agents read it first, so it must earn that position by being accurate and up-to-date.
+### Size budget (CI-enforced)
+
+The root `AGENTS.md` must stay ≤ 500 lines (and ≤ 60 KB); any scoped `*/AGENTS.md` must stay ≤ 250 lines. Enforced by
+`bash ci/verify_agents_md_budget.sh` (CI and pre-commit). Authored target for this root file is ~400 lines.
+
+### Rules
+
+- **No code-structure inventory in any AGENTS.md.** The primary anti-drift control: never add per-file row tables that
+  mirror module layout (the 339→1944-line regrowth was driven by handler-table sync commits). Orient with prose that
+  points at a source file, not a table. Applies to scoped files too.
+- **No hardcoded counts.** Never write "32 extractors", "17 variants", "49 tables" — counts drift the moment code
+  changes. Point at the defining source file instead.
+- **One canonical home; link, don't copy.** If a fact belongs in a `docs/` file, keep it there and link. Do not
+  reproduce endpoint references, testing patterns, or convention prose here.
+- **Subsystem entries are stubs, not deep dives.** Each states its load-bearing invariants as one-liners plus a link to
+  the canonical doc; mechanics, matrices, and file inventories live in that doc.
 
 ### What belongs here
 
-- **Codebase layout** (annotated directory tree) — orient agents before they read code
-- **Architecture invariants** — non-negotiable constraints that span multiple files and would not be
-  obvious from any single file (e.g., "updates are never automatic", "no raw SQL",
-  feature-flag additive-only rule)
-- **Subsystem contracts** (autodiscovery, plugin system, MQTT, notification, audit log, surfaces)
-  — invariants across multiple crates that an agent editing one file could silently violate
-- **Quick-start command reference** — the exact commands agents must run, kept in sync with
-  `docs/development/quality-gates.md` (Rust commands) and the `### Quality Gates` sub-section
-  (integration test commands)
-- **Crate annotations in the layout tree** — one-line purpose and key module descriptions for each
-  crate
-- **Recurring anti-patterns discovered from AI-generated code** — add a rule when the same mistake
-  appears twice
-
-### What does NOT belong here
-
-| Content                                             | Correct location                        |
-| --------------------------------------------------- | --------------------------------------- |
-| Full API endpoint reference                         | `docs/api/`                             |
-| End-user installation and setup guides              | `docs/development/setup.md`             |
-| Detailed testing patterns and coverage expectations | `docs/development/testing.md`           |
-| Dependency policy rules                             | `docs/development/dependency-policy.md` |
-| Plugin authoring guide                              | `docs/development/plugin-guidelines.md` |
-| Detailed coding convention prose                    | `docs/development/coding-standards.md`  |
-| Error handling patterns                             | `docs/development/error-handling.md`    |
-
-`AGENTS.md` must **reference** those files (as it already does), not reproduce them.
+- Project summary, glossary pointer, quick-start commands, and the one-line-annotated codebase layout tree.
+- Compressed MUST-FOLLOW rules: each keeps its bold lead-in verbatim (external docs cite them) + 1–2 sentences + a link.
+- Subsystem-contract stubs (invariant one-liners + link), plus recurring AI-code anti-patterns (add a rule when the same
+  mistake appears twice).
 
 ### When to update
 
-- **Update when:**
-  - A new crate is added to the workspace (add a line to the layout tree)
-  - A crate's key modules or primary responsibilities change significantly
-  - A new architecture invariant is established (add a rule to the General MUST FOLLOW Rules section)
-  - A build command, flag, or test workflow changes — update `docs/development/quality-gates.md` as
-    the canonical source for Rust commands, then update `## Quick-start commands` and the
-    `### Quality Gates` sub-section in sync
-  - A recurring anti-pattern in AI-generated code reveals a missing rule
-  - A subsystem contract changes (e.g., new autodiscovery invariant, new plugin capability)
-  - A new top-level directory or binary is added
-
-- **Do not update when:**
-  - Only linked `docs/` files change — update those files; `AGENTS.md` links to them already
-  - The change is purely internal to one file within an existing crate without altering the crate's
-    public contract or expected agent behavior
-  - A formatting or wording tweak in a doc file does not change meaning for agents
-  - Only integration test infrastructure changes and commands are unchanged
-  - Only `docker/` or `scripts/` files change without affecting agent-facing commands or invariants
-
-### How to update
-
-1. **Do not restructure the file.** Section order is intentional; agents rely on consistent
-   positioning.
-2. **Layout tree changes:** Add or remove the crate entry; keep annotations to one line where
-   possible; match the existing annotation style (crate name in backticks, `(lib)` or `(bin)` tag,
-   em-dash, one-sentence description).
-3. **New invariant rules:** Append to the numbered list in `## General MUST FOLLOW Rules for AI
-Coding Agents`; start with a bold lead-in; link to the relevant `docs/` file.
-4. **Command or flag changes:** Update `docs/development/quality-gates.md` (canonical source for
-   Rust commands) and the `## Quick-start commands` section in the same commit. When updating
-   integration test commands, update the `### Quality Gates` sub-section of `AGENTS.md` and the
-   `## Quick-start commands` section in the same commit. Never modify one without the other.
-5. **Run `markdownlint --config .markdownlint.json AGENTS.md`** after every edit and fix any
-   violations before committing.
-6. **Commit the update together with the code change that triggered it** — same PR or commit.
+Update when a crate is added/removed (one tree line), a new architecture invariant is established (a MUST-FOLLOW rule),
+a subsystem's invariants change, or a command/flag changes (update
+[docs/development/quality-gates.md](docs/development/quality-gates.md) as canonical source **and** the Quick-start block
+in the same commit). Do not update for changes internal to one file, doc-only tweaks, or `docker/`/`scripts/` changes
+that don't affect agent-facing commands or invariants. Run `markdownlint` after every edit.
 
 ### Subfolder AGENTS.md files
 
-Subfolder-scoped files exist where an area uses a different toolchain or has conventions distinct
-enough to warrant a separate guide. Each subfolder file must link back to this root file in its
-opening paragraph.
+Scoped files exist where an area uses a different toolchain or distinct conventions; each must link back to this root
+file in its opening paragraph. To add one, create the file with that back-link and add a row below.
 
-| File                 | Scope                                                               |
-| -------------------- | ------------------------------------------------------------------- |
-| `frontend/AGENTS.md` | SvelteKit frontend (`npm` toolchain, Svelte/TypeScript conventions) |
-
-All other areas (Rust crates, `docs/`, `docker/`, `scripts/`) are covered by this root file. To
-add a subfolder `AGENTS.md`: create the file, add an opening paragraph linking back to this root
-file, and add a row to the table above.
+| File                          | Scope                                                               |
+| ----------------------------- | ------------------------------------------------------------------- |
+| `frontend/AGENTS.md`          | SvelteKit frontend (`npm` toolchain, Svelte/TypeScript conventions) |
+| `crates/ui/web-api/AGENTS.md` | web-api handler modules, sub-state extractors, OpenAPI placement    |
+| `crates/plugins/AGENTS.md`    | plugin authoring: `declare_plugin!`, shared helpers, SSRF, sudo     |
