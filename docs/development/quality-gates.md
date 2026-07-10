@@ -55,6 +55,7 @@ bash ci/verify_no_security_audit.sh                                  # No legacy
 bash ci/verify_typed_audit_actions.sh                                # Dynamic audit action parsing/building stays at explicit boundaries
 bash ci/verify_handler_state_contract.sh                             # No handler mixes State<Arc<AppState>> with sub-state
 python3 ci/verify_db_access_policy.py                                # db_access_policy.toml consistent with routes/
+bash ci/verify_agents_md_budget.sh                                   # AGENTS.md files within size budgets
 ```
 
 Workspace lints (`[workspace.lints]` in root `Cargo.toml`) enforce `warnings = "deny"` and

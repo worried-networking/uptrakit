@@ -35,6 +35,7 @@ FRONTEND_PRETTIER_FILES=()
 ROUTES_RS_FILES=()
 ACTIONS_FILES=()
 WEBSITE_DOCS_TOUCHED=0
+AGENTS_MD_TOUCHED=0
 
 WEBSITE_DOC_PREFIXES=()
 REPO_ROOT=$(git rev-parse --show-toplevel)
@@ -64,6 +65,7 @@ for path in "${STAGED_PATHS[@]}"; do
       ;;
   esac
   [[ "$path" =~ ^crates/ui/web-api/src/routes/.*\.rs$ ]] && ROUTES_RS_FILES+=("$path")
+  [[ "${path##*/}" == "AGENTS.md" ]] && AGENTS_MD_TOUCHED=1
   if [[ "$path" == website/* ]]; then
     WEBSITE_DOCS_TOUCHED=1
   else
@@ -156,6 +158,12 @@ if (( WEBSITE_DOCS_TOUCHED )); then
     # zola check validates the whole site — pre-existing broken links in unrelated docs will also fail.
     ( cd website && zola check --skip-external-links )
   fi
+fi
+
+if (( AGENTS_MD_TOUCHED )); then
+  echo '[pre-commit] Verifying AGENTS.md size budgets...'
+  # Repo-wide check (sub-second); gated on staged AGENTS.md files to keep the hook fast.
+  bash ci/verify_agents_md_budget.sh
 fi
 
 if (( ${#FRONTEND_ESLINT_FILES[@]} > 0 || ${#FRONTEND_PRETTIER_FILES[@]} > 0 )); then

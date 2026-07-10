@@ -70,6 +70,7 @@ jobs:
       - run: bash ci/verify_no_security_audit.sh
       - run: bash ci/verify_typed_audit_actions.sh
       - run: bash ci/verify_no_inline_query_params.sh
+      - run: bash ci/verify_agents_md_budget.sh
 
   backend-lint:
     runs-on:
