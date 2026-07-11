@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use rootcause::prelude::*;
 use serde_json::json;
 
 use crate::image_ref::ImageRef;
@@ -115,12 +116,14 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for DockerPlugin {
                             None
                         }
                         Err(err) => {
-                            tracing::warn!(
-                                image = %ir.full_ref,
-                                error = %err,
-                                "failed to inspect image during discovery"
-                            );
-                            None
+                            bail!(
+                                uptrakit_plugin_infrastructure_core::PluginError::PluginInternal(
+                                    format!(
+                                        "failed to inspect image {} during discovery: {err}",
+                                        ir.full_ref
+                                    )
+                                )
+                            )
                         }
                     };
                     let digest_opt = outcome.clone();

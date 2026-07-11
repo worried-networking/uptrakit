@@ -974,6 +974,28 @@ async fn discover_software_skips_images_without_repo_digests() {
     );
 }
 
+#[tokio::test]
+async fn discover_software_returns_err_when_inspect_image_fails() {
+    // Rule 3: a per-container processing failure (inspect_image Err) must not
+    // silently drop the item and return Ok — the whole discovery must fail.
+    let mock = Arc::new(MockDockerClient {
+        inspect_should_fail: true,
+        containers: vec![LocalContainerInfo {
+            image: "nginx:latest".to_string(),
+            names: vec!["web-server".to_string()],
+            labels: Default::default(),
+        }],
+        ..Default::default()
+    });
+    let plugin =
+        DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
+    let result = plugin.discover_software().await;
+    assert!(
+        result.is_err(),
+        "inspect_image failure during discovery must propagate as Err, not Ok([])"
+    );
+}
+
 // ── discover_software target emission ─────────────────────────────────────
 
 #[tokio::test]

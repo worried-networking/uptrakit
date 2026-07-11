@@ -919,6 +919,8 @@ pub(crate) struct MockDockerClient {
     /// advance virtual time and verify that the caller's timeout fires.
     pub ping_should_hang: bool,
     pub inspect_result: Option<String>, // Some(digest) or None
+    /// When `true`, `inspect_image()` returns an `Err` (simulates daemon failure).
+    pub inspect_should_fail: bool,
     /// Optional OS string returned in `LocalImageDigest.os` (e.g. `"linux"`).
     /// Used by tests that need platform metadata without making real registry calls.
     pub inspect_os: Option<String>,
@@ -964,6 +966,11 @@ impl DockerClient for MockDockerClient {
     }
 
     async fn inspect_image(&self, _full_ref: &str) -> Result<Option<LocalImageDigest>> {
+        if self.inspect_should_fail {
+            bail!(DockerError::DaemonConnection(
+                "mock inspect failure".to_string()
+            ));
+        }
         Ok(self.inspect_result.clone().map(|d| LocalImageDigest {
             digest: d,
             os: self.inspect_os.clone(),
