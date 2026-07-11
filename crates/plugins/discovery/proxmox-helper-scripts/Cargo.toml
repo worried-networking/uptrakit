@@ -21,6 +21,7 @@ uptrakit-shared-types = { workspace = true, features = ["http-ssrf"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
+uptrakit-plugin-infrastructure-core = { workspace = true, features = ["testing"] }
 
 [lints]
 workspace = true

@@ -1,11 +1,12 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec};
 use uptrakit_plugin_infrastructure_core::{
     ConfigModel, ConfigTestKind, DiscoveredSoftware, DiscoveryTarget, HostCompatibility,
-    HostRequirements, HostRuntime, PluginFamily, PluginRole, SudoCommandEntry, SudoHelperScript,
-    declare_plugin, plugin_ids,
+    HostRequirements, HostRuntime, PluginError, PluginFamily, PluginRole, SudoCommandEntry,
+    SudoHelperScript, declare_plugin, plugin_ids,
 };
 use uptrakit_shared_types::ssrf::{SsrfSafeResolver, webpki_client_config};
 
@@ -428,10 +429,34 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for ProxmoxHelperScriptsPlu
             ))
             .await
         {
-            Ok(output) => output.output,
-            Err(_) => {
+            Ok(out) if out.exit_code == 0 => out.output,
+            Ok(_) => {
+                // exit_code != 0: no update script at this path (legitimate empty for non-PHS hosts)
                 tracing::debug!("no PHS update script found at {UPDATE_SCRIPT_PATH}");
                 return Ok(vec![]);
+            }
+            Err(e) => {
+                // executor failure: probe with `test -f` to distinguish absent vs unreadable
+                let probe = self
+                    .executor
+                    .execute_quiet(&CommandSpec::exec(
+                        "test",
+                        ["-f".to_string(), UPDATE_SCRIPT_PATH.to_string()],
+                    ))
+                    .await;
+                match probe {
+                    Ok(p) if p.exit_code == 0 => {
+                        // file exists but is unreadable
+                        bail!(PluginError::PluginInternal(format!(
+                            "failed to read {UPDATE_SCRIPT_PATH}: {e}"
+                        )))
+                    }
+                    _ => {
+                        // file absent or probe failed — treat as non-PHS host
+                        tracing::debug!("no PHS update script found at {UPDATE_SCRIPT_PATH}");
+                        return Ok(vec![]);
+                    }
+                }
             }
         };
 
@@ -446,9 +471,10 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for ProxmoxHelperScriptsPlu
         for script in &scripts {
             // Fetch CT script body.
             let Some(body) = self.fetch_text(&script.script_url).await else {
-                tracing::warn!(slug = %script.slug, url = %script.script_url,
-                    "failed to fetch CT script; skipping");
-                continue;
+                bail!(PluginError::PluginInternal(format!(
+                    "failed to fetch CT script {}; aborting discovery to avoid partial snapshot",
+                    script.script_url
+                )))
             };
 
             let analysis = analyze_phs_script(&script.slug, &body);
@@ -593,9 +619,10 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for ProxmoxHelperScriptsPlu
                 use crate::discovery::PHS_INSTALL_URL_PREFIX;
                 let install_url = format!("{PHS_INSTALL_URL_PREFIX}{}-install.sh", script.slug);
                 let Some(install_body) = self.fetch_text(&install_url).await else {
-                    tracing::warn!(slug = %script.slug,
-                        "install-script fetch failed; skipping");
-                    continue;
+                    bail!(PluginError::PluginInternal(format!(
+                        "install-script fetch failed for {}; aborting discovery to avoid partial snapshot",
+                        script.slug
+                    )))
                 };
 
                 // Some apps (e.g. n8n) do not reference npm in their CT script
@@ -715,7 +742,7 @@ mod tests {
     use super::*;
     use uptrakit_plugin_infrastructure_core::{
         Discoverer, HostCapabilities, LocalCommandExecutor, PluginCapability, PluginMeta,
-        StandardHostRuntime,
+        StandardHostRuntime, testing::RoutedOutputExecutor,
     };
 
     fn test_plugin() -> ProxmoxHelperScriptsPlugin {
@@ -724,6 +751,17 @@ mod tests {
         let runtime = Arc::new(StandardHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
         ProxmoxHelperScriptsPlugin::new(ProxmoxHelperScriptsConfig::default(), runtime)
             .expect("create")
+    }
+
+    fn test_plugin_with(
+        executor: Arc<dyn CommandExecutor>,
+        client: reqwest::Client,
+    ) -> ProxmoxHelperScriptsPlugin {
+        ProxmoxHelperScriptsPlugin {
+            _config: ProxmoxHelperScriptsConfig::default(),
+            executor,
+            client,
+        }
     }
 
     #[test]
@@ -1064,5 +1102,44 @@ mod tests {
         let target = ProxmoxHelperScriptsPlugin::npm_target("@angular/cli");
         assert_eq!(target.plugin_type, plugin_ids::PACKAGE_MANAGER_NPM.clone());
         assert_eq!(target.package_identifier.as_deref(), Some("@angular/cli"));
+    }
+
+    // ── fetch-failure contract ───────────────────────────────────────────
+
+    /// Minimal update script body with one CT line — enough for `parse_phs_scripts`
+    /// to return one entry, triggering the CT fetch path in `discover_software`.
+    const UPDATE_SCRIPT_WITH_ONE_CT: &str = r#"bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/sonarr.sh)""#;
+
+    #[tokio::test]
+    async fn discovery_missing_update_script_returns_empty() {
+        // `cat` exit code 1 → Ok(CommandOutput{exit_code:1}) → non-zero arm → Ok(vec![])
+        let executor = RoutedOutputExecutor::new([("cat", "", 1)]);
+        let client = reqwest::Client::builder()
+            .resolve(
+                "raw.githubusercontent.com",
+                "127.0.0.1:1".parse().expect("addr"),
+            )
+            .build()
+            .expect("client");
+        let plugin = test_plugin_with(executor, client);
+        let result = plugin.discover_software().await.expect("ok");
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn discovery_ct_script_fetch_failure_returns_error() {
+        // `cat` exit code 0 with CT content → parse_phs_scripts finds 1 script →
+        // fetch_text("raw.githubusercontent.com/...sonarr.sh") → connect refused → None →
+        // must now return Err (not Ok with partial snapshot)
+        let executor = RoutedOutputExecutor::new([("cat", UPDATE_SCRIPT_WITH_ONE_CT, 0)]);
+        let client = reqwest::Client::builder()
+            .resolve(
+                "raw.githubusercontent.com",
+                "127.0.0.1:1".parse().expect("addr"),
+            )
+            .build()
+            .expect("client");
+        let plugin = test_plugin_with(executor, client);
+        plugin.discover_software().await.unwrap_err();
     }
 }
