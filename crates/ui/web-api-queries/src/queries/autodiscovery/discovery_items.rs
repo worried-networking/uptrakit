@@ -4,7 +4,7 @@
 use super::default_configs::find_or_create_default_plugin_config;
 use super::{AutodiscoveryError, Result};
 use rootcause::prelude::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set, sea_query::Expr};
 use std::collections::HashSet;
 use time::OffsetDateTime;
 use uptrakit_plugin_infrastructure_registry::is_package_manager_plugin;
@@ -390,6 +390,7 @@ async fn find_or_create_software_item(
             };
 
             if let Some(hsi) = hsi_to_update {
+                let target_hsi_id = hsi.id;
                 let mut active: host_software_item::ActiveModel = hsi.into();
                 active.software_item_id = Set(effective_item.id);
                 active.installed_version = Set(Some(installed_version.to_string()));
@@ -401,6 +402,26 @@ async fn find_or_create_software_item(
                 active.missing_since = Set(None);
                 active.deactivated_at = Set(None);
                 active.update(db).await.context_to()?;
+
+                // Cascade repoint (collision rule 2) moved the live identity
+                // from `linked_item_id` to `effective_item.id`. The matched
+                // `plugin_link` -- and any sibling role rows for the same
+                // `(host, linked_item)` identity, since Phase 1 only matched
+                // one role -- still reference the pre-repoint identity via
+                // their own `software_item_id`/`host_software_item_id`
+                // columns (set once at insert time, never updated above).
+                // Bring every such row in line with the live target so role
+                // dispatch never desyncs from the reactivated item.
+                if effective_item.id != linked_item_id {
+                    reconcile_stale_plugin_links(
+                        db,
+                        host_id,
+                        linked_item_id,
+                        effective_item.id,
+                        target_hsi_id,
+                    )
+                    .await?;
+                }
             }
         } else {
             tracing::debug!(
@@ -603,6 +624,97 @@ async fn find_or_create_software_item(
     }
 
     Ok(Some((software_item_id, hsi_id)))
+}
+
+/// Repoint every `host_software_item_plugin` role row still keyed to
+/// `(host_id, stale_item_id)` onto the live `(target_item_id, target_hsi_id)`
+/// identity after a cascade reactivation (collision rule 2).
+///
+/// Phase 1 only matches a single role row via `.one(db)`, but a
+/// `(host, software_item)` identity carries one row per role
+/// (`detect_version` / `fetch_releases` / `execute_update`), so every
+/// sibling row for the stale identity must move too -- otherwise role
+/// dispatch stays desynced from the reactivated item for the roles Phase 1
+/// didn't happen to match.
+///
+/// `target_hsi_id` may already own equivalent role rows (Case A: an active
+/// target `host_software_item` pre-existed with its own plugin links). Moving
+/// a stale row onto a `(host_software_item_id, role, ordinal)` combination
+/// that's already taken would violate `uq_hsip_hsi_role_ordinal`, so such
+/// stale rows are dropped instead (the target already has a live, correct
+/// assignment for that role); rows with no conflicting role on the target are
+/// updated in place via a single batched `update_many`.
+async fn reconcile_stale_plugin_links(
+    db: &sea_orm::DatabaseConnection,
+    host_id: Uuid,
+    stale_item_id: Uuid,
+    target_item_id: Uuid,
+    target_hsi_id: Uuid,
+) -> Result<()> {
+    let stale_links = HostSoftwareItemPlugin::find()
+        .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+        .filter(host_software_item_plugin::Column::SoftwareItemId.eq(stale_item_id))
+        .all(db)
+        .await
+        .context_to()?;
+    if stale_links.is_empty() {
+        return Ok(());
+    }
+
+    // Roles already owned by the target HSI *other than* the stale rows
+    // themselves. In Case B (`target_hsi_id` is the very row being repointed
+    // in place, e.g. the stale rows' own `host_software_item_id`), the stale
+    // rows are excluded here so they aren't mistaken for pre-existing
+    // conflicts with themselves.
+    let stale_ids: HashSet<Uuid> = stale_links.iter().map(|l| l.id).collect();
+    let target_roles: HashSet<(String, i32)> = HostSoftwareItemPlugin::find()
+        .filter(host_software_item_plugin::Column::HostSoftwareItemId.eq(target_hsi_id))
+        .all(db)
+        .await
+        .context_to()?
+        .into_iter()
+        .filter(|l| !stale_ids.contains(&l.id))
+        .map(|l| (l.role, l.ordinal))
+        .collect();
+
+    let (conflicting, movable): (Vec<_>, Vec<_>) = stale_links
+        .into_iter()
+        .partition(|l| target_roles.contains(&(l.role.clone(), l.ordinal)));
+
+    if !conflicting.is_empty() {
+        let conflicting_ids: Vec<Uuid> = conflicting.iter().map(|l| l.id).collect();
+        tracing::debug!(
+            %host_id,
+            %stale_item_id,
+            %target_hsi_id,
+            count = conflicting_ids.len(),
+            "dropping stale plugin-link role rows superseded by the active target's own links"
+        );
+        HostSoftwareItemPlugin::delete_many()
+            .filter(host_software_item_plugin::Column::Id.is_in(conflicting_ids))
+            .exec(db)
+            .await
+            .context_to()?;
+    }
+
+    if !movable.is_empty() {
+        let movable_ids: Vec<Uuid> = movable.iter().map(|l| l.id).collect();
+        HostSoftwareItemPlugin::update_many()
+            .col_expr(
+                host_software_item_plugin::Column::SoftwareItemId,
+                Expr::value(target_item_id),
+            )
+            .col_expr(
+                host_software_item_plugin::Column::HostSoftwareItemId,
+                Expr::value(target_hsi_id),
+            )
+            .filter(host_software_item_plugin::Column::Id.is_in(movable_ids))
+            .exec(db)
+            .await
+            .context_to()?;
+    }
+
+    Ok(())
 }
 
 /// Process a single discovered software item using the config-ID path.
@@ -1985,5 +2097,184 @@ mod tests {
             stale_link_count, 0,
             "no active link should remain on the dormant item"
         );
+
+        // Case B: no active target HSI pre-existed, so the orig HSI row was
+        // repointed in place -- its plugin-link rows (all three roles) must
+        // now reference the live item and HSI, not the deactivated ones.
+        let plugin_links = HostSoftwareItemPlugin::find()
+            .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+            .all(&db)
+            .await
+            .expect("query plugin links");
+        assert_eq!(
+            plugin_links.len(),
+            3,
+            "all three role rows must exist (no duplicates, none dropped)"
+        );
+        for pl in &plugin_links {
+            assert_eq!(
+                pl.software_item_id, active_item_id,
+                "plugin_link.software_item_id must reference the live active item, role={}",
+                pl.role
+            );
+            assert_eq!(
+                pl.host_software_item_id, link.id,
+                "plugin_link.host_software_item_id must reference the repointed HSI, role={}",
+                pl.role
+            );
+        }
+    }
+
+    /// Collision rule 2, Case A: an ACTIVE target `host_software_item` already
+    /// exists (with its own live plugin-link rows) for `(host, effective_item,
+    /// qualifier)` when the cascade repoint happens. The matched `plugin_link`
+    /// (and its sibling role rows, still keyed to the deactivated orig item/HSI)
+    /// must be reconciled onto the pre-existing active target: repointed where
+    /// the target has no equivalent role row yet, and dropped (deduped) where
+    /// the target already owns that role -- never producing a
+    /// `uq_hsip_hsi_role_ordinal` conflict or a dangling stale reference.
+    #[tokio::test]
+    async fn cascade_reactivation_case_a_reconciles_plugin_links_onto_active_target_hsi() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let pc_id = Uuid::now_v7();
+        let deactivated_item_id = Uuid::now_v7();
+        let active_item_id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+
+        insert_tenant(&db, tenant_id).await;
+        insert_host(&db, host_id, tenant_id).await;
+        insert_plugin_config(&db, pc_id, tenant_id).await;
+
+        // The deactivated item + its (also deactivated) host link and plugin
+        // links -- these are the "stale" rows Phase 1 will match one of.
+        insert_software_item(&db, deactivated_item_id, tenant_id, "Foo", None).await;
+        insert_host_link(&db, host_id, deactivated_item_id, pc_id, "foo").await;
+        let stale_hsi = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .filter(host_software_item::Column::SoftwareItemId.eq(deactivated_item_id))
+            .one(&db)
+            .await
+            .expect("query stale hsi")
+            .expect("stale hsi must exist");
+        let mut hsi_active: host_software_item::ActiveModel = stale_hsi.into();
+        hsi_active.deactivated_at = Set(Some(now));
+        hsi_active.missing_since = Set(Some(now));
+        hsi_active.update(&db).await.expect("deactivate stale hsi");
+
+        let item = SoftwareItem::find_by_id(deactivated_item_id)
+            .one(&db)
+            .await
+            .expect("query item")
+            .expect("item must exist");
+        let mut item_active: software_item::ActiveModel = item.into();
+        item_active.deactivated_at = Set(Some(now));
+        item_active.update(&db).await.expect("deactivate item");
+
+        // A separate, ACTIVE software_item with the same name, ALREADY carrying
+        // its own active host link + plugin links (Case A precondition).
+        insert_software_item(&db, active_item_id, tenant_id, "Foo", None).await;
+        insert_host_link(&db, host_id, active_item_id, pc_id, "foo").await;
+        let active_hsi = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .filter(host_software_item::Column::SoftwareItemId.eq(active_item_id))
+            .one(&db)
+            .await
+            .expect("query active hsi")
+            .expect("active hsi must exist");
+        let active_hsi_id = active_hsi.id;
+
+        // Sanity: two HSIs, six plugin-link rows (three stale + three live) before reconciliation.
+        let plugin_links_before = HostSoftwareItemPlugin::find()
+            .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+            .count(&db)
+            .await
+            .expect("count plugin links before");
+        assert_eq!(plugin_links_before, 6, "precondition: six plugin links");
+
+        let args = DiscoveredItemInfo {
+            package_identifier: "foo",
+            name: "Foo",
+            installed_version: "3.0.0",
+            featured: false,
+            qualifier: None,
+            plugin_package_identifier: None,
+            installed_display_version: None,
+        };
+        let ctx = DiscoveryContext {
+            tenant_id,
+            host_id,
+            now,
+            discovery_source: "package_manager_homebrew",
+        };
+        process_one_discovery(&db, &ctx, pc_id, "package_manager_homebrew", args)
+            .await
+            .expect("process_one_discovery");
+
+        // The originally deactivated item must remain dormant (untouched).
+        let deactivated_item_after = SoftwareItem::find_by_id(deactivated_item_id)
+            .one(&db)
+            .await
+            .expect("query deactivated item")
+            .expect("deactivated item must still exist");
+        assert!(
+            deactivated_item_after.deactivated_at.is_some(),
+            "the originally deactivated item must remain dormant"
+        );
+
+        // The pre-existing active HSI must be the one updated (no new HSI created).
+        let hsi_count = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .count(&db)
+            .await
+            .expect("count hsis");
+        assert_eq!(
+            hsi_count, 2,
+            "no new host_software_item should be created; still two (stale + active)"
+        );
+
+        let active_hsi_after = HostSoftwareItem::find_by_id(active_hsi_id)
+            .one(&db)
+            .await
+            .expect("query active hsi after")
+            .expect("active hsi must still exist");
+        assert_eq!(
+            active_hsi_after.installed_version.as_deref(),
+            Some("3.0.0"),
+            "the pre-existing active hsi must be updated with the fresh discovery data"
+        );
+
+        // Every plugin_link row for this host must now reference the live
+        // (active_item_id, active_hsi_id) identity -- no row may still point
+        // at the deactivated item or its stale HSI, and no duplicate role rows
+        // may exist (the unique index would reject that).
+        let plugin_links_after = HostSoftwareItemPlugin::find()
+            .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+            .all(&db)
+            .await
+            .expect("query plugin links after");
+        assert_eq!(
+            plugin_links_after.len(),
+            3,
+            "stale duplicate role rows must be deduped away; exactly three remain"
+        );
+        for pl in &plugin_links_after {
+            assert_eq!(
+                pl.software_item_id, active_item_id,
+                "plugin_link.software_item_id must reference the live active item, role={}",
+                pl.role
+            );
+            assert_eq!(
+                pl.host_software_item_id, active_hsi_id,
+                "plugin_link.host_software_item_id must reference the active target hsi, role={}",
+                pl.role
+            );
+        }
+        let roles: std::collections::HashSet<&str> =
+            plugin_links_after.iter().map(|l| l.role.as_str()).collect();
+        assert!(roles.contains("detect_version"));
+        assert!(roles.contains("fetch_releases"));
+        assert!(roles.contains("execute_update"));
     }
 }
