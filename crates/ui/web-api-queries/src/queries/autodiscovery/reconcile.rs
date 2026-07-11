@@ -27,14 +27,15 @@
 //! (`discovery_items::find_or_create_software_item`) writes directly against
 //! the plain `DatabaseConnection` with no wrapping transaction, so it cannot
 //! participate in an in-tx `emit_stateful` write here without changing that
-//! path's transaction shape -- out of scope for this task (would risk
-//! destabilizing its existing passing tests). Reconciliation therefore only
-//! emits audit events for the state changes it owns end-to-end: deactivation,
-//! the software-item cascade, and in-flight update termination. Presence-clear
-//! and Task 3's reactivation remain unaudited for now; if that coverage is
-//! needed later it belongs in `discovery_items.rs` (via `emit_event`, since no
-//! transaction wraps that path) or requires wrapping
-//! `find_or_create_software_item` in its own transaction first.
+//! path's transaction shape. Reconciliation therefore only emits audit events
+//! for the state changes it owns end-to-end via `emit_stateful`: deactivation,
+//! the software-item cascade, and in-flight update termination. Reactivation
+//! is audited separately, at its own sites in `discovery_items.rs`, via the
+//! fire-and-forget `emit_event` path (`HOST_SOFTWARE_ITEM_REACTIVATE` /
+//! `SOFTWARE_ITEM_REACTIVATE`, both registered as `AuditActionKind::Event`)
+//! since no transaction wraps that path. Presence-clear remains unaudited: it
+//! is a routine refresh (clearing `missing_since` on rediscovery), not a state
+//! transition worth its own audit entry.
 
 use std::collections::HashSet;
 
@@ -67,9 +68,13 @@ pub(super) const RECONCILE_MIN_MISSING_AGE: time::Duration = time::Duration::hou
 const UNINSTALLED_UPDATE_OUTPUT: &str = "software no longer installed on host";
 
 /// Secret-safe snapshot of a `host_software_items` row for audit views.
+///
+/// `pub(super)` so `discovery_items::find_or_create_software_item`'s
+/// reactivation sites can reuse it for their `HOST_SOFTWARE_ITEM_REACTIVATE`
+/// `emit_event` calls, rather than duplicating an equivalent view type.
 #[derive(uptrakit_audit_log::AuditView)]
 #[audit(target_type = "host_software_item")]
-struct HostSoftwareItemLinkView {
+pub(super) struct HostSoftwareItemLinkView {
     id: Uuid,
     host_id: Uuid,
     software_item_id: Uuid,
@@ -249,7 +254,12 @@ async fn deactivate_link(
         .await?;
     }
 
-    // Force-fail any non-terminal update_history rows tied to this link.
+    // Force-fail any non-terminal update_history rows tied to this link. The
+    // full `unfinished()` set is {Queued, Pending, InProgress, AwaitingRestart},
+    // but this function is only reached after `has_active_update` (which
+    // already defers {InProgress, Pending, Queued}) returns false, so in
+    // practice only `AwaitingRestart` rows can still be here; the broader
+    // filter is kept as defense-in-depth rather than narrowed to that one variant.
     let unfinished_rows = UpdateHistory::find()
         .filter(update_history::Column::HostSoftwareItemId.eq(Some(updated_link.id)))
         .filter(update_history::Column::Status.is_in(UpdateStatus::unfinished()))
@@ -1106,9 +1116,9 @@ mod tests {
             .filter(uptrakit_shared_db::entity::audit_log::Column::TenantId.eq(tenant_id))
             .filter(
                 uptrakit_shared_db::entity::audit_log::Column::ActionType.is_in([
-                    "host_software_item.deactivate",
-                    "software_item.deactivate",
-                    "update.terminate_uninstalled",
+                    uptrakit_audit_log::AuditActionType::HOST_SOFTWARE_ITEM_DEACTIVATE.as_str(),
+                    uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_DEACTIVATE.as_str(),
+                    uptrakit_audit_log::AuditActionType::UPDATE_TERMINATE_UNINSTALLED.as_str(),
                 ]),
             )
             .count(&db)

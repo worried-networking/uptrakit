@@ -2,11 +2,15 @@
 //! and upserting host-software-item links.
 
 use super::default_configs::find_or_create_default_plugin_config;
+use super::reconcile::HostSoftwareItemLinkView;
 use super::{AutodiscoveryError, Result};
 use rootcause::prelude::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set, sea_query::Expr};
 use std::collections::HashSet;
 use time::OffsetDateTime;
+use uptrakit_audit_log::{
+    AuditActionType, AuditEmitter, AuditEntry, AuditOutcome, AuditView, Event,
+};
 use uptrakit_plugin_infrastructure_registry::is_package_manager_plugin;
 use uptrakit_shared_db::entity::{
     host_software_item, host_software_item_plugin, prelude::*, software_ignore, software_item,
@@ -14,6 +18,36 @@ use uptrakit_shared_db::entity::{
 use uptrakit_shared_db::is_unique_constraint_violation;
 use uptrakit_wire::{DiscoveryPluginResult, DiscoveryTarget};
 use uuid::Uuid;
+
+use crate::queries::software_items::SoftwareItemView;
+
+/// Builds and fires one `Event`-kind audit entry (system actor, tenant scope,
+/// `Success` outcome) for a reactivation site. Fire-and-forget: `discovery_items`
+/// write paths run against a plain `DatabaseConnection` with no wrapping
+/// transaction, so there is no in-tx `emit_stateful` write available -- see the
+/// module-scope note on `HOST_SOFTWARE_ITEM_REACTIVATE`/`SOFTWARE_ITEM_REACTIVATE`
+/// in `action_type.rs`.
+fn emit_reactivation_event<V: AuditView>(
+    audit: &AuditEmitter,
+    tenant_id: Uuid,
+    action: impl Into<AuditActionType>,
+    view: &V,
+) {
+    match AuditEntry::<Event>::builder_event(action)
+        .tenant_scope(tenant_id)
+        .actor_system()
+        .outcome(AuditOutcome::Success)
+        .target(
+            V::TARGET_TYPE,
+            view.audit_target_id(),
+            view.audit_target_display(),
+        )
+        .build()
+    {
+        Ok(entry) => audit.emit_event(entry),
+        Err(err) => tracing::warn!(error = %err, "dropping invalid reactivation audit entry"),
+    }
+}
 
 /// Grouped arguments for a discovered item's identity fields.
 pub(super) struct DiscoveredItemInfo<'a> {
@@ -55,6 +89,7 @@ struct DiscoveryContext<'a> {
     host_id: Uuid,
     now: OffsetDateTime,
     discovery_source: &'a str,
+    audit: &'a AuditEmitter,
 }
 
 /// Process a single plugin's discovery results.
@@ -63,6 +98,7 @@ struct DiscoveryContext<'a> {
 /// and the result's `plugin_config_id`.
 pub(super) async fn process_plugin_result(
     db: &sea_orm::DatabaseConnection,
+    audit: &AuditEmitter,
     tenant_id: Uuid,
     host_id: Uuid,
     now: OffsetDateTime,
@@ -95,6 +131,7 @@ pub(super) async fn process_plugin_result(
             host_id,
             now,
             discovery_source: &discovery_source,
+            audit,
         };
         if !item.targets.is_empty() {
             process_targets_discovery(db, &ctx, &item_info, &item.targets).await?;
@@ -347,7 +384,14 @@ async fn find_or_create_software_item(
             } else {
                 let mut active: software_item::ActiveModel = linked_item.into();
                 active.deactivated_at = Set(None);
-                active.update(db).await.context_to()?
+                let reactivated = active.update(db).await.context_to()?;
+                emit_reactivation_event(
+                    ctx.audit,
+                    tenant_id,
+                    AuditActionType::SOFTWARE_ITEM_REACTIVATE,
+                    &SoftwareItemView::from(&reactivated),
+                );
+                reactivated
             }
         } else {
             linked_item
@@ -391,6 +435,7 @@ async fn find_or_create_software_item(
 
             if let Some(hsi) = hsi_to_update {
                 let target_hsi_id = hsi.id;
+                let was_deactivated = hsi.deactivated_at.is_some();
                 let mut active: host_software_item::ActiveModel = hsi.into();
                 active.software_item_id = Set(effective_item.id);
                 active.installed_version = Set(Some(installed_version.to_string()));
@@ -401,7 +446,15 @@ async fn find_or_create_software_item(
                 active.discovery_source = Set(Some(discovery_source.to_string()));
                 active.missing_since = Set(None);
                 active.deactivated_at = Set(None);
-                active.update(db).await.context_to()?;
+                let updated_hsi = active.update(db).await.context_to()?;
+                if was_deactivated {
+                    emit_reactivation_event(
+                        ctx.audit,
+                        tenant_id,
+                        AuditActionType::HOST_SOFTWARE_ITEM_REACTIVATE,
+                        &HostSoftwareItemLinkView::from(&updated_hsi),
+                    );
+                }
 
                 // Cascade repoint (collision rule 2) moved the live identity
                 // from `linked_item_id` to `effective_item.id`. The matched
@@ -491,7 +544,14 @@ async fn find_or_create_software_item(
             );
             let mut active: software_item::ActiveModel = dormant.into();
             active.deactivated_at = Set(None);
-            active.update(db).await.context_to()?.id
+            let reactivated = active.update(db).await.context_to()?;
+            emit_reactivation_event(
+                ctx.audit,
+                tenant_id,
+                AuditActionType::SOFTWARE_ITEM_REACTIVATE,
+                &SoftwareItemView::from(&reactivated),
+            );
+            reactivated.id
         } else {
             // Create a new pending software item.
             let new_id = Uuid::now_v7();
@@ -565,6 +625,7 @@ async fn find_or_create_software_item(
 
     if let Some(hsi) = preferred_existing_hsi {
         let existing_id = hsi.id;
+        let was_deactivated = hsi.deactivated_at.is_some();
         let mut active: host_software_item::ActiveModel = hsi.into();
         active.installed_version = Set(Some(installed_version.to_string()));
         active.installed_version_detected_at = Set(Some(now));
@@ -573,7 +634,15 @@ async fn find_or_create_software_item(
         active.discovery_source = Set(Some(discovery_source.to_string()));
         active.missing_since = Set(None);
         active.deactivated_at = Set(None);
-        active.update(db).await.context_to()?;
+        let updated_hsi = active.update(db).await.context_to()?;
+        if was_deactivated {
+            emit_reactivation_event(
+                ctx.audit,
+                tenant_id,
+                AuditActionType::HOST_SOFTWARE_ITEM_REACTIVATE,
+                &HostSoftwareItemLinkView::from(&updated_hsi),
+            );
+        }
         return Ok(Some((software_item_id, existing_id)));
     }
 
@@ -764,18 +833,59 @@ async fn process_one_discovery(
 
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "test code: panics on failure are acceptable"
+    )]
+    #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
+
     use super::*;
     use crate::queries::autodiscovery::tests_common::{
         all_roles, insert_host, insert_host_link, insert_plugin_config, insert_software_item,
         insert_tenant, phs_result_no_targets, phs_result_with_apt_target,
-        phs_result_with_github_target, phs_result_with_two_targets, setup_db,
+        phs_result_with_github_target, phs_result_with_two_targets, setup_db, test_emitter,
     };
-    use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
+    use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};
+    use std::sync::Arc;
+    use uptrakit_audit_log::{AuditLogDispatcher, DatabaseBackend};
     use uptrakit_shared_db::entity::plugin_config;
     use uptrakit_wire::{
         DiscoveredSoftware as WireDiscoveredSoftware, DiscoveryPluginResult, DiscoveryTarget,
         plugin_ids,
     };
+
+    /// Real (non-Noop) audit emitter for observing `emit_event` writes: the
+    /// dispatcher's background loop writes directly to `db` via
+    /// `DatabaseBackend`, mirroring `reconcile.rs`'s `real_emitter` helper.
+    fn real_emitter(db: &sea_orm::DatabaseConnection) -> AuditEmitter {
+        AuditEmitter::new(AuditLogDispatcher::new(Arc::new(DatabaseBackend::new(
+            db.clone(),
+        ))))
+    }
+
+    /// Polls for the most recent tenant audit row with the given action,
+    /// retrying briefly to allow the fire-and-forget `emit_event` dispatch
+    /// loop to land the row (mirrors
+    /// `web-api::routes::discovery_allowlist::latest_tenant_audit_row_for_action`).
+    async fn latest_audit_row_for_action(
+        db: &sea_orm::DatabaseConnection,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
+    ) -> uptrakit_shared_db::entity::audit_log::Model {
+        use uptrakit_shared_db::entity::audit_log;
+        for _ in 0..50 {
+            if let Some(row) = audit_log::Entity::find()
+                .filter(audit_log::Column::ActionType.eq(action_type))
+                .order_by_desc(audit_log::Column::OccurredAt)
+                .one(db)
+                .await
+                .expect("query audit rows")
+            {
+                return row;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("expected audit row for action {action_type:?}");
+    }
 
     /// When `find_or_create_software_item` encounters a host link pointing to a
     /// deactivated software item (with no active same-name collision), rediscovery
@@ -806,11 +916,13 @@ mod tests {
             installed_display_version: None,
         };
 
+        let audit = real_emitter(&db);
         let ctx = DiscoveryContext {
             tenant_id,
             host_id,
             now,
             discovery_source: "package_manager_homebrew",
+            audit: &audit,
         };
         process_one_discovery(&db, &ctx, pc_id, "package_manager_homebrew", args)
             .await
@@ -865,6 +977,102 @@ mod tests {
             plugin_link_count, 3,
             "expected the pre-existing plugin link rows for all three roles (no duplicates)"
         );
+
+        // Reactivating a deactivated software_item must emit a
+        // `SOFTWARE_ITEM_REACTIVATE` audit event (finding C1). The emit is
+        // fire-and-forget (`emit_event`), so poll for the row to land.
+        let row = latest_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_REACTIVATE,
+        )
+        .await;
+        assert_eq!(row.tenant_id, tenant_id);
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(row.target_type.as_deref(), Some("software_item"));
+        assert_eq!(
+            row.target_id.as_deref(),
+            Some(old_item_id.to_string().as_str())
+        );
+    }
+
+    /// Reactivating a deactivated `host_software_item` link in place (Phase 1,
+    /// no cascade repoint) must emit a `HOST_SOFTWARE_ITEM_REACTIVATE` audit
+    /// event (finding C1). The emit is fire-and-forget (`emit_event`), so this
+    /// polls for the row rather than asserting immediately after the await.
+    #[tokio::test]
+    async fn process_one_discovery_deactivated_link_emits_reactivate_audit() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let pc_id = Uuid::now_v7();
+        let item_id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+
+        insert_tenant(&db, tenant_id).await;
+        insert_host(&db, host_id, tenant_id).await;
+        insert_plugin_config(&db, pc_id, tenant_id).await;
+        insert_software_item(&db, item_id, tenant_id, "jq", None).await;
+        let hsi_id = crate::queries::autodiscovery::tests_common::insert_discovered_host_link(
+            &db,
+            host_id,
+            item_id,
+            pc_id,
+            "jq",
+            None,
+            "package_manager_homebrew",
+            Some(now),
+            None,
+            Some(now),
+        )
+        .await;
+
+        let args = DiscoveredItemInfo {
+            package_identifier: "jq",
+            name: "jq",
+            installed_version: "1.7.0",
+            featured: false,
+            qualifier: None,
+            plugin_package_identifier: None,
+            installed_display_version: None,
+        };
+
+        let audit = real_emitter(&db);
+        let ctx = DiscoveryContext {
+            tenant_id,
+            host_id,
+            now,
+            discovery_source: "package_manager_homebrew",
+            audit: &audit,
+        };
+        process_one_discovery(&db, &ctx, pc_id, "package_manager_homebrew", args)
+            .await
+            .expect("process_one_discovery");
+
+        let link = HostSoftwareItem::find_by_id(hsi_id)
+            .one(&db)
+            .await
+            .expect("query link")
+            .expect("link must exist");
+        assert!(
+            link.deactivated_at.is_none(),
+            "the link must be reactivated in place"
+        );
+
+        let row = latest_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::HOST_SOFTWARE_ITEM_REACTIVATE,
+        )
+        .await;
+        assert_eq!(row.tenant_id, tenant_id);
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(row.target_type.as_deref(), Some("host_software_item"));
+        assert_eq!(row.target_id.as_deref(), Some(hsi_id.to_string().as_str()));
     }
 
     /// `process_one_discovery` must update `installed_version` in place when the
@@ -894,11 +1102,13 @@ mod tests {
             installed_display_version: None,
         };
 
+        let audit = real_emitter(&db);
         let ctx = DiscoveryContext {
             tenant_id,
             host_id,
             now,
             discovery_source: "package_manager_homebrew",
+            audit: &audit,
         };
         process_one_discovery(&db, &ctx, pc_id, "package_manager_homebrew", args)
             .await
@@ -974,11 +1184,13 @@ mod tests {
             installed_display_version: None,
         };
 
+        let audit = real_emitter(&db);
         let ctx = DiscoveryContext {
             tenant_id,
             host_id,
             now,
             discovery_source: "package_manager_homebrew",
+            audit: &audit,
         };
         process_one_discovery(&db, &ctx, pc_id, "package_manager_homebrew", args)
             .await
@@ -1051,11 +1263,13 @@ mod tests {
             installed_display_version: None,
         };
 
+        let audit = real_emitter(&db);
         let ctx = DiscoveryContext {
             tenant_id,
             host_id,
             now,
             discovery_source: "package_manager_homebrew",
+            audit: &audit,
         };
         process_one_discovery(&db, &ctx, pc_id, "package_manager_homebrew", args)
             .await
@@ -1091,9 +1305,17 @@ mod tests {
         let result =
             phs_result_with_github_target("booklore", "BookLore", "1.18.5", "BookLore", "BookLore");
 
-        process_plugin_result(&db, tenant_id, host_id, now, &result, &HashSet::new())
-            .await
-            .expect("process_plugin_result");
+        process_plugin_result(
+            &db,
+            &test_emitter(),
+            tenant_id,
+            host_id,
+            now,
+            &result,
+            &HashSet::new(),
+        )
+        .await
+        .expect("process_plugin_result");
 
         let configs = PluginConfig::find()
             .filter(plugin_config::Column::TenantId.eq(tenant_id))
@@ -1170,9 +1392,17 @@ mod tests {
             }],
         };
 
-        process_plugin_result(&db, tenant_id, host_id, now, &result, &HashSet::new())
-            .await
-            .expect("process_plugin_result");
+        process_plugin_result(
+            &db,
+            &test_emitter(),
+            tenant_id,
+            host_id,
+            now,
+            &result,
+            &HashSet::new(),
+        )
+        .await
+        .expect("process_plugin_result");
 
         let item = SoftwareItem::find()
             .filter(software_item::Column::TenantId.eq(tenant_id))
@@ -1203,9 +1433,17 @@ mod tests {
 
         let result = phs_result_with_apt_target("grafana", "Grafana", "10.2.3");
 
-        process_plugin_result(&db, tenant_id, host_id, now, &result, &HashSet::new())
-            .await
-            .expect("process_plugin_result");
+        process_plugin_result(
+            &db,
+            &test_emitter(),
+            tenant_id,
+            host_id,
+            now,
+            &result,
+            &HashSet::new(),
+        )
+        .await
+        .expect("process_plugin_result");
 
         // No plugin_config should be created for package manager types.
         let configs = PluginConfig::find()
@@ -1264,9 +1502,17 @@ mod tests {
         let mut result = phs_result_with_apt_target("pm2", "PM2", "5.4.2");
         result.discoveries[0].targets[0].plugin_type = plugin_ids::PACKAGE_MANAGER_NPM.clone();
 
-        process_plugin_result(&db, tenant_id, host_id, now, &result, &HashSet::new())
-            .await
-            .expect("process_plugin_result");
+        process_plugin_result(
+            &db,
+            &test_emitter(),
+            tenant_id,
+            host_id,
+            now,
+            &result,
+            &HashSet::new(),
+        )
+        .await
+        .expect("process_plugin_result");
 
         let configs = PluginConfig::find()
             .filter(plugin_config::Column::TenantId.eq(tenant_id))
@@ -1310,9 +1556,17 @@ mod tests {
         insert_tenant(&db, tenant_id).await;
         insert_host(&db, host_id, tenant_id).await;
 
-        process_plugin_result(&db, tenant_id, host_id, now, &result, &HashSet::new())
-            .await
-            .expect("process_plugin_result");
+        process_plugin_result(
+            &db,
+            &test_emitter(),
+            tenant_id,
+            host_id,
+            now,
+            &result,
+            &HashSet::new(),
+        )
+        .await
+        .expect("process_plugin_result");
 
         let configs = PluginConfig::find()
             .filter(plugin_config::Column::TenantId.eq(tenant_id))
@@ -1350,12 +1604,28 @@ mod tests {
         let result2 =
             phs_result_with_github_target("booklore", "BookLore", "1.18.5", "BookLore", "BookLore");
 
-        process_plugin_result(&db, tenant_id, host1, now, &result1, &HashSet::new())
-            .await
-            .expect("host1");
-        process_plugin_result(&db, tenant_id, host2, now, &result2, &HashSet::new())
-            .await
-            .expect("host2");
+        process_plugin_result(
+            &db,
+            &test_emitter(),
+            tenant_id,
+            host1,
+            now,
+            &result1,
+            &HashSet::new(),
+        )
+        .await
+        .expect("host1");
+        process_plugin_result(
+            &db,
+            &test_emitter(),
+            tenant_id,
+            host2,
+            now,
+            &result2,
+            &HashSet::new(),
+        )
+        .await
+        .expect("host2");
 
         let config_count = PluginConfig::find()
             .filter(plugin_config::Column::TenantId.eq(tenant_id))
@@ -1413,9 +1683,17 @@ mod tests {
             }],
         };
 
-        process_plugin_result(&db, tenant_id, host_id, now, &result, &HashSet::new())
-            .await
-            .expect("process_plugin_result");
+        process_plugin_result(
+            &db,
+            &test_emitter(),
+            tenant_id,
+            host_id,
+            now,
+            &result,
+            &HashSet::new(),
+        )
+        .await
+        .expect("process_plugin_result");
 
         let plugin_links = HostSoftwareItemPlugin::find()
             .filter(host_software_item_plugin::Column::HostId.eq(host_id))
@@ -1463,9 +1741,17 @@ mod tests {
             }],
         };
 
-        process_plugin_result(&db, tenant_id, host_id, now, &result, &HashSet::new())
-            .await
-            .expect("process_plugin_result");
+        process_plugin_result(
+            &db,
+            &test_emitter(),
+            tenant_id,
+            host_id,
+            now,
+            &result,
+            &HashSet::new(),
+        )
+        .await
+        .expect("process_plugin_result");
 
         let item = SoftwareItem::find()
             .filter(software_item::Column::TenantId.eq(tenant_id))
@@ -1529,9 +1815,17 @@ mod tests {
             }],
         };
 
-        process_plugin_result(&db, tenant_id, host_id, now, &result, &HashSet::new())
-            .await
-            .expect("process_plugin_result");
+        process_plugin_result(
+            &db,
+            &test_emitter(),
+            tenant_id,
+            host_id,
+            now,
+            &result,
+            &HashSet::new(),
+        )
+        .await
+        .expect("process_plugin_result");
 
         let item = SoftwareItem::find_by_id(item_id)
             .one(&db)
@@ -1559,9 +1853,17 @@ mod tests {
         // First, create the apt config by processing a normal item.
         let result1 = phs_result_with_apt_target("curl", "cURL", "8.0.0");
         let ignore_set = HashSet::new();
-        process_plugin_result(&db, tenant_id, host_id, now, &result1, &ignore_set)
-            .await
-            .expect("first process");
+        process_plugin_result(
+            &db,
+            &test_emitter(),
+            tenant_id,
+            host_id,
+            now,
+            &result1,
+            &ignore_set,
+        )
+        .await
+        .expect("first process");
 
         // Add "Wget" to the tenant-wide name-based ignore list.
         super::super::ignore_rules::create_or_ignore_ignore_rule(&db, tenant_id, "Wget", None)
@@ -1575,9 +1877,17 @@ mod tests {
 
         // Now try to discover "wget" (name: "Wget") via the same apt target path.
         let result2 = phs_result_with_apt_target("wget", "Wget", "1.21.4");
-        process_plugin_result(&db, tenant_id, host_id, now, &result2, &ignore_set)
-            .await
-            .expect("second process");
+        process_plugin_result(
+            &db,
+            &test_emitter(),
+            tenant_id,
+            host_id,
+            now,
+            &result2,
+            &ignore_set,
+        )
+        .await
+        .expect("second process");
 
         // wget must NOT have been created.
         let wget_links = HostSoftwareItemPlugin::find()
@@ -1610,9 +1920,17 @@ mod tests {
         let result =
             phs_result_with_two_targets("booklore", "BookLore", "1.18.5", "BookLore", "BookLore");
 
-        process_plugin_result(&db, tenant_id, host_id, now, &result, &HashSet::new())
-            .await
-            .expect("process_plugin_result must not fail on name collision");
+        process_plugin_result(
+            &db,
+            &test_emitter(),
+            tenant_id,
+            host_id,
+            now,
+            &result,
+            &HashSet::new(),
+        )
+        .await
+        .expect("process_plugin_result must not fail on name collision");
 
         // Exactly one software_items row.
         let items = SoftwareItem::find()
@@ -1722,9 +2040,17 @@ mod tests {
         let expected_plugin_type_str = plugin_ids::DISCOVERY_PROXMOX_HELPER_SCRIPTS.to_string();
 
         // First pass: create.
-        process_plugin_result(&db, tenant_id, host_id, now, &result, &HashSet::new())
-            .await
-            .expect("first process_plugin_result");
+        process_plugin_result(
+            &db,
+            &test_emitter(),
+            tenant_id,
+            host_id,
+            now,
+            &result,
+            &HashSet::new(),
+        )
+        .await
+        .expect("first process_plugin_result");
 
         let link = HostSoftwareItem::find()
             .filter(host_software_item::Column::HostId.eq(host_id))
@@ -1747,9 +2073,17 @@ mod tests {
         );
 
         // Second pass: re-match (Phase 1 in-place update).
-        process_plugin_result(&db, tenant_id, host_id, now, &result, &HashSet::new())
-            .await
-            .expect("second process_plugin_result");
+        process_plugin_result(
+            &db,
+            &test_emitter(),
+            tenant_id,
+            host_id,
+            now,
+            &result,
+            &HashSet::new(),
+        )
+        .await
+        .expect("second process_plugin_result");
 
         let link = HostSoftwareItem::find()
             .filter(host_software_item::Column::HostId.eq(host_id))
@@ -1825,11 +2159,13 @@ mod tests {
             plugin_package_identifier: None,
             installed_display_version: None,
         };
+        let audit = real_emitter(&db);
         let ctx = DiscoveryContext {
             tenant_id,
             host_id,
             now,
             discovery_source: "package_manager_homebrew",
+            audit: &audit,
         };
         process_one_discovery(&db, &ctx, pc_id, "package_manager_homebrew", args)
             .await
@@ -1940,11 +2276,13 @@ mod tests {
             plugin_package_identifier: None,
             installed_display_version: None,
         };
+        let audit = real_emitter(&db);
         let ctx = DiscoveryContext {
             tenant_id,
             host_id,
             now,
             discovery_source: "package_manager_homebrew",
+            audit: &audit,
         };
         process_one_discovery(&db, &ctx, pc_id, "package_manager_homebrew", args)
             .await
@@ -2046,11 +2384,13 @@ mod tests {
             plugin_package_identifier: None,
             installed_display_version: None,
         };
+        let audit = real_emitter(&db);
         let ctx = DiscoveryContext {
             tenant_id,
             host_id,
             now,
             discovery_source: "package_manager_homebrew",
+            audit: &audit,
         };
         process_one_discovery(&db, &ctx, pc_id, "package_manager_homebrew", args)
             .await
@@ -2202,11 +2542,13 @@ mod tests {
             plugin_package_identifier: None,
             installed_display_version: None,
         };
+        let audit = real_emitter(&db);
         let ctx = DiscoveryContext {
             tenant_id,
             host_id,
             now,
             discovery_source: "package_manager_homebrew",
+            audit: &audit,
         };
         process_one_discovery(&db, &ctx, pc_id, "package_manager_homebrew", args)
             .await

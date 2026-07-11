@@ -126,6 +126,7 @@ pub async fn process_discovery_results(
         if !result.discoveries.is_empty() {
             discovery_items::process_plugin_result(
                 db,
+                audit,
                 tenant_id,
                 host_id,
                 now,

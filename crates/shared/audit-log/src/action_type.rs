@@ -285,12 +285,18 @@ impl AuditActionType {
         );
     pub const HOST_SOFTWARE_ITEM_DEACTIVATE: RegisteredAuditAction =
         RegisteredAuditAction::new("host_software_item.deactivate", AuditActionKind::Stateful);
+    // Reactivation sites (`discovery_items::find_or_create_software_item`) write
+    // directly against a plain `DatabaseConnection` with no wrapping transaction,
+    // so they emit via the fire-and-forget `emit_event` path rather than the
+    // in-tx `emit_stateful` path -- hence `Event`, not `Stateful`, despite the
+    // name mirroring the `Stateful` DEACTIVATE counterpart.
     pub const HOST_SOFTWARE_ITEM_REACTIVATE: RegisteredAuditAction =
-        RegisteredAuditAction::new("host_software_item.reactivate", AuditActionKind::Stateful);
+        RegisteredAuditAction::new("host_software_item.reactivate", AuditActionKind::Event);
     pub const SOFTWARE_ITEM_DEACTIVATE: RegisteredAuditAction =
         RegisteredAuditAction::new("software_item.deactivate", AuditActionKind::Stateful);
+    // See HOST_SOFTWARE_ITEM_REACTIVATE: emitted via `emit_event`, no transaction.
     pub const SOFTWARE_ITEM_REACTIVATE: RegisteredAuditAction =
-        RegisteredAuditAction::new("software_item.reactivate", AuditActionKind::Stateful);
+        RegisteredAuditAction::new("software_item.reactivate", AuditActionKind::Event);
     pub const UPDATE_TERMINATE_UNINSTALLED: RegisteredAuditAction =
         RegisteredAuditAction::new("update.terminate_uninstalled", AuditActionKind::Stateful);
     pub const SOFTWARE_ITEM_MERGE: RegisteredAuditAction =
