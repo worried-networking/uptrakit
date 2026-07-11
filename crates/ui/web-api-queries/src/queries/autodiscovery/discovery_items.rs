@@ -43,6 +43,20 @@ impl<'a> DiscoveredItemInfo<'a> {
     }
 }
 
+/// Shared per-call context for the discovery write path.
+///
+/// Groups the fields common to every write site so that downstream helper
+/// functions stay within the workspace's argument-count lint. `discovery_source`
+/// is the *discovering* plugin type (`result.plugin_type`) -- for PHS targets
+/// this remains `discovery_proxmox_helper_scripts`, never the target's own
+/// management plugin type.
+struct DiscoveryContext<'a> {
+    tenant_id: Uuid,
+    host_id: Uuid,
+    now: OffsetDateTime,
+    discovery_source: &'a str,
+}
+
 /// Process a single plugin's discovery results.
 ///
 /// Routes each item to the correct processing path based on its `targets`
@@ -75,18 +89,22 @@ pub(super) async fn process_plugin_result(
             plugin_package_identifier: item.plugin_package_identifier.as_deref(),
             installed_display_version: item.installed_display_version.as_deref(),
         };
+        let discovery_source = result.plugin_type.to_string();
+        let ctx = DiscoveryContext {
+            tenant_id,
+            host_id,
+            now,
+            discovery_source: &discovery_source,
+        };
         if !item.targets.is_empty() {
-            process_targets_discovery(db, tenant_id, host_id, &item_info, &item.targets, now)
-                .await?;
+            process_targets_discovery(db, &ctx, &item_info, &item.targets).await?;
         } else if let Some(existing_pc_id) = result.plugin_config_id {
             process_one_discovery(
                 db,
-                tenant_id,
-                host_id,
+                &ctx,
                 existing_pc_id,
                 result.plugin_type.as_str(),
                 item_info,
-                now,
             )
             .await?;
         } else {
@@ -128,11 +146,9 @@ pub(super) async fn load_ignore_set(
 /// 4. Create role assignments per the target's `roles` list.
 async fn process_targets_discovery(
     db: &sea_orm::DatabaseConnection,
-    tenant_id: Uuid,
-    host_id: Uuid,
+    ctx: &DiscoveryContext<'_>,
     item: &DiscoveredItemInfo<'_>,
     targets: &[DiscoveryTarget],
-    now: OffsetDateTime,
 ) -> Result<()> {
     for target in targets {
         let target_plugin_type_str = target.plugin_type.to_string();
@@ -153,7 +169,7 @@ async fn process_targets_discovery(
             Some(
                 find_or_create_default_plugin_config(
                     db,
-                    tenant_id,
+                    ctx.tenant_id,
                     &target_plugin_type_str,
                     &target.plugin_config,
                     &target.plugin_config_name,
@@ -174,16 +190,9 @@ async fn process_targets_discovery(
         };
 
         // Find-or-create the software item and host link.
-        let Some((software_item_id, hsi_id)) = find_or_create_software_item(
-            db,
-            tenant_id,
-            host_id,
-            pc_id,
-            &target_plugin_type_str,
-            &target_item,
-            now,
-        )
-        .await?
+        let Some((software_item_id, hsi_id)) =
+            find_or_create_software_item(db, ctx, pc_id, &target_plugin_type_str, &target_item)
+                .await?
         else {
             continue;
         };
@@ -192,7 +201,7 @@ async fn process_targets_discovery(
         for role in &target.roles {
             let plugin_link = host_software_item_plugin::ActiveModel {
                 id: Set(Uuid::now_v7()),
-                host_id: Set(host_id),
+                host_id: Set(ctx.host_id),
                 software_item_id: Set(software_item_id),
                 host_software_item_id: Set(hsi_id),
                 plugin_config_id: Set(pc_id),
@@ -202,8 +211,8 @@ async fn process_targets_discovery(
                 package_identifier: Set(target_item.effective_plugin_pkg_id().to_string()),
                 config: Set(target.config_override.clone()),
                 execution_site: Set(execution_site.to_owned()),
-                created_at: Set(now),
-                updated_at: Set(now),
+                created_at: Set(ctx.now),
+                updated_at: Set(ctx.now),
             };
             if let Err(e) = HostSoftwareItemPlugin::insert(plugin_link).exec(db).await
                 && !is_unique_constraint_violation(&e)
@@ -242,13 +251,15 @@ async fn process_targets_discovery(
 ///    targets end up sharing the same `software_item` row.
 async fn find_or_create_software_item(
     db: &sea_orm::DatabaseConnection,
-    tenant_id: Uuid,
-    host_id: Uuid,
+    ctx: &DiscoveryContext<'_>,
     plugin_config_id: Option<Uuid>,
     plugin_type_str: &str,
     item: &DiscoveredItemInfo<'_>,
-    now: OffsetDateTime,
 ) -> Result<Option<(Uuid, Uuid)>> {
+    let tenant_id = ctx.tenant_id;
+    let host_id = ctx.host_id;
+    let now = ctx.now;
+    let discovery_source = ctx.discovery_source;
     let package_identifier = item.package_identifier;
     let name = item.name;
     let installed_version = item.installed_version;
@@ -301,6 +312,9 @@ async fn find_or_create_software_item(
                     active.installed_version_detected_at = Set(Some(now));
                     active.installed_display_version =
                         Set(item.installed_display_version.map(str::to_string));
+                    active.last_discovered_at = Set(Some(now));
+                    active.discovery_source = Set(Some(discovery_source.to_string()));
+                    active.missing_since = Set(None);
                     active.update(db).await.context_to()?;
                 }
             } else {
@@ -446,8 +460,8 @@ async fn find_or_create_software_item(
         linked_at: Set(now),
         update_category: Set("unknown".to_string()),
         deactivated_at: Set(None),
-        last_discovered_at: Set(None),
-        discovery_source: Set(None),
+        last_discovered_at: Set(Some(now)),
+        discovery_source: Set(Some(discovery_source.to_string())),
         missing_since: Set(None),
     };
     match HostSoftwareItem::insert(link).exec(db).await {
@@ -482,23 +496,14 @@ async fn find_or_create_software_item(
 /// `plugin_config_id`. Creates all three standard role assignments.
 async fn process_one_discovery(
     db: &sea_orm::DatabaseConnection,
-    tenant_id: Uuid,
-    host_id: Uuid,
+    ctx: &DiscoveryContext<'_>,
     plugin_config_id: Uuid,
     plugin_type_str: &str,
     args: DiscoveredItemInfo<'_>,
-    now: OffsetDateTime,
 ) -> Result<()> {
-    let Some((software_item_id, hsi_id)) = find_or_create_software_item(
-        db,
-        tenant_id,
-        host_id,
-        Some(plugin_config_id),
-        plugin_type_str,
-        &args,
-        now,
-    )
-    .await?
+    let Some((software_item_id, hsi_id)) =
+        find_or_create_software_item(db, ctx, Some(plugin_config_id), plugin_type_str, &args)
+            .await?
     else {
         return Ok(());
     };
@@ -507,7 +512,7 @@ async fn process_one_discovery(
     for role in ["detect_version", "fetch_releases", "execute_update"] {
         let plugin_link = host_software_item_plugin::ActiveModel {
             id: Set(Uuid::now_v7()),
-            host_id: Set(host_id),
+            host_id: Set(ctx.host_id),
             software_item_id: Set(software_item_id),
             host_software_item_id: Set(hsi_id),
             plugin_config_id: Set(Some(plugin_config_id)),
@@ -517,8 +522,8 @@ async fn process_one_discovery(
             package_identifier: Set(args.effective_plugin_pkg_id().to_string()),
             config: Set(None),
             execution_site: Set("auto".to_string()),
-            created_at: Set(now),
-            updated_at: Set(now),
+            created_at: Set(ctx.now),
+            updated_at: Set(ctx.now),
         };
         if let Err(e) = HostSoftwareItemPlugin::insert(plugin_link).exec(db).await
             && !is_unique_constraint_violation(&e)
@@ -573,17 +578,15 @@ mod tests {
             installed_display_version: None,
         };
 
-        process_one_discovery(
-            &db,
+        let ctx = DiscoveryContext {
             tenant_id,
             host_id,
-            pc_id,
-            "package_manager_homebrew",
-            args,
             now,
-        )
-        .await
-        .expect("process_one_discovery");
+            discovery_source: "package_manager_homebrew",
+        };
+        process_one_discovery(&db, &ctx, pc_id, "package_manager_homebrew", args)
+            .await
+            .expect("process_one_discovery");
 
         let orphan_count = HostSoftwareItem::find()
             .filter(host_software_item::Column::SoftwareItemId.eq(old_item_id))
@@ -648,17 +651,15 @@ mod tests {
             installed_display_version: None,
         };
 
-        process_one_discovery(
-            &db,
+        let ctx = DiscoveryContext {
             tenant_id,
             host_id,
-            pc_id,
-            "package_manager_homebrew",
-            args,
             now,
-        )
-        .await
-        .expect("process_one_discovery");
+            discovery_source: "package_manager_homebrew",
+        };
+        process_one_discovery(&db, &ctx, pc_id, "package_manager_homebrew", args)
+            .await
+            .expect("process_one_discovery");
 
         let items = SoftwareItem::find()
             .filter(software_item::Column::TenantId.eq(tenant_id))
@@ -730,17 +731,15 @@ mod tests {
             installed_display_version: None,
         };
 
-        process_one_discovery(
-            &db,
+        let ctx = DiscoveryContext {
             tenant_id,
             host_id,
-            pc_id,
-            "package_manager_homebrew",
-            args,
             now,
-        )
-        .await
-        .expect("process_one_discovery");
+            discovery_source: "package_manager_homebrew",
+        };
+        process_one_discovery(&db, &ctx, pc_id, "package_manager_homebrew", args)
+            .await
+            .expect("process_one_discovery");
 
         let items = SoftwareItem::find()
             .filter(software_item::Column::TenantId.eq(tenant_id))
@@ -809,17 +808,15 @@ mod tests {
             installed_display_version: None,
         };
 
-        process_one_discovery(
-            &db,
+        let ctx = DiscoveryContext {
             tenant_id,
             host_id,
-            pc_id,
-            "package_manager_homebrew",
-            args,
             now,
-        )
-        .await
-        .expect("process_one_discovery");
+            discovery_source: "package_manager_homebrew",
+        };
+        process_one_discovery(&db, &ctx, pc_id, "package_manager_homebrew", args)
+            .await
+            .expect("process_one_discovery");
 
         let link = HostSoftwareItem::find()
             .filter(host_software_item::Column::HostId.eq(host_id))
@@ -1458,5 +1455,77 @@ mod tests {
             .expect("execute_update role must exist");
         assert_eq!(update.plugin_config_id, Some(shell_config_id));
         assert_eq!(update.package_identifier, "booklore");
+    }
+
+    /// Every discovery create/match must stamp provenance columns:
+    /// `last_discovered_at`, `discovery_source` (the *discovering* plugin
+    /// type -- for PHS targets this is `discovery_proxmox_helper_scripts`,
+    /// not the target's `releases_github`), and clear `missing_since`.
+    ///
+    /// Runs `process_plugin_result` twice: the first pass exercises Phase 3
+    /// (create), the second exercises Phase 1 (in-place update / re-match).
+    #[tokio::test]
+    async fn discovery_create_and_rematch_stamp_provenance() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+
+        insert_tenant(&db, tenant_id).await;
+        insert_host(&db, host_id, tenant_id).await;
+
+        let result =
+            phs_result_with_github_target("booklore", "BookLore", "1.18.5", "BookLore", "BookLore");
+        let expected_plugin_type_str = plugin_ids::DISCOVERY_PROXMOX_HELPER_SCRIPTS.to_string();
+
+        // First pass: create.
+        process_plugin_result(&db, tenant_id, host_id, now, &result, &HashSet::new())
+            .await
+            .expect("first process_plugin_result");
+
+        let link = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .one(&db)
+            .await
+            .expect("q")
+            .expect("row");
+        assert!(
+            link.last_discovered_at.is_some(),
+            "last_discovered_at must be stamped on create"
+        );
+        assert_eq!(
+            link.discovery_source.as_deref(),
+            Some(expected_plugin_type_str.as_str()),
+            "discovery_source must be the discovering plugin type, not the target's"
+        );
+        assert!(
+            link.missing_since.is_none(),
+            "missing_since must be clear on create"
+        );
+
+        // Second pass: re-match (Phase 1 in-place update).
+        process_plugin_result(&db, tenant_id, host_id, now, &result, &HashSet::new())
+            .await
+            .expect("second process_plugin_result");
+
+        let link = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .one(&db)
+            .await
+            .expect("q")
+            .expect("row");
+        assert!(
+            link.last_discovered_at.is_some(),
+            "last_discovered_at must be stamped on rematch"
+        );
+        assert_eq!(
+            link.discovery_source.as_deref(),
+            Some(expected_plugin_type_str.as_str()),
+            "discovery_source must remain the discovering plugin type after rematch"
+        );
+        assert!(
+            link.missing_since.is_none(),
+            "missing_since must be clear after rematch"
+        );
     }
 }
