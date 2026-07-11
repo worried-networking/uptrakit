@@ -283,6 +283,16 @@ impl AuditActionType {
             "software_item.delete_plugin_assignment",
             AuditActionKind::Stateful,
         );
+    pub const HOST_SOFTWARE_ITEM_DEACTIVATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("host_software_item.deactivate", AuditActionKind::Stateful);
+    pub const HOST_SOFTWARE_ITEM_REACTIVATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("host_software_item.reactivate", AuditActionKind::Stateful);
+    pub const SOFTWARE_ITEM_DEACTIVATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("software_item.deactivate", AuditActionKind::Stateful);
+    pub const SOFTWARE_ITEM_REACTIVATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("software_item.reactivate", AuditActionKind::Stateful);
+    pub const UPDATE_TERMINATE_UNINSTALLED: RegisteredAuditAction =
+        RegisteredAuditAction::new("update.terminate_uninstalled", AuditActionKind::Stateful);
     pub const SOFTWARE_ITEM_MERGE: RegisteredAuditAction =
         RegisteredAuditAction::new("software_item.merge", AuditActionKind::Event);
     pub const SOFTWARE_ITEM_BATCH: RegisteredAuditAction =
@@ -520,6 +530,11 @@ const V1_ACTIONS: &[RegisteredAuditAction] = &[
     AuditActionType::SOFTWARE_ITEM_UNASSIGN_HOST,
     AuditActionType::SOFTWARE_ITEM_UPDATE_HOST_ASSIGNMENT,
     AuditActionType::SOFTWARE_ITEM_DELETE_PLUGIN_ASSIGNMENT,
+    AuditActionType::HOST_SOFTWARE_ITEM_DEACTIVATE,
+    AuditActionType::HOST_SOFTWARE_ITEM_REACTIVATE,
+    AuditActionType::SOFTWARE_ITEM_DEACTIVATE,
+    AuditActionType::SOFTWARE_ITEM_REACTIVATE,
+    AuditActionType::UPDATE_TERMINATE_UNINSTALLED,
     AuditActionType::SOFTWARE_ITEM_MERGE,
     AuditActionType::SOFTWARE_ITEM_BATCH,
     AuditActionType::SOFTWARE_VERSION_CHECK_TRIGGERED,
