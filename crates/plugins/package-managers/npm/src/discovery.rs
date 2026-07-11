@@ -36,6 +36,16 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for NpmPlugin {
             bail!(PluginError::CommandFailed(cmd_output.exit_code));
         }
 
+        // A zero-exit `npm list` must emit parseable json. A parse failure signals
+        // a tool malfunction (truncated output, non-json noise), not an empty
+        // install — surface it as an error rather than silently reporting zero
+        // packages (discovery contract: failures set error, empty means empty).
+        if serde_json::from_str::<serde_json::Value>(&cmd_output.output).is_err() {
+            bail!(PluginError::PluginInternal(
+                "npm list -g returned unparseable json output".to_string()
+            ));
+        }
+
         let all_packages = NpmPlugin::parse_npm_list_all(&cmd_output.output);
 
         let packages: Vec<DiscoveredSoftware> = all_packages
@@ -129,5 +139,29 @@ mod tests {
         let discovered = plugin.discover_software().await.expect("ok");
         assert_eq!(discovered.len(), 1);
         assert_eq!(discovered[0].name, "n8n");
+    }
+
+    #[tokio::test]
+    async fn discover_software_unparseable_json_errors() {
+        // zero exit but garbage output => tool malfunction, must surface an error
+        // (not silently report an empty install).
+        let plugin = NpmPlugin::new(
+            NpmConfig::default(),
+            test_runtime_with_executor(FixedOutputExecutor::new("not json at all", 0)),
+        )
+        .expect("create");
+        plugin.discover_software().await.unwrap_err();
+    }
+
+    #[tokio::test]
+    async fn discover_software_empty_dependencies_is_empty() {
+        // Valid json with no dependencies is a legitimate empty install, not an error.
+        let plugin = NpmPlugin::new(
+            NpmConfig::default(),
+            test_runtime_with_executor(FixedOutputExecutor::new(r#"{"dependencies":{}}"#, 0)),
+        )
+        .expect("create");
+        let discovered = plugin.discover_software().await.expect("ok");
+        assert!(discovered.is_empty());
     }
 }

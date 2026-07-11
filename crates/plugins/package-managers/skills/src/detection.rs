@@ -33,31 +33,23 @@ impl uptrakit_plugin_infrastructure_core::VersionDetector for SkillsPlugin {
             return Ok(vec![]);
         }
 
+        // A whole-batch failure (lock file unreadable or unparseable) maps every
+        // requested item to the same per-item error — the contract forbids
+        // silently returning "not installed" for items we could not evaluate.
+        let all_error = |msg: String| -> Vec<BatchDetectResult> {
+            items
+                .iter()
+                .map(|item| BatchDetectResult::error(item.package_identifier.clone(), msg.clone()))
+                .collect()
+        };
+
         let lock_entries = match self.read_lock_file().await {
             Ok(None) => None,
             Ok(Some(content)) => match parse_skill_lock(&content) {
                 Ok(entries) => Some(entries),
-                Err(e) => {
-                    let msg = e.to_string();
-                    let results = items
-                        .iter()
-                        .map(|item| {
-                            BatchDetectResult::error(item.package_identifier.clone(), msg.clone())
-                        })
-                        .collect();
-                    return Ok(results);
-                }
+                Err(e) => return Ok(all_error(e.to_string())),
             },
-            Err(e) => {
-                let msg = e.to_string();
-                let results = items
-                    .iter()
-                    .map(|item| {
-                        BatchDetectResult::error(item.package_identifier.clone(), msg.clone())
-                    })
-                    .collect();
-                return Ok(results);
-            }
+            Err(e) => return Ok(all_error(e.to_string())),
         };
 
         let results = items

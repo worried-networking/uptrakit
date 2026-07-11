@@ -411,6 +411,11 @@ declare_plugin!(ProxmoxHelperScriptsPlugin, ProxmoxHelperScriptsConfig, "discove
     sudo: ProxmoxHelperScriptsPlugin::required_sudo_commands,
 });
 
+/// Sentinel exit code emitted by [`READ_UPDATE_SCRIPT`] when the PHS update
+/// script is absent (legitimate empty on non-PHS hosts). Any other non-zero
+/// exit means the file exists but could not be read (an error).
+const UPDATE_SCRIPT_ABSENT_EXIT: i32 = 44;
+
 // ── Discoverer implementation ────────────────────────────────────────────
 
 #[async_trait]
@@ -421,42 +426,41 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for ProxmoxHelperScriptsPlu
     ) -> uptrakit_plugin_infrastructure_core::Result<Vec<DiscoveredSoftware>> {
         tracing::debug!("reading PHS update script from {UPDATE_SCRIPT_PATH}");
 
+        // Single-command absent-vs-unreadable discrimination via a sentinel exit
+        // code: the shell exits `44` when the file is absent (legitimate empty on
+        // non-PHS hosts) and streams its content otherwise. Any other non-zero
+        // exit means the file exists but is unreadable — an error, not empty.
+        // `UPDATE_SCRIPT_PATH` is a trusted compile-time constant, so embedding it
+        // in the script body carries no injection risk.
+        let read_script = format!(
+            r#"f="{UPDATE_SCRIPT_PATH}"; if [ ! -f "$f" ]; then exit {UPDATE_SCRIPT_ABSENT_EXIT}; fi; cat -- "$f""#
+        );
         let update_content = match self
             .executor
-            .execute_quiet(&CommandSpec::exec(
-                "cat",
-                ["--".to_string(), UPDATE_SCRIPT_PATH.to_string()],
-            ))
+            .execute_quiet(&CommandSpec::exec("sh", ["-c".to_string(), read_script]))
             .await
         {
             Ok(out) if out.exit_code == 0 => out.output,
-            Ok(_) => {
-                // exit_code != 0: no update script at this path (legitimate empty for non-PHS hosts)
+            Ok(out) if out.exit_code == UPDATE_SCRIPT_ABSENT_EXIT => {
                 tracing::debug!("no PHS update script found at {UPDATE_SCRIPT_PATH}");
                 return Ok(vec![]);
             }
+            Ok(out) => {
+                bail!(PluginError::PluginInternal(format!(
+                    "failed to read {UPDATE_SCRIPT_PATH} (exit {})",
+                    out.exit_code
+                )))
+            }
             Err(e) => {
-                // executor failure: probe with `test -f` to distinguish absent vs unreadable
-                let probe = self
-                    .executor
-                    .execute_quiet(&CommandSpec::exec(
-                        "test",
-                        ["-f".to_string(), UPDATE_SCRIPT_PATH.to_string()],
-                    ))
-                    .await;
-                match probe {
-                    Ok(p) if p.exit_code == 0 => {
-                        // file exists but is unreadable
-                        bail!(PluginError::PluginInternal(format!(
-                            "failed to read {UPDATE_SCRIPT_PATH}: {e}"
-                        )))
-                    }
-                    _ => {
-                        // file absent or probe failed — treat as non-PHS host
-                        tracing::debug!("no PHS update script found at {UPDATE_SCRIPT_PATH}");
-                        return Ok(vec![]);
-                    }
+                if let uptrakit_command::CommandError::CommandFailed(c) = e.current_context()
+                    && *c == UPDATE_SCRIPT_ABSENT_EXIT
+                {
+                    tracing::debug!("no PHS update script found at {UPDATE_SCRIPT_PATH}");
+                    return Ok(vec![]);
                 }
+                bail!(PluginError::PluginInternal(format!(
+                    "failed to read {UPDATE_SCRIPT_PATH}: {e}"
+                )))
             }
         };
 
@@ -1112,8 +1116,8 @@ mod tests {
 
     #[tokio::test]
     async fn discovery_missing_update_script_returns_empty() {
-        // `cat` exit code 1 → Ok(CommandOutput{exit_code:1}) → non-zero arm → Ok(vec![])
-        let executor = RoutedOutputExecutor::new([("cat", "", 1)]);
+        // sentinel exit 44 = update script absent → legitimate empty (non-PHS host)
+        let executor = RoutedOutputExecutor::new([("sh", "", UPDATE_SCRIPT_ABSENT_EXIT)]);
         let client = reqwest::Client::builder()
             .resolve(
                 "raw.githubusercontent.com",
@@ -1127,11 +1131,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn discovery_unreadable_update_script_returns_error() {
+        // non-sentinel non-zero exit = file exists but unreadable → must error,
+        // not be misclassified as an empty (non-PHS) host.
+        let executor = RoutedOutputExecutor::new([("sh", "", 1)]);
+        let client = reqwest::Client::builder()
+            .resolve(
+                "raw.githubusercontent.com",
+                "127.0.0.1:1".parse().expect("addr"),
+            )
+            .build()
+            .expect("client");
+        let plugin = test_plugin_with(executor, client);
+        plugin.discover_software().await.unwrap_err();
+    }
+
+    #[tokio::test]
     async fn discovery_ct_script_fetch_failure_returns_error() {
-        // `cat` exit code 0 with CT content → parse_phs_scripts finds 1 script →
+        // sh exit 0 with CT content → parse_phs_scripts finds 1 script →
         // fetch_text("raw.githubusercontent.com/...sonarr.sh") → connect refused → None →
         // must now return Err (not Ok with partial snapshot)
-        let executor = RoutedOutputExecutor::new([("cat", UPDATE_SCRIPT_WITH_ONE_CT, 0)]);
+        let executor = RoutedOutputExecutor::new([("sh", UPDATE_SCRIPT_WITH_ONE_CT, 0)]);
         let client = reqwest::Client::builder()
             .resolve(
                 "raw.githubusercontent.com",
