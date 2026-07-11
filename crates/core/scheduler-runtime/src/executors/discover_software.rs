@@ -249,6 +249,10 @@ fn build_assignments(
     let mut assignments = Vec::new();
 
     for plugin_type in discovery_types {
+        // Reconciliation contract (docs/adr/0027): disabled or unassigned discovery
+        // sources must be OMITTED from the payload — absence means "did not run".
+        // An error-free empty result, by contrast, asserts "nothing installed" and
+        // deactivates previously discovered links.
         if let Some(filter) = effective_filter
             && !filter.contains(plugin_type.as_str())
         {
