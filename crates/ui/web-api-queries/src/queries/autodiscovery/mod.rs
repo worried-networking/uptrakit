@@ -13,6 +13,7 @@
 
 mod discovery_items;
 mod ignore_rules;
+mod reconcile;
 
 pub mod default_configs;
 
@@ -35,10 +36,13 @@ use uuid::Uuid;
 pub enum AutodiscoveryError {
     #[error("database error: {0}")]
     Db(sea_orm::DbErr),
+    #[error("audit log error: {0}")]
+    Audit(uptrakit_audit_log::AuditLogError),
 }
 
 pub type Result<T> = std::result::Result<T, rootcause::Report<AutodiscoveryError>>;
 impl_report_conversion!(sea_orm::DbErr => AutodiscoveryError::Db);
+impl_report_conversion!(uptrakit_audit_log::AuditLogError => AutodiscoveryError::Audit);
 
 // -- Process discovery results --
 
@@ -92,11 +96,6 @@ fn effective_identifier_set(result: &DiscoveryPluginResult) -> HashSet<(String, 
 #[tracing::instrument(skip_all, fields(%tenant_id, %host_id))]
 pub async fn process_discovery_results(
     db: &sea_orm::DatabaseConnection,
-    // Consumed by reconcile (4c).
-    #[expect(
-        unused_variables,
-        reason = "wired through in this task; reconcile() call site lands in 4c"
-    )]
     audit: &uptrakit_audit_log::AuditEmitter,
     agent_id: Uuid,
     tenant_id: Uuid,
@@ -119,10 +118,10 @@ pub async fn process_discovery_results(
             continue;
         }
 
-        // Built from the RAW result (pre-ignore-filter) so reconcile (4c) sees
-        // every identifier the snapshot reported, regardless of the tenant-wide
+        // Built from the RAW result (pre-ignore-filter) so reconcile sees every
+        // identifier the snapshot reported, regardless of the tenant-wide
         // ignore list.
-        let _ids = effective_identifier_set(&result);
+        let ids = effective_identifier_set(&result);
 
         if !result.discoveries.is_empty() {
             discovery_items::process_plugin_result(
@@ -141,7 +140,9 @@ pub async fn process_discovery_results(
                 "discovery plugin returned no items"
             );
         }
-        // 4c inserts: reconcile::reconcile_plugin_result(db, audit, tenant_id, host_id, now, &result, &_ids).await?;
+
+        reconcile::reconcile_plugin_result(db, audit, tenant_id, host_id, now, &result, &ids)
+            .await?;
     }
 
     Ok(())
@@ -340,6 +341,56 @@ pub(crate) mod tests_common {
                 .await
                 .expect("insert host_software_item_plugin");
         }
+    }
+
+    /// Like [`insert_host_link`] but sets discovery provenance columns
+    /// (`discovery_source`, `last_discovered_at`, `missing_since`) and an
+    /// optional `qualifier`, so reconciliation's candidate filter picks the
+    /// row up. Returns the inserted link id.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "test helper: explicit over builder for a fixed, well-understood set of reconciliation setup fields"
+    )]
+    pub async fn insert_discovered_host_link(
+        db: &DatabaseConnection,
+        host_id: Uuid,
+        software_item_id: Uuid,
+        plugin_config_id: Uuid,
+        package_identifier: &str,
+        qualifier: Option<&str>,
+        discovery_source: &str,
+        last_discovered_at: Option<time::OffsetDateTime>,
+        missing_since: Option<time::OffsetDateTime>,
+        deactivated_at: Option<time::OffsetDateTime>,
+    ) -> Uuid {
+        let now = time::OffsetDateTime::now_utc();
+        let hsi_id = Uuid::now_v7();
+        let link = host_software_item::ActiveModel {
+            id: Set(hsi_id),
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_id),
+            qualifier: Set(qualifier.map(str::to_string)),
+            plugin_config_id: Set(Some(plugin_config_id)),
+            package_identifier: Set(Some(package_identifier.to_string())),
+            installed_version: Set(Some("1.0.0".to_string())),
+            installed_version_detected_at: Set(Some(now)),
+            installed_display_version: Set(None),
+            latest_version: Set(None),
+            latest_version_fetched_at: Set(None),
+            latest_release_metadata: Set(None),
+            last_updated_at: Set(None),
+            linked_at: Set(now),
+            update_category: Set("unknown".to_string()),
+            deactivated_at: Set(deactivated_at),
+            last_discovered_at: Set(last_discovered_at),
+            discovery_source: Set(Some(discovery_source.to_string())),
+            missing_since: Set(missing_since),
+        };
+        HostSoftwareItem::insert(link)
+            .exec(db)
+            .await
+            .expect("insert host_software_item");
+        hsi_id
     }
 
     // -- Helper: make DiscoveryPluginResult with targets --

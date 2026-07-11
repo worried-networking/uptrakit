@@ -697,6 +697,12 @@ impl From<Report<AutodiscoveryError>> for ApiError {
                 "autodiscovery.database_error",
                 Some(format_report_summary(&report)),
             ),
+            Audit(_) => ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "An internal error occurred.",
+                "autodiscovery.audit_error",
+                Some(format_report_summary(&report)),
+            ),
         }
     }
 }
