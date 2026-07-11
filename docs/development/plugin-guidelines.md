@@ -1253,6 +1253,20 @@ DiscoveredSoftware {
 The controller processes targets generically: for each target, it finds or creates a plugin config matching `(plugin_type, plugin_config)` and creates
 role assignments per `target.roles`. No plugin-specific synthesis logic exists in the controller.
 
+## Discovery and detection error contract
+
+Discovery results and batch version detection carry deactivation semantics: the controller reconciles previously
+discovered software against each error-free snapshot and deactivates links that stop appearing.
+
+- **Failures must set `error`** — a failed command, unreadable file, HTTP fetch failure, or output-parse failure must
+  surface as `Err` from `discover_software()` (→ `DiscoveryPluginResult.error`) or as per-item
+  `BatchDetectResult::error(...)`. Never degrade a failure to an empty or partial success.
+- **Empty means empty** — `Ok(vec![])` asserts "this tool manages nothing on this host" and triggers deactivation of
+  previously discovered items. The absence of the tool or its manifest/lock file is a legitimate empty.
+- **Partial results are failures** — if any discovered item would be silently dropped because a per-item step failed,
+  return `Err` for the whole run instead. A "not installed" / "no version" determination for an item is data, not a
+  failure, and may be skipped normally.
+
 ## Batch Updates
 
 The `UpdateExecutorPlugin` role trait includes an optional `execute_batch_update()` method for plugins that can update multiple packages in a single
