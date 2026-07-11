@@ -6,10 +6,18 @@ use uptrakit_global_github_provider::GitHubProviderClient;
 use uptrakit_global_github_provider::GitHubProviderHandle;
 use uptrakit_plugin_infrastructure_core::{
     ConfigModel, HostRequirements, HostRuntime, PluginCapability, PluginConfigValidationError,
-    PluginError, PluginFamily, ReleaseFetcher, Result, declare_plugin, roles::ReleaseFetchContext,
+    PluginError, PluginFamily, ReleaseFetcher, Result, command::CommandSpec, declare_plugin,
+    roles::ReleaseFetchContext,
 };
 
 use crate::config::SkillsConfig;
+
+/// Shell script: exit 44 = lock file absent; exit 0 = content on stdout; other = unreadable.
+pub(crate) const READ_LOCK_SCRIPT: &str =
+    r#"f="$HOME/.agents/.skill-lock.json"; if [ ! -f "$f" ]; then exit 44; fi; cat -- "$f""#;
+
+/// Sentinel exit code meaning the skill lock file does not exist.
+pub(crate) const LOCK_ABSENT_EXIT: i32 = 44;
 
 /// Agent Skills package-manager plugin.
 ///
@@ -35,6 +43,44 @@ impl SkillsPlugin {
             executor: runtime.executor(),
             provider: None,
         })
+    }
+
+    /// Read the skill lock file from the agent host.
+    ///
+    /// Returns `Ok(None)` when the lock file is absent (sentinel exit `44`),
+    /// `Ok(Some(content))` when it was read successfully, or `Err` when the
+    /// file exists but could not be read (permission denied, executor failure,
+    /// etc.).
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` for any failure other than the file-absent sentinel.
+    pub(crate) async fn read_lock_file(&self) -> Result<Option<String>> {
+        let cmd = CommandSpec::exec("sh", ["-c".to_string(), READ_LOCK_SCRIPT.to_string()]);
+        match self.executor.execute_quiet(&cmd).await {
+            Ok(out) if out.exit_code == 0 => Ok(Some(out.output)),
+            Ok(out) if out.exit_code == LOCK_ABSENT_EXIT => {
+                tracing::debug!("skill lock file absent (sentinel exit {LOCK_ABSENT_EXIT})");
+                Ok(None)
+            }
+            Ok(out) => {
+                bail!(PluginError::PluginInternal(format!(
+                    "skill lock file exists but is unreadable (exit {})",
+                    out.exit_code
+                )))
+            }
+            Err(e) => {
+                if let uptrakit_command::CommandError::CommandFailed(c) = e.current_context()
+                    && *c == LOCK_ABSENT_EXIT
+                {
+                    tracing::debug!("skill lock file absent (sentinel exit {LOCK_ABSENT_EXIT})");
+                    return Ok(None);
+                }
+                bail!(PluginError::PluginInternal(format!(
+                    "failed to read skill lock file: {e}"
+                )))
+            }
+        }
     }
 }
 

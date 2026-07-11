@@ -1,7 +1,5 @@
 use async_trait::async_trait;
-use uptrakit_plugin_infrastructure_core::{
-    BatchDetectItem, BatchDetectResult, Result, Version, command::CommandSpec,
-};
+use uptrakit_plugin_infrastructure_core::{BatchDetectItem, BatchDetectResult, Result, Version};
 
 use crate::lock::{parse_skill_identifier, parse_skill_lock};
 use crate::plugin::SkillsPlugin;
@@ -13,25 +11,13 @@ impl uptrakit_plugin_infrastructure_core::VersionDetector for SkillsPlugin {
         let (url, skill_path) = parse_skill_identifier(package_identifier)
             .map_err(|e| e.context_to::<uptrakit_plugin_infrastructure_core::PluginError>())?;
 
-        let cmd_output = match self
-            .executor
-            .execute_quiet(&CommandSpec::exec(
-                "sh",
-                [
-                    "-c".to_string(),
-                    "cat ~/.agents/.skill-lock.json".to_string(),
-                ],
-            ))
-            .await
-        {
-            Ok(out) if out.exit_code == 0 => out,
-            Ok(_) | Err(_) => return Ok(None),
+        let content = match self.read_lock_file().await? {
+            None => return Ok(None),
+            Some(c) => c,
         };
 
-        let entries = match parse_skill_lock(&cmd_output.output) {
-            Ok(e) => e,
-            Err(_) => return Ok(None),
-        };
+        let entries = parse_skill_lock(&content)
+            .map_err(|e| e.context_to::<uptrakit_plugin_infrastructure_core::PluginError>())?;
 
         let source_url = url.as_str().trim_end_matches('/');
         let found = entries.iter().find(|e| {
@@ -47,19 +33,31 @@ impl uptrakit_plugin_infrastructure_core::VersionDetector for SkillsPlugin {
             return Ok(vec![]);
         }
 
-        let lock_content: Option<Vec<crate::lock::SkillLockEntry>> = match self
-            .executor
-            .execute_quiet(&CommandSpec::exec(
-                "sh",
-                [
-                    "-c".to_string(),
-                    "cat ~/.agents/.skill-lock.json".to_string(),
-                ],
-            ))
-            .await
-        {
-            Ok(out) if out.exit_code == 0 => parse_skill_lock(&out.output).ok(),
-            _ => None,
+        let lock_entries = match self.read_lock_file().await {
+            Ok(None) => None,
+            Ok(Some(content)) => match parse_skill_lock(&content) {
+                Ok(entries) => Some(entries),
+                Err(e) => {
+                    let msg = e.to_string();
+                    let results = items
+                        .iter()
+                        .map(|item| {
+                            BatchDetectResult::error(item.package_identifier.clone(), msg.clone())
+                        })
+                        .collect();
+                    return Ok(results);
+                }
+            },
+            Err(e) => {
+                let msg = e.to_string();
+                let results = items
+                    .iter()
+                    .map(|item| {
+                        BatchDetectResult::error(item.package_identifier.clone(), msg.clone())
+                    })
+                    .collect();
+                return Ok(results);
+            }
         };
 
         let results = items
@@ -70,7 +68,7 @@ impl uptrakit_plugin_infrastructure_core::VersionDetector for SkillsPlugin {
                         BatchDetectResult::error(item.package_identifier.clone(), e.to_string())
                     }
                     Ok((url, skill_path)) => {
-                        let version = lock_content.as_ref().and_then(|entries| {
+                        let version = lock_entries.as_ref().and_then(|entries| {
                             let source_url = url.as_str().trim_end_matches('/');
                             entries
                                 .iter()
@@ -155,13 +153,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn detect_installed_version_command_fails_returns_none() {
-        let plugin = make_plugin("", 1);
+    async fn detect_installed_version_missing_lock_file_returns_none() {
+        // sentinel exit 44 = file absent => not installed, no error
+        let plugin = make_plugin("", 44);
         let result = plugin
             .detect_installed_version(&brainstorming_id())
             .await
             .expect("ok");
         assert_eq!(result, None);
+    }
+
+    #[tokio::test]
+    async fn detect_installed_version_unreadable_lock_file_errors() {
+        let plugin = make_plugin("", 1);
+        plugin
+            .detect_installed_version(&brainstorming_id())
+            .await
+            .unwrap_err();
     }
 
     #[tokio::test]
@@ -227,5 +235,30 @@ mod tests {
             invalid.error.is_some(),
             "invalid id should produce per-item error"
         );
+    }
+
+    #[tokio::test]
+    async fn batch_detect_missing_lock_file_yields_none_without_error() {
+        let plugin = make_plugin("", 44);
+        let items = vec![BatchDetectItem::new(brainstorming_id())];
+        let results = plugin.batch_detect(&items).await.expect("ok");
+        assert_eq!(results[0].installed_version, None);
+        assert!(results[0].error.is_none());
+    }
+
+    #[tokio::test]
+    async fn batch_detect_unreadable_lock_file_yields_per_item_errors() {
+        let plugin = make_plugin("", 1);
+        let items = vec![BatchDetectItem::new(brainstorming_id())];
+        let results = plugin.batch_detect(&items).await.expect("ok");
+        assert!(results[0].error.is_some());
+    }
+
+    #[tokio::test]
+    async fn batch_detect_corrupt_lock_file_yields_per_item_errors() {
+        let plugin = make_plugin("{corrupt", 0);
+        let items = vec![BatchDetectItem::new(brainstorming_id())];
+        let results = plugin.batch_detect(&items).await.expect("ok");
+        assert!(results[0].error.is_some());
     }
 }

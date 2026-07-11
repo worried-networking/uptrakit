@@ -13,31 +13,15 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for SkillsPlugin {
     async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
         tracing::info!("discovering globally installed Skills");
 
-        let cmd_output = match self
-            .executor
-            .execute_quiet(&CommandSpec::exec(
-                "sh",
-                [
-                    "-c".to_string(),
-                    "cat ~/.agents/.skill-lock.json".to_string(),
-                ],
-            ))
-            .await
-        {
-            Ok(out) if out.exit_code == 0 => out,
-            Ok(_) | Err(_) => {
-                tracing::debug!("skill lock file absent or unreadable; returning empty discovery");
-                return Ok(vec![]);
-            }
+        let content = match self.read_lock_file().await? {
+            None => return Ok(vec![]),
+            Some(c) => c,
         };
 
-        let entries = match parse_skill_lock(&cmd_output.output) {
-            Ok(e) => e,
-            Err(err) => {
-                tracing::warn!(error = %err, "failed to parse skill lock file");
-                return Ok(vec![]);
-            }
-        };
+        let entries = parse_skill_lock(&content).map_err(|err| {
+            tracing::warn!(error = %err, "failed to parse skill lock file");
+            err.context_to::<uptrakit_plugin_infrastructure_core::PluginError>()
+        })?;
 
         let mut discovered = Vec::new();
         for entry in entries {
@@ -164,10 +148,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn command_failure_returns_empty_discovery() {
-        let plugin = make_plugin("", 1);
+    async fn discovery_missing_lock_file_returns_empty_without_error() {
+        // sentinel exit 44 = file absent => legitimate empty snapshot
+        let plugin = make_plugin("", 44);
         let result = plugin.discover_software().await.expect("ok");
         assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn discovery_unreadable_lock_file_returns_error() {
+        // exit 1 = permission denied / unreadable => must be Err
+        let plugin = make_plugin("", 1);
+        plugin.discover_software().await.unwrap_err();
+    }
+
+    #[tokio::test]
+    async fn discovery_corrupt_lock_file_returns_error() {
+        let plugin = make_plugin("{not valid json", 0);
+        plugin.discover_software().await.unwrap_err();
     }
 
     #[tokio::test]

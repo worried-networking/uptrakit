@@ -14,6 +14,7 @@ catalog = ["uptrakit-plugin-infrastructure-core/catalog"]
 
 [dependencies]
 uptrakit-plugin-infrastructure-core = { workspace = true }
+uptrakit-command = { workspace = true }
 uptrakit-global-github-provider = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 rootcause = { workspace = true }
