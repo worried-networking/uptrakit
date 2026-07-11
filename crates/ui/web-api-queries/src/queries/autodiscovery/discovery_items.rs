@@ -296,140 +296,121 @@ async fn find_or_create_software_item(
     if let Some(plugin_link) = existing_plugin_link {
         // Match deactivated software_item rows too -- rediscovery must
         // reactivate them in place rather than treating them as orphaned.
+        //
+        // `plugin_link.software_item_id` is guaranteed to resolve here: the
+        // `host_software_item_plugins` table has a composite FK to
+        // `host_software_items(host_id, software_item_id)` (`ON DELETE
+        // CASCADE`), which itself has a direct FK to `software_items.id`
+        // (also `ON DELETE CASCADE`). Deleting a `software_item` therefore
+        // cascades through `host_software_items` and removes any
+        // `host_software_item_plugins` row that referenced it, so a plugin
+        // link can never outlive its software item. The one hard-delete
+        // path in application code (`reset_data::reset_tenant_data`) also
+        // deletes `host_software_item_plugins`/`host_software_items` before
+        // `software_items`, so it never relies on the cascade either. There
+        // is thus no code path that produces the "orphaned link" state, so
+        // no fallback branch is needed here.
         let linked_item = SoftwareItem::find()
             .filter(software_item::Column::Id.eq(plugin_link.software_item_id))
             .one(db)
             .await
-            .context_to()?;
+            .context_to()?
+            .ok_or_else(|| {
+                report!(AutodiscoveryError::Db(sea_orm::DbErr::RecordNotFound(
+                    format!(
+                        "software_item {} referenced by host_software_item_plugin {} not found",
+                        plugin_link.software_item_id, plugin_link.id
+                    )
+                )))
+            })?;
+        let linked_item_id = linked_item.id;
 
-        if let Some(linked_item) = linked_item {
-            let linked_item_id = linked_item.id;
-
-            // Collision rule 2: cascade reactivation of a deactivated item must
-            // not collide with an ACTIVE same-name item. If one exists, re-point
-            // the link to it and leave the deactivated item dormant.
-            let effective_item = if linked_item.deactivated_at.is_some() {
-                let active_same_name = SoftwareItem::find()
-                    .filter(software_item::Column::TenantId.eq(tenant_id))
-                    .filter(software_item::Column::Name.eq(linked_item.name.as_str()))
-                    .filter(software_item::Column::DeactivatedAt.is_null())
-                    .one(db)
-                    .await
-                    .context_to()?;
-                if let Some(active_item) = active_same_name {
-                    tracing::debug!(
-                        deactivated_item_id = %linked_item_id,
-                        active_item_id = %active_item.id,
-                        name = %linked_item.name,
-                        "cascade reactivation collides with active same-name item; re-pointing link"
-                    );
-                    active_item
-                } else {
-                    let mut active: software_item::ActiveModel = linked_item.into();
-                    active.deactivated_at = Set(None);
-                    active.update(db).await.context_to()?
-                }
-            } else {
-                linked_item
-            };
-
-            // Only update installed_version for non-featured (not yet approved) items.
-            // Featured items get their version from the DetectVersion scheduled
-            // task using the user's assigned plugin config.
-            if !effective_item.featured {
-                // Collision rule 1: prefer an ACTIVE link row for the *target*
-                // (host, effective_item, qualifier) key over repointing/reactivating
-                // a deactivated duplicate. This also covers the cascade-repoint case:
-                // if the active item already has an active link, prefer it and leave
-                // the originally deactivated link (still keyed to `linked_item_id`)
-                // untouched.
-                let mut target_hsi_query = HostSoftwareItem::find()
-                    .filter(host_software_item::Column::HostId.eq(host_id))
-                    .filter(host_software_item::Column::SoftwareItemId.eq(effective_item.id))
-                    .filter(host_software_item::Column::DeactivatedAt.is_null());
-                target_hsi_query = match item.qualifier {
-                    Some(q) => target_hsi_query.filter(host_software_item::Column::Qualifier.eq(q)),
-                    None => {
-                        target_hsi_query.filter(host_software_item::Column::Qualifier.is_null())
-                    }
-                };
-                let active_target_hsi = target_hsi_query.one(db).await.context_to()?;
-
-                let hsi_to_update = if let Some(active_hsi) = active_target_hsi {
-                    Some(active_hsi)
-                } else {
-                    // No active row at the target key yet: reactivate/repoint the
-                    // link row currently keyed to `linked_item_id` (the row Phase 1
-                    // actually matched).
-                    let mut orig_hsi_query = HostSoftwareItem::find()
-                        .filter(host_software_item::Column::HostId.eq(host_id))
-                        .filter(host_software_item::Column::SoftwareItemId.eq(linked_item_id));
-                    orig_hsi_query = match item.qualifier {
-                        Some(q) => {
-                            orig_hsi_query.filter(host_software_item::Column::Qualifier.eq(q))
-                        }
-                        None => {
-                            orig_hsi_query.filter(host_software_item::Column::Qualifier.is_null())
-                        }
-                    };
-                    orig_hsi_query.one(db).await.context_to()?
-                };
-
-                if let Some(hsi) = hsi_to_update {
-                    let mut active: host_software_item::ActiveModel = hsi.into();
-                    active.software_item_id = Set(effective_item.id);
-                    active.installed_version = Set(Some(installed_version.to_string()));
-                    active.installed_version_detected_at = Set(Some(now));
-                    active.installed_display_version =
-                        Set(item.installed_display_version.map(str::to_string));
-                    active.last_discovered_at = Set(Some(now));
-                    active.discovery_source = Set(Some(discovery_source.to_string()));
-                    active.missing_since = Set(None);
-                    active.deactivated_at = Set(None);
-                    active.update(db).await.context_to()?;
-                }
-            } else {
-                tracing::debug!(
-                    software_item_id = %effective_item.id,
-                    featured = effective_item.featured,
-                    %package_identifier,
-                    "skipping installed_version update for featured software item"
-                );
-            }
-            return Ok(None);
-        }
-
-        // The linked software item was discarded; remove the orphaned link.
-        // This is a defensive fallback: FK cascade deletes host_software_items
-        // rows when their software_item is truly deleted, so this branch is
-        // not expected to be reachable in practice.
-        tracing::debug!(
-            plugin_config_id = ?plugin_config_id,
-            plugin_type = %plugin_type_str,
-            package_identifier = %package_identifier,
-            "removing orphaned host link for discarded software item; will re-discover"
-        );
-        let mut orphan_query = HostSoftwareItem::find()
-            .filter(host_software_item::Column::HostId.eq(host_id))
-            .filter(host_software_item::Column::SoftwareItemId.eq(plugin_link.software_item_id));
-        orphan_query = match item.qualifier {
-            Some(q) => orphan_query.filter(host_software_item::Column::Qualifier.eq(q)),
-            None => orphan_query.filter(host_software_item::Column::Qualifier.is_null()),
-        };
-        if let Some(hsi) = orphan_query.one(db).await.context_to()? {
-            // Explicitly remove plugin link rows before deleting the HSI row.
-            // SQLite disables FK cascade enforcement inside the migration
-            // transaction (PRAGMA foreign_keys is a no-op inside BEGIN), so
-            // we must delete child rows manually to maintain integrity.
-            HostSoftwareItemPlugin::delete_many()
-                .filter(host_software_item_plugin::Column::HostSoftwareItemId.eq(hsi.id))
-                .exec(db)
+        // Collision rule 2: cascade reactivation of a deactivated item must
+        // not collide with an ACTIVE same-name item. If one exists, re-point
+        // the link to it and leave the deactivated item dormant.
+        let effective_item = if linked_item.deactivated_at.is_some() {
+            let active_same_name = SoftwareItem::find()
+                .filter(software_item::Column::TenantId.eq(tenant_id))
+                .filter(software_item::Column::Name.eq(linked_item.name.as_str()))
+                .filter(software_item::Column::DeactivatedAt.is_null())
+                .one(db)
                 .await
                 .context_to()?;
-            let hsi_active: host_software_item::ActiveModel = hsi.into();
-            hsi_active.delete(db).await.context_to()?;
+            if let Some(active_item) = active_same_name {
+                tracing::debug!(
+                    deactivated_item_id = %linked_item_id,
+                    active_item_id = %active_item.id,
+                    name = %linked_item.name,
+                    "cascade reactivation collides with active same-name item; re-pointing link"
+                );
+                active_item
+            } else {
+                let mut active: software_item::ActiveModel = linked_item.into();
+                active.deactivated_at = Set(None);
+                active.update(db).await.context_to()?
+            }
+        } else {
+            linked_item
+        };
+
+        // Only update installed_version for non-featured (not yet approved) items.
+        // Featured items get their version from the DetectVersion scheduled
+        // task using the user's assigned plugin config.
+        if !effective_item.featured {
+            // Collision rule 1: prefer an ACTIVE link row for the *target*
+            // (host, effective_item, qualifier) key over repointing/reactivating
+            // a deactivated duplicate. This also covers the cascade-repoint case:
+            // if the active item already has an active link, prefer it and leave
+            // the originally deactivated link (still keyed to `linked_item_id`)
+            // untouched.
+            let mut target_hsi_query = HostSoftwareItem::find()
+                .filter(host_software_item::Column::HostId.eq(host_id))
+                .filter(host_software_item::Column::SoftwareItemId.eq(effective_item.id))
+                .filter(host_software_item::Column::DeactivatedAt.is_null());
+            target_hsi_query = match item.qualifier {
+                Some(q) => target_hsi_query.filter(host_software_item::Column::Qualifier.eq(q)),
+                None => target_hsi_query.filter(host_software_item::Column::Qualifier.is_null()),
+            };
+            let active_target_hsi = target_hsi_query.one(db).await.context_to()?;
+
+            let hsi_to_update = if let Some(active_hsi) = active_target_hsi {
+                Some(active_hsi)
+            } else {
+                // No active row at the target key yet: reactivate/repoint the
+                // link row currently keyed to `linked_item_id` (the row Phase 1
+                // actually matched).
+                let mut orig_hsi_query = HostSoftwareItem::find()
+                    .filter(host_software_item::Column::HostId.eq(host_id))
+                    .filter(host_software_item::Column::SoftwareItemId.eq(linked_item_id));
+                orig_hsi_query = match item.qualifier {
+                    Some(q) => orig_hsi_query.filter(host_software_item::Column::Qualifier.eq(q)),
+                    None => orig_hsi_query.filter(host_software_item::Column::Qualifier.is_null()),
+                };
+                orig_hsi_query.one(db).await.context_to()?
+            };
+
+            if let Some(hsi) = hsi_to_update {
+                let mut active: host_software_item::ActiveModel = hsi.into();
+                active.software_item_id = Set(effective_item.id);
+                active.installed_version = Set(Some(installed_version.to_string()));
+                active.installed_version_detected_at = Set(Some(now));
+                active.installed_display_version =
+                    Set(item.installed_display_version.map(str::to_string));
+                active.last_discovered_at = Set(Some(now));
+                active.discovery_source = Set(Some(discovery_source.to_string()));
+                active.missing_since = Set(None);
+                active.deactivated_at = Set(None);
+                active.update(db).await.context_to()?;
+            }
+        } else {
+            tracing::debug!(
+                software_item_id = %effective_item.id,
+                featured = effective_item.featured,
+                %package_identifier,
+                "skipping installed_version update for featured software item"
+            );
         }
-        // Fall through to phases 2/3.
+        return Ok(None);
     }
 
     // Phase 2: Check if any other host in this tenant already has
