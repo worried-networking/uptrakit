@@ -32,11 +32,16 @@ Two facts discovered during design that shape the fix:
    implements `ResolvesServerCert`, is wired into the live rustls config, and is already swap-called from two
    production paths (manual renewal API, auto-renewal task). TLS leaf-cert reload does not need reexec — it needs
    the third caller of an existing, proven mechanism.
-2. **DB-sourced reloads never reach the reexec hook.** `ReloadSource::DbBump` (the path `PUT /api/v1/settings/*`
-   uses) skips `triage::decide` entirely — so adding fields to triage alone would fix TOML edits while the
-   documented primary UX stayed silently broken. The codebase's own answer is the validate-reject precedent:
-   `DbPoolReloadable::validate()` rejects `db.url` changes with "requires reexec" even though triage also catches
-   them — defense in depth covering both sources.
+2. **DB-sourced reloads never reach the reexec hook — and for nats/network settings, never fire at all.**
+   `ReloadSource::DbBump` skips `triage::decide` entirely. Deeper (verified during review): the
+   `PUT /api/v1/global-settings/nats` and `/network` routes call `upsert_global_setting_raw`, which never bumps
+   `settings_version`; the config reconciler (the only DbBump emitter) hardcodes its sections to
+   `audit`/`registration`; and `sections_to_deltas` has no `nats`/`network`/`tls` arms. So the DB write path for
+   these sections currently produces **no reload cycle whatsoever** — the validate-reject gates below fire on
+   file-sourced reloads today and future-proof the DbBump path if that wiring ever lands. Stated as a known gap,
+   not silently claimed as covered. The codebase's own answer for honest rejection is the validate-reject
+   precedent: `DbPoolReloadable::validate()` rejects `db.url` changes with "requires reexec" even though triage
+   also catches them — defense in depth.
 
 ## Approach
 
@@ -48,11 +53,28 @@ never keep a republish-to-nobody path.
 
 - Gut `NatsReloadable`: delete the watch channel, the `apply()` client-connect (the leak), and `health_check()`'s
   old-client borrow. Keep a minimal reloadable whose `validate()` rejects any `nats.url` change with
-  "nats.url change requires restart" (exact shape of `DbPoolReloadable::validate()` /
-  `EmbeddedServicesReloadable::validate()`). This makes both TOML- and DB-sourced changes fail loudly at validate
-  time — no side effects, coordinator emits FAILED not APPLIED.
-- Add `nats.url` to `reexec/triage.rs::decide()` (one line, file-sourced defense in depth, mirroring `db.url`
-  which also exists in both places).
+  "nats.url change requires restart" (exact shape of `DbPoolReloadable::validate()`;
+  `EmbeddedServicesReloadable::health_check()`'s documented `Ok(())` no-op is the precedent for the gutted
+  methods). Any file-sourced change fails loudly at validate time — no side effects, coordinator emits FAILED
+  not APPLIED.
+- **Register it unconditionally.** Today the reloadable is pushed only when NATS is configured at boot
+  (`if let (Some(nats), Some(url)) …`) — an unconfigured-NATS deployment registers nothing, so a `[nats]` delta
+  matches zero reloadables and the coordinator vacuously reports APPLIED (the same bug class via absent
+  registration). The gutted gate needs no client or URL handle — it is a pure prior-vs-new compare — so the
+  conditional registration goes away with the connect machinery.
+- Add `nats.url` to `reexec/triage.rs::decide()` (one line, mirroring `db.url` which also exists in both
+  places). Direction note: `triage.rs` lives in controller-runtime, which already owns it — no
+  `uptrakit-config-reload` → controller-runtime import is introduced (the forbidden direction). All changes stay
+  in the existing `reload/` modules and `boot/reload.rs` wiring — no new boot phase.
+- **Sequencing, stated plainly (contrarian):** for file-sourced reloads the coordinator runs triage *before*
+  building deltas (`config-reload/src/coordinator/state_machine.rs` `process_request`, Sighup/FileWatch arm —
+  the load-bearing ordering this whole section depends on; if a refactor ever reorders it, the gates below
+  change meaning) — a triage hit reexecs and validate never runs. So the operator UX for a file-sourced
+  `nats.url` edit is an **automatic graceful reexec** (the same UX as `db.url`), not a reload failure. The
+  validate-reject gate is the backstop for delta sources that bypass triage — today that path is unreachable for
+  nats (the known DbBump gap above), so mark the gate `// unreachable until DbBump wires nats sections` rather
+  than calling it defense in depth. Same triage-preemption logic is why the addr gates below deliberately get
+  **no** triage entry.
 - This matches `docs/development/nats-integration.md`'s stated policy (URL hot-reload intentionally unsupported) —
   the code finally agrees with the doc. The `#[expect(dead_code)]` on the module goes away with the dead halves.
 
@@ -68,22 +90,49 @@ claiming success.
   of the proven mechanism. `revert()` swaps back the pre-apply `CertifiedKey` (Reloadable contract: apply
   snapshots pre-apply state). The reloadable needs the resolver handle at construction
   (`PkiRuntime.server_cert_resolver` is available at wire-up time in `boot/reload.rs`).
-- Scope check during implementation: if a `tls.*` delta can change CA/trust material (not just the leaf), the
-  same apply must also swap the client verifier (`DynamicClientVerifier::swap`, also existing); if trust material
-  turns out to be immutable at runtime (`tls.trust_domain` structural), that field instead joins the
-  validate-reject + triage set below. Leaf cert/key = hot swap; structural trust = restart. Map each `tls.*`
-  field to exactly one of the two buckets — no field may stay in the republish-to-nobody bucket.
-- `health_check()` becomes meaningful: assert the resolver now serves the new cert (compare leaf fingerprint).
+- Bucketing, resolved during review (no runtime investigation left): `tls.cert_path`/`tls.key_path` (leaf) = hot
+  swap via the resolver; `tls.trust_domain` is a real, independently stored TOML-only field with no DB-write
+  route — restart bucket by construction (validate-reject + triage). If a `tls.*` delta can change CA/trust
+  material beyond the leaf, the same apply also swaps the client verifier (`DynamicClientVerifier::swap`, also
+  existing). No `tls.*` field may stay in the republish-to-nobody bucket. Note: cert/key-path hot-reload is
+  **file-source only** — no DB route exists for these fields; document it that way.
+- **Phase split (contrarian-driven):** `validate()` does the full load — parse cert, parse key, and verify the
+  key matches the leaf (building the `CertifiedKey` surfaces this) — and stashes the prepared `CertifiedKey`.
+  Today's metadata-only probe would let a mid-rotation write race (cert written, key not yet) through to apply,
+  swapping in a mismatched pair that breaks every handshake while fingerprint health-check still passes.
+  Read-only file loads in `validate()` match the crate's existing validate behavior (metadata probes, DB-URL
+  probes); "pure" in the contract means no state mutation. `apply()` is then a pure `ArcSwap` swap of the
+  already-validated object, stashing the pre-apply `CertifiedKey` in memory; `revert()` restores it via the same
+  in-process store — never re-reads disk (revert makes no external calls; an `ArcSwap` swap is state
+  restoration, not I/O).
+- `health_check()` asserts the resolver now serves the new cert (leaf fingerprint compare) — this proves **the
+  swap took**, not pair validity; validity is guaranteed at validate time. Requires a small new accessor on
+  `ControllerServerCertResolver` (e.g. `current() -> Arc<CertifiedKey>`) — it exposes only `resolve()`/`swap()`
+  today; named here so the implementer doesn't discover it mid-flight.
+- Boot ordering verified: `identity.pki.server_cert_resolver` exists before `reload::wire()` runs and `&identity`
+  is already passed in — handing the resolver to `TlsSnapshotReloadable::new()` is a signature change only.
 
-### HTTPS/PKI listener addresses — reexec + validate-reject; delete drain scaffolding
+### HTTPS/PKI listener addresses — validate-reject only; delete drain scaffolding
 
-- Add `network.https.addr` and `network.pki.addr` to `triage::decide()` — this also fixes the existing doc/code
-  drift (runbook already promises it; reexec preserves the listen sockets via the FD-passing path, and an addr
-  change simply binds fresh in the new process).
-- `HttpsListenerReloadable::validate()` / `PkiListenerReloadable::validate()` reject addr changes ("requires
-  restart") for the DbBump path, same precedent as above.
-- Delete the never-set `draining` flags, their test-only setters, and the pre-bind probe (probing an addr whose
-  change is now rejected is dead work). The reloadables shrink to validate-gates; their watch channels go away.
+Contrarian review killed the reexec route for addr changes, with code evidence: the reexec child uses the
+inherited socket **unconditionally** when FDs are present (`boot/listeners.rs` — the configured addr is consulted
+only in the fresh-bind branch), so an addr-change reexec would keep serving the **old** address — the exact
+honesty bug this spec exists to kill, relocated. Making reexec rebind on addr delta (compare the inherited
+socket's `local_addr` to the configured addr, drop and fresh-bind on mismatch) is real machinery with a
+new failure mode (child fails to bind → controller down instead of failed reload). Therefore:
+
+- `HttpsListenerReloadable::validate()` / `PkiListenerReloadable::validate()` **reject** addr changes with
+  "listener address change requires a full controller restart". No triage entry for addr fields — which keeps
+  this gate *live* for file-sourced reloads (triage would preempt validate; see sequencing note below). The old
+  process keeps serving; the operator restarts deliberately.
+- The runbook's claim that addr changes force reexec was never implemented (doc drift) — the doc deliverable
+  corrects it to "requires full restart" instead of making the false claim true in a way the FD path can't honor.
+- In-place rebind-with-drain or reexec-with-rebind stays deferred (listed in Out of scope) until someone actually
+  needs runtime addr changes; an integration test proving the child binds the *new* addr is the admission ticket.
+- Delete the never-set `draining` flags, their test-only setters, and **both** probe users — the pre-bind probe
+  in `validate()` and the TCP-connect liveness probe in `health_check()` (a validate-only gate controls no
+  socket, so the health probe is dead work too) — which orphans `reload/probe.rs` (`pick_probe_addr`) entirely;
+  delete the module. The reloadables shrink to validate-gates; their watch channels go away.
 
 ### The remaining dropped receivers — ruled in/out with evidence
 
@@ -94,32 +143,35 @@ claiming success.
 - `PluginCatalogReloadable`: documented V1 no-op by design (parent spec §10.6) — out of scope.
 - `DbPoolReloadable` / `AuditDispatcherReloadable`: **not** illusory — both have live production subscribers
   (config reconciler; `audit_log_filter_rx` through AppState). Untouched.
-- `RuntimeConfigChannels`/`RuntimeConfigReceivers` (shared config-reload crate): boot-seeded; no evidence the
-  coordinator re-pushes on apply and no production consumer of the nats/tls receivers found. Verify during
-  implementation; if confirmed boot-seeded-only, note it in the module doc — removing it is a separate cleanup,
-  not this spec.
+- `RuntimeConfigChannels`/`RuntimeConfigReceivers` (shared config-reload crate): **live infrastructure, not
+  removable** (resolved during review — AppState carries `config_receivers` in production, e.g. middleware).
+  The nats/tls receivers specifically appear unread; harmless boot-seeded values. No action in this spec.
 
 ## Tests
 
-1. **NATS:** validate() rejects a url change (both delta sources — construct deltas as the coordinator would for
-   Sighup and DbBump); triage `decide()` unit test gains the `nats.url` case; regression: a reload touching
-   `[nats]` no longer opens any NATS connection (assert via a mock/unreachable URL — apply must not attempt a
-   connect).
+1. **NATS:** validate() rejects a url change (file-sourced delta, as the coordinator constructs it — the DbBump
+   path is unreachable for nats today, per the known gap above); the reloadable is registered without NATS
+   configured and still rejects (unconditional-registration regression); triage `decide()` unit test gains the
+   `nats.url` case; regression: a reload touching `[nats]` no longer opens any NATS connection (assert via a
+   mock/unreachable URL — apply must not attempt a connect).
 2. **TLS:** end-to-end-ish integration: build the resolver + reloadable, apply a delta with a fresh self-signed
    cert pair, assert `resolver.resolve()` serves the new leaf (fingerprint compare); revert restores the old one.
    This is the wiring test class whose absence let the no-ops ship (per-reloadable unit tests all passed while
    nothing was connected).
-3. **Listeners:** validate() rejects addr change; triage gains https/pki addr cases; draining-flag tests deleted
-   with the flag.
+3. **Listeners:** validate() rejects addr change with the "requires full restart" message (live for file-sourced
+   reloads — no triage preemption for addr fields, by design); draining-flag and probe tests deleted with the
+   scaffolding.
 4. **Coordinator behavior unchanged** for genuinely reloadable sections (existing coordinator tests keep
    passing).
 5. No `start_paused` on anything touching real sockets/certs; no tokio-time APIs added (snapshot rule).
 
 ## Documentation deliverables
 
-- `docs/end-user/operator-runbook-reload.md`: reconcile the reexec-forcing field list with the now-true code
-  (https/pki addr, trust_domain if bucketed structural, nats.url added; cert/key-path documented as genuinely
-  hot-reloadable now).
+- `docs/end-user/operator-runbook-reload.md`: reconcile with the now-true code — `nats.url` and
+  `tls.trust_domain` join the reexec-forcing list; `network.https.addr`/`network.pki.addr` are corrected from
+  "forces reexec" (never implemented) to "requires full controller restart"; cert/key-path documented as
+  hot-reloadable **via file reload only** (no DB route). Also fix the field-path spelling drift while there: the
+  runbook writes flat `network.https_addr`; the config struct is nested `network.https.addr`.
 - `docs/development/nats-integration.md`: URL-change section points at the validate-reject + restart behavior.
 - `docs/development/coding-standards.md` Reloadable-trait section: add the rule distilled from this bug class —
   a Reloadable whose apply() has no live consumer must not exist; validate-reject or wire a real subscriber.
@@ -130,7 +182,10 @@ claiming success.
 ## Out of scope / deferred
 
 - Live NATS client swapping in NotificationService/broadcasters (restart-only per policy).
-- In-place listener rebind with drain (the deleted scaffolding's original ambition; reexec covers addr changes).
+- Runtime listener address changes entirely — both in-place rebind-with-drain (the deleted scaffolding's
+  ambition) and reexec-with-rebind (would need addr-delta detection + fresh-bind fallback in the FD-inheritance
+  path, plus an integration test that the child binds the new addr). Addr changes are restart-only until a real
+  need appears.
 - Making `ReloadSource::DbBump` flow through the reexec hook (validate-reject covers the honesty requirement; a
   DB-driven auto-restart is a product decision, not a bug fix).
 - `RuntimeConfigChannels` removal (verify-and-note only).
