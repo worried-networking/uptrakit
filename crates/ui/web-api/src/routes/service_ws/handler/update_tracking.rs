@@ -656,6 +656,9 @@ mod tests {
             linked_at: Set(OffsetDateTime::now_utc()),
             update_category: Set(update_category.to_string()),
             deactivated_at: Set(None),
+            last_discovered_at: Set(None),
+            discovery_source: Set(None),
+            missing_since: Set(None),
         }
         .insert(db)
         .await

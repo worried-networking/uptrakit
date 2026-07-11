@@ -506,6 +506,9 @@ async fn insert_replayable_queued_update(
         linked_at: Set(now),
         update_category: Set("security".to_string()),
         deactivated_at: Set(None),
+        last_discovered_at: Set(None),
+        discovery_source: Set(None),
+        missing_since: Set(None),
     }
     .insert(db)
     .await
@@ -796,6 +799,9 @@ async fn handle_update_result_emits_update_finalized_audit_event() {
         linked_at: Set(OffsetDateTime::now_utc()),
         update_category: Set("security".to_string()),
         deactivated_at: Set(None),
+        last_discovered_at: Set(None),
+        discovery_source: Set(None),
+        missing_since: Set(None),
     }
     .insert(&db)
     .await
@@ -919,6 +925,9 @@ async fn handle_batch_update_result_emits_batch_update_finalized_audit_summary()
         linked_at: Set(OffsetDateTime::now_utc()),
         update_category: Set("security".to_string()),
         deactivated_at: Set(None),
+        last_discovered_at: Set(None),
+        discovery_source: Set(None),
+        missing_since: Set(None),
     }
     .insert(&db)
     .await
@@ -957,6 +966,9 @@ async fn handle_batch_update_result_emits_batch_update_finalized_audit_summary()
         linked_at: Set(OffsetDateTime::now_utc()),
         update_category: Set("security".to_string()),
         deactivated_at: Set(None),
+        last_discovered_at: Set(None),
+        discovery_source: Set(None),
+        missing_since: Set(None),
     }
     .insert(&db)
     .await

@@ -480,6 +480,9 @@ mod tests {
             linked_at: Set(now),
             update_category: Set("unknown".to_string()),
             deactivated_at: Set(None),
+            last_discovered_at: Set(None),
+            discovery_source: Set(None),
+            missing_since: Set(None),
         }
         .insert(db)
         .await

@@ -101,6 +101,9 @@ async fn insert_host_link(
         linked_at: Set(now),
         update_category: Set("unknown".to_string()),
         deactivated_at: Set(None),
+        last_discovered_at: Set(None),
+        discovery_source: Set(None),
+        missing_since: Set(None),
     }
     .insert(&app.db)
     .await
@@ -1382,6 +1385,9 @@ async fn host_count_excludes_deactivated_hosts() {
             plugin_config_id: Set(None),
             package_identifier: Set(None),
             deactivated_at: Set(None),
+            last_discovered_at: Set(None),
+            discovery_source: Set(None),
+            missing_since: Set(None),
         }
         .insert(&app.db)
         .await
@@ -1524,6 +1530,9 @@ async fn list_with_updatable_filter() {
         plugin_config_id: Set(None),
         package_identifier: Set(None),
         deactivated_at: Set(None),
+        last_discovered_at: Set(None),
+        discovery_source: Set(None),
+        missing_since: Set(None),
     }
     .insert(&app.db)
     .await
@@ -1547,6 +1556,9 @@ async fn list_with_updatable_filter() {
         plugin_config_id: Set(None),
         package_identifier: Set(None),
         deactivated_at: Set(None),
+        last_discovered_at: Set(None),
+        discovery_source: Set(None),
+        missing_since: Set(None),
     }
     .insert(&app.db)
     .await

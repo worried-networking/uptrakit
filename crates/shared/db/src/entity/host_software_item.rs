@@ -26,6 +26,9 @@ pub struct Model {
     #[sea_orm(default_value = "unknown")]
     pub update_category: String,
     pub deactivated_at: Option<OffsetDateTime>,
+    pub last_discovered_at: Option<OffsetDateTime>,
+    pub discovery_source: Option<String>,
+    pub missing_since: Option<OffsetDateTime>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
