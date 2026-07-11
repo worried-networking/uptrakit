@@ -83,7 +83,8 @@ pub async fn find_outdated_items_for_host(
     let mut query = HostSoftwareItem::find()
         .filter(host_software_item::Column::HostId.eq(host_id))
         .filter(host_software_item::Column::InstalledVersion.is_not_null())
-        .filter(host_software_item::Column::LatestVersion.is_not_null());
+        .filter(host_software_item::Column::LatestVersion.is_not_null())
+        .filter(host_software_item::Column::DeactivatedAt.is_null());
 
     if let Some(cats) = categories {
         let strs: Vec<&str> = cats.iter().map(UpdateCategory::as_str).collect();
@@ -231,7 +232,8 @@ pub async fn find_outdated_hosts_for_item(
     let mut query = HostSoftwareItem::find()
         .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
         .filter(host_software_item::Column::InstalledVersion.is_not_null())
-        .filter(host_software_item::Column::LatestVersion.is_not_null());
+        .filter(host_software_item::Column::LatestVersion.is_not_null())
+        .filter(host_software_item::Column::DeactivatedAt.is_null());
 
     if let Some(ids) = host_ids {
         query = query.filter(host_software_item::Column::HostId.is_in(ids.to_vec()));
@@ -486,6 +488,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn find_outdated_items_excludes_deactivated_link() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let hsi = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(f.host_id))
+            .filter(host_software_item::Column::SoftwareItemId.eq(f.item_id))
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut active: host_software_item::ActiveModel = hsi.into();
+        active.deactivated_at = Set(Some(OffsetDateTime::now_utc()));
+        active.update(&db).await.unwrap();
+
+        let candidates =
+            find_outdated_items_for_host(&db, f.tenant_id, f.host_id, None, None, None)
+                .await
+                .unwrap();
+        assert!(
+            candidates.is_empty(),
+            "deactivated link must not appear in candidates; got {}",
+            candidates.len()
+        );
+    }
+
+    #[tokio::test]
     async fn find_outdated_items_excludes_specified_ids() {
         let db = setup_db().await;
         let f = insert_base_fixture(&db).await;
@@ -670,6 +698,32 @@ mod tests {
                 .await
                 .unwrap();
         assert!(candidates.is_empty());
+    }
+
+    #[tokio::test]
+    async fn find_outdated_hosts_excludes_deactivated_link() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let hsi = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(f.host_id))
+            .filter(host_software_item::Column::SoftwareItemId.eq(f.item_id))
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut active: host_software_item::ActiveModel = hsi.into();
+        active.deactivated_at = Set(Some(OffsetDateTime::now_utc()));
+        active.update(&db).await.unwrap();
+
+        let candidates =
+            find_outdated_hosts_for_item(&db, f.tenant_id, f.item_id, None, None, None)
+                .await
+                .unwrap();
+        assert!(
+            candidates.is_empty(),
+            "deactivated link must not appear in candidates; got {}",
+            candidates.len()
+        );
     }
 
     #[tokio::test]
