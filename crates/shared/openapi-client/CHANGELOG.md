@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.3](https://github.com/worried-networking/uptrakit/compare/uptrakit-openapi-client-v0.0.2...uptrakit-openapi-client-v0.0.3) - 2026-07-11
+
+### Added
+
+- *(web-api-types)* add UpdateStatus::Interrupted variant
+- *(types)* add terminal UpdateStatus::Interrupted (outcome unknown)
+- *(web-api)* typed-slot dispatch for InstalledVersionEnricher
+- *(plugin-types)* add EnrichInstalledVersion capability
+
+### Fixed
+
+- *(web-api-types)* emit serde wire strings in ToSchema for catch-all enums
+
+### Other
+
+- update Cargo.toml dependencies
+- *(web-api)* drift-proof remaining query handlers via params(<IntoParamsStruct>)
+- *(web-api)* convert list handlers to params(<IntoParamsStruct>) (drift-proof)
+- *(controller)* document canonical sha256 config digest + stale-on-error
+- slim root AGENTS.md to invariants + pointers; fix stale facts
+- *(web-api-types)* guard PluginRole schema drift; point staleness msg to regen-api.sh
+
 ## [0.0.2](https://github.com/worried-networking/uptrakit/compare/uptrakit-openapi-client-v0.0.1...uptrakit-openapi-client-v0.0.2) - 2026-05-05
 
 ### Added
