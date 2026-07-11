@@ -235,20 +235,29 @@ async fn process_targets_discovery(
 /// lookups match on `(plugin_type, package_identifier)` with a NULL
 /// `plugin_config_id` rather than `(plugin_config_id, package_identifier)`.
 ///
-/// Three-phase lookup:
+/// Three-phase lookup. Match phases intentionally see deactivated rows so that
+/// rediscovery reactivates them in place (spec §3) rather than falling through
+/// to insert and creating duplicates:
 ///
-/// 1. If this host already has a `host_software_item_plugin` row for
-///    the matching identity key, update `installed_version` in place
-///    **if** the linked `software_item` is still active. If the item has been
-///    discarded (soft-deleted), the orphaned link is removed and the function falls
-///    through to phases 2/3 so a fresh pending item is created.
+/// 1. If this host already has a `host_software_item_plugin` row for the matching
+///    identity key, update `installed_version` in place. If the linked
+///    `host_software_item` row is deactivated, reactivate it (clear
+///    `deactivated_at`, reset `missing_since`); if an ACTIVE row for the same
+///    `(host, software_item, qualifier)` key also exists (collision rule 1),
+///    prefer and update that active row instead, leaving the deactivated
+///    duplicate untouched. If the linked `software_item` itself is deactivated,
+///    attempt cascade reactivation: if an ACTIVE item with the same
+///    `(tenant_id, name)` already exists (collision rule 2), re-point the link
+///    to that active item and leave the originally deactivated item dormant;
+///    otherwise reactivate the deactivated item in place.
 /// 2. If *any other* host in the tenant has the same assignment backed by an active
 ///    software item, reuse it and insert a new `host_software_item` link for this host.
-/// 3. Otherwise create a new pending `software_item` and `host_software_item`.
-///    If the insert hits a `(tenant_id, name)` unique-constraint violation (e.g.
-///    a second `DiscoveryTarget` for the same `DiscoveredSoftware` item races
-///    through Phase 3 first), fall back to a `(tenant_id, name)` lookup so both
-///    targets end up sharing the same `software_item` row.
+/// 3. Otherwise, if a DEACTIVATED `software_item` with the same name exists, reactivate
+///    it in place; else create a new pending `software_item`. If the insert hits a
+///    `(tenant_id, name)` unique-constraint violation (e.g. a second `DiscoveryTarget`
+///    for the same `DiscoveredSoftware` item races through Phase 3 first), fall back
+///    to a `(tenant_id, name)` lookup so both targets end up sharing the same
+///    `software_item` row.
 async fn find_or_create_software_item(
     db: &sea_orm::DatabaseConnection,
     ctx: &DiscoveryContext<'_>,
@@ -285,29 +294,90 @@ async fn find_or_create_software_item(
     let existing_plugin_link = phase1_query.one(db).await.context_to()?;
 
     if let Some(plugin_link) = existing_plugin_link {
+        // Match deactivated software_item rows too -- rediscovery must
+        // reactivate them in place rather than treating them as orphaned.
         let linked_item = SoftwareItem::find()
             .filter(software_item::Column::Id.eq(plugin_link.software_item_id))
-            .filter(software_item::Column::DeactivatedAt.is_null())
             .one(db)
             .await
             .context_to()?;
 
         if let Some(linked_item) = linked_item {
+            let linked_item_id = linked_item.id;
+
+            // Collision rule 2: cascade reactivation of a deactivated item must
+            // not collide with an ACTIVE same-name item. If one exists, re-point
+            // the link to it and leave the deactivated item dormant.
+            let effective_item = if linked_item.deactivated_at.is_some() {
+                let active_same_name = SoftwareItem::find()
+                    .filter(software_item::Column::TenantId.eq(tenant_id))
+                    .filter(software_item::Column::Name.eq(linked_item.name.as_str()))
+                    .filter(software_item::Column::DeactivatedAt.is_null())
+                    .one(db)
+                    .await
+                    .context_to()?;
+                if let Some(active_item) = active_same_name {
+                    tracing::debug!(
+                        deactivated_item_id = %linked_item_id,
+                        active_item_id = %active_item.id,
+                        name = %linked_item.name,
+                        "cascade reactivation collides with active same-name item; re-pointing link"
+                    );
+                    active_item
+                } else {
+                    let mut active: software_item::ActiveModel = linked_item.into();
+                    active.deactivated_at = Set(None);
+                    active.update(db).await.context_to()?
+                }
+            } else {
+                linked_item
+            };
+
             // Only update installed_version for non-featured (not yet approved) items.
             // Featured items get their version from the DetectVersion scheduled
             // task using the user's assigned plugin config.
-            if !linked_item.featured {
-                let mut hsi_query = HostSoftwareItem::find()
+            if !effective_item.featured {
+                // Collision rule 1: prefer an ACTIVE link row for the *target*
+                // (host, effective_item, qualifier) key over repointing/reactivating
+                // a deactivated duplicate. This also covers the cascade-repoint case:
+                // if the active item already has an active link, prefer it and leave
+                // the originally deactivated link (still keyed to `linked_item_id`)
+                // untouched.
+                let mut target_hsi_query = HostSoftwareItem::find()
                     .filter(host_software_item::Column::HostId.eq(host_id))
-                    .filter(
-                        host_software_item::Column::SoftwareItemId.eq(plugin_link.software_item_id),
-                    );
-                hsi_query = match item.qualifier {
-                    Some(q) => hsi_query.filter(host_software_item::Column::Qualifier.eq(q)),
-                    None => hsi_query.filter(host_software_item::Column::Qualifier.is_null()),
+                    .filter(host_software_item::Column::SoftwareItemId.eq(effective_item.id))
+                    .filter(host_software_item::Column::DeactivatedAt.is_null());
+                target_hsi_query = match item.qualifier {
+                    Some(q) => target_hsi_query.filter(host_software_item::Column::Qualifier.eq(q)),
+                    None => {
+                        target_hsi_query.filter(host_software_item::Column::Qualifier.is_null())
+                    }
                 };
-                if let Some(hsi) = hsi_query.one(db).await.context_to()? {
+                let active_target_hsi = target_hsi_query.one(db).await.context_to()?;
+
+                let hsi_to_update = if let Some(active_hsi) = active_target_hsi {
+                    Some(active_hsi)
+                } else {
+                    // No active row at the target key yet: reactivate/repoint the
+                    // link row currently keyed to `linked_item_id` (the row Phase 1
+                    // actually matched).
+                    let mut orig_hsi_query = HostSoftwareItem::find()
+                        .filter(host_software_item::Column::HostId.eq(host_id))
+                        .filter(host_software_item::Column::SoftwareItemId.eq(linked_item_id));
+                    orig_hsi_query = match item.qualifier {
+                        Some(q) => {
+                            orig_hsi_query.filter(host_software_item::Column::Qualifier.eq(q))
+                        }
+                        None => {
+                            orig_hsi_query.filter(host_software_item::Column::Qualifier.is_null())
+                        }
+                    };
+                    orig_hsi_query.one(db).await.context_to()?
+                };
+
+                if let Some(hsi) = hsi_to_update {
                     let mut active: host_software_item::ActiveModel = hsi.into();
+                    active.software_item_id = Set(effective_item.id);
                     active.installed_version = Set(Some(installed_version.to_string()));
                     active.installed_version_detected_at = Set(Some(now));
                     active.installed_display_version =
@@ -315,12 +385,13 @@ async fn find_or_create_software_item(
                     active.last_discovered_at = Set(Some(now));
                     active.discovery_source = Set(Some(discovery_source.to_string()));
                     active.missing_since = Set(None);
+                    active.deactivated_at = Set(None);
                     active.update(db).await.context_to()?;
                 }
             } else {
                 tracing::debug!(
-                    software_item_id = %linked_item.id,
-                    featured = linked_item.featured,
+                    software_item_id = %effective_item.id,
+                    featured = effective_item.featured,
                     %package_identifier,
                     "skipping installed_version update for featured software item"
                 );
@@ -329,6 +400,9 @@ async fn find_or_create_software_item(
         }
 
         // The linked software item was discarded; remove the orphaned link.
+        // This is a defensive fallback: FK cascade deletes host_software_items
+        // rows when their software_item is truly deleted, so this branch is
+        // not expected to be reachable in practice.
         tracing::debug!(
             plugin_config_id = ?plugin_config_id,
             plugin_type = %plugin_type_str,
@@ -393,53 +467,113 @@ async fn find_or_create_software_item(
     let software_item_id = if let Some(existing) = existing_item {
         existing.id
     } else {
-        // Phase 3: Create a new pending software item.
-        let new_id = Uuid::now_v7();
-        let new_item = software_item::ActiveModel {
-            id: Set(new_id),
-            tenant_id: Set(tenant_id),
-            name: Set(name.to_string()),
-            featured: Set(item.featured),
-            icon_url: Set(None),
-            last_checked_at: Set(None),
-            created_at: Set(now),
-            updated_at: Set(now),
-            deactivated_at: Set(None),
-            awaiting_restart_timeout: Set(None),
-        };
-        match SoftwareItem::insert(new_item).exec(db).await {
-            Ok(_) => {
-                tracing::debug!(
-                    package_identifier = %package_identifier,
-                    "created pending software item from discovery"
-                );
-                new_id
+        // Phase 3: no active item found via Phase 2's cross-host lookup. Check
+        // for a DEACTIVATED same-name item in this tenant and reactivate it in
+        // place instead of creating a duplicate (a fresh `software_items` row
+        // would collide with none here since the existing one is deactivated,
+        // but reusing it preserves history/identity across the deactivate ->
+        // rediscover cycle).
+        let deactivated_same_name = SoftwareItem::find()
+            .filter(software_item::Column::TenantId.eq(tenant_id))
+            .filter(software_item::Column::Name.eq(name))
+            .filter(software_item::Column::DeactivatedAt.is_not_null())
+            .one(db)
+            .await
+            .context_to()?;
+
+        if let Some(dormant) = deactivated_same_name {
+            tracing::debug!(
+                software_item_id = %dormant.id,
+                name = %name,
+                "reactivating deactivated software_item found by name"
+            );
+            let mut active: software_item::ActiveModel = dormant.into();
+            active.deactivated_at = Set(None);
+            active.update(db).await.context_to()?.id
+        } else {
+            // Create a new pending software item.
+            let new_id = Uuid::now_v7();
+            let new_item = software_item::ActiveModel {
+                id: Set(new_id),
+                tenant_id: Set(tenant_id),
+                name: Set(name.to_string()),
+                featured: Set(item.featured),
+                icon_url: Set(None),
+                last_checked_at: Set(None),
+                created_at: Set(now),
+                updated_at: Set(now),
+                deactivated_at: Set(None),
+                awaiting_restart_timeout: Set(None),
+            };
+            match SoftwareItem::insert(new_item).exec(db).await {
+                Ok(_) => {
+                    tracing::debug!(
+                        package_identifier = %package_identifier,
+                        "created pending software item from discovery"
+                    );
+                    new_id
+                }
+                Err(e) if is_unique_constraint_violation(&e) => {
+                    // Another target for the same DiscoveredSoftware (or a concurrent
+                    // request) already created a software_item with this name.
+                    tracing::debug!(
+                        package_identifier = %package_identifier,
+                        name = %name,
+                        "software_item name collision on insert; reusing existing item"
+                    );
+                    SoftwareItem::find()
+                        .filter(software_item::Column::TenantId.eq(tenant_id))
+                        .filter(software_item::Column::Name.eq(name))
+                        .filter(software_item::Column::DeactivatedAt.is_null())
+                        .one(db)
+                        .await
+                        .context_to()?
+                        .ok_or_else(|| {
+                            report!(AutodiscoveryError::Db(sea_orm::DbErr::RecordNotFound(
+                                format!(
+                                    "software_item with name '{name}' not found after collision"
+                                )
+                            )))
+                        })?
+                        .id
+                }
+                Err(e) => return Err(report!(AutodiscoveryError::Db(e))),
             }
-            Err(e) if is_unique_constraint_violation(&e) => {
-                // Another target for the same DiscoveredSoftware (or a concurrent
-                // request) already created a software_item with this name.
-                tracing::debug!(
-                    package_identifier = %package_identifier,
-                    name = %name,
-                    "software_item name collision on insert; reusing existing item"
-                );
-                SoftwareItem::find()
-                    .filter(software_item::Column::TenantId.eq(tenant_id))
-                    .filter(software_item::Column::Name.eq(name))
-                    .filter(software_item::Column::DeactivatedAt.is_null())
-                    .one(db)
-                    .await
-                    .context_to()?
-                    .ok_or_else(|| {
-                        report!(AutodiscoveryError::Db(sea_orm::DbErr::RecordNotFound(
-                            format!("software_item with name '{name}' not found after collision")
-                        )))
-                    })?
-                    .id
-            }
-            Err(e) => return Err(report!(AutodiscoveryError::Db(e))),
         }
     };
+
+    // Before inserting, check whether a host_software_item row already exists
+    // for this (host_id, software_item_id, qualifier) key -- active or
+    // deactivated. The partial unique index only guards active rows, so a
+    // stale deactivated row would otherwise not block a fresh insert and would
+    // leave a duplicate. Reactivate the existing row in place instead.
+    let mut existing_hsi_query = HostSoftwareItem::find()
+        .filter(host_software_item::Column::HostId.eq(host_id))
+        .filter(host_software_item::Column::SoftwareItemId.eq(software_item_id));
+    existing_hsi_query = match item.qualifier {
+        Some(q) => existing_hsi_query.filter(host_software_item::Column::Qualifier.eq(q)),
+        None => existing_hsi_query.filter(host_software_item::Column::Qualifier.is_null()),
+    };
+    let existing_hsi_rows = existing_hsi_query.all(db).await.context_to()?;
+    let preferred_existing_hsi = existing_hsi_rows
+        .iter()
+        .find(|h| h.deactivated_at.is_none())
+        .or_else(|| existing_hsi_rows.first())
+        .cloned();
+
+    if let Some(hsi) = preferred_existing_hsi {
+        let existing_id = hsi.id;
+        let mut active: host_software_item::ActiveModel = hsi.into();
+        active.installed_version = Set(Some(installed_version.to_string()));
+        active.installed_version_detected_at = Set(Some(now));
+        active.installed_display_version = Set(item.installed_display_version.map(str::to_string));
+        active.last_discovered_at = Set(Some(now));
+        active.discovery_source = Set(Some(discovery_source.to_string()));
+        active.missing_since = Set(None);
+        active.deactivated_at = Set(None);
+        active.update(db).await.context_to()?;
+        return Ok(Some((software_item_id, existing_id)));
+    }
 
     // Insert host_software_item link.
     let hsi_id = Uuid::now_v7();
@@ -551,10 +685,11 @@ mod tests {
     };
 
     /// When `find_or_create_software_item` encounters a host link pointing to a
-    /// deactivated software item, it must delete the orphaned link and create a
-    /// fresh pending item.
+    /// deactivated software item (with no active same-name collision), rediscovery
+    /// must reactivate the item in place -- not delete the link and create a
+    /// fresh pending item (spec §3: reactivation is update-in-place).
     #[tokio::test]
-    async fn process_one_discovery_orphaned_link_creates_new_pending() {
+    async fn process_one_discovery_deactivated_item_reactivates_in_place() {
         let db = setup_db().await;
         let tenant_id = Uuid::now_v7();
         let host_id = Uuid::now_v7();
@@ -588,39 +723,54 @@ mod tests {
             .await
             .expect("process_one_discovery");
 
-        let orphan_count = HostSoftwareItem::find()
+        // The link row must be reused (not deleted/recreated).
+        let link_count = HostSoftwareItem::find()
             .filter(host_software_item::Column::SoftwareItemId.eq(old_item_id))
             .count(&db)
             .await
-            .expect("orphan count");
-        assert_eq!(orphan_count, 0, "orphaned host link must be deleted");
+            .expect("link count");
+        assert_eq!(link_count, 1, "the existing host link must be reused");
 
-        let active_items = SoftwareItem::find()
+        // The originally deactivated item must be reactivated in place -- no
+        // new software_item should be created.
+        let items = SoftwareItem::find()
             .filter(software_item::Column::TenantId.eq(tenant_id))
-            .filter(software_item::Column::DeactivatedAt.is_null())
             .all(&db)
             .await
-            .expect("active items");
-        assert_eq!(
-            active_items.len(),
-            1,
-            "expected exactly one new pending item"
+            .expect("items");
+        assert_eq!(items.len(), 1, "no new software_item should be created");
+        assert_eq!(items[0].id, old_item_id, "the original item must be reused");
+        assert!(
+            items[0].deactivated_at.is_none(),
+            "the deactivated item must be reactivated in place"
         );
         assert!(
-            !active_items[0].featured,
-            "new discovery items should preserve plugin-provided featured=false"
+            !items[0].featured,
+            "reactivated items should preserve plugin-provided featured=false"
         );
 
-        let new_link_count = HostSoftwareItemPlugin::find()
+        let link = HostSoftwareItem::find()
+            .filter(host_software_item::Column::SoftwareItemId.eq(old_item_id))
+            .one(&db)
+            .await
+            .expect("query link")
+            .expect("link must exist");
+        assert_eq!(
+            link.installed_version.as_deref(),
+            Some("8.0.0"),
+            "installed_version must be refreshed on reactivation"
+        );
+
+        let plugin_link_count = HostSoftwareItemPlugin::find()
             .filter(host_software_item_plugin::Column::HostId.eq(host_id))
             .filter(host_software_item_plugin::Column::PluginConfigId.eq(pc_id))
             .filter(host_software_item_plugin::Column::PackageIdentifier.eq("curl"))
             .count(&db)
             .await
-            .expect("new link count");
+            .expect("plugin link count");
         assert_eq!(
-            new_link_count, 3,
-            "expected plugin link rows for all three roles"
+            plugin_link_count, 3,
+            "expected the pre-existing plugin link rows for all three roles (no duplicates)"
         );
     }
 
@@ -1526,6 +1676,333 @@ mod tests {
         assert!(
             link.missing_since.is_none(),
             "missing_since must be clear after rematch"
+        );
+    }
+
+    // -- Reactivation tests (Task 3) --
+
+    /// Rediscovery of a previously deactivated link + item must reactivate both
+    /// in place: clear `deactivated_at` on the link and the item, reset
+    /// `missing_since = NULL`, and stamp fresh provenance -- without creating
+    /// any new rows.
+    #[tokio::test]
+    async fn rediscovery_reactivates_deactivated_link_and_item_in_place() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let pc_id = Uuid::now_v7();
+        let item_id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+
+        insert_tenant(&db, tenant_id).await;
+        insert_host(&db, host_id, tenant_id).await;
+        insert_plugin_config(&db, pc_id, tenant_id).await;
+        insert_software_item(&db, item_id, tenant_id, "wget", None).await;
+        insert_host_link(&db, host_id, item_id, pc_id, "wget").await;
+
+        // Simulate reconciliation having deactivated both the link and the item.
+        let hsi = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
+            .one(&db)
+            .await
+            .expect("query hsi")
+            .expect("hsi must exist");
+        let hsi_id = hsi.id;
+        let mut hsi_active: host_software_item::ActiveModel = hsi.into();
+        hsi_active.deactivated_at = Set(Some(now));
+        hsi_active.missing_since = Set(Some(now));
+        hsi_active.update(&db).await.expect("deactivate hsi");
+
+        let item = SoftwareItem::find_by_id(item_id)
+            .one(&db)
+            .await
+            .expect("query item")
+            .expect("item must exist");
+        let mut item_active: software_item::ActiveModel = item.into();
+        item_active.deactivated_at = Set(Some(now));
+        item_active.update(&db).await.expect("deactivate item");
+
+        let args = DiscoveredItemInfo {
+            package_identifier: "wget",
+            name: "wget",
+            installed_version: "2.0.0",
+            featured: false,
+            qualifier: None,
+            plugin_package_identifier: None,
+            installed_display_version: None,
+        };
+        let ctx = DiscoveryContext {
+            tenant_id,
+            host_id,
+            now,
+            discovery_source: "package_manager_homebrew",
+        };
+        process_one_discovery(&db, &ctx, pc_id, "package_manager_homebrew", args)
+            .await
+            .expect("process_one_discovery");
+
+        // No new rows: same item id, same link id.
+        let items = SoftwareItem::find()
+            .filter(software_item::Column::TenantId.eq(tenant_id))
+            .all(&db)
+            .await
+            .expect("items");
+        assert_eq!(items.len(), 1, "no new software_item should be created");
+        assert_eq!(items[0].id, item_id, "the original item must be reused");
+        assert!(
+            items[0].deactivated_at.is_none(),
+            "item.deactivated_at must be cleared on reactivation"
+        );
+
+        let links = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .all(&db)
+            .await
+            .expect("links");
+        assert_eq!(
+            links.len(),
+            1,
+            "no new host_software_item should be created"
+        );
+        assert_eq!(links[0].id, hsi_id, "the original link must be reused");
+        assert!(
+            links[0].deactivated_at.is_none(),
+            "link.deactivated_at must be cleared on reactivation"
+        );
+        assert!(
+            links[0].missing_since.is_none(),
+            "missing_since must be reset to NULL on reactivation"
+        );
+        assert_eq!(
+            links[0].installed_version.as_deref(),
+            Some("2.0.0"),
+            "installed_version must be refreshed on reactivation"
+        );
+    }
+
+    /// Collision rule 1: if an ACTIVE link already exists for the same
+    /// `(host, software_item, qualifier)` key, rediscovery must prefer and
+    /// update the active row, leaving a co-existing deactivated duplicate
+    /// untouched (row count unchanged).
+    #[tokio::test]
+    async fn reactivation_prefers_existing_active_link_row() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let pc_id = Uuid::now_v7();
+        let item_id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+
+        insert_tenant(&db, tenant_id).await;
+        insert_host(&db, host_id, tenant_id).await;
+        insert_plugin_config(&db, pc_id, tenant_id).await;
+        insert_software_item(&db, item_id, tenant_id, "wget", None).await;
+        // insert_host_link creates one active link + 3 plugin-link rows.
+        insert_host_link(&db, host_id, item_id, pc_id, "wget").await;
+
+        let active_hsi = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
+            .one(&db)
+            .await
+            .expect("query active hsi")
+            .expect("active hsi must exist");
+        let active_hsi_id = active_hsi.id;
+
+        // Insert a second, deactivated link row directly for the same key.
+        // The partial unique index excludes deactivated rows, so this is legal.
+        let deactivated_hsi_id = Uuid::now_v7();
+        host_software_item::ActiveModel {
+            id: Set(deactivated_hsi_id),
+            host_id: Set(host_id),
+            software_item_id: Set(item_id),
+            qualifier: Set(None),
+            plugin_config_id: Set(Some(pc_id)),
+            package_identifier: Set(Some("wget".to_string())),
+            installed_version: Set(Some("0.9.0".to_string())),
+            installed_version_detected_at: Set(Some(now)),
+            installed_display_version: Set(None),
+            latest_version: Set(None),
+            latest_version_fetched_at: Set(None),
+            latest_release_metadata: Set(None),
+            last_updated_at: Set(None),
+            linked_at: Set(now),
+            update_category: Set("unknown".to_string()),
+            deactivated_at: Set(Some(now)),
+            last_discovered_at: Set(None),
+            discovery_source: Set(None),
+            missing_since: Set(Some(now)),
+        }
+        .insert(&db)
+        .await
+        .expect("insert deactivated duplicate link");
+
+        let args = DiscoveredItemInfo {
+            package_identifier: "wget",
+            name: "wget",
+            installed_version: "2.0.0",
+            featured: false,
+            qualifier: None,
+            plugin_package_identifier: None,
+            installed_display_version: None,
+        };
+        let ctx = DiscoveryContext {
+            tenant_id,
+            host_id,
+            now,
+            discovery_source: "package_manager_homebrew",
+        };
+        process_one_discovery(&db, &ctx, pc_id, "package_manager_homebrew", args)
+            .await
+            .expect("process_one_discovery");
+
+        // Row count unchanged: still exactly two host_software_item rows for this item.
+        let links = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
+            .all(&db)
+            .await
+            .expect("links");
+        assert_eq!(
+            links.len(),
+            2,
+            "row count must be unchanged: no new link created"
+        );
+
+        let active_after = links
+            .iter()
+            .find(|l| l.id == active_hsi_id)
+            .expect("active row must still exist");
+        assert!(
+            active_after.deactivated_at.is_none(),
+            "the active row must remain active"
+        );
+        assert_eq!(
+            active_after.installed_version.as_deref(),
+            Some("2.0.0"),
+            "the active row must be updated with the new discovery"
+        );
+
+        let deactivated_after = links
+            .iter()
+            .find(|l| l.id == deactivated_hsi_id)
+            .expect("deactivated duplicate must still exist");
+        assert!(
+            deactivated_after.deactivated_at.is_some(),
+            "the deactivated duplicate must be left untouched (still deactivated)"
+        );
+        assert_eq!(
+            deactivated_after.installed_version.as_deref(),
+            Some("0.9.0"),
+            "the deactivated duplicate must not be modified"
+        );
+    }
+
+    /// Collision rule 2: cascade-reactivation of a deactivated `software_item`
+    /// must not violate `uq_software_items_active_name`. If an ACTIVE item with
+    /// the same name already exists, the link must be re-pointed to the active
+    /// item and the originally deactivated item left dormant.
+    #[tokio::test]
+    async fn cascade_reactivation_repoints_link_when_active_same_name_item_exists() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let pc_id = Uuid::now_v7();
+        let deactivated_item_id = Uuid::now_v7();
+        let active_item_id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+
+        insert_tenant(&db, tenant_id).await;
+        insert_host(&db, host_id, tenant_id).await;
+        insert_plugin_config(&db, pc_id, tenant_id).await;
+
+        // The deactivated item + its (also deactivated) host link.
+        insert_software_item(&db, deactivated_item_id, tenant_id, "Foo", None).await;
+        insert_host_link(&db, host_id, deactivated_item_id, pc_id, "foo").await;
+        let hsi = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .filter(host_software_item::Column::SoftwareItemId.eq(deactivated_item_id))
+            .one(&db)
+            .await
+            .expect("query hsi")
+            .expect("hsi must exist");
+        let mut hsi_active: host_software_item::ActiveModel = hsi.into();
+        hsi_active.deactivated_at = Set(Some(now));
+        hsi_active.missing_since = Set(Some(now));
+        hsi_active.update(&db).await.expect("deactivate hsi");
+
+        let item = SoftwareItem::find_by_id(deactivated_item_id)
+            .one(&db)
+            .await
+            .expect("query item")
+            .expect("item must exist");
+        let mut item_active: software_item::ActiveModel = item.into();
+        item_active.deactivated_at = Set(Some(now));
+        item_active.update(&db).await.expect("deactivate item");
+
+        // A separate, ACTIVE software_item with the same name (same tenant).
+        insert_software_item(&db, active_item_id, tenant_id, "Foo", None).await;
+
+        let args = DiscoveredItemInfo {
+            package_identifier: "foo",
+            name: "Foo",
+            installed_version: "3.0.0",
+            featured: false,
+            qualifier: None,
+            plugin_package_identifier: None,
+            installed_display_version: None,
+        };
+        let ctx = DiscoveryContext {
+            tenant_id,
+            host_id,
+            now,
+            discovery_source: "package_manager_homebrew",
+        };
+        process_one_discovery(&db, &ctx, pc_id, "package_manager_homebrew", args)
+            .await
+            .expect("process_one_discovery");
+
+        // The originally deactivated item must remain dormant (untouched).
+        let deactivated_item_after = SoftwareItem::find_by_id(deactivated_item_id)
+            .one(&db)
+            .await
+            .expect("query deactivated item")
+            .expect("deactivated item must still exist");
+        assert!(
+            deactivated_item_after.deactivated_at.is_some(),
+            "the originally deactivated item must remain dormant"
+        );
+
+        // The link must now point at the active item.
+        let link = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .filter(host_software_item::Column::SoftwareItemId.eq(active_item_id))
+            .one(&db)
+            .await
+            .expect("query repointed link")
+            .expect("link on the active item must exist");
+        assert!(
+            link.deactivated_at.is_none(),
+            "the repointed link must be active"
+        );
+        assert_eq!(
+            link.installed_version.as_deref(),
+            Some("3.0.0"),
+            "the repointed link must carry the fresh discovery data"
+        );
+
+        // No lingering active link on the deactivated item.
+        let stale_link_count = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .filter(host_software_item::Column::SoftwareItemId.eq(deactivated_item_id))
+            .filter(host_software_item::Column::DeactivatedAt.is_null())
+            .count(&db)
+            .await
+            .expect("count stale active links");
+        assert_eq!(
+            stale_link_count, 0,
+            "no active link should remain on the dormant item"
         );
     }
 }
