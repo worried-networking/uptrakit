@@ -869,10 +869,13 @@ pub async fn load_target_for_dispatch(
         .context_to()?
         .ok_or_else(|| report!(TriggerUpdateError::HostNotFound))?;
 
-    // 3. Verify host is assigned to the software item.
+    // 3. Verify host is assigned to the software item, excluding deactivated
+    // links (cleared when discovery stops reporting the item as installed on
+    // this host).
     let hsi_link = HostSoftwareItem::find()
         .filter(host_software_item::Column::HostId.eq(host_id))
         .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
+        .filter(host_software_item::Column::DeactivatedAt.is_null())
         .one(db)
         .await
         .context_to()?
@@ -2019,5 +2022,142 @@ mod tests {
             item.output,
             "plugin error: Timed out waiting for Proxmox task\n"
         );
+    }
+
+    /// `load_target_for_dispatch` must reject a deactivated `host_software_item`
+    /// link even when the software item itself is still active (kept active by a
+    /// second, still-active link on another host) and the host row is active.
+    ///
+    /// This isolates the gap fixed alongside the batch-candidate builders in
+    /// `update_batches::candidates`: the shared dispatch *resolver* was missing
+    /// the analogous `deactivated_at IS NULL` guard on the link itself, so a
+    /// deactivated link (created when discovery stops reporting the software as
+    /// installed on that host) would still resolve and dispatch an update to
+    /// software no longer present on the host.
+    #[tokio::test]
+    async fn load_target_for_dispatch_rejects_deactivated_host_link() {
+        use crate::queries::update_batches::tests::{insert_base_fixture, setup_db};
+        use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+        use time::OffsetDateTime;
+        use uptrakit_shared_db::entity::{host, host_software_item, prelude::*, service_host};
+        use uuid::Uuid;
+
+        use super::TriggerUpdateError;
+
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let now = OffsetDateTime::now_utc();
+
+        // Second host, linked to the same software item and the same (approved)
+        // service, so the item stays active -- cascade-deactivation only fires
+        // when the *last* active link is removed.
+        let host_b_id = Uuid::now_v7();
+        host::ActiveModel {
+            id: Set(host_b_id),
+            tenant_id: Set(f.tenant_id),
+            machine_id: Set("machine-002".to_string()),
+            hostname: Set("host-002".to_string()),
+            friendly_name: Set("Host 002".to_string()),
+            os_type: Set(None),
+            os_version: Set(None),
+            architecture: Set(None),
+            ip_address: Set(None),
+            host_features: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        service_host::ActiveModel {
+            service_id: Set(f.service_id),
+            host_id: Set(host_b_id),
+            linked_at: Set(now),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        let hsi_b_id = Uuid::now_v7();
+        host_software_item::ActiveModel {
+            id: Set(hsi_b_id),
+            host_id: Set(host_b_id),
+            software_item_id: Set(f.item_id),
+            qualifier: Set(None),
+            plugin_config_id: Set(None),
+            package_identifier: Set(Some("test-pkg".to_string())),
+            installed_version: Set(Some("1.0.0".to_string())),
+            installed_version_detected_at: Set(None),
+            installed_display_version: Set(None),
+            latest_version: Set(Some("1.1.0".to_string())),
+            latest_version_fetched_at: Set(None),
+            latest_release_metadata: Set(None),
+            last_updated_at: Set(None),
+            linked_at: Set(now),
+            update_category: Set("security".to_string()),
+            deactivated_at: Set(None),
+            last_discovered_at: Set(None),
+            discovery_source: Set(None),
+            missing_since: Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        // Host B needs its own `execute_update` plugin assignment for the
+        // control resolution to succeed end-to-end.
+        uptrakit_shared_db::entity::host_software_item_plugin::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            host_id: Set(host_b_id),
+            software_item_id: Set(f.item_id),
+            host_software_item_id: Set(hsi_b_id),
+            plugin_config_id: Set(None),
+            plugin_type: Set("releases_github".to_string()),
+            role: Set("execute_update".to_string()),
+            ordinal: Set(0),
+            package_identifier: Set("org/repo".to_string()),
+            config: Set(None),
+            execution_site: Set("auto".to_string()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        // Deactivate host A's link only; host B's link stays active.
+        let hsi_a = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(f.host_id))
+            .filter(host_software_item::Column::SoftwareItemId.eq(f.item_id))
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut active: host_software_item::ActiveModel = hsi_a.into();
+        active.deactivated_at = Set(Some(now));
+        active.update(&db).await.unwrap();
+
+        // Host A: link is deactivated -> must surface `HostNotAssigned`, not
+        // dispatch to software no longer installed on that host.
+        let result_a = super::load_target_for_dispatch(&db, f.tenant_id, f.host_id, f.item_id)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                result_a.current_context(),
+                TriggerUpdateError::HostNotAssigned
+            ),
+            "expected HostNotAssigned for a deactivated host_software_item link, got {:?}",
+            result_a.current_context()
+        );
+
+        // Control: host B's link is still active, so it must resolve fine.
+        let result_b = super::load_target_for_dispatch(&db, f.tenant_id, host_b_id, f.item_id)
+            .await
+            .expect("host B's active link must still resolve");
+        assert_eq!(result_b.hsi_link.host_id, host_b_id);
     }
 }
