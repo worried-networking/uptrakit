@@ -336,7 +336,7 @@ jobs:
       - name: Cache cross binary
         if: matrix.cross
         id: cache-cross
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cargo/bin/cross
           key: cross-0.2.5-${{ runner.os }}-${{ runner.arch }}
@@ -621,7 +621,7 @@ jobs:
       - name: Cache cross binary
         if: matrix.cross
         id: cache-cross
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cargo/bin/cross
           key: cross-0.2.5-${{ runner.os }}-${{ runner.arch }}
