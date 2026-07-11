@@ -24,9 +24,10 @@ pub use ignore_rules::{
     list_ignore_rules,
 };
 
+use std::collections::HashSet;
 use time::OffsetDateTime;
 use uptrakit_shared_macros::impl_report_conversion;
-use uptrakit_wire::DiscoveryResultsPayload;
+use uptrakit_wire::{DiscoveryPluginResult, DiscoveryResultsPayload};
 use uuid::Uuid;
 
 /// Error returned by autodiscovery query helpers.
@@ -41,6 +42,44 @@ impl_report_conversion!(sea_orm::DbErr => AutodiscoveryError::Db);
 
 // -- Process discovery results --
 
+/// Compute the effective `(package_identifier, qualifier)` set reported by a
+/// single plugin result, ahead of any ignore-list filtering.
+///
+/// Reuses the same identifier-resolution rules `discovery_items` applies when
+/// writing rows, so the set exactly mirrors what will end up assigned:
+/// - Target-based items: the target's `package_identifier` override (falling
+///   back to the item's own `package_identifier` when the target doesn't
+///   override it) -- mirrors `discovery_items::process_targets_discovery`.
+/// - Plain items (no targets): `DiscoveredItemInfo::effective_plugin_pkg_id()`
+///   (the `plugin_package_identifier` override, or `package_identifier`).
+///
+/// The qualifier is always the discovered item's own `qualifier` -- targets do
+/// not override it. Qualifier-bearing links (e.g. Docker containers) reconcile
+/// within their qualifier, so a snapshot reporting only qualifier "a" does not
+/// affect a link keyed to qualifier "b" even when both share a
+/// `package_identifier`.
+fn effective_identifier_set(result: &DiscoveryPluginResult) -> HashSet<(String, Option<String>)> {
+    let mut ids = HashSet::new();
+    for item in &result.discoveries {
+        if item.targets.is_empty() {
+            let effective = item
+                .plugin_package_identifier
+                .as_deref()
+                .unwrap_or(&item.package_identifier);
+            ids.insert((effective.to_string(), item.qualifier.clone()));
+        } else {
+            for target in &item.targets {
+                let effective = target
+                    .package_identifier
+                    .as_deref()
+                    .unwrap_or(&item.package_identifier);
+                ids.insert((effective.to_string(), item.qualifier.clone()));
+            }
+        }
+    }
+    ids
+}
+
 /// Process a `DiscoveryResultsPayload` received from an agent.
 ///
 /// For each plugin result, delegates to one of two generic processing paths:
@@ -53,6 +92,12 @@ impl_report_conversion!(sea_orm::DbErr => AutodiscoveryError::Db);
 #[tracing::instrument(skip_all, fields(%tenant_id, %host_id))]
 pub async fn process_discovery_results(
     db: &sea_orm::DatabaseConnection,
+    // Consumed by reconcile (4c).
+    #[expect(
+        unused_variables,
+        reason = "wired through in this task; reconcile() call site lands in 4c"
+    )]
+    audit: &uptrakit_audit_log::AuditEmitter,
     agent_id: Uuid,
     tenant_id: Uuid,
     host_id: Uuid,
@@ -74,17 +119,29 @@ pub async fn process_discovery_results(
             continue;
         }
 
-        if result.discoveries.is_empty() {
+        // Built from the RAW result (pre-ignore-filter) so reconcile (4c) sees
+        // every identifier the snapshot reported, regardless of the tenant-wide
+        // ignore list.
+        let _ids = effective_identifier_set(&result);
+
+        if !result.discoveries.is_empty() {
+            discovery_items::process_plugin_result(
+                db,
+                tenant_id,
+                host_id,
+                now,
+                &result,
+                &ignore_set,
+            )
+            .await?;
+        } else {
             tracing::debug!(
                 %agent_id,
                 plugin_type = %result.plugin_type,
                 "discovery plugin returned no items"
             );
-            continue;
         }
-
-        discovery_items::process_plugin_result(db, tenant_id, host_id, now, &result, &ignore_set)
-            .await?;
+        // 4c inserts: reconcile::reconcile_plugin_result(db, audit, tenant_id, host_id, now, &result, &_ids).await?;
     }
 
     Ok(())
@@ -105,9 +162,12 @@ pub async fn process_discovery_results(
 )]
 #[cfg(all(test, feature = "db-sqlite"))]
 pub(crate) mod tests_common {
+    use std::sync::Arc;
+
     use sea_orm::{
         ActiveModelTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait, Set,
     };
+    use uptrakit_audit_log::{AuditEmitter, AuditLogDispatcher, NoopBackend};
     use uptrakit_shared_db::entity::{
         host, host_software_item, host_software_item_plugin, plugin_config, prelude::*,
         software_item, tenant,
@@ -125,6 +185,15 @@ pub(crate) mod tests_common {
             .await
             .expect("migrations");
         db
+    }
+
+    /// Shared no-op `AuditEmitter` for `process_discovery_results` test callers.
+    ///
+    /// Backed only by a `NoopBackend`-wrapped dispatcher, so `emit_event`/
+    /// `emit_stateful` calls are inert -- reconciliation tests (4c) share this
+    /// so they don't each need to construct their own emitter.
+    pub fn test_emitter() -> AuditEmitter {
+        AuditEmitter::new(AuditLogDispatcher::new(Arc::new(NoopBackend)))
     }
 
     // -- FK-setup helpers --
@@ -441,6 +510,73 @@ mod tests {
 
     use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
 
+    /// `effective_identifier_set` must key on `(effective_package_identifier, qualifier)`,
+    /// reusing the same resolution rules as `discovery_items`:
+    /// - target-based items: `target.package_identifier.unwrap_or(item.package_identifier)`
+    /// - plain items (no targets): `item.effective_plugin_pkg_id()`
+    ///
+    /// A target's `package_identifier` override must replace the raw discovery-level id
+    /// in the set (not add alongside it), and a plain item's qualifier must be preserved
+    /// as part of the key so qualifier-bearing links reconcile independently.
+    #[tokio::test]
+    async fn effective_identifier_set_uses_target_override_and_qualifier() {
+        let result = uptrakit_wire::DiscoveryPluginResult {
+            plugin_type: plugin_ids::DISCOVERY_PROXMOX_HELPER_SCRIPTS.clone(),
+            plugin_config_id: None,
+            error: None,
+            discoveries: vec![
+                // Target-based item: the target overrides package_identifier.
+                uptrakit_wire::DiscoveredSoftware {
+                    package_identifier: "raw-discovery-id".to_string(),
+                    name: "BookLore".to_string(),
+                    installed_version: "1.18.5".to_string(),
+                    targets: vec![uptrakit_wire::DiscoveryTarget {
+                        plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
+                        plugin_config: serde_json::json!({}),
+                        plugin_config_name: "BookLore/BookLore".to_string(),
+                        roles: all_roles(),
+                        package_identifier: Some("BookLore/BookLore".to_string()),
+                        config_override: None,
+                        execution_site: None,
+                    }],
+                    extra: None,
+                    featured: false,
+                    qualifier: None,
+                    plugin_package_identifier: None,
+                    installed_display_version: None,
+                },
+                // Plain item (no targets) carrying a qualifier (e.g. Docker container).
+                uptrakit_wire::DiscoveredSoftware {
+                    package_identifier: "nginx:latest".to_string(),
+                    name: "nginx".to_string(),
+                    installed_version: "1.24.0".to_string(),
+                    targets: vec![],
+                    extra: None,
+                    featured: false,
+                    qualifier: Some("web-server".to_string()),
+                    plugin_package_identifier: None,
+                    installed_display_version: None,
+                },
+            ],
+        };
+
+        let ids = effective_identifier_set(&result);
+
+        assert!(
+            ids.contains(&("BookLore/BookLore".to_string(), None)),
+            "expected the target's package_identifier override in the set"
+        );
+        assert!(
+            !ids.contains(&("raw-discovery-id".to_string(), None)),
+            "raw discovery-level id must NOT appear once a target overrides it"
+        );
+        assert!(
+            ids.contains(&("nginx:latest".to_string(), Some("web-server".to_string()))),
+            "expected the plain item's effective_plugin_pkg_id() paired with its qualifier"
+        );
+        assert_eq!(ids.len(), 2, "expected exactly two identifier-set entries");
+    }
+
     /// When an item arrives with `plugin_config_id: None` but carries a
     /// `DiscoveryTarget`, the server must auto-create the plugin config and
     /// create a `host_software_items` link row.
@@ -484,7 +620,7 @@ mod tests {
             }],
         };
 
-        process_discovery_results(&db, agent_id, tenant_id, host_id, payload)
+        process_discovery_results(&db, &test_emitter(), agent_id, tenant_id, host_id, payload)
             .await
             .expect("process must succeed");
 
@@ -561,14 +697,28 @@ mod tests {
         };
 
         // First run.
-        process_discovery_results(&db, agent_id, tenant_id, host_id, make_payload("1.24.4"))
-            .await
-            .expect("first run");
+        process_discovery_results(
+            &db,
+            &test_emitter(),
+            agent_id,
+            tenant_id,
+            host_id,
+            make_payload("1.24.4"),
+        )
+        .await
+        .expect("first run");
 
         // Second run with an updated version.
-        process_discovery_results(&db, agent_id, tenant_id, host_id, make_payload("1.24.5"))
-            .await
-            .expect("second run");
+        process_discovery_results(
+            &db,
+            &test_emitter(),
+            agent_id,
+            tenant_id,
+            host_id,
+            make_payload("1.24.5"),
+        )
+        .await
+        .expect("second run");
 
         // No plugin_config should be created for package manager types.
         let config_count = PluginConfig::find()

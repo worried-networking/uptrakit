@@ -57,6 +57,7 @@ async fn process_discovery_page_for_host(
 
     if let Err(e) = crate::queries::autodiscovery::process_discovery_results(
         state.db(),
+        &state.audit_emitter,
         svc.id,
         svc.tenant_id,
         host_id,
