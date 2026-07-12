@@ -64,8 +64,11 @@ sanity_check "$DENY_HEAD_TMP" "HEAD"
 # Base
 git worktree add "$WORKTREE" "$BASE_REF" --detach -q
 cp deny.toml "$WORKTREE/deny.toml"
-# --disable-fetch: advisory DB was just fetched by the HEAD check above.
-(cd "$WORKTREE" && cargo deny -f json check --disable-fetch > /dev/null 2> "$DENY_BASE_TMP") || true
+# --offline: advisory DB was just fetched by the HEAD check above; skip the re-fetch.
+# Global --offline (before the subcommand) replaces the check-only --disable-fetch flag
+# removed in cargo-deny 0.20's CLI refactor; it is also accepted by the 0.19.x pin, where
+# it internally sets disable_fetch, so this stays portable across both versions.
+(cd "$WORKTREE" && cargo deny --offline -f json check > /dev/null 2> "$DENY_BASE_TMP") || true
 sanity_check "$DENY_BASE_TMP" "$BASE_REF"
 
 NEW=$(comm -23 <(fingerprints "$DENY_HEAD_TMP") <(fingerprints "$DENY_BASE_TMP"))

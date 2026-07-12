@@ -19,5 +19,5 @@ jobs:
           save-if: "false"
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-deny@0.19.4
+          tool: cargo-deny@0.20.2
       - run: bash scripts/check_deny.sh
