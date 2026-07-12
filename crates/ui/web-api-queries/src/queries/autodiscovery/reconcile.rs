@@ -46,7 +46,8 @@ use sea_orm::{
 };
 use time::OffsetDateTime;
 use uptrakit_audit_log::{
-    AuditActionType, AuditCommitHook, AuditEmitter, AuditEntry, AuditOutcome, AuditView,
+    AuditCommitHook, AuditEmitter, AuditEntry, AuditEntryBuilder, AuditOutcome, HasAfter,
+    HasBefore, Stateful,
 };
 use uptrakit_shared_db::entity::{host_software_item, prelude::*, software_item, update_history};
 use uptrakit_shared_types::UpdateStatus;
@@ -216,9 +217,7 @@ async fn deactivate_link(
         hook,
         audit,
         tenant_id,
-        AuditActionType::HOST_SOFTWARE_ITEM_DEACTIVATE,
-        &before_view,
-        &after_view,
+        AuditEntry::host_software_item_deactivate(&before_view, &after_view),
     )
     .await?;
 
@@ -247,9 +246,7 @@ async fn deactivate_link(
             hook,
             audit,
             tenant_id,
-            AuditActionType::SOFTWARE_ITEM_DEACTIVATE,
-            &item_before,
-            &item_after,
+            AuditEntry::software_item_deactivate(&item_before, &item_after),
         )
         .await?;
     }
@@ -287,9 +284,7 @@ async fn deactivate_link(
             hook,
             audit,
             tenant_id,
-            AuditActionType::UPDATE_TERMINATE_UNINSTALLED,
-            &terminate_before,
-            &terminate_before,
+            AuditEntry::update_terminate_uninstalled(&terminate_before, &terminate_before),
         )
         .await?;
     }
@@ -297,23 +292,19 @@ async fn deactivate_link(
     Ok(())
 }
 
-/// Builds and emits one `Stateful` audit entry in-tx (system actor, tenant
-/// scope, `Success` outcome) for a before/after view pair.
-async fn emit_reconcile_stateful<V: AuditView>(
+/// Finishes and emits an already-built `Stateful` audit entry builder in-tx
+/// (system actor, tenant scope, `Success` outcome).
+async fn emit_reconcile_stateful(
     tx: &DatabaseTransaction,
     hook: &AuditCommitHook,
     audit: &AuditEmitter,
     tenant_id: Uuid,
-    action: impl Into<AuditActionType>,
-    before: &V,
-    after: &V,
+    builder: AuditEntryBuilder<Stateful, HasBefore, HasAfter>,
 ) -> Result<()> {
-    let entry = AuditEntry::builder_stateful(action)
+    let entry = builder
         .tenant_scope(tenant_id)
         .actor_system()
         .outcome(AuditOutcome::Success)
-        .before(before)
-        .after(after)
         .build()
         .context_to()?;
     audit.emit_stateful(tx, hook, entry).await.context_to()?;

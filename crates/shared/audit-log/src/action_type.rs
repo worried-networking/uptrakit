@@ -816,6 +816,9 @@ uptrakit_audit_log_derive::audit_actions! {
     software_item_update => SOFTWARE_ITEM_UPDATE, Stateful;
     software_item_delete => SOFTWARE_ITEM_DELETE, Stateful;
     software_item_approve => SOFTWARE_ITEM_APPROVE, Stateful;
+    host_software_item_deactivate => HOST_SOFTWARE_ITEM_DEACTIVATE, Stateful;
+    software_item_deactivate => SOFTWARE_ITEM_DEACTIVATE, Stateful;
+    update_terminate_uninstalled => UPDATE_TERMINATE_UNINSTALLED, Stateful;
     software_item_assign_hosts => SOFTWARE_ITEM_ASSIGN_HOSTS, Stateful;
     software_item_unassign_host => SOFTWARE_ITEM_UNASSIGN_HOST, Stateful;
     software_item_update_host_assignment => SOFTWARE_ITEM_UPDATE_HOST_ASSIGNMENT, Stateful;
