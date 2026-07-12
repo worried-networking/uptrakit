@@ -47,9 +47,19 @@ semantics, shell selection, and `UnsupportedShell` error are all preserved. The 
 execution site: the injected executor decides local-vs-SSH. There is no second shell-wrapping path to drift against.
 
 Convert the current free function `run_shell_command(command, shell, output_tx)` into a `&self` method (so it can reach
-`self.executor`), mirroring `SystemdHookPlugin::run_systemctl`:
+`self.executor`). Only the command-invocation line changes; the exit-code handling stays **byte-for-byte identical**:
 
 ```rust
+/// Run a shell hook command through the host runtime's injected [`CommandExecutor`],
+/// so it targets the correct host (local or SSH), not the agent's own machine.
+///
+/// Returns `Ok(exit_code)` for any command that ran, including non-zero exits — the
+/// executor surfaces a non-zero exit as `CommandError::CommandFailed(code)`, which we
+/// unwrap to the code so callers decide the semantics (pre-hook abort vs. post-hook warn).
+///
+/// # Errors
+/// Returns `PluginError::InstallFailed` only on a genuine transport/spawn failure
+/// (SSH unreachable, unsupported shell) — never for a hook that merely exited non-zero.
 async fn run_shell_command(
     &self,
     command: &str,
@@ -57,26 +67,41 @@ async fn run_shell_command(
     output_tx: &UpdateOutputSender,
 ) -> Result<i32> {
     let spec = CommandSpec::shell_with(command, shell);
-    let output = self.executor.execute(&spec, output_tx).await.map_err(|e| {
-        report!(uptrakit_plugin_infrastructure_core::PluginError::InstallFailed(format!(
-            "shell hook command failed: {e}"
-        )))
-    })?;
-    tracing::debug!(exit_code = output.exit_code, output_len = output.output.len(), "shell hook completed");
-    Ok(output.exit_code)
+    match self.executor.execute(&spec, output_tx).await {
+        Ok(output) => {
+            tracing::debug!(exit_code = output.exit_code, output_len = output.output.len(), "shell hook completed");
+            Ok(output.exit_code)
+        }
+        Err(e) => {
+            if let uptrakit_command::CommandError::CommandFailed(code) = e.current_context() {
+                return Ok(*code);
+            }
+            Err(report!(uptrakit_plugin_infrastructure_core::PluginError::InstallFailed(format!(
+                "shell hook command failed: {e}"
+            ))))
+        }
+    }
 }
 ```
 
-Call sites at `plugin.rs:98` / `plugin.rs:139` become `self.run_shell_command(cmd, self.config.shell, &plugin_tx)`.
+Call sites at `plugin.rs:98` / `plugin.rs:139` become `self.run_shell_command(cmd, self.config.shell, output_tx)`.
 
-**Exit-code semantics simplify and stay correct.** `CommandExecutor::execute` returns `Ok(CommandOutput { exit_code })`
-for a non-zero exit (it does **not** map non-zero to `Err` — confirmed by systemd checking `result.exit_code != 0`
-after an `Ok`). So the method returns `Ok(output.exit_code)` and the existing `on_failure`/`should_proceed` logic in
-`execute_pre_hook` (`plugin.rs:78-107`) and `execute_post_hook` (`plugin.rs:109-150`) is unchanged — it already
-branches on the returned exit code. Only a _real_ transport/spawn error (SSH down, shell unsupported) becomes an `Err`
-→ `PluginError::InstallFailed`. This drops the current `CommandError::CommandFailed(code) → Ok(code)` special-case,
-which is no longer reachable (that error came from the local-spawn path; the executor already surfaces a clean
-exit_code).
+**Exit-code semantics are preserved (load-bearing, verified).** `CommandExecutor::execute` maps a **non-zero exit to
+`Err(CommandError::CommandFailed(exit_code))`**, in **every** implementation:
+
+- `LocalCommandExecutor::execute` (`executor.rs:190-206`) delegates to `run_command_exec_impl`, which
+  `bail!(CommandError::CommandFailed(exit_code))` when `!status.success()` (`command.rs:190-191`). The
+  `execute_failure` unit test (`executor.rs:362-370`) asserts `result.is_err()` for `exit 1`.
+- The SSH path (`agent-ssh-runtime/src/ssh_executor.rs:142-147`) does the same: `if result.exit_code != 0 { …
+bail!(CommandError::CommandFailed(exit_code)) }`.
+
+So the shell hook **must keep** the current `CommandFailed(code) → Ok(code)` extraction — it is _not_ dead, it is the
+only thing that turns a non-zero hook exit back into a value the `on_failure`/`should_proceed` logic in
+`execute_pre_hook` (`plugin.rs:98-104`, non-zero ⇒ graceful `abort`) and `execute_post_hook` (`plugin.rs:139-149`,
+non-zero ⇒ **non-fatal warn**, still `Ok`) can branch on. Dropping it would turn a post-hook that exits `1` into a hard
+`PluginError` failure — a behavior regression. The Err-arm is copied verbatim from today's free function; only the
+command source changes from `run_command_with_shell(...)` to `self.executor.execute(&spec, ...)`. Systemd gets away
+with a plain `?` + `if result.exit_code != 0` because it always _wants_ any non-zero to fail; the shell hook does not.
 
 ### 2. Remove `#[expect(dead_code)]`
 
@@ -105,25 +130,35 @@ bug is invisible to them because on a local runtime both paths spawn locally. Th
 is **routed through the injected executor**.
 
 Add a **recording executor double** in the shell plugin's test module — a `CommandExecutor` impl that captures each
-`CommandSpec` passed to `execute()` into a `parking_lot::Mutex<Vec<CommandSpec>>` and returns a configurable
-`CommandOutput { exit_code }`. (The Docker plugin's `MockCommandExecutor`, `releases/docker/src/tests.rs:24-53`, is the
-shape to copy, extended to record instead of discard.) `parking_lot` is a workspace dep; `#[async_trait]` per the trait.
+`CommandSpec` passed to `execute()` into a `parking_lot::Mutex<Vec<CommandSpec>>` and returns a **configurable
+`crate::Result<CommandOutput>`** (so a test can make it yield `Ok(CommandOutput { exit_code: 0, .. })`,
+`Err(CommandError::CommandFailed(1))`, or `Err(CommandError::UnsupportedShell(..))`). Matching the real contract — where
+non-zero exit is an `Err(CommandFailed)`, not an `Ok` — is essential; a double that returns `Ok(exit_code: 1)` would not
+exercise the extraction path. (The Docker plugin's `MockCommandExecutor`, `releases/docker/src/tests.rs:24-53`, is the
+shape to copy, extended to record the spec and to return a caller-supplied result.) `parking_lot` is a workspace dep;
+`#[async_trait]` per the trait.
 
 Tests:
 
-1. **Routing regression (the HIGH):** run a pre-hook through the recording double; assert exactly one captured spec,
-   and that its `mode` is `CommandMode::Shell { command, shell }` carrying the configured command + `config.shell`.
-   Proves the command went through `executor.execute`, not a local spawn. _(If `CommandMode`/its fields are not `pub`
-   for cross-crate assertion, assert via the spec's `Debug`/`resolve()` output — resolve to `(shell, ["-c", wrapped])`
-   and assert the wrapped string contains the command; implementer picks whichever is public.)_
-2. **Post-hook routes too:** same assertion via `execute_post_hook`.
-3. **Non-zero exit → `on_failure` respected:** double returns `exit_code = 1`; with `on_failure: true`, pre-hook
-   result `should_proceed == false`; a second case with `on_failure: false` → `should_proceed == true`. Confirms the
-   exit code is read from `CommandOutput`, not swallowed.
-4. **Exit 0 → proceed:** double returns `exit_code = 0` → `should_proceed == true`.
-5. **Transport error → `PluginError`, not a silent success:** double returns `Err(CommandError::…)`; assert the hook
-   returns an `Err` (not `Ok(should_proceed = true)`). Guards the dropped `CommandFailed → Ok(code)` special-case from
-   masking a genuine SSH/spawn failure as success.
+1. **Routing regression (the HIGH):** run a pre-hook through the recording double (configured `Ok(exit_code: 0)`);
+   assert exactly one captured spec, and that its `mode` is `CommandMode::Shell { command, shell }` carrying the
+   configured command + `config.shell`. Proves the command went through `executor.execute`, not a local spawn. _(If
+   `CommandMode`/its fields are not `pub` for cross-crate assertion, assert via the spec's `Debug`/`resolve()` output —
+   resolve to `(shell, ["-c", wrapped])` and assert the wrapped string contains the command; implementer picks whichever
+   is public.)_
+2. **Post-hook routes too:** same capture assertion via `execute_post_hook`.
+3. **Non-zero exit is extracted, not hard-failed (the regression guard):** double returns
+   `Err(CommandError::CommandFailed(1))`. Assert `execute_pre_hook` returns `Ok(PreUpdateHookResult)` with
+   `should_proceed == false` (graceful abort, **not** an `Err`); assert `execute_post_hook` (with `on_failure: true` so
+   it runs) returns `Ok(())` (non-fatal warn, **not** an `Err`). This is the exact behavior the naive `?`-only approach
+   would have broken.
+4. **Exit 0 → proceed:** double returns `Ok(exit_code: 0)` → pre-hook `should_proceed == true`, post-hook `Ok(())`.
+5. **Genuine transport error → `PluginError`, not a silent success:** double returns a **non-`CommandFailed`** error;
+   assert the hook returns an `Err` (not `Ok(should_proceed = true)`). Cover both `Err(CommandError::UnsupportedShell(..))`
+   (a real SSH/shell failure) **and** `Err(CommandError::UnsupportedOperation(..))` — the latter is what a
+   `NoopCommandExecutor` returns, so this doubles as a guard that a Noop-executor leak surfaces loudly as
+   `PluginError::InstallFailed` rather than a silent success. Confirms only real spawn/transport failures propagate,
+   while non-zero exits (test 3) do not.
 
 Keep the existing `LocalCommandExecutor` echo/exit tests as end-to-end smoke coverage (unchanged).
 
@@ -131,14 +166,15 @@ No `start_paused` — no `tokio::time` API is used.
 
 ## Documentation deliverables
 
-- **Doc comment** on the reworked `run_shell_command` method (and a one-line note on the struct) stating the hook runs
-  through the injected `CommandExecutor`, so it targets the correct host (local or SSH) — replacing the stale
-  `plugin.rs:47` comment that references the bypassed utility.
-- **`docs/development/plugin-guidelines.md`** — if a hook-authoring section exists, add one invariant line: _"Lifecycle
-  hook plugins MUST execute commands via the injected `CommandExecutor` (`self.executor.execute(&CommandSpec…)`), never
-  by spawning a process locally — the executor is the only component that routes to the correct host."_ If no such
-  section exists, state "no external doc surface" and skip (the doc comment carries it). Verify during implementation;
-  do not invent a new section solely for this line.
+- **Doc comment** on the reworked `run_shell_command` method (shown in §1, including the `# Errors` section required by
+  coding-standards for a public-ish fallible fn) plus a one-line note on the struct, stating the hook runs through the
+  injected `CommandExecutor` so it targets the correct host (local or SSH) — replacing the stale `plugin.rs:47-51`
+  comment that references the bypassed `run_command_with_shell` utility.
+- **`docs/development/plugin-guidelines.md`** — the **`## Update Lifecycle Plugins`** section already exists (line 163;
+  line 189 already documents the post-hook non-fatal contract). Add one invariant line there: _"Lifecycle hook plugins
+  MUST execute commands via the injected `CommandExecutor` (`self.executor.execute(&CommandSpec…)`), never by spawning a
+  process locally — the executor is the only component that routes to the correct host (local or SSH)."_ This is a
+  required deliverable, not conditional.
 - **No API / wire / OpenAPI / config change.** `ShellHookConfig` is untouched; no endpoint or wire payload involved; no
   regen.
 - **No ADR** — bugfix restoring an existing abstraction (the executor boundary), using the in-repo systemd-hook
@@ -151,3 +187,10 @@ No `start_paused` — no `tokio::time` API is used.
   correctly — the plugin just has to use it).
 - The separate interactive-PTY hook finding (`update.rs` forwarding runtime) — owned by
   `2026-07-11-interactive-pty-lifecycle-design.md`; unrelated mechanism.
+
+**Forward-looking note (for the next author):** hooks are safe from the controller-side `NoopCommandExecutor` today only
+because real hook execution runs on the agent (`agent-core/update.rs` `run_pre_hook_plugins`/`run_post_hook_plugins`,
+always with `LocalCommandExecutor` or `SudoAwareCommandExecutor`), and the `PreUpdateHook`/`PostUpdateHook`
+`ConfigTestKind`s currently fall into the unimplemented `_ =>` arm in `agent-core/src/config_test.rs` (never construct
+`ShellHookPlugin`). If those config-test kinds are ever wired up, they MUST be handed a real routing executor — never a
+Noop — or the hook will fail with `PluginError::InstallFailed`. Test 5 encodes this expectation.
