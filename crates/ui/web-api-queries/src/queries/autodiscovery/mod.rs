@@ -51,9 +51,13 @@ impl_report_conversion!(uptrakit_audit_log::AuditLogError => AutodiscoveryError:
 ///
 /// Reuses the same identifier-resolution rules `discovery_items` applies when
 /// writing rows, so the set exactly mirrors what will end up assigned:
-/// - Target-based items: the target's `package_identifier` override (falling
-///   back to the item's own `package_identifier` when the target doesn't
-///   override it) -- mirrors `discovery_items::process_targets_discovery`.
+/// - Target-based items: mirrors the stored key exactly --
+///   `host_software_item.package_identifier` ends up set to
+///   `target_item.effective_plugin_pkg_id()`, i.e. the item's own
+///   `plugin_package_identifier` (if set) takes precedence OVER the target's
+///   `package_identifier` override, which in turn falls back to the item's own
+///   `package_identifier` -- mirrors `discovery_items::process_targets_discovery`
+///   composed with `DiscoveredItemInfo::effective_plugin_pkg_id()`.
 /// - Plain items (no targets): `DiscoveredItemInfo::effective_plugin_pkg_id()`
 ///   (the `plugin_package_identifier` override, or `package_identifier`).
 ///
@@ -73,10 +77,17 @@ fn effective_identifier_set(result: &DiscoveryPluginResult) -> HashSet<(String, 
             ids.insert((effective.to_string(), item.qualifier.clone()));
         } else {
             for target in &item.targets {
-                let effective = target
+                // Mirror the stored key exactly: host_software_item.package_identifier =
+                // target_item.effective_plugin_pkg_id() = plugin_package_identifier (if set),
+                // else the target's package_identifier override, else the item's own
+                // package_identifier. Omitting the plugin_package_identifier layer makes
+                // Docker links (plugin_package_identifier set, target package_identifier None)
+                // read as absent every cycle -> false deactivation of installed software.
+                let base = target
                     .package_identifier
                     .as_deref()
                     .unwrap_or(&item.package_identifier);
+                let effective = item.plugin_package_identifier.as_deref().unwrap_or(base);
                 ids.insert((effective.to_string(), item.qualifier.clone()));
             }
         }
@@ -564,7 +575,7 @@ mod tests {
 
     /// `effective_identifier_set` must key on `(effective_package_identifier, qualifier)`,
     /// reusing the same resolution rules as `discovery_items`:
-    /// - target-based items: `target.package_identifier.unwrap_or(item.package_identifier)`
+    /// - target-based items: `item.plugin_package_identifier.unwrap_or(target.package_identifier.unwrap_or(item.package_identifier))`
     /// - plain items (no targets): `item.effective_plugin_pkg_id()`
     ///
     /// A target's `package_identifier` override must replace the raw discovery-level id
@@ -627,6 +638,62 @@ mod tests {
             "expected the plain item's effective_plugin_pkg_id() paired with its qualifier"
         );
         assert_eq!(ids.len(), 2, "expected exactly two identifier-set entries");
+    }
+
+    /// Regression test for a false-deactivation bug: Docker discovery emits a
+    /// target-based item (non-empty `targets`, target `package_identifier: None`)
+    /// that also carries `plugin_package_identifier: Some(..)`. The write path
+    /// (`discovery_items::process_targets_discovery` + `find_or_create_software_item`)
+    /// stores `host_software_item.package_identifier` as
+    /// `target_item.effective_plugin_pkg_id()`, which prefers
+    /// `plugin_package_identifier` over the target's `package_identifier`
+    /// override. `effective_identifier_set` must mirror that same precedence so
+    /// the stored key is recognized as present on every reconciliation pass,
+    /// instead of reading as absent and eventually deactivating a still-installed
+    /// container.
+    #[tokio::test]
+    async fn effective_identifier_set_docker_link_stays_present() {
+        let result = uptrakit_wire::DiscoveryPluginResult {
+            plugin_type: plugin_ids::RELEASES_DOCKER.clone(),
+            plugin_config_id: None,
+            error: None,
+            discoveries: vec![uptrakit_wire::DiscoveredSoftware {
+                package_identifier: "nginx:latest".to_string(),
+                name: "nginx".to_string(),
+                installed_version: "sha256:deadbeef".to_string(),
+                targets: vec![uptrakit_wire::DiscoveryTarget {
+                    plugin_type: plugin_ids::RELEASES_DOCKER.clone(),
+                    plugin_config: serde_json::json!({}),
+                    plugin_config_name: "Docker".to_string(),
+                    roles: all_roles(),
+                    package_identifier: None,
+                    config_override: None,
+                    execution_site: None,
+                }],
+                extra: Some(serde_json::json!({ "container": "web-server" })),
+                featured: true,
+                qualifier: Some("web-server".to_string()),
+                plugin_package_identifier: Some("nginx:latest#web-server".to_string()),
+                installed_display_version: None,
+            }],
+        };
+
+        let ids = effective_identifier_set(&result);
+
+        assert!(
+            ids.contains(&(
+                "nginx:latest#web-server".to_string(),
+                Some("web-server".to_string())
+            )),
+            "expected plugin_package_identifier to take precedence over the target's \
+             None package_identifier override, matching the stored host_software_item key"
+        );
+        assert!(
+            !ids.contains(&("nginx:latest".to_string(), Some("web-server".to_string()))),
+            "the bare package_identifier (dropping plugin_package_identifier) must NOT \
+             appear -- that shape is what caused every Docker container to read as absent"
+        );
+        assert_eq!(ids.len(), 1, "expected exactly one identifier-set entry");
     }
 
     /// When an item arrives with `plugin_config_id: None` but carries a
