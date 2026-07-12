@@ -79,8 +79,9 @@ Point-fix with explicit `.filter(Column::TenantId.eq(tenant_id))` on each query,
 `(db, Option<Uuid>)` plumbing (the previous draft of this spec). Rejected: it preserves the exact mechanism that
 produced the bug — a separately-droppable tenant parameter next to an unscoped connection — and its stated reasons
 for avoiding `TenantDb` do not hold (the transaction objection was factually wrong; the "crate idiom" objection is
-stale — `resource_scaling.rs` and `update_protection.rs` already construct and hold `TenantDb`, and the surface
-context has carried one all along).
+stale — `resource_scaling.rs` and `update_protection.rs` already construct and hold `TenantDb` in their test modules
+(no production construction in the crate yet — the surface context has carried a ready-made `&TenantDb` all along,
+which is exactly what this spec starts consuming)).
 
 ### Other write paths to `proxmox_host_mappings` (ruled in/out)
 
@@ -123,15 +124,23 @@ Sizing note: `surfaces.rs` has roughly two dozen call sites taking `tenant_id: O
 `execute_controller_*` wrapper plus every handler behind it), not just the three vulnerable write arms — this is a
 signature-threading change across the whole dispatch chain, not a three-function patch.
 
-Commit ordering: land this as two commits so the security-critical delta is independently reviewable and revertible.
+Commit ordering: land this as two commits so the security-critical delta is small and independently reviewable.
 **Commit A** — the vulnerability closure: `handle_action_inner` and `execute_controller_surface_action_typed` (the
 dispatch entry point, since the three write wrappers currently take only `db` with no `tenant_id` to thread — closing
 finding 1 requires touching the entry point, not just the three arms), the three write-wrapper signatures
 (`execute_controller_manual_match`/`approve_match`/`unmatch_host`) and their `handle_match`/`handle_approve_match`/
 `handle_unmatch` handlers, all of `matching.rs` (host_id validation, BEGIN IMMEDIATE, atomic unmatch), and the
-`handle_save_item_overrides`/`handle_preload_item_overrides` software-item check (§3). **Commit B** — the read-handler
-and `require_tenant_id`-caller signature churn, which is behavior-preserving by the "no `None` caller" argument above.
-Commit A alone closes the IDOR; Commit B is defense-in-depth cleanup.
+`handle_save_item_overrides`/`handle_preload_item_overrides` software-item check (§3). **Commit A bridge (explicit,
+by design):** the entry point takes `&TenantDb` in Commit A while every not-yet-converted read/other arm still has
+the old `(db, Option<Uuid>)` signature — those arms are called as
+`execute_controller_xyz(tenant_db.db(), Some(tenant_db.tenant_id()), …)` with a
+`// Commit-B bridge: converted in the follow-up commit` comment. Yes, that is the unwrap pattern this spec deletes —
+as named, commented, one-commit-lived scaffolding on the *non-vulnerable* arms only; the three write arms and
+`matching.rs` receive `&TenantDb` proper in Commit A. **Commit B** — the read-handler and `require_tenant_id`-caller
+signature churn (behavior-preserving by the "no `None` caller" argument above), deleting every bridge call site and
+`require_tenant_id` itself. Commit A alone closes the IDOR. Honest revert semantics: Commit A is revertible alone;
+Commit B is NOT independently revertible (it deletes scaffolding Commit A introduced) — revert means both or neither
+after B lands. The pair is a directed sequence, not two independent changes.
 
 - `handle_action_inner` passes `ctx.tenant_db()` instead of `(ctx.tenant_db().db(), Some(ctx.tenant_id()))`.
 - `execute_controller_surface_action_typed(tenant_db: &TenantDb, surface_id, action_id, params)` — the
@@ -229,7 +238,10 @@ functions wrap their mock connection as `TenantDb::new(db, tenant_id)` — the e
 (`manual_match_preserves_single_host_mapping_under_conflict`) is extended with a second same-tenant mapping under a
 different `plugin_config_id` to pin cross-config conflict clearing.
 
-**b. New tenant-isolation tests (real in-memory SQLite).** Add
+**b. New tenant-isolation tests (real in-memory SQLite).** Crate disambiguation: the `TenantDb` type lives in
+`uptrakit-tenant-db` (`crates/shared/tenant-db/`), which the proxmox crate already depends on and which has no
+`migration`/`db-sqlite` features — do NOT touch its feature set; the dev-dependency below is the separate
+`uptrakit-shared-db` (entities + migrations). Add
 `uptrakit-shared-db = { workspace = true, features = ["migration", "db-sqlite"] }` to the proxmox crate's
 `[dev-dependencies]` — a wholly new `[dev-dependencies]` line (the crate's dev-deps today are only `tokio` and
 `httpmock`; the existing `uptrakit-shared-db` entry sits under `[dependencies]` without these features). Both
@@ -280,7 +292,8 @@ makes or doesn't):
 
 ## Documentation deliverables
 
-- None beyond code/doc-comments. The tenant-isolation rule (`TenantDb` helpers, AGENTS.md rule 28) and the BEGIN
+- None beyond code/doc-comments. The tenant-isolation rule ("Use `TenantDb` helpers for all tenant-scoped queries",
+  AGENTS.md § Architecture rules and invariants) and the BEGIN
   IMMEDIATE rule are already documented in `docs/development/coding-standards.md`; this change makes the code conform
   to them. No wire-protocol, API-surface, or behavior-contract change for legitimate same-tenant callers
   (foreign-tenant requests change from silent success to "not found" — the security fix itself). No new ADR: no
@@ -289,8 +302,9 @@ makes or doesn't):
 ## Out of scope / deferred
 
 - Other plugins unwrapping the surface handle the same way — `crates/plugins/releases/docker/src/surfaces.rs` also
-  does `ctx.tenant_db().db()` into raw queries. Worth the same conversion; auditing/fixing it is a separate finding,
-  not this spec (quick grep during implementation encouraged).
+  does `ctx.tenant_db().db()` into raw queries. Already tracked: covered by its own spec,
+  `2026-07-12-docker-switch-tag-tenant-isolation-design.md` (quick grep for further instances during implementation
+  still encouraged).
 - Crate-wide `TenantDb` migration of proxmox modules **off** the surface path (`discovery.rs`,
   `protection_store.rs`, `policy_store.rs`, `scaling_store.rs`) — separate refactor; this spec converts the surface
   dispatch chain and `matching.rs` only.
