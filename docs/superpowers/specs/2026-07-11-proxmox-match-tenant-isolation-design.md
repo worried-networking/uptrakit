@@ -47,7 +47,10 @@ three arms dropped it. **No change to the plugins API is required**; the fix is 
 Thread `&TenantDb` through the proxmox surface dispatch chain and `matching.rs`, replacing the
 `(&DatabaseConnection, Option<Uuid>)` pair everywhere in that chain. All `proxmox_host_mapping`, `host`, and
 `software_item` queries on the touched paths go through `TenantDb` builders (`find`, `find_by_id`, `update_many`), so
-the tenant filter is structurally unforgettable rather than a per-query discipline.
+the tenant filter is scoped-by-default rather than a per-query discipline. Honest limit: `TenantDb::db()` remains an
+escape hatch (this spec itself uses it for the transaction handle and for helpers keeping raw signatures), so the
+guarantee is "unscoped queries require a deliberate `.db()` call", not "unscoped queries are unrepresentable" — still
+a meaningful bar against the forgotten-parameter failure mode that produced this bug.
 
 Feasibility facts (verified in code):
 
@@ -59,7 +62,9 @@ Feasibility facts (verified in code):
   `ConnectionTrait`, including a transaction handle:
   `tenant_db.find_by_id::<proxmox_host_mapping::Entity, _>(id).one(&tx)`. Transactions are begun from
   `tenant_db.db().begin_with_options(…)`. (The previous draft rejected `TenantDb` on the belief that its helpers
-  cannot participate in transactions — that was incorrect.)
+  cannot participate in transactions — that was incorrect.) Note: this is type-valid but has no prior literal call
+  site — `apply_match` will be the repo's first combination of `TenantDb` builders with an explicit transaction
+  handle; implementation is breaking new (mechanically trivial) ground, not copying an existing site.
 - Removing the `Option<Uuid>` is mechanical, not semantic: grep shows **no caller** — production or test — passes
   `tenant_id = None` into any surfaces.rs handler. The production dispatch always passes `Some(ctx.tenant_id())`, and
   every test passes `Some(tenant_id)`. The `if let Some(tid)` branches in read handlers are dead `None` paths.
@@ -170,7 +175,15 @@ Commit A alone closes the IDOR; Commit B is defense-in-depth cleanup.
   `mapping_id` then yields the existing "mapping {id} not found" error — no information leak, no new error variant.
 - Host validation before assignment: `tenant_db.find_by_id::<host::Entity, _>(host_id)` +
   `.filter(host::Column::DeactivatedAt.is_null())`, executed on `&tx`. Missing → "host {id} not found" via the
-  existing `ProxmoxError::Database` reporting style used for the mapping-not-found case.
+  existing `ProxmoxError::Database` reporting style used for the mapping-not-found case. Named behavior change: today
+  `apply_match` accepts any `host_id` without an existence check, so a deactivated host was technically matchable;
+  after this fix it errors. Intentional hardening, and unreachable from the UI flow — the suggestion/candidate host
+  list already filters `DeactivatedAt.is_null()` (surfaces.rs `handle_list` suggestion loading) — so only a hand-crafted
+  request naming a deactivated host observes the change.
+- Implementation checklist item: all three reads inside `apply_match` (mapping lookup, host validation, conflict
+  query) MUST execute on `&tx`, not on `tenant_db.db()` — the builders look identical either way, this is the repo's
+  first `TenantDb`-with-transaction site, and a read that silently escapes the transaction re-opens the
+  BUSY_SNAPSHOT/TOCTOU gap this spec closes.
 - Conflict-clearing: the conflict query becomes
   `tenant_db.find::<proxmox_host_mapping::Entity>().filter(HostId.eq(host_id)).filter(Id.ne(mapping_id)).all(&tx)` —
   tenant scoping is now automatic; the per-conflict `tracing::warn!` loop is retained. Same-tenant behavior is
@@ -180,7 +193,9 @@ Commit A alone closes the IDOR; Commit B is defense-in-depth cleanup.
 - `unmatch` is collapsed to a single atomic statement, following the existing `update_many` call shape used in
   `crates/ui/web-api-queries/src/queries/enrollment_tokens.rs` (`revoke_enrollment_token` — the only other
   `TenantDb::update_many` call site in the repo; this is the first plugin-crate use of it):
-  `tenant_db.update_many::<proxmox_host_mapping::Entity>().col_expr(Column::HostId, Expr::value(None::<Uuid>)).col_expr(Column::MatchMethod, Expr::value(None::<String>)).filter(Column::Id.eq(mapping_id)).exec(tenant_db.db())`.
+  `tenant_db.update_many::<proxmox_host_mapping::Entity>().col_expr(Column::HostId, Expr::value(Option::<Uuid>::None)).col_expr(Column::MatchMethod, Expr::value(Option::<String>::None)).filter(Column::Id.eq(mapping_id)).exec(tenant_db.db())`
+  (the `Expr::value(Option::<T>::None)` NULL form is the repo idiom — see `update_dispatch.rs` and
+  `scheduler-runtime` `claim.rs`; do not write `None::<T>` bare).
   `rows_affected == 0` maps to the existing "mapping {id} not found" error. This removes the current unwrapped
   SELECT-then-UPDATE pair (a TOCTOU gap today) instead of wrapping it in a transaction — one statement, atomic by
   construction, no read.
@@ -215,16 +230,29 @@ functions wrap their mock connection as `TenantDb::new(db, tenant_id)` — the e
 different `plugin_config_id` to pin cross-config conflict clearing.
 
 **b. New tenant-isolation tests (real in-memory SQLite).** Add
-`uptrakit-shared-db = { workspace = true, features = ["migration"] }` to the proxmox crate's `[dev-dependencies]`
-(`uptrakit-shared-db` is already in `[workspace.dependencies]` at `Cargo.toml:123` with `default-features = false`, so
-no new `[workspace.dependencies]` entry is needed — only the crate-local `features = ["migration"]` opt-in). Note:
+`uptrakit-shared-db = { workspace = true, features = ["migration", "db-sqlite"] }` to the proxmox crate's
+`[dev-dependencies]` — a wholly new `[dev-dependencies]` line (the crate's dev-deps today are only `tokio` and
+`httpmock`; the existing `uptrakit-shared-db` entry sits under `[dependencies]` without these features). Both
+features are required: `migration` pulls in `sea-orm-migration` only, while `db-sqlite` enables the actual
+`sea-orm/sqlx-sqlite` driver — without it `Database::connect("sqlite::memory:")` has no linked SQLite backend and
+the test module will not run. This mirrors the spec's cited precedent exactly
+(`crates/ui/surface-proxy/Cargo.toml` enables `["migration", "db-sqlite"]` on `uptrakit-shared-db` alongside
+`["migrations"]` on the proxmox crate). No new `[workspace.dependencies]` registration needed —
+`uptrakit-shared-db` is already there at `Cargo.toml:123` with `default-features = false`. Note:
 every current consumer of the `migration` feature is a `crates/ui/*` or `crates/core/*` crate; this is the first
 `crates/plugins/*` crate to pull it into `[dev-dependencies]` — a new precedent, not reuse of an established
-plugin-crate pattern. Test setup: `Database::connect("sqlite::memory:")`,
-run the shared-db migrations (creates `tenant`, `host`, `software_item`, `plugin_config`) plus the plugin's
-controller migration (creates `proxmox_host_mappings` — pattern exists in `controller_migration.rs` tests), insert
-fixture rows for **two tenants** (FK constraints are enforced: each mapping needs its `tenant` + `plugin_config`
-parents, each match target its `host`; `testing::insert_host_mapping` helps).
+plugin-crate pattern. Test setup: `Database::connect("sqlite::memory:")`, then the canonical combined-migration
+helper — `uptrakit_shared_db::migration::run_migrations_with_plugins(&db, ProxmoxPlugin::controller_migrations())` —
+which runs the shared-db migrations (creates `tenant`, `host`, `software_item`, `plugin_config`) and the plugin's
+controller migration (creates `proxmox_host_mappings`) as one migrator. Direct precedent for proxmox specifically:
+`setup_proxmox_db()` in `crates/ui/surface-proxy/src/proxy/tests/controller_owned/proxmox_update_protection.rs` —
+copy that shape; do not run the two migrators separately. `ProxmoxPlugin::controller_migrations()` is behind the
+crate's `migrations` feature, so gate the new test module `#[cfg(all(test, feature = "migrations"))]` (the
+`cargo test --all-features` quality gate runs it; featureless `cargo test` skips it — equivalent gating to the
+existing `controller_migration.rs` tests, but a different mechanism: those use plain `#[cfg(test)]` inside a module
+that is itself `#[cfg(feature = "migrations")]`-gated at its `mod` declaration in `lib.rs`, whereas the new module
+carries the conjunction inline). Insert fixture rows for **two tenants** (FK constraints are enforced: each mapping
+needs its `tenant` + `plugin_config` parents, each match target its `host`; `testing::insert_host_mapping` helps).
 
 Invariant: error-string assertions alone ("not found") are insufficient — `find_by_id` returning `None` looks
 identical whether a row is absent or merely foreign, so every isolation case below MUST assert the foreign row's
@@ -236,7 +264,9 @@ under future edits. Cases:
 2. `manual_match` with a `host_id` belonging to another tenant → error; mapping's `host_id` stays `NULL`.
 3. `unmatch` with a foreign-tenant `mapping_id` → error; foreign mapping keeps its match.
 4. `unmatch` twice on the same in-tenant mapping → **assert both calls return `Ok`** (pins `rows_affected` counting
-   matched rows, not changed rows; a matched-but-unchanged row must not surface as "not found").
+   matched rows, not changed rows; a matched-but-unchanged row must not surface as "not found"). Backend-portable:
+   both supported backends (SQLite and Postgres) report rows matched by `WHERE`, not rows whose values changed, so
+   the SQLite test is representative of the Postgres path.
 5. Happy-path conflict clearing across two same-tenant configs re-verified on the SQLite harness (real `WHERE`
    evaluation, complementing the mock test in (a)).
 
