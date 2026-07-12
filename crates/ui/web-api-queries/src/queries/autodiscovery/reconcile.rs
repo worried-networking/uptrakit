@@ -134,6 +134,28 @@ pub(super) async fn reconcile_plugin_result(
         .await
         .context_to()?;
 
+    // Batch-load the candidate links that have an update actively rewriting
+    // their state, so the absence path below is a pure in-memory lookup rather
+    // than one COUNT query per link (N+1).
+    let candidate_ids: Vec<Uuid> = candidates.iter().map(|link| link.id).collect();
+    let active_update_ids: HashSet<Uuid> = if candidate_ids.is_empty() {
+        HashSet::new()
+    } else {
+        UpdateHistory::find()
+            .filter(update_history::Column::HostSoftwareItemId.is_in(candidate_ids))
+            .filter(update_history::Column::Status.is_in([
+                UpdateStatus::InProgress,
+                UpdateStatus::Pending,
+                UpdateStatus::Queued,
+            ]))
+            .all(&tx)
+            .await
+            .context_to()?
+            .into_iter()
+            .filter_map(|row| row.host_software_item_id)
+            .collect()
+    };
+
     for link in candidates {
         let present = link.package_identifier.as_ref().is_some_and(|pid| {
             effective_identifiers.contains(&(pid.clone(), link.qualifier.clone()))
@@ -151,7 +173,7 @@ pub(super) async fn reconcile_plugin_result(
 
         // Absent from this snapshot: defer entirely while an update is
         // actively rewriting this link's state.
-        if has_active_update(&tx, link.id).await? {
+        if active_update_ids.contains(&link.id) {
             continue;
         }
 
@@ -173,23 +195,6 @@ pub(super) async fn reconcile_plugin_result(
     tx.commit().await.context_to()?;
     hook.flush_after_commit().await;
     Ok(())
-}
-
-/// Returns true when the link has an `update_history` row whose status is
-/// still actively being rewritten by the update-execution path
-/// (`InProgress`/`Pending`/`Queued`).
-async fn has_active_update(tx: &DatabaseTransaction, link_id: Uuid) -> Result<bool> {
-    let count = UpdateHistory::find()
-        .filter(update_history::Column::HostSoftwareItemId.eq(Some(link_id)))
-        .filter(update_history::Column::Status.is_in([
-            UpdateStatus::InProgress,
-            UpdateStatus::Pending,
-            UpdateStatus::Queued,
-        ]))
-        .count(tx)
-        .await
-        .context_to()?;
-    Ok(count > 0)
 }
 
 /// Deactivates a link that has been absent past the age floor, cascading to
@@ -253,9 +258,9 @@ async fn deactivate_link(
 
     // Force-fail any non-terminal update_history rows tied to this link. The
     // full `unfinished()` set is {Queued, Pending, InProgress, AwaitingRestart},
-    // but this function is only reached after `has_active_update` (which
-    // already defers {InProgress, Pending, Queued}) returns false, so in
-    // practice only `AwaitingRestart` rows can still be here; the broader
+    // but this function is only reached after the `active_update_ids` batch
+    // (which already defers {InProgress, Pending, Queued}) excludes this link,
+    // so in practice only `AwaitingRestart` rows can still be here; the broader
     // filter is kept as defense-in-depth rather than narrowed to that one variant.
     let unfinished_rows = UpdateHistory::find()
         .filter(update_history::Column::HostSoftwareItemId.eq(Some(updated_link.id)))

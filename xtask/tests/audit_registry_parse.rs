@@ -12,7 +12,9 @@ fn registry_load_finds_known_actions() {
         .get("plugin_config.update")
         .expect("plugin_config.update");
     assert_eq!(pcu.kind, registry::Kind::Stateful);
-    // Total should be 134 actions (127 + 5 config-reload variants + system.alert.written
-    // + auth.service.rekey_resolved)
-    assert_eq!(reg.actions.len(), 134);
+    // Total should be 139 actions (127 + 5 config-reload variants + system.alert.written
+    // + auth.service.rekey_resolved + 5 uninstall-reconciliation variants:
+    // host_software_item.{deactivate,reactivate}, software_item.{deactivate,reactivate},
+    // update.terminate_uninstalled)
+    assert_eq!(reg.actions.len(), 139);
 }
