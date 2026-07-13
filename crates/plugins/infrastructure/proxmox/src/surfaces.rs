@@ -477,18 +477,18 @@ async fn execute_controller_surface_action_typed(
         .await
         .map_err(map_controller_action_error),
         ControllerSurfaceAction::MatchHost => execute_controller_manual_match(
-            db,
+            tenant_db,
             parse_action_params::<ProxmoxManualMatchRequest>(params, action_id)?,
         )
         .await
         .map_err(map_controller_action_error),
         ControllerSurfaceAction::ApproveMatch => {
-            execute_controller_approve_match(db, parse_approve_match_request(params)?)
+            execute_controller_approve_match(tenant_db, parse_approve_match_request(params)?)
                 .await
                 .map_err(map_controller_action_error)
         }
         ControllerSurfaceAction::UnmatchHost => execute_controller_unmatch_host(
-            db,
+            tenant_db,
             parse_action_params::<ProxmoxMappingRequest>(params, action_id)?,
         )
         .await
@@ -606,24 +606,24 @@ async fn execute_controller_test_connection(
 }
 
 async fn execute_controller_manual_match(
-    db: &DatabaseConnection,
+    tenant_db: &TenantDb,
     request: ProxmoxManualMatchRequest,
 ) -> std::result::Result<serde_json::Value, String> {
-    handle_match(db, request).await
+    handle_match(tenant_db, request).await
 }
 
 async fn execute_controller_approve_match(
-    db: &DatabaseConnection,
+    tenant_db: &TenantDb,
     request: ProxmoxApproveMatchRequest,
 ) -> std::result::Result<serde_json::Value, String> {
-    handle_approve_match(db, request).await
+    handle_approve_match(tenant_db, request).await
 }
 
 async fn execute_controller_unmatch_host(
-    db: &DatabaseConnection,
+    tenant_db: &TenantDb,
     request: ProxmoxMappingRequest,
 ) -> std::result::Result<serde_json::Value, String> {
-    handle_unmatch(db, request).await
+    handle_unmatch(tenant_db, request).await
 }
 
 async fn execute_controller_list_all_unmatched(
@@ -973,7 +973,7 @@ async fn handle_test_connection(
 
 /// Manually match a mapping to a host.
 async fn handle_match(
-    db: &DatabaseConnection,
+    tenant_db: &TenantDb,
     request: ProxmoxManualMatchRequest,
 ) -> std::result::Result<serde_json::Value, String> {
     let mapping_id = request.mapping_id;
@@ -981,7 +981,7 @@ async fn handle_match(
 
     tracing::info!(%mapping_id, %host_id, "manually matching Proxmox guest to host");
 
-    crate::matching::manual_match(db, mapping_id, host_id)
+    crate::matching::manual_match(tenant_db, mapping_id, host_id)
         .await
         .map_err(|e| format!("manual match failed: {e}"))?;
 
@@ -990,7 +990,7 @@ async fn handle_match(
 
 /// Approve a suggested match.
 async fn handle_approve_match(
-    db: &DatabaseConnection,
+    tenant_db: &TenantDb,
     request: ProxmoxApproveMatchRequest,
 ) -> std::result::Result<serde_json::Value, String> {
     let mapping_id = request.mapping_id;
@@ -1008,7 +1008,7 @@ async fn handle_approve_match(
         "approving suggested Proxmox guest-to-host match"
     );
 
-    crate::matching::apply_suggested_match(db, mapping_id, host_id, method)
+    crate::matching::apply_suggested_match(tenant_db, mapping_id, host_id, method)
         .await
         .map_err(|e| format!("approve match failed: {e}"))?;
 
@@ -1017,14 +1017,14 @@ async fn handle_approve_match(
 
 /// Remove a match from a mapping.
 async fn handle_unmatch(
-    db: &DatabaseConnection,
+    tenant_db: &TenantDb,
     request: ProxmoxMappingRequest,
 ) -> std::result::Result<serde_json::Value, String> {
     let mapping_id = request.mapping_id;
 
     tracing::info!(%mapping_id, "removing Proxmox guest-to-host match");
 
-    crate::matching::unmatch(db, mapping_id)
+    crate::matching::unmatch(tenant_db, mapping_id)
         .await
         .map_err(|e| format!("unmatch failed: {e}"))?;
 

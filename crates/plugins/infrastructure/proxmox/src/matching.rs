@@ -6,14 +6,16 @@
 use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
 
+use sea_orm::sea_query::Expr;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
+    ActiveModelTrait, ColumnTrait, QueryFilter, Set, SqliteTransactionMode, TransactionOptions,
     TransactionTrait,
 };
 use uuid::Uuid;
 
 use crate::entity::proxmox_host_mapping;
 use uptrakit_shared_db::entity::host;
+use uptrakit_tenant_db::TenantDb;
 
 use crate::error::{ProxmoxError, Result};
 
@@ -298,32 +300,44 @@ pub fn suggestions_by_mapping_id(
 // ── DB operations ───────────────────────────────────────────────────────────
 
 /// Set or update a manual match between a mapping and a host.
-pub async fn manual_match(db: &DatabaseConnection, mapping_id: Uuid, host_id: Uuid) -> Result<()> {
-    apply_match(db, mapping_id, host_id, MatchMethod::Manual).await
+pub async fn manual_match(tenant_db: &TenantDb, mapping_id: Uuid, host_id: Uuid) -> Result<()> {
+    apply_match(tenant_db, mapping_id, host_id, MatchMethod::Manual).await
 }
 
 /// Apply a suggested match that has been approved by the user.
 pub async fn apply_suggested_match(
-    db: &DatabaseConnection,
+    tenant_db: &TenantDb,
     mapping_id: Uuid,
     host_id: Uuid,
     method: MatchMethod,
 ) -> Result<()> {
-    apply_match(db, mapping_id, host_id, method).await
+    apply_match(tenant_db, mapping_id, host_id, method).await
 }
 
 /// Internal: apply a match with the given method.
+///
+/// All reads execute on the transaction handle so the mapping lookup, host
+/// validation, and conflict query observe one consistent snapshot.
 async fn apply_match(
-    db: &DatabaseConnection,
+    tenant_db: &TenantDb,
     mapping_id: Uuid,
     host_id: Uuid,
     method: MatchMethod,
 ) -> Result<()> {
-    let tx = db.begin().await.map_err(|e| {
-        rootcause::report!(ProxmoxError::Database(format!(
-            "failed to begin Proxmox match transaction: {e}"
-        )))
-    })?;
+    // BEGIN IMMEDIATE prevents SQLITE_BUSY_SNAPSHOT when another connection
+    // commits between our read and write.
+    let tx = tenant_db
+        .db()
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..Default::default()
+        })
+        .await
+        .map_err(|e| {
+            rootcause::report!(ProxmoxError::Database(format!(
+                "failed to begin Proxmox match transaction: {e}"
+            )))
+        })?;
 
     tracing::debug!(
         %mapping_id,
@@ -332,7 +346,8 @@ async fn apply_match(
         "applying Proxmox guest-to-host match"
     );
 
-    let mapping = proxmox_host_mapping::Entity::find_by_id(mapping_id)
+    let mapping = tenant_db
+        .find_by_id::<proxmox_host_mapping::Entity, _>(mapping_id)
         .one(&tx)
         .await
         .map_err(|e| {
@@ -346,9 +361,25 @@ async fn apply_match(
             )))
         })?;
 
+    // Validate the caller-supplied host belongs to this tenant and is active
+    // before assigning it. Intentional hardening: a deactivated host was
+    // previously (technically) matchable; now it errors.
+    tenant_db
+        .find_by_id::<host::Entity, _>(host_id)
+        .filter(host::Column::DeactivatedAt.is_null())
+        .one(&tx)
+        .await
+        .map_err(|e| {
+            rootcause::report!(ProxmoxError::Database(format!("failed to find host: {e}")))
+        })?
+        .ok_or_else(|| {
+            rootcause::report!(ProxmoxError::Database(format!("host {host_id} not found")))
+        })?;
+
     // Preserve one-host-to-one-mapping invariant by clearing stale/conflicting
     // rows before assigning this host to the requested mapping.
-    let conflicts = proxmox_host_mapping::Entity::find()
+    let conflicts = tenant_db
+        .find::<proxmox_host_mapping::Entity>()
         .filter(proxmox_host_mapping::Column::HostId.eq(host_id))
         .filter(proxmox_host_mapping::Column::Id.ne(mapping_id))
         .all(&tx)
@@ -402,31 +433,36 @@ async fn apply_match(
 }
 
 /// Remove a match from a mapping.
-pub async fn unmatch(db: &DatabaseConnection, mapping_id: Uuid) -> Result<()> {
+///
+/// Single atomic UPDATE (no read): `rows_affected` counts rows matched by the
+/// tenant-scoped WHERE, so a foreign or absent mapping maps to "not found".
+pub async fn unmatch(tenant_db: &TenantDb, mapping_id: Uuid) -> Result<()> {
     tracing::debug!(%mapping_id, "removing Proxmox guest-to-host match");
 
-    let mapping = proxmox_host_mapping::Entity::find_by_id(mapping_id)
-        .one(db)
+    let result = tenant_db
+        .update_many::<proxmox_host_mapping::Entity>()
+        .col_expr(
+            proxmox_host_mapping::Column::HostId,
+            Expr::value(Option::<Uuid>::None),
+        )
+        .col_expr(
+            proxmox_host_mapping::Column::MatchMethod,
+            Expr::value(Option::<String>::None),
+        )
+        .filter(proxmox_host_mapping::Column::Id.eq(mapping_id))
+        .exec(tenant_db.db())
         .await
         .map_err(|e| {
             rootcause::report!(ProxmoxError::Database(format!(
-                "failed to find mapping: {e}"
-            )))
-        })?
-        .ok_or_else(|| {
-            rootcause::report!(ProxmoxError::Database(format!(
-                "mapping {mapping_id} not found"
+                "failed to update mapping: {e}"
             )))
         })?;
 
-    let mut active: proxmox_host_mapping::ActiveModel = mapping.into();
-    active.host_id = Set(None);
-    active.match_method = Set(None);
-    active.update(db).await.map_err(|e| {
-        rootcause::report!(ProxmoxError::Database(format!(
-            "failed to update mapping: {e}"
-        )))
-    })?;
+    if result.rows_affected == 0 {
+        return Err(rootcause::report!(ProxmoxError::Database(format!(
+            "mapping {mapping_id} not found"
+        ))));
+    }
 
     tracing::info!(%mapping_id, "Proxmox guest-to-host match removed");
 
@@ -714,9 +750,11 @@ mod tests {
     async fn manual_match_preserves_single_host_mapping_under_conflict() {
         let tenant_id = Uuid::now_v7();
         let plugin_config_id = Uuid::now_v7();
+        let other_config_id = Uuid::now_v7();
         let host_id = Uuid::now_v7();
         let mapping_id = Uuid::now_v7();
         let conflicting_mapping_id = Uuid::now_v7();
+        let cross_config_conflict_id = Uuid::now_v7();
         let now = OffsetDateTime::now_utc();
 
         let mapping = proxmox_host_mapping::Model {
@@ -753,13 +791,43 @@ mod tests {
             discovered_at: now,
             updated_at: now,
         };
+        // Same tenant, different plugin config: conflict clearing must span configs.
+        let cross_config_conflict = proxmox_host_mapping::Model {
+            id: cross_config_conflict_id,
+            tenant_id,
+            plugin_config_id: other_config_id,
+            host_id: Some(host_id),
+            proxmox_node: "pve2".to_string(),
+            proxmox_vmid: 102,
+            proxmox_type: "qemu".to_string(),
+            proxmox_name: Some("vm-102".to_string()),
+            proxmox_status: "running".to_string(),
+            hostname: Some("vm-102".to_string()),
+            ip_addresses: None,
+            machine_id: None,
+            match_method: Some(MatchMethod::Manual.as_str().to_string()),
+            discovered_at: now,
+            updated_at: now,
+        };
+
+        let matched_host = make_host(host_id, "vm-100", "vm-100", None, "mid-100");
 
         let db = MockDatabase::new(DbBackend::MySql)
+            // apply_match: mapping lookup
             .append_query_results([vec![mapping.clone()]])
-            .append_query_results([vec![conflict.clone()]])
+            // apply_match: host validation
+            .append_query_results([vec![matched_host]])
+            // apply_match: conflict query (two conflicts, two configs)
+            .append_query_results([vec![conflict.clone(), cross_config_conflict.clone()]])
+            // ActiveModel::update re-fetches: conflict A, conflict B, target mapping
             .append_query_results([vec![conflict]])
+            .append_query_results([vec![cross_config_conflict]])
             .append_query_results([vec![mapping]])
             .append_exec_results([
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                },
                 MockExecResult {
                     last_insert_id: 0,
                     rows_affected: 1,
@@ -771,10 +839,11 @@ mod tests {
             ])
             .into_connection();
 
-        let result = manual_match(&db, mapping_id, host_id).await;
+        let tenant_db = TenantDb::new(db, tenant_id);
+        let result = manual_match(&tenant_db, mapping_id, host_id).await;
         assert!(result.is_ok(), "manual match should succeed: {result:?}");
 
-        let logs = db.into_transaction_log();
+        let logs = tenant_db.db().clone().into_transaction_log();
         assert_eq!(
             logs.len(),
             1,
@@ -792,14 +861,16 @@ mod tests {
             .collect();
         assert_eq!(
             update_statements.len(),
-            2,
-            "expected one conflicting-row clear and one assignment update"
+            3,
+            "expected two conflicting-row clears (both configs) and one assignment update"
         );
-        assert!(
+        assert_eq!(
             update_statements
                 .iter()
-                .any(|sql| sql.contains("`host_id` = NULL")),
-            "one update should clear the conflicting mapping"
+                .filter(|sql| sql.contains("`host_id` = NULL"))
+                .count(),
+            2,
+            "both conflicting mappings should be cleared regardless of plugin_config_id"
         );
         assert!(
             update_statements
