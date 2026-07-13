@@ -7,176 +7,193 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- _(db-migrate)_ copy all previously-dropped tables — 2FA (`user_totp`,
+  `user_recovery_codes`, `mfa_challenges`), OAuth (`oauth_clients`, `oauth_consents`,
+  `oauth_authorization_requests`, `oauth_authorization_codes`, `oauth_refresh_tokens`,
+  `oauth_controller_instances`), `instance_plugin_setting`, `service_merge_redirect`,
+  and the Proxmox scaling tables were silently omitted from `db-migrate`.
+
+  > **Data-loss advisory:** a `db-migrate` run on an earlier build left these tables
+  > **empty** at the destination. The 2FA/OAuth/`instance_plugin_setting` tables have
+  > shipped since v0.0.5. The source database is never modified, so this is
+  > recoverable: after upgrading, **re-run `db-migrate` from your original source
+  > database** (or restore the affected rows from it) before decommissioning the
+  > source. Losing 2FA enrollment locks users out of their accounts. Source and
+  > destination must use the same master key. See
+  > [Database Data Migration](../../../docs/end-user/db-migration.md).
+
 ## [0.0.1](https://github.com/worried-networking/uptrakit/releases/tag/v0.0.1) - 2026-04-27
 
 ### Added
 
-- *(audit)* emit semantic mutation audit events
-- *(global-github-provider)* add global runtime and tiny client integration
-- *(settings)* add shared GitHub provider settings foundation
-- *(web-api)* thread dispatch context through update lifecycle
+- _(audit)_ emit semantic mutation audit events
+- _(global-github-provider)_ add global runtime and tiny client integration
+- _(settings)_ add shared GitHub provider settings foundation
+- _(web-api)_ thread dispatch context through update lifecycle
 - port service providers and cli to surface runtime
 - port representative plugins to native surfaces
 - add surface runtime rollout guard
-- *(updates)* make restart recovery owner-aware
+- _(updates)_ make restart recovery owner-aware
 - unify mqtt runtime for standalone and embedded hosting
-- *(auth)* enforce OIDC private issuer policy by tenancy mode
+- _(auth)_ enforce OIDC private issuer policy by tenancy mode
 - add agent-side host feature probing and expose in REST API
-- *(controller)* add embedded SSH agent support
-- *(plugins)* register dashboard-icons in plugin registry and controller
-- *(controller)* persist embedded service ownership and yield state
-- *(web-api)* wire WorkloadClaimRegistry into AppState, NotificationService, and event delivery
-- *(controller)* add embedded agent with machine-id-based coexistence
-- *(controller)* extend embedded infrastructure for tenant services
-- *(controller)* wire embedded scheduler through EmbeddedServiceHost
-- *(controller)* add EmbeddedServiceHost infrastructure
-- *(sse)* propagate AdminEvents across controller instances via NATS
-- *(reset-data)* add backend for tenant data reset endpoint
-- *(controller)* register notification extensions at startup
-- *(controller)* make notifications-all, embedded-scheduler, embed-frontend default features
+- _(controller)_ add embedded SSH agent support
+- _(plugins)_ register dashboard-icons in plugin registry and controller
+- _(controller)_ persist embedded service ownership and yield state
+- _(web-api)_ wire WorkloadClaimRegistry into AppState, NotificationService, and event delivery
+- _(controller)_ add embedded agent with machine-id-based coexistence
+- _(controller)_ extend embedded infrastructure for tenant services
+- _(controller)_ wire embedded scheduler through EmbeddedServiceHost
+- _(controller)_ add EmbeddedServiceHost infrastructure
+- _(sse)_ propagate AdminEvents across controller instances via NATS
+- _(reset-data)_ add backend for tenant data reset endpoint
+- _(controller)_ register notification extensions at startup
+- _(controller)_ make notifications-all, embedded-scheduler, embed-frontend default features
 - make `interactive` a default feature in binary crates
-- *(controller)* add mDNS/DNS-SD zeroconf advertiser
-- *(web-api)* add interactive WebSocket endpoint and session management
-- *(db)* unified software tracking data model
+- _(controller)_ add mDNS/DNS-SD zeroconf advertiser
+- _(web-api)_ add interactive WebSocket endpoint and session management
+- _(db)_ unified software tracking data model
 - add host tags database schema, entities, and API types
-- *(web-api,controller)* add --reject-dangerous-commands CLI flag
-- *(db)* add proxmox_host_mappings migration and entity
-- *(extensions)* implement plugin-backed extension action dispatch
-- *(web-api)* add security headers middleware
-- *(web-api)* add request-id middleware with x-request-id header
-- *(web-api)* route batch progress events via NATS for multi-instance
-- *(scheduler)* add DiscoverHostPackagesExecutor for periodic host-package rediscovery
-- *(controller)* add enrollment token bootstrap and env var support
-- *(controller)* master key rotation via --rotate-master-key-file
-- *(controller)* init DEK ring at startup; auto-create first DEK
-- *(db)* add data_encryption_keys migration and entity
-- *(scheduler)* add AuditLogCleanupExecutor for retention cleanup
-- *(db-migrate)* register audit_logs and system_audit_logs tables
-- *(controller)* wire audit log CLI flags, backend construction, and tracing
-- *(controller)* defer external tasks when external scheduler connects
-- *(db)* add system_services and system_service_certificates entities and migration
-- *(controller)* add gated v1-to-v2 re-encryption pass
-- *(agent)* add operator freeze file to halt update execution
-- *(crypto)* add ENC:v2: context-bound AAD ciphertext format
-- *(web-api)* add per-service cert lifetime override
-- *(scheduler-engine,db)* add detect_version task and rename version_check to fetch_releases
-- *(controller)* reconcile NATS URL from DB and CLI at startup
-- *(db)* add global_settings table and migrate data
-- *(notifications)* wire email channel with global SMTP settings
-- *(controller)* make DB connection pool size configurable
-- *(web-api)* add notification REST API routes and Telegram callback
-- *(web-api)* add notification dispatcher and event integration
-- *(db)* add notification_channels, notification_rules, notification_log tables
-- *(controller)* add embedded-scheduler feature, credential delivery, and service profiles
-- *(nats)* extract shared NATS crate and refactor transport
-- *(wire)* add scheduler capabilities, ServiceCredentials, RequestCaRotation
-- *(controller)* add db-migrate subcommand for cross-backend data migration
-- *(controller)* wire NATS transport into controller startup
-- *(controller)* replace blind shutdown sleep with service drain poll loop
-- *(api)* rename provider-configs to plugin-configs
-- *(controller)* synthesize GitHub/APT configs from PHS discovery
-- *(db)* migrate docker_registry → docker in provider_configs
-- *(db)* replace initiated_by with actor_type/actor_id; add HA discovery columns
-- *(controller)* scope -v verbosity to uptrakit crates only
-- *(logging)* add verbosity flags and structured log instrumentation
-- *(autodiscovery)* implement software autodiscovery feature
-- *(agent-ssh)* implement version check and update execution over SSH
-- *(controller)* add embed-frontend feature for single-binary deployment
+- _(web-api,controller)_ add --reject-dangerous-commands CLI flag
+- _(db)_ add proxmox_host_mappings migration and entity
+- _(extensions)_ implement plugin-backed extension action dispatch
+- _(web-api)_ add security headers middleware
+- _(web-api)_ add request-id middleware with x-request-id header
+- _(web-api)_ route batch progress events via NATS for multi-instance
+- _(scheduler)_ add DiscoverHostPackagesExecutor for periodic host-package rediscovery
+- _(controller)_ add enrollment token bootstrap and env var support
+- _(controller)_ master key rotation via --rotate-master-key-file
+- _(controller)_ init DEK ring at startup; auto-create first DEK
+- _(db)_ add data_encryption_keys migration and entity
+- _(scheduler)_ add AuditLogCleanupExecutor for retention cleanup
+- _(db-migrate)_ register audit_logs and system_audit_logs tables
+- _(controller)_ wire audit log CLI flags, backend construction, and tracing
+- _(controller)_ defer external tasks when external scheduler connects
+- _(db)_ add system_services and system_service_certificates entities and migration
+- _(controller)_ add gated v1-to-v2 re-encryption pass
+- _(agent)_ add operator freeze file to halt update execution
+- _(crypto)_ add ENC:v2: context-bound AAD ciphertext format
+- _(web-api)_ add per-service cert lifetime override
+- _(scheduler-engine,db)_ add detect_version task and rename version_check to fetch_releases
+- _(controller)_ reconcile NATS URL from DB and CLI at startup
+- _(db)_ add global_settings table and migrate data
+- _(notifications)_ wire email channel with global SMTP settings
+- _(controller)_ make DB connection pool size configurable
+- _(web-api)_ add notification REST API routes and Telegram callback
+- _(web-api)_ add notification dispatcher and event integration
+- _(db)_ add notification_channels, notification_rules, notification_log tables
+- _(controller)_ add embedded-scheduler feature, credential delivery, and service profiles
+- _(nats)_ extract shared NATS crate and refactor transport
+- _(wire)_ add scheduler capabilities, ServiceCredentials, RequestCaRotation
+- _(controller)_ add db-migrate subcommand for cross-backend data migration
+- _(controller)_ wire NATS transport into controller startup
+- _(controller)_ replace blind shutdown sleep with service drain poll loop
+- _(api)_ rename provider-configs to plugin-configs
+- _(controller)_ synthesize GitHub/APT configs from PHS discovery
+- _(db)_ migrate docker_registry → docker in provider_configs
+- _(db)_ replace initiated_by with actor_type/actor_id; add HA discovery columns
+- _(controller)_ scope -v verbosity to uptrakit crates only
+- _(logging)_ add verbosity flags and structured log instrumentation
+- _(autodiscovery)_ implement software autodiscovery feature
+- _(agent-ssh)_ implement version check and update execution over SSH
+- _(controller)_ add embed-frontend feature for single-binary deployment
 - add centralised DB-backed task scheduler with HA-safe optimistic locking
-- *(cli)* add unified --version build metadata across binaries
-- *(db)* add `db-all` feature to enable all database backends
+- _(cli)_ add unified --version build metadata across binaries
+- _(db)_ add `db-all` feature to enable all database backends
 - add mqtt client connection status
-- *(db,enrollment,cli,controller)* encrypt credentials at rest and harden TOFU
-- *(controller)* store managed CA in database
+- _(db,enrollment,cli,controller)_ encrypt credentials at rest and harden TOFU
+- _(controller)_ store managed CA in database
 - add cross-controller notification delivery via outbox pattern
-- *(controller)* add version-gated CRL rebuild for cross-instance revocation propagation
-- *(web-api)* add version-gated periodic settings reload for cross-instance consistency
-- *(web-api)* add periodic settings reload for cross-instance consistency
-- *(web-api)* add unified database-backed rate limiting for auth endpoints
+- _(controller)_ add version-gated CRL rebuild for cross-instance revocation propagation
+- _(web-api)_ add version-gated periodic settings reload for cross-instance consistency
+- _(web-api)_ add periodic settings reload for cross-instance consistency
+- _(web-api)_ add unified database-backed rate limiting for auth endpoints
 - [**breaking**] support multiple MQTT clients per tenant
 - require registration token for OIDC first registration
-- *(controller)* implement zero-downtime graceful restart via SO_REUSEPORT
+- _(controller)_ implement zero-downtime graceful restart via SO_REUSEPORT
 - add agent version tracking and version check wire protocol
 - add update_history entity with read-only REST API
-- *(controller)* add mqtt_leases migration
-- *(controller)* add OIDC provider bootstrap CLI flags
+- _(controller)_ add mqtt_leases migration
+- _(controller)_ add OIDC provider bootstrap CLI flags
 - [**breaking**] add owner role with ManageGlobalSettings privilege
 - [**breaking**] add OCSP SHA-1 support, --pki-addr flag, and Nginx OCSP integration test
 - [**breaking**] implement CSR-based agent certificate issuance
 - add multi-tenancy database infrastructure and tenant-scoped queries
 - add OCSP responder, backend URL setting, and CA certificate extensions
 - add Host entity with machine_id-based identity
-- *(controller)* add CLI flags and reconciliation for forwarded cert headers
-- *(controller)* add settings reconciliation module
-- *(controller)* add server certificate SAN sanity checks at startup
-- *(web)* add device authorization flow backend
-- *(controller,agent,web)* implement CA key rotation with dual-CA support
+- _(controller)_ add CLI flags and reconciliation for forwarded cert headers
+- _(controller)_ add settings reconciliation module
+- _(controller)_ add server certificate SAN sanity checks at startup
+- _(web)_ add device authorization flow backend
+- _(controller,agent,web)_ implement CA key rotation with dual-CA support
 
 ### Fixed
 
-- *(proxmox)* fix update protection never running in embedded builds
-- *(server)* return 200 for SPA fallback routes instead of 404
-- *(ci)* resolve all backend-lint, frontend, semantic-boundary, markdown, and edition CI failures
-- *(tests)* update stale surface rollout tests in controller
-- *(agent-ssh-runtime)* restore UpdateHooks dropped in surface rename
-- *(surfaces)* harden provider availability and form handling
-- *(controller)* remove embedded rollout local-satisfaction shortcut
+- _(proxmox)_ fix update protection never running in embedded builds
+- _(server)_ return 200 for SPA fallback routes instead of 404
+- _(ci)_ resolve all backend-lint, frontend, semantic-boundary, markdown, and edition CI failures
+- _(tests)_ update stale surface rollout tests in controller
+- _(agent-ssh-runtime)_ restore UpdateHooks dropped in surface rename
+- _(surfaces)_ harden provider availability and form handling
+- _(controller)_ remove embedded rollout local-satisfaction shortcut
 - align phase0 surface provider capabilities with real registrations
 - unify phase0 rollout contract source and db-sqlite test gating
 - unblock task 8 verification bundle
 - make rollout reports instance-scoped
 - make surface rollout guard dynamic
-- *(reconnect)* refresh embedded capabilities and retry partial replays
-- *(controller)* match rebased app-state notification path
-- *(controller)* allow minimal build without embedded services
+- _(reconnect)_ refresh embedded capabilities and retry partial replays
+- _(controller)_ match rebased app-state notification path
+- _(controller)_ allow minimal build without embedded services
 - shut down embedded mqtt on all exits
 - release embedded mqtt claims on yield
-- *(controller)* allow drain token in agent-only builds
-- *(controller)* wire machine id yield reevaluation
-- *(controller)* gate built-in host by embedded features
-- *(controller)* gate ServiceTransport import for embedded scheduler
+- _(controller)_ allow drain token in agent-only builds
+- _(controller)_ wire machine id yield reevaluation
+- _(controller)_ gate built-in host by embedded features
+- _(controller)_ gate ServiceTransport import for embedded scheduler
 - complete transport close-policy overrides and tests
-- *(controller)* resolve clippy warnings in provision and main
+- _(controller)_ resolve clippy warnings in provision and main
 - add missing `is_embedded` fields to test fixtures and fix clippy
-- *(controller)* drain embedded services before service-drain wait (Phase 2.5)
-- *(controller)* remove unused CoexistencePolicy parameter from add()
-- *(controller)* resolve clippy collapsible-if warnings in embedded agent
-- *(scheduler)* replace CoexistencePolicy with closure-only yield and set-based tracking
-- *(wire)* remove obsolete Register sends from agent, agent-ssh, scheduler
+- _(controller)_ drain embedded services before service-drain wait (Phase 2.5)
+- _(controller)_ remove unused CoexistencePolicy parameter from add()
+- _(controller)_ resolve clippy collapsible-if warnings in embedded agent
+- _(scheduler)_ replace CoexistencePolicy with closure-only yield and set-based tracking
+- _(wire)_ remove obsolete Register sends from agent, agent-ssh, scheduler
 - replace #[cfg(not(feature))] with additive feature patterns
-- *(extensions)* scope plugin extension actions per-extension to fix notification channel buttons
-- *(mqtt)* unify MQTT software states query path to fix incorrect version state
-- *(controller)* fix mDNS service advertisement on macOS
+- _(extensions)_ scope plugin extension actions per-extension to fix notification channel buttons
+- _(mqtt)_ unify MQTT software states query path to fix incorrect version state
+- _(controller)_ fix mDNS service advertisement on macOS
 - resolve clippy warnings and cargo-deny duplicates
-- *(crypto)* convert DataKeyRing::new panic to Result
-- *(controller)* increase DB connection pool idle timeout to 5 minutes
-- *(scheduler)* rename DiscoverHostPackages to DiscoverSoftware to match DB value
-- *(db_migrate)* update table count for host_tags tables
-- *(shutdown)* eliminate ~10s graceful shutdown delay
-- *(controller)* replace #[cfg(not(feature))] with additive-only patterns
-- *(security)* zeroize master key hex and warn on broad proxy CIDRs
+- _(crypto)_ convert DataKeyRing::new panic to Result
+- _(controller)_ increase DB connection pool idle timeout to 5 minutes
+- _(scheduler)_ rename DiscoverHostPackages to DiscoverSoftware to match DB value
+- _(db_migrate)_ update table count for host_tags tables
+- _(shutdown)_ eliminate ~10s graceful shutdown delay
+- _(controller)_ replace #[cfg(not(feature))] with additive-only patterns
+- _(security)_ zeroize master key hex and warn on broad proxy CIDRs
 - migrate all call sites to ColumnAadEntry, fix managed_ca_rotation test
-- *(controller)* request_log middleware covers all routes including SPA fallback
-- *(controller)* correct doc comment about DEK insert race handling
-- *(controller)* use Display format for startup error printing
-- *(nats)* propagate inner error strings through NatsError and NatsTransportError
-- *(controller)* update embedded SchedulerConfig::new call
-- *(notifications)* add configurable private-host validation and header blocklist to webhook
-- *(wire)* add Other(String) catch-all to ErrorCode/EnrollmentStatus, mark payload structs #[non_exhaustive]
-- *(web-api,controller)* add shutdown CancellationToken to AppState for SSE streams
-- *(web-api)* propagate token revocations via NATS and persist to DB
-- *(controller)* snapshot CRL manager locks before crypto rebuild
-- *(controller)* use server listening signal for SIGUSR1 takeover
-- *(service-sdk,controller)* use Constrained(0) in test CA helpers
-- *(controller)* init_master_key returns Option<SecretString> instead of Option<String>
+- _(controller)_ request_log middleware covers all routes including SPA fallback
+- _(controller)_ correct doc comment about DEK insert race handling
+- _(controller)_ use Display format for startup error printing
+- _(nats)_ propagate inner error strings through NatsError and NatsTransportError
+- _(controller)_ update embedded SchedulerConfig::new call
+- _(notifications)_ add configurable private-host validation and header blocklist to webhook
+- _(wire)_ add Other(String) catch-all to ErrorCode/EnrollmentStatus, mark payload structs #[non_exhaustive]
+- _(web-api,controller)_ add shutdown CancellationToken to AppState for SSE streams
+- _(web-api)_ propagate token revocations via NATS and persist to DB
+- _(controller)_ snapshot CRL manager locks before crypto rebuild
+- _(controller)_ use server listening signal for SIGUSR1 takeover
+- _(service-sdk,controller)_ use Constrained(0) in test CA helpers
+- _(controller)_ init_master_key returns Option<SecretString> instead of Option<String>
 - remove unapproved .expect() uses and Report::new() violations
-- *(controller)* add dedicated SCHEDULER_SHUTDOWN_TIMEOUT of 60 seconds
-- *(config)* replace non-additive cfg(not) feature flags with cfg!() expressions
-- *(pki)* add overflow guard to encode_der_length
-- *(controller)* route registration token to stderr, not tracing
-- *(crypto)* enable plaintext mode when --allow-plaintext-secrets has no master key
-- *(controller)* update last_checked_at and push MQTT after Phase A fetch_releases
-- *(controller)* use track() for CRL manager; document mTLS allow_unauthenticated
+- _(controller)_ add dedicated SCHEDULER_SHUTDOWN_TIMEOUT of 60 seconds
+- _(config)_ replace non-additive cfg(not) feature flags with cfg!() expressions
+- _(pki)_ add overflow guard to encode_der_length
+- _(controller)_ route registration token to stderr, not tracing
+- _(crypto)_ enable plaintext mode when --allow-plaintext-secrets has no master key
+- _(controller)_ update last_checked_at and push MQTT after Phase A fetch_releases
+- _(controller)_ use track() for CRL manager; document mTLS allow_unauthenticated
 - resolve top-5 code-review issues (PKI, cross-tenant, N+1, provider)
 - frontend accessibility, security, and UX improvements with expanded tests
 - resolve remaining codereview issues with ping interval, retry, and auto-refresh
@@ -190,38 +207,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - eliminate .expect() calls and improve error chain preservation
 - resolve top 5 code review findings across 8 crates
 - resolve top 5 code review findings across 8 crates
-- *(controller)* restore oidc feature gates broken by rebase
-- *(controller)* resolve rebase and fix reverse-proxy test AppState init
-- *(controller)* add missing hosts table join in version_check query
-- *(tests)* harden nginx OCSP reverse-proxy tests in CI
-- *(security)* resolve SEC-01, DIR-01, DB-01 from code review
-- *(web-api)* unify service ip and last-seen tracking
+- _(controller)_ restore oidc feature gates broken by rebase
+- _(controller)_ resolve rebase and fix reverse-proxy test AppState init
+- _(controller)_ add missing hosts table join in version_check query
+- _(tests)_ harden nginx OCSP reverse-proxy tests in CI
+- _(security)_ resolve SEC-01, DIR-01, DB-01 from code review
+- _(web-api)_ unify service ip and last-seen tracking
 - resolve additional codereview findings
 - address codereview high-risk issues
 - address top codereview issues
 - harden ws message handling
-- *(web-api)* implement code review fix plans H2, H3, H8, H9
-- *(web-api,wire,types)* implement code review fix plans #9-#16
+- _(web-api)_ implement code review fix plans H2, H3, H8, H9
+- _(web-api,wire,types)_ implement code review fix plans #9-#16
 - make agent cert signing async
-- *(controller)* allow dev startup without master key
-- *(web-api,wire,agent)* eliminate command injection in update hooks
-- *(security)* implement fix plans #1-#3 from code review
-- *(controller)* dedupe migration list
-- *(web)* add IP detection and request logging to PKI HTTP server
-- *(test)* fix Envoy CRL test to use PEM format instead of DER
-- *(test)* fix HAProxy reverse proxy test config
-- *(test)* fix Envoy reverse proxy test config
-- *(test)* use certificate_der_base64 and modern trust_pool syntax in Caddy test
-- *(test)* correct Traefik v3 reverse proxy test config
-- *(test-server)* add nonblocking listener and ALPN for reverse proxy tests
+- _(controller)_ allow dev startup without master key
+- _(web-api,wire,agent)_ eliminate command injection in update hooks
+- _(security)_ implement fix plans #1-#3 from code review
+- _(controller)_ dedupe migration list
+- _(web)_ add IP detection and request logging to PKI HTTP server
+- _(test)_ fix Envoy CRL test to use PEM format instead of DER
+- _(test)_ fix HAProxy reverse proxy test config
+- _(test)_ fix Envoy reverse proxy test config
+- _(test)_ use certificate_der_base64 and modern trust_pool syntax in Caddy test
+- _(test)_ correct Traefik v3 reverse proxy test config
+- _(test-server)_ add nonblocking listener and ALPN for reverse proxy tests
 - fix cert renewal
 
 ### Other
 
-- *(db)* enable WAL mode and busy-timeout for SQLite
+- _(db)_ enable WAL mode and busy-timeout for SQLite
 - migrate release automation from release-please to release-plz
 - remove surface rollout gate
-- *(surfaces)* remove extension-era runtime leftovers
+- _(surfaces)_ remove extension-era runtime leftovers
 - fully negotiate surface provider compatibility
 - rename surface runtime capability internals
 - drop dead extension bootstrap hook
@@ -234,104 +251,104 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - extract scheduler runtime
 - extract ssh agent runtime
 - Extract shared agent runtime
-- *(controller)* add generic built-in service host
+- _(controller)_ add generic built-in service host
 - unify notification handle access
-- *(service-sdk)* document transport and error-layer contract
+- _(service-sdk)_ document transport and error-layer contract
 - extract TracingBuilder into uptrakit-tracing-init crate
 - migrate security_audit message prefixes to target: "security_audit"
 - migrate all binaries to TracingBuilder
 - remove remaining MySQL/MariaDB code paths and comments
-- *(db)* remove MySQL/MariaDB feature flags from all crates
+- _(db)_ remove MySQL/MariaDB feature flags from all crates
 - migrate all call sites to catalog/descriptor model
-- *(codereview)* update core runtime binary review findings
-- *(registry)* move DashboardIconCache lifecycle into with_dashboard_icons
-- *(controller)* use controller DB for embedded SSH agent
-- *(core)* remove shared MQTT-specific config ownership
-- *(codereview)* refresh Rust backend review files
-- *(embedded)* revive CoexistencePolicy with YieldOnSameAppName default
-- *(controller)* introduce EmbeddedShutdownTokens for embedded service lifecycle
-- *(web-api-types,cli,openapi-client,frontend)* remove MQTT settings API surface
-- *(web-api)* remove controller-side MQTT settings infrastructure
-- *(web-api)* replace external_scheduler_connected with EmbeddedServiceNotifier trait
-- *(scheduler-engine)* replace AtomicBool with closure for yield logic
-- *(scheduler)* replace push_software_states with signal_software_states_changed
+- _(codereview)_ update core runtime binary review findings
+- _(registry)_ move DashboardIconCache lifecycle into with_dashboard_icons
+- _(controller)_ use controller DB for embedded SSH agent
+- _(core)_ remove shared MQTT-specific config ownership
+- _(codereview)_ refresh Rust backend review files
+- _(embedded)_ revive CoexistencePolicy with YieldOnSameAppName default
+- _(controller)_ introduce EmbeddedShutdownTokens for embedded service lifecycle
+- _(web-api-types,cli,openapi-client,frontend)_ remove MQTT settings API surface
+- _(web-api)_ remove controller-side MQTT settings infrastructure
+- _(web-api)_ replace external_scheduler_connected with EmbeddedServiceNotifier trait
+- _(scheduler-engine)_ replace AtomicBool with closure for yield logic
+- _(scheduler)_ replace push_software_states with signal_software_states_changed
 - decompose AppState into CertState, AuthState, BroadcastState, OidcState substates
 - remove fixed entries from CODEREVIEW.md files
-- *(notifications)* remove dead notification-specific code
-- *(codereview)* extend backend review — 14-dimension analysis (2026-03-15)
-- *(controller)* split startup into phase-specific modules
-- *(controller)* extract nullable-string reconciliation helper in startup
-- *(controller)* extract phases from run() to reduce cyclomatic complexity
-- *(plugins)* unify plugin registries — eliminate NotificationPluginRegistry
-- *(core)* tighten pub to pub(crate) in binary crates
+- _(notifications)_ remove dead notification-specific code
+- _(codereview)_ extend backend review — 14-dimension analysis (2026-03-15)
+- _(controller)_ split startup into phase-specific modules
+- _(controller)_ extract nullable-string reconciliation helper in startup
+- _(controller)_ extract phases from run() to reduce cyclomatic complexity
+- _(plugins)_ unify plugin registries — eliminate NotificationPluginRegistry
+- _(core)_ tighten pub to pub(crate) in binary crates
 - Merge branch 'worktree-refactor/plugin'
 - update SAN documentation for full-list semantics
-- *(api)* rename extra_sans to sans in API types and CLI
-- *(controller)* rework SAN reconciliation for full-list semantics
-- *(settings)* rename extra_sans to sans across settings infrastructure
-- *(pki)* split collect_sans into auto_detect_sans and parse_san_list
-- *(codereview)* add 2026-03-10 comprehensive review across all 12 dimensions
-- *(codereview)* add 2026-03-10 comprehensive review across all 12 dimensions
+- _(api)_ rename extra_sans to sans in API types and CLI
+- _(controller)_ rework SAN reconciliation for full-list semantics
+- _(settings)_ rename extra_sans to sans across settings infrastructure
+- _(pki)_ split collect_sans into auto_detect_sans and parse_san_list
+- _(codereview)_ add 2026-03-10 comprehensive review across all 12 dimensions
+- _(codereview)_ add 2026-03-10 comprehensive review across all 12 dimensions
 - remove fixed issues from all CODEREVIEW.md files
-- *(controller)* add chunked processing to re-encryption helpers
-- *(notifications)* migrate web-api to notification plugin registry
-- *(scheduler)* replace cron expressions with interval + jitter
+- _(controller)_ add chunked processing to re-encryption helpers
+- _(notifications)_ migrate web-api to notification plugin registry
+- _(scheduler)_ replace cron expressions with interval + jitter
 - strike through fixed CODEREVIEW entries from top-5 fix session
 - merge 2026-03-06 parallel review findings into CODEREVIEW.md files
-- *(extensions)* separate action catalogue in registry and plugins
-- *(tracing)* use registry-based subscriber in all binaries
+- _(extensions)_ separate action catalogue in registry and plugins
+- _(tracing)_ use registry-based subscriber in all binaries
 - add cargo-llvm-cov test coverage analysis to CODEREVIEW.md files
-- *(controller)* remove reverse proxy test infrastructure
+- _(controller)_ remove reverse proxy test infrastructure
 - add descriptions to binary crates and remove mqtt publish=false
 - apply cargo fmt after rebase onto main
 - fmt
 - fmt
-- *(controller)* v2→v3 auto-migration; remove --upgrade-encryption
+- _(controller)_ v2→v3 auto-migration; remove --upgrade-encryption
 - update all callers to 2-arg encrypt_str/decrypt_str/EncryptedString::new
 - eliminate raw SQL from tests and migrations
 - remove resolved issues from CODEREVIEW.md files
-- *(controller)* add coverage for reencrypt_legacy_plaintext
-- *(codereview)* update backend code review findings
+- _(controller)_ add coverage for reencrypt_legacy_plaintext
+- _(codereview)_ update backend code review findings
 - migrate external deps to workspace = true
-- *(codereview)* add tests, consistency, maintainability, and database dimensions to all per-crate reviews
-- *(codereview)* remove fixed issues, update summaries
-- *(controller)* replace CRL poll loop with event-driven rebuild and DB persistence
-- *(controller)* update PKI, reconciliation, and startup for global settings
-- *(codereview)* remove already-fixed and false-positive items
-- *(scheduler-engine)* remove db from SchedulerNotifier::push_software_states_for_tenant
-- *(codereview)* remove fixed issues from CODEREVIEW.md files
-- *(codereview)* remove fixed issues from all CODEREVIEW.md files
+- _(codereview)_ add tests, consistency, maintainability, and database dimensions to all per-crate reviews
+- _(codereview)_ remove fixed issues, update summaries
+- _(controller)_ replace CRL poll loop with event-driven rebuild and DB persistence
+- _(controller)_ update PKI, reconciliation, and startup for global settings
+- _(codereview)_ remove already-fixed and false-positive items
+- _(scheduler-engine)_ remove db from SchedulerNotifier::push_software_states_for_tenant
+- _(codereview)_ remove fixed issues from CODEREVIEW.md files
+- _(codereview)_ remove fixed issues from all CODEREVIEW.md files
 - remove fixed issues from CODEREVIEW.md files
 - document non_exhaustive, HTTP timeouts, and parking_lot; clarify start_paused rule
-- *(codereview)* comprehensive backend code review across 6 dimensions
-- *(codereview)* remove fixed issues from CODEREVIEW.md files
+- _(codereview)_ comprehensive backend code review across 6 dimensions
+- _(codereview)_ remove fixed issues from CODEREVIEW.md files
 - remove fixed and false-positive entries from CODEREVIEW files
 - apply cargo fmt to all changed files
-- *(shared-db)* remove dead code, crypto shim, and convenience re-exports
+- _(shared-db)_ remove dead code, crypto shim, and convenience re-exports
 - remove fixed and resolved entries from CODEREVIEW.md files
 - remove DB outbox, add NATS feature foundation
 - fix AGENTS.md crate layout, update dev docs, and clean up CODEREVIEW files
-- *(db)* rename oidc_providers deleted_at to deactivated_at
-- *(cargo)* add workspace lints and consolidate inline dependencies
+- _(db)_ rename oidc_providers deleted_at to deactivated_at
+- _(cargo)_ add workspace lints and consolidate inline dependencies
 - apply cargo fmt across workspace
-- *(plugins)* rename crate packages to encode category
-- *(deps)* promote plugin-core, plugin-registry, and command to workspace deps
-- *(controller)* role-based version check with controller-side fetch
+- _(plugins)_ rename crate packages to encode category
+- _(deps)_ promote plugin-core, plugin-registry, and command to workspace deps
+- _(controller)_ role-based version check with controller-side fetch
 - update documentation for plugin architecture
-- *(wire)* rename provider_type/provider_config to plugin_type/plugin_config
-- *(db)* merge all migrations into one and rename to plugin_configs
+- _(wire)_ rename provider_type/provider_config to plugin_type/plugin_config
+- _(db)_ merge all migrations into one and rename to plugin_configs
 - rename providers to plugins throughout the codebase
-- *(shared-db)* move controller migrations into shared-db crate
+- _(shared-db)_ move controller migrations into shared-db crate
 - remove all fixed findings from CODEREVIEW.md files
 - apply cargo fmt to entire workspace
-- *(deps)* sync sea-orm-migration pins to rc.34
+- _(deps)_ sync sea-orm-migration pins to rc.34
 - add comprehensive code review findings
 - add comprehensive code review findings
-- *(software-items)* decouple software items from provider configs
+- _(software-items)_ decouple software items from provider configs
 - remove obsolete TESTCOV files
-- *(db)* merge all migrations into initial and fix RBAC permission seeding
-- *(codereview)* resolve all remaining open code review findings
-- *(codereview)* resolve top 5 open code review findings
+- _(db)_ merge all migrations into initial and fix RBAC permission seeding
+- _(codereview)_ resolve all remaining open code review findings
+- _(codereview)_ resolve top 5 open code review findings
 - rebase onto main and fix post-rebase build issues
 - replace pause() calls with start_paused = true in all time-dependent tests
 - apply top-5 code review fixes (Issues 1–5)
@@ -345,12 +362,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - cargo fmt + fix clippy await_holding_lock in shared-db test
 - replace numeric HTTP status codes with StatusCode enum variants
 - add extensibility-focused code review findings
-- *(codereview)* add code review for controller, web-api, and openapi-client
-- *(deps)* minimise unnecessary dependencies and feature-gate OIDC
-- *(deps)* replace workspace-wide tokio full with per-crate minimal features
-- *(controller)* remove unused uptrakit-web-api-types dependency
+- _(codereview)_ add code review for controller, web-api, and openapi-client
+- _(deps)_ minimise unnecessary dependencies and feature-gate OIDC
+- _(deps)_ replace workspace-wide tokio full with per-crate minimal features
+- _(controller)_ remove unused uptrakit-web-api-types dependency
 - remove CODEREVIEW.md files
-- *(types)* use Uuid instead of String for all entity ID fields
+- _(types)_ use Uuid instead of String for all entity ID fields
 - replace Result<T, String> with typed error enums across codebase
 - cargo fmt
 - cargo fmt
@@ -361,53 +378,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - add extensibility-focused code review for all crates
 - add code review results for controller and web-api crates
 - replace Result<T, String> in crypto.rs and migrate bail!() codebase-wide
-- *(deps)* update Rust dependencies to latest versions
-- *(CODEREVIEW)* remove obsolete codereview files
+- _(deps)_ update Rust dependencies to latest versions
+- _(CODEREVIEW)_ remove obsolete codereview files
 - drop hex, urlencoding and open crates
 - clean up workspace dependencies
-- *(controller)* merge 26 DB migrations into single initial migration
+- _(controller)_ merge 26 DB migrations into single initial migration
 - remove resolved findings and fix plans from CODEREVIEW.md files
 - update CODEREVIEW.md files with verified fix statuses, merge FIX_PLANS.md
-- *(controller)* add final fix plans #36-#45, completing all 52 findings
-- *(controller)* add fix plans #26-#35 to code review
-- *(controller)* add detailed fix plans for issues #16-#25
-- *(controller)* add detailed fix plans for issues #11-#15
-- *(controller)* add detailed fix plans for issues #6-#10
-- *(controller)* move code review to crate dir, add TOP 5 fix plans
+- _(controller)_ add final fix plans #36-#45, completing all 52 findings
+- _(controller)_ add fix plans #26-#35 to code review
+- _(controller)_ add detailed fix plans for issues #16-#25
+- _(controller)_ add detailed fix plans for issues #11-#15
+- _(controller)_ add detailed fix plans for issues #6-#10
+- _(controller)_ move code review to crate dir, add TOP 5 fix plans
 - Revert "feat(web-api): add periodic settings reload for cross-instance consistency"
 - add impl_report_conversion! macro and replace verbose ReportConversion impls
 - enforce rootcause best practices and migrate errors to thiserror
-- *(controller)* introduce ReconcileParams to reduce function arguments
+- _(controller)_ introduce ReconcileParams to reduce function arguments
 - remove unused start_https method from OCSP test responder
 - [**breaking**] unify enrollment, TLS, CA, and CLI into shared enrollment crate
 - [**breaking**] enforce rootcause Report<E> error handling across all crates
 - update all dependencies to latest versions
-- *(directories)* replace AppKind enum with plain &str parameter
+- _(directories)_ replace AppKind enum with plain &str parameter
 - [**breaking**] use cross-platform directories with config/state separation
 - [**breaking**] unify agents and MQTT services into single Service entity
-- *(mqtt)* drop websocket broker transport
-- *(mqtt)* replace direct DB access with WebSocket/mTLS controller communication
+- _(mqtt)_ drop websocket broker transport
+- _(mqtt)_ replace direct DB access with WebSocket/mTLS controller communication
 - update documentation for agent graceful shutdown
-- *(controller)* [**breaking**] remove MQTT feature and code
+- _(controller)_ [**breaking**] remove MQTT feature and code
 - [**breaking**] move MQTT settings to dedicated mqtt_clients table
 - Merge branch 'feature/available_versions'
 - expand Nginx OCSP tests for HTTPS and AIA behaviour
 - Merge branch 'features/ca-improvements'
 - Merge branch 'feature/host-entity'
-- *(web)* extract agent identity parsing into shared utility
-- *(web)* replace setting key constants with SettingKey enum
+- _(web)_ extract agent identity parsing into shared utility
+- _(web)_ replace setting key constants with SettingKey enum
 - clean up workspace dependency placement
 - [**breaking**] remove HTTP server, rework agent bootstrap, add CRL endpoint
 - Merge branch 'refactor/app_state'
-- *(controller)* use pre-loaded settings map in reconciliation
-- *(controller)* use reconciled settings at startup
-- *(cli)* make DB-managed CLI args optional, add --force-settings-override
-- *(web)* replace in-memory auth flow stores with DB-backed storage
-- *(web)* convert JwtManager::load_or_generate to Report<AuthError>
-- *(web)* introduce CertSignerError for AgentCertSigner trait
-- *(controller)* fix PkiError semantic mismatches
-- *(controller)* change default data dir to ~/.uptrakit-controller
-- *(controller)* handle JoinError instead of expect in server startup
+- _(controller)_ use pre-loaded settings map in reconciliation
+- _(controller)_ use reconciled settings at startup
+- _(cli)_ make DB-managed CLI args optional, add --force-settings-override
+- _(web)_ replace in-memory auth flow stores with DB-backed storage
+- _(web)_ convert JwtManager::load_or_generate to Report<AuthError>
+- _(web)_ introduce CertSignerError for AgentCertSigner trait
+- _(controller)_ fix PkiError semantic mismatches
+- _(controller)_ change default data dir to ~/.uptrakit-controller
+- _(controller)_ handle JoinError instead of expect in server startup
 - Merge branch 'feature/web-ui-agent-info'
 - Merge branch 'feature/cli-basic'
 - Merge branch 'feature/ca-rotation'
@@ -424,5 +441,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- *(plugins)* default dangerous command rejection to ON (ATK-16)
-- *(crypto)* clear UPTRAKIT_MASTER_KEY env var after reading (ATK-03)
+- _(plugins)_ default dangerous command rejection to ON (ATK-16)
+- _(crypto)_ clear UPTRAKIT_MASTER_KEY env var after reading (ATK-03)

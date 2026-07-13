@@ -214,9 +214,24 @@ after cleaning but before copying completes, the target is left empty or partial
 populated. The source database is never modified. Fix the root cause and re-run from
 the original source database.
 
-**No released version is affected by the 2026-07 coverage gap** — no released build
-shipped the 2FA, OAuth, `instance_plugin_setting`, `service_merge_redirect`, or proxmox
-scaling migrations before this fix was included.
+> [!WARNING]
+> **Data-loss advisory — migrations run before this fix.** Earlier builds of
+> `db-migrate` copied only a subset of tables. A migration run on any release that
+> already shipped a given table's schema silently left that table **empty** at the
+> destination (the tool's verify step counted only listed tables, so it did not
+> notice). Affected tables and the first release that shipped each:
+>
+> - **2FA** (`user_totp`, `user_recovery_codes`, `mfa_challenges`), **OAuth**
+>   (`oauth_clients`, `oauth_consents`, `oauth_authorization_requests`,
+>   `oauth_authorization_codes`, `oauth_refresh_tokens`, `oauth_controller_instances`),
+>   and `instance_plugin_setting` — shipped since **v0.0.5**.
+> - `service_merge_redirect` and the Proxmox scaling tables
+>   (`proxmox_scaling_defaults`, `proxmox_scaling_item_overrides`) — shipped after v0.0.5.
+>
+> The source database is never modified, so this is recoverable: after upgrading to a
+> build containing this fix, **re-run `db-migrate` from your original source database**
+> (or restore the affected 2FA/OAuth rows from it). Losing 2FA enrollment locks users
+> out of their accounts, so re-run before decommissioning the source.
 
 ---
 

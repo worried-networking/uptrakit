@@ -75,8 +75,20 @@ mod tests {
 
         /// Tables created by migrations but intentionally excluded from db-migrate.
         /// These hold transient agent-local state that agents re-populate after migration.
-        const AGENT_ONLY_TABLES: &[&str] =
-            &["ssh_hosts", "proxmox_host_state", "proxmox_pending_matches"];
+        ///
+        /// Two families, both agent-local: the Proxmox plugin's embedded-agent tables
+        /// (`proxmox_host_state`, `proxmox_pending_matches`) and the agent-ssh-runtime
+        /// embedded-agent tables (`ssh_hosts` and its FK children `pending_proxmox_matches`
+        /// and `routeros_host_config`). Note `proxmox_pending_matches` (Proxmox plugin) and
+        /// `pending_proxmox_matches` (agent-ssh-runtime) are distinct tables despite the
+        /// near-identical names.
+        const AGENT_ONLY_TABLES: &[&str] = &[
+            "ssh_hosts",
+            "proxmox_host_state",
+            "proxmox_pending_matches",
+            "pending_proxmox_matches",
+            "routeros_host_config",
+        ];
 
         let opt = ConnectOptions::new("sqlite::memory:");
         let db = Database::connect(opt).await.expect("source db");
@@ -84,6 +96,8 @@ mod tests {
             .await
             .expect("source migrations");
 
+        // Raw SQL exception: schema introspection over `sqlite_master` has no
+        // SeaORM entity to build against, so `sea_query` cannot express it.
         let live: HashSet<String> = db
             .query_all_raw(Statement::from_string(
                 DbBackend::Sqlite,
