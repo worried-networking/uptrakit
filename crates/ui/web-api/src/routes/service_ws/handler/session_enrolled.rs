@@ -110,6 +110,7 @@ pub(super) async fn upgrade_service_capabilities(
 /// All state produced during enrolled session setup that the main loop and
 /// cleanup phases need.
 struct EnrolledSessionState {
+    connection_id: uuid::Uuid,
     push_rx: tokio::sync::mpsc::Receiver<ControllerMessage>,
     cancel_token: tokio_util::sync::CancellationToken,
     approved: bool,
@@ -160,6 +161,7 @@ async fn setup_enrolled_session(
             service_app_name,
         )
         .await;
+    let connection_id = connection_handle.connection_id();
     let cancel_token =
         super::session_authenticated::cancellation_token_from_connection_handle(connection_handle);
 
@@ -194,6 +196,7 @@ async fn setup_enrolled_session(
     approval_poll.tick().await; // skip immediate first tick
 
     EnrolledSessionState {
+        connection_id,
         push_rx,
         cancel_token,
         approved,
@@ -211,14 +214,24 @@ async fn cleanup_enrolled_session(
     if session.cancel_token.is_cancelled() {
         return;
     }
-    state.service_connections.unregister(&service_id).await;
-
-    // Notify embedded services about the disconnection.
-    if let Some(ref notifier) = state.embedded_service_notifier {
-        notifier.on_external_disconnected(&service_id);
+    // Race-safe: only remove if this cleanup still owns the current registration.
+    if state
+        .service_connections
+        .unregister_current(&service_id, session.connection_id)
+        .await
+    {
+        // Notify embedded services about the disconnection.
+        if let Some(ref notifier) = state.embedded_service_notifier {
+            notifier.on_external_disconnected(&service_id);
+        }
+        tracing::debug!(%service_id, "enrolled service disconnected");
+    } else {
+        tracing::debug!(
+            %service_id,
+            connection_id = %session.connection_id,
+            "enrolled cleanup skipped — connection already replaced by a reconnect"
+        );
     }
-
-    tracing::debug!(%service_id, "enrolled service disconnected");
 }
 
 /// Unified enrolled handler for all service types.
@@ -408,6 +421,45 @@ mod tests {
     use super::*;
 
     use uuid::Uuid;
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn enrolled_cleanup_stale_connection_does_not_evict_replacement() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
+        let service_id = Uuid::now_v7();
+        insert_test_service_row(&db, tenant_id, service_id, "uptrakit-agent").await;
+
+        // A's session sets up (registers A). session.connection_id == A's id.
+        let mut session = setup_enrolled_session(&state, service_id, false).await;
+        // B reconnects and supersedes A in the registry.
+        let (_rx_b, handle_b) = state
+            .service_connections
+            .register(
+                service_id,
+                std::collections::BTreeSet::new(),
+                None,
+                None,
+                None,
+            )
+            .await;
+
+        // Force the guarded path: a fresh, uncancelled token so cleanup does NOT
+        // early-return, but the session still holds A's stale connection_id.
+        session.cancel_token = tokio_util::sync::CancellationToken::new();
+        cleanup_enrolled_session(&state, service_id, &session).await;
+
+        // unregister_current(A) returns false because B is current → B survives.
+        assert!(state.service_connections.is_connected(&service_id).await);
+        assert_eq!(
+            state
+                .service_connections
+                .current_connection_id(&service_id)
+                .await,
+            Some(handle_b.connection_id()),
+        );
+    }
 
     #[cfg(feature = "db-sqlite")]
     #[tokio::test]
