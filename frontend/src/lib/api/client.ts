@@ -325,6 +325,20 @@ function unwrap(result: FieldsResult): unknown {
 	return result;
 }
 
+// THIS function is the single point that decides terminality for a still-non-OK
+// post-refresh retry, splitting on the AUTHORITATIVE 401 signal exactly like
+// `mapRefreshFailure` does — only the 401 retry (session truly dead: user deactivated,
+// token revoked) clears the token and leaves the session-expired banner raised; every
+// other outcome (non-401 non-OK, or success) clears the banner.
+//
+// The response interceptor deliberately EXCLUDES 401 from ApiError mapping (see the
+// "401 refresh-retry" note above), so for a 401 retry `result.error` is the raw,
+// interceptor-untouched body object — `unwrap()` would `throw` that plain object,
+// producing the opaque `Error("[object Object]")` this fix removes. We therefore map
+// it to a typed `ApiError` via `unauthorizedApiError` BEFORE `unwrap()` can run. For a
+// non-401 non-OK retry the interceptor has ALREADY mapped the body to a typed
+// `ApiError` in `result.error`, so re-throwing it (via `unwrap`) preserves its status
+// and error code — rebuilding it here would drop the code and message.
 async function refreshAndRetry(options: RequestArgs): Promise<unknown> {
 	setSessionExpired(true);
 	let refreshed: RefreshResult;
@@ -334,20 +348,34 @@ async function refreshAndRetry(options: RequestArgs): Promise<unknown> {
 		throw mapRefreshFailure(refreshErr);
 	}
 	setAccessToken(refreshed.access_token);
+	let result: FieldsResult;
 	try {
 		// Single retry. The request interceptor re-applies the new Bearer; the client
 		// rebuilds the body from options.body, so the consumed stream is irrelevant.
-		return unwrap((await client.request({ ...options, throwOnError: false })) as FieldsResult);
+		result = (await client.request({ ...options, throwOnError: false })) as FieldsResult;
 	} catch (retryErr) {
-		throw translateFetchError(retryErr);
-	} finally {
 		setSessionExpired(false);
+		throw translateFetchError(retryErr);
 	}
+	if (result.response?.status === 401) {
+		// Retry still unauthorized: token cleared; banner stays raised.
+		setAccessToken(null);
+		throw unauthorizedApiError(result.response, result.error);
+	}
+	// Success or benign non-OK (already an interceptor-mapped ApiError in result.error):
+	// banner clears; unwrap() re-throws the typed error or returns the success fields.
+	setSessionExpired(false);
+	return unwrap(result);
 }
 
-// A 401 with no access token to refresh: convert it to ApiError. The response body
-// is already consumed by the generated client (it parsed `first.error` from it), so
-// build ApiError from `first.error` directly rather than re-reading the Response.
+// Maps a 401 to an ApiError from its ALREADY-parsed body (`first.error`/`result.error`)
+// rather than re-reading the Response — the generated client has already consumed the
+// stream. 401 is the one status the response interceptor does NOT map to an ApiError
+// (it is the refresh-retry seam), so both 401 call sites — the unauthenticated
+// first-call (`requestWithRefresh`, no token to refresh) and the post-refresh retry
+// that is STILL 401 (`refreshAndRetry`) — must map it here; every other non-OK status
+// arrives from the interceptor already typed. `extractApiError` (errors.ts) is the
+// analogous helper for the still-unread-Response case the interceptor itself uses.
 function unauthorizedApiError(response: Response, body: unknown): ApiError {
 	let message = response.statusText || 'Unauthorized';
 	let errorCode: string | null = null;
