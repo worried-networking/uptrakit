@@ -21,6 +21,7 @@ use uptrakit_plugin_infrastructure_core::{
     SurfaceFormDescriptor, SurfaceRowCondition,
 };
 use uptrakit_shared_types::Permission;
+use uptrakit_tenant_db::TenantDb;
 
 use crate::client::ProxmoxClient;
 use crate::config::ProxmoxConfig;
@@ -436,23 +437,19 @@ async fn handle_action_inner(
     params: serde_json::Value,
 ) -> std::result::Result<serde_json::Value, SurfaceActionError> {
     tracing::debug!("dispatching Proxmox surface action");
-    execute_controller_surface_action_typed(
-        ctx.tenant_db().db(),
-        Some(ctx.tenant_id()),
-        surface_id,
-        action_id,
-        params,
-    )
-    .await
+    execute_controller_surface_action_typed(ctx.tenant_db(), surface_id, action_id, params).await
 }
 
 async fn execute_controller_surface_action_typed(
-    db: &DatabaseConnection,
-    tenant_id: Option<Uuid>,
+    tenant_db: &TenantDb,
     surface_id: &str,
     action_id: &str,
     params: serde_json::Value,
 ) -> std::result::Result<serde_json::Value, SurfaceActionError> {
+    // Commit-B bridge (spec §1 "Commit A bridge"): feeds the not-yet-converted
+    // arms; deleted in the final conversion commit.
+    let db = tenant_db.db();
+    let tenant_id = Some(tenant_db.tenant_id());
     let Some(route) = resolve_controller_surface_action(surface_id, action_id) else {
         return Err(SurfaceActionError::InvalidInput(format!(
             "unknown action '{action_id}' for surface '{surface_id}'"
