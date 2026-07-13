@@ -7,8 +7,12 @@
 //! captured at boot with no swap seam. File-sourced `nats.url` changes are
 //! preempted by reexec triage (`reexec/triage.rs`); this gate is the backstop
 //! for delta sources that bypass triage.
-//! // unreachable until DbBump wires nats sections — sections_to_deltas has
-//! // no `nats` arm today; kept so a future wiring cannot silently no-op.
+//!
+//! Reachable today via the file/SIGHUP reload path: `build_deltas` emits a
+//! `Nats` delta on any `[nats]` change (`prior.nats != new.nats`), so an
+//! `extra`-only edit (not URL, hence not reexec-forced) reaches this gate live.
+//! The DbBump path (`sections_to_deltas`) has no `nats` arm yet; the gate is
+//! kept so a future wiring cannot silently no-op.
 
 #![cfg(feature = "nats")]
 
@@ -29,8 +33,12 @@ use uptrakit_config_reload::reloadable::Reloadable;
 /// captured at boot with no swap seam. File-sourced `nats.url` changes are
 /// preempted by reexec triage (`reexec/triage.rs`); this gate is the backstop
 /// for delta sources that bypass triage.
-/// // unreachable until DbBump wires nats sections — sections_to_deltas has
-/// // no `nats` arm today; kept so a future wiring cannot silently no-op.
+///
+/// Reachable today via the file/SIGHUP reload path: `build_deltas` emits a
+/// `Nats` delta on any `[nats]` change (`prior.nats != new.nats`), so an
+/// `extra`-only edit (not URL, hence not reexec-forced) reaches this gate live.
+/// The DbBump path (`sections_to_deltas`) has no `nats` arm yet; the gate is
+/// kept so a future wiring cannot silently no-op.
 pub(crate) struct NatsReloadable {
     /// URL the running transport was built with (DB-reconciled effective
     /// value, not necessarily the boot file's); `None` = NATS unconfigured.
