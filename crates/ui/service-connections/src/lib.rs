@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use parking_lot::RwLock;
 use rand::Rng;
-use time::OffsetDateTime;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use uptrakit_wire::Capability;
@@ -28,8 +27,6 @@ struct ServiceConnection {
     /// The `service_app_name` from the service record, used to fan out
     /// `ServiceConfigUpdated` to all instances of the same app.
     service_app_name: Option<String>,
-    /// Timestamp when the connection was registered.
-    connected_at: OffsetDateTime,
     /// Whether this connection is temporarily yielded to an external counterpart.
     yielded: bool,
 }
@@ -111,6 +108,11 @@ impl ServiceConnectionRegistry {
     /// `service_app_name` is stored per-connection so that
     /// [`broadcast_to_app_except`](Self::broadcast_to_app_except) can fan out
     /// `ServiceConfigUpdated` to all instances of the same service app.
+    ///
+    /// Invariant (load-bearing): the remove-old → cancel-token → insert-new
+    /// sequence runs under a single `inner.write()` guard with no `.await`,
+    /// so a superseded session's cleanup can never observe a transient empty slot.
+    /// A later refactor that shards this lock must preserve that atomicity.
     pub async fn register(
         &self,
         service_id: Uuid,
@@ -133,7 +135,6 @@ impl ServiceConnectionRegistry {
             cancel_token: cancel_token.clone(),
             capabilities,
             service_app_name,
-            connected_at: OffsetDateTime::now_utc(),
             yielded: false,
         };
 
@@ -153,6 +154,12 @@ impl ServiceConnectionRegistry {
     }
 
     /// Remove a service from the registry unconditionally.
+    ///
+    /// **Do not call from per-connection disconnect-cleanup paths.** A reconnecting
+    /// service can `register()` a replacement inside a cleanup's await window;
+    /// unconditional removal then evicts the live replacement. Cleanup paths must
+    /// use [`unregister_current`](Self::unregister_current). This method is for
+    /// bulk/forced teardown (graceful shutdown, force-disconnect) only.
     pub async fn unregister(&self, service_id: &Uuid) {
         self.inner.write().connections.remove(service_id);
     }
@@ -162,6 +169,11 @@ impl ServiceConnectionRegistry {
     ///
     /// Returns `true` when the connection was removed. Returns `false` when a
     /// newer registration already replaced it or the service was already gone.
+    ///
+    /// Invariant: eviction requires per-`register()` *uniqueness*, so the check is
+    /// `connection_id` *equality* (`==`). Never "optimize" it to a `>` comparison
+    /// on the v7-timestamp-ordered id — a monotonic-id shortcut would silently
+    /// re-introduce the reconnect-eviction race this method exists to prevent.
     pub async fn unregister_current(&self, service_id: &Uuid, connection_id: Uuid) -> bool {
         let mut guard = self.inner.write();
         if guard
@@ -258,13 +270,19 @@ impl ServiceConnectionRegistry {
         self.inner.read().connections.contains_key(service_id)
     }
 
-    /// Get the connection time for a service, if connected.
-    pub async fn connected_at(&self, service_id: &Uuid) -> Option<OffsetDateTime> {
+    /// Get the `connection_id` of the current registration for `service_id`, if
+    /// connected.
+    ///
+    /// Disconnect-cleanup paths compare this against the `connection_id` they
+    /// captured at `register()` time to tell a genuine disconnect (ids match /
+    /// `None`) apart from a reconnected replacement (ids differ). See
+    /// [`unregister_current`](Self::unregister_current).
+    pub async fn current_connection_id(&self, service_id: &Uuid) -> Option<Uuid> {
         self.inner
             .read()
             .connections
             .get(service_id)
-            .map(|c| c.connected_at)
+            .map(|c| c.connection_id)
     }
 
     /// Broadcast a message to all connected services.
@@ -771,6 +789,44 @@ mod tests {
         let registry = ServiceConnectionRegistry::new();
         let result = registry.filter_connected(&[]).await;
         assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn current_connection_id_matches_handle_and_tracks_replacement() {
+        let registry = ServiceConnectionRegistry::new();
+        let service_id = Uuid::now_v7();
+
+        let (_rx_a, handle_a) = registry
+            .register(service_id, BTreeSet::new(), None, None, None)
+            .await;
+        assert_eq!(
+            registry.current_connection_id(&service_id).await,
+            Some(handle_a.connection_id()),
+            "current id should equal handle A's id after first register"
+        );
+
+        // Reconnect: B supersedes A.
+        let (_rx_b, handle_b) = registry
+            .register(service_id, BTreeSet::new(), None, None, None)
+            .await;
+        assert_ne!(handle_a.connection_id(), handle_b.connection_id());
+        assert_eq!(
+            registry.current_connection_id(&service_id).await,
+            Some(handle_b.connection_id()),
+            "current id should track the replacement"
+        );
+
+        // A's stale cleanup must not evict B.
+        assert!(
+            !registry
+                .unregister_current(&service_id, handle_a.connection_id())
+                .await
+        );
+        assert!(registry.is_connected(&service_id).await);
+
+        // No registration -> None.
+        let absent = Uuid::now_v7();
+        assert_eq!(registry.current_connection_id(&absent).await, None);
     }
 
     #[tokio::test]
