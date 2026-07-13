@@ -5,9 +5,12 @@
  * support custom headers (Authorization: Bearer).
  */
 
-import { getAccessToken } from './auth.svelte';
+import { getAccessToken, setAccessToken } from './auth.svelte';
+import { BASE, dedupedRefresh, isAuthClassRefreshFailure } from './api/client';
 
-const BASE: string = import.meta.env.VITE_API_BASE || '/api/v1';
+/** Module-local marker for a 401 stream response (repo idiom: Error
+ *  subclasses carry extra meaning — ApiError, RefreshError). Not exported. */
+class UnauthorizedError extends Error {}
 
 /** Connection states for the SSE stream. */
 export type SseConnectionState = 'connecting' | 'streaming' | 'completed' | 'error' | 'disconnected';
@@ -77,6 +80,9 @@ export function connectOutputStream(
 		})
 			.then((response) => {
 				if (!response.ok) {
+					if (response.status === 401) {
+						throw new UnauthorizedError('unauthorized');
+					}
 					throw new Error(`HTTP ${response.status}: ${response.statusText}`);
 				}
 				if (!response.body) {
@@ -99,6 +105,7 @@ export function connectOutputStream(
 					return; // Clean disconnect.
 				}
 
+				const unauthorized = err instanceof UnauthorizedError;
 				const message = err instanceof Error ? err.message : 'Connection failed';
 				callbacks.onError?.(message);
 
@@ -107,7 +114,46 @@ export function connectOutputStream(
 				if (attempt <= maxAttempts) {
 					const delay = Math.min(1000 * Math.pow(2, attempt - 1), 30000);
 					callbacks.onStateChange?.('connecting');
-					setTimeout(connect, delay);
+					setTimeout(() => {
+						if (disconnected) return;
+						if (unauthorized) {
+							// Session refresh through the shared deduped path. Terminality
+							// keys on the REFRESH, not the reconnect: an auth-class refresh
+							// failure (mapRefreshFailure's 4xx branch) is the true "session
+							// revoked" signal and terminates the stream. A transient refresh
+							// failure (timeout/TypeError/5xx) is NOT terminal — it re-enters
+							// this same backed-off cycle. A 401 on the reconnect itself
+							// (after a successful refresh) is ambiguous (propagation lag,
+							// multi-tab rotation) and also simply re-enters this cycle
+							// (falls into the `unauthorized` branch again next attempt).
+							//
+							// Note: dedupedRefresh dedup is per-tab (per JS context) — N tabs
+							// waking from expiry issue N refreshes; correct (refresh-token
+							// cookie) and pre-existing; cross-tab coordination is out of scope.
+							void dedupedRefresh().then(
+								(refreshed) => {
+									// dedupedRefresh returns the result but does NOT write the
+									// token store — both existing consumers set it themselves
+									// (client.ts refreshAndRetry, raw.ts). Without this line the
+									// reconnect re-reads the STALE token and loops on 401.
+									setAccessToken(refreshed.access_token);
+									connect();
+								},
+								(refreshErr) => {
+									if (isAuthClassRefreshFailure(refreshErr)) {
+										callbacks.onStateChange?.('error');
+										return;
+									}
+									// Transient refresh failure: not terminal. Re-enter the
+									// normal reconnect cycle (attempt already incremented above;
+									// the next catch's backoff/refresh handles retry).
+									connect();
+								}
+							);
+						} else {
+							connect();
+						}
+					}, delay);
 				} else {
 					callbacks.onStateChange?.('error');
 				}
@@ -247,6 +293,9 @@ export function connectEventStream(callbacks: AdminEventCallbacks, options?: Sse
 		})
 			.then((response) => {
 				if (!response.ok) {
+					if (response.status === 401) {
+						throw new UnauthorizedError('unauthorized');
+					}
 					throw new Error(`HTTP ${response.status}: ${response.statusText}`);
 				}
 				if (!response.body) {
@@ -260,6 +309,7 @@ export function connectEventStream(callbacks: AdminEventCallbacks, options?: Sse
 			})
 			.then(() => {
 				// Stream ended normally (server closed). Reconnect.
+				// This is NOT a 401 path — leave it unchanged.
 				if (!disconnected) {
 					attempt++;
 					const delay = Math.min(1000 * Math.pow(2, attempt - 1), 30000);
@@ -272,14 +322,56 @@ export function connectEventStream(callbacks: AdminEventCallbacks, options?: Sse
 					return;
 				}
 
+				const unauthorized = err instanceof UnauthorizedError;
 				const message = err instanceof Error ? err.message : 'Connection failed';
 				callbacks.onError?.(message);
 
+				// Note: a dead-but-cycling events stream has no user-facing signal
+				// (accepted gap — follow-up material, not in scope for this fix).
 				attempt++;
 				if (attempt <= maxAttempts) {
 					const delay = Math.min(1000 * Math.pow(2, attempt - 1), 30000);
 					callbacks.onStateChange?.('connecting');
-					setTimeout(connect, delay);
+					setTimeout(() => {
+						if (disconnected) return;
+						if (unauthorized) {
+							// Session refresh through the shared deduped path. Terminality
+							// keys on the REFRESH, not the reconnect: an auth-class refresh
+							// failure (mapRefreshFailure's 4xx branch) is the true "session
+							// revoked" signal and terminates the stream. A transient refresh
+							// failure (timeout/TypeError/5xx) is NOT terminal — it re-enters
+							// this same backed-off cycle. A 401 on the reconnect itself
+							// (after a successful refresh) is ambiguous (propagation lag,
+							// multi-tab rotation) and also simply re-enters this cycle
+							// (falls into the `unauthorized` branch again next attempt).
+							//
+							// Note: dedupedRefresh dedup is per-tab (per JS context) — N tabs
+							// waking from expiry issue N refreshes; correct (refresh-token
+							// cookie) and pre-existing; cross-tab coordination is out of scope.
+							void dedupedRefresh().then(
+								(refreshed) => {
+									// dedupedRefresh returns the result but does NOT write the
+									// token store — both existing consumers set it themselves
+									// (client.ts refreshAndRetry, raw.ts). Without this line the
+									// reconnect re-reads the STALE token and loops on 401.
+									setAccessToken(refreshed.access_token);
+									connect();
+								},
+								(refreshErr) => {
+									if (isAuthClassRefreshFailure(refreshErr)) {
+										callbacks.onStateChange?.('error');
+										return;
+									}
+									// Transient refresh failure: not terminal. Re-enter the
+									// normal reconnect cycle (attempt already incremented above;
+									// the next catch's backoff/refresh handles retry).
+									connect();
+								}
+							);
+						} else {
+							connect();
+						}
+					}, delay);
 				} else {
 					callbacks.onStateChange?.('error');
 				}

@@ -281,6 +281,18 @@ function translateFetchError(err: unknown): Error {
 	return new Error(String(err));
 }
 
+// Mirrors mapRefreshFailure's branch conditions without side effects so callers
+// outside the ApiError/session-store machinery (sse.ts) can classify a refresh
+// failure as auth-class vs transient without duplicating mapRefreshFailure internals.
+// Auth-class: any failure that is NOT a timeout/abort, NOT a TypeError, and NOT a
+// 5xx RefreshError — i.e. a real 4xx "session revoked" signal.
+export function isAuthClassRefreshFailure(refreshErr: unknown): boolean {
+	if (isTimeoutOrAbort(refreshErr)) return false;
+	if (refreshErr instanceof TypeError) return false;
+	if (refreshErr instanceof RefreshError && refreshErr.status >= 500) return false;
+	return true;
+}
+
 // Ported from api.ts:338-360. Maps a refresh failure to a user-facing Error and
 // performs the matching session side effect. The default (real 4xx auth failure)
 // clears the token and leaves the session-expired banner raised.
