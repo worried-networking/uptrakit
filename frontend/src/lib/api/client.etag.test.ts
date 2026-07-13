@@ -113,6 +113,57 @@ describe('settings ETag auto-injection (via configured client interceptors)', ()
 		expect(spy).toHaveBeenCalledTimes(3);
 	});
 
+	it('clears the cached ETag on 409 if_match.stale so the next PUT omits If-Match', async () => {
+		const spy = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValueOnce(jsonResponse({ ok: true }, { etag: 'v1' })) // GET → caches v1
+			.mockResolvedValueOnce(
+				new Response(JSON.stringify({ error: 'stale', error_code: 'if_match.stale' }), {
+					status: 409,
+					headers: { 'Content-Type': 'application/json' }
+				})
+			) // stale PUT → must clear the cache
+			.mockResolvedValueOnce(jsonResponse({ ok: true }, { etag: 'v2' })); // retry PUT succeeds
+
+		await apiClient.get({ url: '/global-settings/network' });
+		await expect(apiClient.put({ url: '/global-settings/network', body: { foo: 'bar' } })).rejects.toMatchObject({
+			status: 409,
+			errorCode: 'if_match.stale'
+		});
+
+		// Second PUT must NOT carry an If-Match — the stale cache entry was cleared.
+		await apiClient.put({ url: '/global-settings/network', body: { foo: 'bar' } });
+
+		expect(ifMatchOf(spy, 2)).toBeNull();
+		expect(spy).toHaveBeenCalledTimes(3);
+	});
+
+	it('leaves the cache untouched on a 409 that is NOT if_match.stale', async () => {
+		const spy = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValueOnce(jsonResponse({ ok: true }, { etag: 'v1' })) // GET → caches v1
+			.mockResolvedValueOnce(
+				new Response(JSON.stringify({ error: 'conflict', error_code: 'some.other_conflict' }), {
+					status: 409,
+					headers: { 'Content-Type': 'application/json' }
+				})
+			) // non-stale 409 → cache must survive
+			.mockResolvedValueOnce(jsonResponse({ ok: true }, { etag: 'v2' })); // retry PUT succeeds
+
+		await apiClient.get({ url: '/global-settings/network' });
+		await expect(apiClient.put({ url: '/global-settings/network', body: { foo: 'bar' } })).rejects.toMatchObject({
+			status: 409,
+			errorCode: 'some.other_conflict'
+		});
+
+		// Second PUT must still carry the original If-Match — an unconditional clear would
+		// wrongly wipe it here too, which is exactly what this negative case guards against.
+		await apiClient.put({ url: '/global-settings/network', body: { foo: 'bar' } });
+
+		expect(ifMatchOf(spy, 2)).toBe('v1');
+		expect(spy).toHaveBeenCalledTimes(3);
+	});
+
 	it('isolates global and tenant scopes', async () => {
 		const spy = vi
 			.spyOn(globalThis, 'fetch')

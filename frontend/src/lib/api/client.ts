@@ -167,6 +167,16 @@ function captureEtag(response: Response, requestUrl: string): void {
 	if (etag) settingsEtagCache[scope] = etag;
 }
 
+// Clears the cached ETag for the scope a URL maps to (same URL→scope resolution as
+// `applyIfMatch`/`captureEtag`). Called on a 409 `if_match.stale` so the NEXT save
+// omits `If-Match` and can succeed against the server's current version, instead of
+// repeating the same stale precondition forever. No-op if the URL matches no scope.
+function clearSettingsEtagForUrl(requestUrl: string): void {
+	const scope = settingsScope(apiPath(requestUrl));
+	if (!scope) return;
+	settingsEtagCache[scope] = null;
+}
+
 // Exported so the raw-fetch escape hatch (api/raw.ts) reuses the SAME 2FA-redirect
 // rule rather than re-implementing the 403 → /profile#security branch.
 export async function handle2faRedirect(response: Response): Promise<void> {
@@ -192,7 +202,11 @@ client.interceptors.response.use(async (response: Response, request: Request): P
 	captureEtag(response, request.url);
 	await handle2faRedirect(response);
 	if (!response.ok && response.status !== 401) {
-		throw await extractApiError(response.clone());
+		const apiError = await extractApiError(response.clone());
+		if (response.status === 409 && apiError.errorCode === 'if_match.stale') {
+			clearSettingsEtagForUrl(request.url);
+		}
+		throw apiError;
 	}
 	return response;
 });

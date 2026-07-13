@@ -13,7 +13,7 @@
 		updateZeroconfSettings,
 		rotateCa
 	} from '$lib/api';
-	import { Permission, hasAnyPermission, hasPermissionValue } from '$lib/api';
+	import { Permission, hasAnyPermission, hasPermissionValue, ApiError } from '$lib/api';
 	import type { SystemAlert } from '$lib/api';
 	import { showSuccess, showError, clearError } from '$lib/notifications.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
@@ -103,6 +103,19 @@
 		void loadSurfaceReadModels(belowSurfaces.map((surface) => surface.surface_id));
 	});
 
+	// Shows the friendly stale-ETag message when `e` is a 409 `if_match.stale` failure
+	// (this tab's own missed ETag capture, or another editor's concurrent save) and
+	// returns whether it did. Callers must call this LAST in the catch block — after
+	// any other error handling — so the stale-ETag message is the one left showing in
+	// the single-active-message notification store.
+	function showErrorWithStaleEtagOverride(e: unknown, fallback: string): void {
+		if (e instanceof ApiError && e.errorCode === 'if_match.stale') {
+			showError('Settings changed since you loaded this page — please reload and try again');
+			return;
+		}
+		showError(e instanceof Error ? e.message : fallback);
+	}
+
 	async function loadGlobalSettings() {
 		loading = true;
 		const results = await Promise.allSettled([
@@ -166,7 +179,7 @@
 			natsUrlInput = '';
 			showSuccess('NATS URL updated. Changes take effect after the controller is restarted.');
 		} catch (e) {
-			showError(e instanceof Error ? e.message : 'Failed to save NATS URL');
+			showErrorWithStaleEtagOverride(e, 'Failed to save NATS URL');
 		} finally {
 			natsSaving = false;
 		}
@@ -181,7 +194,7 @@
 			natsUrlInput = '';
 			showSuccess('NATS URL cleared. Changes take effect after the controller is restarted.');
 		} catch (e) {
-			showError(e instanceof Error ? e.message : 'Failed to clear NATS URL');
+			showErrorWithStaleEtagOverride(e, 'Failed to clear NATS URL');
 		} finally {
 			natsClearing = false;
 		}
@@ -203,7 +216,7 @@
 			githubProviderHasAuthToken = res.has_auth_token;
 			showSuccess('Global GitHub provider settings saved.');
 		} catch (e) {
-			showError(e instanceof Error ? e.message : 'Failed to save GitHub provider settings');
+			showErrorWithStaleEtagOverride(e, 'Failed to save GitHub provider settings');
 		} finally {
 			githubProviderSaving = false;
 		}
@@ -229,7 +242,7 @@
 				'Zero-configuration discovery settings saved. Changes take effect after the controller is restarted.'
 			);
 		} catch (e) {
-			showError(e instanceof Error ? e.message : 'Failed to save zeroconf settings');
+			showErrorWithStaleEtagOverride(e, 'Failed to save zeroconf settings');
 		} finally {
 			zeroconfSaving = false;
 		}
@@ -267,7 +280,7 @@
 				showSuccess('Network settings saved.');
 			}
 		} catch (e) {
-			showError(e instanceof Error ? e.message : 'Failed to save network settings');
+			showErrorWithStaleEtagOverride(e, 'Failed to save network settings');
 		}
 	}
 
