@@ -231,6 +231,53 @@ fn emit_update_freeze_apply_failure(
     );
 }
 
+/// Bounded capacity for the proxy `stdin_tx`/`signal_tx` channels created
+/// synchronously in `handle_execute_update_ssh`, ahead of PTY promotion.
+///
+/// Consumers (`handle_update_stdin_data_ssh`) `try_send` into these proxies
+/// from the moment the update starts — before the forwarder task's
+/// `channels_rx` has resolved to the real PTY channels. Anything buffered
+/// here is drained into the real channel once resolution completes; once the
+/// proxy fills up, further pre-resolution `try_send`s drop with the existing
+/// warn (a deliberate bounded divergence from the local runtime's
+/// pure-drop-before-resolution behavior).
+#[cfg(feature = "interactive")]
+pub const SSH_PROXY_CHANNEL_CAPACITY: usize = 32;
+
+/// Shared resolved/pending state for an in-flight SSH update's interactive
+/// channels, written by the forwarder task and read by the replay derivation.
+///
+/// The proxy `stdin_tx`/`signal_tx` senders stored on [`SshInFlightUpdate`]
+/// are always `Some`-equivalent (plain senders, no `Option`) from the moment
+/// the update starts, so their presence can no longer answer "is this update
+/// live" for replay purposes. This struct tracks that separately: it starts
+/// `channels_rx_pending = true`, `resolved = false`, and the forwarder task
+/// (which holds a clone of the `Arc`) flips both fields exactly once, when
+/// `channels_rx` resolves — `resolved = true` on `Ok`, left `false` on `Err`.
+#[cfg(feature = "interactive")]
+#[derive(Debug, Clone, Copy)]
+pub struct SshInteractiveResolution {
+    /// `true` once the forwarder observes `channels_rx` resolve `Ok` — a real
+    /// PTY was allocated and the proxy channels are now bridged to it.
+    pub resolved: bool,
+    /// `true` until the forwarder observes `channels_rx` resolve (`Ok` or
+    /// `Err`). Still-pending means PTY promotion may yet happen.
+    pub channels_rx_pending: bool,
+}
+
+#[cfg(feature = "interactive")]
+impl SshInteractiveResolution {
+    /// Starting state at update creation: not yet resolved, resolution
+    /// still pending (matches production construction in
+    /// `handle_execute_update_ssh`).
+    pub fn pending() -> Self {
+        Self {
+            resolved: false,
+            channels_rx_pending: true,
+        }
+    }
+}
+
 pub struct SshInFlightUpdate {
     pub update_history_id: uuid::Uuid,
     pub forwarder: tokio::task::JoinHandle<()>,
@@ -238,10 +285,19 @@ pub struct SshInFlightUpdate {
     /// a resumable update. Guards against double-sending the same payload
     /// (early + final) when the spawned task ultimately completes.
     pub early_sent: bool,
+    /// Proxy stdin sender. Always live from update start (never `None`) —
+    /// `handle_update_stdin_data_ssh` `try_send`s into it unconditionally.
+    /// The forwarder task bridges this proxy to the real PTY stdin channel
+    /// once `channels_rx` resolves, draining anything buffered pre-resolution.
     #[cfg(feature = "interactive")]
-    pub stdin_tx: Option<tokio::sync::mpsc::Sender<Vec<u8>>>,
+    pub stdin_tx: tokio::sync::mpsc::Sender<Vec<u8>>,
+    /// Proxy signal sender — same proxy/bridge treatment as `stdin_tx`.
     #[cfg(feature = "interactive")]
-    pub signal_tx: Option<tokio::sync::mpsc::Sender<i32>>,
+    pub signal_tx: tokio::sync::mpsc::Sender<i32>,
+    /// Resolved/pending state for replay, written by the forwarder task.
+    /// See [`SshInteractiveResolution`].
+    #[cfg(feature = "interactive")]
+    pub resolution: Arc<parking_lot::Mutex<SshInteractiveResolution>>,
 }
 
 #[non_exhaustive]
@@ -491,8 +547,16 @@ where
             self.pending_initial_host_report = false;
 
             for (host_machine_id, update) in &self.in_flight_updates {
+                // The proxy stdin_tx/signal_tx senders are always `Some`-equivalent
+                // from update start, so their presence can't answer "is this live"
+                // anymore. Derive from the forwarder-owned resolution state instead:
+                // resolved-and-live -> true; still-pending (promotion may yet happen)
+                // -> true (intent); errored/never-promoted -> false.
                 #[cfg(feature = "interactive")]
-                let interactive = update.stdin_tx.is_some();
+                let interactive = {
+                    let resolution = update.resolution.lock();
+                    resolution.resolved || resolution.channels_rx_pending
+                };
                 #[cfg(not(feature = "interactive"))]
                 let interactive = false;
 
@@ -2097,6 +2161,11 @@ mod tests {
     async fn poll_updates_returns_event_when_map_is_non_empty() {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<(String, UpdateEvent)>(4);
         let mut in_flight_updates = HashMap::new();
+        #[cfg(feature = "interactive")]
+        let (stdin_tx, _stdin_rx) =
+            tokio::sync::mpsc::channel::<Vec<u8>>(SSH_PROXY_CHANNEL_CAPACITY);
+        #[cfg(feature = "interactive")]
+        let (signal_tx, _signal_rx) = tokio::sync::mpsc::channel::<i32>(SSH_PROXY_CHANNEL_CAPACITY);
         in_flight_updates.insert(
             "host-1".to_string(),
             SshInFlightUpdate {
@@ -2104,9 +2173,11 @@ mod tests {
                 forwarder: tokio::spawn(std::future::pending()),
                 early_sent: false,
                 #[cfg(feature = "interactive")]
-                stdin_tx: None,
+                stdin_tx,
                 #[cfg(feature = "interactive")]
-                signal_tx: None,
+                signal_tx,
+                #[cfg(feature = "interactive")]
+                resolution: Arc::new(parking_lot::Mutex::new(SshInteractiveResolution::pending())),
             },
         );
 

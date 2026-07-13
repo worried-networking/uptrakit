@@ -40,6 +40,47 @@ async fn recv_attention_opt(rx: &mut Option<tokio::sync::mpsc::Receiver<()>>) ->
     std::future::pending().await
 }
 
+/// Receive from an optional interactive-channels resolution oneshot. Pends
+/// forever when `None` (either never interactive, or already resolved and
+/// reset by the caller).
+#[cfg(feature = "interactive")]
+async fn recv_channels_opt(
+    rx: &mut Option<
+        tokio::sync::oneshot::Receiver<uptrakit_agent_core::update::InteractiveChannels>,
+    >,
+) -> std::result::Result<
+    uptrakit_agent_core::update::InteractiveChannels,
+    tokio::sync::oneshot::error::RecvError,
+> {
+    match rx {
+        Some(rx) => rx.await,
+        None => std::future::pending().await,
+    }
+}
+
+/// Drain anything already buffered in the proxy stdin/signal receivers into
+/// the real PTY channels, once `channels_rx` resolves `Ok`.
+///
+/// Pinned semantic: pre-resolution `try_send`s from `handle_update_stdin_data_ssh`
+/// land in the bounded proxy (capacity `SSH_PROXY_CHANNEL_CAPACITY`); this
+/// drains everything buffered there into the real channel so it is delivered,
+/// not lost. Anything beyond the proxy's capacity was already dropped at
+/// `try_send` time (existing warn, no new drop path here).
+#[cfg(feature = "interactive")]
+fn drain_proxies_into_real_channels(
+    stdin_proxy_rx: &mut tokio::sync::mpsc::Receiver<Vec<u8>>,
+    signal_proxy_rx: &mut tokio::sync::mpsc::Receiver<i32>,
+    real_stdin_tx: &tokio::sync::mpsc::Sender<Vec<u8>>,
+    real_signal_tx: &tokio::sync::mpsc::Sender<i32>,
+) {
+    while let Ok(buffered) = stdin_proxy_rx.try_recv() {
+        let _ = real_stdin_tx.try_send(buffered);
+    }
+    while let Ok(buffered) = signal_proxy_rx.try_recv() {
+        let _ = real_signal_tx.try_send(buffered);
+    }
+}
+
 // ── Per-host runtime dispatch ────────────────────────────────────────────────
 
 /// Select the appropriate [`HostRuntime`] implementation for the given host.
@@ -586,11 +627,29 @@ pub async fn handle_execute_update_ssh(
     )]
     let mut in_flight = uptrakit_agent_core::start_update(payload, runtime, conn, &ctx).await;
 
-    // Extract interactive channels before moving InFlightUpdate into the forwarder.
+    // Extract the resolution oneshot before moving InFlightUpdate into the
+    // forwarder, and synchronously create the proxy stdin/signal channels.
+    //
+    // The map entry (SshInFlightUpdate) stores the proxy SEND halves directly
+    // — consumers (handle_update_stdin_data_ssh) never see an Option/lock,
+    // they try_send into the proxy exactly as before. The forwarder task
+    // below holds the proxy RECEIVE halves plus channels_rx, and bridges
+    // proxy -> real PTY channels once channels_rx resolves, draining
+    // anything already buffered so pre-resolution stdin isn't lost.
     #[cfg(feature = "interactive")]
-    let stdin_tx = in_flight.stdin_tx.take();
+    let channels_rx = in_flight.channels_rx.take();
     #[cfg(feature = "interactive")]
-    let signal_tx = in_flight.signal_tx.take();
+    let (stdin_proxy_tx, mut stdin_proxy_rx) =
+        tokio::sync::mpsc::channel::<Vec<u8>>(crate::SSH_PROXY_CHANNEL_CAPACITY);
+    #[cfg(feature = "interactive")]
+    let (signal_proxy_tx, mut signal_proxy_rx) =
+        tokio::sync::mpsc::channel::<i32>(crate::SSH_PROXY_CHANNEL_CAPACITY);
+    #[cfg(feature = "interactive")]
+    let resolution = Arc::new(parking_lot::Mutex::new(
+        crate::SshInteractiveResolution::pending(),
+    ));
+    #[cfg(feature = "interactive")]
+    let forwarder_resolution = Arc::clone(&resolution);
 
     tracing::debug!(
         host_machine_id = %host_machine_id,
@@ -612,7 +671,86 @@ pub async fn handle_execute_update_ssh(
         let mut attention_rx: Option<tokio::sync::mpsc::Receiver<()>> = in_flight.attention_rx;
         #[cfg(not(feature = "interactive"))]
         let mut attention_rx: Option<tokio::sync::mpsc::Receiver<()>> = None;
+        // Real PTY stdin/signal senders, filled in once channels_rx resolves
+        // Ok. Until then, proxy-buffered data has nowhere to bridge to.
+        #[cfg(feature = "interactive")]
+        let mut stdin_real_tx: Option<tokio::sync::mpsc::Sender<Vec<u8>>> = None;
+        #[cfg(feature = "interactive")]
+        let mut signal_real_tx: Option<tokio::sync::mpsc::Sender<i32>> = None;
+        #[cfg(feature = "interactive")]
+        let mut channels_rx = channels_rx;
         loop {
+            #[cfg(feature = "interactive")]
+            tokio::select! {
+                biased;
+                Some(early) = early_result_rx.recv() => {
+                    if tx.send((host_id.clone(), UpdateEvent::EarlyResult(early))).await.is_err() {
+                        break;
+                    }
+                }
+                Some(msg) = output_rx.recv() => {
+                    if tx.send((host_id.clone(), UpdateEvent::Output(msg))).await.is_err() {
+                        // The aggregate channel receiver has gone away.  We must
+                        // still await the update handle (so the task is not
+                        // orphaned) and attempt to send Completed, even though it
+                        // will likely also fail — this avoids leaving the DB in
+                        // `in_progress` if the event loop is merely slow to start.
+                        let result = handle.await;
+                        let _ = tx.send((host_id, UpdateEvent::Completed(result))).await;
+                        break;
+                    }
+                }
+                result = &mut handle => {
+                    let _ = tx.send((host_id, UpdateEvent::Completed(result))).await;
+                    break;
+                }
+                Some(()) = recv_attention_opt(&mut attention_rx) => {
+                    let _ = tx.send((host_id.clone(), UpdateEvent::Attention(update_history_id))).await;
+                }
+                resolved = recv_channels_opt(&mut channels_rx) => {
+                    channels_rx = None;
+                    match resolved {
+                        Ok((real_stdin_tx, real_signal_tx, real_attention_rx)) => {
+                            // Drain anything buffered pre-resolution, then bridge live.
+                            drain_proxies_into_real_channels(
+                                &mut stdin_proxy_rx,
+                                &mut signal_proxy_rx,
+                                &real_stdin_tx,
+                                &real_signal_tx,
+                            );
+                            stdin_real_tx = Some(real_stdin_tx);
+                            signal_real_tx = Some(real_signal_tx);
+                            attention_rx = Some(real_attention_rx);
+                            let mut state = forwarder_resolution.lock();
+                            state.resolved = true;
+                            state.channels_rx_pending = false;
+                        }
+                        Err(_) => {
+                            // No real PTY to bridge to — drop the proxies implicitly
+                            // by leaving stdin_real_tx/signal_real_tx as None.
+                            tracing::warn!(
+                                %update_history_id,
+                                "interactive update ended without PTY promotion; stdin/signal channels unavailable"
+                            );
+                            let mut state = forwarder_resolution.lock();
+                            state.resolved = false;
+                            state.channels_rx_pending = false;
+                        }
+                    }
+                }
+                Some(data) = stdin_proxy_rx.recv(), if stdin_real_tx.is_some() => {
+                    if let Some(real) = &stdin_real_tx {
+                        let _ = real.try_send(data);
+                    }
+                }
+                Some(sig) = signal_proxy_rx.recv(), if signal_real_tx.is_some() => {
+                    if let Some(real) = &signal_real_tx {
+                        let _ = real.try_send(sig);
+                    }
+                }
+            }
+
+            #[cfg(not(feature = "interactive"))]
             tokio::select! {
                 biased;
                 Some(early) = early_result_rx.recv() => {
@@ -650,9 +788,11 @@ pub async fn handle_execute_update_ssh(
             forwarder,
             early_sent: false,
             #[cfg(feature = "interactive")]
-            stdin_tx,
+            stdin_tx: stdin_proxy_tx,
             #[cfg(feature = "interactive")]
-            signal_tx,
+            signal_tx: signal_proxy_tx,
+            #[cfg(feature = "interactive")]
+            resolution,
         },
     );
 }
@@ -1009,18 +1149,18 @@ pub fn handle_update_stdin_data_ssh(
     };
 
     if let Some(signal) = payload.signal {
-        if let Some(ref signal_tx) = update.signal_tx {
-            if signal_tx.try_send(signal).is_err() {
-                tracing::warn!("signal channel full or closed; dropping signal {signal}");
-            }
-        } else {
-            tracing::debug!("signal_tx not available for this update; ignoring signal");
+        // update.signal_tx is a proxy sender, always live from update start.
+        // Pre-resolution sends buffer in the proxy (up to
+        // SSH_PROXY_CHANNEL_CAPACITY) and are drained into the real PTY
+        // channel by the forwarder once channels_rx resolves.
+        if update.signal_tx.try_send(signal).is_err() {
+            tracing::warn!("signal channel full or closed; dropping signal {signal}");
         }
-    } else if let Some(ref stdin_tx) = update.stdin_tx {
+    } else {
         use base64::Engine as _;
         match base64::engine::general_purpose::STANDARD.decode(&payload.data) {
             Ok(bytes) => {
-                if stdin_tx.try_send(bytes).is_err() {
+                if update.stdin_tx.try_send(bytes).is_err() {
                     tracing::warn!("stdin channel full or closed; dropping stdin data");
                 }
             }
@@ -1028,8 +1168,6 @@ pub fn handle_update_stdin_data_ssh(
                 tracing::warn!(error = %e, "failed to decode base64 stdin data");
             }
         }
-    } else {
-        tracing::debug!("stdin_tx not available for this update; ignoring stdin data");
     }
 }
 
@@ -1187,15 +1325,92 @@ mod tests {
     // ── Test helpers ─────────────────────────────────────────────────────────
 
     fn make_ssh_in_flight() -> SshInFlightUpdate {
+        #[cfg(feature = "interactive")]
+        let (stdin_tx, _stdin_rx) =
+            tokio::sync::mpsc::channel::<Vec<u8>>(crate::SSH_PROXY_CHANNEL_CAPACITY);
+        #[cfg(feature = "interactive")]
+        let (signal_tx, _signal_rx) =
+            tokio::sync::mpsc::channel::<i32>(crate::SSH_PROXY_CHANNEL_CAPACITY);
         SshInFlightUpdate {
             update_history_id: uuid::Uuid::nil(),
             forwarder: tokio::spawn(std::future::pending()),
             early_sent: false,
             #[cfg(feature = "interactive")]
-            stdin_tx: None,
+            stdin_tx,
             #[cfg(feature = "interactive")]
-            signal_tx: None,
+            signal_tx,
+            #[cfg(feature = "interactive")]
+            resolution: Arc::new(parking_lot::Mutex::new(
+                crate::SshInteractiveResolution::pending(),
+            )),
         }
+    }
+
+    // ── Proxy channel bridging (pinned semantic) ────────────────────────────
+
+    /// Stdin bytes sent into the proxy sender *before* `channels_rx` resolves
+    /// must be delivered to the real channel once the forwarder bridges
+    /// proxy -> real on resolution — not lost.
+    #[cfg(feature = "interactive")]
+    #[tokio::test]
+    async fn proxy_buffered_stdin_is_delivered_on_bridge() {
+        let (stdin_proxy_tx, mut stdin_proxy_rx) =
+            tokio::sync::mpsc::channel::<Vec<u8>>(crate::SSH_PROXY_CHANNEL_CAPACITY);
+        let (signal_proxy_tx, mut signal_proxy_rx) =
+            tokio::sync::mpsc::channel::<i32>(crate::SSH_PROXY_CHANNEL_CAPACITY);
+
+        // Pre-resolution: buffer stdin bytes and a signal into the proxies,
+        // exactly as handle_update_stdin_data_ssh would via try_send.
+        stdin_proxy_tx
+            .try_send(b"hello".to_vec())
+            .expect("buffer stdin");
+        stdin_proxy_tx
+            .try_send(b"world".to_vec())
+            .expect("buffer stdin");
+        signal_proxy_tx.try_send(2).expect("buffer signal");
+        drop(stdin_proxy_tx);
+        drop(signal_proxy_tx);
+
+        // Resolution: bridge proxy -> real, draining what's buffered.
+        let (real_stdin_tx, mut real_stdin_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(8);
+        let (real_signal_tx, mut real_signal_rx) = tokio::sync::mpsc::channel::<i32>(8);
+        drain_proxies_into_real_channels(
+            &mut stdin_proxy_rx,
+            &mut signal_proxy_rx,
+            &real_stdin_tx,
+            &real_signal_tx,
+        );
+
+        assert_eq!(real_stdin_rx.try_recv().expect("first chunk"), b"hello");
+        assert_eq!(real_stdin_rx.try_recv().expect("second chunk"), b"world");
+        assert!(
+            real_stdin_rx.try_recv().is_err(),
+            "no further buffered stdin beyond what was sent"
+        );
+        assert_eq!(real_signal_rx.try_recv().expect("signal"), 2);
+    }
+
+    /// Once the proxy fills to `SSH_PROXY_CHANNEL_CAPACITY`, a further
+    /// pre-resolution `try_send` errors and drops — no panic, no new drop
+    /// path (this is `try_send`'s existing `Err` handling).
+    #[cfg(feature = "interactive")]
+    #[tokio::test]
+    async fn proxy_overflow_beyond_capacity_drops_without_panic() {
+        let (stdin_proxy_tx, _stdin_proxy_rx) =
+            tokio::sync::mpsc::channel::<Vec<u8>>(crate::SSH_PROXY_CHANNEL_CAPACITY);
+
+        for i in 0..crate::SSH_PROXY_CHANNEL_CAPACITY {
+            stdin_proxy_tx
+                .try_send(vec![i as u8])
+                .expect("buffer up to capacity");
+        }
+
+        // One more send beyond capacity must error (dropped), not panic.
+        let overflow_result = stdin_proxy_tx.try_send(vec![0xFF]);
+        assert!(
+            overflow_result.is_err(),
+            "try_send beyond SSH_PROXY_CHANNEL_CAPACITY must error, not buffer"
+        );
     }
 
     /// Build a minimal [`Model`] for testing classification and fast-path logic.
