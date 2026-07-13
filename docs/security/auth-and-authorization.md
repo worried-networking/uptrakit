@@ -68,6 +68,9 @@ Refresh token verification and rotation validate session data integrity before p
 - **Database constraint**: The sessions table enforces
   `CHECK(auth_method != 'oidc' OR oidc_provider_id IS NOT NULL)` to prevent invalid state at the
   storage layer.
+- **Expiry cleanup**: The scheduler's `AuthCleanupExecutor` purges expired `sessions` rows
+  (`expires_at < now`, no grace window) alongside other expired auth state, so stale session rows do
+  not accumulate unbounded.
 
 See also: [Secrets Handling and Encryption](secrets-and-encryption.md) for encryption-at-rest details.
 
@@ -96,11 +99,19 @@ graceful fallback.**
 
 ### Why defaults are dangerous
 
-| Site                                      | Anti-pattern           | Effect                                                                                 |
-| ----------------------------------------- | ---------------------- | -------------------------------------------------------------------------------------- |
-| `require_auth.rs` — load user permissions | `.unwrap_or_default()` | DB outage → empty permission set → 403 Forbidden; legitimate requests blocked silently |
-| `oidc_auth.rs` — count existing users     | `.unwrap_or(false)`    | DB outage → assume zero users → unintended first-admin OIDC registration allowed       |
-| `oidc_auth.rs` — list OIDC providers      | `.unwrap_or_default()` | DB outage → empty provider list → correct behavior obscured, outage masked             |
+| Site                                  | Anti-pattern           | Effect                                                                           |
+| ------------------------------------- | ---------------------- | -------------------------------------------------------------------------------- |
+| `users.rs` — build user response      | `.unwrap_or_default()` | DB outage → empty permission set in the admin user list/detail view              |
+| `access_presets.rs` — apply preset    | `.unwrap_or_default()` | DB outage → empty permission set in the apply-preset response                    |
+| `oidc_auth.rs` — count existing users | `.unwrap_or(false)`    | DB outage → assume zero users → unintended first-admin OIDC registration allowed |
+| `oidc_auth.rs` — list OIDC providers  | `.unwrap_or_default()` | DB outage → empty provider list → correct behavior obscured, outage masked       |
+
+The auth token-minting paths — `register`, `login`, `refresh`, the OIDC mint, and the post-MFA/2FA session
+builders — now propagate permission-load failures as HTTP 500 rather than minting a token with empty permissions.
+The one deliberate exception is `me`: on a permission-load DB error it stays fail-closed (empty permissions, HTTP
+200) because the SPA treats any non-2xx from `me` as an unconditional logout, so a 500 would eject an
+already-logged-in user on a transient blip. The `users.rs` and `access_presets.rs` sites above are lower-severity
+read paths that mint no token; they remain to be fixed to the same `?`-propagation pattern.
 
 ### Required pattern
 

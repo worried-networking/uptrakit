@@ -371,8 +371,8 @@ it. Existing file-based keys (`jwt_signing.key`) are automatically migrated to t
 
 ## JWT Token Denylist
 
-An in-memory `TokenDenylist` (`src/auth/token_denylist.rs`) provides immediate JWT revocation within each controller
-instance. It supports:
+A `TokenDenylist` (`src/auth/token_denylist.rs`) provides immediate JWT revocation. Each controller instance keeps an
+in-memory cache backed by two DB tables (`revoked_token_jtis`, `revoked_token_users`). It supports:
 
 - **Per-JTI denial**: individual tokens denied by their `jti` claim.
 - **Per-user denial**: all tokens for a user issued before a given timestamp.
@@ -380,5 +380,8 @@ instance. It supports:
 The denylist is checked on every JWT-authenticated request in the `authenticate_jwt` middleware. On logout, all tokens
 for the user are denied for the remaining access token lifetime (15 min). A periodic purge task cleans expired entries.
 
-**Known limitation**: the denylist is per-instance (in-memory). Cross-instance revocation relies on natural token
-expiry. DB-backed HA sync is deferred.
+**High availability**: the denylist is DB-backed, so revocations survive restarts and span instances.
+`load_from_db` seeds the in-memory cache at startup, and new revocations propagate cross-instance via the NATS
+`ControllerMessage::TokenRevoked` event. The per-user revocation cutoff is written with a monotonic guarded upsert
+(`ON CONFLICT … WHERE`) that can only advance, never regress, the revocation horizon; if the guard suppresses a write,
+the writer reconciles its own cache upward from the DB row rather than trusting its (possibly stale) local value.

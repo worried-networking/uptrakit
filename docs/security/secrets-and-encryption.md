@@ -327,8 +327,10 @@ See also: [External Scheduler Deployment](../end-user/deployment/external-schedu
 - JWT signing keys live in the `auth.jwt_signing_key` settings entry (base64 encoded, global scope). File-based keys
   (`jwt_signing.key`) are migrated to the database automatically.
 - Refresh tokens are stored hashed in `HttpOnly; Secure; SameSite=Strict` cookies and rotated on every use.
-- A per-instance `TokenDenylist` in memory enables immediate JWT revocation by `jti` or per user. On logout, all tokens
-  for the user are denied for the remaining lifetime.
+- A `TokenDenylist` enables immediate JWT revocation by `jti` or per user. On logout, all tokens for the user are denied
+  for the remaining lifetime. It is DB-backed (`revoked_token_jtis`, `revoked_token_users`) with a per-instance in-memory
+  cache seeded at startup and propagated across instances via the NATS `TokenRevoked` event; the per-user cutoff uses a
+  monotonic guarded upsert so a stale-cache instance cannot regress the revocation horizon.
 - Agent/MQTT private keys are generated locally and never leave their hosts.
 - CA private keys live in `CaKeyStore` with `zeroize` guard, accessed only by signing components.
 
