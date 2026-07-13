@@ -338,14 +338,14 @@ pub(super) async fn build_handler_test_state(
 #[cfg(feature = "db-sqlite")]
 pub(super) fn test_authenticated_session(
     service_id: Uuid,
-    connected_at: time::OffsetDateTime,
+    connection_id: Uuid,
 ) -> AuthenticatedSessionState {
     let (_push_tx, push_rx) = tokio::sync::mpsc::channel(1);
     let (msg_tx, _msg_rx) = tokio::sync::mpsc::channel(1);
     let (_resp_tx, resp_rx) = tokio::sync::mpsc::channel(1);
     AuthenticatedSessionState {
         service_id,
-        connected_at,
+        connection_id,
         is_system: false,
         has_update_tracking: false,
         has_software_discovery: false,
@@ -381,12 +381,9 @@ pub(super) fn register_test_runtime_state(
 }
 
 #[cfg(feature = "db-sqlite")]
-pub(super) async fn register_test_connection(
-    state: &Arc<AppState>,
-    service_id: Uuid,
-) -> time::OffsetDateTime {
+pub(super) async fn register_test_connection(state: &Arc<AppState>, service_id: Uuid) -> Uuid {
     let capabilities = BTreeSet::from([Capability::UiSurfaces]);
-    let _ = state
+    let (_push_rx, handle) = state
         .service_connections
         .register(
             service_id,
@@ -396,11 +393,7 @@ pub(super) async fn register_test_connection(
             Some("uptrakit-agent-ssh".to_string()),
         )
         .await;
-    state
-        .service_connections
-        .connected_at(&service_id)
-        .await
-        .expect("connected_at should exist after registration")
+    handle.connection_id()
 }
 
 #[cfg(feature = "db-sqlite")]
@@ -715,7 +708,7 @@ pub(super) async fn run_embedded_register_once(
     capabilities: BTreeSet<Capability>,
     runtime_instance_id: Uuid,
 ) {
-    let _ = state
+    let (_, connection_handle) = state
         .service_connections
         .register(
             service_id,
@@ -725,6 +718,7 @@ pub(super) async fn run_embedded_register_once(
             Some("uptrakit-agent".to_string()),
         )
         .await;
+    let connection_id = connection_handle.connection_id();
 
     let (service_tx, service_rx) = tokio::sync::mpsc::channel(4);
     let cancel = CancellationToken::new();
@@ -733,6 +727,7 @@ pub(super) async fn run_embedded_register_once(
         run_embedded_message_handler(
             Arc::clone(&state),
             service_id,
+            connection_id,
             tenant_id,
             &handler_capabilities,
             "uptrakit-agent",

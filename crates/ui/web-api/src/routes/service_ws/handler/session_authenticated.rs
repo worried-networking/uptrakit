@@ -81,7 +81,10 @@ pub(super) async fn send_ws_with_timeout(
 /// and cleanup phases need.
 pub(super) struct AuthenticatedSessionState {
     pub(super) service_id: uuid::Uuid,
-    pub(super) connected_at: time::OffsetDateTime,
+    /// The `connection_id` minted by the registry at `register()` time.
+    /// Used by cleanup to drive `unregister_current` (race-safe removal) and by
+    /// `authenticated_session_ownership` to distinguish current from replaced.
+    pub(super) connection_id: uuid::Uuid,
     pub(super) is_system: bool,
     pub(super) has_update_tracking: bool,
     pub(super) has_software_discovery: bool,
@@ -145,7 +148,10 @@ pub(super) async fn load_service_capabilities(
 /// Stage 3: Register the connection in `ServiceConnectionRegistry` and notify
 /// the embedded service infrastructure about the new external connection.
 ///
-/// Returns `(push_rx, cancel_token, connected_at)`.
+/// Returns `(push_rx, cancel_token, connection_id)`. The `connection_id` is
+/// read from the handle the registry returns — there is no second registry
+/// lookup, so an admin `force_disconnect` racing in between cannot cause a
+/// panic.
 pub(super) fn cancellation_token_from_connection_handle(
     connection: crate::service_connections::ServiceConnectionHandle,
 ) -> tokio_util::sync::CancellationToken {
@@ -166,7 +172,7 @@ pub(super) async fn register_connection(
 ) -> (
     tokio::sync::mpsc::Receiver<ControllerMessage>,
     tokio_util::sync::CancellationToken,
-    time::OffsetDateTime,
+    uuid::Uuid,
 ) {
     let (push_rx, connection_handle) = state
         .service_connections
@@ -184,15 +190,10 @@ pub(super) async fn register_connection(
         notifier.on_external_connected(service_id, capabilities, None, false);
     }
 
-    let connected_at = state
-        .service_connections
-        .connected_at(&service_id)
-        .await
-        .expect("connected service should have a registered timestamp");
-
+    let connection_id = connection_handle.connection_id();
     let cancel_token = cancellation_token_from_connection_handle(connection_handle);
 
-    (push_rx, cancel_token, connected_at)
+    (push_rx, cancel_token, connection_id)
 }
 
 /// Stage 4: Load linked host IDs shared between the main loop and the processor.
@@ -445,7 +446,7 @@ pub(super) async fn setup_authenticated_session(
     .await;
 
     // Stage 4: Register the connection and notify embedded services.
-    let (push_rx, cancel_token, connected_at) = register_connection(
+    let (push_rx, cancel_token, connection_id) = register_connection(
         state,
         service_id,
         &session_capabilities,
@@ -488,7 +489,7 @@ pub(super) async fn setup_authenticated_session(
 
     Some(AuthenticatedSessionState {
         service_id,
-        connected_at,
+        connection_id,
         is_system,
         has_update_tracking,
         has_software_discovery,
@@ -517,6 +518,7 @@ pub(super) async fn cleanup_authenticated_session(
 ) {
     let AuthenticatedSessionState {
         service_id,
+        connection_id,
         is_system,
         has_update_tracking,
         has_software_discovery,
@@ -586,11 +588,24 @@ pub(super) async fn cleanup_authenticated_session(
         }
     }
 
-    state.service_connections.unregister(&service_id).await;
-
-    // Notify embedded services about the disconnection.
-    if let Some(ref notifier) = state.embedded_service_notifier {
-        notifier.on_external_disconnected(&service_id);
+    // Race-safe: a service reconnecting during this cleanup's awaits registers a
+    // replacement; unregister_current removes only if we still own the current
+    // registration, so the live replacement survives.
+    if state
+        .service_connections
+        .unregister_current(&service_id, connection_id)
+        .await
+    {
+        // Notify embedded services about the disconnection.
+        if let Some(ref notifier) = state.embedded_service_notifier {
+            notifier.on_external_disconnected(&service_id);
+        }
+    } else {
+        tracing::debug!(
+            %service_id,
+            %connection_id,
+            "cleanup skipped — connection already replaced by a reconnect"
+        );
     }
 
     tracing::debug!(%service_id, "authenticated service disconnected");
@@ -616,12 +631,10 @@ pub(super) async fn authenticated_session_ownership(
 ) -> AuthenticatedSessionOwnership {
     match state
         .service_connections
-        .connected_at(&session.service_id)
+        .current_connection_id(&session.service_id)
         .await
     {
-        Some(connected_at) if connected_at == session.connected_at => {
-            AuthenticatedSessionOwnership::Current
-        }
+        Some(id) if id == session.connection_id => AuthenticatedSessionOwnership::Current,
         Some(_) => AuthenticatedSessionOwnership::Replaced,
         None => AuthenticatedSessionOwnership::Removed,
     }
@@ -955,7 +968,7 @@ mod tests {
 
             cleanup_authenticated_session(
                 &state,
-                test_authenticated_session(service_id, time::OffsetDateTime::now_utc()),
+                test_authenticated_session(service_id, uuid::Uuid::now_v7()),
             )
             .await;
 
@@ -977,7 +990,7 @@ mod tests {
 
             let service_id = Uuid::now_v7();
             register_test_runtime_state(&state, service_id, tenant_id);
-            let connected_at = register_test_connection(&state, service_id).await;
+            let connection_id = register_test_connection(&state, service_id).await;
             state
                 .service_connections
                 .force_disconnect(&service_id)
@@ -985,7 +998,7 @@ mod tests {
 
             handle_cancelled_authenticated_session_after_close(
                 &state,
-                test_authenticated_session(service_id, connected_at),
+                test_authenticated_session(service_id, connection_id),
             )
             .await;
 
@@ -1006,12 +1019,12 @@ mod tests {
 
             let service_id = Uuid::now_v7();
             register_test_runtime_state(&state, service_id, tenant_id);
-            let superseded_connected_at = register_test_connection(&state, service_id).await;
-            let _replacement_connected_at = register_test_connection(&state, service_id).await;
+            let superseded_id = register_test_connection(&state, service_id).await;
+            let _replacement_id = register_test_connection(&state, service_id).await;
 
             handle_cancelled_authenticated_session_after_close(
                 &state,
-                test_authenticated_session(service_id, superseded_connected_at),
+                test_authenticated_session(service_id, superseded_id),
             )
             .await;
 
@@ -1034,12 +1047,12 @@ mod tests {
 
             let service_id = Uuid::now_v7();
             register_test_runtime_state(&state, service_id, tenant_id);
-            let superseded_connected_at = register_test_connection(&state, service_id).await;
-            let _replacement_connected_at = register_test_connection(&state, service_id).await;
+            let superseded_id = register_test_connection(&state, service_id).await;
+            let _replacement_id = register_test_connection(&state, service_id).await;
 
             finalize_authenticated_session(
                 &state,
-                test_authenticated_session(service_id, superseded_connected_at),
+                test_authenticated_session(service_id, superseded_id),
             )
             .await;
 
@@ -1063,8 +1076,8 @@ mod tests {
 
             let service_id = uuid::Uuid::now_v7();
             register_test_runtime_state(&state, service_id, tenant_id);
-            let superseded_at = register_test_connection(&state, service_id).await;
-            let _replacement_at = register_test_connection(&state, service_id).await;
+            let superseded_id = register_test_connection(&state, service_id).await;
+            let _replacement_id = register_test_connection(&state, service_id).await;
 
             let mut rx = state
                 .notification
@@ -1079,7 +1092,7 @@ mod tests {
                 &state,
                 AuthenticatedSessionState {
                     service_id,
-                    connected_at: superseded_at,
+                    connection_id: superseded_id,
                     is_system: false,
                     has_update_tracking: false,
                     has_software_discovery: false,
@@ -1123,8 +1136,8 @@ mod tests {
 
             let service_id = uuid::Uuid::now_v7();
             // Do NOT register a provider — this service never had UiSurfaces.
-            let superseded_at = register_test_connection(&state, service_id).await;
-            let _replacement_at = register_test_connection(&state, service_id).await;
+            let superseded_id = register_test_connection(&state, service_id).await;
+            let _replacement_id = register_test_connection(&state, service_id).await;
 
             let mut rx = state
                 .notification
@@ -1139,7 +1152,7 @@ mod tests {
                 &state,
                 AuthenticatedSessionState {
                     service_id,
-                    connected_at: superseded_at,
+                    connection_id: superseded_id,
                     is_system: false,
                     has_update_tracking: false,
                     has_software_discovery: false,
@@ -1175,8 +1188,8 @@ mod tests {
 
             let service_id = uuid::Uuid::now_v7();
             register_test_runtime_state(&state, service_id, tenant_id);
-            let superseded_at = register_test_connection(&state, service_id).await;
-            let _replacement_at = register_test_connection(&state, service_id).await;
+            let superseded_id = register_test_connection(&state, service_id).await;
+            let _replacement_id = register_test_connection(&state, service_id).await;
 
             let mut rx = state
                 .notification
@@ -1191,7 +1204,7 @@ mod tests {
                 &state,
                 AuthenticatedSessionState {
                     service_id,
-                    connected_at: superseded_at,
+                    connection_id: superseded_id,
                     is_system: true,
                     has_update_tracking: false,
                     has_software_discovery: false,
@@ -1227,8 +1240,8 @@ mod tests {
 
             let service_id = uuid::Uuid::now_v7();
             register_test_runtime_state(&state, service_id, tenant_id);
-            // Register superseded connection (receiver dropped — only timestamp needed).
-            let superseded_at = register_test_connection(&state, service_id).await;
+            // Register superseded connection (receiver dropped — connection_id needed for cleanup).
+            let superseded_id = register_test_connection(&state, service_id).await;
             // Register replacement connection, keeping receiver alive so the mpsc channel
             // stays open and the proxy can dispatch the invoke without a SendFailed.
             let (_rx_replacement, _handle_replacement) = state
@@ -1276,7 +1289,7 @@ mod tests {
                 &state,
                 AuthenticatedSessionState {
                     service_id,
-                    connected_at: superseded_at,
+                    connection_id: superseded_id,
                     is_system: false,
                     has_update_tracking: false,
                     has_software_discovery: false,
@@ -1308,6 +1321,90 @@ mod tests {
                     Err(crate::surface_proxy::SurfaceProxyError::ServiceDisconnected)
                 ),
                 "fail_in_flight_for_provider should have cancelled in-flight invoke: {invoke_result:?}"
+            );
+        }
+
+        #[cfg(feature = "db-sqlite")]
+        #[tokio::test]
+        async fn authenticated_cleanup_stale_connection_does_not_evict_replacement() {
+            let db = crate::test_harness::setup_migrated_db().await;
+            let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+            let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+            let service_id = uuid::Uuid::now_v7();
+
+            // A registers, then B supersedes A (reconnect).
+            let superseded_id = register_test_connection(&state, service_id).await;
+            let _replacement_id = register_test_connection(&state, service_id).await;
+            assert_ne!(superseded_id, _replacement_id);
+
+            // A's session runs its finalize/cleanup after B is live.
+            let session = test_authenticated_session(service_id, superseded_id);
+            finalize_authenticated_session(&state, session).await;
+
+            // B must still be registered — the stale cleanup must not evict it.
+            assert!(
+                state.service_connections.is_connected(&service_id).await,
+                "replacement connection B must survive A's stale cleanup"
+            );
+            assert_eq!(
+                state
+                    .service_connections
+                    .current_connection_id(&service_id)
+                    .await,
+                Some(_replacement_id),
+            );
+        }
+
+        #[cfg(feature = "db-sqlite")]
+        #[tokio::test]
+        async fn cleanup_authenticated_session_stale_id_does_not_evict_replacement() {
+            let db = crate::test_harness::setup_migrated_db().await;
+            let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+            let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+            let service_id = uuid::Uuid::now_v7();
+
+            // A registers (capture its id), then B supersedes A.
+            let superseded_id = register_test_connection(&state, service_id).await;
+            let _replacement_id = register_test_connection(&state, service_id).await;
+
+            // Drive cleanup for A's session directly, with A's now-stale id. No tenant /
+            // workload claims — isolate the registry-removal branch.
+            let (_push_tx, push_rx) = tokio::sync::mpsc::channel(1);
+            let (msg_tx, _msg_rx) = tokio::sync::mpsc::channel(1);
+            let (_resp_tx, resp_rx) = tokio::sync::mpsc::channel(1);
+            cleanup_authenticated_session(
+                &state,
+                AuthenticatedSessionState {
+                    service_id,
+                    connection_id: superseded_id,
+                    is_system: false,
+                    has_update_tracking: false,
+                    has_software_discovery: false,
+                    has_workload_claims: false,
+                    service_tenant_id: None,
+                    linked_host_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
+                    push_rx,
+                    cancel_token: tokio_util::sync::CancellationToken::new(),
+                    msg_tx,
+                    resp_rx,
+                    processor_cancel: tokio_util::sync::CancellationToken::new(),
+                    processor_handle: tokio::spawn(async {}),
+                    rate_limiter: MessageRateLimiter::new(
+                        WS_MESSAGE_RATE_WINDOW,
+                        WS_MESSAGE_RATE_LIMIT,
+                    ),
+                },
+            )
+            .await;
+
+            // unregister_current(A) returns false because B is current → B survives.
+            assert!(state.service_connections.is_connected(&service_id).await);
+            assert_eq!(
+                state
+                    .service_connections
+                    .current_connection_id(&service_id)
+                    .await,
+                Some(_replacement_id),
             );
         }
 
@@ -1551,7 +1648,7 @@ mod tests {
         let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
         let service_id = uuid::Uuid::now_v7();
         register_test_runtime_state(&state, service_id, tenant_id);
-        let connected_at = register_test_connection(&state, service_id).await;
+        let connection_id = register_test_connection(&state, service_id).await;
 
         let mut rx = state
             .notification
@@ -1566,7 +1663,7 @@ mod tests {
             &state,
             AuthenticatedSessionState {
                 service_id,
-                connected_at,
+                connection_id,
                 is_system: false,
                 has_update_tracking: false,
                 has_software_discovery: false,
@@ -1601,7 +1698,7 @@ mod tests {
         let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
         let service_id = uuid::Uuid::now_v7();
         register_test_runtime_state(&state, service_id, tenant_id);
-        let connected_at = register_test_connection(&state, service_id).await;
+        let connection_id = register_test_connection(&state, service_id).await;
 
         let mut rx = state
             .notification
@@ -1616,7 +1713,7 @@ mod tests {
             &state,
             AuthenticatedSessionState {
                 service_id,
-                connected_at,
+                connection_id,
                 is_system: true,
                 has_update_tracking: false,
                 has_software_discovery: false,
