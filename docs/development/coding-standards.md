@@ -2028,6 +2028,27 @@ Rules:
 - `health_check()` verifies the subsystem accepted the new config and is operating normally.
 - `rollback_window()` returns the maximum duration the watchdog waits for `health_check()`.
 
+## Reloadable Subsystems Must Have a Live Consumer
+
+A `Reloadable` whose `apply()` has no live consumer must not exist. If a config section changes but
+nothing in the running process reads the new value — because the subsystem holds a client, connection,
+or resource captured once at boot with no swap seam — that is not a candidate for a silent `apply()`
+that republishes to a channel nobody reads. Choose one of:
+
+- **Wire a real subscriber or swap mechanism.** If the value can be hot-applied, `apply()` must mutate
+  the actual live state the subsystem uses (an `arc_swap`, a `watch` channel a consumer polls, etc.), not
+  just an in-memory snapshot next to the real one.
+- **Validate-reject the change.** If the subsystem has no swap seam, `validate()` must return an error
+  for any delta to that field, forcing the coordinator to report the reload as rejected rather than
+  applied.
+
+Never let `apply()` return `Ok(())` for a change it did not actually apply. The coordinator's success
+report is a promise to the operator that the new value is live; a `Reloadable` that accepts a delta it
+silently ignores breaks that promise — the coordinator reports `ConfigReloadApplied` while nothing
+changed. See the NATS URL reload gate (`crates/core/controller-runtime/src/reload/nats.rs`) for a
+validate-reject implementation of this rule, and [Operator Runbook — Graceful
+Reload](../end-user/operator-runbook-reload.md) for the operator-facing behavior this rule produces.
+
 ## Reexec Hook Pattern
 
 When a config reload detects an irreversibly-bound key change (e.g. `db.url`, `master_key`, `log.path`, embedded-service topology), the coordinator

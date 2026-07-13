@@ -26,10 +26,21 @@ the controller's master key on any write.
 
 ### Runtime API
 
-The NATS URL can be updated at runtime via `PUT /api/v1/settings/nats` or `uptrakit settings nats set`.
-**Hot-reload is intentionally not supported** — changing the URL updates the DB and in-memory snapshot,
-but does not reconnect the live NATS transport. The controller must be restarted for the change to take
-effect.
+The NATS URL can be updated at runtime via `PUT /api/v1/global-settings/nats` or
+`uptrakit settings nats set`. **This route does not trigger a reload** — it only updates the DB-stored
+value and the in-memory settings snapshot; the live NATS transport keeps its boot-time connection until
+the controller is restarted. This is a known gap: the settings route has no reload seam of its own.
+
+A file-sourced edit to `nats.url` in `controller.toml` is a different path and behaves differently: it is
+one of the irreversibly-bound keys detected by reexec triage (`reexec/triage.rs`), so the controller
+automatically calls `exec()` to replace the process image with the new URL applied — no manual restart
+required. See [Operator Runbook — Graceful Reload](../end-user/operator-runbook-reload.md#reexec-semantics).
+
+Any reload path that reaches the `[nats]` `Reloadable` gate _without_ going through triage first (e.g. a
+future delta source) is rejected at validate with `"nats.url change requires reexec"` or `"nats config
+change requires restart"` — this gate is a backstop, not an alternate hot-reload mechanism. NATS URL
+hot-reload-in-place is not supported by any path: the live consumer holds a client captured at boot with
+no swap seam.
 
 The `SettingsSnapshot.nats_url` field holds a `MaskedUrl` whose `Display`/`Debug`/`Serialize` automatically
 replace the password component with `***`, ensuring credentials are never leaked into logs or API responses.

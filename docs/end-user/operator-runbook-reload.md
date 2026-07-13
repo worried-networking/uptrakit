@@ -22,8 +22,10 @@ systemctl reload uptrakit-controller
 ```
 
 The controller re-reads `controller.toml` and applies changes in-process. If the change includes an
-irreversibly-bound key (listen address, DB pool URL, TLS trust domain), the controller calls `exec()`
-to replace the process image instead.
+irreversibly-bound key (DB pool URL, master key, log path, embedded-service topology, NATS URL, TLS
+trust domain), the controller calls `exec()` to replace the process image instead. Changing the HTTPS
+or PKI listener address does **not** reexec — it is rejected at validate; see [Listener Address and
+Zeroconf Changes](#listener-address-and-zeroconf-changes).
 
 ### File Edit + File-Watch
 
@@ -80,10 +82,40 @@ to replace the running process image with the updated configuration:
 
 **Irreversibly-bound keys** (additions require an ADR amendment):
 
-- `network.https_addr`
-- `network.pki_addr`
 - `db.url`
+- `master_key`
+- `log.path`
+- `embedded_services` topology (enabling/disabling Agent, Agent-SSH, MQTT, or Scheduler)
+- `nats.url`
 - `tls.trust_domain`
+
+## Listener Address and Zeroconf Changes
+
+The HTTPS listener address (`network.addr`), the PKI advertisement address (`network.pki_addr`), and
+`[zeroconf]` config are **not** reexec-forcing and **not** hot-reloadable. A reload attempt that changes
+any of them fails loudly at validate:
+
+- `network.addr` change: `"listener address change requires a full controller restart (network https addr)"`
+- `network.pki_addr` change: `"listener address change requires a full controller restart (network pki_addr)"`
+- `[zeroconf]` change: `"zeroconf config change requires restart"`
+
+Re-binding a listening socket mid-process has no FD-inheritance path in the current reexec
+implementation, so these fields are validate-reject gates rather than reexec triggers. To change a
+listener address or zeroconf config, edit `controller.toml` and restart the controller (`systemctl
+restart uptrakit-controller`, not `reload`).
+
+## TLS Certificate and Key Hot-Reload
+
+`tls.cert_path` and `tls.key_path` are hot-reloadable **via file reload only** — there is no DB-backed
+settings route for these fields. On a reload:
+
+1. `validate()` loads the candidate certificate/key pair from disk and confirms the key matches the
+   certificate (`keys_match()`) before accepting the change.
+2. `apply()` independently re-loads and re-verifies the pair, then atomically swaps it into the served
+   TLS resolver — the next handshake serves the new leaf with no restart and no dropped connections.
+3. If the post-apply health check fails, the reloadable reverts to the previously served leaf.
+
+`tls.trust_domain` is excluded from this hot-swap path — see the reexec list above.
 
 ## Recovery from Degraded State
 

@@ -52,7 +52,7 @@ Most CLI arguments are reconciled with DB-persisted values at startup. The recon
 | `--forwarded-client-cert-info-header` | `network.forwarded_client_cert_info_header` | `null`            | Yes                        |
 | `--forwarded-client-cert-pem-header`  | `network.forwarded_client_cert_pem_header`  | `null`            | Yes                        |
 | `--pki-addr`                          | `network.pki_addr`                          | `null`            | Yes (requires CA rotation) |
-| `--https-addr`                        | `network.https_addr`                        | `[::]:8443`       | No (restart)               |
+| `--https-addr`                        | `network.addr`                              | `[::]:8443`       | No (restart)               |
 
 **Not DB-managed** (bootstrap/infrastructure): `--data-dir`, `--db-url`, `--tls-cert`, `--tls-key`, `--ca-cert`,
 `--ca-key`, `--static-dir`, `--reuseport`, `--takeover-from`, `--shutdown-timeout-secs`, `--master-key-file`.
