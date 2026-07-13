@@ -446,10 +446,6 @@ async fn execute_controller_surface_action_typed(
     action_id: &str,
     params: serde_json::Value,
 ) -> std::result::Result<serde_json::Value, SurfaceActionError> {
-    // Commit-B bridge (spec §1 "Commit A bridge"): feeds the not-yet-converted
-    // arms; deleted in the final conversion commit.
-    let db = tenant_db.db();
-    let tenant_id = Some(tenant_db.tenant_id());
     let Some(route) = resolve_controller_surface_action(surface_id, action_id) else {
         return Err(SurfaceActionError::InvalidInput(format!(
             "unknown action '{action_id}' for surface '{surface_id}'"
@@ -458,20 +454,18 @@ async fn execute_controller_surface_action_typed(
 
     match route {
         ControllerSurfaceAction::ListHostMappings => {
-            execute_controller_list_host_mappings(db, tenant_id, params)
+            execute_controller_list_host_mappings(tenant_db, params)
                 .await
                 .map_err(map_controller_action_error)
         }
         ControllerSurfaceAction::DiscoverHosts => execute_controller_discover_hosts(
-            db,
-            tenant_id,
+            tenant_db,
             parse_action_params::<ProxmoxPluginConfigRequest>(params, action_id)?,
         )
         .await
         .map_err(map_controller_action_error),
         ControllerSurfaceAction::TestConnection => execute_controller_test_connection(
-            db,
-            tenant_id,
+            tenant_db,
             parse_action_params::<ProxmoxPluginConfigRequest>(params, action_id)?,
         )
         .await
@@ -494,31 +488,27 @@ async fn execute_controller_surface_action_typed(
         .await
         .map_err(map_controller_action_error),
         ControllerSurfaceAction::ListAllUnmatched => execute_controller_list_all_unmatched(
-            db,
-            tenant_id,
+            tenant_db,
             parse_action_params::<ProxmoxUnmatchedGuestsRequest>(params, action_id)?,
         )
         .await
         .map_err(map_controller_action_error),
         ControllerSurfaceAction::GetHostInfo => execute_controller_get_host_info(
-            db,
-            tenant_id,
+            tenant_db,
             parse_action_params::<ProxmoxHostInfoRequest>(params, action_id)?,
         )
         .await
         .map_err(map_controller_action_error),
         ControllerSurfaceAction::PreloadGlobalDefaults => {
             execute_controller_preload_global_defaults(
-                db,
-                tenant_id,
+                tenant_db,
                 parse_action_params::<ProxmoxScopeSelectionRequest>(params, action_id)?,
             )
             .await
             .map_err(map_controller_action_error)
         }
         ControllerSurfaceAction::SaveGlobalDefaults => execute_controller_save_global_defaults(
-            db,
-            tenant_id,
+            tenant_db,
             parse_action_params::<ProxmoxGlobalDefaultsSaveRequest>(params, action_id)?,
         )
         .await
@@ -537,8 +527,7 @@ async fn execute_controller_surface_action_typed(
         .map_err(map_controller_action_error),
         ControllerSurfaceAction::LoadBackupTargetOptions => {
             execute_controller_load_backup_target_options(
-                db,
-                tenant_id,
+                tenant_db,
                 parse_action_params::<ProxmoxScopeSelectionRequest>(params, action_id)?,
             )
             .await
@@ -546,32 +535,28 @@ async fn execute_controller_surface_action_typed(
         }
         ControllerSurfaceAction::PreloadScalingGlobalDefaults => {
             handle_preload_scaling_global_defaults(
-                db,
-                tenant_id,
+                tenant_db,
                 parse_action_params::<ProxmoxScopeSelectionRequest>(params, action_id)?,
             )
             .await
             .map_err(map_controller_action_error)
         }
         ControllerSurfaceAction::SaveScalingGlobalDefaults => handle_save_scaling_global_defaults(
-            db,
-            tenant_id,
+            tenant_db,
             parse_action_params::<ProxmoxScalingGlobalDefaultsSaveRequest>(params, action_id)?,
         )
         .await
         .map_err(map_controller_action_error),
         ControllerSurfaceAction::PreloadScalingItemOverrides => {
             handle_preload_scaling_item_overrides(
-                db,
-                tenant_id,
+                tenant_db,
                 parse_action_params::<ProxmoxItemOverridePreloadRequest>(params, action_id)?,
             )
             .await
             .map_err(map_controller_action_error)
         }
         ControllerSurfaceAction::SaveScalingItemOverrides => handle_save_scaling_item_overrides(
-            db,
-            tenant_id,
+            tenant_db,
             parse_action_params::<ProxmoxScalingItemOverridesSaveRequest>(params, action_id)?,
         )
         .await
@@ -580,27 +565,24 @@ async fn execute_controller_surface_action_typed(
 }
 
 async fn execute_controller_list_host_mappings(
-    db: &DatabaseConnection,
-    tenant_id: Option<Uuid>,
+    tenant_db: &TenantDb,
     params: serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
-    handle_list(db, tenant_id, params).await
+    handle_list(tenant_db, params).await
 }
 
 async fn execute_controller_discover_hosts(
-    db: &DatabaseConnection,
-    tenant_id: Option<Uuid>,
+    tenant_db: &TenantDb,
     request: ProxmoxPluginConfigRequest,
 ) -> std::result::Result<serde_json::Value, String> {
-    handle_discover(db, tenant_id, request).await
+    handle_discover(tenant_db, request).await
 }
 
 async fn execute_controller_test_connection(
-    db: &DatabaseConnection,
-    tenant_id: Option<Uuid>,
+    tenant_db: &TenantDb,
     request: ProxmoxPluginConfigRequest,
 ) -> std::result::Result<serde_json::Value, String> {
-    handle_test_connection(db, tenant_id, request).await
+    handle_test_connection(tenant_db, request).await
 }
 
 async fn execute_controller_manual_match(
@@ -625,35 +607,31 @@ async fn execute_controller_unmatch_host(
 }
 
 async fn execute_controller_list_all_unmatched(
-    db: &DatabaseConnection,
-    tenant_id: Option<Uuid>,
+    tenant_db: &TenantDb,
     request: ProxmoxUnmatchedGuestsRequest,
 ) -> std::result::Result<serde_json::Value, String> {
-    handle_list_all_unmatched(db, tenant_id, request).await
+    handle_list_all_unmatched(tenant_db, request).await
 }
 
 async fn execute_controller_get_host_info(
-    db: &DatabaseConnection,
-    tenant_id: Option<Uuid>,
+    tenant_db: &TenantDb,
     request: ProxmoxHostInfoRequest,
 ) -> std::result::Result<serde_json::Value, String> {
-    handle_get_info(db, tenant_id, request).await
+    handle_get_info(tenant_db, request).await
 }
 
 async fn execute_controller_preload_global_defaults(
-    db: &DatabaseConnection,
-    tenant_id: Option<Uuid>,
+    tenant_db: &TenantDb,
     request: ProxmoxScopeSelectionRequest,
 ) -> std::result::Result<serde_json::Value, String> {
-    handle_preload_global_defaults(db, tenant_id, request).await
+    handle_preload_global_defaults(tenant_db, request).await
 }
 
 async fn execute_controller_save_global_defaults(
-    db: &DatabaseConnection,
-    tenant_id: Option<Uuid>,
+    tenant_db: &TenantDb,
     request: ProxmoxGlobalDefaultsSaveRequest,
 ) -> std::result::Result<serde_json::Value, String> {
-    handle_save_global_defaults(db, tenant_id, request).await
+    handle_save_global_defaults(tenant_db, request).await
 }
 
 async fn execute_controller_preload_item_overrides(
@@ -671,11 +649,10 @@ async fn execute_controller_save_item_overrides(
 }
 
 async fn execute_controller_load_backup_target_options(
-    db: &DatabaseConnection,
-    tenant_id: Option<Uuid>,
+    tenant_db: &TenantDb,
     request: ProxmoxScopeSelectionRequest,
 ) -> std::result::Result<serde_json::Value, String> {
-    handle_load_backup_target_options(db, tenant_id, request).await
+    handle_load_backup_target_options(tenant_db, request).await
 }
 
 fn parse_action_params<T>(
@@ -747,8 +724,7 @@ fn parse_pagination_per_page(params: &serde_json::Value) -> u64 {
 
 /// List discovered Proxmox host mappings with pagination and inline match suggestions.
 async fn handle_list(
-    db: &DatabaseConnection,
-    tenant_id: Option<Uuid>,
+    tenant_db: &TenantDb,
     params: serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
     use crate::entity::proxmox_host_mapping;
@@ -760,13 +736,12 @@ async fn handle_list(
 
     tracing::debug!(?plugin_config_id, %page, %per_page, "listing Proxmox host mappings");
 
-    let mut base_query = proxmox_host_mapping::Entity::find().inner_join(plugin_config::Entity);
+    let mut base_query = tenant_db
+        .find::<proxmox_host_mapping::Entity>()
+        .inner_join(plugin_config::Entity);
 
     if let Some(pcid) = plugin_config_id {
         base_query = base_query.filter(proxmox_host_mapping::Column::PluginConfigId.eq(pcid));
-    }
-    if let Some(tid) = tenant_id {
-        base_query = base_query.filter(proxmox_host_mapping::Column::TenantId.eq(tid));
     }
 
     let base_query = base_query
@@ -780,7 +755,7 @@ async fn handle_list(
 
     let total = base_query
         .clone()
-        .count(db)
+        .count(tenant_db.db())
         .await
         .map_err(|e| format!("database error counting mappings: {e}"))?;
 
@@ -788,7 +763,7 @@ async fn handle_list(
     let mappings = base_query
         .offset(Some(offset))
         .limit(Some(per_page))
-        .all(db)
+        .all(tenant_db.db())
         .await
         .map_err(|e| format!("database error: {e}"))?;
 
@@ -808,29 +783,24 @@ async fn handle_list(
 
     // Load active hosts for suggestions (only if there are unmatched mappings on this page)
     let suggestion_map = if !unmatched_mappings.is_empty() {
-        if let Some(tid) = tenant_id {
-            let all_hosts: Vec<host::Model> = host::Entity::find()
-                .filter(host::Column::TenantId.eq(tid))
-                .filter(host::Column::DeactivatedAt.is_null())
-                .all(db)
-                .await
-                .map_err(|e| format!("database error loading hosts: {e}"))?;
+        let all_hosts: Vec<host::Model> = tenant_db
+            .find::<host::Entity>()
+            .filter(host::Column::DeactivatedAt.is_null())
+            .all(tenant_db.db())
+            .await
+            .map_err(|e| format!("database error loading hosts: {e}"))?;
 
-            // Exclude hosts already matched to any mapping
-            let available_hosts: Vec<host::Model> = all_hosts
-                .into_iter()
-                .filter(|h| !matched_host_ids.contains(&h.id))
-                .collect();
+        // Exclude hosts already matched to any mapping
+        let available_hosts: Vec<host::Model> = all_hosts
+            .into_iter()
+            .filter(|h| !matched_host_ids.contains(&h.id))
+            .collect();
 
-            let unmatched_owned: Vec<proxmox_host_mapping::Model> =
-                unmatched_mappings.into_iter().cloned().collect();
+        let unmatched_owned: Vec<proxmox_host_mapping::Model> =
+            unmatched_mappings.into_iter().cloned().collect();
 
-            let suggestions =
-                crate::matching::compute_suggestions(&unmatched_owned, &available_hosts);
-            crate::matching::suggestions_by_mapping_id(suggestions)
-        } else {
-            std::collections::HashMap::new()
-        }
+        let suggestions = crate::matching::compute_suggestions(&unmatched_owned, &available_hosts);
+        crate::matching::suggestions_by_mapping_id(suggestions)
     } else {
         std::collections::HashMap::new()
     };
@@ -846,11 +816,14 @@ async fn handle_list(
     let config_name_map: std::collections::HashMap<Uuid, String> = if config_ids_on_page.is_empty()
     {
         std::collections::HashMap::new()
-    } else if let Some(tid) = tenant_id {
-        let configs = list_proxmox_plugin_configs_by_ids(db, tid, &config_ids_on_page).await?;
-        configs.into_iter().map(|c| (c.id, c.name)).collect()
     } else {
-        std::collections::HashMap::new()
+        let configs = list_proxmox_plugin_configs_by_ids(
+            tenant_db.db(),
+            tenant_db.tenant_id(),
+            &config_ids_on_page,
+        )
+        .await?;
+        configs.into_iter().map(|c| (c.id, c.name)).collect()
     };
 
     let items: Vec<serde_json::Value> = mappings
@@ -903,21 +876,20 @@ async fn handle_list(
 
 /// Trigger discovery for a Proxmox plugin configuration.
 async fn handle_discover(
-    db: &DatabaseConnection,
-    tenant_id: Option<Uuid>,
+    tenant_db: &TenantDb,
     request: ProxmoxPluginConfigRequest,
 ) -> std::result::Result<serde_json::Value, String> {
     let plugin_config_id = request.plugin_config_id;
-    let tenant_id = tenant_id.ok_or_else(|| "tenant context required for discovery".to_string())?;
+    let tenant_id = tenant_db.tenant_id();
 
     tracing::info!(%plugin_config_id, %tenant_id, "starting Proxmox discovery action");
 
-    let config = load_proxmox_config(db, tenant_id, plugin_config_id).await?;
+    let config = load_proxmox_config(tenant_db.db(), tenant_id, plugin_config_id).await?;
     let client =
         ProxmoxClient::new(&config).map_err(|e| format!("failed to create client: {e}"))?;
 
     let persisted = crate::discovery::discover_and_persist(
-        db,
+        tenant_db.db(),
         tenant_id,
         plugin_config_id,
         &client,
@@ -941,16 +913,14 @@ async fn handle_discover(
 
 /// Test connectivity to the Proxmox VE API.
 async fn handle_test_connection(
-    db: &DatabaseConnection,
-    tenant_id: Option<Uuid>,
+    tenant_db: &TenantDb,
     request: ProxmoxPluginConfigRequest,
 ) -> std::result::Result<serde_json::Value, String> {
     let plugin_config_id = request.plugin_config_id;
-    let tenant_id =
-        tenant_id.ok_or_else(|| "tenant context required for test-connection".to_string())?;
+    let tenant_id = tenant_db.tenant_id();
     tracing::debug!(%plugin_config_id, %tenant_id, "testing Proxmox VE connection");
 
-    let config = load_proxmox_config(db, tenant_id, plugin_config_id).await?;
+    let config = load_proxmox_config(tenant_db.db(), tenant_id, plugin_config_id).await?;
     let client =
         ProxmoxClient::new(&config).map_err(|e| format!("failed to create client: {e}"))?;
 
@@ -1029,8 +999,7 @@ async fn handle_unmatch(
 
 /// Get Proxmox info for a specific host.
 async fn handle_get_info(
-    db: &DatabaseConnection,
-    tenant_id: Option<Uuid>,
+    tenant_db: &TenantDb,
     request: ProxmoxHostInfoRequest,
 ) -> std::result::Result<serde_json::Value, String> {
     use crate::entity::proxmox_host_mapping;
@@ -1038,15 +1007,10 @@ async fn handle_get_info(
     let host_id = request.host_id;
     tracing::debug!(%host_id, "fetching Proxmox info for host");
 
-    let mut query = proxmox_host_mapping::Entity::find()
-        .filter(proxmox_host_mapping::Column::HostId.eq(host_id));
-
-    if let Some(tid) = tenant_id {
-        query = query.filter(proxmox_host_mapping::Column::TenantId.eq(tid));
-    }
-
-    let mapping = query
-        .one(db)
+    let mapping = tenant_db
+        .find::<proxmox_host_mapping::Entity>()
+        .filter(proxmox_host_mapping::Column::HostId.eq(host_id))
+        .one(tenant_db.db())
         .await
         .map_err(|e| format!("database error: {e}"))?;
 
@@ -1083,18 +1047,16 @@ async fn handle_get_info(
 /// fields for use in surface action dropdowns (e.g., SSH agent's "Bootstrap via
 /// Discovered Guest").
 async fn handle_list_all_unmatched(
-    db: &DatabaseConnection,
-    tenant_id: Option<Uuid>,
+    tenant_db: &TenantDb,
     request: ProxmoxUnmatchedGuestsRequest,
 ) -> std::result::Result<serde_json::Value, String> {
     use crate::entity::proxmox_host_mapping;
 
-    let tenant_id = tenant_id.ok_or_else(|| "tenant context required".to_string())?;
     let page = request.page.unwrap_or(1).max(1);
     let per_page = request.per_page.unwrap_or(50).clamp(1, 1000).min(200);
 
-    let base_query = proxmox_host_mapping::Entity::find()
-        .filter(proxmox_host_mapping::Column::TenantId.eq(tenant_id))
+    let base_query = tenant_db
+        .find::<proxmox_host_mapping::Entity>()
         .filter(proxmox_host_mapping::Column::HostId.is_null())
         .order_by(
             sea_orm::sea_query::Func::lower(sea_orm::sea_query::Expr::col(
@@ -1106,7 +1068,7 @@ async fn handle_list_all_unmatched(
 
     let total = base_query
         .clone()
-        .count(db)
+        .count(tenant_db.db())
         .await
         .map_err(|e| format!("database error counting unmatched: {e}"))?;
 
@@ -1114,7 +1076,7 @@ async fn handle_list_all_unmatched(
     let mappings = base_query
         .offset(Some(offset))
         .limit(Some(per_page))
-        .all(db)
+        .all(tenant_db.db())
         .await
         .map_err(|e| format!("database error: {e}"))?;
 
@@ -1147,7 +1109,7 @@ async fn handle_list_all_unmatched(
         .collect();
 
     tracing::debug!(
-        %tenant_id,
+        tenant_id = %tenant_db.tenant_id(),
         item_count = items.len(),
         %total,
         "listed all unmatched Proxmox guests"
@@ -1169,12 +1131,11 @@ struct ProxmoxConfigOption {
 }
 
 async fn handle_preload_global_defaults(
-    db: &DatabaseConnection,
-    tenant_id: Option<Uuid>,
+    tenant_db: &TenantDb,
     request: ProxmoxScopeSelectionRequest,
 ) -> std::result::Result<serde_json::Value, String> {
-    let tenant_id = require_tenant_id(tenant_id, "global defaults preload")?;
-    let configs = resolve_scope_plugin_configs(db, tenant_id, &request).await?;
+    let tenant_id = tenant_db.tenant_id();
+    let configs = resolve_scope_plugin_configs(tenant_db.db(), tenant_id, &request).await?;
 
     let Some(selected_config) = configs.first() else {
         return Ok(json!({
@@ -1186,7 +1147,7 @@ async fn handle_preload_global_defaults(
         }));
     };
 
-    let policy = load_global_default(db, tenant_id, selected_config.id)
+    let policy = load_global_default(tenant_db.db(), tenant_id, selected_config.id)
         .await
         .map_err(|e| format!("failed to load global defaults: {e}"))?
         .unwrap_or_else(ProtectionPolicy::do_nothing);
@@ -1205,16 +1166,15 @@ async fn handle_preload_global_defaults(
 }
 
 async fn handle_save_global_defaults(
-    db: &DatabaseConnection,
-    tenant_id: Option<Uuid>,
+    tenant_db: &TenantDb,
     request: ProxmoxGlobalDefaultsSaveRequest,
 ) -> std::result::Result<serde_json::Value, String> {
-    let tenant_id = require_tenant_id(tenant_id, "global defaults save")?;
+    let tenant_id = tenant_db.tenant_id();
     let plugin_config_id = request.plugin_config_id;
     let mode_raw = normalize_required_mode(request.mode.as_str())?;
     let mode = parse_protection_mode(mode_raw)?;
 
-    ensure_proxmox_plugin_config_exists(db, tenant_id, plugin_config_id).await?;
+    ensure_proxmox_plugin_config_exists(tenant_db, plugin_config_id).await?;
 
     let snapshot_timeout =
         validate_optional_positive_timeout(request.snapshot_timeout_seconds, "snapshot timeout")?;
@@ -1231,14 +1191,15 @@ async fn handle_save_global_defaults(
                         .to_string(),
                 );
             }
-            ensure_cached_backup_target_exists(db, plugin_config_id, &target_key).await?;
+            ensure_cached_backup_target_exists(tenant_db.db(), plugin_config_id, &target_key)
+                .await?;
             Some(target_key)
         }
         ProtectionMode::DoNothing | ProtectionMode::Snapshot => None,
     };
 
     upsert_global_default(
-        db,
+        tenant_db.db(),
         tenant_id,
         plugin_config_id,
         &ProtectionPolicy {
@@ -1329,8 +1290,7 @@ async fn handle_save_item_overrides(
     let plugin_config_id = request.plugin_config_id;
     let mode_raw = normalize_required_mode(request.mode.as_str())?;
 
-    ensure_proxmox_plugin_config_exists(tenant_db.db(), tenant_db.tenant_id(), plugin_config_id)
-        .await?;
+    ensure_proxmox_plugin_config_exists(tenant_db, plugin_config_id).await?;
     ensure_software_item_in_tenant(tenant_db, software_item_id).await?;
 
     if mode_raw == "inherit_global" {
@@ -1392,12 +1352,11 @@ async fn handle_save_item_overrides(
 }
 
 async fn handle_load_backup_target_options(
-    db: &DatabaseConnection,
-    tenant_id: Option<Uuid>,
+    tenant_db: &TenantDb,
     request: ProxmoxScopeSelectionRequest,
 ) -> std::result::Result<serde_json::Value, String> {
-    let tenant_id = require_tenant_id(tenant_id, "backup target options")?;
-    let configs = resolve_scope_plugin_configs(db, tenant_id, &request).await?;
+    let configs =
+        resolve_scope_plugin_configs(tenant_db.db(), tenant_db.tenant_id(), &request).await?;
 
     if configs.is_empty() {
         return Ok(json!({
@@ -1410,7 +1369,7 @@ async fn handle_load_backup_target_options(
     // (is_shared, node, storage_id, value, label) — sort keys kept inline.
     let mut options: Vec<(bool, String, String, String, String)> = Vec::new();
     for config in configs {
-        let targets = list_cached_backup_targets(db, config.id)
+        let targets = list_cached_backup_targets(tenant_db.db(), config.id)
             .await
             .map_err(|e| format!("failed to list cached backup targets: {e}"))?;
         for target in targets {
@@ -1555,12 +1514,11 @@ fn validate_scaling_dimensions(
 }
 
 async fn handle_preload_scaling_global_defaults(
-    db: &DatabaseConnection,
-    tenant_id: Option<Uuid>,
+    tenant_db: &TenantDb,
     request: ProxmoxScopeSelectionRequest,
 ) -> std::result::Result<serde_json::Value, String> {
-    let tenant_id = require_tenant_id(tenant_id, "scaling global defaults preload")?;
-    let configs = resolve_scope_plugin_configs(db, tenant_id, &request).await?;
+    let tenant_id = tenant_db.tenant_id();
+    let configs = resolve_scope_plugin_configs(tenant_db.db(), tenant_id, &request).await?;
 
     let Some(selected_config) = configs.first() else {
         return Ok(json!({
@@ -1573,7 +1531,7 @@ async fn handle_preload_scaling_global_defaults(
         }));
     };
 
-    let policy = load_scaling_global_default(db, tenant_id, selected_config.id)
+    let policy = load_scaling_global_default(tenant_db.db(), tenant_id, selected_config.id)
         .await
         .map_err(|e| format!("failed to load scaling global defaults: {e}"))?;
 
@@ -1588,11 +1546,10 @@ async fn handle_preload_scaling_global_defaults(
 }
 
 async fn handle_save_scaling_global_defaults(
-    db: &DatabaseConnection,
-    tenant_id: Option<Uuid>,
+    tenant_db: &TenantDb,
     request: ProxmoxScalingGlobalDefaultsSaveRequest,
 ) -> std::result::Result<serde_json::Value, String> {
-    let tenant_id = require_tenant_id(tenant_id, "scaling global defaults save")?;
+    let tenant_id = tenant_db.tenant_id();
     let plugin_config_id = request.plugin_config_id;
 
     let mode = parse_scaling_mode_global(&request.scaling_mode)?;
@@ -1604,9 +1561,9 @@ async fn handle_save_scaling_global_defaults(
         request.delta_memory_mb,
     )?;
 
-    ensure_proxmox_plugin_config_exists(db, tenant_id, plugin_config_id).await?;
+    ensure_proxmox_plugin_config_exists(tenant_db, plugin_config_id).await?;
 
-    upsert_scaling_global_default(db, tenant_id, plugin_config_id, &policy)
+    upsert_scaling_global_default(tenant_db.db(), tenant_id, plugin_config_id, &policy)
         .await
         .map_err(|e| format!("failed to save scaling global defaults: {e}"))?;
 
@@ -1614,22 +1571,23 @@ async fn handle_save_scaling_global_defaults(
 }
 
 async fn handle_preload_scaling_item_overrides(
-    db: &DatabaseConnection,
-    tenant_id: Option<Uuid>,
+    tenant_db: &TenantDb,
     request: ProxmoxItemOverridePreloadRequest,
 ) -> std::result::Result<serde_json::Value, String> {
-    let tenant_id = require_tenant_id(tenant_id, "scaling item overrides preload")?;
+    let tenant_id = tenant_db.tenant_id();
     let software_item_id = request.software_item_id;
 
     let effective_config_id = match request.plugin_config_id {
         Some(id) => Some(id),
-        None => find_first_scaling_item_override_config(db, tenant_id, software_item_id)
-            .await
-            .map_err(|e| format!("failed to find saved scaling override config: {e}"))?,
+        None => {
+            find_first_scaling_item_override_config(tenant_db.db(), tenant_id, software_item_id)
+                .await
+                .map_err(|e| format!("failed to find saved scaling override config: {e}"))?
+        }
     };
 
     let configs = resolve_scope_plugin_configs(
-        db,
+        tenant_db.db(),
         tenant_id,
         &ProxmoxScopeSelectionRequest {
             plugin_config_id: effective_config_id,
@@ -1650,10 +1608,14 @@ async fn handle_preload_scaling_item_overrides(
         }));
     };
 
-    let item_override =
-        load_scaling_item_override(db, tenant_id, software_item_id, selected_config.id)
-            .await
-            .map_err(|e| format!("failed to load scaling item override: {e}"))?;
+    let item_override = load_scaling_item_override(
+        tenant_db.db(),
+        tenant_id,
+        software_item_id,
+        selected_config.id,
+    )
+    .await
+    .map_err(|e| format!("failed to load scaling item override: {e}"))?;
 
     let (scaling_mode_str, abs_c, abs_m, del_c, del_m) = match item_override {
         None => ("inherit".to_string(), None, None, None, None),
@@ -1678,22 +1640,26 @@ async fn handle_preload_scaling_item_overrides(
 }
 
 async fn handle_save_scaling_item_overrides(
-    db: &DatabaseConnection,
-    tenant_id: Option<Uuid>,
+    tenant_db: &TenantDb,
     request: ProxmoxScalingItemOverridesSaveRequest,
 ) -> std::result::Result<serde_json::Value, String> {
-    let tenant_id = require_tenant_id(tenant_id, "scaling item overrides save")?;
+    let tenant_id = tenant_db.tenant_id();
     let software_item_id = request.software_item_id;
     let plugin_config_id = request.plugin_config_id;
 
-    ensure_proxmox_plugin_config_exists(db, tenant_id, plugin_config_id).await?;
+    ensure_proxmox_plugin_config_exists(tenant_db, plugin_config_id).await?;
 
     let mode_opt = parse_scaling_mode_item(&request.scaling_mode)?;
 
     let Some(mode) = mode_opt else {
-        delete_scaling_item_override(db, tenant_id, software_item_id, plugin_config_id)
-            .await
-            .map_err(|e| format!("failed to clear scaling item override: {e}"))?;
+        delete_scaling_item_override(
+            tenant_db.db(),
+            tenant_id,
+            software_item_id,
+            plugin_config_id,
+        )
+        .await
+        .map_err(|e| format!("failed to clear scaling item override: {e}"))?;
         return Ok(json!({
             "success": true,
             "cleared": true,
@@ -1710,9 +1676,15 @@ async fn handle_save_scaling_item_overrides(
         request.delta_memory_mb,
     )?;
 
-    upsert_scaling_item_override(db, tenant_id, software_item_id, plugin_config_id, &policy)
-        .await
-        .map_err(|e| format!("failed to save scaling item override: {e}"))?;
+    upsert_scaling_item_override(
+        tenant_db.db(),
+        tenant_id,
+        software_item_id,
+        plugin_config_id,
+        &policy,
+    )
+    .await
+    .map_err(|e| format!("failed to save scaling item override: {e}"))?;
 
     Ok(json!({
         "success": true,
@@ -1744,18 +1716,16 @@ async fn ensure_software_item_in_tenant(
 }
 
 async fn ensure_proxmox_plugin_config_exists(
-    db: &DatabaseConnection,
-    tenant_id: Uuid,
+    tenant_db: &TenantDb,
     plugin_config_id: Uuid,
 ) -> std::result::Result<(), String> {
-    let config = uptrakit_shared_db::entity::plugin_config::Entity::find_by_id(plugin_config_id)
-        .filter(uptrakit_shared_db::entity::plugin_config::Column::TenantId.eq(tenant_id))
-        .filter(
-            uptrakit_shared_db::entity::plugin_config::Column::PluginType
-                .eq("infrastructure_proxmox"),
-        )
-        .filter(uptrakit_shared_db::entity::plugin_config::Column::DeactivatedAt.is_null())
-        .one(db)
+    use uptrakit_shared_db::entity::plugin_config;
+
+    let config = tenant_db
+        .find_by_id::<plugin_config::Entity, _>(plugin_config_id)
+        .filter(plugin_config::Column::PluginType.eq("infrastructure_proxmox"))
+        .filter(plugin_config::Column::DeactivatedAt.is_null())
+        .one(tenant_db.db())
         .await
         .map_err(|e| format!("database error validating Proxmox config: {e}"))?;
 
@@ -1932,13 +1902,6 @@ fn parse_protection_mode(value: &str) -> std::result::Result<ProtectionMode, Str
         "backup" => Ok(ProtectionMode::Backup),
         _ => Err(format!("invalid protection mode '{value}'")),
     }
-}
-
-fn require_tenant_id(
-    tenant_id: Option<Uuid>,
-    action_context: &str,
-) -> std::result::Result<Uuid, String> {
-    tenant_id.ok_or_else(|| format!("tenant context required for {action_context}"))
 }
 
 fn validate_optional_positive_timeout(
@@ -2249,10 +2212,10 @@ mod tests {
         let tenant_id = Uuid::now_v7();
         let plugin_config_id = Uuid::now_v7();
         let db = mock_empty_plugin_config_validation_db();
+        let tenant_db = TenantDb::new(db, tenant_id);
 
         let result = handle_save_global_defaults(
-            &db,
-            Some(tenant_id),
+            &tenant_db,
             ProxmoxGlobalDefaultsSaveRequest {
                 plugin_config_id,
                 mode: "do_nothing".to_string(),
@@ -2397,10 +2360,10 @@ mod tests {
                 rows_affected: 1,
             }])
             .into_connection();
+        let tenant_db = TenantDb::new(db.clone(), tenant_id);
 
         handle_save_global_defaults(
-            &db,
-            Some(tenant_id),
+            &tenant_db,
             ProxmoxGlobalDefaultsSaveRequest {
                 plugin_config_id,
                 mode: "snapshot".to_string(),
@@ -2430,10 +2393,10 @@ mod tests {
         let db = MockDatabase::new(DbBackend::MySql)
             .append_query_results([vec![mock_plugin_config_model(tenant_id, plugin_config_id)]])
             .into_connection();
+        let tenant_db = TenantDb::new(db, tenant_id);
 
         let result = handle_save_global_defaults(
-            &db,
-            Some(tenant_id),
+            &tenant_db,
             ProxmoxGlobalDefaultsSaveRequest {
                 plugin_config_id,
                 mode: "snapshot".to_string(),
@@ -2455,10 +2418,10 @@ mod tests {
         let db = MockDatabase::new(DbBackend::MySql)
             .append_query_results([vec![mock_plugin_config_model(tenant_id, plugin_config_id)]])
             .into_connection();
+        let tenant_db = TenantDb::new(db, tenant_id);
 
         let result = handle_save_global_defaults(
-            &db,
-            Some(tenant_id),
+            &tenant_db,
             ProxmoxGlobalDefaultsSaveRequest {
                 plugin_config_id,
                 mode: "backup".to_string(),
@@ -2496,8 +2459,9 @@ mod tests {
                 mock_plugin_config_model(tenant_id, config_id2),
             ]])
             .into_connection();
+        let tenant_db = TenantDb::new(db, tenant_id);
 
-        let result = handle_list(&db, Some(tenant_id), serde_json::json!({}))
+        let result = handle_list(&tenant_db, serde_json::json!({}))
             .await
             .expect("handle_list should succeed without plugin_config_id");
 
@@ -2532,10 +2496,10 @@ mod tests {
             .append_query_results([Vec::<uptrakit_shared_db::entity::host::Model>::new()])
             .append_query_results([[mock_plugin_config_model(tenant_id, config_id)]])
             .into_connection();
+        let tenant_db = TenantDb::new(db, tenant_id);
 
         let result = handle_list(
-            &db,
-            Some(tenant_id),
+            &tenant_db,
             serde_json::json!({ "plugin_config_id": config_id.to_string() }),
         )
         .await
@@ -2565,8 +2529,9 @@ mod tests {
             .append_query_results([Vec::<uptrakit_shared_db::entity::host::Model>::new()])
             .append_query_results([[mock_plugin_config_model(tenant_id, config_id)]])
             .into_connection();
+        let tenant_db = TenantDb::new(db, tenant_id);
 
-        let result = handle_list(&db, Some(tenant_id), serde_json::json!({}))
+        let result = handle_list(&tenant_db, serde_json::json!({}))
             .await
             .expect("handle_list should succeed");
 
@@ -2608,8 +2573,9 @@ mod tests {
             .append_query_results([Vec::<uptrakit_shared_db::entity::host::Model>::new()])
             .append_query_results([[mock_plugin_config_model(tenant_id, config_id)]])
             .into_connection();
+        let tenant_db = TenantDb::new(db, tenant_id);
 
-        let result = handle_list(&db, Some(tenant_id), serde_json::json!({}))
+        let result = handle_list(&tenant_db, serde_json::json!({}))
             .await
             .expect("handle_list should succeed");
 
