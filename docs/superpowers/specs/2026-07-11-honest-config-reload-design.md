@@ -125,8 +125,9 @@ claiming success.
   re-verify before the swap) — health_check performs no third validation. Requires a small new accessor on
   `ControllerServerCertResolver` (e.g. `current() -> Arc<CertifiedKey>`) — it exposes only `resolve()`/`swap()`
   today; named here so the implementer doesn't discover it mid-flight.
-- Boot ordering verified: `identity.server_cert_resolver` (field path corrected during review — it sits directly
-  on `Identity`, not under a `pki` sub-struct) exists before `reload::wire()` runs and `&identity` is already
+- Boot ordering verified: `identity.pki.server_cert_resolver` (re-verified twice during review — `Identity.pki:
+  PkiFields` at `boot/identity/mod.rs:46-48`, `server_cert_resolver` inside `PkiFields` at `:32`; one reviewer
+  wrongly "corrected" this to a flat field) exists before `reload::wire()` runs and `&identity` is already
   passed in — handing the resolver to `TlsSnapshotReloadable::new()` is a signature change only. In
   controller-runtime `Identity` the resolver is a plain `Arc` (always present); `AppState.server_cert_resolver`
   is an `Option` with a `reload_from_config` fallback branch in the manual-renew handler — the controller binary
