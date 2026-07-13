@@ -60,7 +60,7 @@ Convert each silent `else { continue }` into a logged `Err` arm, and fix the blo
 let db_version = match crate::pki::load_ca_version(&db).await {
     Ok(v) => v,
     Err(e) => {
-        tracing::error!(error = ?e, "CA reload: failed to query CA version from database; retrying next interval");
+        tracing::error!(error = ?e, "failed to query CA version from database");
         continue;
     }
 };
@@ -80,7 +80,7 @@ let cert_pem = match tokio::fs::read_to_string(&cert_path).await {
     Ok(pem) => pem,
     Err(e) => {
         tracing::error!(error = %e, path = %cert_path.display(),
-            "server cert renewal: failed to read server.crt; skipping this cycle");
+            "failed to read server certificate for renewal");
         continue;
     }
 };
@@ -90,8 +90,17 @@ let cert_pem = match tokio::fs::read_to_string(&cert_path).await {
   both `logging.md`'s stated default ("`%e` for most errors; `?e` only when Display is insufficient") and the
   loop's own non-`Report` sibling `rcgen::Error` at `:501`/`:510` (which use `%e`). `path = %cert_path.display()`
   matches the crate's field style (`boot/reload.rs:224`).
-- **`tokio::fs::read_to_string(&cert_path).await` is behavior-identical** to the `std::fs` call (same
-  `io::Result<String>`, ENOENT→`Err`, UTF-8 and symlink-follow semantics) but non-blocking on the worker. This is
+- **Message shape matches file siblings:** every existing error message in `tasks.rs` is lowercase
+  `"failed to X [for Y]"` with no task-name prefix and no `"; <consequence>"` clause (`:313` "failed to reload CA
+  state from database", `:501` "failed to parse CA key for server cert renewal"). Both new messages follow that
+  shape; the diagnostic extra (which file) travels in the structured `path` field, not prose.
+- **`tokio::fs::read_to_string(&cert_path).await` is semantically equivalent** to the `std::fs` call (same
+  `io::Result<String>`, ENOENT→`Err`, UTF-8 and symlink-follow semantics) and non-blocking on the async worker —
+  not literally identical: `tokio::fs` dispatches to the blocking pool and introduces an await point — both
+  irrelevant at a once-per-24h single-file read, and the new await is unreachable by any abort path anyway (both
+  loops are registered via `bg.track()`, token-based, never `track_abort()`; shutdown awaits with a timeout and
+  drops — never aborts — the handles, and `token.cancelled()` is only selected at loop top, not concurrently with
+  the body). This is
   the IO-**call** idiom already used at `installation_id.rs:20` / `server.rs:186`. **Add `"fs"` explicitly to
   `controller-runtime`'s `tokio` features** — it currently arrives only via feature-unification (three existing
   `tokio::fs` sites compile today), which is a latent fragility (a future build that drops the unifying crate
@@ -121,13 +130,16 @@ visible**, not a silent crypto failure — and it matches the posture the existi
 already take for the same failure class. The `error!` level introduces **no new alert class**: siblings already
 emit `error!` for this failure mode, so anything scanning for `error!` fires on it today. Escalating to a
 supervisor/health-signal would be a larger change across all arms of both loops — out of scope here.
+**Residual risk, named:** a persistently-failing instance keeps serving on a CA the rest of the fleet may have
+rotated away from until an operator acts on the log — log-and-continue surfaces the condition but nothing
+escalates it; the health-signal escalation is deferred, not implied unnecessary.
 
 ## Tests
 
-**No new unit test.** This change adds **no new branching logic**: it converts two silent `else { continue }` into
-logged `Err(e) => { error!; continue }` (pure observability) plus one blocking→async IO-mode swap
-(behavior-preserving). Per the repo testing decision-table, tracing output is not unit-tested and `tokio::fs` is
-an upstream dep whose behavior we do not test. Both loops are `tokio::spawn`'d infinite polling loops that are
+**No new unit test.** The `match` conversion does add two `Err` arms — but both new branches are
+**non-testable-by-policy**: one is pure observability (a `tracing::error!` line — tracing output is not
+unit-tested per the repo testing decision-table) and the other is an upstream IO-mode swap (`tokio::fs` is an
+upstream dep whose behavior we do not test). Both loops are `tokio::spawn`'d infinite polling loops that are
 impractical to unit-test without refactoring the whole task. The only extractable "unit" would be the *rejected*
 edge-trigger state — do **not** add it. Do **not** add `start_paused` (no tokio-time assertion is introduced).
 
@@ -135,6 +147,8 @@ edge-trigger state — do **not** add it. Do **not** add `start_paused` (no toki
 
 - `cargo check --all-features` / `cargo clippy --all-targets --all-features` clean — the added `.await` compiles;
   no blocking `std::fs::` remains in `tasks.rs` (grep confirms zero after the change).
+- `cargo check --no-default-features --features db-sqlite` — the minimal build is the combination that directly
+  exercises the `"fs"` manifest change (confirms the feature declaration stands on its own, not on unification).
 - Grep `tasks.rs` for `let Ok(` + `else {` and `std::fs::` → both patterns gone from these two loops; every
   poll-loop error arm now logs.
 - Manual: confirm the two `error!` lines carry the error and (for the cert read) the path.
