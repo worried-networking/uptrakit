@@ -14,7 +14,8 @@ documented Per-Section Watch Pattern ("inject receivers at construction time"). 
 
 - **NATS:** `NatsReloadable::apply()` connects a real new `async_nats::Client`, `tx.send` fails (zero
   subscribers — `receiver()` has no call sites), the new client is dropped/disconnected, `health_check()` borrows
-  the OLD client and passes, and the coordinator emits `SYSTEM_CONFIG_RELOAD_APPLIED`. The live consumers
+  whatever `tx` currently holds — the **freshly-connected new client, orphaned from every real consumer** (alive,
+  flushes fine) — and passes, and the coordinator emits `SYSTEM_CONFIG_RELOAD_APPLIED`. The live consumers
   (`NotificationService`, `EventBroadcaster`, `BatchProgressBroadcaster`) hold a static clone captured once at
   boot. An operator migrating NATS servers sees "applied" while delivery silently stays on (or loses) the old
   server — and every unrelated file reload touching `[nats]` reconnects-and-discards a client (the leak).
@@ -75,8 +76,16 @@ never keep a republish-to-nobody path.
   nats (the known DbBump gap above), so mark the gate `// unreachable until DbBump wires nats sections` rather
   than calling it defense in depth. Same triage-preemption logic is why the addr gates below deliberately get
   **no** triage entry.
+- Reject message wording: "nats.url change requires reexec" — matching the `db.url` precedent and the actual
+  triage behavior (a file-sourced edit reexecs); "restart" is reserved for the listener-addr case below, which is
+  deliberately NOT reexec-able.
+- Feature-gate clarity: "register unconditionally" removes only the **runtime** `if let (Some(nats), Some(url))`
+  gate; the `#[cfg(feature = "nats")]` block around the push stays (with the feature compiled out there is no
+  type to register — additive-only, unchanged).
 - This matches `docs/development/nats-integration.md`'s stated policy (URL hot-reload intentionally unsupported) —
-  the code finally agrees with the doc. The `#[expect(dead_code)]` on the module goes away with the dead halves.
+  the code finally agrees with the doc. Explicit line item: remove the `#[expect(dead_code)]` on `mod nats` in
+  `reload/mod.rs` — its reason string ("unused until Task 14") is already stale (the reloadable is conditionally
+  wired today), and after this change nothing dead remains.
 
 **Rejected:** wiring the receiver into `NatsTransport` and live-swapping clients in
 `NotificationService`/broadcasters — three consumers captured statically at boot with no swap seam; building one
@@ -96,21 +105,48 @@ claiming success.
   material beyond the leaf, the same apply also swaps the client verifier (`DynamicClientVerifier::swap`, also
   existing). No `tls.*` field may stay in the republish-to-nobody bucket. Note: cert/key-path hot-reload is
   **file-source only** — no DB route exists for these fields; document it that way.
-- **Phase split (contrarian-driven):** `validate()` does the full load — parse cert, parse key, and verify the
-  key matches the leaf (building the `CertifiedKey` surfaces this) — and stashes the prepared `CertifiedKey`.
-  Today's metadata-only probe would let a mid-rotation write race (cert written, key not yet) through to apply,
-  swapping in a mismatched pair that breaks every handshake while fingerprint health-check still passes.
-  Read-only file loads in `validate()` match the crate's existing validate behavior (metadata probes, DB-URL
-  probes); "pure" in the contract means no state mutation. `apply()` is then a pure `ArcSwap` swap of the
-  already-validated object, stashing the pre-apply `CertifiedKey` in memory; `revert()` restores it via the same
-  in-process store — never re-reads disk (revert makes no external calls; an `ArcSwap` swap is state
-  restoration, not I/O).
+- **Phase split (contrarian-driven; stash removed on review):** `validate()` does the full load — parse cert,
+  parse key, verify the key matches the leaf (building the `CertifiedKey` surfaces this) — **and discards the
+  result**. Today's metadata-only probe would let a mid-rotation write race (cert written, key not yet) through
+  to apply, swapping in a mismatched pair that breaks every handshake while fingerprint health-check still
+  passes; a full parse in validate rejects that before ANY subsystem's apply runs (the coordinator's
+  all-validate-then-all-apply atomicity is why the full check belongs here, not only in apply). Read-only file
+  loads in `validate()` match the crate's existing validate behavior (metadata probes, bind probes); "no state
+  mutation" in the trait contract holds — which is also why validate does NOT stash the prepared `CertifiedKey`
+  for apply: the trait gives no ordering guarantee that the next call on `&self` is the matching `apply()`, no
+  sibling reloadable carries validate→apply state, and a stale stash consumed by a mismatched apply is a new bug
+  class. Instead `apply()` **re-loads and re-verifies** the pair itself (cheap double disk read) and only then
+  swaps — a mid-gap file change fails apply cleanly BEFORE any mutation (honest ApplyFailed, no broken
+  handshakes). `apply()` stashes the pre-apply `CertifiedKey` in memory (that stash is apply-internal state for
+  revert — the documented Reloadable snapshot pattern every sibling uses); `revert()` restores it via the same
+  in-process store — never re-reads disk (an `ArcSwap` swap is state restoration, not I/O).
 - `health_check()` asserts the resolver now serves the new cert (leaf fingerprint compare) — this proves **the
-  swap took**, not pair validity; validity is guaranteed at validate time. Requires a small new accessor on
+  swap took**, not pair validity; validity is already guaranteed twice upstream (validate's full parse, apply's
+  re-verify before the swap) — health_check performs no third validation. Requires a small new accessor on
   `ControllerServerCertResolver` (e.g. `current() -> Arc<CertifiedKey>`) — it exposes only `resolve()`/`swap()`
   today; named here so the implementer doesn't discover it mid-flight.
-- Boot ordering verified: `identity.pki.server_cert_resolver` exists before `reload::wire()` runs and `&identity`
-  is already passed in — handing the resolver to `TlsSnapshotReloadable::new()` is a signature change only.
+- Boot ordering verified: `identity.server_cert_resolver` (field path corrected during review — it sits directly
+  on `Identity`, not under a `pki` sub-struct) exists before `reload::wire()` runs and `&identity` is already
+  passed in — handing the resolver to `TlsSnapshotReloadable::new()` is a signature change only. In
+  controller-runtime `Identity` the resolver is a plain `Arc` (always present); `AppState.server_cert_resolver`
+  is an `Option` with a `reload_from_config` fallback branch in the manual-renew handler — the controller binary
+  always wires `Some`, so that fallback is for other embedders; assert (do not assume) this when wiring.
+- **Owner split, external vs managed certs (contrarian Critical — resolved in scope):** `tls.cert_path`/`key_path`
+  exist only in external-cert deployments (`has_external_tls_cert`), where the auto-renew task is already gated
+  OFF (`boot/serve.rs` `if !ca.has_external_tls_cert`) — but the manual-renew API
+  (`routes/server_cert.rs::renew_server_certificate`) is NOT gated: it mints an **internal-CA** cert into
+  `pki_path/server.{crt,key}` and unconditionally swaps the resolver, silently replacing the operator's external
+  cert with one from a different trust chain (and a later file reload flips back). Same illusory-success class
+  this spec exists to kill, adjacent code — **in scope**: the manual-renew handler rejects when
+  `has_external_tls_cert` ("server certificate is externally managed; rotate the files and reload instead").
+  Placement (contrarian pass-2): the guard is an early return in the **outer** `renew_server_certificate`, NOT
+  inside `_inner` — the handler funnels every `_inner` error through a catch-all that hardcodes
+  `INTERNAL_SERVER_ERROR` + `AuditOutcome::Failed`; only an outer early-return yields the intended 409-class
+  response and a semantically-correct rejection audit outcome.
+  Consequence: in external-cert mode the reload path is the resolver's **single writer by construction**
+  (auto-renew gated off, manual renew now rejected), which is what makes `revert()`'s in-memory restore
+  unconditionally correct — no concurrent writer can be clobbered. State this ownership invariant in the
+  reloadable's doc comment; a compare-and-swap guard in revert is NOT added (no second writer exists to race).
 
 ### HTTPS/PKI listener addresses — validate-reject only; delete drain scaffolding
 
@@ -155,15 +191,20 @@ new failure mode (child fails to bind → controller down instead of failed relo
    `nats.url` case; regression: a reload touching `[nats]` no longer opens any NATS connection (assert via a
    mock/unreachable URL — apply must not attempt a connect).
 2. **TLS:** end-to-end-ish integration: build the resolver + reloadable, apply a delta with a fresh self-signed
-   cert pair, assert `resolver.resolve()` serves the new leaf (fingerprint compare); revert restores the old one.
+   cert pair, assert `resolver.current()` returns the new leaf (fingerprint compare — `resolve()` takes a
+   `ClientHello` that cannot be constructed outside a live handshake; `current()` is the new accessor this spec
+   adds); revert restores the old one.
    This is the wiring test class whose absence let the no-ops ship (per-reloadable unit tests all passed while
    nothing was connected).
 3. **Listeners:** validate() rejects addr change with the "requires full restart" message (live for file-sourced
    reloads — no triage preemption for addr fields, by design); draining-flag and probe tests deleted with the
    scaffolding.
-4. **Coordinator behavior unchanged** for genuinely reloadable sections (existing coordinator tests keep
+4. **Manual-renew guard:** `renew_server_certificate` returns the rejection (409-class error) when
+   `has_external_tls_cert`; unchanged behavior when managed (TestApp harness). This endpoint change requires
+   `./scripts/regen-api.sh` (new error response documented in OpenAPI) — commit the regenerated spec + client.
+5. **Coordinator behavior unchanged** for genuinely reloadable sections (existing coordinator tests keep
    passing).
-5. No `start_paused` on anything touching real sockets/certs; no tokio-time APIs added (snapshot rule).
+6. No `start_paused` on anything touching real sockets/certs; no tokio-time APIs added (snapshot rule).
 
 ## Documentation deliverables
 
@@ -188,6 +229,14 @@ new failure mode (child fails to bind → controller down instead of failed relo
   need appears.
 - Making `ReloadSource::DbBump` flow through the reexec hook (validate-reject covers the honesty requirement; a
   DB-driven auto-restart is a product decision, not a bug fix).
+- **HTTP-layer false-success on the settings PUT routes — named, accepted, deferred.** Two distinct gaps this
+  spec deliberately does not conflate: (1) the coordinator DbBump path not emitting nats/network/tls deltas —
+  fine to leave (no delta ⇒ no false APPLIED audit event); (2) `PUT /api/v1/global-settings/{nats,network}`
+  returning 200 OK for a persisted setting with **zero runtime effect and no restart signal** — the original
+  bug's class relocated to the HTTP boundary, live for the most common operator entry point. This spec's honesty
+  guarantee is therefore **file-source-scoped**; the HTTP-layer fix (reject with "requires restart" or a
+  `restart_required: true` response field on those routes) touches web-api routes + OpenAPI regen + frontend and
+  is a separate follow-up spec — it must not silently fall off the backlog.
 - `RuntimeConfigChannels` removal (verify-and-note only).
 - `PluginCatalogReloadable` V1 no-op (documented design).
 - The scheduler/other-binary reload paths (audit scoped this to the controller).
