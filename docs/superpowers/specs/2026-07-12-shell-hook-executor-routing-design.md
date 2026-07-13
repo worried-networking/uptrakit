@@ -27,10 +27,23 @@ hooks are arbitrary unprivileged user scripts and must stay unprivileged (a scri
 governed by the plugin sudo allowlist). So the sudo angle is a **non-issue** here; the single real defect is
 wrong-host execution. This spec fixes exactly that and changes nothing about privilege.
 
+**Local-host invariance (the common case) is airtight, not just documented.** In production the local runtime is
+`SudoAwareCommandExecutor(LocalCommandExecutor)`, so routing through the executor now runs `apply_sudo(spec)` on every
+hook where the old free-function path did not. But `apply_sudo` cannot add sudo here for **two** independent reasons:
+(1) the production hook spec has `privileged: false`, so `apply_sudo` short-circuits at the `!spec.privileged` guard
+(`sudo.rs:165`) and returns `spec.clone()` before any `match`; and (2) even the harder `privileged: true` case forwards
+Shell specs unchanged via the `CommandMode::Shell { .. }` arm (`sudo.rs:195`, emitting only a `tracing::warn!`). That
+harder branch is already covered by the existing `privileged_shell_mode_passes_through_unchanged` test (`sudo.rs:428`).
+So the "no sudo prefix on Shell specs" property is a **tested** invariant of `SudoAwareCommandExecutor` (production
+relies on the even-earlier guard), not a documentation assertion — re-testing it in the shell plugin would only
+duplicate that coverage (and test another component's contract), so this spec does not.
+
 ## Approach
 
-Route the hook command through the injected executor, exactly as the systemd hook does. The fix is fully contained in
-`crates/plugins/hooks/shell/src/plugin.rs` — no new types, no config change, no change to `uptrakit_command`.
+Route the hook command through the injected executor, exactly as the systemd hook does. The **production** fix is fully
+contained in `crates/plugins/hooks/shell/src/plugin.rs` — no new production types, no config change, no change to
+`uptrakit_command`. (The regression test adds one shared **test-only** double to `infrastructure-core::testing`; see
+Tests.)
 
 ### 1. Execute via `self.executor.execute(&CommandSpec::shell_with(cmd, shell), output_tx)`
 
@@ -47,11 +60,23 @@ semantics, shell selection, and `UnsupportedShell` error are all preserved. The 
 execution site: the injected executor decides local-vs-SSH. There is no second shell-wrapping path to drift against.
 
 Convert the current free function `run_shell_command(command, shell, output_tx)` into a `&self` method (so it can reach
-`self.executor`). Only the command-invocation line changes; the exit-code handling stays **byte-for-byte identical**:
+`self.executor`). The exit-code handling stays **byte-for-byte identical**; the changes are the invocation line plus a
+small **import diff** (do not undersell it):
+
+- Add `use uptrakit_command::CommandSpec;` — `plugin.rs:4` currently imports **only** `CommandExecutor` from
+  `uptrakit_command`, and the new body names `CommandSpec::shell_with`.
+- `rootcause::report!` and `uptrakit_command::CommandError` stay **fully-qualified** exactly as today (`plugin.rs:64,67`)
+  — no `use rootcause::prelude::*;` is added, matching the current file's style.
+- The method takes **no** `#[tracing::instrument]` — it keeps the current free fn's inline `tracing::debug!` only, so
+  instrumentation is unchanged.
 
 ```rust
 /// Run a shell hook command through the host runtime's injected [`CommandExecutor`],
 /// so it targets the correct host (local or SSH), not the agent's own machine.
+///
+/// Deliberately uses the non-interactive [`CommandExecutor::execute`]; shell hooks
+/// get no PTY/stdin (stdin is `/dev/null`, as before this change). Interactive/PTY
+/// hooks are tracked separately in `2026-07-11-interactive-pty-lifecycle-design.md`.
 ///
 /// Returns `Ok(exit_code)` for any command that ran, including non-zero exits — the
 /// executor surfaces a non-zero exit as `CommandError::CommandFailed(code)`, which we
@@ -76,9 +101,11 @@ async fn run_shell_command(
             if let uptrakit_command::CommandError::CommandFailed(code) = e.current_context() {
                 return Ok(*code);
             }
-            Err(report!(uptrakit_plugin_infrastructure_core::PluginError::InstallFailed(format!(
-                "shell hook command failed: {e}"
-            ))))
+            Err(rootcause::report!(
+                uptrakit_plugin_infrastructure_core::PluginError::InstallFailed(format!(
+                    "shell hook command failed: {e}"
+                ))
+            ))
         }
     }
 }
@@ -129,23 +156,49 @@ today **and** after the fix (local shell still runs), so they cannot catch a reg
 bug is invisible to them because on a local runtime both paths spawn locally. The regression test must prove the command
 is **routed through the injected executor**.
 
-Add a **recording executor double** in the shell plugin's test module — a `CommandExecutor` impl that captures each
-`CommandSpec` passed to `execute()` into a `parking_lot::Mutex<Vec<CommandSpec>>` and returns a **configurable
-`crate::Result<CommandOutput>`** (so a test can make it yield `Ok(CommandOutput { exit_code: 0, .. })`,
+The regression test needs a double that **records each `CommandSpec`** and returns a **configurable
+`uptrakit_command::Result<CommandOutput>`** (so a test can make it yield `Ok(CommandOutput { exit_code: 0, .. })`,
 `Err(CommandError::CommandFailed(1))`, or `Err(CommandError::UnsupportedShell(..))`). Matching the real contract — where
 non-zero exit is an `Err(CommandFailed)`, not an `Ok` — is essential; a double that returns `Ok(exit_code: 1)` would not
-exercise the extraction path. (The Docker plugin's `MockCommandExecutor`, `releases/docker/src/tests.rs:24-53`, is the
-shape to copy, extended to record the spec and to return a caller-supplied result.) `parking_lot` is a workspace dep;
-`#[async_trait]` per the trait.
+exercise the extraction path.
+
+**Do not hand-roll a private mock.** The canonical home for shared `CommandExecutor` doubles is
+`crates/plugins/infrastructure/core/src/testing.rs` (feature `testing`), which already ships `FixedOutputExecutor` and
+`RoutedOutputExecutor` and is consumed by other plugin crates via a `features = ["testing"]` dev-dependency. Neither
+existing double records the spec **or** returns a caller-supplied `Err`, so extend that module rather than reinventing a
+fourth private mock (the Docker plugin's `MockCommandExecutor` at `releases/docker/src/tests.rs:24-53` is exactly the
+duplication to stop propagating). Add a new `RecordingExecutor` there:
+
+- Captures every `CommandSpec` passed to `execute`/`execute_quiet` into a `parking_lot::Mutex<Vec<CommandSpec>>` (both
+  methods record, and both return the same configured outcome — a uniform reusable double, not a poison method), exposed
+  via a `recorded() -> Vec<CommandSpec>` accessor (`CommandSpec` derives `Clone`, so `.clone()`-into-`Vec` is trivial;
+  `#[async_trait]` per the trait). **`parking_lot` is not yet a dependency of `infrastructure-core`** — the `testing`
+  feature is empty (`testing = []`) and the module's current deps (`async-trait`, `tokio`, `uptrakit-command`,
+  `rootcause`) are all non-optional, so add `parking_lot = { workspace = true }` to
+  `crates/plugins/infrastructure/core/Cargo.toml`'s `[dependencies]` (non-optional, mirroring those) before `testing.rs`
+  can name `parking_lot::Mutex`.
+- Returns a caller-supplied result. A constructor cloning a fixed `Result` is awkward (`CommandError` is not `Clone`, so
+  a stored `Result<CommandOutput>` cannot be — `CommandOutput` itself is `Clone`), so store a boxed result-producing
+  closure
+  (`Box<dyn Fn() -> uptrakit_command::Result<CommandOutput> + Send + Sync>`) and expose constructors such as
+  `RecordingExecutor::ok(exit_code)`, `::failed(code)` (→ `Err(CommandError::CommandFailed(code))`), and
+  `::erroring(|| Err(...))` for the transport-error cases. Unlike the sibling doubles (`FixedOutputExecutor`
+  /`RoutedOutputExecutor`), whose ctors return `Arc<dyn CommandExecutor>`, these constructors return `Arc<Self>` — the
+  test needs a typed handle to call the inherent `recorded()` after injection, and `.recorded()` is unreachable through
+  an `Arc<dyn CommandExecutor>`. The `Arc<Self>` coerces to `Arc<dyn CommandExecutor>` at the injection site
+  (`StandardHostRuntime::new`), so it still satisfies the executor slot.
+
+The shell plugin's test module then consumes it via a new dev-dependency
+`uptrakit-plugin-infrastructure-core = { workspace = true, features = ["testing"] }` — benefiting every hook/plugin
+crate that later needs spec-recording, not just this one.
 
 Tests:
 
 1. **Routing regression (the HIGH):** run a pre-hook through the recording double (configured `Ok(exit_code: 0)`);
    assert exactly one captured spec, and that its `mode` is `CommandMode::Shell { command, shell }` carrying the
-   configured command + `config.shell`. Proves the command went through `executor.execute`, not a local spawn. _(If
-   `CommandMode`/its fields are not `pub` for cross-crate assertion, assert via the spec's `Debug`/`resolve()` output —
-   resolve to `(shell, ["-c", wrapped])` and assert the wrapped string contains the command; implementer picks whichever
-   is public.)_
+   configured command + `config.shell`. `CommandMode` and `CommandSpec.mode` are `pub`, so a cross-crate
+   `matches!(spec.mode, CommandMode::Shell { .. })` (plus field equality) asserts directly — no `Debug`/`resolve()`
+   round-trip needed. Proves the command went through `executor.execute`, not a local spawn.
 2. **Post-hook routes too:** same capture assertion via `execute_post_hook`.
 3. **Non-zero exit is extracted, not hard-failed (the regression guard):** double returns
    `Err(CommandError::CommandFailed(1))`. Assert `execute_pre_hook` returns `Ok(PreUpdateHookResult)` with
@@ -166,15 +219,27 @@ No `start_paused` — no `tokio::time` API is used.
 
 ## Documentation deliverables
 
-- **Doc comment** on the reworked `run_shell_command` method (shown in §1, including the `# Errors` section required by
-  coding-standards for a public-ish fallible fn) plus a one-line note on the struct, stating the hook runs through the
-  injected `CommandExecutor` so it targets the correct host (local or SSH) — replacing the stale `plugin.rs:47-51`
-  comment that references the bypassed `run_command_with_shell` utility.
-- **`docs/development/plugin-guidelines.md`** — the **`## Update Lifecycle Plugins`** section already exists (line 163;
-  line 189 already documents the post-hook non-fatal contract). Add one invariant line there: _"Lifecycle hook plugins
-  MUST execute commands via the injected `CommandExecutor` (`self.executor.execute(&CommandSpec…)`), never by spawning a
-  process locally — the executor is the only component that routes to the correct host (local or SSH)."_ This is a
-  required deliverable, not conditional.
+- **Doc comment** on the reworked `run_shell_command` method (shown in §1). The `# Errors` section is not strictly
+  mandated — the method is private to the crate, and the coding-standards `# Errors` rule is a _should_ for public /
+  shared-crate APIs — but it is included as consistent with the surrounding practice. Also add a one-line note on the
+  struct stating the hook runs through the injected `CommandExecutor` so it targets the correct host (local or SSH) —
+  replacing the stale `plugin.rs:47-51` comment that references the bypassed `run_command_with_shell` utility.
+- **`docs/development/plugin-guidelines.md`** — the `## Update Lifecycle Plugins` section already exists (it documents
+  the pre-hook `proceed`/`abort` and post-hook non-fatal contracts). Add one invariant line, matching that section's
+  plain `--` code-span bullet style (no bold lead-in): `Lifecycle hook plugins execute commands via the injected
+  CommandExecutor (self.executor.execute(&CommandSpec…)) -- never by spawning a process locally, since the executor is
+  the only component that routes to the correct host (local or SSH).` Required deliverable, not conditional.
+- **`docs/development/update-hooks.md`** — the built-in-hook reference that the plugin-guidelines section links to. Add
+  the same routing invariant here (this is the canonical home for `hook_shell`/`hook_systemd` behavior), so the rule
+  lives with the hook docs and not only in the general guidelines.
+- **`crates/plugins/infrastructure/core/src/testing.rs`** — the new `RecordingExecutor` (Tests §) is a test-only shared
+  helper; document it with a doc-comment matching `FixedOutputExecutor`/`RoutedOutputExecutor`. No doc-catalogue entry
+  (test infrastructure, not a public runtime API).
+- **`agent-core/src/config_test.rs`** — add a one-line code comment on the unimplemented `_ =>` arm that today swallows
+  the `PreUpdateHook`/`PostUpdateHook` config-test kinds, e.g. `// PreUpdateHook/PostUpdateHook intentionally
+  unimplemented — wiring these up requires a real routing executor, never a Noop (see shell-hook routing spec).` This
+  puts the forward-looking warning (below) where the next author will actually see it, not only in a spec they may never
+  read.
 - **No API / wire / OpenAPI / config change.** `ShellHookConfig` is untouched; no endpoint or wire payload involved; no
   regen.
 - **No ADR** — bugfix restoring an existing abstraction (the executor boundary), using the in-repo systemd-hook
