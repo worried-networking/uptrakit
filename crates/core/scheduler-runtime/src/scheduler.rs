@@ -93,6 +93,27 @@ impl Drop for LiveTaskGuard {
     }
 }
 
+/// One heartbeat beat: snapshot the live set once, refresh those claims, log
+/// the outcome. Never propagates a write error — a transient failure is
+/// retried on the next beat (see `HEARTBEAT_INTERVAL` budget). Extracted so the
+/// heartbeat loop in `run()` and the beat-failure test drive the SAME code.
+async fn run_heartbeat_beat(
+    db: &DatabaseConnection,
+    controller_id: Uuid,
+    live_tasks: &Arc<parking_lot::Mutex<HashSet<Uuid>>>,
+    now: time::OffsetDateTime,
+) {
+    // Snapshot the live set ONCE per beat; guard dropped at the `.collect()`
+    // semicolon — no await under lock (see refresh_claims's doc comment for
+    // why a task finishing mid-snapshot is a benign race).
+    let live_ids: Vec<Uuid> = live_tasks.lock().iter().copied().collect();
+    match claim::refresh_claims(db, controller_id, &live_ids, now).await {
+        Ok(n) if n > 0 => tracing::debug!(refreshed = n, "heartbeat refreshed task claims"),
+        Ok(_) => {}
+        Err(e) => tracing::warn!(error = %e, "heartbeat failed to refresh claims"),
+    }
+}
+
 /// Central DB-backed task scheduler.
 ///
 /// Polls the `scheduled_tasks` table for due tasks, claims them via optimistic
@@ -229,33 +250,7 @@ impl Scheduler {
                         _ = abort.cancelled() => return,
                         _ = drain.cancelled() => return,
                         _ = beat.tick() => {
-                            // Snapshot the live set ONCE per beat — do not
-                            // re-read it after the snapshot within this tick
-                            // (see refresh_claims's doc comment for why a
-                            // task finishing mid-snapshot is a benign race,
-                            // not a correctness gap).
-                            let live_ids: Vec<Uuid> = live_tasks.lock().iter().copied().collect();
-                            // guard dropped at the semicolon — no await under lock
-                            match claim::refresh_claims(
-                                &db,
-                                controller_id,
-                                &live_ids,
-                                time::OffsetDateTime::now_utc(),
-                            )
-                            .await
-                            {
-                                Ok(n) if n > 0 => {
-                                    tracing::debug!(refreshed = n, "heartbeat refreshed task claims");
-                                }
-                                Ok(_) => {}
-                                Err(e) => {
-                                    // Never propagate/exit on a write failure — transient
-                                    // SQLITE_BUSY is exactly when the next tick should
-                                    // retry; the 600s staleness window absorbs 8 missed
-                                    // beats (see HEARTBEAT_INTERVAL budget above).
-                                    tracing::warn!(error = %e, "heartbeat failed to refresh claims");
-                                }
-                            }
+                            run_heartbeat_beat(&db, controller_id, &live_tasks, time::OffsetDateTime::now_utc()).await;
                         }
                     }
                 }
@@ -286,37 +281,50 @@ impl Scheduler {
                     return;
                 }
                 _ = interval.tick() => {
-                    // A *graceful* beat-task death is worse than a crash: the
-                    // instance would keep claiming tasks with no heartbeat
-                    // behind them while peers wipe its live claims at 600s.
-                    // Gated on neither shutdown token being cancelled yet —
-                    // an ungated check would race a clean shutdown (the beat
-                    // legitimately exits via its own token arms during
-                    // drain/abort) and log a spurious fatal ERROR on every
-                    // graceful stop. Under `panic = "abort"` a panic in the
-                    // beat kills the whole instance anyway, so this check
-                    // only guards the non-panic exit paths that shouldn't
-                    // exist today but must not be silent if a future
-                    // refactor introduces one (e.g. an errant early `return`
-                    // added to the beat loop). `is_finished()` is a cheap
-                    // sync call, checked once per poll tick.
-                    if !drain.is_cancelled() && !abort.is_cancelled() && heartbeat.is_finished() {
-                        tracing::error!(
-                            controller_id = %self.config.controller_id,
-                            "heartbeat task exited unexpectedly; releasing all claims and stopping scheduler loop"
-                        );
-                        if let Err(e) = claim::release_all_claims(
-                            &self.db,
-                            self.config.controller_id,
-                        ).await {
-                            tracing::warn!(error = %e, "failed to release claims after heartbeat death");
-                        }
+                    // A *graceful* beat-task death is worse than a crash: see
+                    // `release_and_stop_if_heartbeat_dead`'s doc comment for
+                    // the full rationale (gating, panic="abort" interaction).
+                    if self.release_and_stop_if_heartbeat_dead(&heartbeat, &drain, &abort).await {
                         break;
                     }
                     self.poll_cycle(&drain, &abort).await;
                 }
             }
         }
+    }
+
+    /// If the heartbeat task died without a shutdown token being cancelled,
+    /// release all of this controller's claims and signal the poll loop to
+    /// stop. Returns `true` when the loop must `break`.
+    ///
+    /// A *graceful* beat-task death is worse than a crash: the instance would
+    /// keep claiming tasks with no heartbeat behind them while peers wipe its
+    /// live claims at 600s. Gated on neither shutdown token being cancelled
+    /// yet — an ungated check would race a clean shutdown (the beat
+    /// legitimately exits via its own token arms during drain/abort) and log
+    /// a spurious fatal ERROR on every graceful stop. Under `panic = "abort"`
+    /// a panic in the beat kills the whole instance anyway, so this check
+    /// only guards the non-panic exit paths that shouldn't exist today but
+    /// must not be silent if a future refactor introduces one (e.g. an
+    /// errant early `return` added to the beat loop). `is_finished()` is a
+    /// cheap sync call, checked once per poll tick.
+    async fn release_and_stop_if_heartbeat_dead(
+        &self,
+        heartbeat: &tokio::task::JoinHandle<()>,
+        drain: &CancellationToken,
+        abort: &CancellationToken,
+    ) -> bool {
+        if !drain.is_cancelled() && !abort.is_cancelled() && heartbeat.is_finished() {
+            tracing::error!(
+                controller_id = %self.config.controller_id,
+                "heartbeat task exited unexpectedly; releasing all claims and stopping scheduler loop"
+            );
+            if let Err(e) = claim::release_all_claims(&self.db, self.config.controller_id).await {
+                tracing::warn!(error = %e, "failed to release claims after heartbeat death");
+            }
+            return true;
+        }
+        false
     }
 
     /// Single poll cycle: recover stale claims, find due tasks, execute them in parallel.
@@ -1352,126 +1360,65 @@ mod tests {
         .insert(&db)
         .await
         .expect("insert task");
-
-        // Drive a real write failure by claiming the task directly (bypassing
-        // the scheduler) with a *different* controller id and inserting the
-        // task id into a `live_tasks` set under `controller_id`. The
-        // heartbeat's `refresh_claims` call filters on
-        // `LockedBy.eq(controller_id)`, which will not match the foreign
-        // claim, so `refresh_claims` returns `Ok(0)` — not a write error.
-        // A real transport/lock failure (e.g. SQLITE_BUSY) is not
-        // deterministically reproducible in-process; exercising the `Ok(0)`
-        // no-refresh branch alongside the warn-and-continue path covers the
-        // same "must not exit the loop" contract without a flaky forced-IO
-        // trick. We assert the heartbeat loop is still alive and beating
-        // afterward by re-pointing `live_tasks` at a task this controller
-        // *does* own and observing a refresh.
-        let other_controller = Uuid::now_v7();
-        claim::try_claim(&db, task.id, other_controller)
+        claim::try_claim(&db, task.id, controller_id)
             .await
-            .expect("claim by other controller");
+            .expect("claim task under this controller");
+        let claimed = scheduled_task::Entity::find_by_id(task.id)
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("task exists");
+        let locked_at_at_claim = claimed.locked_at.expect("task should be locked");
 
         let live_tasks: Arc<parking_lot::Mutex<HashSet<Uuid>>> =
             Arc::new(parking_lot::Mutex::new(HashSet::from([task.id])));
 
-        let drain = CancellationToken::new();
-        let abort = CancellationToken::new();
-        let heartbeat_interval = Duration::from_millis(30);
+        // Drive a GENUINE `Err` out of `refresh_claims`, deterministically,
+        // without flaky forced-IO: a second in-memory connection with no
+        // migrations run has no `scheduled_task` table at all, so the
+        // `update_many` inside `refresh_claims` fails with "no such table".
+        let bad_db = sea_orm::Database::connect("sqlite::memory:")
+            .await
+            .expect("connect bad_db");
 
-        let heartbeat_handle = {
-            let db = db.clone();
-            let live_tasks = Arc::clone(&live_tasks);
-            let drain = drain.clone();
-            let abort = abort.clone();
-            tokio::spawn(async move {
-                let mut beat = tokio::time::interval(heartbeat_interval);
-                beat.tick().await;
-                loop {
-                    tokio::select! {
-                        biased;
-                        _ = abort.cancelled() => return,
-                        _ = drain.cancelled() => return,
-                        _ = beat.tick() => {
-                            let live_ids: Vec<Uuid> = live_tasks.lock().iter().copied().collect();
-                            match claim::refresh_claims(
-                                &db,
-                                controller_id,
-                                &live_ids,
-                                time::OffsetDateTime::now_utc(),
-                            )
-                            .await
-                            {
-                                Ok(_) => {}
-                                Err(e) => {
-                                    tracing::warn!(error = %e, "heartbeat failed to refresh claims");
-                                }
-                            }
-                        }
-                    }
-                }
-            })
-        };
+        // Call the REAL extracted beat body against the broken connection.
+        // This must return normally (not panic) — the `Err` arm inside
+        // `run_heartbeat_beat` is required to swallow the error, never
+        // propagate it. A future edit that swaps the `Err` arm for `?` would
+        // fail to compile here, since `run_heartbeat_beat` returns `()` and
+        // this call site does not `.await?` it — see the note below.
+        run_heartbeat_beat(&bad_db, controller_id, &live_tasks, now).await;
 
-        // Let a few beats elapse against the foreign claim (all Ok(0), no
-        // panic, loop keeps running).
-        tokio::time::sleep(Duration::from_millis(120)).await;
+        // Prove the beat body still works on the REAL db after a prior
+        // failure: this is the "loop continues after a write failure"
+        // property under test. `locked_at` must have advanced strictly past
+        // the claim-time value — pass an explicit later timestamp so the
+        // assertion cannot pass merely because the claim and the beat raced
+        // within the same clock tick.
+        let beat_now = locked_at_at_claim + time::Duration::seconds(1);
+        run_heartbeat_beat(&db, controller_id, &live_tasks, beat_now).await;
+        let after = scheduled_task::Entity::find_by_id(task.id)
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("task exists");
+        let locked_at = after.locked_at.expect("task should still be locked");
         assert!(
-            !heartbeat_handle.is_finished(),
-            "heartbeat loop must keep running through no-op refreshes"
+            locked_at > locked_at_at_claim,
+            "heartbeat beat against the real db must still refresh locked_at \
+             after a prior beat's write failure was swallowed"
         );
 
-        // Now hand the heartbeat a task this controller actually owns and
-        // confirm it still beats.
-        let claimed_task = scheduled_task::ActiveModel {
-            id: ActiveValue::Set(Uuid::now_v7()),
-            tenant_id: ActiveValue::Set(tenant.id),
-            task_type: ActiveValue::Set(ScheduledTaskType::StaleLeaseCleanup),
-            interval_seconds: ActiveValue::Set(300),
-            jitter_seconds: ActiveValue::Set(30),
-            enabled: ActiveValue::Set(true),
-            task_config: ActiveValue::Set(None),
-            last_run_at: ActiveValue::Set(None),
-            next_run_at: ActiveValue::Set(now - time::Duration::minutes(1)),
-            locked_by: ActiveValue::Set(None),
-            locked_at: ActiveValue::Set(None),
-            last_error: ActiveValue::Set(None),
-            run_count: ActiveValue::Set(0),
-            created_at: ActiveValue::Set(now),
-            updated_at: ActiveValue::Set(now),
-        }
-        .insert(&db)
-        .await
-        .expect("insert second task");
-        claim::try_claim(&db, claimed_task.id, controller_id)
-            .await
-            .expect("claim by this controller");
-        live_tasks.lock().insert(claimed_task.id);
-
-        let mut refreshed = false;
-        for _ in 0..200 {
-            tokio::time::sleep(Duration::from_millis(5)).await;
-            let current = scheduled_task::Entity::find_by_id(claimed_task.id)
-                .one(&db)
-                .await
-                .expect("query")
-                .expect("task exists");
-            if let Some(locked_at) = current.locked_at
-                && locked_at > now
-            {
-                refreshed = true;
-                break;
-            }
-        }
-        assert!(
-            refreshed,
-            "heartbeat loop must still beat successfully after prior no-op refreshes"
-        );
-
-        abort.cancel();
-        tokio::time::timeout(Duration::from_secs(5), heartbeat_handle)
-            .await
-            .expect("heartbeat should exit within 5s")
-            .expect("heartbeat task panicked");
+        // Note on coverage of the warn-vs-error log level: this repo has no
+        // tracing-capture test precedent (`tracing-test` is a workspace dep
+        // but currently unused; surface-proxy references it only as a
+        // possible future option in a comment), so the log line itself is
+        // not asserted. The load-bearing regression — a propagating `Err`
+        // arm — is instead caught structurally: `run_heartbeat_beat` returns
+        // `()`, so replacing its `Err` arm with `?` fails to compile at
+        // `run()`'s call site (which does not propagate anything from the
+        // heartbeat task), and the genuine-`Err`-swallow assertion above
+        // proves the arm does not propagate today.
     }
 
     #[tokio::test]
@@ -1506,9 +1453,17 @@ mod tests {
             .await
             .expect("claim task directly to simulate a live claim under this controller");
 
+        let config = SchedulerConfig {
+            poll_interval: DEFAULT_POLL_INTERVAL,
+            controller_id,
+            task_execution_timeout: TASK_EXECUTION_TIMEOUT,
+            heartbeat_interval: HEARTBEAT_INTERVAL,
+        };
+        let scheduler = Scheduler::new(db.clone(), config, Box::new(|| false));
+
         // Poll loop must exit and release claims once it observes a
         // heartbeat that finished without either shutdown token being
-        // cancelled. Exercised directly against the loop body's condition
+        // cancelled. Exercised directly against the REAL extracted method
         // via a real, deliberately-finished JoinHandle standing in for a
         // dead heartbeat task, since `run()` does not expose the live
         // `heartbeat` handle for external replacement.
@@ -1527,15 +1482,14 @@ mod tests {
         assert!(!abort.is_cancelled());
         assert!(heartbeat.is_finished());
 
-        // Mirror the exact fatal-path body from `run()`'s tick arm.
-        if !drain.is_cancelled() && !abort.is_cancelled() && heartbeat.is_finished() {
-            let released = claim::release_all_claims(&db, controller_id)
-                .await
-                .expect("release_all_claims should succeed");
-            assert_eq!(released, 1, "the live claim should be released");
-        } else {
-            panic!("fatal-path condition should have been true in this scenario");
-        }
+        // Call the REAL production method — not a copy of its condition.
+        let must_stop = scheduler
+            .release_and_stop_if_heartbeat_dead(&heartbeat, &drain, &abort)
+            .await;
+        assert!(
+            must_stop,
+            "a finished heartbeat with no shutdown token cancelled must be fatal"
+        );
 
         let after = scheduled_task::Entity::find_by_id(task.id)
             .one(&db)
@@ -1560,9 +1514,11 @@ mod tests {
         while !heartbeat2.is_finished() {
             tokio::task::yield_now().await;
         }
-        let fatal = !drain2.is_cancelled() && !abort2.is_cancelled() && heartbeat2.is_finished();
+        let must_stop2 = scheduler
+            .release_and_stop_if_heartbeat_dead(&heartbeat2, &drain2, &abort2)
+            .await;
         assert!(
-            !fatal,
+            !must_stop2,
             "a finished heartbeat during a cancelled drain must not be treated as fatal"
         );
         let still_locked = scheduled_task::Entity::find_by_id(task.id)
