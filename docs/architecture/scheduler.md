@@ -12,7 +12,10 @@ controller instances are deployed.
 Key properties:
 
 - **HA-safe**: only one instance executes a given task at a time (optimistic lock via `locked_by`/`locked_at` columns).
-- **Stale recovery**: tasks locked longer than 10 minutes are automatically released.
+- **Heartbeat-kept-alive claims**: a dedicated heartbeat task refreshes `locked_at` every 60 seconds for
+  in-progress executions, so a claim only goes stale when its owning instance stops heartbeating (crash
+  or partition), never merely because the task is still running.
+- **Stale recovery**: claims with no heartbeat for 10 minutes are automatically released.
 - **Interval+jitter**: each task runs on a fixed interval (seconds) with configurable random jitter to spread load.
 - **REST-manageable**: administrators can view, update schedules, and trigger immediate execution via the REST API.
 
@@ -129,15 +132,28 @@ by migration `m20260312_000002_discover_software_task`.
 
 ## HA Claim Mechanism
 
-The claim pattern mirrors `MqttLeaseCoordinator` (see [Cross-Controller Communication](../development/cross-controller-comm.md)):
+The claim is a row-level lease on `scheduled_tasks`, kept alive by a heartbeat rather than
+released only at task completion:
 
 1. **Poll**: every 15 seconds, each controller polls for due tasks (`next_run_at <= now`, `enabled = true`, `locked_by IS NULL`).
 1. **Claim**: `UPDATE SET locked_by = $me, locked_at = $now WHERE id = $id AND locked_by IS NULL` -- succeeds only if `rows_affected == 1`.
-1. **Execute**: run the task's executor.
+1. **Execute**: run the task's executor. While the task is executing, its id sits in an in-process
+   "live set"; a dedicated heartbeat task refreshes `locked_at = now` for every live claim owned by
+   this controller every 60 seconds (`HEARTBEAT_INTERVAL`), independently of poll cycles.
 1. **Release**: clear `locked_by`/`locked_at`, update `last_run_at`, `run_count`, and optionally `last_error`.
-   Compute `next_run_at = now + interval_seconds + rand(0..=jitter_seconds)`.
-1. **Stale recovery**: on each poll cycle, tasks with `locked_at < now - 10 min` are released (the controller may have crashed).
-1. **Shutdown**: all claims held by the stopping controller are released.
+   Compute `next_run_at = now + interval_seconds + rand(0..=jitter_seconds)`. The release is
+   **ownership-scoped**: it filters on `locked_by = $me`, so if this claim was already reclaimed by
+   another instance (stale recovery below), the release matches zero rows and becomes a no-op — the
+   finishing instance logs a warning and skips writing run metadata, which belongs to the takeover
+   owner instead.
+1. **Stale recovery**: on each poll cycle, tasks with `locked_at < now - 10 min` are released. Because
+   a live task's `locked_at` is refreshed every 60 seconds, this 10-minute window is not a task
+   runtime budget — a task can run for hours without its claim going stale. It only fires when the
+   owning controller has stopped heartbeating altogether (crashed, partitioned, or its heartbeat task
+   itself died), i.e. the claim is truly abandoned.
+1. **Shutdown**: all claims held by the stopping controller are released. The same release path runs
+   if the heartbeat task ever exits unexpectedly (see below) — the scheduler stops claiming new work
+   rather than continue holding leases with no heartbeat behind them.
 
 Manual trigger via the REST API sets `next_run_at = now`, making the task immediately eligible on the next poll cycle.
 
@@ -153,9 +169,11 @@ const TASK_EXECUTION_TIMEOUT: Duration = Duration::from_secs(2 * 60 * 60); // 2 
 
 If a task runs longer than this limit, the timeout fires and the task receives
 `SchedulerError::TaskTimedOut`. The claim is then released with the timeout recorded so that
-the next poll cycle can re-claim and retry the task. This prevents a runaway task from holding
-its claim indefinitely, which would otherwise block future executions until the 10-minute stale
-recovery fires.
+the next poll cycle can re-claim and retry the task. Because the heartbeat keeps a live task's
+claim fresh (see [HA Claim Mechanism](#ha-claim-mechanism)), the 10-minute stale-claim window is
+not what bounds a runaway task — without this explicit timeout, a hung-but-still-executing task
+would keep heartbeating and hold its claim indefinitely. The timeout is the actual backstop that
+prevents that.
 
 The timeout is also exposed as `SchedulerConfig.task_execution_timeout` (`Duration`, default 2 hours)
 so that integration tests and unusual deployments can override it without recompiling.
@@ -238,8 +256,10 @@ Calls `cleanup_expired()` on all DB-backed auth flow stores: `OidcFlowStore`, `A
 
 ### StaleLeaseCleanupExecutor
 
-Creates a `MqttLeaseCoordinator` and calls `cleanup_stale_leases()` to release MQTT client leases that have been held without heartbeat for longer
-than the stale threshold.
+No-op: the `mqtt_leases` table and its coordinator were removed when MQTT client management moved
+to the shared-surface runtime (migration `m20260329_000001`). The executor is retained only so that
+pre-existing `scheduled_tasks` rows with `task_type = 'stale_lease_cleanup'` continue to run without
+error; it performs no work.
 
 ### CaRotationCheckExecutor (internal)
 

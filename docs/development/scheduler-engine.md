@@ -135,8 +135,10 @@ Cleans expired authentication flow state from the database. With the `oidc` feat
 
 ### StaleLeaseCleanupExecutor
 
-Releases stale MQTT client leases by running a direct DELETE query against the `mqtt_leases` table
-for entries whose `last_heartbeat` exceeds the stale threshold.
+No-op: the `mqtt_leases` table it used to clean up was dropped when MQTT client management moved to
+the shared-surface runtime (migration `m20260329_000001`). The executor is retained only so that
+pre-existing `scheduled_tasks` rows with `task_type = 'stale_lease_cleanup'` continue to run without
+error; it performs no work.
 
 ### FetchReleasesExecutor
 
