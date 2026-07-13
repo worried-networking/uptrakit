@@ -12,7 +12,7 @@ merged into one CLI-layer editing pass (shared `try_parse_from` test harness).
 
 | # | Audit | File:line | Hazard |
 | - | ----- | --------- | ------ |
-| 1 | L1122 | `tail.rs:69` | The SSE `tail` loop `print!`s each chunk and **never flushes** — interactive PTY prompts (no trailing newline) stay buffered, so the user sees a silent hang instead of `Continue? [y/N]:`; piped output is block-buffered (breaks `\| tee`); `print!` also **panics on a broken pipe** (`\| head`). |
+| 1 | L1122 | `tail.rs:69` | The SSE `tail` loop `print!`s each chunk and **never flushes** — interactive PTY prompts (no trailing newline) stay buffered, so the user sees a silent hang instead of `Continue? [y/N]:`; piped output is block-buffered (breaks `\| tee`); `print!` also **panics on a broken pipe** (`\| head` — Rust ignores SIGPIPE, so where a coreutil dies silently to the signal, `print!` aborts loudly). |
 | 2 | L1138 | `services.rs:184` | `update-freeze`'s `--enable`/`--disable` are a mutually-exclusive but **not-required** clap group; the dispatch **discards `disable`** and sends `enabled = enable`, so `uptrakit services update-freeze <id>` with **no flag** silently sends `enabled: false` — **unfreezing updates from an argument-less invocation**. |
 
 ## Verified current reality (byte-checked, 2026-07-12)
@@ -44,9 +44,17 @@ use std::io::Write; // module-level import
 // Output arm:
 Some(Ok(UpdateOutputEvent::Output(line))) => {
     let mut out = std::io::stdout().lock();
-    if out.write_all(line.text.as_bytes()).and_then(|_| out.flush()).is_err() {
-        // stdout closed (broken pipe, e.g. `| head`) — stop gracefully, don't panic
-        break TailResult { status: "detached".to_string(), error: None };
+    if let Err(e) = out.write_all(line.text.as_bytes()).and_then(|_| out.flush()) {
+        // stdout closed — stop gracefully, don't panic. A broken pipe is a NORMAL
+        // workflow (`uptrakit tail … | head -5`: head exits, the next write EPIPEs);
+        // coreutils die silently to SIGPIPE there, so narrating it to stderr would be
+        // spurious noise — break silently. Any OTHER write error is narrated per this
+        // file's exit-narration convention (`tail.rs:60/72/82/89`); stderr is a
+        // separate FD, so it still reaches the operator when stdout is closed.
+        if e.kind() != std::io::ErrorKind::BrokenPipe {
+            eprintln!("Stream error: {e}");
+        }
+        break TailResult { status: "disconnected".to_string(), error: None };
     }
 }
 ```
@@ -54,10 +62,20 @@ Some(Ok(UpdateOutputEvent::Output(line))) => {
 - **Flush per event** removes the **client-side** buffering barrier: no-newline chunks no longer sit in the
   local stdout buffer, and piped output (`| tee`) is no longer block-buffered. Per-event flush cost is negligible
   — it is dominated by the per-event SSE transport work (server serialize + network + JSON deserialize) already
-  paid for each `Output` event, so the granularity adds nothing measurable even for a chatty update.
-- **Graceful broken-pipe**: `write_all`/`flush` return `io::Result`; on error (closed reader) we break instead of
-  letting `print!` panic. The lock is acquired inside the arm, used synchronously, and dropped at arm end — no
-  `.await` is held while locked, so no deadlock with the other `select!` arms.
+  paid for each `Output` event, so the granularity adds nothing measurable even for a chatty update. **The
+  explicit `flush()` is also the EPIPE-detection point** — `StdoutLock` line-buffers, so `write_all` of a
+  no-newline chunk can return `Ok` having only buffered; the closed pipe then surfaces at the `flush()`. Do not
+  "simplify" to a bare `write_all` — that would swallow the broken pipe for exactly the no-newline chunks this
+  fix targets. (Whichever call fails, `std` maps the underlying `EPIPE` to `ErrorKind::BrokenPipe`, so the kind
+  test is stable across both the write and flush paths.)
+- **Graceful broken-pipe, EPIPE-aware**: `write_all`/`flush` return `io::Result`; on error we break instead of
+  letting `print!` panic. `ErrorKind::BrokenPipe` breaks **silently**: `… | head -5` is a normal workflow (head
+  exits, the next write EPIPEs), and the coreutils precedent (`head`/`grep`/`cat`) is silent SIGPIPE death — a
+  stderr message there is spurious noise. Any **other** write error is `eprintln!`-ed, matching the file's
+  exit-narration convention (every other `break TailResult` arm reports to stderr, `tail.rs:60/72/82/89`).
+  Capturing via `if let Err(e)` (not a bare `.is_err()`) makes the kind test + narration possible. The lock is
+  acquired inside the arm, used synchronously, and dropped at arm end — no `.await` is held while locked, so no
+  deadlock with the other `select!` arms.
 - **Scope of the interactive-prompt win (do not over-claim):** the client flush is **necessary** for a live
   no-newline prompt (`Continue? [y/N]:`) but **sufficient only if the upstream path streams per chunk**. The
   standard agent executor reads command output via `BufReader` + `AsyncBufReadExt` (`command.rs:104-105`) —
@@ -68,11 +86,14 @@ Some(Ok(UpdateOutputEvent::Output(line))) => {
   and removing client-side buffering. Plan step: trace the interactive `Output`-event producer (PTY read → wire
   `Output` → SSE) and confirm whether it streams per chunk; if it line-buffers, note it as a dependency of the
   interactive-PTY work, and keep the live-prompt claim scoped accordingly.
-- **`status` on broken-pipe:** `TailResult::exit_code()` maps `completed→0`, `failed→1`, **everything else → 2**
-  (`tail.rs:30-35`), so reusing `"detached"` yields exit 2 — identical to any non-completion, and identical to a
-  distinct `"disconnected"` would. The status string is cosmetic here (on a broken pipe stdout is closed, so the
-  final status can't even be printed), so `"detached"` is acceptable; a distinct `"disconnected"` is optional if
-  a JSON consumer ever distinguishes the cause. No exit-code change either way.
+- **`status` on broken-pipe — `"disconnected"`, not `"detached"`:** the file reserves `"detached"` for the
+  user-intent ctrl-c arm; `"disconnected"` already exists for the stream-gone family (`tail.rs:91`, the
+  stream-ended-without-completion arm) and is the semantically closer bucket for an I/O failure. Zero cost: all
+  `TailResult` consumers (`update.rs`, `history.rs`, `batch_update.rs`) only call `.exit_code()`, whose map
+  (`completed→0`, `failed→1`, `_→2`, `tail.rs:30-35`) sends both strings to exit 2, and the status is never
+  JSON-serialized. **Exit 2 under `pipefail` matches precedent, stated honestly:** a SIGPIPE-killed coreutil in
+  the same position exits 141 — also non-zero — so `tail | head` under `set -o pipefail` behaves no worse than
+  `cat bigfile | head` does today; scripts wanting a clean `| head` mask the producer's status either way.
 
 ### Fix 2 — `update-freeze`: required arg-group + explicit `enabled`
 
@@ -113,9 +134,13 @@ shell-completion golden/snapshot file the required group would invalidate.
   - `--disable` → parses; yields `disable=true` (disabled path).
   - both `--enable --disable` → `.is_err()` (mutual exclusion preserved).
   This asserts the arg-group contract — the actual new logic.
-- **tail flush:** no unit test — the flush + broken-pipe branch is stdout **I/O-mode behavior** coupled to the
-  real `stdout()`, not new branching logic worth a stdout-injection refactor (rejected per the repo testing
-  decision-table; matches how prior I/O-mode swaps were handled). No `start_paused` (no tokio-time API added).
+- **tail flush:** no unit test. The arm now **does** contain a branch (the `ErrorKind::BrokenPipe` test), stated
+  honestly — but the branch condition is `std`-supplied error classification reachable only via a real closed-pipe
+  FD: exercising it deterministically needs either a forked-reader process test (out of scope) or a stdout-injection
+  refactor (rejected as over-engineering), and unit-testing the `.kind()` comparison in isolation would test `std`'s
+  error mapping (banned by the repo decision-table). A pure-helper seam (extract `(narrate, status)` classification
+  into a testable fn) exists and is **declined** at this size — a two-arm one-liner. No `start_paused` (no
+  tokio-time API added).
 
 ## Deliverables
 
@@ -126,8 +151,10 @@ shell-completion golden/snapshot file the required group would invalidate.
 
 **Commit granularity:** land as **two separate commits** (one per fix — the two mechanisms are unrelated and
 independently revertable), per `docs/development/commit-messages.md` ("small, granular commits, focused on a
-single thing"): `fix(cli): flush tail output per event and handle broken pipe` and `fix(cli): require an explicit
---enable/--disable on update-freeze`. One spec, two commits.
+single thing"): `fix(cli): flush tail output per event and handle broken pipe` and `fix(cli)!: require an explicit
+--enable/--disable on update-freeze` — the second carries the `!` breaking-change marker
+(`docs/development/commit-messages.md`), consistent with the Compatibility note below: the no-flag invocation was
+previously accepted and is now rejected. One spec, two commits.
 
 **Compatibility note (for the changelog/release notes):** the update-freeze fix is a deliberate **behavior
 break** — `uptrakit services update-freeze <id>` with no flag was previously *accepted* (silently sending
@@ -150,6 +177,10 @@ silent unfreeze); any automation relying on the old no-flag-means-disable behavi
 - **Model update-freeze as a required `--state <enable|disable>` ValueEnum** — rejected: a **breaking CLI-surface
   change** (existing `--enable`/`--disable` invocations break) for no benefit over making the existing group
   required.
+- **Default no-flag to `--enable` (fail-safe direction)** — rejected: non-breaking and fail-safe, but it keeps an
+  implicit meaning for the argument-less invocation — the bug class being fixed is "no-flag silently does
+  *something*"; silently freezing is safer than silently unfreezing yet still surprises. Fail-loud makes the
+  operator's intent explicit; the one-time script fix is trivial (`--disable`).
 - **A line-buffered writer wrapper / global stdout reconfiguration for tail** — rejected: a per-event flush is
   sufficient at human-scale tail throughput; a wrapper is unneeded machinery.
 - **Refactor the tail loop to inject a fake stdout for testability** — rejected: over-engineering to unit-test
