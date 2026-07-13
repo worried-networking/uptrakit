@@ -32,7 +32,10 @@ warning nobody reads.
    `cargo package --workspace` … the package must verify") is **dead**: `ci/release-plz/cargo-wrapper.sh` injects
    `--no-verify` into every release-plz `cargo package --workspace` invocation (wrapper body, "Inject --no-verify so
    cargo only emits the .crate tarball without building"), and `release-plz.toml` sets `semver_check = false`
-   workspace-wide. No release-plz code path runs `build.rs` in a `frontend/build/`-less worktree.
+   workspace-wide. No release-plz code path runs `build.rs` in a `frontend/build/`-less worktree. `cargo publish` /
+   docs.rs are likewise no release-profile compile path: the workspace root sets `publish = ["uptrakit-private"]`
+   (a named fake registry — cargo refuses crates.io; `release-plz.toml` separately sets `publish = false`), so no
+   crate is ever published or built on docs.rs.
 2. **`cargo chef cook` cannot fire the gate.** cargo-chef's skeleton replaces build scripts with **dummy** `build.rs`
    files (cargo-chef `src/skeleton/mod.rs`: "create dummy `lib.rs`, `main.rs` and `build.rs` files where needed";
    dummy build-script artifacts are removed after cook, `mod.rs` ~276, so the real script re-runs at the real build).
@@ -93,9 +96,14 @@ Design points:
   ambiguity must fail loud, never stub.
 - **No `rerun-if-env-changed=PROFILE`.** Profile selection changes `OUT_DIR`/fingerprint; cargo re-runs the script
   per profile already. The existing `cargo::rerun-if-changed=build` stays.
-- **`panic!` is the sanctioned failure mechanism in this build script**, but `[workspace.lints.clippy]` sets
-  `panic = "deny"` and the crate inherits workspace lints, so the existing attribute on `main()` **must be widened**
-  (firm step, not conditional):
+- **`panic!` is the sanctioned failure mechanism in this build script** — cargo wraps a build-script panic in
+  `error: failed to run custom build command for uptrakit-frontend` and prints the panic message above the backtrace
+  note, so the actionable text still reaches the operator; it also matches how this script already fails (every
+  `.expect()` call). `eprintln!` + `std::process::exit(1)` would print marginally cleaner but diverge from the file's
+  established failure idiom for no behavioural gain. Accepted cost: widening the `#[expect]` suppresses `clippy::panic`
+  for the whole of `main()`, not just the gate — acceptable in a 60-line build script where panicking is the uniform
+  error policy. `[workspace.lints.clippy]` sets `panic = "deny"` and the crate inherits workspace lints, so the
+  existing attribute on `main()` **must be widened** (firm step, not conditional):
 
   ```rust
   #[expect(
@@ -166,8 +174,10 @@ build?`) that cargo already provides as `PROFILE`. It also kept the false in-cod
     can supply a placeholder `frontend/build/index.html` by hand — the same degraded-UI outcome as today's silent
     stub, but as a **deliberate, visible act** instead of an invisible default. Document the command; do not weaken
     the gate for it. The placeholder is **transient and must never be committed** — `frontend/build/` stays
-    gitignored; a committed placeholder would satisfy the gate on every future build for everyone, silently
-    reinstating the exact hazard this spec kills.
+    gitignored; a committed placeholder (`git add -f`, or a future `.gitignore` edit) would satisfy the gate on every
+    future build for everyone, silently reinstating the exact hazard this spec kills. Today that rule is documented
+    discipline, not enforced; a one-line CI guard asserting `git ls-files frontend/build/` is empty would enforce it —
+    named here as **deferred optional hardening** (see Optional cleanup), not a deliverable of this fix.
   - **Convention made explicit.** The gate encodes "release profile ⇒ shippable ⇒ real assets required". Anyone
     adding a future release-profile CI job that compiles the controller graph (e.g. `--release` coverage or a
     smoke-test job) must supply `frontend/build/` first, or the job fails at `uptrakit-frontend`'s build script. The
@@ -192,6 +202,10 @@ build?`) that cargo already provides as `PROFILE`. It also kept the false in-cod
   (`release-plz.yml` ~157) is vestigial: under the `--no-verify` wrapper no compile happens in that job, and even a
   wrapper regression would package-verify in **debug** profile (lenient). Removing it saves ~1-2 min per release-PR
   run but touches release infrastructure beyond this finding — deferred.
+- A CI guard asserting `git ls-files frontend/build/` returns nothing would turn the break-glass "never commit the
+  placeholder" rule from documented discipline into an enforced invariant. Unlike the rejected
+  `ci/verify_require_frontend.sh` (which protected forgettable per-site wiring), this guards a repo state no build
+  exercises. Deferred: the hazard requires a deliberate `git add -f` or `.gitignore` edit, both visible in review.
 - The stale feature name `embed-frontend` (actual: `embedded-frontend`) is **repo-wide doc drift**, not just the
   AGENTS.md note this spec fixes: `grep -rn embed-frontend` hits ~14 canonical docs (`ARCHITECTURE.md`,
   `frontend/AGENTS.md`, `docs/development/{quality-gates,setup,feature-flags,coding-standards,docker,…}.md`,
@@ -202,11 +216,15 @@ build?`) that cargo already provides as `PROFILE`. It also kept the false in-cod
 
 - `cargo fmt --all`; `cargo clippy --all-targets --all-features` (with `frontend/build/` present) **and**
   `cargo clippy --all-targets --no-default-features --features db-sqlite` **without** `frontend/build/` — the latter
-  proves the debug stub path still compiles clean.
+  proves the debug stub path still compiles clean. Note: clippy always compiles in **debug** profile, so neither
+  clippy run can reach the panic branch — clippy validates the copy path and the stub path respectively; only manual
+  steps 1-2 below exercise the fail-closed gate.
 - `markdownlint --config .markdownlint.json` on the edited docs.
 - Manual verification at implementation (build.rs is not compiled into any test target; a unit test is impossible,
   not skipped):
-  1. `rm -rf frontend/build && cargo build --release -p uptrakit-frontend` → **fails** with the gate message;
+  1. `rm -rf frontend/build && cargo build --release -p uptrakit-frontend` → **fails** with the gate message (fires
+     even on a warm `target/`: the deleted `frontend/build` dir is itself the `cargo::rerun-if-changed=build` path,
+     so its disappearance forces the script to re-run);
   2. same command with `--profile release-fast` → **fails** (inherited release, probed);
   3. `cargo check -p uptrakit-frontend` (debug, no build dir) → succeeds with the stub warning;
   4. after `npm run build`: `cargo build --release -p uptrakit-frontend` → succeeds, `$OUT_DIR/embed/` holds real
