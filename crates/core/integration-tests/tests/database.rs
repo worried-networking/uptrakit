@@ -5,6 +5,7 @@ mod database {
     mod audit_logs;
     mod auth_flow;
     mod batch_actions;
+    mod denylist;
     mod enrollment_tokens;
     mod error_cases;
     mod health;

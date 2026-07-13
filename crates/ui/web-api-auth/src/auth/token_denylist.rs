@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use sea_orm::{ActiveModelTrait, ActiveValue, DatabaseConnection, EntityTrait};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue, DatabaseConnection, EntityTrait, ExprTrait,
+    sea_query::{Expr, OnConflict},
+};
 use tokio::sync::RwLock;
 use uptrakit_shared_db::entity::{revoked_token_jti, revoked_token_user};
 use uuid::Uuid;
@@ -192,8 +195,72 @@ impl TokenDenylist {
                 iat_cutoff: ActiveValue::Set(iat_cutoff),
                 purge_after: ActiveValue::Set(purge_after),
             };
-            if let Err(e) = model.insert(db).await {
-                tracing::warn!(%user_id, error = %e, "failed to persist user revocation to DB");
+            // Monotonic upsert: on PK conflict, advance the row ONLY when the incoming
+            // cutoff is newer than the stored one. Guards against a stale-cache instance
+            // regressing the revocation horizon (single-column PK => OnConflict::column).
+            // exec_without_returning() gives the raw rows-affected count directly — needed
+            // to detect a WHERE-guard-suppressed no-op, which plain exec()'s InsertResult
+            // (last_insert_id only) cannot distinguish on this Set-supplied PK.
+            let result = revoked_token_user::Entity::insert(model)
+                .on_conflict(
+                    OnConflict::column(revoked_token_user::Column::UserId)
+                        .update_columns([
+                            revoked_token_user::Column::IatCutoff,
+                            revoked_token_user::Column::PurgeAfter,
+                        ])
+                        .action_and_where(
+                            Expr::col(revoked_token_user::Column::IatCutoff).lt(iat_cutoff),
+                        )
+                        .to_owned(),
+                )
+                .exec_without_returning(db)
+                .await;
+            match result {
+                Ok(0) => {
+                    // The WHERE guard suppressed the write: another instance already holds a
+                    // HIGHER cutoff in the DB than the one we just tried to write (this
+                    // instance's own cache was stale). Reconcile our in-memory entry UPWARD
+                    // to the stored value so this instance stops under-revoking in the gap
+                    // — do not wait for load_from_db at restart or a NATS TokenRevoked catch-up.
+                    match revoked_token_user::Entity::find_by_id(user_id)
+                        .one(db)
+                        .await
+                    {
+                        Ok(Some(row)) => {
+                            let mut inner = self.inner.write().await;
+                            let entry =
+                                inner.user_entries.entry(user_id).or_insert(UserDenyEntry {
+                                    iat_cutoff: 0,
+                                    purge_after: 0,
+                                });
+                            if row.iat_cutoff > entry.iat_cutoff {
+                                *entry = UserDenyEntry {
+                                    iat_cutoff: row.iat_cutoff,
+                                    purge_after: row.purge_after,
+                                };
+                            }
+                        }
+                        Ok(None) => {
+                            // Should not happen (we just conflicted on this PK) — leave the
+                            // cache as-is; not fatal, next load_from_db/NATS event corrects it.
+                            tracing::warn!(
+                                %user_id,
+                                "denylist upsert no-op but row not found on re-read"
+                            );
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                %user_id,
+                                error = %e,
+                                "failed to re-read denylist row after suppressed upsert"
+                            );
+                        }
+                    }
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::warn!(%user_id, error = %e, "failed to persist user revocation to DB");
+                }
             }
         }
     }
@@ -615,5 +682,70 @@ mod tests {
                 .is_none(),
             "deny_token_remote must not write to DB"
         );
+    }
+
+    #[tokio::test]
+    async fn deny_user_db_write_is_monotonic() {
+        let db = setup_db().await;
+        let user_id = Uuid::new_v4();
+
+        // Instance A persists a high cutoff.
+        let denylist_a = TokenDenylist::new_with_db(db.clone());
+        denylist_a.deny_user(user_id, 1_000, 1_900).await;
+
+        // Instance B has a stale in-memory view (fresh instance, entry defaults to 0)
+        // and tries to write a LOWER cutoff. The DB row must not regress.
+        let denylist_b = TokenDenylist::new_with_db(db.clone());
+        denylist_b.deny_user(user_id, 500, 1_400).await;
+
+        let row = revoked_token_user::Entity::find_by_id(user_id)
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row exists");
+        assert_eq!(
+            row.iat_cutoff, 1_000,
+            "lower cutoff must not overwrite higher"
+        );
+        assert_eq!(row.purge_after, 1_900);
+
+        // A legitimately higher cutoff DOES advance the row.
+        denylist_b.deny_user(user_id, 2_000, 2_900).await;
+        let row = revoked_token_user::Entity::find_by_id(user_id)
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row exists");
+        assert_eq!(row.iat_cutoff, 2_000);
+        assert_eq!(row.purge_after, 2_900);
+    }
+
+    /// Regression test for the losing-instance cache-divergence fix (spec-directed): when
+    /// instance B's suppressed upsert no-ops against a higher DB cutoff set by instance A,
+    /// B's own in-memory entry must be reconciled UPWARD to the DB value — not left at the
+    /// lower value B tried to write. Otherwise B would under-revoke in the gap until restart
+    /// or a NATS TokenRevoked catch-up.
+    #[tokio::test]
+    async fn deny_user_reconciles_cache_upward_on_suppressed_upsert() {
+        let db = setup_db().await;
+        let user_id = Uuid::new_v4();
+
+        // Instance A persists a high cutoff.
+        let denylist_a = TokenDenylist::new_with_db(db.clone());
+        denylist_a.deny_user(user_id, 1_000, 1_900).await;
+
+        // Instance B has a stale (default-zero) in-memory entry and writes a LOWER cutoff.
+        // Its own gate passes locally (500 > 0), so its cache is provisionally set to 500,
+        // but the DB upsert is suppressed by the WHERE guard (DB stays at 1000).
+        let denylist_b = TokenDenylist::new_with_db(db.clone());
+        denylist_b.deny_user(user_id, 500, 1_400).await;
+
+        // B's in-memory entry must now reflect the DB's higher cutoff (1000), not the 500
+        // it tried to write — i.e. B must not accept a token with iat in [500, 1000).
+        assert!(
+            denylist_b.is_denied("unrelated-jti", &user_id, 750).await,
+            "losing instance's cache must be reconciled upward to the DB cutoff"
+        );
+        assert!(!denylist_b.is_denied("unrelated-jti", &user_id, 1_500).await);
     }
 }

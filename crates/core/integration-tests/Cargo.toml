@@ -42,6 +42,7 @@ const-oid = { workspace = true }
 rootcause = { workspace = true }
 
 # Database integration test helpers
+uptrakit-web-api-auth = { workspace = true }
 testcontainers-modules = { workspace = true }
 paste = { workspace = true }
 uptrakit-shared-db = { workspace = true, features = ["migration", "db-sqlite", "db-postgres"] }

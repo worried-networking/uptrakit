@@ -7576,6 +7576,7 @@ dependencies = [
  "uptrakit-shared-db",
  "uptrakit-tracing-init",
  "uptrakit-web-api",
+ "uptrakit-web-api-auth",
  "uptrakit-web-api-types",
  "uptrakit-wire",
  "uuid",
