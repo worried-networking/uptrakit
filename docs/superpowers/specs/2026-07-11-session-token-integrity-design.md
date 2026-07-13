@@ -20,14 +20,14 @@ Four independent auth-subsystem defects, each small and mechanical:
    `load_from_db()` seeds the stale cutoff — access tokens issued between the two revocations are accepted again for
    their full 15-minute lifetime, the exact window the denylist exists to close. The doc comment already claims
    "upsert with monotonic iat_cutoff wins"; the DB write doesn't. **Multi-instance race (confirmed during review):**
-   the in-memory gate is per-process — instance B with no cache entry for a user will pass its own gate for a _lower_
+   the in-memory gate is per-process — instance B with no cache entry for a user will pass its own gate for a *lower*
    cutoff and, with an unconditional on-conflict update, regress instance A's higher DB cutoff. The fix must guard at
    the SQL layer, not rely on the per-instance gate.
 2. **OIDC mint skips `is_active` (MEDIUM, security).** `mint_oidc_auth_response` (oidc_auth.rs) loads the user by id
    and never checks `is_active`; the oidc_link password-ownership path skips it too. Every other session-minting path
    checks (login, refresh, mfa, `handle_linked_user`). A user deactivated within the 60s exchange / 10min link window
    mints a full session (+15min token). **Ordering hazard, found reading the code:** `mint_oidc_auth_response` creates
-   the refresh token _before_ it loads the user — a naive is_active check placed after would leave a live refresh
+   the refresh token *before* it loads the user — a naive is_active check placed after would leave a live refresh
    token behind.
 3. **Sessions never cleaned (MEDIUM, stability).** `cleanup_expired_sessions` has only test callers; the scheduler's
    `AuthCleanupExecutor` purges every other auth table but omits `sessions`. Every login and every refresh-rotation
@@ -59,12 +59,21 @@ in-memory gate cannot enforce it). `deny_user_except` **delegates to `deny_user`
 `self.deny_user(...)` then mutates an in-memory allowlist only, no DB insert of its own), so it is fixed
 automatically; no second site. The doc comment finally matches the code.
 
+Two cache-consistency notes (contrarian): (a) **losing-instance cache divergence** — when the SQL guard no-ops
+(instance B upserted 50, DB already holds A's 100), B's in-memory entry now holds 50 while the DB holds 100; B
+wrongly accepts tokens in [50,100) until NATS `deny_user_remote` reconciles or restart reseeds. Close it in the
+same fix: on a no-op upsert (0 rows affected — or use a re-read), reconcile the in-memory entry **upward** to
+the stored DB value; test asserts the losing instance's `is_denied` reflects 100 after the call, not only the
+DB row. (b) **purge/upsert on the same PK is benign** — a purge fires only when `purge_after` has passed (all
+pre-cutoff tokens already expired), so a concurrent delete+insert serializes on the PK and cannot regress an
+active cutoff; worst case is a redundant re-insert — stated so no test is owed.
+
 ### 2. `is_active` check in `mint_oidc_auth_response`, before minting
 
 Load the user and check `is_active` **before** creating the refresh token (reorder — the load currently sits after;
 verified feasible: `create_refresh_token` depends only on `user_id`/`provider_id`, both function params, not on the
 user load). On `!is_active`, return `error_response(StatusCode::FORBIDDEN, "User is deactivated")` — mirroring the
-**refresh** path's choice (auth.rs:1942/2093), _not_ login/mfa's generic `UNAUTHORIZED "Invalid credentials"`. The
+**refresh** path's choice (auth.rs:1942/2093), *not* login/mfa's generic `UNAUTHORIZED "Invalid credentials"`. The
 divergence is intentional and must not be "fixed" to match login: OIDC (like refresh) is post-identity-proof, so
 revealing "deactivated" leaks nothing an authenticated user can't already infer. This one site covers oidc_exchange,
 oidc_link, and complete-registration — the oidc_link password path funnels through `mint_oidc_auth_response`
@@ -79,37 +88,65 @@ Retention on `revoked_at` is out of scope (the audit's "optional") — expiry-ba
 revoked-but-unexpired rows are still within their valid lifetime and must not be deleted. Mirror the existing executor
 tests (seed an expired + a live session, run, assert the expired is gone and the live remains).
 
-Two operational notes (contrarian): `sessions` is the only table in this executor that grows on **every** login _and_
+Two operational notes (contrarian): `sessions` is the only table in this executor that grows on **every** login *and*
 refresh rotation, so the first cleanup after deploy may face a large backlog — a single `delete_many` holds a SQLite
 write lock for its duration (one-time multi-second stall, not data loss). Do **not** pre-batch (it would make
-`sessions` the lone bespoke-loop table here); instead (a) verify a `sessions.expires_at` index exists so the delete
-doesn't full-scan (highest-leverage mitigation — add the index migration if absent), and (b) note a `LIMIT`-batched
-variant as the escape hatch only if production shows first-run lock contention.
+`sessions` the lone bespoke-loop table here); instead (a) the `sessions.expires_at` index **already exists —
+twice** (`idx_sessions_expires_at` in the initial migration and the composite `idx_sessions_user_id_expires_at`
+in `m20260302_000001`; verified during review — no migration needed, do not add a third), and (b) note a
+`LIMIT`-batched variant as the escape hatch only if production shows first-run lock contention.
 
 ### 4. Permission-load error → 500
 
-**Six sites** (grep-confirmed): `register` auth.rs:412, `login` auth.rs:662, **two** refresh-adjacent blocks
-auth.rs:1947 **and** 2109, plus `mint_oidc_auth_response` oidc_auth.rs:2056. Base fix: replace the `Err → vec![]` /
+**Six broken sites** (grep-confirmed; total `get_user_permissions` call sites is higher — `mfa.rs` and
+`me_2fa.rs` already return 500 correctly): `register` auth.rs:412, `login` auth.rs:662, **`me` auth.rs:1947**
+(function-boundary corrected during review — `fn me` starts at :1930, `fn refresh` at :1991, so :1947 is the
+read-only `me` endpoint, NOT a refresh block; it mints nothing. Conditional treatment (contrarian): a 500 from
+`me` is a session-bootstrap read — if the SPA treats any non-200 on `me` as unauthenticated, a transient DB
+blip would eject a logged-in user, strictly worse than today's degraded empty-permissions render (which is
+fail-CLOSED — empty permissions deny everything, satisfying the never-default-to-allow rule). Verify the
+frontend distinguishes 401 (logout) from 5xx (retry/keep session) on `me`; if yes, 500 it like the rest; if
+no, keep `me`'s `vec![]` fallback, add the missing `tracing::error!`, and record the deviation in the doc
+comment — the four minting sites carry the actual risk. Tie-break: **absent a positive verification, keep the
+fallback — do NOT default to 500 "for consistency"**), **one** refresh block
+auth.rs:2109, plus `mint_oidc_auth_response` (`crates/ui/web-api/src/routes/oidc_auth.rs`:2056). Base fix:
+replace the `Err → vec![]` /
 `unwrap_or_default()` arm with `return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")` —
 mirroring `build_full_session`'s **value**, not its shape (these handlers return bare `Response`, so
 `return error_response(...)` directly, no `Err(...)` wrapper).
 
-**Refresh-path caveat (contrarian-driven — a blind 500 here strands the user).** At the refresh sites the token
+**Refresh-path caveat (contrarian-driven — a blind 500 here strands the user; applies to the ONE refresh site
+:2109, not to `me`).** At the refresh site the token
 rotation has **already committed** before the permission load (verified: `rotate_refresh_token` commits, then
-`is_active` at auth.rs:2093, then permissions at 2109) — so today's `vec![]` fallback still returns a _working new_
+`is_active` at auth.rs:2093, then permissions at 2109) — so today's `vec![]` fallback still returns a *working new*
 refresh token; a bare 500 aborts after rotation but before the token reaches the client, forcing a full re-login on a
 transient blip. Fix consistently with the `is_active` branch immediately above (auth.rs:2093-2105), which **revokes
 the just-rotated token then returns the error**: on permission error, `revoke_refresh_token(&new)` then 500 — a
 consistent state (no dangling token), matching the file's own established pattern. Preferred where feasible: move the
-permission load _before_ the rotation so failure aborts before the old token is consumed (user keeps the old token,
-retries) — apply the reorder if the rotation doesn't depend on the permission set; otherwise revoke-then-500. This
+permission load *before* the rotation so failure aborts before the old token is consumed (user keeps the old token,
+retries) — **the reorder is the primary instruction** (verified feasible during review: `rotate_refresh_token`
+takes only the token string and nothing downstream of the rotation consumes `permissions`, so the load moves
+above the rotation cleanly); revoke-then-500 is the fallback only if implementation uncovers a dependency this
+review missed. This
 rule applies to **any** of the six sites where a mint/rotation precedes the permission load;
-`login`/`register`/`mint_oidc` (no prior irreversible commit at the load point) take the plain 500. Copy the
+`login`/`register`/`me`/`mint_oidc` (no prior irreversible commit at the load point) take the plain 500. Copy the
 `is_active` branch's failure semantics exactly: its `revoke_refresh_token` is **best-effort** (`let _ = …`), so the
 revoke on the permission-error branch must swallow/log a revoke failure too, not `?`-propagate it into a different
 error path (a transient outage can fail the revoke as well). The `tracing::error!` stays at the four auth.rs sites;
 the oidc site has **no** log today (`.unwrap_or_default()`) — add one. Implementer greps all `get_user_permissions`
 fallbacks rather than trusting the enumeration.
+
+**Audit emission on the new error branches (decision, not left to the implementer; two distinct helper
+families — corrected during review):** (1) the refresh permission-error branch copies the `is_active` precedent
+(auth.rs:2093-2105) WHOLE, including `emit_auth_token_refresh_audit(…, AuditOutcome::Failed, …)` — a direct
+transplant, the helper lives in the same file. (2) The OIDC `is_active` branch **cannot** use `emit_auth_*_audit`
+(that family is auth.rs-local); `oidc_auth.rs` has its own parallel surface — `emit_oidc_route_audit` and the
+caller-level outcome classification — and `mint_oidc_auth_response` (shared by 3 call sites with different
+action types) emits nothing itself today. Bounded implementer decision: either emit inline via
+`emit_oidc_route_audit` with the action type resolved from context, or let the existing caller-level outcome
+classification carry the `Denied` — use the oidc primitive, never `emit_auth_*_audit`. No new
+`audit-catalog.toml` entries needed — coverage is keyed per handler site and `login`/`refresh`/`register`/oidc
+handlers already have entries (verified); `deny_user` is not itself an audited site.
 
 ## Tests
 
@@ -122,17 +159,22 @@ DB-backed, no `start_paused`, no tokio-time APIs — snapshot rules):
 2. **OIDC is_active:** deactivate a user, drive `mint_oidc_auth_response` (via the exchange and link paths); assert
    `FORBIDDEN` and that **no** session row / refresh token persists (guards against the ordering hazard).
 3. **Session cleanup:** the executor test above.
-4. **Permission-load 500:** inject a permission-query failure using the codebase's established idiom —
-   `db.execute_unprepared("DROP TABLE role_permission")` on the `TestApp` connection after seeding the user/ session,
-   before invoking the handler (10+ existing usages of this pattern in the route tests). Assert 500 and no token
-   issued. Cover the refresh path (worst consequence) at minimum; login/register/mint_oidc are the same mechanism and
-   cheap to add. No manual-verification escape hatch — the pattern makes all four testable. Also add the
-   multi-instance denylist regression: `deny_user(u, 100)` then a _fresh_ `TokenDenylist` (empty gate)
-   `deny_user(u, 50)` → assert the DB row stays 100 (the WHERE guard, not the gate, is what holds). **This guard test
-   must run against Postgres, not only SQLite** — the whole risk is `ON CONFLICT DO UPDATE … WHERE` dialect
-   divergence + the `i64`→`BIGINT` bind on the strict engine; the rest of the auth tests are `sqlite::memory:`-only,
-   so this one needs an explicit Postgres backend (the crate's integration-test path) or the "correct under concurrent
-   multi-instance writes" claim is never exercised on the engine HA uses.
+4. **Permission-load 500:** inject a permission-query failure using the codebase's established fault-injection
+   idiom — `db.execute_unprepared("DROP TABLE …")` on the `TestApp` connection after seeding, before invoking the
+   handler (10+ existing usages of the *technique* in the route tests; `role_permissions` — plural, the SQL
+   `table_name`, not the singular Rust entity module — as the target table is NEW — no prior usage, but it is
+   the table `get_user_permissions` queries via `require_auth.rs`, so the injection is valid). Assert 500 and
+   no token issued. Cover the refresh path (worst consequence) at minimum;
+   login/register/me/mint*oidc are the same mechanism and cheap to add. No manual-verification escape hatch —
+   the pattern makes all of them testable. Also add the multi-instance denylist regression: `deny_user(u, 100)`
+   then a *fresh* `TokenDenylist` (empty gate) `deny_user(u, 50)` → assert the DB row stays 100 (the WHERE
+   guard, not the gate, is what holds). **This guard test must run against Postgres, not only SQLite** — the
+   whole risk is `ON CONFLICT DO UPDATE … WHERE` dialect divergence + the `i64`→`BIGINT` bind on the strict
+   engine. Plumbing reality (named, not implied): `web-api-auth` has NO Postgres test path today, and the only
+   Postgres harness (`setup_postgres`/`TestHarness` in `crates/core/integration-tests`) is crate-private — the
+   guard test is a **new** `#[ignore]`-gated test file in `crates/core/integration-tests` that adds
+   `uptrakit-web-api-auth` as a dev-dependency and drives `TokenDenylist` against the harness's Postgres
+   backend. That wiring is a deliverable of this spec, not pre-existing.
 5. Refresh permission-error: assert the just-rotated token is revoked (or the load reordered before rotation) on the
    500 branch — no dangling committed-but-unreturned token.
 
