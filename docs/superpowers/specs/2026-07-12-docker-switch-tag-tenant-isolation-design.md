@@ -116,7 +116,8 @@ Feasibility facts (verified in code):
   this exact table; the added host predicate is the defense-in-depth layer, not the anchor.
 - Composing a chained manual `InnerJoin` onto a `find_via_tenant_join` result is an established
   pattern, not a novel construction:
-  `crates/ui/web-api-queries/src/queries/services.rs:783` anchors `service_host` via `service`,
+  `crates/ui/web-api-queries/src/queries/services.rs` (~:784; the chained join at ~:787 — line
+  numbers are hints, grep `find_via_tenant_join` in that file) anchors `service_host` via `service`,
   then chains `.join(JoinType::InnerJoin, …Relation::Host.def())` with a follow-on `host::` filter.
   The Docker sites are structurally identical; the second join's filter targets `host::Column::TenantId`
   (defense-in-depth) rather than a `DeactivatedAt` predicate.
@@ -126,9 +127,24 @@ Feasibility facts (verified in code):
 - `ctx.tenant_id()` (`descriptor.rs:180`) and `TenantDb::tenant_id()` (`tenant_db.rs:25`) both
   expose the caller tenant for the second predicate.
 - The Docker crate already depends on `uptrakit-tenant-db` and `uptrakit-shared-db`
-  (`crates/plugins/releases/docker/Cargo.toml`); no dependency change for production code. The host
-  predicate needs `sea_orm::JoinType` and the `host` / `software_item` entity paths in scope
-  (import additions only).
+  (`crates/plugins/releases/docker/Cargo.toml`); no dependency change for production code. Explicit
+  import diff for `surfaces.rs` (the chains do NOT compile without these — `.join()` is a
+  `QuerySelect` trait method, `.def()` needs `RelationTrait`; neither handler imports them today):
+  `use sea_orm::{JoinType, QuerySelect, RelationTrait};` plus
+  `use uptrakit_shared_db::entity::{host, software_item};` — the same trait set `services.rs`
+  imports for its own chained join (verified at its lines 2-5). Import bookkeeping, exact (both
+  handlers currently import `ColumnTrait`, `EntityTrait`, `QueryFilter` — `get-current-tag` at
+  lines 170-172, `switch-tag` in the grouped block at line 210):
+  - **Retain** `ColumnTrait` (the `Column::…eq()`/`host::Column::TenantId.eq()` predicates) and
+    `QueryFilter` (the post-join `.filter(…)`). Both are still used after the refactor.
+  - **Drop** `EntityTrait`: its _only_ uses in each handler are the three
+    `host_software_item_plugin::Entity::find()` / `host_software_item::Entity::find()` calls
+    (`surfaces.rs:181`, `:242`, `:259`) — the exact sites being replaced by
+    `ctx.tenant_db().find_via_tenant_join::<…>()`, whose `Target::find()` happens _inside_ the
+    helper. With those gone, no direct `Entity::` method remains in either body, so leaving
+    `EntityTrait as _` imported trips `unused_imports` under `warnings = "deny"`. Remove it in the
+    same edit that swaps the queries. (`switch-tag`'s `ActiveModelTrait`/`Set`/`TransactionTrait`
+    imports stay — the write path still builds `ActiveModel`s and runs the transaction.)
 
 ### The three query sites (each read, each different — exact replacements)
 
@@ -167,11 +183,18 @@ Feasibility facts (verified in code):
 
 The site-2 (plugin rows) and site-3 (`host_software_item`) loads carry independent two-parent joins
 but filter the **same** caller-supplied `(host_id, software_item_id)` pair with the **same** two
-tenant predicates. `host_software_item`'s partial unique index on `(host_id, software_item_id[,
-qualifier])` (`m20260318_000001_host_software_item_qualifier.rs`) means site 3's `.one()` resolves
-the single row for that pair. The two joins therefore cannot disagree for same-tenant data: a
-foreign or mismatched pair yields empty on both (site 2's empty check returns the "no plugin
-assignments" error before site 3 runs); a same-tenant pair matches on both.
+tenant predicates. The tenant verdict is robust to `host_software_item` qualifier multiplicity: a
+single `(host_id, software_item_id)` pair may legitimately have more than one `host_software_item`
+row (the `qualifier` column is nullable and `uix_hsi_qualified` keys on `(host_id, software_item_id,
+qualifier)`, so the multi-container case produces several rows; `.one()` returns whichever the result
+order yields — pre-existing behavior). But **all** such rows share the same `host_id` and
+`software_item_id`, hence the same two parents, hence the same tenant verdict — the two-parent filter
+admits or rejects them as a set. Whichever row `.one()` returns is therefore guaranteed to be the
+caller's tenant. The two joins cannot disagree for same-tenant data regardless of qualifier
+multiplicity: a foreign or mismatched pair yields empty on both (site 2's empty check returns the "no
+plugin assignments" error before site 3 runs); a same-tenant pair matches on both. This argument is
+tenant-set-based, not index-uniqueness-based — the schema does **not** guarantee a single row per
+pair, and the safety claim does not rely on it.
 
 Unlike the `host_software_item_plugins/mod.rs` precedent (which `.select_only()`s a projection),
 these sites load full `Model`s — the `switch-tag` handler converts them into `ActiveModel`s to
@@ -214,7 +237,11 @@ a future edit adding a third query would silently inherit nothing.
 Real in-memory SQLite with the workspace's established pattern — `Database::connect("sqlite::memory:")`
 
 - `uptrakit_shared_db::migration::run_migrations(&db)` (as in
-  `crates/ui/web-api-queries/src/queries/hosts.rs:485`). New dev-dependency features only:
+  `crates/ui/web-api-queries/src/queries/hosts.rs:485`). Manifest change, stated precisely: a **new**
+  `[dev-dependencies]` entry — the crate has `uptrakit-shared-db` under `[dependencies]` only (no
+  features) and its dev-deps today are just `tokio` + `uptrakit-command`; this adds the dual-entry
+  pattern `web-api-queries/Cargo.toml` already uses (plain prod dep + featured dev dep). Workspace
+  registration already exists, so `cargo deny` is unaffected:
 
 ```toml
 # crates/plugins/releases/docker/Cargo.toml [dev-dependencies]
@@ -231,7 +258,9 @@ Docker crate cannot depend on (dependency direction: surface-proxy → plugins).
 a ~10-line test-local impl of the `SurfaceActionController` trait
 (`crates/plugins/infrastructure/core/src/roles.rs:391` — three methods: `tenant_id`, `user_id`,
 `tenant_db`) holding a `TenantDb::new(db.clone(), tenant_id)`; the same pattern infra-core's own
-tests use (`descriptor.rs` test module). Cases (two tenants, A = caller, B = victim):
+tests use (`descriptor.rs` test module — note that precedent stubs `tenant_db()` with
+`unimplemented!()` since its suite never touches the DB; this spec's version returning a real
+`TenantDb` is a superset, there is no worked real-DB example to copy verbatim). Cases (two tenants, A = caller, B = victim):
 
 1. **Cross-tenant read blocked**: `get-current-tag` with tenant-B `host_id`/`software_item_id`
    returns empty `new_image_ref`.
@@ -243,15 +272,24 @@ tests use (`descriptor.rs` test module). Cases (two tenants, A = caller, B = vic
 4. **Same-tenant write works**: `switch-tag` with tenant-A IDs rewrites all Docker plugin rows
    (suffix preserved per row), clears the item's version state, sets
    `update_category = "unknown"`, and skips a seeded non-Docker plugin row.
-5. **Mismatched-parent row blocked (both-anchor regression guard)**: seed a
-   `host_software_item` + `host_software_item_plugin` row whose `host` belongs to tenant A but whose
-   `software_item` belongs to tenant B (the shape the sibling `assign_hosts` gap can produce). A
-   tenant-A caller supplying that host/software-item pair reads empty (`get-current-tag`) and the
-   `switch-tag` write is refused with the "no plugin assignments" error and no row mutated. This
-   case fails if the fix scopes on only one parent, pinning the defense-in-depth requirement. It
-   stays meaningful even after the `assign_hosts` fix lands: the `host.tenant_id ==
-software_item.tenant_id` invariant is not enforceable at the DB layer (no cross-column FK/CHECK),
-   so a future regression of that invariant would re-open the hole this guard covers.
+5. **Mismatched-parent row blocked — both orientations (both-anchor regression guard)**: assert
+   **both** parent-mismatch orientations, because a single orientation only pins one of the two
+   single-anchor mutants. Seed two mismatched `host_software_item` + `host_software_item_plugin`
+   rows (the shape the sibling `assign_hosts` gap can produce):
+   - **5a — `host∈A`, `software_item∈B`**: catches a `host`-anchored single-parent mutant (drops the
+     `software_item` filter → would leak).
+   - **5b — `host∈B`, `software_item∈A`**: catches a `software_item`-anchored single-parent mutant
+     that keeps the chosen anchor but drops the **added** `host` defense-in-depth join → would leak.
+     This is the higher-value case: the chosen fix anchors on `software_item` (line 99), so the most
+     likely future regression is someone removing the "extra" chained host join believing the anchor
+     alone suffices. Only 5b keeps that mutant dead.
+
+   For each orientation a tenant-A caller supplying that host/software-item pair reads empty
+   (`get-current-tag`) and the `switch-tag` write is refused with the "no plugin assignments" error
+   and no row mutated. One orientation alone leaves a single-anchor mutant alive, so both are
+   required. This guard stays meaningful even after the `assign_hosts` fix lands: the
+   `host.tenant_id == software_item.tenant_id` invariant is not enforceable at the DB layer (no
+   cross-table FK/CHECK ties `host.tenant_id` to `software_item.tenant_id`), so a future regression of that invariant would re-open the hole it covers.
 
 No tokio time APIs are involved → no `start_paused`. Existing unit tests in `surfaces.rs` (action
 descriptors, param parsing, suffix helpers) are unaffected.
@@ -266,8 +304,8 @@ descriptors, param parsing, suffix helpers) are unaffected.
 - No new audit action: the existing Tier-2 `emit_docker_switch_tag_audit_event` continues to record
   attempts and outcomes; foreign-ID attempts now record the error outcome. No `audit-catalog.toml`
   change (no new state-changing site).
-- No new workspace dependency (feature additions on an existing workspace dev-dependency only) →
-  `cargo deny check` unaffected but run per gates.
+- No new workspace dependency (one new `[dev-dependencies]` entry for an already-workspace-registered
+  crate — see Tests) → `cargo deny check` unaffected but run per gates.
 
 ## Documentation deliverables
 
