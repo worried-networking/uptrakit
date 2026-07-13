@@ -1,375 +1,215 @@
-# Strict Frontend Build Gate — fail loud instead of shipping a stub UI
+# Strict Frontend Build Gate — release builds fail loud instead of shipping a stub UI
 
-**Date:** 2026-07-12
+**Date:** 2026-07-12 (revised 2026-07-13 — `UPTRAKIT_REQUIRE_FRONTEND` env var dropped for a profile-based gate)
 **Status:** Design
 **Audit finding:** audit-2026-07-11 HIGH · stability · ci-tooling · effort S
 **Hazard sites:** `frontend/build.rs:22-40`, `.github/workflows/release-plz.yml`,
 `.github/workflows/docker.yml` (`build` + `build-swagger`), `docker/Dockerfile`
-**Edited by fix:** `frontend/build.rs`, `.github/workflows/release-plz.yml`,
-`docker/Dockerfile`, `ci/verify_require_frontend.sh` (new), `.github/workflows/ci.yml`
+**Edited by fix:** `frontend/build.rs`, `docs/development/releases.md`, `AGENTS.md` (stale frontend note + quick-start
+comment) — **nothing else**
 
 ## Problem
 
-`frontend/build.rs` (crate `uptrakit-frontend`, embedded by
-`crates/core/controller-runtime` under the `embedded-frontend` feature) embeds the
-real SvelteKit SPA when `frontend/build/index.html` exists, and otherwise writes
-a **stub** `index.html` and emits only a `cargo::warning`:
+`frontend/build.rs` (crate `uptrakit-frontend`, pulled unconditionally into every controller build —
+`uptrakit-controller`'s manifest hard-declares `uptrakit-controller-runtime = { features = ["embedded-frontend", …] }`)
+embeds the real SvelteKit SPA when `frontend/build/index.html` exists, and otherwise writes a **stub** `index.html`
+and emits only a `cargo::warning`. The same lenient script serves every real ship path:
 
-```rust
-if src_index.is_file() {
-    copy_dir_recursive(&src_build, &embed_dir).expect("copy build/ to OUT_DIR");
-} else {
-    // release-plz git_only mode runs `cargo package --workspace` in a fresh
-    // worktree where `frontend/build/` (gitignored) does not exist. Embed a
-    // stub so the package verifies. ...
-    fs::write(&stub, "<!doctype html>…stub…").expect("write stub index.html");
-    println!("cargo::warning=frontend/build/ missing — embedded stub. …");
-}
-```
+- **release-plz.yml build-artifacts + backfill** download the `frontend-build` artifact to `frontend/build`, then
+  `cargo build --release -p uptrakit-controller` / `-p uptrakit-controller-standalone` (lines ~374-424, ~658-707 —
+  every ship build is `--release`).
+- **docker.yml** (`build`, `build-swagger`) injects the artifact as the `frontend-builder` build-context; the
+  Dockerfile's builder stage runs `cargo build --release` after
+  `COPY --from=frontend-builder /app/frontend/build /app/frontend/build`.
 
-The stub path exists for **one legitimate reason**: release-plz `git_only`
-packaging runs `cargo package --workspace` in a fresh worktree where the
-gitignored `frontend/build/` is absent, and the package must still verify.
+If the artifact path, the SvelteKit adapter output dir, or `npm run build` output ever drifts (or the downloaded dir
+is empty), release binaries and ghcr images silently ship a stub UI — no gate fails, the only signal is a build
+warning nobody reads.
 
-The hazard: the **same lenient `build.rs`** is used by every real-ship path, so
-a missing/empty/ drifted `frontend/build/` produces a released binary or image
-with a stub UI and **no failing gate** — only a build warning nobody reads:
+## Verified reality (premises the fix rests on — each traced, not assumed)
 
-- **release-plz.yml build-artifacts** downloads the `frontend-build` artifact to
-  `frontend/build` (only `if released == 'true'`, lines ~348-352), then builds
-  `uptrakit-controller` and `uptrakit-controller-standalone` (the
-  `Build controller-standalone` step ~382-390).
-- **release-plz.yml backfill** path re-downloads `frontend-build` to
-  `frontend/build` (in the `backfill-build-artifacts` job, ~633-639, gated by
-  the `backfill-plan` output containing `uptrakit-controller` /
-  `uptrakit-controller-standalone` — not `released == 'true'`) for the same
-  controller binaries.
-- **docker.yml** downloads `frontend-build` to
-  `/tmp/frontend-ctx/app/frontend/build` and injects it as the
-  `frontend-builder` build-context, consumed by the Dockerfile's
-  `COPY --from=frontend-builder /app/frontend/build /app/frontend/build`; the
-  `cargo build` runs **inside** the image.
-
-If the artifact path, the SvelteKit adapter output dir, or `npm run build`
-output ever drifts (or the build dir is empty), the controller /
-controller-standalone release binaries and the ghcr images silently ship a stub
-UI. This is precisely the partial-release-integrity hazard class the release
-machinery exists to prevent — but here it is invisible.
+1. **release-plz never compiles this crate.** The stub's in-code justification ("release-plz git_only mode runs
+   `cargo package --workspace` … the package must verify") is **dead**: `ci/release-plz/cargo-wrapper.sh` injects
+   `--no-verify` into every release-plz `cargo package --workspace` invocation (wrapper body, "Inject --no-verify so
+   cargo only emits the .crate tarball without building"), and `release-plz.toml` sets `semver_check = false`
+   workspace-wide. No release-plz code path runs `build.rs` in a `frontend/build/`-less worktree.
+2. **`cargo chef cook` cannot fire the gate.** cargo-chef's skeleton replaces build scripts with **dummy** `build.rs`
+   files (cargo-chef `src/skeleton/mod.rs`: "create dummy `lib.rs`, `main.rs` and `build.rs` files where needed";
+   dummy build-script artifacts are removed after cook, `mod.rs` ~276, so the real script re-runs at the real build).
+   The Dockerfile's real `cargo build --release` runs after both `COPY . .` and the frontend COPY.
+3. **`PROFILE` is a documented build-script env var; probed empirically** (throwaway crate, cargo stable): `debug`
+   for dev builds, `release` for `--release`, and `release` for a custom profile with `inherits = "release"`
+   (matters: the workspace defines `[profile.release-fast]` inheriting release). Cargo derives the value from the
+   profile's `inherits` chain, not its name — the probe confirms the documented behaviour, it is not a special case.
+   **Known caveat, disclosed:** cargo's build-script env-var docs mark `PROFILE` "not recommended", pointing at
+   `OPT_LEVEL` etc. for "a more correct view of the actual settings". That advice targets code that cares about
+   optimization settings; ours cares about **shippability**, and for this workspace `OPT_LEVEL` is strictly worse:
+   `[profile.release]` sets `opt-level = 3` while `[profile.release-fast]` overrides `opt-level = 2`
+   (root `Cargo.toml` ~278-290), so any `OPT_LEVEL` predicate either misclassifies `release-fast` as non-shippable or
+   degenerates into an allowlist of numbers. `DEBUG` separates nothing (reflects debug-info generation, not profile).
+   `PROFILE`'s binary debug/release answer is exactly the question the gate asks.
+4. **Every context that compiles `uptrakit-frontend` without real assets today is a debug build:** CI `backend-lint`
+   (`cargo check`/`clippy`, both feature sets — no node step in the job), CI `test` (`cargo llvm-cov`, doctests),
+   `.husky/pre-push` (workspace check/clippy/test + doctests, all before its npm section), and local workspace
+   `cargo check/test`. None of them ships a binary.
+5. **Every ship path is `--release`:** release-plz build-artifacts + backfill (all eight build invocations),
+   `docker/Dockerfile` builder stage, cross builds. A source install (`cargo install --git …` /
+   `cargo build --release`) is also release-profile — today it silently self-ships a stub; under this fix it fails
+   loud.
 
 ## Root cause
 
-A single build script serves two audiences with opposite needs (packaging
-worktrees _must_ tolerate an absent build dir; real ships _must not_), and it
-resolves the conflict by always choosing the lenient branch. There is no signal
-that distinguishes "packaging worktree, stub is fine" from "release build, stub
-is a defect."
+One build script serves two audiences with opposite needs — compile-only debug contexts (CI lint/test, local dev)
+must tolerate an absent build dir; shippable release builds must not — and it always picks the lenient branch. The
+profile **is** the signal that separates the audiences; no external flag is needed.
 
-## Chosen approach — opt-in strict gate, lenient default preserved
+## Chosen approach — profile-based gate, no environment variable
 
-Add one environment variable, `UPTRAKIT_REQUIRE_FRONTEND`. When it is set (to any
-non-lenient value — see Change 1) **and** the real assets are absent, `build.rs`
-fails the build instead of embedding the stub. When it is unset (the default),
-behaviour is byte-for-byte what it is today. The strict flag is then set at the
-real-ship build sites and nowhere else: **step-level** on the two release-plz
-binary build jobs (Change 2), and a **single unconditional `ENV`** in the
-Dockerfile that every image job inherits (Change 3).
-
-This is the smallest change that closes the hazard: it adds a fail-loud signal
-without redesigning the artifact-passing mechanism, the SvelteKit adapter, or
-the `embed-frontend` feature. The lenient default keeps `cargo package`
-worktrees, local `cargo build`, and `cargo check --all-features` working
-unchanged (local `docker build` is strict, but its `frontend-builder` stage
-always produces real assets, so the gate never fires spuriously there).
-
-### Change 1 — `frontend/build.rs`
-
-In the `else` branch (real assets absent), before writing the stub, consult the
-flag and fail hard when strict mode is on:
+In the `else` branch (assets absent), fail hard unless the profile is `debug`:
 
 ```rust
-// Strict mode: real-ship builds (release-plz binaries, docker images) set
-// UPTRAKIT_REQUIRE_FRONTEND. If the real assets are absent there, a stub would
-// silently ship — fail the build instead. Unset/empty/"0"/"false" (the default)
-// keeps the lenient stub path for release-plz `cargo package` worktrees and
-// local dev. Any other non-empty value means strict: a safety gate must
-// fail-closed on an ambiguous value, never silently no-op.
-let strict = std::env::var("UPTRAKIT_REQUIRE_FRONTEND")
-    .map(|v| !v.is_empty() && v != "0" && !v.eq_ignore_ascii_case("false"))
-    .unwrap_or(false);
-if strict {
+// frontend/build/ is gitignored; compile-only debug contexts (CI lint/test
+// jobs, pre-push, local workspace builds) may legitimately lack it — they
+// embed a stub and warn. A release-profile build produces a shippable
+// binary, where a stub would silently replace the real UI (the exact
+// hazard: release-plz binaries, docker images, `cargo install`). Fail-closed:
+// anything cargo ever reports other than "debug" is treated as shippable.
+let debug_profile = std::env::var("PROFILE").as_deref() == Ok("debug");
+if !debug_profile {
     panic!(
-        "UPTRAKIT_REQUIRE_FRONTEND is set but frontend/build/index.html is \
-         missing — refusing to embed the stub UI. Ensure the `frontend-build` \
-         artifact was downloaded to frontend/build/ (release-plz) or COPYed to \
-         /app/frontend/build (docker) before this build."
+        "frontend/build/index.html missing in a release-profile build — \
+         refusing to embed the stub UI. Run `npm run build` in frontend/ \
+         (CI: ensure the frontend-build artifact was downloaded to \
+         frontend/build/)."
     );
 }
+// … existing stub write + cargo::warning (debug only) …
 ```
 
-**Why a permissive predicate, not `== Ok("1")`.** For a safety gate the
-dangerous failure direction is "guard silently does nothing," so an unexpected
-value (`true`, `yes`, a stray trailing newline) must resolve to strict, not
-lenient. The predicate above treats only unset / empty / `0` / `false` as
-lenient. The CI grep (below) still pins the literal `=1` at every ship site, so
-the two are belt-and-suspenders, not coupled on a single spelling.
+Design points:
 
-And add, next to the existing `cargo::rerun-if-changed=build`:
+- **Fail-closed predicate.** Only the exact value `debug` is lenient. `release`, a future cargo value, or a missing
+  var all resolve to strict — for a safety gate the dangerous direction is "guard silently does nothing", so
+  ambiguity must fail loud, never stub.
+- **No `rerun-if-env-changed=PROFILE`.** Profile selection changes `OUT_DIR`/fingerprint; cargo re-runs the script
+  per profile already. The existing `cargo::rerun-if-changed=build` stays.
+- **`panic!` is the sanctioned failure mechanism in this build script**, but `[workspace.lints.clippy]` sets
+  `panic = "deny"` and the crate inherits workspace lints, so the existing attribute on `main()` **must be widened**
+  (firm step, not conditional):
 
-```rust
-println!("cargo::rerun-if-env-changed=UPTRAKIT_REQUIRE_FRONTEND");
-```
+  ```rust
+  #[expect(
+      clippy::expect_used,
+      clippy::panic,
+      reason = "build script — panicking on missing environment variables, I/O \
+                errors, or absent frontend assets in a release-profile build is \
+                the correct behaviour"
+  )]
+  fn main() { … }
+  ```
 
-**`panic!` is the correct, idiomatic failure here** and does not violate the
-"no `panic!` in production code" binding rule: `build.rs` is a build script, not
-a production code path, and the file's own `main()` already carries
-`#[expect(clippy::expect_used, reason = "build script — panicking on missing
-environment variables or I/O errors is the correct behaviour")]`. This `panic!`
-is the same sanctioned failure mechanism the existing `.expect()` calls rely on.
+  `allow_attributes_without_reason = "deny"` makes the `reason` mandatory; do not substitute a bare `#[allow]`.
+  This **replaces** the existing `#[expect(clippy::expect_used, …)]` attribute on `main()` — do not stack a second
+  attribute.
 
-**`clippy::panic` is denied today — the `#[expect]` MUST be widened (firm step,
-not conditional).** The workspace lint table sets `panic = "deny"` in
-`[workspace.lints.clippy]` (root `Cargo.toml`), and `frontend/Cargo.toml` opts
-in via `[lints] workspace = true`, so a bare `panic!` in `build.rs` fails clippy
-now. Change 1 therefore includes widening the existing attribute on `main()`
-to cover the new lint, e.g.:
+- **Rewrite the stale stub comment.** The current comment justifies the stub with release-plz `cargo package`
+  verification, which no longer compiles anything (Verified reality #1). The replacement text is the comment block in
+  the snippet above — it names the real remaining audience (debug-only compile contexts) and the fail-closed rule;
+  use it verbatim.
+- **Nothing else changes.** No workflow edits, no Dockerfile edits, no `ci/verify_*` script: there is no per-site
+  flag anyone can forget — the gate lives inside the build script every ship path already executes. The prior
+  revision's `UPTRAKIT_REQUIRE_FRONTEND` + step-level `env:` wiring + Dockerfile `ENV` + `ci/verify_require_frontend.sh`
+  grep guard are all superseded by this structural placement (the grep guard existed only to protect the forgettable
+  wiring; with no wiring there is nothing to guard).
 
-```rust
-#[expect(
-    clippy::expect_used,
-    clippy::panic,
-    reason = "build script — panicking on missing environment variables, I/O \
-              errors, or an absent frontend under UPTRAKIT_REQUIRE_FRONTEND is \
-              the correct behaviour"
-)]
-fn main() { … }
-```
+### What the gate does and does not guarantee (stated honestly)
 
-`allow_attributes_without_reason = "deny"` is also set, so the `reason` is
-mandatory — do **not** silence it with a bare `#[allow]`.
-
-`rerun-if-env-changed` is **cheap correctness insurance that makes the env-var
-contract explicit to cargo** — keep it, but it is not the load-bearing Docker
-protection. In the Dockerfile the real `cargo build` runs after `COPY . .`
-(source) and the frontend `COPY` (assets), on a distinct layer from
-`cargo chef cook`; that layer invalidation is what guarantees `build.rs` runs
-fresh against the populated `frontend/build/`. (An earlier draft claimed the
-line stops cargo "serving the cook-stage stub embed from cache"; that overstates
-it — `cargo chef cook` compiles _dependencies_, and whether or not it runs this
-workspace member's `build.rs`, no cook-stage frontend embed is reused at the
-real build layer. See the Docker note in Change 3 and Risks.)
-
-### Change 2 — `.github/workflows/release-plz.yml`
-
-Set `UPTRAKIT_REQUIRE_FRONTEND: 1` as a **step-level** `env:` on the controller
-and controller-standalone cargo build steps in:
-
-- the **build-artifacts** job (the `Build controller-standalone` step and the
-  controller build step in the same job), and
-- the **backfill** job's equivalent controller build steps.
-
-These steps only run/consume the `frontend-build` artifact on a real release
-(`released == 'true'`) or an explicit backfill dispatch, so strict mode is
-always safe there. **Do not** set it at the workflow or job level — the
-release-plz `release`/packaging steps and any `cargo package`/verify worktree
-must keep the lenient default.
-
-Add an inline comment on each `env:` line naming why it must stay:
-
-```yaml
-env:
-  # Fail the build if only the stub frontend would embed — this job ships a
-  # real release binary. See docs/development/releases.md#strict-frontend-gate.
-  UPTRAKIT_REQUIRE_FRONTEND: "1"
-```
-
-### Change 3 — `docker/Dockerfile` only (single source of truth for all images)
-
-**The strict flag for images is hardcoded in the Dockerfile, not passed
-per-job.** Every image the Dockerfile produces embeds real assets: its
-`frontend-builder` stage runs `npm run build` internally (line ~26) and CI
-overrides that stage with `--build-context frontend-builder=<prebuilt>`, so the
-`COPY --from=frontend-builder /app/frontend/build` **always** lands a populated
-`frontend/build/` — for CI _and_ local `docker build`. There is no legitimate
-image build with absent assets, so strict-on-always is correct, and a single
-unconditional `ENV` covers **every** image job — `build`, `build-swagger`
-(`uptrakit-controller-swagger`), and any image job added later — with zero
-per-job build-arg wiring. This deliberately rejects the per-job `build-arg`
-approach: `docker.yml` has more than one frontend-embedding image job
-(`build-swagger` at ~182-239 ships a real published image), and a per-job arg
-must be remembered in each `build-args:` block — the exact "a future job forgets
-it" failure this spec exists to kill. One Dockerfile line removes that class.
-
-**Placement is the critical, traced detail.** The `builder` stage runs
-`cargo chef cook` (dependencies only, from a source skeleton) **before**
-`COPY --from=frontend-builder /app/frontend/build` and before the real
-`cargo build`. `uptrakit-frontend`'s `build.rs` is in the controller graph
-**unconditionally** — `uptrakit-controller`'s manifest hard-declares
-`uptrakit-controller-runtime = { features = ["embedded-frontend", …] }`
-(`Cargo.toml:27-28`) and `controller-runtime`'s default feature set includes
-`embedded-frontend` (`Cargo.toml:11`), so it is in scope for every controller
-image regardless of the `FEATURES` build-arg. If `cargo chef cook` runs that
-`build.rs` (whether cargo-chef executes a workspace member's build script is
-version-dependent), it runs against an absent `frontend/build/`. Declaring the
-`ENV` **after** the frontend COPY and **before** the real `cargo build` makes
-strict mode invisible to the cook stage in _either_ case — a stage-top `ENV`
-would risk panicking cook on the (correct-for-cook) stub path. The after-COPY
-placement is safe and correct regardless of cargo-chef's member-build behaviour.
-
-Concretely, in `docker/Dockerfile` stage `builder`, between the existing
-`COPY --from=frontend-builder /app/frontend/build /app/frontend/build`
-(line ~72) and the `RUN … cargo build …` (line ~76):
-
-```dockerfile
-COPY --from=frontend-builder /app/frontend/build /app/frontend/build
-
-# Strict frontend gate for all images. Declared AFTER cargo chef cook (which may
-# run build.rs against an absent frontend/build/) and BEFORE the real cargo
-# build. Every image built from this file has real assets (npm build or CI
-# --build-context), so strict-always never fires spuriously; it only catches a
-# genuinely empty/drifted frontend/build/. See docs/development/releases.md#strict-frontend-gate.
-ENV UPTRAKIT_REQUIRE_FRONTEND=1
-
-RUN if [ -n "${FEATURES}" ]; then \
-      cargo build --release -p "${PACKAGE}" --no-default-features --features "${FEATURES}"; \
-    ...
-```
-
-`build.rs` checks `CARGO_MANIFEST_DIR/build/index.html` — for `uptrakit-frontend`
-that resolves to `/app/frontend/build/index.html`, exactly where the COPY lands
-(verified against the current Dockerfile). No `docker.yml` change is required for
-the gate — the flag lives entirely in the Dockerfile.
-
-### Regression guard — CI-file invariant, scope stated honestly
-
-`build.rs` is a build script: it is not compiled into any test target, so there
-is no Rust unit/integration test for it (adding one is impossible, not merely
-skipped). The protective logic is a two-line env-gated guard; the real
-protection is the flag being present at the ship sites.
-
-After Change 3, the **image** ship paths are guarded structurally: the flag is a
-single unconditional `ENV` in the Dockerfile, inherited by every image job
-including `build-swagger`, so there is no per-job wiring a future job can forget.
-The only ship sites that carry a _forgettable_ per-step flag are the two
-**release-plz binary** build sites (build-artifacts controller +
-controller-standalone, and the backfill equivalents).
-
-The guard is therefore a **repo-file assertion**: `ci/verify_require_frontend.sh`
-— a short grep that fails if `UPTRAKIT_REQUIRE_FRONTEND` is not present at (a) the
-release-plz controller/controller-standalone build steps (build-artifacts +
-backfill) and (b) the Dockerfile `ENV` line — so a future edit that drops the
-flag at either is caught in review/CI rather than at the next silent stub
-release. It follows the existing `ci/verify_*.sh` convention verbatim: the five
-current scripts all start `#!/usr/bin/env bash` + `set -euo pipefail`, resolve
-`ROOT` via `cd "$(dirname "${BASH_SOURCE[0]}")/.."`, and exit 1 with a
-`verify_require_frontend: <message>` prefix on failure (`verify_agents_md_budget.sh`
-is the closest structural template — no allowlist). Keep it a pure grep — no
-parsing framework.
-
-**Guard mechanism considered and rejected: grep the produced binary for the stub
-marker.** A stronger check would, after each release `cargo build`, grep the
-built binary (or its embedded `index.html`) for the stub marker string and fail
-if present — that directly tests "no stub shipped" and covers _future_ ship
-paths for free. Rejected for this spec as heavier than the hazard warrants
-(YAGNI): it adds a post-build step to every release/image job (the same per-job
-maintenance the file-grep avoids), and after Change 3 the image paths are already
-covered structurally while the binary paths number exactly two, low-churn jobs.
-The file-grep is the proportionate floor; the binary-marker check is noted here
-so a future maintainer who adds many more binary ship paths knows the upgrade.
-
-**Wiring is a required deliverable, not just documentation.** Documenting the
-command does not make CI run it. The script must be added as an explicit
-`- run: bash ci/verify_require_frontend.sh` step in `.github/workflows/ci.yml`,
-alongside the sibling `ci/verify_*.sh` steps (currently grouped ~lines 70-73);
-without that step the guard is inert in CI and only fires for whoever runs it
-locally — defeating its purpose. The same commit also adds it to the AGENTS.md
-quick-start block and to `docs/development/quality-gates.md` (the canonical
-source, which also decides whether it additionally runs at a husky hook tier —
-this spec does not hard-code the tier, matching how the other `verify_*` gates
-are governed).
-
-**Guard scope, stated explicitly (no overstatement):** this gate — both the
-`build.rs` check and the CI grep — verifies only that **`index.html` is
-present** in `frontend/build/` on a real-ship build, which is the identical
-signal `build.rs` already keys on. It does **not** validate asset _content_ or
-completeness: a `frontend/build/` that contains a valid `index.html` but
-drifted, partial, or stale sibling assets would pass. That residual is
-deliberately out of scope (see Out of Scope) — closing it would mean
-content-hashing the SvelteKit output, which is a different, larger change. The
-CI grep's guarantee is narrower still: it proves the _flag is wired_, not that
-any given build _had_ real assets.
+- **Guarantees:** any release-profile compile of `uptrakit-frontend` either embeds a `frontend/build/` containing
+  `index.html` or fails the build. This covers artifact-path drift, adapter-output drift, an empty/missing download
+  dir, and source installs — on every current and future ship path, because they all build `--release`.
+- **Does not guarantee:** asset _content_ or completeness — a `frontend/build/` with a valid `index.html` but stale
+  or partial sibling assets passes (same signal `build.rs` keys on today; closing it means content-hashing the
+  SvelteKit output — out of scope). A hypothetical ship path that builds a **debug** binary would also slip; none
+  exists, and "ship builds are `--release`" is the documented convention.
+- **Debug builds are behavior-unchanged** — stub + warning, exactly as today.
+- **False-positive direction (accepted):** a release-profile compile of the controller graph for a non-ship purpose
+  (a future `--release` CI smoke/coverage job, a local `release-fast` build) fails without assets. That failure is
+  loud, self-explanatory, and bypassable via the documented break-glass placeholder — the opposite failure (silent
+  stub in a shipped binary) is the one this spec exists to kill.
 
 ## Alternatives considered
 
-- **Fail hard unconditionally when the stub would embed (no env flag).**
-  Rejected: it breaks the legitimate release-plz `cargo package --workspace`
-  packaging worktree, whose whole purpose is to verify with `frontend/build/`
-  absent. The flag exists precisely to separate that audience from real ships.
-- **Delete the stub path; require `frontend/build/` always.** Rejected: same
-  breakage as above, plus it forces every local `cargo check --all-features` to
-  first run `npm run build`, which the current lenient default intentionally
-  avoids.
-- **Validate asset content (hash/manifest), not just `index.html` presence.**
-  Rejected as scope creep (YAGNI). The audit's failure mode is a _missing/empty_
-  build dir, which `index.html` presence already detects. Content validation is
-  noted as a residual, not built.
+- **Opt-in strict env var (`UPTRAKIT_REQUIRE_FRONTEND`) set at ship sites** — the previous revision of this spec.
+  Rejected on review: it adds per-site wiring (two release-plz steps + a Dockerfile `ENV`), a CI grep script to
+  protect that wiring, and an env-var contract to document — all to reconstruct a signal (`is this a shippable
+build?`) that cargo already provides as `PROFILE`. It also kept the false in-code premise that release-plz package
+  verification needs the stub (it doesn't; the wrapper injects `--no-verify`). Honest framing of the trade: the env
+  flag was more **explicit** at each ship site; the profile gate is more **unforgettable** (no wiring to forget or
+  rot). Both rest on the same convention ("ship builds are `--release`") — the profile gate wins because that
+  convention holds everywhere today and a violation fails loud in CI rather than shipping a stub.
+- **Unconditional fail (delete the stub).** Matches the finding's letter but taxes every debug context: CI
+  `backend-lint` and `test` jobs would need node + `npm run build` (~1-2 min each), pre-push would need reordering,
+  and every contributor would need frontend assets before any workspace-wide `cargo check/test` — including the
+  minimal `--no-default-features --features db-sqlite` gates. Offered to the user; release-profile gate chosen.
+- **Validate asset content (hash/manifest).** Scope creep; the audit's failure mode is a missing/empty build dir,
+  which `index.html` presence detects. Named as a residual, not built.
 
 ## Documentation deliverables
 
-- **`docs/development/releases.md`** — new `#strict-frontend-gate` subsection:
-  the `UPTRAKIT_REQUIRE_FRONTEND` contract (permissive predicate; unset/`0`/`false`
-  = lenient), where it is set (step-level on the two release-plz binary jobs; a
-  single unconditional `ENV` in the Dockerfile for all images), the Dockerfile
-  placement constraint (after COPY / before real build), and why the lenient stub
-  still exists for packaging worktrees. The inline release-plz + Dockerfile
-  comments link here.
-- **`frontend/build.rs`** — module/`main` doc comment explaining the two modes
-  (lenient default vs strict `UPTRAKIT_REQUIRE_FRONTEND=1`).
-- **`AGENTS.md` quick-start** + **`docs/development/quality-gates.md`
-  (canonical, edited in the same commit)** — list `ci/verify_require_frontend.sh`
-  alongside the other `ci/verify_*` gates.
-- **No ADR** — CI/build-integrity mechanics, not an architectural decision.
-- **No wire-protocol, OpenAPI, or `frontend/src` change** — the frontend build
-  _output_ is unchanged; only when-to-fail changes.
-- **No new dependency** — `std::env::var` only.
+- **`docs/development/releases.md`** — new `#strict-frontend-gate` subsection: the profile-based contract (debug =
+  stub + warning; anything else = hard failure without `frontend/build/index.html`), why release-plz packaging is
+  unaffected (`--no-verify` wrapper, `semver_check = false`), why docker cook is unaffected (cargo-chef dummy
+  build scripts), and the residuals above. The subsection must also document two operational points surfaced by
+  review:
+  - **Break-glass path.** The gate deliberately couples release-profile controller builds to frontend build health.
+    If an urgent backend-only release must ship while the frontend build is broken for unrelated reasons, an operator
+    can supply a placeholder `frontend/build/index.html` by hand — the same degraded-UI outcome as today's silent
+    stub, but as a **deliberate, visible act** instead of an invisible default. Document the command; do not weaken
+    the gate for it. The placeholder is **transient and must never be committed** — `frontend/build/` stays
+    gitignored; a committed placeholder would satisfy the gate on every future build for everyone, silently
+    reinstating the exact hazard this spec kills.
+  - **Convention made explicit.** The gate encodes "release profile ⇒ shippable ⇒ real assets required". Anyone
+    adding a future release-profile CI job that compiles the controller graph (e.g. `--release` coverage or a
+    smoke-test job) must supply `frontend/build/` first, or the job fails at `uptrakit-frontend`'s build script. The
+    failure direction is safe (loud CI breakage, never a shipped stub), but the note saves the next maintainer the
+    surprise.
+- **`frontend/build.rs`** — rewritten branch comment (the load-bearing doc for the next reader).
+- **`AGENTS.md` quick-start note** — the existing "`--all-features` … requires `frontend/build/`" note is stale
+  (debug `--all-features` works via the stub, today and after this change). Reword to: release-profile builds of the
+  controller require `frontend/build/` (`npm run build` first); debug builds embed a stub UI. While editing, also fix
+  the stale feature name `embed-frontend` → `embedded-frontend` (the flag is declared `embedded-frontend` in
+  `crates/core/controller-runtime/Cargo.toml`, not the `controller` crate). The typo occurs **twice** in `AGENTS.md`
+  — the prose Note and the `npm run build` comment in the Frontend quick-start block (locate by
+  `grep -n embed-frontend AGENTS.md`, currently lines ~50 and ~60); fix both. The same stale name in `docker/Dockerfile`
+  is **out of scope** for this finding. The reworded prose need not name the flag at all.
+- **No ADR** — build-integrity mechanics, not an architectural decision. **No wire/OpenAPI/frontend-source change.**
+  **No new dependency** (`std::env::var` only). **No `docs/development/quality-gates.md` change** — no gate command
+  is added, removed, or altered (the AGENTS.md "same commit" rule for quality-gate edits is therefore not triggered).
 
-## Out of scope
+## Optional cleanup (deferred, named for honesty)
 
-- Reworking the `frontend-build` artifact-passing mechanism, the SvelteKit
-  adapter output dir, or the `embed-frontend` feature.
-- Content/completeness validation of the embedded assets beyond `index.html`
-  presence (the same signal `build.rs` already uses). A `frontend/build/` with a
-  present-but-drifted `index.html` and partial siblings passes the gate — named
-  as a known residual, not a regression this spec introduces.
-- The other CI/release-integrity audit findings (attest-before-upload,
-  double-CI-run, unpinned markdownlint) — separate specs.
-
-## Risks
-
-- **Docker chef-cook / real-build ordering (primary).** Covered in Change 3: the
-  `ENV` must sit after the frontend COPY and before the real `cargo build`;
-  placing it at stage-top could panic `cargo chef cook` if cook runs the member
-  `build.rs` against an absent build dir. The after-COPY placement is safe
-  regardless of whether cargo-chef executes the member build script. The
-  load-bearing protection that the real build re-runs `build.rs` against real
-  assets is `COPY . .` layer invalidation, not `rerun-if-env-changed` (which is
-  kept as explicit-contract insurance).
-- **Step-scope in release-plz.** The flag must be step-level `env:` on the
-  controller build steps only; a job- or workflow-level setting would leak into
-  the release-plz packaging/verify steps and break them. Enforced by the inline
-  comment + the CI grep asserting _presence at the ship steps_ (not absence
-  elsewhere — the grep is a floor, not a ceiling).
-- **CI grep brittleness.** A structural refactor of the workflows (job rename,
-  step reordering) could make the grep pass or fail spuriously. Kept minimal and
-  documented so a maintainer can adjust it in the same PR as any such refactor.
+- The release-pr job step `Build frontend (required by uptrakit-frontend cargo package verify)`
+  (`release-plz.yml` ~157) is vestigial: under the `--no-verify` wrapper no compile happens in that job, and even a
+  wrapper regression would package-verify in **debug** profile (lenient). Removing it saves ~1-2 min per release-PR
+  run but touches release infrastructure beyond this finding — deferred.
+- The stale feature name `embed-frontend` (actual: `embedded-frontend`) is **repo-wide doc drift**, not just the
+  AGENTS.md note this spec fixes: `grep -rn embed-frontend` hits ~14 canonical docs (`ARCHITECTURE.md`,
+  `frontend/AGENTS.md`, `docs/development/{quality-gates,setup,feature-flags,coding-standards,docker,…}.md`,
+  `docs/end-user/deployment/*`) plus `docker/Dockerfile` comments. A rename sweep is a separate doc-cleanup change —
+  deferred; this spec fixes only the two occurrences inside the file it must edit anyway.
 
 ## Quality gates
 
-- `cargo fmt --all`; `cargo clippy --all-targets --all-features` (exercises the
-  edited `build.rs` under the frontend-embedding graph — requires
-  `frontend/build/` present, i.e. `npm run build` first, per AGENTS.md).
-- `bash ci/verify_require_frontend.sh` (new) passes.
+- `cargo fmt --all`; `cargo clippy --all-targets --all-features` (with `frontend/build/` present) **and**
+  `cargo clippy --all-targets --no-default-features --features db-sqlite` **without** `frontend/build/` — the latter
+  proves the debug stub path still compiles clean.
 - `markdownlint --config .markdownlint.json` on the edited docs.
-- Manual/CI verification at implementation: a docker image build with
-  `UPTRAKIT_REQUIRE_FRONTEND=1` and an intentionally-empty `frontend/build/`
-  must fail at the `cargo build` layer (not at `cargo chef cook`), and a normal
-  build must still succeed and embed real assets.
+- Manual verification at implementation (build.rs is not compiled into any test target; a unit test is impossible,
+  not skipped):
+  1. `rm -rf frontend/build && cargo build --release -p uptrakit-frontend` → **fails** with the gate message;
+  2. same command with `--profile release-fast` → **fails** (inherited release, probed);
+  3. `cargo check -p uptrakit-frontend` (debug, no build dir) → succeeds with the stub warning;
+  4. after `npm run build`: `cargo build --release -p uptrakit-frontend` → succeeds, `$OUT_DIR/embed/` holds real
+     assets;
+  5. a local `docker build -f docker/Dockerfile …` → succeeds (frontend-builder stage supplies assets; cook stage
+     runs dummy build scripts).
