@@ -111,6 +111,7 @@ fn emit_server_cert_renew_audit(
     responses(
         (status = 200, description = "Server certificate renewed", body = RenewServerCertResponse),
         (status = 403, description = "Not authorized"),
+        (status = 409, description = "Server certificate is externally managed; renewal via this API is rejected"),
         (status = 500, description = "Renewal failed")
     ),
     extensions(("x-required-permission" = json!("manage_global_settings"))),
@@ -123,6 +124,19 @@ pub async fn renew_server_certificate(
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    if state.server.has_external_tls_cert {
+        emit_server_cert_renew_audit(
+            &state,
+            &user,
+            api_token_id,
+            uptrakit_audit_log::AuditOutcome::Denied,
+            serde_json::json!({ "reason_code": "external_tls_cert_managed" }),
+        );
+        return error_response(
+            StatusCode::CONFLICT,
+            "server certificate is externally managed; rotate the files and reload instead",
+        );
+    }
     match renew_server_certificate_inner(&state).await {
         Ok(resp) => {
             emit_server_cert_renew_audit(
@@ -499,5 +513,98 @@ mod tests {
             details["reason_code"],
             serde_json::json!("ca_key_parse_failed")
         );
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn renew_server_certificate_rejects_when_externally_managed() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) =
+            crate::test_harness::build_test_state_with_external_tls_cert(db.clone(), tenant_id)
+                .await;
+        assert!(state.server.has_external_tls_cert);
+
+        // Snapshot the on-disk cert/key paths and the resolver identity before
+        // the call so we can assert neither is touched.
+        let cert_path = state.server.pki_path.join("server.crt");
+        let key_path = state.server.pki_path.join("server.key");
+        assert!(
+            !cert_path.exists() && !key_path.exists(),
+            "precondition: no cert/key files should exist before the call"
+        );
+
+        let user_id = uuid::Uuid::now_v7();
+        let response = renew_server_certificate(
+            State(Arc::clone(&state)),
+            CanManageGlobalSettings::new(AuthenticatedUser::new(
+                user_id,
+                AuthMethod::Password,
+                vec![Permission::ManageGlobalSettings],
+                None,
+            )),
+            None,
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("read response body");
+        let body: uptrakit_web_api_types::error::ErrorResponse =
+            serde_json::from_slice(&bytes).expect("deserialize error response");
+        assert_eq!(
+            body.error,
+            "server certificate is externally managed; rotate the files and reload instead"
+        );
+
+        // The rejection must not touch the filesystem or the resolver.
+        assert!(
+            !cert_path.exists() && !key_path.exists(),
+            "no cert/key files should be written when renewal is rejected"
+        );
+
+        wait_for_system_audit_rows(&db, 1).await;
+        let row = system_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::SYSTEM_SERVER_CERTIFICATE_RENEW,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("external_tls_cert_managed")
+        );
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn renew_server_certificate_unchanged_when_managed() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
+        assert!(!state.server.has_external_tls_cert);
+
+        let user_id = uuid::Uuid::now_v7();
+        let response = renew_server_certificate(
+            State(Arc::clone(&state)),
+            CanManageGlobalSettings::new(AuthenticatedUser::new(
+                user_id,
+                AuthMethod::Password,
+                vec![Permission::ManageGlobalSettings],
+                None,
+            )),
+            None,
+        )
+        .await;
+
+        // Existing (pre-guard) behaviour is unaffected: the internal-CA path
+        // still attempts renewal and fails for the same reason as the
+        // existing failure test (dummy empty key in the test harness).
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 }

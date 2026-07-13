@@ -7459,6 +7459,10 @@ export type RenewServerCertificateErrors = {
      */
     403: unknown;
     /**
+     * Server certificate is externally managed; renewal via this API is rejected
+     */
+    409: unknown;
+    /**
      * Renewal failed
      */
     500: unknown;

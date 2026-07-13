@@ -169,12 +169,21 @@ pub struct ServerState {
     /// reloading the full TLS config.  `None` when the controller was started
     /// without the dynamic-resolver path (e.g. in tests).
     pub server_cert_resolver: Option<Arc<dyn crate::server_cert_swap::ServerCertSwap>>,
+    /// Whether the server's TLS certificate is externally managed (operator-supplied
+    /// files) rather than minted by the internal CA.
+    ///
+    /// When `true`, the manual server-cert renewal API must reject rather than
+    /// silently replace the external chain with an internal-CA cert — the
+    /// file-reload path is the resolver's single writer by construction only
+    /// when this invariant holds.
+    pub has_external_tls_cert: bool,
 }
 
 impl ServerState {
     /// Creates a new [`ServerState`] without a hot-swap resolver.
     ///
     /// Used by tests and callers that do not need zero-downtime cert swaps.
+    /// Defaults `has_external_tls_cert` to `false` (internal-CA deployment).
     #[must_use]
     pub fn new(
         pki_path: std::path::PathBuf,
@@ -184,6 +193,7 @@ impl ServerState {
             pki_path,
             rustls_config,
             server_cert_resolver: None,
+            has_external_tls_cert: false,
         }
     }
 
@@ -201,6 +211,7 @@ impl ServerState {
             pki_path,
             rustls_config,
             server_cert_resolver: Some(resolver),
+            has_external_tls_cert: false,
         }
     }
 }
@@ -408,6 +419,7 @@ pub struct AppStateBuilder {
     pki_path: Option<std::path::PathBuf>,
     rustls_config: Option<axum_server::tls_rustls::RustlsConfig>,
     server_cert_resolver: Option<Arc<dyn crate::server_cert_swap::ServerCertSwap>>,
+    has_external_tls_cert: bool,
     crl_pem_cache: Option<Arc<parking_lot::RwLock<String>>>,
     ca_rotation_trigger: Option<Arc<tokio::sync::Notify>>,
     default_tenant_id: Option<uuid::Uuid>,
@@ -476,6 +488,7 @@ impl AppStateBuilder {
             pki_path: None,
             rustls_config: None,
             server_cert_resolver: None,
+            has_external_tls_cert: false,
             crl_pem_cache: None,
             ca_rotation_trigger: None,
             default_tenant_id: None,
@@ -606,6 +619,16 @@ impl AppStateBuilder {
         v: Arc<dyn crate::server_cert_swap::ServerCertSwap>,
     ) -> Self {
         self.server_cert_resolver = Some(v);
+        self
+    }
+
+    /// Set whether the server's TLS certificate is externally managed.
+    ///
+    /// Defaults to `false` (internal-CA deployment). When `true`, the manual
+    /// server-cert renewal API rejects instead of swapping in an internal-CA
+    /// cert over the operator-supplied chain.
+    pub fn has_external_tls_cert(mut self, v: bool) -> Self {
+        self.has_external_tls_cert = v;
         self
     }
 
@@ -1063,12 +1086,14 @@ impl AppStateBuilder {
                 let rustls_config = self
                     .rustls_config
                     .ok_or(AppStateBuildError("rustls_config"))?;
-                match self.server_cert_resolver {
+                let mut server = match self.server_cert_resolver {
                     Some(resolver) => {
                         ServerState::with_cert_resolver(pki_path, rustls_config, resolver)
                     }
                     None => ServerState::new(pki_path, rustls_config),
-                }
+                };
+                server.has_external_tls_cert = self.has_external_tls_cert;
+                server
             },
             default_tenant_id: self
                 .default_tenant_id

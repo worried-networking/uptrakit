@@ -76,7 +76,7 @@ pub(crate) async fn assemble(
                 crl_pem_cache,
                 crl_manager: _crl_manager,
                 initial_ca_version: _initial_ca_version,
-                has_external_tls_cert: _has_external_tls_cert,
+                has_external_tls_cert,
             },
         jwt_manager,
         cert_signer,
@@ -103,6 +103,7 @@ pub(crate) async fn assemble(
         .rustls_config(rustls_config.clone())
         .server_cert_resolver(std::sync::Arc::clone(&server_cert_resolver)
             as std::sync::Arc<dyn uptrakit_web_api::server_cert_swap::ServerCertSwap>)
+        .has_external_tls_cert(has_external_tls_cert)
         .crl_pem_cache(crl_pem_cache)
         .ca_rotation_trigger(ca_rotation_trigger)
         .default_tenant_id(default_tenant_id)

@@ -5946,6 +5946,9 @@
           "403": {
             "description": "Not authorized"
           },
+          "409": {
+            "description": "Server certificate is externally managed; renewal via this API is rejected"
+          },
           "500": {
             "description": "Renewal failed"
           }

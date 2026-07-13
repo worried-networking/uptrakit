@@ -108,6 +108,22 @@ pub(crate) async fn build_test_state(
     build_test_state_with_plugin_ops(db, tenant_id, None).await
 }
 
+/// Build a test [`AppState`] with `server.has_external_tls_cert` forced to `true`.
+///
+/// Used by tests that assert the manual server-cert renewal API rejects when
+/// the TLS certificate is externally managed.
+pub(crate) async fn build_test_state_with_external_tls_cert(
+    db: DatabaseConnection,
+    tenant_id: uuid::Uuid,
+) -> (Arc<AppState>, Arc<JwtManager>) {
+    let (state, jwt) = build_test_state_with_plugin_ops(db, tenant_id, None).await;
+    let mut server = state.server.clone();
+    server.has_external_tls_cert = true;
+    let mut app_state = (*state).clone();
+    app_state.server = server;
+    (Arc::new(app_state), jwt)
+}
+
 pub(crate) async fn build_test_state_with_plugin_ops(
     db: DatabaseConnection,
     tenant_id: uuid::Uuid,
