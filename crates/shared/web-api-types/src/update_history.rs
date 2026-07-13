@@ -142,11 +142,12 @@ pub struct UpdateHistoryResponse {
     pub created_at: OffsetDateTime,
     /// Classification of the update (security, bugfix, feature, unknown).
     pub update_category: String,
-    /// Whether the update was dispatched in interactive mode (PTY allocated).
+    /// Whether the update was dispatched in interactive mode (PTY allocation
+    /// intended; input unlocks in the UI once the PTY is live).
     ///
-    /// `true` means the agent opened a PTY and kept stdin open. The UI uses
-    /// this to show an "Input Required" badge on every in-progress interactive
-    /// update in the history list, even when not actively watching the stream.
+    /// The UI uses this to show an "Input Required" badge on every in-progress
+    /// interactive update in the history list, even when not actively watching
+    /// the stream.
     pub interactive: bool,
     /// Whether any output was dropped because it exceeded the output size cap.
     ///

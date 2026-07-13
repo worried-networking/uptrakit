@@ -502,9 +502,11 @@ pub struct UpdateStartedPayload {
     pub update_history_id: Uuid,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub from_version: Option<String>,
-    /// Whether a PTY was actually allocated for this update.
-    /// `false` for non-interactive updates or when PTY allocation failed.
-    /// Old agents that do not send this field will deserialize as `false`.
+    /// Whether this update was dispatched in interactive mode and the agent's
+    /// executor supports PTY allocation (dispatch intent). The PTY itself is
+    /// allocated when the update command starts; on reconnect replay the agent
+    /// reports live reality instead (channels resolved). Old agents that do
+    /// not send this field will deserialize as `false`.
     #[serde(default)]
     pub interactive: bool,
 }

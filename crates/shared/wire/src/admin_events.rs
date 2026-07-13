@@ -73,7 +73,8 @@ pub enum AdminEvent {
         update_history_id: Uuid,
         host_id: Uuid,
         software_item_id: Uuid,
-        /// Whether the update was dispatched in interactive mode (PTY allocated).
+        /// Whether the update was dispatched in interactive mode (PTY allocation
+        /// intended; input unlocks in the UI once the PTY is live).
         ///
         /// Allows the history list to show an "Input Required" badge in
         /// real-time without reloading, as soon as the update transitions to

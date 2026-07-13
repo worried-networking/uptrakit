@@ -13172,7 +13172,7 @@
                 },
                 "interactive": {
                   "type": "boolean",
-                  "description": "Whether the update was dispatched in interactive mode (PTY allocated).\n\n`true` means the agent opened a PTY and kept stdin open. The UI uses\nthis to show an \"Input Required\" badge on every in-progress interactive\nupdate in the history list, even when not actively watching the stream."
+                  "description": "Whether the update was dispatched in interactive mode (PTY allocation\nintended; input unlocks in the UI once the PTY is live).\n\nThe UI uses this to show an \"Input Required\" badge on every in-progress\ninteractive update in the history list, even when not actively watching\nthe stream."
                 },
                 "output": {
                   "type": "string"
@@ -15269,7 +15269,7 @@
           },
           "interactive": {
             "type": "boolean",
-            "description": "Whether the update was dispatched in interactive mode (PTY allocated).\n\n`true` means the agent opened a PTY and kept stdin open. The UI uses\nthis to show an \"Input Required\" badge on every in-progress interactive\nupdate in the history list, even when not actively watching the stream."
+            "description": "Whether the update was dispatched in interactive mode (PTY allocation\nintended; input unlocks in the UI once the PTY is live).\n\nThe UI uses this to show an \"Input Required\" badge on every in-progress\ninteractive update in the history list, even when not actively watching\nthe stream."
           },
           "output": {
             "type": "string"

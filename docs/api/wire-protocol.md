@@ -220,6 +220,26 @@ and is not sent to the agent.
 | `timeout_seconds`          | `Duration`              | Maximum execution time for the entire update (including hook plugins). Rust field is `timeout`, serialized as seconds on the wire (`timeout_seconds`). Defaults to 7200 (2 hours) when omitted.                   |
 | `interactive`              | bool                    | When `true`, the agent allocates a PTY and keeps stdin open for forwarding. Defaults to `false`. Only honoured when the agent advertises `InteractiveUpdates`. See [Interactive Updates](interactive-updates.md). |
 
+`UpdateStartedPayload` (agent → controller, acknowledging the update above has started) echoes an
+`interactive` field of its own, but its meaning shifts by send site:
+
+- **First send** (update dispatch): `interactive` is dispatch _intent_ —
+  `ExecuteUpdatePayload.interactive` AND the agent's executor reports PTY support
+  (`supports_interactive()`). The PTY itself is allocated only once the update command starts, so
+  intent can be `true` even if PTY setup later falls back to non-interactive.
+- **Reconnect replay** (agent re-sends `UpdateStarted` for an in-flight update after reconnecting):
+  `interactive` instead reports live reality, derived from whether the interactive channels have
+  resolved (`stdin_tx.is_some() || channels_rx.is_some()`) rather than from the original dispatch
+  flag.
+- Old agents that never send the field deserialize it as `false`.
+
+The controller persists this value onto `update_history.interactive` and rebroadcasts it verbatim in
+`AdminEvent::UpdateStarted` and `UpdateHistoryResponse` — both carry the same intent/live-state
+duality, not a confirmed-PTY guarantee. The frontend does **not** gate stdin input on this flag; it
+gates on independent PTY-liveness evidence (the first stdout/stderr output frame from the update
+stream, or a `stdin_attention` signal), since intent can be signalled before the PTY is actually
+live.
+
 #### `ReleaseInfo` fields
 
 `ReleaseInfo` carries metadata about the upstream release being installed. It is populated by the

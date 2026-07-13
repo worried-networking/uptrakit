@@ -1854,11 +1854,12 @@ export type PaginatedResponseUpdateHistoryResponse = {
         host_name: string;
         id: string;
         /**
-         * Whether the update was dispatched in interactive mode (PTY allocated).
+         * Whether the update was dispatched in interactive mode (PTY allocation
+         * intended; input unlocks in the UI once the PTY is live).
          *
-         * `true` means the agent opened a PTY and kept stdin open. The UI uses
-         * this to show an "Input Required" badge on every in-progress interactive
-         * update in the history list, even when not actively watching the stream.
+         * The UI uses this to show an "Input Required" badge on every in-progress
+         * interactive update in the history list, even when not actively watching
+         * the stream.
          */
         interactive: boolean;
         output: string;
@@ -2970,11 +2971,12 @@ export type UpdateHistoryResponse = {
     host_name: string;
     id: string;
     /**
-     * Whether the update was dispatched in interactive mode (PTY allocated).
+     * Whether the update was dispatched in interactive mode (PTY allocation
+     * intended; input unlocks in the UI once the PTY is live).
      *
-     * `true` means the agent opened a PTY and kept stdin open. The UI uses
-     * this to show an "Input Required" badge on every in-progress interactive
-     * update in the history list, even when not actively watching the stream.
+     * The UI uses this to show an "Input Required" badge on every in-progress
+     * interactive update in the history list, even when not actively watching
+     * the stream.
      */
     interactive: boolean;
     output: string;
