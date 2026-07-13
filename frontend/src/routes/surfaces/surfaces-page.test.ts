@@ -48,6 +48,7 @@ vi.mock('$lib/surfaces/registry.svelte', () => ({
 	getSurfaceReadLoading: vi.fn(() => false),
 	getSurfaceRegistryLoaded: vi.fn(() => true),
 	loadSurfaceReadModels: vi.fn(async () => {}),
+	getSurfaceReadFailed: vi.fn(() => false),
 	getSurfaceProviders: vi.fn(() => buildSurfacePageParity().providers)
 }));
 
@@ -346,6 +347,7 @@ describe('/surfaces/[id] handlePageChange URL management', () => {
 			getSurfaceReadLoading: vi.fn(() => false),
 			getSurfaceRegistryLoaded: vi.fn(() => true),
 			loadSurfaceReadModels: vi.fn(async () => {}),
+			getSurfaceReadFailed: vi.fn(() => false),
 			getSurfaceProviders: vi.fn(() => buildSurfacePageParity().providers)
 		}));
 		vi.doMock('$lib/api', async (importOriginal) => ({
@@ -397,6 +399,7 @@ describe('/surfaces/[id] handlePageChange URL management', () => {
 			getSurfaceReadLoading: vi.fn(() => false),
 			getSurfaceRegistryLoaded: vi.fn(() => true),
 			loadSurfaceReadModels: vi.fn(async () => {}),
+			getSurfaceReadFailed: vi.fn(() => false),
 			getSurfaceProviders: vi.fn(() => buildSurfacePageParity().providers)
 		}));
 		vi.doMock('$lib/api', async (importOriginal) => ({

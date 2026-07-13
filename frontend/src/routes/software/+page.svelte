@@ -55,7 +55,8 @@
 		getSurfaceReadModel,
 		getSurfaceReadRequested,
 		getSurfacesBySlot,
-		loadSurfaceReadModels
+		loadSurfaceReadModels,
+		refreshSurfaceReadModel
 	} from '$lib/surfaces/registry.svelte';
 	import { filterSurfacesByPermission, isSurfaceTabPending } from '$lib/surfaces/read-model';
 	import {
@@ -256,10 +257,16 @@
 	});
 
 	$effect(() => {
-		if (slotTabSurfaces.length === 0) {
+		const ids = slotTabSurfaces.map((surface) => surface.surface_id);
+		if (ids.length === 0) {
 			return;
 		}
-		void loadSurfaceReadModels(slotTabSurfaces.map((surface) => surface.surface_id));
+		untrack(() => {
+			for (const id of ids) {
+				void refreshSurfaceReadModel(id);
+			}
+			void loadSurfaceReadModels(ids);
+		});
 	});
 
 	// Auto-select first available surface tab when surfaces appear but none is active.

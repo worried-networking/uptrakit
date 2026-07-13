@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { SvelteURLSearchParams } from 'svelte/reactivity';
@@ -6,6 +7,7 @@
 	import SurfaceReadPanel from '$lib/components/surfaces/SurfaceReadPanel.svelte';
 	import {
 		getSurfaceById,
+		getSurfaceReadFailed,
 		getSurfaceReadLoading,
 		getSurfaceReadModel,
 		getSurfaceReadRequested,
@@ -71,10 +73,10 @@
 		if (!surface || !canViewSurface) {
 			return;
 		}
-		if (isReadRequested || isReadLoading) {
+		if (isReadRequested || isReadLoading || (surface && getSurfaceReadFailed(surface.surface_id))) {
 			return;
 		}
-		void loadSurfaceReadModels([surface.surface_id]);
+		untrack(() => void loadSurfaceReadModels([surface.surface_id]));
 	});
 </script>
 

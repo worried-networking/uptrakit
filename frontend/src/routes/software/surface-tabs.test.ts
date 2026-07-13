@@ -57,7 +57,8 @@ vi.mock('$lib/surfaces/registry.svelte', () => ({
 	getSurfacesBySlot: vi.fn((slot: string) =>
 		slot === 'software.tabs' ? buildSoftwareTabsParityFixture().surfaceTabs : []
 	),
-	loadSurfaceReadModels: vi.fn(async () => {})
+	loadSurfaceReadModels: vi.fn(async () => {}),
+	refreshSurfaceReadModel: vi.fn(async () => {})
 }));
 
 import SoftwarePage from './+page.svelte';

@@ -58,7 +58,8 @@ vi.mock('$lib/surfaces/registry.svelte', () => ({
 	getSurfaceReadModel: vi.fn(() => undefined),
 	getSurfaceReadRequested: vi.fn(() => false),
 	getSurfacesBySlot: vi.fn(() => []),
-	loadSurfaceReadModels: vi.fn(async () => {})
+	loadSurfaceReadModels: vi.fn(async () => {}),
+	refreshSurfaceReadModel: vi.fn(async () => {})
 }));
 
 import SoftwarePage from './+page.svelte';

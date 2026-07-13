@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount, onDestroy, untrack } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
@@ -26,7 +26,12 @@
 	import Pagination from '$lib/components/Pagination.svelte';
 	import { Permission, PluginCapability, hasAnyPermission, hasPermissionValue } from '$lib/api';
 	import SurfaceReadPanel from '$lib/components/surfaces/SurfaceReadPanel.svelte';
-	import { getSurfaceReadModel, getSurfacesBySlot, loadSurfaceReadModels } from '$lib/surfaces/registry.svelte';
+	import {
+		getSurfaceReadModel,
+		getSurfacesBySlot,
+		loadSurfaceReadModels,
+		refreshSurfaceReadModel
+	} from '$lib/surfaces/registry.svelte';
 	import type {
 		HostAgentSummary,
 		HostResponse,
@@ -163,10 +168,16 @@
 	});
 
 	$effect(() => {
-		if (hostDetailSlotRenderableSurfaces.length === 0) {
+		const ids = hostDetailSlotRenderableSurfaces.map((surface) => surface.surface_id);
+		if (ids.length === 0) {
 			return;
 		}
-		void loadSurfaceReadModels(hostDetailSlotRenderableSurfaces.map((surface) => surface.surface_id));
+		untrack(() => {
+			for (const id of ids) {
+				void refreshSurfaceReadModel(id);
+			}
+			void loadSurfaceReadModels(ids);
+		});
 	});
 
 	async function loadData(background = false) {

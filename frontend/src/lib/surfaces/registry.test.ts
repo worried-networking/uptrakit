@@ -1,14 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { tick } from 'svelte';
 import type { SurfaceProviderInfo, SurfaceReadResponse, SurfaceResponse } from '$lib/surfaces/contract';
 import {
 	clearSurfaceRegistry,
+	getSurfaceReadFailed,
 	getSurfaceReadLoading,
 	getSurfaceReadRequested,
 	getSurfaceProviders,
 	getSurfaceReadModel,
 	getSurfacesBySlot,
+	loadSurfaceReadModel,
 	loadSurfaceReadModels,
 	loadSurfaceRegistry,
+	refreshSurfaceReadModel,
 	resolveSurfacePageNavItems
 } from './registry.svelte';
 import { getSurfaceRead, listSurfaceProviders, listSurfaces } from '$lib/api';
@@ -203,6 +207,178 @@ describe('surface registry', () => {
 
 		expect(getSurfaceRead).toHaveBeenCalledTimes(1);
 		expect(getSurfaceReadModel('surface.targeted')?.descriptor.surface_id).toBe('surface.targeted');
+	});
+
+	it('marks a surface read as failed and does not refetch on a second load call (loop prevention)', async () => {
+		vi.mocked(listSurfaces).mockResolvedValue([
+			makeSurface({
+				surfaceId: 'surface.targeted',
+				label: 'Targeted',
+				priority: 100,
+				slot: 'software.tabs',
+				targeting: 'targeted'
+			})
+		]);
+		vi.mocked(listSurfaceProviders).mockResolvedValue([makeProvider('provider.a')]);
+		vi.mocked(getSurfaceRead).mockRejectedValue(new Error('boom'));
+
+		await loadSurfaceRegistry();
+		await loadSurfaceReadModel('surface.targeted');
+
+		expect(getSurfaceReadFailed('surface.targeted')).toBe(true);
+		expect(getSurfaceReadModel('surface.targeted')).toBeUndefined();
+		expect(getSurfaceRead).toHaveBeenCalledTimes(1);
+
+		await loadSurfaceReadModel('surface.targeted');
+		await tick();
+
+		expect(getSurfaceRead).toHaveBeenCalledTimes(1);
+		expect(getSurfaceReadFailed('surface.targeted')).toBe(true);
+	});
+
+	it('refreshSurfaceReadModel clears the failed mark and re-fetches successfully', async () => {
+		vi.mocked(listSurfaces).mockResolvedValue([
+			makeSurface({
+				surfaceId: 'surface.targeted',
+				label: 'Targeted',
+				priority: 100,
+				slot: 'software.tabs',
+				targeting: 'targeted'
+			})
+		]);
+		vi.mocked(listSurfaceProviders).mockResolvedValue([makeProvider('provider.a')]);
+		vi.mocked(getSurfaceRead)
+			.mockRejectedValueOnce(new Error('boom'))
+			.mockImplementation(async (surfaceId: string) => makeRead(surfaceId));
+
+		await loadSurfaceRegistry();
+		await loadSurfaceReadModel('surface.targeted');
+		expect(getSurfaceReadFailed('surface.targeted')).toBe(true);
+
+		await refreshSurfaceReadModel('surface.targeted');
+
+		expect(getSurfaceRead).toHaveBeenCalledTimes(2);
+		expect(getSurfaceReadFailed('surface.targeted')).toBe(false);
+		expect(getSurfaceReadModel('surface.targeted')?.descriptor.surface_id).toBe('surface.targeted');
+	});
+
+	it('clears a pre-existing failed mark on a subsequent successful load', async () => {
+		vi.mocked(listSurfaces).mockResolvedValue([
+			makeSurface({
+				surfaceId: 'surface.targeted',
+				label: 'Targeted',
+				priority: 100,
+				slot: 'software.tabs',
+				targeting: 'targeted'
+			})
+		]);
+		vi.mocked(listSurfaceProviders).mockResolvedValue([makeProvider('provider.a')]);
+		vi.mocked(getSurfaceRead)
+			.mockRejectedValueOnce(new Error('boom'))
+			.mockImplementation(async (surfaceId: string) => makeRead(surfaceId));
+
+		await loadSurfaceRegistry();
+		await loadSurfaceReadModel('surface.targeted');
+		expect(getSurfaceReadFailed('surface.targeted')).toBe(true);
+
+		// A direct retry through refreshSurfaceReadModel (clear-then-load) succeeds and clears the mark.
+		await refreshSurfaceReadModel('surface.targeted');
+
+		expect(getSurfaceReadFailed('surface.targeted')).toBe(false);
+		expect(getSurfaceReadModel('surface.targeted')?.descriptor.surface_id).toBe('surface.targeted');
+	});
+
+	it('clearSurfaceRegistry evicts failed marks, making a previously-failed id re-fetchable', async () => {
+		vi.mocked(listSurfaces).mockResolvedValue([
+			makeSurface({
+				surfaceId: 'surface.targeted',
+				label: 'Targeted',
+				priority: 100,
+				slot: 'software.tabs',
+				targeting: 'targeted'
+			})
+		]);
+		vi.mocked(listSurfaceProviders).mockResolvedValue([makeProvider('provider.a')]);
+		vi.mocked(getSurfaceRead).mockRejectedValue(new Error('boom'));
+
+		await loadSurfaceRegistry();
+		await loadSurfaceReadModel('surface.targeted');
+		expect(getSurfaceReadFailed('surface.targeted')).toBe(true);
+
+		clearSurfaceRegistry();
+
+		expect(getSurfaceReadFailed('surface.targeted')).toBe(false);
+
+		vi.mocked(getSurfaceRead).mockImplementation(async (surfaceId: string) => makeRead(surfaceId));
+		await loadSurfaceReadModel('surface.targeted');
+
+		expect(getSurfaceReadModel('surface.targeted')?.descriptor.surface_id).toBe('surface.targeted');
+	});
+
+	it('loadSurfaceRegistry evicts failed marks, making a previously-failed id re-fetchable', async () => {
+		vi.mocked(listSurfaces).mockResolvedValue([
+			makeSurface({
+				surfaceId: 'surface.targeted',
+				label: 'Targeted',
+				priority: 100,
+				slot: 'software.tabs',
+				targeting: 'targeted'
+			})
+		]);
+		vi.mocked(listSurfaceProviders).mockResolvedValue([makeProvider('provider.a')]);
+		vi.mocked(getSurfaceRead).mockRejectedValue(new Error('boom'));
+
+		await loadSurfaceRegistry();
+		await loadSurfaceReadModel('surface.targeted');
+		expect(getSurfaceReadFailed('surface.targeted')).toBe(true);
+
+		// A registry re-fetch (e.g. tenant switch) should evict failedReads too.
+		await loadSurfaceRegistry();
+
+		expect(getSurfaceReadFailed('surface.targeted')).toBe(false);
+
+		vi.mocked(getSurfaceRead).mockImplementation(async (surfaceId: string) => makeRead(surfaceId));
+		await loadSurfaceReadModel('surface.targeted');
+
+		expect(getSurfaceReadModel('surface.targeted')?.descriptor.surface_id).toBe('surface.targeted');
+	});
+
+	it('does not re-fire loadSurfaceReadModel on repeated per-navigation refresh-then-fail churn (loop freedom)', async () => {
+		vi.mocked(listSurfaces).mockResolvedValue([
+			makeSurface({
+				surfaceId: 'surface.targeted',
+				label: 'Targeted',
+				priority: 100,
+				slot: 'software.tabs',
+				targeting: 'targeted'
+			})
+		]);
+		vi.mocked(listSurfaceProviders).mockResolvedValue([makeProvider('provider.a')]);
+		vi.mocked(getSurfaceRead).mockRejectedValue(new Error('boom'));
+
+		await loadSurfaceRegistry();
+
+		// Simulate a keyed-effect navigation: refresh (clears mark) then load (fails again).
+		await refreshSurfaceReadModel('surface.targeted');
+		expect(getSurfaceRead).toHaveBeenCalledTimes(1);
+		expect(getSurfaceReadFailed('surface.targeted')).toBe(true);
+
+		// Reactive settle after the failure — the churn on failedReads (delete-then-add) must not
+		// itself trigger another loadSurfaceReadModel call outside the one deliberate refresh above.
+		await tick();
+		await tick();
+
+		expect(getSurfaceRead).toHaveBeenCalledTimes(1);
+
+		// A second, independent navigation performs exactly one more deliberate retry.
+		await refreshSurfaceReadModel('surface.targeted');
+		expect(getSurfaceRead).toHaveBeenCalledTimes(2);
+		expect(getSurfaceReadFailed('surface.targeted')).toBe(true);
+
+		// And again settling must not climb further.
+		await tick();
+		await tick();
+		expect(getSurfaceRead).toHaveBeenCalledTimes(2);
 	});
 
 	it('derives surface page nav items directly from the surface registry slot', () => {

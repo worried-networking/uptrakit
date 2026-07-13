@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount, onDestroy, untrack } from 'svelte';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
@@ -45,7 +45,8 @@
 		getSurfaceRegistryLoaded,
 		getSurfaceReadRequested,
 		getSurfaceReadLoading,
-		loadSurfaceReadModels
+		loadSurfaceReadModels,
+		refreshSurfaceReadModel
 	} from '$lib/surfaces/registry.svelte';
 	import { filterSurfacesByPermission, isSurfaceTabPending, shouldUseSurfaceRoute } from '$lib/surfaces/read-model';
 	import {
@@ -355,17 +356,29 @@
 	});
 
 	$effect(() => {
-		if (softwareItemTabSurfaces.length === 0) {
+		const ids = softwareItemTabSurfaces.map((surface) => surface.surface_id);
+		if (ids.length === 0) {
 			return;
 		}
-		void loadSurfaceReadModels(softwareItemTabSurfaces.map((surface) => surface.surface_id));
+		untrack(() => {
+			for (const id of ids) {
+				void refreshSurfaceReadModel(id);
+			}
+			void loadSurfaceReadModels(ids);
+		});
 	});
 
 	$effect(() => {
-		if (hostContextSurfaces.length === 0) {
+		const ids = hostContextSurfaces.map((surface) => surface.surface_id);
+		if (ids.length === 0) {
 			return;
 		}
-		void loadSurfaceReadModels(hostContextSurfaces.map((surface) => surface.surface_id));
+		untrack(() => {
+			for (const id of ids) {
+				void refreshSurfaceReadModel(id);
+			}
+			void loadSurfaceReadModels(ids);
+		});
 	});
 
 	onDestroy(() => {

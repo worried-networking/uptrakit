@@ -11,6 +11,7 @@ const providersBySurface = new SvelteMap<string, SurfaceProviderInfo[]>();
 const readsBySurface = new SvelteMap<string, SurfaceReadResponse>();
 const readRequestedBySurface = new SvelteMap<string, boolean>();
 const readLoadPromises = new SvelteMap<string, Promise<void>>();
+const failedReads = new SvelteSet<string>();
 let loadPromise: Promise<void> | null = null;
 
 const providerAvailabilityOrder: Record<SurfaceProviderInfo['availability'], number> = {
@@ -110,13 +111,16 @@ export function getSurfaceReadLoading(surfaceId: string): boolean {
 	return readLoadPromises.has(surfaceId);
 }
 
+export function getSurfaceReadFailed(surfaceId: string): boolean {
+	return failedReads.has(surfaceId);
+}
+
 export async function loadSurfaceReadModel(surfaceId: string): Promise<void> {
 	readRequestedBySurface.set(surfaceId, true);
-	if (readsBySurface.has(surfaceId)) {
-		return;
-	}
-	if (readLoadPromises.has(surfaceId)) {
-		await readLoadPromises.get(surfaceId);
+	if (readsBySurface.has(surfaceId) || readLoadPromises.has(surfaceId) || failedReads.has(surfaceId)) {
+		if (readLoadPromises.has(surfaceId)) {
+			await readLoadPromises.get(surfaceId);
+		}
 		return;
 	}
 
@@ -124,9 +128,10 @@ export async function loadSurfaceReadModel(surfaceId: string): Promise<void> {
 		try {
 			const read = await getSurfaceRead(surfaceId);
 			readsBySurface.set(surfaceId, read);
+			failedReads.delete(surfaceId);
 		} catch (error) {
 			console.error(`Failed to load surface read model for ${surfaceId}:`, error);
-			readsBySurface.delete(surfaceId);
+			failedReads.add(surfaceId);
 		}
 	})();
 
@@ -136,6 +141,16 @@ export async function loadSurfaceReadModel(surfaceId: string): Promise<void> {
 	} finally {
 		readLoadPromises.delete(surfaceId);
 	}
+}
+
+/** Clears a failed-read mark and re-fetches. The load path retains failures
+ *  in `failedReads` instead of re-arming (loop prevention); this is the
+ *  explicit retry affordance for surface UIs and for the per-navigation
+ *  eviction below. Mutates ONLY `failedReads` — never deletes
+ *  `readsBySurface`/`readRequestedBySurface`. */
+export async function refreshSurfaceReadModel(surfaceId: string): Promise<void> {
+	failedReads.delete(surfaceId);
+	await loadSurfaceReadModel(surfaceId);
 }
 
 export async function loadSurfaceReadModels(surfaceIds: string[]): Promise<void> {
@@ -159,6 +174,7 @@ export async function loadSurfaceRegistry(): Promise<void> {
 			readsBySurface.clear();
 			readRequestedBySurface.clear();
 			readLoadPromises.clear();
+			failedReads.clear();
 
 			const targetedSurfaces = sortedSurfaces.filter((surface) => surface.targeting === 'targeted');
 			const providerResults: Array<[string, SurfaceProviderInfo[]]> = await Promise.all(
@@ -183,6 +199,7 @@ export async function loadSurfaceRegistry(): Promise<void> {
 			readsBySurface.clear();
 			readRequestedBySurface.clear();
 			readLoadPromises.clear();
+			failedReads.clear();
 		} finally {
 			surfacesLoaded = true;
 			surfacesLoading = false;
@@ -205,5 +222,6 @@ export function clearSurfaceRegistry(): void {
 	readsBySurface.clear();
 	readRequestedBySurface.clear();
 	readLoadPromises.clear();
+	failedReads.clear();
 	loadPromise = null;
 }
