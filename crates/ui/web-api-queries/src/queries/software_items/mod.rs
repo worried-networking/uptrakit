@@ -774,7 +774,7 @@ mod active_update_status_tests {
         let now = OffsetDateTime::now_utc();
 
         // Tenant A owns the software item; tenant B owns a host.
-        let (tenant_a, _host_a, item_a, _hsi_a) = insert_parents(&db).await;
+        let (tenant_a, host_a, item_a, _hsi_a) = insert_parents(&db).await;
 
         let tenant_b = Uuid::now_v7();
         tenant::ActiveModel {
@@ -838,10 +838,17 @@ mod active_update_status_tests {
         .expect("insert rogue link");
 
         // Scoped to tenant A: the foreign host_b must not surface, only the item's own host.
+        // Assert positive presence of host_a too — a filter that wrongly dropped ALL
+        // hosts would still satisfy a bare `!= host_b` check (vacuous pass).
         let hosts = super::load_item_hosts(&db, tenant_a, item_a).await;
-        assert!(
-            hosts.iter().all(|h| h.host_id != host_b),
-            "foreign-tenant host must be excluded from tenant A's view, got {hosts:?}"
+        assert_eq!(
+            hosts.len(),
+            1,
+            "tenant A must see exactly its own host, got {hosts:?}"
+        );
+        assert_eq!(
+            hosts[0].host_id, host_a,
+            "the surfaced host must be tenant A's own host_a, not the foreign host_b, got {hosts:?}"
         );
     }
 }

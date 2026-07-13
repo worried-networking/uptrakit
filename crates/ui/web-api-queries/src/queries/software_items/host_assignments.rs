@@ -1121,6 +1121,144 @@ mod tests {
         );
     }
 
+    /// Insert a `host_software_item` link with no tenant check, so that
+    /// `update_host_assignment*`'s first lookup (host_id + item_id) succeeds and
+    /// the host-tenant filter becomes the load-bearing gate under test.
+    async fn seed_link(db: &DatabaseConnection, host_id: Uuid, item_id: Uuid) {
+        use uptrakit_shared_db::entity::host_software_item;
+        let now = OffsetDateTime::now_utc();
+        host_software_item::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            host_id: Set(host_id),
+            software_item_id: Set(item_id),
+            qualifier: Set(None),
+            plugin_config_id: Set(None),
+            package_identifier: Set(None),
+            installed_version: Set(None),
+            installed_version_detected_at: Set(None),
+            installed_display_version: Set(None),
+            latest_version: Set(None),
+            latest_version_fetched_at: Set(None),
+            latest_release_metadata: Set(None),
+            last_updated_at: Set(None),
+            linked_at: Set(now),
+            update_category: Set("unknown".to_string()),
+            deactivated_at: Set(None),
+            last_discovered_at: Set(None),
+            discovery_source: Set(None),
+            missing_since: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert rogue host_software_item link");
+    }
+
+    /// Minimal `UpdateHostAssignmentRequest` that reaches the host lookup:
+    /// `execution_site` resolves to `"auto"`, which passes `validate_execution_site`
+    /// for any role, so the tenant-scoped host lookup is the first gate that can fail.
+    fn foreign_update_req() -> super::UpdateHostAssignmentRequest {
+        super::UpdateHostAssignmentRequest {
+            role: uptrakit_web_api_types::PluginRole::DetectVersion,
+            ordinal: 0,
+            plugin_config_id: None,
+            plugin_config: None,
+            plugin_type: None,
+            package_identifier: None,
+            config_override: JsonObjectMapPatch::Keep,
+            execution_site: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn assign_hosts_rejects_foreign_tenant_host() {
+        use crate::tenant_db::TenantDb;
+        let db = idor_db().await;
+        let (tenant_a, item_a) = seed_tenant_with_item(&db, "a").await;
+        let (tenant_b, _item_b) = seed_tenant_with_item(&db, "b").await;
+        let host_b = seed_host(&db, tenant_b).await; // host belongs to tenant B
+
+        // Act as tenant A; attempt to attach tenant B's host to tenant A's item
+        // through the public (non-tx) entry point.
+        let tenant_db = TenantDb::new(db.clone(), tenant_a);
+        let req = super::AssignHostsRequest {
+            host_assignments: vec![HostSoftwareAssignment {
+                host_id: host_b,
+                plugins: vec![],
+            }],
+        };
+
+        let result = super::assign_hosts(&StubOps, &tenant_db, item_a, req).await;
+
+        // `SoftwareItemDetailResponse` has no `Debug`, so match on the error context
+        // directly rather than `{result:?}`-formatting the whole result.
+        assert!(
+            matches!(
+                result.as_ref().map_err(|e| e.current_context()),
+                Err(super::SoftwareItemQueryError::HostNotFound(id)) if *id == host_b
+            ),
+            "cross-tenant host must be rejected as HostNotFound(host_b), got Ok or a different error"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_host_assignment_in_tx_rejects_foreign_tenant_host() {
+        let db = idor_db().await;
+        let (tenant_a, item_a) = seed_tenant_with_item(&db, "a").await;
+        let (tenant_b, _item_b) = seed_tenant_with_item(&db, "b").await;
+        let host_b = seed_host(&db, tenant_b).await;
+        // Rogue link so the host-tenant filter (not the missing link) is what rejects host_b.
+        seed_link(&db, host_b, item_a).await;
+
+        let txn = db.begin().await.expect("begin");
+        let result = super::update_host_assignment_in_tx(
+            &StubOps,
+            &txn,
+            tenant_a,
+            item_a,
+            host_b,
+            foreign_update_req(),
+        )
+        .await;
+
+        assert!(
+            matches!(
+                result.as_ref().map_err(|e| e.current_context()),
+                Err(super::SoftwareItemQueryError::HostNotFound(id)) if *id == host_b
+            ),
+            "cross-tenant host must be rejected as HostNotFound, got {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_host_assignment_rejects_foreign_tenant_host() {
+        use crate::tenant_db::TenantDb;
+        let db = idor_db().await;
+        let (tenant_a, item_a) = seed_tenant_with_item(&db, "a").await;
+        let (tenant_b, _item_b) = seed_tenant_with_item(&db, "b").await;
+        let host_b = seed_host(&db, tenant_b).await;
+        seed_link(&db, host_b, item_a).await;
+
+        let tenant_db = TenantDb::new(db.clone(), tenant_a);
+        let result = super::update_host_assignment(
+            &StubOps,
+            &tenant_db,
+            item_a,
+            host_b,
+            foreign_update_req(),
+        )
+        .await;
+
+        // `SoftwareItemDetailResponse` has no `Debug`, so match on the error context
+        // directly rather than `{result:?}`-formatting the whole result.
+        assert!(
+            matches!(
+                result.as_ref().map_err(|e| e.current_context()),
+                Err(super::SoftwareItemQueryError::HostNotFound(id)) if *id == host_b
+            ),
+            "cross-tenant host must be rejected as HostNotFound(host_b), got Ok or a different error"
+        );
+    }
+
     #[test]
     fn type_only_inline_override_keep_preserves_existing_override() {
         let existing = Some(

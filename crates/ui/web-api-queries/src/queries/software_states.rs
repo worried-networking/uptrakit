@@ -115,9 +115,9 @@ pub async fn load_software_states_for_tenant(
     let active_hosts: HashMap<Uuid, host::Model> = if host_ids.is_empty() {
         HashMap::new()
     } else {
-        Host::find()
+        tenant_db
+            .find::<Host>()
             .filter(host::Column::Id.is_in(host_ids))
-            .filter(host::Column::TenantId.eq(tenant_id))
             .filter(host::Column::DeactivatedAt.is_null())
             .all(db)
             .await?
@@ -608,7 +608,7 @@ async fn build_host_metadata(
 
     // 2. Load agent info (client_version, last_seen_at) for all hosts.
     //    `service_host` has no `tenant_id` of its own; this query is
-    //    tenant-scoped both ways (see plan Task 3 / ledger row 50):
+    //    tenant-scoped both ways:
     //      - service side: `find_via_tenant_join` supplies the inner-join to
     //        `service` AND filters `service.tenant_id = tenant`.
     //      - host side: `host_ids` are the keys of the caller's
