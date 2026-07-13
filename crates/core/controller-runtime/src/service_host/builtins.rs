@@ -121,6 +121,7 @@ enum EmbeddedBridgeMode {
 #[cfg(feature = "embedded-scheduler")]
 struct EmbeddedBridgeRegistration {
     service_id: Uuid,
+    connection_id: Uuid,
     capabilities: BTreeSet<Capability>,
     app_name: String,
     service_rx: tokio::sync::mpsc::Receiver<uptrakit_wire::ServiceMessage>,
@@ -134,6 +135,7 @@ fn scheduler_bridge_registration(
 ) -> EmbeddedBridgeRegistration {
     EmbeddedBridgeRegistration {
         service_id: add_result.service_id,
+        connection_id: add_result.connection_id,
         capabilities: scheduler_caps,
         app_name: SCHEDULER.app_name.to_string(),
         service_rx: add_result.service_rx,
@@ -152,6 +154,7 @@ fn spawn_scheduler_bridge(
     let bridge_cancel = bg.child_token();
     let EmbeddedBridgeRegistration {
         service_id,
+        connection_id,
         capabilities,
         app_name,
         service_rx,
@@ -162,6 +165,7 @@ fn spawn_scheduler_bridge(
             uptrakit_web_api::embedded_support::run_embedded_system_message_handler(
                 Arc::clone(app_state),
                 service_id,
+                connection_id,
                 service_tenant_id,
                 capabilities,
                 app_name,
@@ -304,6 +308,7 @@ pub(crate) async fn register_agent(
         uptrakit_web_api::embedded_support::run_embedded_message_handler(
             Arc::clone(app_state),
             add_result.service_id,
+            add_result.connection_id,
             default_tenant_id,
             agent_caps,
             AGENT.app_name.to_string(),
@@ -382,6 +387,7 @@ pub(crate) async fn register_agent_ssh(
         uptrakit_web_api::embedded_support::run_embedded_message_handler(
             Arc::clone(app_state),
             add_result.service_id,
+            add_result.connection_id,
             default_tenant_id,
             ssh_caps,
             AGENT_SSH.app_name.to_string(),
@@ -434,6 +440,7 @@ pub(crate) async fn register_mqtt(
         uptrakit_web_api::embedded_support::run_embedded_system_message_handler(
             Arc::clone(app_state),
             add_result.service_id,
+            add_result.connection_id,
             Some(default_tenant_id),
             mqtt_caps,
             MQTT.app_name.to_string(),
@@ -463,6 +470,7 @@ mod tests {
             scheduler_caps.clone(),
             crate::embedded::AddResult {
                 service_id,
+                connection_id: uuid::Uuid::now_v7(),
                 service_rx,
             },
         );

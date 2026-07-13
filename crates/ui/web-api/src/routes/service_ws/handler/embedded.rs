@@ -30,6 +30,7 @@ use crate::AppState;
 pub(crate) async fn run_embedded_message_handler(
     state: Arc<AppState>,
     service_id: uuid::Uuid,
+    connection_id: uuid::Uuid,
     tenant_id: uuid::Uuid,
     capabilities: &BTreeSet<Capability>,
     app_name: &str,
@@ -40,6 +41,7 @@ pub(crate) async fn run_embedded_message_handler(
         state,
         EmbeddedHandlerSession {
             service_id,
+            connection_id,
             is_system: false,
             service_tenant_id: Some(tenant_id),
             app_name,
@@ -54,6 +56,7 @@ pub(crate) async fn run_embedded_message_handler(
 pub(crate) async fn run_embedded_system_message_handler(
     state: Arc<AppState>,
     service_id: uuid::Uuid,
+    connection_id: uuid::Uuid,
     service_tenant_id: Option<uuid::Uuid>,
     capabilities: &BTreeSet<Capability>,
     app_name: &str,
@@ -64,6 +67,7 @@ pub(crate) async fn run_embedded_system_message_handler(
         state,
         EmbeddedHandlerSession {
             service_id,
+            connection_id,
             is_system: true,
             service_tenant_id,
             app_name,
@@ -77,6 +81,7 @@ pub(crate) async fn run_embedded_system_message_handler(
 
 pub(super) struct EmbeddedHandlerSession<'a> {
     service_id: uuid::Uuid,
+    connection_id: uuid::Uuid,
     is_system: bool,
     service_tenant_id: Option<uuid::Uuid>,
     app_name: &'a str,
@@ -160,6 +165,7 @@ pub(super) async fn run_embedded_message_handler_inner(
     cleanup_embedded_service_session(
         &state,
         session.service_id,
+        session.connection_id,
         session.app_name,
         has_workload_claims,
         session.service_tenant_id,
@@ -176,6 +182,7 @@ pub(super) async fn run_embedded_message_handler_inner(
 pub(super) async fn cleanup_embedded_service_session(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
+    connection_id: uuid::Uuid,
     _service_app_name: &str,
     has_workload_claims: bool,
     tenant_id: Option<uuid::Uuid>,
@@ -208,10 +215,21 @@ pub(super) async fn cleanup_embedded_service_session(
         .registry
         .unregister_service(&service_id);
 
-    state.service_connections.unregister(&service_id).await;
-
-    if let Some(ref notifier) = state.embedded_service_notifier {
-        notifier.on_external_disconnected(&service_id);
+    // Race-safe: only remove if this cleanup still owns the current registration.
+    if state
+        .service_connections
+        .unregister_current(&service_id, connection_id)
+        .await
+    {
+        if let Some(ref notifier) = state.embedded_service_notifier {
+            notifier.on_external_disconnected(&service_id);
+        }
+    } else {
+        tracing::debug!(
+            %service_id,
+            %connection_id,
+            "embedded cleanup skipped — connection already replaced by a reconnect"
+        );
     }
 }
 
@@ -252,7 +270,7 @@ mod tests {
             ]
             .into_iter()
             .collect();
-            let _ = state
+            let (_, connection_handle) = state
                 .service_connections
                 .register(
                     service_id,
@@ -262,6 +280,7 @@ mod tests {
                     Some("uptrakit-mqtt".to_string()),
                 )
                 .await;
+            let connection_id = connection_handle.connection_id();
 
             state
                 .surface_proxy_deps
@@ -296,6 +315,7 @@ mod tests {
             run_embedded_system_message_handler(
                 state.clone(),
                 service_id,
+                connection_id,
                 Some(tenant_id),
                 &mqtt_capabilities,
                 "uptrakit-mqtt",
@@ -324,6 +344,54 @@ mod tests {
 
     #[cfg(feature = "db-sqlite")]
     #[tokio::test]
+    async fn cleanup_embedded_session_stale_id_does_not_evict_replacement() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        let service_id = uuid::Uuid::now_v7();
+
+        // Register A, capture its id; then B supersedes A.
+        let (_rx_a, handle_a) = state
+            .service_connections
+            .register(
+                service_id,
+                std::collections::BTreeSet::new(),
+                None,
+                None,
+                None,
+            )
+            .await;
+        let stale_id = handle_a.connection_id();
+        let (_rx_b, _handle_b) = state
+            .service_connections
+            .register(
+                service_id,
+                std::collections::BTreeSet::new(),
+                None,
+                None,
+                None,
+            )
+            .await;
+
+        // A's cleanup runs with A's (now stale) id — must not evict B.
+        cleanup_embedded_service_session(
+            &state,
+            service_id,
+            stale_id,
+            "uptrakit-agent",
+            false,
+            Some(tenant_id),
+        )
+        .await;
+
+        assert!(
+            state.service_connections.is_connected(&service_id).await,
+            "replacement B must survive embedded cleanup with a stale connection_id"
+        );
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
     async fn cleanup_embedded_session_broadcasts_surfaces_changed_when_tenant_present() {
         let db = crate::test_harness::setup_migrated_db().await;
         let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
@@ -340,6 +408,7 @@ mod tests {
         cleanup_embedded_service_session(
             &state,
             service_id,
+            uuid::Uuid::now_v7(),
             "uptrakit-agent-ssh",
             false,
             Some(tenant_id),
@@ -370,6 +439,7 @@ mod tests {
         cleanup_embedded_service_session(
             &state,
             service_id,
+            uuid::Uuid::now_v7(),
             "uptrakit-agent-ssh",
             false,
             None, // system service — no tenant

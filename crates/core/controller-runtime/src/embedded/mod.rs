@@ -58,6 +58,9 @@ pub(crate) struct EmbeddedShutdownTokens {
 pub(crate) struct AddResult {
     /// The provisioned service ID.
     pub service_id: Uuid,
+    /// The `connection_id` minted at `register()` time; used by embedded
+    /// cleanup to call `unregister_current` instead of unconditional `unregister`.
+    pub connection_id: Uuid,
     /// Receiver for `ServiceMessage` sent by the embedded service.
     /// System services (scheduler) can ignore this; tenant services (agent)
     /// must feed it into a message processor bridge.
@@ -215,7 +218,7 @@ impl EmbeddedServiceHost {
         self.registry
             .get_or_init(|| state.service_connections.clone());
 
-        let (push_rx, _cancel_token) = state
+        let (push_rx, connection_handle) = state
             .service_connections
             .register(
                 service_id,
@@ -225,6 +228,7 @@ impl EmbeddedServiceHost {
                 Some(app_name.to_string()),
             )
             .await;
+        let connection_id = connection_handle.connection_id();
 
         // 3. Create bidirectional channels.
         //
@@ -330,6 +334,7 @@ impl EmbeddedServiceHost {
 
         Ok(AddResult {
             service_id,
+            connection_id,
             service_rx,
         })
     }

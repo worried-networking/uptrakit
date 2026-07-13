@@ -56,6 +56,7 @@ pub trait EmbeddedServiceNotifier: Send + Sync {
 pub async fn run_embedded_message_handler(
     state: Arc<AppState>,
     service_id: Uuid,
+    connection_id: Uuid,
     tenant_id: Uuid,
     capabilities: BTreeSet<Capability>,
     app_name: String,
@@ -65,6 +66,7 @@ pub async fn run_embedded_message_handler(
     crate::routes::service_ws::handler::run_embedded_message_handler(
         state,
         service_id,
+        connection_id,
         tenant_id,
         &capabilities,
         &app_name,
@@ -78,6 +80,7 @@ pub async fn run_embedded_message_handler(
 pub async fn run_embedded_system_message_handler(
     state: Arc<AppState>,
     service_id: Uuid,
+    connection_id: Uuid,
     service_tenant_id: Option<Uuid>,
     capabilities: BTreeSet<Capability>,
     app_name: String,
@@ -87,6 +90,7 @@ pub async fn run_embedded_system_message_handler(
     crate::routes::service_ws::handler::run_embedded_system_message_handler(
         state,
         service_id,
+        connection_id,
         service_tenant_id,
         &capabilities,
         &app_name,
