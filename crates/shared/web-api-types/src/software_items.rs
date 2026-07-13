@@ -350,7 +350,7 @@ pub struct SoftwareItemDetailResponse {
     pub hosts: Vec<SoftwareItemHostSummary>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SoftwareItemHostSummary {
     /// Primary key of the `host_software_items` row — unique per link even when the same
@@ -406,7 +406,7 @@ pub struct SoftwareItemHostSummary {
 /// When the assignment was created via autodiscovery (package managers),
 /// `plugin_config_id` and `plugin_config_name` are `None` — the plugin type
 /// is read directly from the HSIP row's `plugin_type` column.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct HostPluginRoleSummary {
     pub role: PluginRole,

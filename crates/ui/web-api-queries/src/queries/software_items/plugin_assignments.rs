@@ -79,7 +79,7 @@ pub async fn delete_plugin_assignment(
         .await
         .ok_or_else(|| report!(SoftwareItemQueryError::NotFound))?;
 
-    let hosts = load_item_hosts(tenant_db.db(), item_id).await;
+    let hosts = load_item_hosts(tenant_db.db(), tenant_db.tenant_id(), item_id).await;
     let host_count = hosts.len() as u64;
     let plugins = load_plugins(tenant_db.db(), item_id).await;
     let latest_version = load_latest_version_for_item(tenant_db.db(), item_id).await;

@@ -309,6 +309,7 @@ pub(super) async fn load_plugins(db: &sea_orm::DatabaseConnection, item_id: Uuid
 /// Returns `None` if there are no links or a critical query fails.
 pub(super) async fn load_host_assignment_data(
     db: &sea_orm::DatabaseConnection,
+    tenant_id: Uuid,
     item_id: Uuid,
 ) -> Option<HostAssignmentData> {
     let links = match HostSoftwareItem::find()
@@ -331,6 +332,7 @@ pub(super) async fn load_host_assignment_data(
 
     let hosts: HashMap<Uuid, host::Model> = match Host::find()
         .filter(host::Column::Id.is_in(host_ids.clone()))
+        .filter(host::Column::TenantId.eq(tenant_id))
         .filter(host::Column::DeactivatedAt.is_null())
         .all(db)
         .await
@@ -402,26 +404,29 @@ pub(super) async fn load_host_assignment_data(
 
 pub(super) async fn load_item_hosts(
     db: &sea_orm::DatabaseConnection,
+    tenant_id: Uuid,
     item_id: Uuid,
 ) -> Vec<SoftwareItemHostSummary> {
-    try_load_item_hosts_inner(db, item_id, false)
+    try_load_item_hosts_inner(db, tenant_id, item_id, false)
         .await
         .unwrap_or_default()
 }
 
 pub(super) async fn try_load_item_hosts(
     db: &sea_orm::DatabaseConnection,
+    tenant_id: Uuid,
     item_id: Uuid,
 ) -> Result<Vec<SoftwareItemHostSummary>> {
-    try_load_item_hosts_inner(db, item_id, true).await
+    try_load_item_hosts_inner(db, tenant_id, item_id, true).await
 }
 
 async fn try_load_item_hosts_inner(
     db: &sea_orm::DatabaseConnection,
+    tenant_id: Uuid,
     item_id: Uuid,
     strict_config_override: bool,
 ) -> Result<Vec<SoftwareItemHostSummary>> {
-    let Some(data) = load_host_assignment_data(db, item_id).await else {
+    let Some(data) = load_host_assignment_data(db, tenant_id, item_id).await else {
         return Ok(Vec::new());
     };
 
@@ -695,7 +700,7 @@ mod active_update_status_tests {
         .await
         .expect("insert update_history");
 
-        let hosts = super::load_item_hosts(&db, item_id).await;
+        let hosts = super::load_item_hosts(&db, tenant_id, item_id).await;
 
         assert_eq!(hosts.len(), 1, "expected one host summary");
         let summary = &hosts[0];
@@ -748,7 +753,7 @@ mod active_update_status_tests {
         .await
         .expect("insert update_history");
 
-        let hosts = super::load_item_hosts(&db, item_id).await;
+        let hosts = super::load_item_hosts(&db, tenant_id, item_id).await;
 
         assert_eq!(hosts.len(), 1, "expected one host summary");
         let summary = &hosts[0];
@@ -759,6 +764,84 @@ mod active_update_status_tests {
         assert!(
             summary.active_update_status.is_none(),
             "active_update_status should be None for a Completed row"
+        );
+    }
+
+    #[tokio::test]
+    async fn load_item_hosts_excludes_foreign_tenant_host() {
+        use uptrakit_shared_db::entity::host_software_item;
+        let db = make_db().await;
+        let now = OffsetDateTime::now_utc();
+
+        // Tenant A owns the software item; tenant B owns a host.
+        let (tenant_a, _host_a, item_a, _hsi_a) = insert_parents(&db).await;
+
+        let tenant_b = Uuid::now_v7();
+        tenant::ActiveModel {
+            id: Set(tenant_b),
+            name: Set("tenant-b".to_string()),
+            slug: Set(format!("t-{tenant_b}")),
+            is_default: Set(false),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert tenant b");
+
+        let host_b = Uuid::now_v7();
+        host::ActiveModel {
+            id: Set(host_b),
+            tenant_id: Set(tenant_b),
+            machine_id: Set(format!("machine-{host_b}")),
+            hostname: Set("host-b".to_string()),
+            friendly_name: Set("Host B".to_string()),
+            os_type: Set(None),
+            os_version: Set(None),
+            architecture: Set(None),
+            ip_address: Set(None),
+            host_features: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert host b");
+
+        // A rogue link: tenant A's item points at tenant B's host.
+        host_software_item::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            host_id: Set(host_b),
+            software_item_id: Set(item_a),
+            qualifier: Set(None),
+            plugin_config_id: Set(None),
+            package_identifier: Set(None),
+            installed_version: Set(None),
+            installed_version_detected_at: Set(None),
+            installed_display_version: Set(None),
+            latest_version: Set(None),
+            latest_version_fetched_at: Set(None),
+            latest_release_metadata: Set(None),
+            last_updated_at: Set(None),
+            linked_at: Set(now),
+            update_category: Set("unknown".to_string()),
+            deactivated_at: Set(None),
+            last_discovered_at: Set(None),
+            discovery_source: Set(None),
+            missing_since: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert rogue link");
+
+        // Scoped to tenant A: the foreign host_b must not surface, only the item's own host.
+        let hosts = super::load_item_hosts(&db, tenant_a, item_a).await;
+        assert!(
+            hosts.iter().all(|h| h.host_id != host_b),
+            "foreign-tenant host must be excluded from tenant A's view, got {hosts:?}"
         );
     }
 }

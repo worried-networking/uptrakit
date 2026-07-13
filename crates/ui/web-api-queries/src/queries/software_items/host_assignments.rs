@@ -697,7 +697,7 @@ pub async fn assign_hosts(
         .await
         .ok_or_else(|| report!(SoftwareItemQueryError::NotFound))?;
 
-    let hosts = try_load_item_hosts(tenant_db.db(), id).await?;
+    let hosts = try_load_item_hosts(tenant_db.db(), tenant_db.tenant_id(), id).await?;
     let host_count = hosts.len() as u64;
     let plugins = load_plugins(tenant_db.db(), id).await;
     let latest_version = load_latest_version_for_item(tenant_db.db(), id).await;
@@ -907,7 +907,7 @@ pub async fn update_host_assignment(
         .await
         .ok_or_else(|| report!(SoftwareItemQueryError::NotFound))?;
 
-    let hosts = try_load_item_hosts(tenant_db.db(), id).await?;
+    let hosts = try_load_item_hosts(tenant_db.db(), tenant_db.tenant_id(), id).await?;
     let host_count = hosts.len() as u64;
     let plugins = load_plugins(tenant_db.db(), id).await;
     let latest_version = load_latest_version_for_item(tenant_db.db(), id).await;

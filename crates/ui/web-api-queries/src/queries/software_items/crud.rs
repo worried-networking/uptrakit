@@ -731,7 +731,7 @@ pub async fn get_software_item(
         return Ok(None);
     };
 
-    let hosts = load_item_hosts(tenant_db.db(), id).await;
+    let hosts = load_item_hosts(tenant_db.db(), tenant_db.tenant_id(), id).await;
     let host_count = hosts.len() as u64;
     let plugins = load_plugins(tenant_db.db(), id).await;
     let latest_version = load_latest_version_for_item(tenant_db.db(), id).await;
