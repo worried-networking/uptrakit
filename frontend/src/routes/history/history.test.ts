@@ -1,13 +1,74 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
+import { flushSync } from 'svelte';
 import { Permission, type UpdateHistoryResponse } from '$lib/api';
 import { page } from '$app/state';
 import { goto } from '$app/navigation';
+import type { InteractiveCallbacks } from '$lib/interactive';
 
 const interactiveMocks = vi.hoisted(() => ({
 	disconnect: vi.fn(),
 	sendSignal: vi.fn(),
 	sendInput: vi.fn()
+}));
+
+// Captures the callbacks object passed to `connectInteractiveSession` so tests
+// can drive `onOutput`/`onStdinAttention` directly, as the real WebSocket
+// handler would.
+let capturedCallbacks: InteractiveCallbacks | undefined;
+
+// Mock xterm.js so tests can simulate typed input via `onDataHandler` without
+// depending on the real terminal/canvas rendering pipeline (same pattern as
+// TerminalOutput.test.ts).
+const xtermMocks = vi.hoisted(() => {
+	class MockTerminal {
+		options: Record<string, unknown>;
+		loadAddon = vi.fn();
+		open = vi.fn();
+		onData = vi.fn((handler: (data: string) => void) => {
+			this.onDataHandler = handler;
+			const dispose = vi.fn(() => {
+				if (this.onDataHandler === handler) {
+					this.onDataHandler = null;
+				}
+			});
+			return { dispose };
+		});
+		write = vi.fn();
+		clear = vi.fn();
+		dispose = vi.fn();
+		onDataHandler: ((data: string) => void) | null = null;
+
+		constructor(options: Record<string, unknown>) {
+			this.options = options;
+			xtermMocks.terminalInstances.push(this);
+		}
+	}
+
+	class MockFitAddon {
+		fit = vi.fn();
+	}
+
+	class MockWebLinksAddon {}
+
+	return {
+		terminalInstances: [] as MockTerminal[],
+		MockTerminal,
+		MockFitAddon,
+		MockWebLinksAddon
+	};
+});
+
+vi.mock('@xterm/xterm', () => ({
+	Terminal: xtermMocks.MockTerminal
+}));
+
+vi.mock('@xterm/addon-fit', () => ({
+	FitAddon: xtermMocks.MockFitAddon
+}));
+
+vi.mock('@xterm/addon-web-links', () => ({
+	WebLinksAddon: xtermMocks.MockWebLinksAddon
 }));
 
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
@@ -31,7 +92,10 @@ vi.mock('$lib/notifications.svelte', () => ({
 }));
 
 vi.mock('$lib/interactive', () => ({
-	connectInteractiveSession: vi.fn(() => interactiveMocks)
+	connectInteractiveSession: vi.fn((_id: string, callbacks: InteractiveCallbacks) => {
+		capturedCallbacks = callbacks;
+		return interactiveMocks;
+	})
 }));
 
 vi.mock('$lib/sse', () => ({
@@ -242,6 +306,8 @@ describe('History Route', () => {
 				total_pages: 1
 			}
 		} as unknown as Awaited<ReturnType<typeof api.listUpdateHistory>>);
+		capturedCallbacks = undefined;
+		xtermMocks.terminalInstances.length = 0;
 	});
 
 	afterEach(() => {
@@ -331,6 +397,122 @@ describe('History Route', () => {
 		expect(sigintButton.closest('[data-ui="terminal-shell"]')).toBeInTheDocument();
 		await fireEvent.click(sigintButton);
 		expect(interactiveMocks.sendSignal).toHaveBeenCalledWith(2);
+	});
+
+	describe('interactive terminal input gating (PTY evidence)', () => {
+		// `TerminalOutput` recreates its underlying xterm instance whenever its
+		// `liveMode` (derived from `onInput`) flips, so the mock's terminal
+		// instance list can grow across an unlock transition — always read the
+		// latest instance rather than caching a reference that may be disposed.
+		function latestTerminal() {
+			const terminal = xtermMocks.terminalInstances.at(-1);
+			expect(terminal).toBeDefined();
+			return terminal!;
+		}
+
+		async function openInteractiveModal() {
+			render(HistoryPage);
+			await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+			const pgEntry = screen.getByText('postgresql on prod-03').closest('article')!;
+			const attachButton = within(pgEntry).getByRole('button', { name: /attach terminal/i });
+			await fireEvent.click(attachButton);
+			vi.runOnlyPendingTimers();
+			await screen.findByRole('button', { name: 'Ctrl+C' });
+			expect(capturedCallbacks).toBeDefined();
+			return pgEntry;
+		}
+
+		it('(a) keeps stdin disabled with no evidence yet', async () => {
+			await openInteractiveModal();
+
+			const terminal = latestTerminal();
+			expect(terminal.options.disableStdin).toBe(true);
+			terminal.onDataHandler?.('ls\n');
+			expect(interactiveMocks.sendInput).not.toHaveBeenCalled();
+		});
+
+		it('(b) does not unlock on pre-promotion hook/system output frames', async () => {
+			await openInteractiveModal();
+
+			capturedCallbacks?.onOutput?.({
+				id: 'line-1',
+				text: 'running pre-hook…\n',
+				stream: 'pre_hook',
+				timestamp: '2026-02-01T12:00:00Z',
+				seq: 1
+			});
+			capturedCallbacks?.onOutput?.({
+				id: 'line-2',
+				text: 'starting update pipeline\n',
+				stream: 'system',
+				timestamp: '2026-02-01T12:00:01Z',
+				seq: 2
+			});
+			flushSync();
+
+			const terminal = latestTerminal();
+			expect(terminal.options.disableStdin).toBe(true);
+			terminal.onDataHandler?.('ls\n');
+			expect(interactiveMocks.sendInput).not.toHaveBeenCalled();
+		});
+
+		it('(c) unlocks on the first stdout output frame and forwards typed input', async () => {
+			await openInteractiveModal();
+
+			capturedCallbacks?.onOutput?.({
+				id: 'line-3',
+				text: 'Reading package lists...\n',
+				stream: 'stdout',
+				timestamp: '2026-02-01T12:00:02Z',
+				seq: 3
+			});
+			flushSync();
+
+			const terminal = latestTerminal();
+			expect(terminal.options.disableStdin).toBe(false);
+			terminal.onDataHandler?.('y\n');
+			expect(interactiveMocks.sendInput).toHaveBeenCalledWith('y\n');
+		});
+
+		it('(d) acceptance: zero-output case unlocks only via stdin_attention', async () => {
+			await openInteractiveModal();
+
+			// No onOutput calls of any kind (no stdout, no hook/system frames).
+			expect(latestTerminal().options.disableStdin).toBe(true);
+
+			capturedCallbacks?.onStdinAttention?.(null);
+			flushSync();
+
+			const terminal = latestTerminal();
+			expect(terminal.options.disableStdin).toBe(false);
+			terminal.onDataHandler?.('y\n');
+			expect(interactiveMocks.sendInput).toHaveBeenCalledWith('y\n');
+		});
+
+		it('(e) reconnecting the same item re-locks input until fresh evidence', async () => {
+			const pgEntry = await openInteractiveModal();
+
+			capturedCallbacks?.onOutput?.({
+				id: 'line-4',
+				text: 'unlocked\n',
+				stream: 'stdout',
+				timestamp: '2026-02-01T12:00:03Z',
+				seq: 4
+			});
+			flushSync();
+			expect(latestTerminal().options.disableStdin).toBe(false);
+
+			// Close and reattach — simulates a reconnect against the same item.
+			await fireEvent.click(screen.getByRole('button', { name: 'Close terminal' }));
+			await fireEvent.click(within(pgEntry).getByRole('button', { name: /attach terminal/i }));
+			vi.runOnlyPendingTimers();
+			await screen.findByRole('button', { name: 'Ctrl+C' });
+
+			const reconnectedTerminal = latestTerminal();
+			expect(reconnectedTerminal.options.disableStdin).toBe(true);
+			reconnectedTerminal.onDataHandler?.('ls\n');
+			expect(interactiveMocks.sendInput).not.toHaveBeenCalled();
+		});
 	});
 
 	describe('status filter (FilterBar)', () => {

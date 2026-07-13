@@ -126,6 +126,10 @@
 	let activeStreamId: string | null = $state(null);
 	let wsState: InteractiveConnectionState = $state('disconnected');
 	let stdinAttention: boolean = $state(false);
+	// True once there is evidence the interactive session's PTY is actually
+	// live (first stdout/stderr output frame, or a stdin_attention signal).
+	// Pre-promotion hook/system frames do not count — stdin would go nowhere.
+	let ptyEvidence: boolean = $state(false);
 	let terminalRef: TerminalOutput | undefined = $state(undefined);
 
 	// Admin SSE event stream for real-time list updates
@@ -277,6 +281,7 @@
 		activeStreamId = null;
 		wsState = 'disconnected';
 		stdinAttention = false;
+		ptyEvidence = false;
 	}
 
 	function isLiveStatus(status: UpdateHistoryStatus): boolean {
@@ -291,17 +296,23 @@
 		activeStreamId = updateHistoryId;
 		wsState = 'connecting';
 		stdinAttention = false;
+		ptyEvidence = false;
 
 		activeWsHandle = connectInteractiveSession(updateHistoryId, {
 			onOutput: (line) => {
 				terminalRef?.write(line.text);
+				if (line.stream === 'stdout' || line.stream === 'stderr') {
+					ptyEvidence = true;
+				}
 			},
 			onCompleted: () => {
 				stdinAttention = false;
+				ptyEvidence = false;
 				reloadItem(updateHistoryId);
 			},
 			onStdinAttention: () => {
 				stdinAttention = true;
+				ptyEvidence = true;
 			},
 			onStateChange: (state) => {
 				wsState = state;
@@ -795,7 +806,7 @@
 					inlineBadges={terminalInlineBadgesFor(expandedItem)}
 					showTerminal={isLiveStatus(expandedItem.status) || Boolean(expandedItem.output?.trim())}
 					output={expandedItem.output ?? ''}
-					onInput={isLiveStatus(expandedItem.status)
+					onInput={isLiveStatus(expandedItem.status) && ptyEvidence
 						? (data) => (activeStreamId === expandedItem.id ? activeWsHandle?.sendInput(data) : undefined)
 						: undefined}
 					onclose={closeHistoryModal}
