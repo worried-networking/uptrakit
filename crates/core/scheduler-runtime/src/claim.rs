@@ -8,14 +8,27 @@ use uuid::Uuid;
 
 use crate::error::{self, SchedulerError};
 
-/// Duration after which a locked task is considered stale and can be reclaimed
-/// (10 minutes).
+/// Duration without a heartbeat after which a locked task is considered stale
+/// and can be reclaimed by another controller instance (10 minutes).
 ///
-/// This is intentionally much shorter than [`super::TASK_EXECUTION_TIMEOUT`]
-/// (2 hours). If a controller crashes mid-execution, we want another instance
-/// to pick up the abandoned task within minutes rather than waiting for the
-/// full execution timeout. Running tasks check their own cancellation token
-/// against `TASK_EXECUTION_TIMEOUT` independently.
+/// **Staleness means no heartbeat**, not "ran longer than N minutes". A healthy
+/// long-running task refreshes its `locked_at` timestamp on every heartbeat
+/// (see `refresh_claims`, Task 2); the stale-claim scanner only reclaims rows
+/// whose `locked_at` has not been refreshed within this window.
+///
+/// **Budget arithmetic (600 s is defended, not asserted):**
+///
+/// - 8 consecutive missed/failed beats at the 60 s interval = 480 s
+/// - ≤60 s claim-to-first-beat phase lag (the task may claim just before a
+///   beat fires, so the first beat can arrive up to one full interval later)
+/// - seconds-class NTP skew between controller instances (staleness is computed
+///   cross-instance against wall clock, so skew is part of the budget, not a
+///   rounding error)
+///
+/// Each beat is a single small statement on the serialised SQLite writer, so
+/// even pathological contention that delays several consecutive beats sits far
+/// inside the 600 s budget. The sum (480 + 60 + headroom) arrives comfortably
+/// under 600 s.
 const STALE_CLAIM_SECONDS: i64 = 600;
 
 /// Attempt to claim a task for execution via optimistic locking.
@@ -48,14 +61,29 @@ pub async fn try_claim(
 
 /// Release a task claim after execution, updating run metadata.
 ///
+/// The `controller_id` parameter is used to scope the release to the owning
+/// controller. If another controller has taken over the claim (e.g. via stale
+/// claim recovery), the filter will match zero rows and `Ok(0)` is returned —
+/// the **lost-claim** signal. Run metadata (`run_count`, `last_run_at`,
+/// `last_error`, `next_run_at`) is intentionally NOT written through a lost
+/// claim: that metadata belongs to the takeover owner, not to this instance.
+///
 /// The `result` parameter is `Result<(), String>` because the `last_error` DB column
 /// is `Option<String>`. The caller converts typed errors to strings before calling.
+///
+/// # Return value
+///
+/// - `Ok(1)` — claim released successfully; metadata written.
+/// - `Ok(0)` — claim was already taken over by another controller; caller
+///   should log a warning and skip any post-run bookkeeping.
+/// - `Err(_)` — database error.
 pub async fn release_claim(
     db: &DatabaseConnection,
     task_id: Uuid,
+    controller_id: Uuid,
     next_run_at: OffsetDateTime,
     result: &Result<(), String>,
-) -> error::Result<()> {
+) -> error::Result<u64> {
     let now = OffsetDateTime::now_utc();
     let last_error = match result {
         Ok(()) => None,
@@ -97,18 +125,25 @@ pub async fn release_claim(
             );
     }
 
-    update
+    let db_result = update
         .filter(scheduled_task::Column::Id.eq(task_id))
+        .filter(scheduled_task::Column::LockedBy.eq(controller_id))
         .exec(db)
         .await
         .context_to::<SchedulerError>()?;
 
-    Ok(())
+    Ok(db_result.rows_affected)
 }
 
-/// Find and release stale task claims (locked longer than the timeout).
-pub async fn recover_stale_claims(db: &DatabaseConnection) -> error::Result<u64> {
-    let cutoff = OffsetDateTime::now_utc() - time::Duration::seconds(STALE_CLAIM_SECONDS);
+/// Find and release stale task claims (no heartbeat for longer than the timeout).
+///
+/// `now` is injected so callers can supply a deterministic clock in tests
+/// instead of relying on `OffsetDateTime::now_utc()`.
+pub async fn recover_stale_claims(
+    db: &DatabaseConnection,
+    now: OffsetDateTime,
+) -> error::Result<u64> {
+    let cutoff = now - time::Duration::seconds(STALE_CLAIM_SECONDS);
 
     let result = scheduled_task::Entity::update_many()
         .col_expr(
@@ -302,7 +337,10 @@ mod tests {
         try_claim(&db, task.id, controller_id).await.unwrap();
 
         let next = OffsetDateTime::now_utc() + time::Duration::minutes(5);
-        release_claim(&db, task.id, next, &Ok(())).await.unwrap();
+        let released = release_claim(&db, task.id, controller_id, next, &Ok(()))
+            .await
+            .unwrap();
+        assert_eq!(released, 1);
 
         let updated = scheduled_task::Entity::find_by_id(task.id)
             .one(&db)
@@ -327,7 +365,10 @@ mod tests {
 
         let next = OffsetDateTime::now_utc() + time::Duration::minutes(5);
         let err = Err("test error".to_string());
-        release_claim(&db, task.id, next, &err).await.unwrap();
+        let released = release_claim(&db, task.id, controller_id, next, &err)
+            .await
+            .unwrap();
+        assert_eq!(released, 1);
 
         let updated = scheduled_task::Entity::find_by_id(task.id)
             .one(&db)
@@ -337,6 +378,110 @@ mod tests {
         assert!(updated.locked_by.is_none());
         assert_eq!(updated.last_error.as_deref(), Some("test error"));
         assert_eq!(updated.run_count, 0); // Not incremented on failure
+    }
+
+    /// Releasing a claim owned by a different controller is a no-op: returns
+    /// `Ok(0)` and leaves the row untouched (locked_by, run_count, last_run_at,
+    /// last_error, next_run_at all unchanged).
+    #[tokio::test]
+    async fn release_claim_foreign_controller_is_noop() {
+        let db = setup_test_db().await;
+        let tenant = seed_tenant(&db).await;
+        let task = seed_task(&db, tenant.id).await;
+
+        let controller_a = Uuid::now_v7();
+        let controller_b = Uuid::now_v7();
+
+        // Controller A claims the task.
+        try_claim(&db, task.id, controller_a).await.unwrap();
+
+        // Snapshot the task state after claim (before attempted release).
+        let before = scheduled_task::Entity::find_by_id(task.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+
+        // Controller B tries to release — must be a no-op.
+        let next = OffsetDateTime::now_utc() + time::Duration::minutes(5);
+        let released = release_claim(&db, task.id, controller_b, next, &Ok(()))
+            .await
+            .unwrap();
+        assert_eq!(released, 0, "foreign-controller release must match 0 rows");
+
+        // Row must be completely unchanged.
+        let after = scheduled_task::Entity::find_by_id(task.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            after.locked_by,
+            Some(controller_a),
+            "locked_by must still belong to controller A"
+        );
+        assert_eq!(
+            after.run_count, before.run_count,
+            "run_count must be unchanged"
+        );
+        assert_eq!(
+            after.last_run_at, before.last_run_at,
+            "last_run_at must be unchanged"
+        );
+        assert_eq!(
+            after.last_error, before.last_error,
+            "last_error must be unchanged"
+        );
+        assert_eq!(
+            after.next_run_at, before.next_run_at,
+            "next_run_at must be unchanged"
+        );
+    }
+
+    /// Verifies that `recover_stale_claims` uses the injected `now` parameter
+    /// rather than calling `OffsetDateTime::now_utc()` internally.
+    ///
+    /// - `now + 601s` → the claim is 601 s old, which exceeds the 600 s budget
+    ///   → 1 row recovered.
+    /// - `now + 599s` → the claim is only 599 s old, still within budget
+    ///   → 0 rows recovered.
+    #[tokio::test]
+    async fn recover_stale_claims_uses_injected_now() {
+        let db = setup_test_db().await;
+        let tenant = seed_tenant(&db).await;
+        let task = seed_task(&db, tenant.id).await;
+
+        // Claim the task so it appears locked.
+        try_claim(&db, task.id, Uuid::now_v7()).await.unwrap();
+
+        // Use real now as the base — the task was just claimed, so locked_at ≈ now.
+        let now = OffsetDateTime::now_utc();
+
+        // 599 s in the future: claim is not yet stale → 0 recovered.
+        let recovered_before = recover_stale_claims(&db, now + time::Duration::seconds(599))
+            .await
+            .unwrap();
+        assert_eq!(
+            recovered_before, 0,
+            "claim should not be recovered at 599 s"
+        );
+
+        // 601 s in the future: claim has been stale for 1 s → 1 recovered.
+        let recovered_after = recover_stale_claims(&db, now + time::Duration::seconds(601))
+            .await
+            .unwrap();
+        assert_eq!(recovered_after, 1, "claim should be recovered at 601 s");
+
+        // Task must now be unlocked.
+        let updated = scheduled_task::Entity::find_by_id(task.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            updated.locked_by.is_none(),
+            "task must be unlocked after recovery"
+        );
     }
 
     #[tokio::test]

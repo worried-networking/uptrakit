@@ -178,7 +178,7 @@ impl Scheduler {
     #[tracing::instrument(skip_all, fields(controller_id = %self.config.controller_id))]
     async fn poll_cycle(&self, drain: &CancellationToken, abort: &CancellationToken) {
         // Recover stale claims from crashed controllers
-        match claim::recover_stale_claims(&self.db).await {
+        match claim::recover_stale_claims(&self.db, time::OffsetDateTime::now_utc()).await {
             Ok(recovered) if recovered > 0 => {
                 tracing::info!(recovered, "recovered stale task claims");
             }
@@ -252,6 +252,7 @@ impl Scheduler {
             let executor = executor.clone();
             let abort = abort.clone();
             let timeout = self.config.task_execution_timeout;
+            let controller_id = self.config.controller_id;
 
             join_set.spawn(async move {
                 // Execute with per-task timeout and hard-abort awareness.
@@ -272,19 +273,30 @@ impl Scheduler {
                         // stale-claim recovery window (up to 10 minutes).
                         let now = time::OffsetDateTime::now_utc();
                         let next_run_at = interval::compute_next_run_at(now, task.interval_seconds, task.jitter_seconds);
-                        if let Err(e) = claim::release_claim(
+                        match claim::release_claim(
                             &db,
                             task.id,
+                            controller_id,
                             next_run_at,
                             &Err("scheduler shutdown during execution".to_string()),
                         )
                         .await
                         {
-                            tracing::warn!(
-                                task_id = %task.id,
-                                error = %e,
-                                "failed to release task claim on scheduler shutdown"
-                            );
+                            Ok(0) => {
+                                tracing::warn!(
+                                    task_id = %task.id,
+                                    controller_id = %controller_id,
+                                    "claim already taken over; run metadata not written"
+                                );
+                            }
+                            Ok(_) => {}
+                            Err(e) => {
+                                tracing::warn!(
+                                    task_id = %task.id,
+                                    error = %e,
+                                    "failed to release task claim on scheduler shutdown"
+                                );
+                            }
                         }
                         return;
                     }
@@ -317,12 +329,18 @@ impl Scheduler {
                 // Convert typed error to string for DB storage.
                 let db_result = result.as_ref().map(|_| ()).map_err(|e| e.to_string());
 
-                if let Err(e) = claim::release_claim(&db, task.id, next_run_at, &db_result).await {
-                    tracing::warn!(
-                        task_id = %task.id,
-                        error = %e,
-                        "failed to release task claim"
-                    );
+                match claim::release_claim(&db, task.id, controller_id, next_run_at, &db_result).await {
+                    Ok(0) => {
+                        tracing::warn!(
+                            task_id = %task.id,
+                            controller_id = %controller_id,
+                            "claim already taken over; run metadata not written"
+                        );
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::warn!(task_id = %task.id, error = %e, "failed to release task claim");
+                    }
                 }
             });
         }
