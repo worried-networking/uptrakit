@@ -524,15 +524,13 @@ async fn execute_controller_surface_action_typed(
         .await
         .map_err(map_controller_action_error),
         ControllerSurfaceAction::PreloadItemOverrides => execute_controller_preload_item_overrides(
-            db,
-            tenant_id,
+            tenant_db,
             parse_action_params::<ProxmoxItemOverridePreloadRequest>(params, action_id)?,
         )
         .await
         .map_err(map_controller_action_error),
         ControllerSurfaceAction::SaveItemOverrides => execute_controller_save_item_overrides(
-            db,
-            tenant_id,
+            tenant_db,
             parse_action_params::<ProxmoxItemOverrideSaveRequest>(params, action_id)?,
         )
         .await
@@ -659,19 +657,17 @@ async fn execute_controller_save_global_defaults(
 }
 
 async fn execute_controller_preload_item_overrides(
-    db: &DatabaseConnection,
-    tenant_id: Option<Uuid>,
+    tenant_db: &TenantDb,
     request: ProxmoxItemOverridePreloadRequest,
 ) -> std::result::Result<serde_json::Value, String> {
-    handle_preload_item_overrides(db, tenant_id, request).await
+    handle_preload_item_overrides(tenant_db, request).await
 }
 
 async fn execute_controller_save_item_overrides(
-    db: &DatabaseConnection,
-    tenant_id: Option<Uuid>,
+    tenant_db: &TenantDb,
     request: ProxmoxItemOverrideSaveRequest,
 ) -> std::result::Result<serde_json::Value, String> {
-    handle_save_item_overrides(db, tenant_id, request).await
+    handle_save_item_overrides(tenant_db, request).await
 }
 
 async fn execute_controller_load_backup_target_options(
@@ -1262,23 +1258,22 @@ async fn handle_save_global_defaults(
 }
 
 async fn handle_preload_item_overrides(
-    db: &DatabaseConnection,
-    tenant_id: Option<Uuid>,
+    tenant_db: &TenantDb,
     request: ProxmoxItemOverridePreloadRequest,
 ) -> std::result::Result<serde_json::Value, String> {
-    let tenant_id = require_tenant_id(tenant_id, "item override preload")?;
     let software_item_id = request.software_item_id;
+    ensure_software_item_in_tenant(tenant_db, software_item_id).await?;
 
     let effective_config_id = match request.plugin_config_id {
         Some(id) => Some(id),
-        None => find_first_item_override_config(db, software_item_id)
+        None => find_first_item_override_config(tenant_db.db(), software_item_id)
             .await
             .map_err(|e| format!("failed to find saved override config: {e}"))?,
     };
 
     let configs = resolve_scope_plugin_configs(
-        db,
-        tenant_id,
+        tenant_db.db(),
+        tenant_db.tenant_id(),
         &ProxmoxScopeSelectionRequest {
             plugin_config_id: effective_config_id,
             software_item_id: Some(software_item_id),
@@ -1297,7 +1292,7 @@ async fn handle_preload_item_overrides(
         }));
     };
 
-    let item_override = load_item_override(db, software_item_id, selected_config.id)
+    let item_override = load_item_override(tenant_db.db(), software_item_id, selected_config.id)
         .await
         .map_err(|e| format!("failed to load per-item override: {e}"))?;
 
@@ -1327,19 +1322,19 @@ async fn handle_preload_item_overrides(
 }
 
 async fn handle_save_item_overrides(
-    db: &DatabaseConnection,
-    tenant_id: Option<Uuid>,
+    tenant_db: &TenantDb,
     request: ProxmoxItemOverrideSaveRequest,
 ) -> std::result::Result<serde_json::Value, String> {
-    let tenant_id = require_tenant_id(tenant_id, "item override save")?;
     let software_item_id = request.software_item_id;
     let plugin_config_id = request.plugin_config_id;
     let mode_raw = normalize_required_mode(request.mode.as_str())?;
 
-    ensure_proxmox_plugin_config_exists(db, tenant_id, plugin_config_id).await?;
+    ensure_proxmox_plugin_config_exists(tenant_db.db(), tenant_db.tenant_id(), plugin_config_id)
+        .await?;
+    ensure_software_item_in_tenant(tenant_db, software_item_id).await?;
 
     if mode_raw == "inherit_global" {
-        delete_item_override(db, software_item_id, plugin_config_id)
+        delete_item_override(tenant_db.db(), software_item_id, plugin_config_id)
             .await
             .map_err(|e| format!("failed to clear per-item override: {e}"))?;
         return Ok(json!({
@@ -1367,14 +1362,15 @@ async fn handle_save_item_overrides(
                         .to_string(),
                 );
             }
-            ensure_cached_backup_target_exists(db, plugin_config_id, &target_key).await?;
+            ensure_cached_backup_target_exists(tenant_db.db(), plugin_config_id, &target_key)
+                .await?;
             Some(target_key)
         }
         ProtectionMode::DoNothing | ProtectionMode::Snapshot => None,
     };
 
     upsert_item_override(
-        db,
+        tenant_db.db(),
         software_item_id,
         plugin_config_id,
         &ProtectionPolicy {
@@ -1724,6 +1720,27 @@ async fn handle_save_scaling_item_overrides(
         "software_item_id": software_item_id.to_string(),
         "plugin_config_id": plugin_config_id.to_string(),
     }))
+}
+
+async fn ensure_software_item_in_tenant(
+    tenant_db: &TenantDb,
+    software_item_id: Uuid,
+) -> std::result::Result<(), String> {
+    use uptrakit_shared_db::entity::software_item;
+
+    let item = tenant_db
+        .find_by_id::<software_item::Entity, _>(software_item_id)
+        .filter(software_item::Column::DeactivatedAt.is_null())
+        .one(tenant_db.db())
+        .await
+        .map_err(|e| format!("database error validating software item: {e}"))?;
+
+    if item.is_none() {
+        return Err(format!(
+            "software item '{software_item_id}' was not found in tenant scope"
+        ));
+    }
+    Ok(())
 }
 
 async fn ensure_proxmox_plugin_config_exists(
@@ -2198,6 +2215,8 @@ mod tests {
         let software_item_id = Uuid::now_v7();
 
         let db = MockDatabase::new(DbBackend::MySql)
+            // ensure_software_item_in_tenant -> item found
+            .append_query_results([vec![mock_software_item_model(tenant_id, software_item_id)]])
             // find_first_item_override_config -> no saved overrides
             .append_query_results([
                 Vec::<crate::entity::proxmox_protection_item_override::Model>::new(),
@@ -2207,10 +2226,10 @@ mod tests {
                 uptrakit_shared_db::entity::host_software_item_plugin::Model,
             >::new()])
             .into_connection();
+        let tenant_db = TenantDb::new(db, tenant_id);
 
         let result = handle_preload_item_overrides(
-            &db,
-            Some(tenant_id),
+            &tenant_db,
             ProxmoxItemOverridePreloadRequest {
                 software_item_id,
                 plugin_config_id: None,
@@ -2254,10 +2273,10 @@ mod tests {
         let software_item_id = Uuid::now_v7();
         let plugin_config_id = Uuid::now_v7();
         let db = mock_empty_plugin_config_validation_db();
+        let tenant_db = TenantDb::new(db, tenant_id);
 
         let result = handle_save_item_overrides(
-            &db,
-            Some(tenant_id),
+            &tenant_db,
             ProxmoxItemOverrideSaveRequest {
                 software_item_id,
                 plugin_config_id,
@@ -2296,25 +2315,22 @@ mod tests {
         }
     }
 
-    fn mock_host_software_item_plugin_model(
+    fn mock_software_item_model(
+        tenant_id: Uuid,
         software_item_id: Uuid,
-        plugin_config_id: Uuid,
-    ) -> uptrakit_shared_db::entity::host_software_item_plugin::Model {
+    ) -> uptrakit_shared_db::entity::software_item::Model {
         let now = OffsetDateTime::now_utc();
-        uptrakit_shared_db::entity::host_software_item_plugin::Model {
-            id: Uuid::now_v7(),
-            host_id: Uuid::now_v7(),
-            software_item_id,
-            host_software_item_id: Uuid::now_v7(),
-            plugin_config_id: Some(plugin_config_id),
-            plugin_type: "infrastructure_proxmox".to_string(),
-            role: "execute_update".to_string(),
-            ordinal: 0,
-            package_identifier: "pkg".to_string(),
-            config: None,
-            execution_site: "auto".to_string(),
+        uptrakit_shared_db::entity::software_item::Model {
+            id: software_item_id,
+            tenant_id,
+            name: "test-item".to_string(),
+            featured: false,
+            icon_url: None,
+            last_checked_at: None,
             created_at: now,
             updated_at: now,
+            deactivated_at: None,
+            awaiting_restart_timeout: None,
         }
     }
 
@@ -2612,18 +2628,13 @@ mod tests {
         let db = MockDatabase::new(DbBackend::MySql)
             // ensure_proxmox_plugin_config_exists
             .append_query_results([vec![mock_plugin_config_model(tenant_id, plugin_config_id)]])
-            // list_proxmox_plugin_configs_for_software_item -> host_software_item_plugins
-            .append_query_results([vec![mock_host_software_item_plugin_model(
-                software_item_id,
-                plugin_config_id,
-            )]])
-            // list_proxmox_plugin_configs_by_ids
-            .append_query_results([vec![mock_plugin_config_model(tenant_id, plugin_config_id)]])
+            // ensure_software_item_in_tenant -> item found
+            .append_query_results([vec![mock_software_item_model(tenant_id, software_item_id)]])
             .into_connection();
+        let tenant_db = TenantDb::new(db, tenant_id);
 
         let result = handle_save_item_overrides(
-            &db,
-            Some(tenant_id),
+            &tenant_db,
             ProxmoxItemOverrideSaveRequest {
                 software_item_id,
                 plugin_config_id,
@@ -2637,5 +2648,63 @@ mod tests {
 
         let err = result.expect_err("zero timeout should be rejected");
         assert!(err.contains("snapshot timeout must be a positive integer"));
+    }
+
+    #[tokio::test]
+    async fn save_item_overrides_rejects_foreign_software_item() {
+        let tenant_id = Uuid::now_v7();
+        let software_item_id = Uuid::now_v7();
+        let plugin_config_id = Uuid::now_v7();
+
+        let db = MockDatabase::new(DbBackend::MySql)
+            // ensure_proxmox_plugin_config_exists -> config found
+            .append_query_results([vec![mock_plugin_config_model(tenant_id, plugin_config_id)]])
+            // ensure_software_item_in_tenant -> no row (foreign tenant)
+            .append_query_results([Vec::<uptrakit_shared_db::entity::software_item::Model>::new()])
+            .into_connection();
+        let tenant_db = TenantDb::new(db, tenant_id);
+
+        let result = handle_save_item_overrides(
+            &tenant_db,
+            ProxmoxItemOverrideSaveRequest {
+                software_item_id,
+                plugin_config_id,
+                mode: "inherit_global".to_string(),
+                backup_target_option: None,
+                snapshot_timeout_seconds: None,
+                backup_timeout_seconds: None,
+            },
+        )
+        .await;
+
+        let err = result.expect_err("save should reject foreign software item");
+        assert!(err.contains("not found in tenant scope"), "got: {err}");
+        // No further statements: the mock has no delete/upsert results appended,
+        // so reaching them would have panicked the mock — absence of panic plus
+        // the error proves no override row was written.
+    }
+
+    #[tokio::test]
+    async fn preload_item_overrides_rejects_foreign_software_item() {
+        let tenant_id = Uuid::now_v7();
+        let software_item_id = Uuid::now_v7();
+
+        let db = MockDatabase::new(DbBackend::MySql)
+            // ensure_software_item_in_tenant -> no row (foreign tenant)
+            .append_query_results([Vec::<uptrakit_shared_db::entity::software_item::Model>::new()])
+            .into_connection();
+        let tenant_db = TenantDb::new(db, tenant_id);
+
+        let result = handle_preload_item_overrides(
+            &tenant_db,
+            ProxmoxItemOverridePreloadRequest {
+                software_item_id,
+                plugin_config_id: None,
+            },
+        )
+        .await;
+
+        let err = result.expect_err("preload should reject foreign software item");
+        assert!(err.contains("not found in tenant scope"), "got: {err}");
     }
 }
