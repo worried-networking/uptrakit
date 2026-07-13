@@ -201,6 +201,10 @@ async fn resolve_plugin_config_txn(
 
 /// Ensure a `host_software_item` link row exists for the given host and item.
 /// Returns the link's ID (existing or newly created).
+///
+/// Precondition: the caller MUST have already validated that `host_id` belongs to the
+/// acting tenant (e.g. via a `Host::find_by_id(host_id).filter(host::Column::TenantId.eq(...))`
+/// lookup). This helper trusts `host_id` and performs no tenant check of its own.
 async fn ensure_host_link(
     txn: &impl sea_orm::ConnectionTrait,
     host_id: Uuid,
@@ -395,6 +399,7 @@ pub async fn assign_hosts_in_tx(
         let host_id = assignment.host_id;
 
         let host_model = Host::find_by_id(host_id)
+            .filter(host::Column::TenantId.eq(tenant_id))
             .filter(host::Column::DeactivatedAt.is_null())
             .one(txn)
             .await
@@ -481,6 +486,7 @@ pub async fn update_host_assignment_in_tx(
 
     // Load host model for compatibility validation.
     let host_model = Host::find_by_id(host_id)
+        .filter(host::Column::TenantId.eq(tenant_id))
         .filter(host::Column::DeactivatedAt.is_null())
         .one(txn)
         .await
@@ -660,7 +666,8 @@ pub async fn assign_hosts(
     for assignment in &req.host_assignments {
         let host_id = assignment.host_id;
 
-        let host_model = Host::find_by_id(host_id)
+        let host_model = tenant_db
+            .find_by_id::<host::Entity, _>(host_id)
             .filter(host::Column::DeactivatedAt.is_null())
             .one(&txn)
             .await
@@ -763,7 +770,8 @@ pub async fn update_host_assignment(
     validate_execution_site(&effective_exec_site, &req.role)?;
 
     // Load host model for compatibility validation.
-    let host_model = Host::find_by_id(host_id)
+    let host_model = tenant_db
+        .find_by_id::<host::Entity, _>(host_id)
         .filter(host::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
@@ -963,7 +971,155 @@ pub async fn load_host_assignment(
 #[cfg(test)]
 mod tests {
     use super::resolve_type_only_inline_override;
-    use uptrakit_web_api_types::software_items::{JsonObjectMap, JsonObjectMapPatch};
+    use sea_orm::{ActiveModelTrait, Database, DatabaseConnection, Set, TransactionTrait};
+    use time::OffsetDateTime;
+    use uptrakit_shared_db::entity::{host, software_item, tenant};
+    use uptrakit_web_api_types::software_items::{
+        HostSoftwareAssignment, JsonObjectMap, JsonObjectMapPatch,
+    };
+    use uuid::Uuid;
+
+    // Minimal PluginConfigOps double. The IDOR lookups fail before any ops method is
+    // reached, so the bodies are never executed — they exist only to satisfy the trait.
+    struct StubOps;
+
+    impl uptrakit_plugin_infrastructure_registry::PluginMetadataOps for StubOps {
+        fn get(
+            &self,
+            _id: &uptrakit_shared_types::PluginTypeId,
+        ) -> Option<&uptrakit_plugin_infrastructure_registry::PluginDescriptor> {
+            None
+        }
+        fn all(&self) -> Vec<&uptrakit_plugin_infrastructure_registry::PluginDescriptor> {
+            vec![]
+        }
+        fn instance_enabled(&self, _id: &uptrakit_shared_types::PluginTypeId) -> bool {
+            true
+        }
+    }
+
+    impl uptrakit_plugin_infrastructure_registry::PluginConfigOps for StubOps {}
+
+    async fn idor_db() -> DatabaseConnection {
+        let db = Database::connect("sqlite::memory:")
+            .await
+            .expect("connect sqlite");
+        uptrakit_shared_db::migration::run_migrations(&db)
+            .await
+            .expect("migrations");
+        db
+    }
+
+    /// Seed one tenant with one software_item and return (tenant_id, item_id).
+    async fn seed_tenant_with_item(db: &DatabaseConnection, name: &str) -> (Uuid, Uuid) {
+        let now = OffsetDateTime::now_utc();
+        let tenant_id = Uuid::now_v7();
+        let item_id = Uuid::now_v7();
+        tenant::ActiveModel {
+            id: Set(tenant_id),
+            name: Set(name.to_string()),
+            slug: Set(format!("t-{tenant_id}")),
+            is_default: Set(false),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert tenant");
+        software_item::ActiveModel {
+            id: Set(item_id),
+            tenant_id: Set(tenant_id),
+            name: Set("item".to_string()),
+            featured: Set(false),
+            icon_url: Set(None),
+            last_checked_at: Set(None),
+            awaiting_restart_timeout: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert software_item");
+        (tenant_id, item_id)
+    }
+
+    /// Seed one host under the given tenant and return its id.
+    async fn seed_host(db: &DatabaseConnection, tenant_id: Uuid) -> Uuid {
+        let now = OffsetDateTime::now_utc();
+        let host_id = Uuid::now_v7();
+        host::ActiveModel {
+            id: Set(host_id),
+            tenant_id: Set(tenant_id),
+            machine_id: Set(format!("machine-{host_id}")),
+            hostname: Set("h".to_string()),
+            friendly_name: Set("H".to_string()),
+            os_type: Set(None),
+            os_version: Set(None),
+            architecture: Set(None),
+            ip_address: Set(None),
+            host_features: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert host");
+        host_id
+    }
+
+    #[tokio::test]
+    async fn assign_hosts_in_tx_accepts_own_tenant_host() {
+        let db = idor_db().await;
+        let (tenant_a, item_a) = seed_tenant_with_item(&db, "a").await;
+        let host_a = seed_host(&db, tenant_a).await; // host belongs to tenant A
+
+        // Assign host_a to item_a while acting as tenant A — must succeed.
+        let req = super::AssignHostsRequest {
+            host_assignments: vec![HostSoftwareAssignment {
+                host_id: host_a,
+                plugins: vec![],
+            }],
+        };
+
+        let txn = db.begin().await.expect("begin");
+        let result = super::assign_hosts_in_tx(&StubOps, &txn, tenant_a, item_a, &req).await;
+
+        assert!(
+            result.is_ok(),
+            "host belonging to the acting tenant must be accepted, got {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn assign_hosts_in_tx_rejects_foreign_tenant_host() {
+        let db = idor_db().await;
+        let (tenant_a, item_a) = seed_tenant_with_item(&db, "a").await;
+        let (tenant_b, _item_b) = seed_tenant_with_item(&db, "b").await;
+        let host_b = seed_host(&db, tenant_b).await; // host belongs to tenant B
+
+        // Attempt to attach host_b (tenant B) to item_a while acting as tenant A.
+        let req = super::AssignHostsRequest {
+            host_assignments: vec![HostSoftwareAssignment {
+                host_id: host_b,
+                plugins: vec![],
+            }],
+        };
+
+        let txn = db.begin().await.expect("begin");
+        let result = super::assign_hosts_in_tx(&StubOps, &txn, tenant_a, item_a, &req).await;
+
+        assert!(
+            matches!(
+                result.as_ref().map_err(|e| e.current_context()),
+                Err(super::SoftwareItemQueryError::HostNotFound(id)) if *id == host_b
+            ),
+            "cross-tenant host must be rejected as HostNotFound, got {result:?}"
+        );
+    }
 
     #[test]
     fn type_only_inline_override_keep_preserves_existing_override() {
