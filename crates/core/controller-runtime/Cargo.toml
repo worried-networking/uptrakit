@@ -104,6 +104,7 @@ uptrakit-crypto = { workspace = true, features = ["testing"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 tempfile = { workspace = true }
 sea-orm = { workspace = true, features = ["mock"] }
+toml = { workspace = true }
 
 [build-dependencies]
 uptrakit-build-info = { workspace = true }

@@ -39,6 +39,9 @@ pub(crate) fn decide(prior: &RuntimeConfig, new: &RuntimeConfig) -> ReexecDecisi
     if prior.db.url != new.db.url {
         reasons.push("db.url");
     }
+    if prior.nats.url != new.nats.url {
+        reasons.push("nats.url");
+    }
     if prior.master_key != new.master_key {
         reasons.push("master_key");
     }
@@ -58,7 +61,7 @@ pub(crate) fn decide(prior: &RuntimeConfig, new: &RuntimeConfig) -> ReexecDecisi
 #[cfg(test)]
 mod tests {
     use uptrakit_config_reload::config::{
-        DbConfig, EmbeddedServicesConfig, LogConfig, RuntimeConfig,
+        DbConfig, EmbeddedServicesConfig, LogConfig, NatsConfig, RuntimeConfig,
     };
     use uptrakit_shared_types::SecretString;
 
@@ -89,6 +92,16 @@ mod tests {
         let decision = decide(&prior, &new);
         assert!(decision.needed);
         assert!(decision.reasons.contains(&"db.url"));
+    }
+
+    #[test]
+    fn nats_url_change_requires_reexec() {
+        let prior = base_config();
+        let mut new = prior.clone();
+        new.nats = NatsConfig::new("nats://new:4222");
+        let decision = decide(&prior, &new);
+        assert!(decision.needed);
+        assert!(decision.reasons.contains(&"nats.url"));
     }
 
     #[test]

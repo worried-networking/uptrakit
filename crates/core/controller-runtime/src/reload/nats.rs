@@ -1,64 +1,54 @@
-//! NATS client reloadable subsystem.
+//! Validate-reject gate for `[nats]` config changes.
 //!
-//! [`NatsReloadable`] wraps an [`async_nats::Client`] and distributes updated
-//! client handles to consumers via a [`tokio::sync::watch`] channel so that
-//! subscribers can atomically pick up a new connection without a full process
-//! restart.
+//! [`NatsReloadable`] is a validate-reject gate for `[nats]` config changes.
 //!
-//! On `apply`, a fresh client is connected, published via the watch channel,
-//! and the prior client is stashed for a potential `revert`.  A `flush` probe
-//! with a 5-second timeout confirms liveness after apply.
+//! NATS URL hot-reload is intentionally unsupported (see
+//! docs/development/nats-integration.md): the live consumers hold a client
+//! captured at boot with no swap seam. File-sourced `nats.url` changes are
+//! preempted by reexec triage (`reexec/triage.rs`); this gate is the backstop
+//! for delta sources that bypass triage.
+//! // unreachable until DbBump wires nats sections — sections_to_deltas has
+//! // no `nats` arm today; kept so a future wiring cannot silently no-op.
 
 #![cfg(feature = "nats")]
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_nats::Client;
-use parking_lot::Mutex;
 use rootcause::prelude::*;
-use tokio::sync::watch;
 use uptrakit_config_reload::config::NatsConfig;
 use uptrakit_config_reload::defaults::WATCHDOG_NATS;
 use uptrakit_config_reload::delta::RuntimeConfigDelta;
 use uptrakit_config_reload::error::ConfigReloadError;
 use uptrakit_config_reload::reloadable::Reloadable;
 
-/// A [`Reloadable`] subsystem that manages the NATS client connection.
+/// Validate-reject gate for `[nats]` config changes.
 ///
-/// The watch channel carries `Arc<Client>` so that subscribers can cheaply
-/// clone the current client without copying internal state.
-///
-/// On `apply`, a new client is connected to the new URL, published via the
-/// watch channel, and the prior client is stashed for a potential `revert`.
-/// On `revert` the prior client is re-published.
+/// NATS URL hot-reload is intentionally unsupported (see
+/// docs/development/nats-integration.md): the live consumers hold a client
+/// captured at boot with no swap seam. File-sourced `nats.url` changes are
+/// preempted by reexec triage (`reexec/triage.rs`); this gate is the backstop
+/// for delta sources that bypass triage.
+/// // unreachable until DbBump wires nats sections — sections_to_deltas has
+/// // no `nats` arm today; kept so a future wiring cannot silently no-op.
 pub(crate) struct NatsReloadable {
-    /// Sender half of the client broadcast channel.
-    tx: watch::Sender<Arc<Client>>,
-    /// The previous client, stashed by `apply` so that `revert` can restore it.
-    snapshot: Mutex<Option<Arc<Client>>>,
-    /// URL the snapshot client was connected to, saved for restoration.
-    snapshot_url: Mutex<Option<String>>,
-    /// URL the current client is connected to.
-    current_url: Mutex<String>,
+    /// URL the running transport was built with (DB-reconciled effective
+    /// value, not necessarily the boot file's); `None` = NATS unconfigured.
+    effective_url: Option<String>,
+    /// The `[nats]` section the process booted with — gates non-URL fields
+    /// (`extra`): `build_deltas` emits a Nats delta on ANY section change
+    /// (`prior.nats != new.nats`, whole-struct compare), so a URL-only gate
+    /// would report APPLIED for an `extra`-only edit while changing nothing —
+    /// the same vacuous class this spec kills.
+    boot: NatsConfig,
 }
 
 impl NatsReloadable {
-    /// Create a new `NatsReloadable` wrapping an already-connected client.
-    pub(crate) fn new(initial_client: Client, url: String) -> Self {
-        let (tx, _rx) = watch::channel(Arc::new(initial_client));
+    pub(crate) fn new(effective_url: Option<String>, boot: NatsConfig) -> Self {
         Self {
-            tx,
-            snapshot: Mutex::new(None),
-            snapshot_url: Mutex::new(None),
-            current_url: Mutex::new(url),
+            effective_url,
+            boot,
         }
-    }
-
-    /// Subscribe to client updates.  Each receiver always holds the latest
-    /// live client; consumers should `borrow()` it before issuing requests.
-    pub(crate) fn receiver(&self) -> watch::Receiver<Arc<Client>> {
-        self.tx.subscribe()
     }
 }
 
@@ -69,116 +59,33 @@ impl Reloadable for NatsReloadable {
         "nats"
     }
 
-    /// Validate the incoming config.
-    ///
-    /// Delegates to [`NatsConfig::validate`] which rejects an empty URL.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ConfigReloadError::Validate`] if the config is invalid.
     fn validate(&self, new: &NatsConfig) -> Result<(), Report> {
-        new.validate()?;
-        Ok(())
-    }
-
-    /// Connect a fresh NATS client and publish it via the watch channel.
-    ///
-    /// The current client is stashed so that `revert` can restore it.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ConfigReloadError::ApplyFailed`] if the new client cannot
-    /// connect (e.g. NATS server unreachable).
-    async fn apply(&self, new: Arc<NatsConfig>) -> Result<(), Report> {
-        // Read current URL before any await so no lock is held across .await.
-        let old_url = self.current_url.lock().clone();
-
-        let client = async_nats::connect(&new.url).await.map_err(|e| {
-            report!(ConfigReloadError::ApplyFailed {
-                subsystem: "nats".into(),
-                message: e.to_string(),
-            })
-        })?;
-        let new_arc = Arc::new(client);
-
-        // Stash the current client and URL before replacing them.
-        // Each lock is acquired, used, and released before the next — no
-        // two locks are ever held simultaneously.
-        let prior = self.tx.borrow().clone();
-        {
-            let mut guard = self.snapshot.lock();
-            *guard = Some(prior);
-        } // guard dropped
-        {
-            let mut guard = self.snapshot_url.lock();
-            *guard = Some(old_url);
-        } // guard dropped
-        {
-            let mut guard = self.current_url.lock();
-            *guard = new.url.clone();
-        } // guard dropped
-
-        tracing::info!(url = %new.url, "nats client reloaded");
-
-        #[expect(
-            clippy::let_underscore_must_use,
-            reason = "watch::Sender::send returns Err only when all receivers are dropped; benign here"
-        )]
-        let _ = self.tx.send(new_arc);
-        Ok(())
-    }
-
-    /// Restore the previously stashed client if one was saved by `apply`.
-    ///
-    /// # Errors
-    ///
-    /// Always returns `Ok(())` — if no snapshot exists there is nothing to
-    /// revert and the subsystem remains in its current state.
-    async fn revert(&self) -> Result<(), Report> {
-        let prior = self.snapshot.lock().clone();
-        let prior_url = self.snapshot_url.lock().clone();
-        // Both guards are dropped before the send (no .await while holding them).
-        if let Some(prior) = prior {
-            if let Some(url) = prior_url {
-                let mut guard = self.current_url.lock();
-                *guard = url;
-            } // guard dropped
-            tracing::info!("nats client reverted to prior");
-
-            #[expect(
-                clippy::let_underscore_must_use,
-                reason = "watch::Sender::send returns Err only when all receivers are dropped; benign here"
-            )]
-            let _ = self.tx.send(prior);
+        let new_url = (!new.url.is_empty()).then(|| new.url.clone());
+        if new_url != self.effective_url {
+            bail!(ConfigReloadError::Validate(
+                "nats.url change requires reexec".to_string()
+            ));
+        }
+        if new.extra != self.boot.extra {
+            bail!(ConfigReloadError::Validate(
+                "nats config change requires restart".to_string()
+            ));
         }
         Ok(())
     }
 
-    /// Confirm the current NATS client is live by flushing pending output.
-    ///
-    /// A 5-second timeout is applied; exceeding it is treated as a failure.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ConfigReloadError::HealthFailed`] if the flush times out or
-    /// returns an error.
+    async fn apply(&self, _new: Arc<NatsConfig>) -> Result<(), Report> {
+        // URL unchanged (validate gates any change); nothing to apply.
+        Ok(())
+    }
+
+    async fn revert(&self) -> Result<(), Report> {
+        Ok(())
+    }
+
     async fn health_check(&self) -> Result<(), Report> {
-        let client = self.tx.borrow().clone();
-        tokio::time::timeout(Duration::from_secs(5), client.flush())
-            .await
-            .map_err(|_elapsed| {
-                report!(ConfigReloadError::HealthFailed {
-                    subsystem: "nats".into(),
-                    message: "flush timed out after 5s".into(),
-                })
-            })?
-            .map_err(|e| {
-                report!(ConfigReloadError::HealthFailed {
-                    subsystem: "nats".into(),
-                    message: e.to_string(),
-                })
-            })?;
-        tracing::debug!("nats health check ok");
+        // No state is mutated by apply; health is always OK if validate
+        // passed (same contract as EmbeddedServicesReloadable).
         Ok(())
     }
 
@@ -197,19 +104,65 @@ uptrakit_config_reload::reloadable_erased_impl!(NatsReloadable, RuntimeConfigDel
 mod tests {
     use super::*;
 
-    // These tests validate NatsConfig directly without requiring a live NATS
-    // server.  Integration tests for apply/health_check require Docker
-    // (testcontainers) and live under tests/ with #[ignore].
-
-    #[test]
-    fn nats_validate_rejects_empty_url() {
-        let cfg = NatsConfig::default(); // url = ""
-        cfg.validate().unwrap_err();
+    fn boot_with_url(url: &str) -> NatsConfig {
+        NatsConfig::new(url)
     }
 
     #[test]
-    fn nats_validate_accepts_valid_url() {
-        let cfg = NatsConfig::new("nats://localhost:4222");
-        cfg.validate().unwrap();
+    fn nats_validate_rejects_url_change() {
+        let reloadable = NatsReloadable::new(
+            Some("nats://old:4222".into()),
+            boot_with_url("nats://old:4222"),
+        );
+        let new_cfg = NatsConfig::new("nats://new:4222");
+        let err = reloadable.validate(&new_cfg).unwrap_err();
+        assert!(err.to_string().contains("nats.url"), "err: {err}");
+    }
+
+    #[test]
+    fn nats_validate_accepts_unchanged_url() {
+        let reloadable = NatsReloadable::new(
+            Some("nats://old:4222".into()),
+            boot_with_url("nats://old:4222"),
+        );
+        let new_cfg = NatsConfig::new("nats://old:4222");
+        reloadable.validate(&new_cfg).unwrap();
+    }
+
+    #[test]
+    fn nats_validate_rejects_url_change_when_unconfigured() {
+        let reloadable = NatsReloadable::new(None, NatsConfig::default());
+        let new_cfg = NatsConfig::new("nats://new:4222");
+        let err = reloadable.validate(&new_cfg).unwrap_err();
+        assert!(err.to_string().contains("nats.url"), "err: {err}");
+    }
+
+    #[test]
+    fn nats_validate_accepts_still_unconfigured() {
+        let reloadable = NatsReloadable::new(None, NatsConfig::default());
+        let new_cfg = NatsConfig::default(); // url is empty
+        reloadable.validate(&new_cfg).unwrap();
+    }
+
+    #[test]
+    fn nats_validate_rejects_extra_change() {
+        let reloadable = NatsReloadable::new(
+            Some("nats://old:4222".into()),
+            boot_with_url("nats://old:4222"),
+        );
+        let mut new_cfg = NatsConfig::new("nats://old:4222");
+        new_cfg
+            .extra
+            .insert("unknown_key".into(), toml::Value::String("val".into()));
+        let err = reloadable.validate(&new_cfg).unwrap_err();
+        assert!(err.to_string().contains("nats config"), "err: {err}");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn nats_apply_never_connects() {
+        let url = "nats://unreachable.invalid:4222";
+        let reloadable = NatsReloadable::new(Some(url.into()), boot_with_url(url));
+        let new_cfg = Arc::new(NatsConfig::new(url));
+        reloadable.apply(new_cfg).await.unwrap();
     }
 }

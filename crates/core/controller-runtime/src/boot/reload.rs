@@ -122,12 +122,10 @@ pub(crate) async fn wire(
     ];
 
     #[cfg(feature = "nats")]
-    if let (Some(nats), Some(url)) = (&components.nats_transport, &reconciled.nats_url) {
-        reloadables.push(Arc::new(crate::reload::nats::NatsReloadable::new(
-            nats.nats_client(),
-            url.clone(),
-        )));
-    }
+    reloadables.push(Arc::new(crate::reload::nats::NatsReloadable::new(
+        reconciled.nats_url.clone(),
+        booted.runtime.nats.clone(),
+    )));
 
     booted.coordinator.extend_reloadables(reloadables);
     booted

@@ -11,10 +11,6 @@ pub(crate) mod db_pool;
 pub(crate) mod embedded;
 pub(crate) mod https_listener;
 #[cfg(feature = "nats")]
-#[expect(
-    dead_code,
-    reason = "NatsReloadable is wired into the coordinator in Task 14; struct and constructor are unused until then"
-)]
 pub(crate) mod nats;
 pub(crate) mod pki_listener;
 pub(crate) mod probe;
