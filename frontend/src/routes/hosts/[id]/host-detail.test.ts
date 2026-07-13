@@ -876,4 +876,75 @@ describe('Host Detail Page — param-only navigation reload', () => {
 		expect(screen.queryByRole('heading', { name: 'Production Server' })).not.toBeInTheDocument();
 		expect(screen.getByText('staging-server')).toBeInTheDocument();
 	});
+
+	it('discards a stale assigned-software response that resolves after a newer navigation', async () => {
+		vi.mocked(api.getHost).mockImplementation(
+			({ path }: { path: { id: string } }) =>
+				Promise.resolve({
+					data: path.id === 'host-002' ? sampleHost2 : sampleHost
+				}) as ReturnType<typeof api.getHost>
+		);
+		vi.mocked(auth.getUser).mockReturnValue({
+			...adminUser,
+			permissions: [...adminUser.permissions, Permission.VIEW_SOFTWARE]
+		});
+
+		let resolveSoftware1!: (value: Awaited<ReturnType<typeof api.listSoftwareItems>>) => void;
+		let resolveSoftware2!: (value: Awaited<ReturnType<typeof api.listSoftwareItems>>) => void;
+
+		vi.mocked(api.listSoftwareItems).mockImplementation(((opts: Parameters<typeof api.listSoftwareItems>[0]) => {
+			if (opts?.query?.host_id === 'host-001') {
+				return new Promise((resolve) => {
+					resolveSoftware1 = resolve;
+				});
+			}
+			return new Promise((resolve) => {
+				resolveSoftware2 = resolve;
+			});
+		}) as unknown as typeof api.listSoftwareItems);
+
+		render(HostDetailPage);
+		await waitFor(() =>
+			expect(vi.mocked(api.listSoftwareItems)).toHaveBeenCalledWith({
+				query: { page: 1, per_page: 20, host_id: 'host-001' }
+			})
+		);
+
+		// Navigate to host-002 before host-001's assigned-software fetch resolves.
+		page.params.id = 'host-002';
+		await waitFor(() =>
+			expect(vi.mocked(api.listSoftwareItems)).toHaveBeenCalledWith({
+				query: { page: 1, per_page: 20, host_id: 'host-002' }
+			})
+		);
+
+		// Resolve host-002 first (the current id), then host-001 (the stale, superseded id).
+		resolveSoftware2({
+			data: {
+				items: [{ id: 'sw-002', name: 'host-002-software' }],
+				total: 1,
+				page: 1,
+				per_page: 20,
+				total_pages: 1
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listSoftwareItems>>);
+		await waitFor(() => expect(screen.getByText('host-002-software')).toBeInTheDocument());
+
+		resolveSoftware1({
+			data: {
+				items: [{ id: 'sw-001', name: 'host-001-software' }],
+				total: 1,
+				page: 1,
+				per_page: 20,
+				total_pages: 1
+			}
+		} as unknown as Awaited<ReturnType<typeof api.listSoftwareItems>>);
+
+		// Give the stale host-001 response a chance to (incorrectly) commit if the guard were absent.
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		// Committed assigned-software list must remain host-002's — the guard must have discarded host-001's late response.
+		expect(screen.getByText('host-002-software')).toBeInTheDocument();
+		expect(screen.queryByText('host-001-software')).not.toBeInTheDocument();
+	});
 });

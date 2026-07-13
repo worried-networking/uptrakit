@@ -237,29 +237,47 @@
 	}
 
 	async function loadHostAllowlist() {
+		const requestedId = id;
 		hostAllowlistLoading = true;
 		try {
-			const { data: allowlistData } = await listHostDiscoveryAllowlist({ path: { id } });
+			const { data: allowlistData } = await listHostDiscoveryAllowlist({ path: { id: requestedId } });
+			if (requestedId !== id) {
+				// A newer navigation started before this response resolved; discard —
+				// committing would clobber the current id's state with stale data
+				// (out-of-order resolution guard).
+				return;
+			}
 			hostAllowlist = allowlistData;
 		} catch (e) {
-			showError(e instanceof Error ? e.message : 'Failed to load host discovery allowlist');
+			if (requestedId === id) {
+				showError(e instanceof Error ? e.message : 'Failed to load host discovery allowlist');
+			}
 		} finally {
-			hostAllowlistLoading = false;
+			if (requestedId === id) hostAllowlistLoading = false;
 		}
 	}
 
 	async function loadAssignedSoftware(page = 1) {
+		const requestedId = id;
 		assignedSoftwareLoading = true;
 		assignedSoftwareError = null;
 		try {
-			const { data: result } = await listSoftwareItems({ query: { page, per_page: 20, host_id: id } });
+			const { data: result } = await listSoftwareItems({ query: { page, per_page: 20, host_id: requestedId } });
+			if (requestedId !== id) {
+				// A newer navigation started before this response resolved; discard —
+				// committing would clobber the current id's state with stale data
+				// (out-of-order resolution guard).
+				return;
+			}
 			assignedSoftware = result.items;
 			assignedSoftwareTotal = result.total;
 			assignedSoftwarePage = page;
 		} catch (e) {
-			assignedSoftwareError = e instanceof Error ? e.message : 'Failed to load assigned software';
+			if (requestedId === id) {
+				assignedSoftwareError = e instanceof Error ? e.message : 'Failed to load assigned software';
+			}
 		} finally {
-			assignedSoftwareLoading = false;
+			if (requestedId === id) assignedSoftwareLoading = false;
 		}
 	}
 
