@@ -4,6 +4,7 @@ use time::OffsetDateTime;
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{
     api_rate_limit, email_change_request, mfa_challenge, pending_device_flow, scheduled_task,
+    session,
 };
 
 use crate::executor::TaskExecutor;
@@ -11,8 +12,11 @@ use crate::executor::TaskExecutor;
 /// Cleans expired auth state from DB-backed stores.
 ///
 /// Uses direct DB queries instead of store wrappers so the scheduler engine
-/// does not depend on `uptrakit-web-api`. Does NOT clean `TokenDenylist`
-/// (that stays per-controller, in-memory).
+/// does not depend on `uptrakit-web-api`. Cleaned tables include pending
+/// device/OIDC flows, `api_rate_limit`, `email_change_request`, expired
+/// `mfa_challenge` rows (1-day grace), and expired `sessions` rows
+/// (`expires_at < now`, no grace). Does NOT clean `TokenDenylist` (that stays
+/// per-controller, in-memory).
 ///
 /// All DELETE statements run inside a single database transaction so that the
 /// cleanup is atomic: either all expired records are removed in one round trip,
@@ -89,6 +93,15 @@ impl TaskExecutor for AuthCleanupExecutor {
         // then delete them.
         MfaChallenge::delete_many()
             .filter(mfa_challenge::Column::ExpiresAt.lt(now - time::Duration::days(1)))
+            .exec(&txn)
+            .await
+            .context_to()?;
+
+        // Remove expired sessions. Uses the existing idx_sessions_expires_at index.
+        // No grace window (unlike MFA challenges): auth events are already captured
+        // in the audit log, so expired session rows carry no forensic value.
+        session::Entity::delete_many()
+            .filter(session::Column::ExpiresAt.lt(now))
             .exec(&txn)
             .await
             .context_to()?;
@@ -358,5 +371,93 @@ mod tests {
         let remaining = EmailChangeRequest::find().all(&db).await.expect("query");
         assert_eq!(remaining.len(), 1, "only fresh request should remain");
         assert_eq!(remaining[0].token_hash, "fresh-hash");
+    }
+
+    #[tokio::test]
+    async fn deletes_expired_sessions() {
+        use uptrakit_shared_db::entity::{session, user};
+        use uptrakit_shared_types::SessionTokenType;
+
+        let db = setup_db().await;
+        let now = OffsetDateTime::now_utc();
+        let past = now - time::Duration::hours(1);
+        let future = now + time::Duration::hours(1);
+
+        // FK parent user.
+        let user_id = uuid::Uuid::now_v7();
+        user::ActiveModel {
+            id: Set(user_id),
+            email: Set(uptrakit_shared_types::MaskedEmail::new(
+                "test-sess@example.com",
+            )),
+            first_name: Set("Test".to_string()),
+            last_name: Set("User".to_string()),
+            password_hash: Set(None),
+            is_active: Set(true),
+            deactivated_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(&db)
+        .await
+        .expect("insert user");
+
+        // Expired session.
+        session::ActiveModel {
+            id: Set(uuid::Uuid::now_v7()),
+            user_id: Set(user_id),
+            refresh_token_hash: Set("expired-hash".to_string()),
+            auth_method: Set("password".to_string()),
+            oidc_provider_id: Set(None),
+            token_type: Set(SessionTokenType::RefreshToken),
+            created_at: Set(past),
+            expires_at: Set(past),
+            revoked_at: Set(None),
+            user_agent: Set(None),
+            ip_address: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert expired session");
+
+        // Fresh session.
+        session::ActiveModel {
+            id: Set(uuid::Uuid::now_v7()),
+            user_id: Set(user_id),
+            refresh_token_hash: Set("fresh-hash".to_string()),
+            auth_method: Set("password".to_string()),
+            oidc_provider_id: Set(None),
+            token_type: Set(SessionTokenType::RefreshToken),
+            created_at: Set(now),
+            expires_at: Set(future),
+            revoked_at: Set(None),
+            user_agent: Set(None),
+            ip_address: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert fresh session");
+
+        let executor = AuthCleanupExecutor::new(db.clone());
+        let task = make_task(&db);
+        executor
+            .execute(&task)
+            .await
+            .expect("execute should succeed");
+
+        // Only the fresh session survives.
+        let remaining = session::Entity::find().all(&db).await.expect("query");
+        assert_eq!(remaining.len(), 1, "only the fresh session should remain");
+        assert_eq!(remaining[0].refresh_token_hash, "fresh-hash");
+
+        // The parent user row must NOT be collaterally deleted.
+        assert!(
+            user::Entity::find_by_id(user_id)
+                .one(&db)
+                .await
+                .expect("query")
+                .is_some(),
+            "cleanup must not delete the parent user",
+        );
     }
 }
