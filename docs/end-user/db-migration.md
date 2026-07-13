@@ -166,7 +166,8 @@ Migration complete.
 
 Before printing the summary, the tool counts every application table on both
 the source and target and reports an error if any count does not match. The
-check covers all 34 application tables.
+check covers every core and plugin-registered application table; coverage is
+enforced by an always-on test.
 
 ---
 
@@ -199,6 +200,23 @@ source again.
 - **Feature flag required** — the binary must be compiled with support for the
   target backend. A mismatch between the URL scheme and the compiled features
   produces a clear error at startup.
+
+---
+
+## Important preconditions and failure modes
+
+**Master key:** the source and destination must use the same master key. Rows
+encrypted with a different key are unrecoverable after copying — the tool verifies
+the key against the source before wiping the target and aborts on a mismatch.
+
+**Failed run:** `clean_all` runs before `copy_all`. If the migration is interrupted
+after cleaning but before copying completes, the target is left empty or partially
+populated. The source database is never modified. Fix the root cause and re-run from
+the original source database.
+
+**No released version is affected by the 2026-07 coverage gap** — no released build
+shipped the 2FA, OAuth, `instance_plugin_setting`, `service_merge_redirect`, or proxmox
+scaling migrations before this fix was included.
 
 ---
 

@@ -1115,24 +1115,34 @@ uptrakit-controller \
 
 ### Where the data migration code lives
 
-| Path                                              | Purpose                                                           |
-| ------------------------------------------------- | ----------------------------------------------------------------- |
-| `crates/core/controller/src/db_migrate/mod.rs`    | Top-level `run()` function, orchestration                         |
-| `crates/core/controller/src/db_migrate/error.rs`  | `DbMigrateError` and `Result<T>` type alias                       |
-| `crates/core/controller/src/db_migrate/tables.rs` | Generic `migrate_table<E>`, `copy_all`, `clean_all`, `verify_all` |
-| `crates/core/controller/src/cli.rs`               | `ControllerCommand::DbMigrate`, `DbMigrateArgs`                   |
+| Path                                                      | Purpose                                                                   |
+| --------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `crates/core/controller-runtime/src/db_migrate/mod.rs`    | Top-level `run()` function, orchestration                                 |
+| `crates/core/controller-runtime/src/db_migrate/error.rs`  | `DbMigrateError` and `Result<T>` type alias                               |
+| `crates/core/controller-runtime/src/db_migrate/tables.rs` | `copy_all`, `clean_all`, `verify_all` orchestrators + coverage guard test |
+| `crates/shared/db/src/migrate_core_tables.rs`             | `CoreTableDescriptor`, `core_tables()`, `copy`, `clean`, `verify`         |
+| `crates/core/controller-runtime/src/cli.rs`               | `ControllerCommand::DbMigrate`, `DbMigrateArgs`                           |
 
 ### Algorithm
 
 1. Run `run_migrations()` on the target to create the schema and seed rows.
 2. Delete all seeded rows from the target in reverse FK order (`clean_all`).
-3. Copy each of the 34 application tables from source to target in FK-safe
-   order using offset pagination (`copy_all`).
+3. Copy every core application table enumerated by `core_tables()`
+   (`crates/shared/db/src/migrate_core_tables.rs`) plus every plugin-registered
+   table, in FK-safe order using offset pagination (`copy_all`).
 4. Count every table on both sides; fail on the first mismatch (`verify_all`).
 
-Encrypted fields (CA keys, MQTT passwords, OIDC secrets) are copied as opaque
-blobs — no decryption or re-encryption occurs during migration. The same master
-key used in normal operation must be supplied to `db-migrate`.
+`core_tables()` is the single authority for which core tables db-migrate covers.
+To add a table, add one `CoreTableDescriptor::for_entity::<PreludeAlias>("table_name")`
+line at an FK-safe position. The always-on `migration_coverage_complete` test in
+`controller-runtime/src/db_migrate/tables.rs` fails until every live table is either
+listed in `core_tables()`, registered by a plugin descriptor, or in the
+`AGENT_ONLY_TABLES` exclusion.
+
+Encrypted fields are copied as opaque blobs — no re-encryption occurs during
+migration. The same master key used in normal operation must be supplied to
+`db-migrate`, and the tool verifies the key can decrypt the source data before
+wiping the target.
 
 See the end-user guide for operator-facing instructions:
 [docs/end-user/db-migration.md](../end-user/db-migration.md).
