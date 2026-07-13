@@ -169,6 +169,44 @@ pub async fn recover_stale_claims(
     Ok(result.rows_affected)
 }
 
+/// Refresh `locked_at` for this controller's claims on currently-executing
+/// tasks (the heartbeat). Only tasks in `live_ids` are refreshed — a
+/// panicked/cancelled task drops out of the live set, its claim goes stale,
+/// and `recover_stale_claims` heals it. Empty `live_ids` performs no query.
+///
+/// Benign snapshot race: the caller snapshots the live set once per beat
+/// before calling this fn. If a task finishes (drop guard removes it from
+/// the live set) between that snapshot and this write, the write still
+/// includes the now-finished task's id — but it is a no-op for that id:
+/// `release_claim` already NULLed `locked_by` for it, so this fn's
+/// `LockedBy.eq(controller_id)` filter can no longer match that row. No
+/// extra locking or ordering is needed between the snapshot, this write, and
+/// `release_claim` (see the live-set/guard doc comment in scheduler.rs for
+/// the full argument).
+pub async fn refresh_claims(
+    db: &DatabaseConnection,
+    controller_id: Uuid,
+    live_ids: &[Uuid],
+    now: OffsetDateTime,
+) -> error::Result<u64> {
+    if live_ids.is_empty() {
+        return Ok(0);
+    }
+
+    let result = scheduled_task::Entity::update_many()
+        .col_expr(
+            scheduled_task::Column::LockedAt,
+            sea_orm::sea_query::Expr::value(now),
+        )
+        .filter(scheduled_task::Column::LockedBy.eq(controller_id))
+        .filter(scheduled_task::Column::Id.is_in(live_ids.iter().copied()))
+        .exec(db)
+        .await
+        .context_to::<SchedulerError>()?;
+
+    Ok(result.rows_affected)
+}
+
 /// Release all claims held by a specific controller (used during shutdown).
 pub async fn release_all_claims(
     db: &DatabaseConnection,
@@ -670,5 +708,166 @@ mod tests {
             !due.iter().any(|t| t.id == unknown_id),
             "row with unknown task type must be excluded"
         );
+    }
+
+    /// `refresh_claims` must only touch rows that are both owned by the calling
+    /// controller AND present in `live_ids`. Controller B's claim and
+    /// controller A's non-live claim must be left completely untouched.
+    #[tokio::test]
+    async fn refresh_claims_updates_only_own_live_tasks() {
+        let db = setup_test_db().await;
+        // Each task lives in its own tenant: the (tenant_id, task_type) unique
+        // index rejects two tasks of the same type in one tenant, and
+        // `seed_task` always uses the AuthCleanup type.
+        let tenant_live = seed_tenant(&db).await;
+        let tenant_other = seed_tenant(&db).await;
+        let tenant_b = seed_tenant(&db).await;
+
+        let task_a_live = seed_task(&db, tenant_live.id).await;
+        let task_a_other = seed_task(&db, tenant_other.id).await;
+        let task_b = seed_task(&db, tenant_b.id).await;
+
+        let controller_a = Uuid::now_v7();
+        let controller_b = Uuid::now_v7();
+
+        try_claim(&db, task_a_live.id, controller_a).await.unwrap();
+        try_claim(&db, task_a_other.id, controller_a).await.unwrap();
+        try_claim(&db, task_b.id, controller_b).await.unwrap();
+
+        // Snapshot locked_at for the rows that must remain untouched.
+        let before_a_other = scheduled_task::Entity::find_by_id(task_a_other.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        let before_b = scheduled_task::Entity::find_by_id(task_b.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let refreshed_at = OffsetDateTime::now_utc() + time::Duration::minutes(1);
+        let updated = refresh_claims(&db, controller_a, &[task_a_live.id], refreshed_at)
+            .await
+            .unwrap();
+        assert_eq!(updated, 1, "exactly one row (the live one) is refreshed");
+
+        let after_a_live = scheduled_task::Entity::find_by_id(task_a_live.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            after_a_live.locked_at,
+            Some(refreshed_at),
+            "live task's locked_at must be updated to the injected now"
+        );
+
+        let after_a_other = scheduled_task::Entity::find_by_id(task_a_other.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            after_a_other.locked_at, before_a_other.locked_at,
+            "non-live task owned by controller A must be untouched"
+        );
+
+        let after_b = scheduled_task::Entity::find_by_id(task_b.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            after_b.locked_at, before_b.locked_at,
+            "controller B's claim must be untouched by A's refresh"
+        );
+    }
+
+    /// An empty `live_ids` slice must perform no query and change no rows.
+    #[tokio::test]
+    async fn refresh_claims_empty_live_set_is_noop() {
+        let db = setup_test_db().await;
+        let tenant = seed_tenant(&db).await;
+        let task = seed_task(&db, tenant.id).await;
+        let controller_id = Uuid::now_v7();
+
+        try_claim(&db, task.id, controller_id).await.unwrap();
+
+        let before = scheduled_task::Entity::find_by_id(task.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let updated = refresh_claims(
+            &db,
+            controller_id,
+            &[],
+            OffsetDateTime::now_utc() + time::Duration::minutes(1),
+        )
+        .await
+        .unwrap();
+        assert_eq!(updated, 0, "empty live_ids must be a no-op");
+
+        let after = scheduled_task::Entity::find_by_id(task.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            after.locked_at, before.locked_at,
+            "row must be untouched when live_ids is empty"
+        );
+    }
+
+    /// Full heartbeat-vs-staleness cycle: a claim refreshed at t0+540s is still
+    /// fresh at t0+660s (120s old, well under the 600s budget) but becomes
+    /// stale once 601s elapse since the last beat. After stale recovery, a
+    /// fresh claim by a new controller can be released normally.
+    #[tokio::test]
+    async fn heartbeat_prevents_stale_recovery() {
+        let db = setup_test_db().await;
+        let tenant = seed_tenant(&db).await;
+        let task = seed_task(&db, tenant.id).await;
+        let controller_id = Uuid::now_v7();
+
+        let t0 = OffsetDateTime::now_utc();
+        try_claim(&db, task.id, controller_id).await.unwrap();
+
+        // Heartbeat at t0+540s keeps the claim fresh.
+        let beat_at = t0 + time::Duration::seconds(540);
+        let refreshed = refresh_claims(&db, controller_id, &[task.id], beat_at)
+            .await
+            .unwrap();
+        assert_eq!(refreshed, 1, "heartbeat must refresh the live claim");
+
+        // At t0+660s the claim is only 120s old (660-540) — must NOT be recovered.
+        let recovered_fresh = recover_stale_claims(&db, t0 + time::Duration::seconds(660))
+            .await
+            .unwrap();
+        assert_eq!(
+            recovered_fresh, 0,
+            "claim refreshed 120s ago must not be considered stale"
+        );
+
+        // At beat_at+601s the claim is stale (no further heartbeat) — must be recovered.
+        let recovered_stale = recover_stale_claims(&db, beat_at + time::Duration::seconds(601))
+            .await
+            .unwrap();
+        assert_eq!(
+            recovered_stale, 1,
+            "claim stale for 601s since last beat must be recovered"
+        );
+
+        // Re-claim by a new controller and confirm a scoped release still works.
+        let controller_2 = Uuid::now_v7();
+        assert!(try_claim(&db, task.id, controller_2).await.unwrap());
+
+        let next_run_at = OffsetDateTime::now_utc() + time::Duration::minutes(5);
+        let released = release_claim(&db, task.id, controller_2, next_run_at, &Ok(()))
+            .await
+            .unwrap();
+        assert_eq!(released, 1, "re-claimed task must release cleanly");
     }
 }

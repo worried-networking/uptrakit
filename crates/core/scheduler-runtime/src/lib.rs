@@ -15,7 +15,7 @@ mod standalone;
 pub use error::{Result, SchedulerError};
 pub use executor::TaskExecutor;
 pub use notifier::SchedulerNotifier;
-pub use scheduler::{Scheduler, SchedulerConfig, TASK_EXECUTION_TIMEOUT};
+pub use scheduler::{HEARTBEAT_INTERVAL, Scheduler, SchedulerConfig, TASK_EXECUTION_TIMEOUT};
 pub use tick_executor::TickExecutor;
 
 pub use runtime::{ManagedSchedulerRuntime, SchedulerRunConfig, SchedulerStopMode, run_scheduler};

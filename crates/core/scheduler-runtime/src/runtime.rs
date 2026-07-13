@@ -6,7 +6,9 @@ use crate::executors::{
     discover_software::DiscoverSoftwareExecutor, fetch_releases::FetchReleasesExecutor,
     stale_lease_cleanup::StaleLeaseCleanupExecutor,
 };
-use crate::{Scheduler, SchedulerConfig, SchedulerNotifier, TASK_EXECUTION_TIMEOUT};
+use crate::{
+    HEARTBEAT_INTERVAL, Scheduler, SchedulerConfig, SchedulerNotifier, TASK_EXECUTION_TIMEOUT,
+};
 use sea_orm::DatabaseConnection;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -152,6 +154,7 @@ where
             poll_interval,
             controller_id,
             task_execution_timeout: TASK_EXECUTION_TIMEOUT,
+            heartbeat_interval: HEARTBEAT_INTERVAL,
         },
         should_yield,
     );

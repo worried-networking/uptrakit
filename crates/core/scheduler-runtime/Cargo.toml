@@ -22,6 +22,7 @@ oidc = []
 
 [dependencies]
 async-trait = { workspace = true }
+parking_lot = { workspace = true }
 rand = { workspace = true }
 rootcause = { workspace = true }
 sea-orm = { workspace = true }
@@ -50,7 +51,6 @@ uptrakit-service-sdk = { workspace = true, optional = true }
 zeroize = { workspace = true, optional = true }
 
 [dev-dependencies]
-parking_lot = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 uptrakit-crypto = { workspace = true, features = ["testing"] }
 uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["test-support"] }
