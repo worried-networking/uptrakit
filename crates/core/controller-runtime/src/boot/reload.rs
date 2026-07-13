@@ -79,8 +79,10 @@ pub(crate) async fn wire(
     let db_reloadable =
         crate::reload::db_pool::DbPoolReloadable::new(db_conn.clone(), db_url.clone());
     let db_rx = db_reloadable.subscribe();
-    let (tls_reloadable, _tls_rx) =
-        crate::reload::tls_snapshot::TlsSnapshotReloadable::new(booted.runtime.tls.clone());
+    let tls_reloadable = crate::reload::tls_snapshot::TlsSnapshotReloadable::new(
+        booted.runtime.tls.clone(),
+        Arc::clone(&identity.pki.server_cert_resolver),
+    );
     let (https_reloadable, _https_rx) = crate::reload::https_listener::HttpsListenerReloadable::new(
         booted.runtime.network.https.clone(),
     );

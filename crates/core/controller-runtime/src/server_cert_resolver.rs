@@ -25,6 +25,11 @@ impl ControllerServerCertResolver {
     pub(crate) fn swap(&self, next: Arc<CertifiedKey>) {
         self.current.store(next);
     }
+
+    /// Currently served certificate (for reload health checks).
+    pub(crate) fn current(&self) -> Arc<CertifiedKey> {
+        self.current.load_full()
+    }
 }
 
 impl ResolvesServerCert for ControllerServerCertResolver {

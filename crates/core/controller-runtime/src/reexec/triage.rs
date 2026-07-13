@@ -42,6 +42,9 @@ pub(crate) fn decide(prior: &RuntimeConfig, new: &RuntimeConfig) -> ReexecDecisi
     if prior.nats.url != new.nats.url {
         reasons.push("nats.url");
     }
+    if prior.tls.trust_domain != new.tls.trust_domain {
+        reasons.push("tls.trust_domain");
+    }
     if prior.master_key != new.master_key {
         reasons.push("master_key");
     }
@@ -102,6 +105,16 @@ mod tests {
         let decision = decide(&prior, &new);
         assert!(decision.needed);
         assert!(decision.reasons.contains(&"nats.url"));
+    }
+
+    #[test]
+    fn trust_domain_change_requires_reexec() {
+        let prior = base_config();
+        let mut new = prior.clone();
+        new.tls.trust_domain = "changed.example".into();
+        let decision = decide(&prior, &new);
+        assert!(decision.needed);
+        assert!(decision.reasons.contains(&"tls.trust_domain"));
     }
 
     #[test]
