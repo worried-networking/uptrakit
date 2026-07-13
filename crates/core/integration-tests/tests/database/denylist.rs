@@ -2,6 +2,11 @@
 //! The monotonic ON CONFLICT ... WHERE guard is dialect-sensitive, so it must
 //! be verified on Postgres, not only SQLite.
 
+#![expect(
+    clippy::expect_used,
+    reason = "integration test code: panics are acceptable in test helpers (db_test! macro means functions are not annotated #[test])"
+)]
+
 use sea_orm::EntityTrait;
 use uptrakit_shared_db::entity::revoked_token_user;
 use uptrakit_web_api_auth::auth::token_denylist::TokenDenylist;
