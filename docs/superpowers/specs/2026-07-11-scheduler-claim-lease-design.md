@@ -57,11 +57,26 @@ blocks the next tick for its whole duration, so a poll-tick heartbeat would be s
 exactly the long-task scenario this fix targets (verified in `scheduler.rs`: `interval.tick() =>
 poll_cycle(...).await` + `while let Some(_) = join_set.join_next().await`).
 
-Instead: the scheduler spawns **one** dedicated heartbeat task at startup — an `interval` loop (~90s; 6+ beats
-per stale window, margin chosen because heartbeat/poll/release all contend on the same serialized-writer SQLite
-DB and a beat can be delayed under write contention; each write is a single small statement, so multi-beat
-starvation is not expected — the wider margin is cheap insurance) executing one statement per beat, cancelled by
-the same shutdown token the poll loop uses (shutdown then runs the existing `release_all_claims`).
+Instead: the scheduler spawns **one** dedicated heartbeat task at startup — an `interval` loop at **60s**
+(margin defended, not asserted: staleness = no refresh for 600s, so the design survives **8 consecutive
+missed/failed beats** plus the ≤60s claim-to-first-beat phase lag plus seconds-class NTP skew between instances
+— staleness is computed cross-instance against wall clock, so skew is part of the budget; each beat is one
+small single-statement write on the serialized SQLite writer, so even pathological contention delaying several
+consecutive beats sits far inside that budget) executing one statement per beat, cancelled by the same shutdown
+token the poll loop uses (shutdown then runs the existing `release_all_claims`).
+
+**Beat-loop failure semantics (contrarian — the beat is a new single point of liveness; underspecifying it
+reintroduces the bug):** a failed beat write **logs (`tracing::warn!`) and continues — never propagates, never
+exits the loop** (transient SQLITE_BUSY is exactly when the next tick should retry; the 600s window absorbs 8
+misses). A *graceful* beat-task death would be worse than a crash — the instance would keep claiming tasks with
+no heartbeat behind them while peers wipe its live claims at 600s — so the poll loop checks the beat task's
+`JoinHandle` each cycle (`is_finished()`, cheap sync call) and treats a finished beat task as fatal:
+`tracing::error!`, run `release_all_claims`, and exit the scheduler loop so peers take over cleanly. (Under
+`panic = "abort"` a panic in the beat kills the whole instance anyway; the `is_finished()` check guards the
+non-panic exit paths that shouldn't exist but must not be silent if a refactor introduces one.) Shutdown
+ordering: gate the `is_finished()` check on "shutdown token not already cancelled" — during clean shutdown the
+beat exits on the shared token, and an ungated check racing that observation would log a spurious fatal ERROR
+on every clean shutdown.
 
 **The heartbeat refreshes only claims with a live task, never all owned rows** (contrarian-driven — the naive
 owner-wide refresh creates a *new, non-self-healing* leak: `release_claim` runs inside the spawned closure, a
@@ -71,19 +86,32 @@ live-task set (`Arc<parking_lot::Mutex<HashSet<Uuid>>>`) — inserted at `join_s
 guard** inside the spawned closure so removal happens on normal completion, timeout-cancel, and panic alike.
 The beat executes
 `update_many().col_expr(LockedAt, now).filter(LockedBy.eq(controller_id)).filter(Id.is_in(live_ids))` (empty
-set → skip the query). A panicked/cancelled task drops out of the set, its `locked_at` goes stale, and
-`recover_stale_claims` heals it exactly as today. One task, one query per beat, honors the
-batch-over-per-item-loops rule. Two implementation notes: live-set removal and `release_claim` need **no**
+set → skip the query; snapshot the live set **once per beat**). A panicked/cancelled task drops out of the set,
+its `locked_at` goes stale, and `recover_stale_claims` heals it exactly as today. One task, one query per beat,
+honors the batch-over-per-item-loops rule. Benign race, record in the beat's doc comment: a task finishing
+between the beat's set-snapshot and its DB write is harmless — `release_claim` NULLs `locked_by`, so the beat's
+`LockedBy.eq(controller_id)` filter no longer matches the stale id (self-correcting; re-claim by the same
+controller inside that ~ms window is structurally impossible at 15s poll cadence — no lock coordination needed
+beyond the plain remove). Two implementation notes: live-set removal and `release_claim` need **no**
 ordering between them — staleness heal (600s) dominates the beat interval (~90s) by ~6×, so the last refresh
 keeps the claim safe long past the release that follows microseconds later; do not engineer an ordering. And
 the drop guard's `Drop` takes the live-set `parking_lot` lock for a plain `remove` only — no `.await`, no
 nested locks (under this workspace's `panic = "abort"` a panicking task kills the whole instance anyway, and
-the 600s heal on other instances is the recovery path).
+the 600s heal on other instances is the recovery path). Prior art for sync-lock-in-Drop:
+`AuditCommitHook::drop` (`crates/shared/audit-log/src/commit_hook.rs`) — cite it in the guard's doc comment
+(the live-set + RAII-guard *pairing* is new in this codebase; both halves are independently precedented).
 
 Prerequisite audit (named because `tokio::time::timeout` only cancels futures at await points): verify no
 registered `TaskExecutor::execute` does blocking IO/CPU work outside `spawn_blocking` — a blocking executor
-escapes the 2h timeout, and with a live-set heartbeat its claim stays fresh while it blocks. If any executor
-blocks, fixing it is a prerequisite bug in this spec's scope, not deferred. `STALE_CLAIM_SECONDS` stays 600, keeping the 10-minute crash recovery the
+escapes the 2h timeout, and with a live-set heartbeat its claim stays fresh while it blocks (strictly worse
+than today's accidental 600s recovery). If any executor blocks, fixing it is a prerequisite bug in this spec's
+scope, not deferred. Durable guard (the one-time audit does not survive future contributors): the heartbeat
+makes this contract load-bearing, so elevate it into the `TaskExecutor` trait doc — "implementations must not
+block outside `spawn_blocking`; a blocking executor defeats both the execution timeout and the heartbeat lease
+and wedges the instance until restart" — added in this spec's doc deliverables. Same trait doc also records the
+second load-bearing contract the residual-risk section leans on: executors must tolerate duplicate execution
+across a partition window (idempotence is currently true of every registered executor but enforced nowhere —
+make it a stated contract, not an accident). `STALE_CLAIM_SECONDS` stays 600, keeping the 10-minute crash recovery the
 current comment promises — now actually safe, because staleness means "no heartbeat for 10 minutes" (instance
 dead or partitioned), not "task ran longer than 10 minutes". Update the `STALE_CLAIM_SECONDS` doc comment to
 describe the heartbeat contract.
@@ -95,9 +123,11 @@ it corrects the doc comment to state the cross-cycle limitation.
 
 **Rejected alternatives:** heartbeat inside the poll tick — structurally unreachable, above. Raising
 `STALE_CLAIM_SECONDS` above 2h — trivial but trades the real defect for a >2-hour crash-recovery stall on every
-crashed-mid-task instance (controller ids are per-boot on both the embedded path (`Uuid::now_v7()` at boot) and
-the standalone scheduler (enrollment-assigned service id) — verified; a restarted instance cannot resume its
-old claims). Per-task heartbeat tasks — N interval tasks and cancellation plumbing for a signal one global
+crashed-mid-task instance (embedded controller ids are per-boot (`Uuid::now_v7()`, never persisted); the
+standalone scheduler's enrollment-assigned service id IS stable across ordinary restarts — but a claim held by a
+crashed instance still cannot be "resumed": nothing re-associates in-memory execution with a stale row, so
+recovery waits out the staleness window on either path). Per-task heartbeat tasks — N interval tasks and
+cancellation plumbing for a signal one global
 statement provides. Restructuring `run()`/`poll_cycle` so ticking doesn't gate on task drain — larger
 scheduling-semantics change; the dedicated task achieves liveness without touching claim/execution ordering.
 
@@ -109,7 +139,7 @@ untestable without backdating rows, which testing.md forbids. Give the claim fun
 fabricated times). **Stated deviation from the canonical pattern:** testing.md's documented clock injection is a
 struct-held `Arc<dyn Fn() -> OffsetDateTime>` + `#[cfg(test)] with_clock` constructor, used by the stateful
 OAuth/rate-limit stores. `claim.rs` is free functions with no struct to hang a clock on; the nearest analog
-(`DeviceFlowService::poll(&self, …, now: OffsetDateTime)`) uses the same parameter shape, and every value is
+(`DeviceFlowStore::poll(&self, …, now: OffsetDateTime)` — store, not "Service") uses the same parameter shape, and every value is
 computed and consumed within one statement — the stale-stored-clock hazard the canonical pattern guards against
 cannot arise. Wrapping the module in a `ClaimStore` struct solely to hold a clock is machinery without a second
 motivation; if the module ever grows state, revisit.
@@ -136,6 +166,9 @@ backdating and no tokio-time APIs — DB-backed tests, no `start_paused`, per th
 
 1. `release_claim` with a different `controller_id` → returns `Ok(0)`, claim intact, run metadata untouched
    (return-type change: existing `release_claim` tests extend their assertions, not just their parameters).
+   Cover **both** scheduler call sites' `Ok(0)` handling — the completion release AND the hard-abort release
+   (the abort path computes `next_run_at` it must be fine to not persist; nothing downstream may assume the
+   write landed).
 2. Heartbeat statement refreshes `locked_at` only for the calling controller's claims (two controllers, two
    tasks).
 3. `recover_stale_claims(now)` does **not** release a claim whose `locked_at` was heartbeat-refreshed within the
@@ -143,7 +176,11 @@ backdating and no tokio-time APIs — DB-backed tests, no `start_paused`, per th
 4. Full-cycle regression: claim → heartbeat past the old 600s boundary → assert no recovery → scoped release
    returns `Ok(1)`.
 5. Heartbeat-task lifecycle: it beats while a (stubbed, slow) task runs — the scenario the poll loop cannot
-   cover — and stops on shutdown-token cancellation before `release_all_claims` runs.
+   cover — and stops on shutdown-token cancellation before `release_all_claims` runs. Error tolerance: a beat
+   whose DB write fails (e.g. dropped/poisoned connection stub) logs and keeps beating — the loop must not
+   exit; and the poll loop's `is_finished()` check trips the fatal path when the beat task is externally
+   aborted — assert the fatal branch's **effects** (release_all invoked + scheduler loop exited), not merely
+   that the handle reads finished.
 6. Live-set drop guard: a task closure that panics (or is timeout-dropped) leaves the live set → next beat does
    not refresh its claim → `recover_stale_claims(now)` with advanced `now` reclaims it (the zombie-claim
    regression test).
@@ -151,9 +188,11 @@ backdating and no tokio-time APIs — DB-backed tests, no `start_paused`, per th
 
 ## Documentation deliverables
 
-- Doc comments: `STALE_CLAIM_SECONDS` (heartbeat contract), `release_claim` (ownership scoping + lost-claim
-  semantics + new return type), the new heartbeat fn, and the `Scheduler` struct comment (cross-cycle blocking
-  limitation, see above).
+- Doc comments: `STALE_CLAIM_SECONDS` (heartbeat contract + the 8-missed-beats/skew budget), `release_claim`
+  (ownership scoping + lost-claim semantics + new return type), the new heartbeat fn (error semantics, benign
+  snapshot race, `AuditCommitHook` prior art for the drop guard), the `TaskExecutor` trait contract
+  (no blocking outside `spawn_blocking` — load-bearing under the heartbeat lease), and the `Scheduler` struct
+  comment (cross-cycle blocking limitation, see above).
 - `docs/architecture/scheduler.md` (~claim-protocol section): update for the heartbeat contract **and fix the
   dead cross-reference found during review** — it cites `MqttLeaseCoordinator` as the mirrored claim pattern,
   which was removed with the `mqtt_leases` table (migration `m20260329_000001`); `docs/development/
