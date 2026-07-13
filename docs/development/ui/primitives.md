@@ -703,12 +703,87 @@ modules. Calling inside a callback, event handler, or `$effect` throws a rune-ou
 
 **Pagination note:** `currentPage` on all in-scope pages is `$derived(parseUrlPage(page.url))`. A single data-loading `$effect` tracks both filter
 params and `currentPage`. When `set()` removes `page=`, `currentPage` auto-derives to 1 — no separate `currentPage = 1` assignment needed in
-`onchange` handlers.
+`onchange` handlers. See [Effect pattern](#effect-pattern) below for the loader-invocation shape this implies.
 
-**Effect pattern:** The data-loading `$effect` must wrap its async loader call in `untrack(() => loadX(pg))`. The loader synchronously reads
-`$state` values it later writes (e.g. `items.map(...)` then `items = result.items`); without `untrack`, those reads tag the effect and the writes
-re-arm it indefinitely. Capture `currentPage` to a local `const pg = currentPage;` before `untrack` so only the explicit filter/page reads above
-drive re-runs.
+---
+
+### Effect pattern
+
+Any `$effect` that triggers a data load must isolate its dependency tracking from the loader's own reads/writes, and — when it loads into
+shared or entity-keyed state — guard against committing a stale response. Three shapes recur across the codebase:
+
+**1. Filter-effect (`untrack`-wrapped loader):** wrap the async loader call in `untrack(() => loadX(pg))`. The loader synchronously reads
+`$state` values it later writes (e.g. `items.map(...)` then `items = result.items`); without `untrack`, those reads tag the effect and the
+writes re-arm it indefinitely. Capture derived values like `currentPage` to a local `const pg = currentPage;` before `untrack` so only the
+explicit filter/page reads at the top of the effect drive re-runs. See `frontend/src/routes/software/+page.svelte`:
+
+```typescript
+$effect(() => {
+  void featured.value;
+  void updatable.value;
+  void pluginType.value;
+  void queryParam.value;
+  const pg = currentPage;
+  if (canView) untrack(() => loadAll(pg));
+});
+```
+
+**2. Param-keyed reload with a per-load generation guard:** when the effect must re-fire on a route param change (e.g. navigating between
+`/hosts/[id]` pages), read the param outside `untrack` and discard the wrapped loader call the same way — `void id;` then
+`untrack(() => loadData())`. Loaders never run inside the tracking context. Additionally, single-entity loaders capture the id/key they
+loaded for at call time and discard the response if that key has since changed, so an out-of-order (slow first, fast second) resolution
+can't clobber the current page's state. See `frontend/src/routes/hosts/[id]/+page.svelte`:
+
+```typescript
+$effect(() => {
+  void id;
+  if (!getUser()) {
+    return;
+  }
+  untrack(() => {
+    void loadData();
+    // ...
+  });
+});
+
+async function loadData(background = false) {
+  const requestedId = id;
+  // ...
+  if (requestedId !== id) {
+    // A newer navigation started before this response resolved; discard —
+    // committing would clobber the current id's state with stale data
+    // (out-of-order resolution guard).
+    return;
+  }
+  // ... commit response ...
+}
+```
+
+This generation guard protects only the single-entity commit inside `loadData` — it is not needed for loaders that write into a per-id map
+(e.g. `readsBySurface` below), since each response commits under its own key and cannot clobber another id's entry.
+
+**3. Retain-on-error for shared store-backed loaders:** loaders backed by a module-level store shared across components (rather than
+component-local `$state`) must not let a failed fetch re-arm automatically. On failure, mark the key in a failed-set instead of deleting the
+cached/requested state; the effect's own re-run guard (checking the failed-set) then prevents an immediate retry loop. Retrying is an
+explicit call — never a side effect of clearing tracked state on failure. See `frontend/src/lib/surfaces/registry.svelte.ts`'s
+`refreshSurfaceReadModel`, which mutates only the failed-set and never deletes the underlying read/requested maps:
+
+```typescript
+/** Clears a failed-read mark and re-fetches. The load path retains failures
+ *  in `failedReads` instead of re-arming (loop prevention); this is the
+ *  explicit retry affordance for surface UIs and for the per-navigation
+ *  eviction below. Mutates ONLY `failedReads` — never deletes
+ *  `readsBySurface`/`readRequestedBySurface`. */
+export async function refreshSurfaceReadModel(
+  surfaceId: string,
+): Promise<void> {
+  failedReads.delete(surfaceId);
+  await loadSurfaceReadModel(surfaceId);
+}
+```
+
+Callers that want a retry (e.g. a keyed effect re-running on navigation) call `refreshSurfaceReadModel` explicitly before loading; nothing
+in the load path itself clears a failure.
 
 ---
 
@@ -1082,7 +1157,8 @@ lucide-svelte 1.0.1's exports):
 ```typescript
 import type { ComponentType, SvelteComponent } from "svelte";
 
-let { icon: IconComponent }: { icon?: ComponentType<SvelteComponent> } = $props();
+let { icon: IconComponent }: { icon?: ComponentType<SvelteComponent> } =
+  $props();
 ```
 
 Render with a **capitalized** variable name — Svelte treats lowercase tags as HTML elements:
