@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount, onDestroy, untrack } from 'svelte';
 	import { Terminal } from '@xterm/xterm';
 	import { FitAddon } from '@xterm/addon-fit';
 	import { WebLinksAddon } from '@xterm/addon-web-links';
@@ -138,15 +138,21 @@
 	$effect(() => {
 		if (!open || !showTerminal || !containerEl || terminal) return;
 
+		// `liveMode` is read untracked here: this effect only needs its value at
+		// construction time for the initial xterm options. Runtime flips (e.g. the
+		// mid-stream onInput gate in history/+page.svelte) are handled reactively
+		// by the options effect below, without remounting the terminal — otherwise
+		// a flip after output has already been written would wipe the buffer.
+		const initialLiveMode = untrack(() => liveMode);
 		const nextTerminal = new Terminal({
-			disableStdin: !liveMode,
-			convertEol: !liveMode,
+			disableStdin: !initialLiveMode,
+			convertEol: !initialLiveMode,
 			scrollback: 10000,
 			fontSize: 9,
 			lineHeight: 1.6,
 			fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
 			theme: TERMINAL_THEME,
-			cursorBlink: liveMode,
+			cursorBlink: initialLiveMode,
 			cursorStyle: 'bar',
 			cursorInactiveStyle: 'none'
 		});

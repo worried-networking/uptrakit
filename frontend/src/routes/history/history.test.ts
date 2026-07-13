@@ -400,10 +400,11 @@ describe('History Route', () => {
 	});
 
 	describe('interactive terminal input gating (PTY evidence)', () => {
-		// `TerminalOutput` recreates its underlying xterm instance whenever its
-		// `liveMode` (derived from `onInput`) flips, so the mock's terminal
-		// instance list can grow across an unlock transition — always read the
-		// latest instance rather than caching a reference that may be disposed.
+		// `TerminalOutput` snapshots `liveMode` (derived from `onInput`) only at
+		// construction time, so an unlock transition updates the existing xterm
+		// instance's options in place rather than recreating it. Read the latest
+		// instance via this helper anyway, so tests stay valid regardless of
+		// remount behavior.
 		function latestTerminal() {
 			const terminal = xtermMocks.terminalInstances.at(-1);
 			expect(terminal).toBeDefined();
@@ -512,6 +513,39 @@ describe('History Route', () => {
 			expect(reconnectedTerminal.options.disableStdin).toBe(true);
 			reconnectedTerminal.onDataHandler?.('ls\n');
 			expect(interactiveMocks.sendInput).not.toHaveBeenCalled();
+		});
+
+		it('(f) regression: the unlock transition updates the existing xterm instance instead of remounting it', async () => {
+			await openInteractiveModal();
+
+			const instanceCountBeforeUnlock = xtermMocks.terminalInstances.length;
+			const terminalBeforeUnlock = latestTerminal();
+			terminalBeforeUnlock.write('$ apt upgrade\r\n');
+			expect(terminalBeforeUnlock.options.disableStdin).toBe(true);
+
+			capturedCallbacks?.onOutput?.({
+				id: 'line-5',
+				text: 'Do you want to continue? [Y/n] ',
+				stream: 'stdout',
+				timestamp: '2026-02-01T12:00:04Z',
+				seq: 5
+			});
+			flushSync();
+
+			// No new xterm instance was constructed across the flip — the buffered
+			// output written above must survive, since it is never replayed in live
+			// mode (see TerminalOutput.svelte's replay effect, which only fires
+			// when !liveMode).
+			expect(xtermMocks.terminalInstances.length).toBe(instanceCountBeforeUnlock);
+			expect(terminalBeforeUnlock.dispose).not.toHaveBeenCalled();
+
+			// The SAME instance had its options flipped in place by the runtime
+			// options effect.
+			const terminalAfterUnlock = latestTerminal();
+			expect(terminalAfterUnlock).toBe(terminalBeforeUnlock);
+			expect(terminalAfterUnlock.options.disableStdin).toBe(false);
+			terminalAfterUnlock.onDataHandler?.('y\n');
+			expect(interactiveMocks.sendInput).toHaveBeenCalledWith('y\n');
 		});
 	});
 
