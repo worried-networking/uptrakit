@@ -1,11 +1,3 @@
-// `#[allow(unused_assignments, unused_mut)]` is used for a variable that is
-// conditionally assigned inside `#[cfg(feature = "interactive")]` blocks;
-// `#[expect]` cannot be used because the lint fires only without that feature.
-#![expect(
-    clippy::allow_attributes,
-    reason = "feature-conditional suppression of unused_assignments/unused_mut; #[expect] is incompatible with conditional use"
-)]
-
 use std::sync::Arc;
 
 use uptrakit_plugin_infrastructure_registry::{
@@ -37,35 +29,50 @@ pub struct InFlightUpdate {
     /// `true` once the early result has been forwarded to the controller.
     /// Guards against double-sending the same payload (early + final).
     pub early_sent: bool,
-    /// Stdin writer for interactive updates. `None` for non-interactive.
+    /// Stdin writer for interactive updates. Starts `None` and is filled by
+    /// the event loop once `channels_rx` resolves.
     #[cfg(feature = "interactive")]
     pub stdin_tx: Option<tokio::sync::mpsc::Sender<Vec<u8>>>,
-    /// Signal sender for interactive updates. `None` for non-interactive.
+    /// Signal sender for interactive updates. Starts `None` and is filled by
+    /// the event loop once `channels_rx` resolves.
     #[cfg(feature = "interactive")]
     pub signal_tx: Option<tokio::sync::mpsc::Sender<i32>>,
-    /// Attention receiver for stdin-waiting detection.
+    /// Attention receiver for stdin-waiting detection. Starts `None` and is
+    /// filled by the event loop once `channels_rx` resolves.
     #[cfg(feature = "interactive")]
     pub attention_rx: Option<tokio::sync::mpsc::Receiver<()>>,
+    /// Resolves once the forwarding executor promotes the update command to
+    /// interactive mode, delivering the stdin/signal/attention channels.
+    /// `None` for non-interactive updates. Consumed by the event loop, which
+    /// then populates `stdin_tx`/`signal_tx`/`attention_rx` above.
+    #[cfg(feature = "interactive")]
+    pub channels_rx: Option<tokio::sync::oneshot::Receiver<crate::update::InteractiveChannels>>,
 }
 
-/// Result of spawning an update task, including optional interactive channels.
+/// Result of spawning an update task, including the interactive dispatch
+/// intent and (for interactive dispatches) a receiver for the channels
+/// delivered once the update pipeline promotes to a PTY.
 struct SpawnedUpdate {
     handle: tokio::task::JoinHandle<crate::update::UpdateExecutionResult>,
     #[cfg(feature = "interactive")]
-    stdin_tx: Option<tokio::sync::mpsc::Sender<Vec<u8>>>,
-    #[cfg(feature = "interactive")]
-    signal_tx: Option<tokio::sync::mpsc::Sender<i32>>,
-    #[cfg(feature = "interactive")]
-    attention_rx: Option<tokio::sync::mpsc::Receiver<()>>,
+    channels_rx: Option<tokio::sync::oneshot::Receiver<crate::update::InteractiveChannels>>,
+    /// `true` when the update was dispatched with an interactive PTY
+    /// request — i.e. the caller asked for `interactive` and the executor
+    /// declared PTY support. This is *intent*, not confirmation: the PTY may
+    /// still fail to allocate, in which case the pipeline falls back to
+    /// non-interactive execution transparently.
+    interactive_intent: bool,
 }
 
 /// Spawn the update task, using interactive execution when the feature is
 /// enabled and the payload requests it.
 ///
 /// When the `interactive` feature is enabled and `payload.interactive` is
-/// true, the update runs through `execute_update_interactive` which
-/// allocates a PTY and returns channels for stdin/signal forwarding.
-/// Otherwise, falls back to the standard non-interactive path.
+/// true, the update runs through `execute_update_interactive`, which returns
+/// immediately with a receiver for the stdin/signal/attention channels —
+/// those channels are delivered later, once the pipeline promotes the update
+/// command to a PTY. Otherwise, falls back to the standard non-interactive
+/// path.
 async fn spawn_update_task(
     payload: uptrakit_wire::ExecuteUpdatePayload,
     runtime: Arc<dyn HostRuntime>,
@@ -77,13 +84,11 @@ async fn spawn_update_task(
     #[cfg(feature = "interactive")]
     if payload.interactive && runtime.executor().supports_interactive() {
         let result =
-            crate::update::execute_update_interactive(payload, runtime, output_tx, early_result_tx)
-                .await;
+            crate::update::execute_update_interactive(payload, runtime, output_tx, early_result_tx);
         return SpawnedUpdate {
             handle: result.handle,
-            stdin_tx: result.stdin_tx,
-            signal_tx: result.signal_tx,
-            attention_rx: result.attention_rx,
+            channels_rx: Some(result.channels_rx),
+            interactive_intent: true,
         };
     }
 
@@ -94,11 +99,8 @@ async fn spawn_update_task(
     SpawnedUpdate {
         handle,
         #[cfg(feature = "interactive")]
-        stdin_tx: None,
-        #[cfg(feature = "interactive")]
-        signal_tx: None,
-        #[cfg(feature = "interactive")]
-        attention_rx: None,
+        channels_rx: None,
+        interactive_intent: false,
     }
 }
 
@@ -367,25 +369,17 @@ pub async fn start_update(
     )
     .await;
 
-    // Confirmed PTY allocation: stdin_tx is Some only when execute_update_interactive
-    // successfully allocated a PTY and delivered channels via the oneshot.
-    #[allow(
-        unused_assignments,
-        unused_mut,
-        reason = "only assigned when `interactive` feature is enabled"
-    )]
-    let mut confirmed_interactive = false;
-    #[cfg(feature = "interactive")]
-    {
-        confirmed_interactive = spawned.stdin_tx.is_some();
-    }
-
-    // Send UpdateStarted
+    // Send UpdateStarted. `interactive` carries dispatch *intent* — it reflects
+    // whether the update was dispatched down the interactive path (caller
+    // requested it and the executor declared PTY support), not whether a PTY
+    // was actually allocated. Confirmation happens later when `channels_rx`
+    // resolves; the frontend "Input Required" badge is intent-driven by design
+    // (it may briefly show even if the PTY setup subsequently falls back).
     if let Err(e) = conn
         .transport_send(ServiceMessage::UpdateStarted(UpdateStartedPayload {
             update_history_id,
             from_version: None,
-            interactive: confirmed_interactive,
+            interactive: spawned.interactive_intent,
         }))
         .await
     {
@@ -399,11 +393,13 @@ pub async fn start_update(
         early_result_rx,
         early_sent: false,
         #[cfg(feature = "interactive")]
-        stdin_tx: spawned.stdin_tx,
+        stdin_tx: None,
         #[cfg(feature = "interactive")]
-        signal_tx: spawned.signal_tx,
+        signal_tx: None,
         #[cfg(feature = "interactive")]
-        attention_rx: spawned.attention_rx,
+        attention_rx: None,
+        #[cfg(feature = "interactive")]
+        channels_rx: spawned.channels_rx,
     }
 }
 

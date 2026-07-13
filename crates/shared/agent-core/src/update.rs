@@ -1049,19 +1049,23 @@ async fn check_attestation_gate(
 // ── Interactive update execution ──────────────────────────────────────
 
 /// Handle returned from [`execute_update_interactive`], containing the
-/// spawned task and channels for stdin/signal/attention forwarding.
+/// spawned task and a oneshot that resolves once the update pipeline
+/// promotes the plugin's update command to interactive mode.
 #[cfg(feature = "interactive")]
 pub struct InteractiveUpdateHandle {
     pub handle: tokio::task::JoinHandle<UpdateExecutionResult>,
-    pub stdin_tx: Option<mpsc::Sender<Vec<u8>>>,
-    pub signal_tx: Option<mpsc::Sender<i32>>,
-    pub attention_rx: Option<mpsc::Receiver<()>>,
+    /// Resolved by the event loop when [`ForwardingInteractiveExecutor`]
+    /// promotes the update command to `execute_interactive()`. Errors
+    /// (sender dropped) if the pipeline ends without promotion — e.g. the
+    /// update fails before reaching the plugin's execute step, or the
+    /// executor falls back to non-interactive execution.
+    pub channels_rx: tokio::sync::oneshot::Receiver<InteractiveChannels>,
 }
 
 /// Tuple type for channels delivered from [`ForwardingInteractiveExecutor`]
 /// to [`execute_update_interactive`] via oneshot.
 #[cfg(feature = "interactive")]
-type InteractiveChannels = (mpsc::Sender<Vec<u8>>, mpsc::Sender<i32>, mpsc::Receiver<()>);
+pub type InteractiveChannels = (mpsc::Sender<Vec<u8>>, mpsc::Sender<i32>, mpsc::Receiver<()>);
 
 /// A [`CommandExecutor`] wrapper that intercepts the first `execute()` call
 /// and promotes it to `execute_interactive()`.
@@ -1150,7 +1154,7 @@ impl CommandExecutor for ForwardingInteractiveExecutor {
     }
 }
 
-/// Execute an update interactively with PTY support.
+/// Spawn an update interactively with PTY support.
 ///
 /// Runs the same update pipeline as [`execute_update`] but constructs a
 /// [`ForwardingInteractiveExecutor`] and passes it as `update_exec_runtime`
@@ -1160,14 +1164,13 @@ impl CommandExecutor for ForwardingInteractiveExecutor {
 /// `execute_interactive()`, allocating a real PTY without any changes to the
 /// `Plugin` trait.
 ///
-/// Returns an [`InteractiveUpdateHandle`] whose `stdin_tx`, `signal_tx`, and
-/// `attention_rx` are `Some(...)` when the executor supports interactive mode
-/// and the update reaches the plugin execution step. If the executor falls back
-/// to non-interactive (e.g. SSH executor without PTY support, or the update
-/// fails before reaching the plugin step), all three fields are `None` and the
-/// update still runs to completion via `handle`.
+/// Returns immediately with an [`InteractiveUpdateHandle`] — it does not await
+/// PTY promotion. The handle's `channels_rx` is resolved later by the event
+/// loop when (and if) the forwarding executor promotes the update command to
+/// interactive mode.
 #[cfg(feature = "interactive")]
-pub async fn execute_update_interactive(
+#[tracing::instrument(skip_all, fields(update_history_id = %payload.update_history_id))]
+pub fn execute_update_interactive(
     payload: ExecuteUpdatePayload,
     runtime: Arc<dyn HostRuntime>,
     output_tx: mpsc::Sender<UpdateOutputMessage>,
@@ -1200,27 +1203,9 @@ pub async fn execute_update_interactive(
         .await
     });
 
-    // Await delivery of the interactive channels from
-    // ForwardingInteractiveExecutor::execute(). This resolves when the plugin's
-    // first execute() call is intercepted and promoted to interactive mode.
-    //
-    // If the oneshot sender is dropped before sending (the update fails before
-    // reaching the plugin's execute step, or the executor falls back to
-    // non-interactive), channels_rx returns Err and we return None channels —
-    // the update still runs to completion via `handle`.
-    match channels_rx.await {
-        Ok((stdin_tx, signal_tx, attention_rx)) => InteractiveUpdateHandle {
-            handle,
-            stdin_tx: Some(stdin_tx),
-            signal_tx: Some(signal_tx),
-            attention_rx: Some(attention_rx),
-        },
-        Err(_) => InteractiveUpdateHandle {
-            handle,
-            stdin_tx: None,
-            signal_tx: None,
-            attention_rx: None,
-        },
+    InteractiveUpdateHandle {
+        handle,
+        channels_rx,
     }
 }
 

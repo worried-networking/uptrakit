@@ -812,6 +812,8 @@ mod tests {
             signal_tx: None,
             #[cfg(feature = "interactive")]
             attention_rx: None,
+            #[cfg(feature = "interactive")]
+            channels_rx: None,
         });
 
         let mut transport = MockTransport::new();
