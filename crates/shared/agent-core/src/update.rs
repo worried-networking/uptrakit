@@ -1697,6 +1697,306 @@ mod interactive_lifecycle_tests {
             "orphaned PTY child (marker {marker}) should have been group-killed on cancellation"
         );
     }
+
+    /// Local copy of `tests::test_payload` — the parent helper is private to
+    /// the sibling `tests` module and not visible here.
+    fn test_payload() -> ExecuteUpdatePayload {
+        ExecuteUpdatePayload {
+            host_machine_id: String::new(),
+            update_history_id: uuid::Uuid::nil(),
+            software_item_id: uuid::Uuid::nil(),
+            software_item_name: "Test App".to_string(),
+            to_version: "2.0.0".to_string(),
+            detect_version_plugin: None,
+            execute_update_plugin: PluginAssignment {
+                plugin_type: uptrakit_wire::plugin_ids::RELEASES_GITHUB.clone(),
+                package_identifier: "test-app".to_string(),
+                config: serde_json::json!({}),
+            },
+            pre_update_hook_plugins: vec![],
+            post_update_hook_plugins: vec![],
+            release_info: None,
+            timeout: Duration::from_secs(60),
+            interactive: false,
+        }
+    }
+
+    /// Local copy of `tests::test_runtime` — see `test_payload` above.
+    fn test_runtime() -> Arc<dyn HostRuntime> {
+        use uptrakit_command::LocalCommandExecutor;
+        use uptrakit_plugin_infrastructure_core::{HostCapabilities, StandardHostRuntime};
+        Arc::new(StandardHostRuntime::new(
+            Arc::new(LocalCommandExecutor),
+            HostCapabilities::default(),
+        ))
+    }
+
+    /// Builds a `PluginAssignment` for the test-support stub lifecycle hook,
+    /// configured to stream `line_count` output lines from its pre-hook.
+    fn stub_hook_assignment(line_count: usize) -> PluginAssignment {
+        PluginAssignment {
+            plugin_type: uptrakit_shared_types::plugin_ids::TEST_LIFECYCLE_HOOK,
+            package_identifier: "test-lifecycle-hook".to_string(),
+            config: serde_json::json!({ "line_count": line_count }),
+        }
+    }
+
+    /// Fix 1 regression (deadlock): a pre-hook emitting more lines than the
+    /// output channel's bounded capacity (100, see `execute_update_pipeline`)
+    /// must not wedge `execute_update_interactive`. The function must return
+    /// a handle immediately — before the hook finishes streaming — so the
+    /// caller can drain `output_rx` concurrently with awaiting completion.
+    ///
+    /// Real-clock `tokio::time::timeout` (AGENTS ledger #76 exception,
+    /// documented per the standards snapshot's `start_paused` rule): the
+    /// wedge under test is CHANNEL-CAPACITY-parked (`send().await` on the
+    /// full bounded-100 channel), not timer-parked. Paused-time auto-advance
+    /// semantics around channel-parked tasks are unreliable in both
+    /// directions — the virtual clock may never advance while a task looks
+    /// runnable, or may jump through the guard timeout during a brief
+    /// all-parked instant on otherwise-healthy code. A real 5s bound is
+    /// deterministic instead: healthy code finishes in milliseconds, and the
+    /// pre-fix regression (handle awaited only after full drain, or the
+    /// pipeline blocked on `send().await` with no reader) fails the 5s bound.
+    #[tokio::test]
+    async fn interactive_update_returns_handle_before_hook_finishes_streaming() {
+        let mut payload = test_payload();
+        payload.interactive = true;
+        payload.release_info = None; // attestation gate must do no network I/O
+        payload.pre_update_hook_plugins = vec![stub_hook_assignment(150)];
+        // A trivial local update command — RELEASES_GITHUB's real executor
+        // would attempt network I/O in `execute_update`, which is unrelated
+        // to what this test pins (channel-capacity deadlock in the hook).
+        payload.execute_update_plugin = PluginAssignment {
+            plugin_type: uptrakit_wire::plugin_ids::GENERIC_SHELL.clone(),
+            package_identifier: "test-app".to_string(),
+            config: serde_json::json!({ "update_command": "true" }),
+        };
+
+        let runtime = test_runtime();
+        let (output_tx, mut output_rx) = mpsc::channel::<UpdateOutputMessage>(100);
+        let (early_result_tx, _early_result_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let test_body = async {
+            // Call returns immediately with a handle — obtained BEFORE any
+            // draining of output_rx below, proving the fn didn't block while
+            // the 150-line hook was still streaming into the bounded-100
+            // channel.
+            let interactive_handle =
+                execute_update_interactive(payload, runtime, output_tx, early_result_tx);
+
+            // Drain output concurrently with awaiting the handle. Without the
+            // fix, nothing would ever drain the channel here in a real
+            // caller — but even in this test, if `execute_update_interactive`
+            // itself blocked before returning, we'd never reach this point at
+            // all within the outer timeout.
+            let drain = async {
+                let mut count = 0usize;
+                while output_rx.recv().await.is_some() {
+                    count += 1;
+                }
+                count
+            };
+
+            let (drained, join_result) = tokio::join!(drain, interactive_handle.handle);
+            (drained, join_result)
+        };
+
+        let (drained, join_result) = tokio::time::timeout(Duration::from_secs(5), test_body)
+            .await
+            .expect(
+                "execute_update_interactive deadlocked: pre-hook's 150 lines exceeded the \
+                 bounded-100 output channel and nothing drained it within 5s (Fix 1 regression)",
+            );
+
+        let exec_result = join_result.expect("update task should not panic");
+        assert!(
+            drained >= 150,
+            "expected at least the hook's 150 output lines to be drained, got {drained}"
+        );
+        assert_eq!(
+            exec_result.result.status,
+            UpdateFinalStatus::Completed,
+            "update should complete successfully once the hook finishes streaming"
+        );
+    }
+
+    /// Fix 2 regression (PTY targeting): only the update command's `execute()`
+    /// call may be promoted to `execute_interactive()` — a lifecycle hook has
+    /// no executor/runtime accessor on `UpdateLifecycleContext` (verified:
+    /// `plugin-infrastructure-core/src/traits.rs`) and therefore can never
+    /// itself trigger PTY promotion. This test pins that behavior end-to-end
+    /// through `execute_update_interactive`: a pre-hook (1 output line) runs
+    /// before a `generic_shell` update command, and the recording executor
+    /// installed as the base runtime's executor must observe exactly one
+    /// `execute_interactive` call, carrying the UPDATE command's spec.
+    #[tokio::test]
+    async fn interactive_promotion_targets_update_command_not_hook() {
+        /// Records every `execute`/`execute_interactive` call as
+        /// `"<method>:<spec-summary>"`, then always succeeds so the pipeline
+        /// can run to completion without a real PTY.
+        struct RecordingUpdateExecutor {
+            calls: parking_lot::Mutex<Vec<String>>,
+        }
+
+        fn spec_summary(spec: &CommandSpec) -> String {
+            format!("{:?}", spec.mode)
+        }
+
+        #[async_trait::async_trait]
+        impl CommandExecutor for RecordingUpdateExecutor {
+            async fn execute(
+                &self,
+                spec: &CommandSpec,
+                _output_tx: &mpsc::Sender<UpdateOutputLine>,
+            ) -> uptrakit_command::Result<uptrakit_command::CommandOutput> {
+                self.calls
+                    .lock()
+                    .push(format!("execute:{}", spec_summary(spec)));
+                Ok(uptrakit_command::CommandOutput {
+                    output: String::new(),
+                    exit_code: 0,
+                })
+            }
+
+            async fn execute_quiet(
+                &self,
+                _spec: &CommandSpec,
+            ) -> uptrakit_command::Result<uptrakit_command::CommandOutput> {
+                Ok(uptrakit_command::CommandOutput {
+                    output: String::new(),
+                    exit_code: 0,
+                })
+            }
+
+            fn supports_interactive(&self) -> bool {
+                true
+            }
+
+            async fn execute_interactive(
+                &self,
+                spec: &CommandSpec,
+                _output_tx: &mpsc::Sender<UpdateOutputLine>,
+            ) -> uptrakit_command::Result<InteractiveHandle> {
+                self.calls
+                    .lock()
+                    .push(format!("execute_interactive:{}", spec_summary(spec)));
+                let (stdin_tx, _stdin_rx) = mpsc::channel(1);
+                let (signal_tx, _signal_rx) = mpsc::channel(1);
+                let (_attention_tx, attention_rx) = mpsc::channel(1);
+                Ok(InteractiveHandle {
+                    // Safe no-op target: `kill_process_group(0)` is a verified
+                    // no-op, so a fabricated pid is safe if the guard ever fires.
+                    child_pid: 0,
+                    stdin_tx,
+                    signal_tx,
+                    completion: tokio::spawn(async {
+                        Ok(uptrakit_command::CommandOutput {
+                            output: String::new(),
+                            exit_code: 0,
+                        })
+                    }),
+                    attention_rx,
+                })
+            }
+        }
+
+        let recording = Arc::new(RecordingUpdateExecutor {
+            calls: parking_lot::Mutex::new(Vec::new()),
+        });
+        let recording_dyn: Arc<dyn CommandExecutor> = recording.clone();
+        let runtime = uptrakit_plugin_infrastructure_registry::construct_host_runtime(
+            recording_dyn,
+            uptrakit_plugin_infrastructure_core::HostCapabilities::default(),
+        );
+
+        let mut payload = test_payload();
+        payload.interactive = true;
+        payload.release_info = None;
+        payload.pre_update_hook_plugins = vec![stub_hook_assignment(1)];
+        payload.execute_update_plugin = PluginAssignment {
+            plugin_type: uptrakit_wire::plugin_ids::GENERIC_SHELL.clone(),
+            package_identifier: "test-app".to_string(),
+            config: serde_json::json!({ "update_command": "true" }),
+        };
+
+        let (output_tx, mut output_rx) = mpsc::channel::<UpdateOutputMessage>(100);
+        let (early_result_tx, _early_result_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let mut interactive_handle =
+            execute_update_interactive(payload, runtime, output_tx, early_result_tx);
+
+        // Prove the hook's participation via its output line appearing before
+        // the update command's promotion, by observing it prior to awaiting
+        // channels_rx (which resolves only once the update command reaches
+        // the forwarding executor's execute() call).
+        let mut hook_line_seen = false;
+        let mut saw_channels = false;
+        let mut output_closed = false;
+        let test_body = async {
+            // First, drain strictly until the hook's own line is observed.
+            // The pipeline runs pre-hooks fully before the update command
+            // (`execute_update_pipeline`: hooks -> attestation -> plugin
+            // execute), so the hook's line is always sent, and always sent
+            // before the update command's `execute()` call that triggers PTY
+            // promotion — waiting for it here (before racing channels_rx)
+            // proves that ordering rather than assuming it.
+            while !hook_line_seen {
+                match output_rx.recv().await {
+                    Some(line) if line.output.contains("test-lifecycle-hook") => {
+                        hook_line_seen = true;
+                    }
+                    Some(_) => {}
+                    None => panic!("output_rx closed before the hook's line was observed"),
+                }
+            }
+
+            // Now race draining the rest of the output against channels_rx
+            // resolving — both must complete, in either order.
+            while !output_closed || !saw_channels {
+                tokio::select! {
+                    maybe_line = output_rx.recv(), if !output_closed => {
+                        if maybe_line.is_none() {
+                            output_closed = true;
+                        }
+                    }
+                    channels = &mut interactive_handle.channels_rx, if !saw_channels => {
+                        channels.expect(
+                            "channels_rx should resolve Ok: promotion targets the update \
+                             command, not the hook (Fix 2 regression)",
+                        );
+                        saw_channels = true;
+                    }
+                }
+            }
+        };
+
+        tokio::time::timeout(Duration::from_secs(5), test_body)
+            .await
+            .expect("pipeline did not complete within 5s");
+
+        interactive_handle
+            .handle
+            .await
+            .expect("update task should not panic");
+
+        let calls = recording.calls.lock().clone();
+        let interactive_calls: Vec<&String> = calls
+            .iter()
+            .filter(|c| c.starts_with("execute_interactive:"))
+            .collect();
+        assert_eq!(
+            interactive_calls.len(),
+            1,
+            "expected exactly one execute_interactive call (the update command); got: {calls:?}"
+        );
+        assert!(
+            interactive_calls[0].contains("true"),
+            "the single execute_interactive call should carry the UPDATE command's spec \
+             (shell \"true\"), not the hook's; got: {}",
+            interactive_calls[0]
+        );
+    }
 }
 
 #[cfg(test)]

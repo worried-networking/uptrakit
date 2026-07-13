@@ -126,6 +126,9 @@ pub mod plugin_ids {
     pub const TEST_ENRICHER_ECHO: PluginTypeId = PluginTypeId::from_static("__test_enricher_echo");
     #[cfg(feature = "test-support")]
     pub const TEST_ENRICHER_MISS: PluginTypeId = PluginTypeId::from_static("__test_enricher_miss");
+    #[cfg(feature = "test-support")]
+    pub const TEST_LIFECYCLE_HOOK: PluginTypeId =
+        PluginTypeId::from_static("__test_lifecycle_hook");
 
     /// All well-known plugin type IDs. Must include every constant above.
     /// Tests verify bidirectional consistency with `all_descriptors()`.

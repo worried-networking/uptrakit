@@ -76,6 +76,7 @@ pub fn all_descriptors() -> Vec<&'static PluginDescriptor> {
         descs.push(&crate::test_support::CTX_CAPTURE_DESCRIPTOR);
         descs.push(&crate::test_support::ENRICHER_ECHO_DESCRIPTOR);
         descs.push(&crate::test_support::ENRICHER_MISS_DESCRIPTOR);
+        descs.push(&crate::test_support::TEST_LIFECYCLE_HOOK_DESCRIPTOR);
     }
     descs
 }
@@ -248,6 +249,7 @@ mod tests {
             known.insert(plugin_ids::TEST_CTX_CAPTURE.as_str().to_owned());
             known.insert(plugin_ids::TEST_ENRICHER_ECHO.as_str().to_owned());
             known.insert(plugin_ids::TEST_ENRICHER_MISS.as_str().to_owned());
+            known.insert(plugin_ids::TEST_LIFECYCLE_HOOK.as_str().to_owned());
         }
         for d in &descs {
             assert!(

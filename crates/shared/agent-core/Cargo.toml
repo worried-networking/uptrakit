@@ -34,6 +34,7 @@ uptrakit-directories = { workspace = true }
 
 [dev-dependencies]
 uptrakit-plugin-infrastructure-core = { workspace = true }
+uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["daemon", "test-support"] }
 uptrakit-service-sdk = { workspace = true, features = ["test-support"] }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
