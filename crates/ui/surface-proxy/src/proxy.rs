@@ -357,6 +357,8 @@ impl SurfaceProxy {
                     );
                 }
 
+                let _cleanup_guard = PendingGuard::new(Arc::clone(&self.pending), request_id);
+
                 let outbound = surfaces::SurfaceActionRequest {
                     request_id,
                     tenant_id: request.tenant_id.to_string(),
@@ -686,6 +688,40 @@ fn decrement_counter<K: Eq + Hash + Clone>(map: &mut HashMap<K, usize>, key: &K)
         if *counter == 0 {
             map.remove(key);
         }
+    }
+}
+
+/// RAII cleanup guard for an in-flight ProviderProxied request.
+///
+/// Held by `invoke_inner` for the lifetime of a proxied request. If the future
+/// is dropped at an `.await` (e.g. the HTTP client disconnects), `Drop` runs the
+/// shared `take_pending` cleanup — removing the pending entry, decrementing both
+/// budget counters, and releasing the owner-tagged idempotency reservation.
+///
+/// It is a pure backstop: every normal `invoke_inner` return path already removes
+/// the entry via another actor (`complete`, `timeout_pending_request`,
+/// `fail_pending_request`), so `Drop` is a presence-checked no-op on those paths.
+///
+/// Drop-safety: locks the `parking_lot::Mutex` for a synchronous `take_pending`
+/// only — no `.await`, no nested lock, no `unwrap`; a missing entry is a no-op, so
+/// cleanup is idempotent by construction.
+struct PendingGuard {
+    pending: Arc<Mutex<PendingState>>,
+    request_id: Uuid,
+}
+
+impl PendingGuard {
+    fn new(pending: Arc<Mutex<PendingState>>, request_id: Uuid) -> Self {
+        Self {
+            pending,
+            request_id,
+        }
+    }
+}
+
+impl Drop for PendingGuard {
+    fn drop(&mut self) {
+        let _ = self.pending.lock().take_pending(&self.request_id);
     }
 }
 

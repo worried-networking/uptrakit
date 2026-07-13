@@ -582,3 +582,138 @@ async fn invoke_fails_immediately_when_provider_disconnects() {
         Err(SurfaceProxyError::ServiceDisconnected)
     ));
 }
+
+#[tokio::test]
+async fn provider_proxied_client_disconnect_releases_budget_and_idempotency() {
+    let registry = Arc::new(registry());
+    let service_connections = ServiceConnectionRegistry::new();
+    let proxy = Arc::new(SurfaceProxy::new());
+    let (_service_id, mut rx) = register_service_for_proxy(&registry, &service_connections).await;
+
+    // Drive invoke in a task and DON'T respond — park it on `timeout(rx)`.
+    let proxy_clone = Arc::clone(&proxy);
+    let sc = service_connections.clone();
+    let reg = Arc::clone(&registry);
+    let handle = tokio::spawn(async move {
+        proxy_clone
+            .invoke(
+                &sc,
+                &reg,
+                request_with_idem("idem-cancel"),
+                Some(Duration::from_secs(120)),
+            )
+            .await
+    });
+
+    // Wait for the outbound request — proves register_pending ran and counters incremented.
+    let outbound = rx.recv().await.expect("outbound surface request");
+    assert!(matches!(
+        outbound,
+        ControllerMessage::SurfaceActionRequest(_)
+    ));
+    assert_eq!(
+        proxy
+            .pending
+            .lock()
+            .in_flight_per_provider
+            .get("provider-a")
+            .copied(),
+        Some(1),
+        "provider budget must be reserved mid-flight (non-vacuous baseline)"
+    );
+
+    // Simulate the client disconnecting: drop the invoke future.
+    handle.abort();
+    let _ = handle.await;
+
+    let state = proxy.pending.lock();
+    assert!(
+        state.in_flight_per_provider.is_empty(),
+        "provider budget leaked after cancel"
+    );
+    assert!(
+        state.in_flight_per_tenant.is_empty(),
+        "tenant budget leaked after cancel"
+    );
+    assert!(
+        state.in_flight_idempotency.is_empty(),
+        "idempotency reservation leaked after cancel"
+    );
+}
+
+#[tokio::test]
+async fn provider_proxied_success_releases_exactly_once() {
+    let registry = registry();
+    let service_connections = ServiceConnectionRegistry::new();
+    let proxy = Arc::new(SurfaceProxy::new());
+    let (_service_id, mut rx) = register_service_for_proxy(&registry, &service_connections).await;
+
+    let proxy_clone = Arc::clone(&proxy);
+    tokio::spawn(async move {
+        if let Some(ControllerMessage::SurfaceActionRequest(request)) = rx.recv().await {
+            proxy_clone.complete(
+                request.request_id,
+                surfaces::SurfaceActionResponse {
+                    request_id: request.request_id,
+                    success: true,
+                    result: Some(serde_json::json!({"ok": true})),
+                    error: None,
+                },
+            );
+        }
+    });
+
+    let response = proxy
+        .invoke(
+            &service_connections,
+            &registry,
+            request_with_idem("idem-ok"),
+            Some(Duration::from_secs(5)),
+        )
+        .await
+        .expect("invoke should succeed");
+    assert!(response.success);
+
+    let state = proxy.pending.lock();
+    assert!(state.in_flight_per_provider.is_empty());
+    assert!(state.in_flight_per_tenant.is_empty());
+    assert!(state.in_flight_idempotency.is_empty());
+}
+
+#[tokio::test]
+async fn provider_proxied_repeated_cancellation_does_not_accumulate_budget() {
+    let registry = Arc::new(registry());
+    let service_connections = ServiceConnectionRegistry::new();
+    let proxy = Arc::new(SurfaceProxy::new());
+    let (_service_id, mut rx) = register_service_for_proxy(&registry, &service_connections).await;
+
+    // Far more cancellations than the 32-per-provider cap — a leak would trip RateLimited well before 40.
+    for i in 0..40 {
+        let proxy_clone = Arc::clone(&proxy);
+        let sc = service_connections.clone();
+        let reg = Arc::clone(&registry);
+        let handle = tokio::spawn(async move {
+            proxy_clone
+                .invoke(
+                    &sc,
+                    &reg,
+                    request_with_idem(&format!("idem-loop-{i}")),
+                    Some(Duration::from_secs(120)),
+                )
+                .await
+        });
+        let outbound = rx.recv().await.expect("outbound request");
+        assert!(
+            matches!(outbound, ControllerMessage::SurfaceActionRequest(_)),
+            "iteration {i} must register and send (not RateLimited)"
+        );
+        handle.abort();
+        let _ = handle.await;
+    }
+
+    // Non-vacuous: a leak would leave up to 40 stuck entries here; the guard drives it to empty.
+    assert!(
+        proxy.pending.lock().in_flight_per_provider.is_empty(),
+        "cancelled requests must not accumulate provider budget"
+    );
+}
