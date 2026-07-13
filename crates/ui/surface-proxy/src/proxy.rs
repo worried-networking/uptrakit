@@ -44,6 +44,11 @@ const IDEMPOTENCY_RETENTION: Duration = Duration::from_secs(20 * 60);
 const FAILURE_WINDOW: Duration = Duration::from_secs(60);
 const FAILURE_LIMIT: usize = 5;
 const FAILURE_COOLDOWN: Duration = Duration::from_secs(60);
+/// Extra grace beyond a request's own deadline before the backstop sweep reaps it.
+/// Generous on purpose: the sweep is a last-resort GC for genuinely-orphaned entries
+/// a live timeout path would already have removed — it must never contend the normal
+/// per-request timeout (up to `MAX_TIMEOUT_SECONDS`).
+const IN_FLIGHT_SWEEP_MARGIN: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -163,6 +168,7 @@ struct PendingRequest {
     provider_id: String,
     tenant_id: Uuid,
     idempotency_key: IdempotencyKey,
+    deadline: std::time::Instant,
     sender: tokio::sync::oneshot::Sender<surfaces::SurfaceActionResponse>,
 }
 
@@ -179,6 +185,7 @@ struct IdempotencyKey {
 struct IdempotencyInFlight {
     request_fingerprint: u64,
     owner: Uuid,
+    deadline: std::time::Instant,
 }
 
 #[derive(Debug, Clone)]
@@ -297,7 +304,12 @@ impl SurfaceProxy {
                     let mut state = self.pending.lock();
                     state.cleanup_expired();
                     state.ensure_idempotency_available(&idem_key, request_fingerprint)?;
-                    state.reserve_idempotency(idem_key.clone(), request_fingerprint, request_id);
+                    state.reserve_idempotency(
+                        idem_key.clone(),
+                        request_fingerprint,
+                        request_id,
+                        std::time::Instant::now() + timeout,
+                    );
                 }
 
                 let _idem_guard =
@@ -346,14 +358,15 @@ impl SurfaceProxy {
                     state.ensure_provider_not_rate_limited(&resolved.provider_id)?;
                     state.ensure_budget(&resolved.provider_id, request.tenant_id)?;
                     state.ensure_idempotency_available(&idem_key, request_fingerprint)?;
-                    state.register_pending(
+                    state.register_pending(PendingRegistration {
                         request_id,
-                        &resolved.provider_id,
-                        request.tenant_id,
-                        idem_key.clone(),
+                        provider_id: &resolved.provider_id,
+                        tenant_id: request.tenant_id,
+                        idempotency_key: idem_key.clone(),
                         request_fingerprint,
-                        tx,
-                    );
+                        deadline: std::time::Instant::now() + timeout,
+                        sender: tx,
+                    });
                 }
 
                 let _cleanup_guard = PendingGuard::new(Arc::clone(&self.pending), request_id);
@@ -521,22 +534,34 @@ impl SurfaceProxy {
     }
 }
 
+struct PendingRegistration<'a> {
+    request_id: Uuid,
+    provider_id: &'a str,
+    tenant_id: Uuid,
+    idempotency_key: IdempotencyKey,
+    request_fingerprint: u64,
+    deadline: std::time::Instant,
+    sender: tokio::sync::oneshot::Sender<surfaces::SurfaceActionResponse>,
+}
+
 impl PendingState {
-    fn register_pending(
-        &mut self,
-        request_id: Uuid,
-        provider_id: &str,
-        tenant_id: Uuid,
-        idempotency_key: IdempotencyKey,
-        request_fingerprint: u64,
-        sender: tokio::sync::oneshot::Sender<surfaces::SurfaceActionResponse>,
-    ) {
+    fn register_pending(&mut self, reg: PendingRegistration<'_>) {
+        let PendingRegistration {
+            request_id,
+            provider_id,
+            tenant_id,
+            idempotency_key,
+            request_fingerprint,
+            deadline,
+            sender,
+        } = reg;
         self.pending.insert(
             request_id,
             PendingRequest {
                 provider_id: provider_id.to_string(),
                 tenant_id,
                 idempotency_key: idempotency_key.clone(),
+                deadline,
                 sender,
             },
         );
@@ -545,7 +570,7 @@ impl PendingState {
             .entry(provider_id.to_string())
             .or_default() += 1;
         *self.in_flight_per_tenant.entry(tenant_id).or_default() += 1;
-        self.reserve_idempotency(idempotency_key, request_fingerprint, request_id);
+        self.reserve_idempotency(idempotency_key, request_fingerprint, request_id, deadline);
     }
 
     fn take_pending(
@@ -569,12 +594,19 @@ impl PendingState {
         self.take_pending(request_id).is_some()
     }
 
-    fn reserve_idempotency(&mut self, key: IdempotencyKey, request_fingerprint: u64, owner: Uuid) {
+    fn reserve_idempotency(
+        &mut self,
+        key: IdempotencyKey,
+        request_fingerprint: u64,
+        owner: Uuid,
+        deadline: std::time::Instant,
+    ) {
         self.in_flight_idempotency.insert(
             key,
             IdempotencyInFlight {
                 request_fingerprint,
                 owner,
+                deadline,
             },
         );
     }
@@ -678,6 +710,22 @@ impl PendingState {
                 tracker.blocked_until = None;
             }
         }
+
+        // Backstop: reap in-flight reservations whose own deadline (plus a generous
+        // margin) has passed — genuinely orphaned entries a live timeout path would
+        // already have removed. Never a global threshold (would reap slow-but-alive
+        // long-timeout requests and record a spurious provider failure).
+        let reap_ids: Vec<Uuid> = self
+            .pending
+            .iter()
+            .filter(|(_, pending)| pending.deadline + IN_FLIGHT_SWEEP_MARGIN < now)
+            .map(|(request_id, _)| *request_id)
+            .collect();
+        for request_id in &reap_ids {
+            let _ = self.take_pending(request_id);
+        }
+        self.in_flight_idempotency
+            .retain(|_, in_flight| in_flight.deadline + IN_FLIGHT_SWEEP_MARGIN >= now);
     }
 }
 
