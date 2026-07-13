@@ -82,6 +82,11 @@ pub(crate) fn register_column_aad_mappings() {
             column: "config",
             aad: AAD_NOTIFICATION_CONFIG,
         },
+        ColumnAadEntry {
+            table: "user_totp",
+            column: "secret",
+            aad: "uptrakit:user_totp:secret",
+        },
     ];
 
     #[cfg(feature = "embedded-ssh-agent")]
