@@ -15,7 +15,7 @@ pub(crate) fn proxmox_db_migrate_tables()
     use crate::entity::{
         proxmox_backup_target_cache, proxmox_host_mapping, proxmox_protection_audit,
         proxmox_protection_default, proxmox_protection_item_override,
-        proxmox_resource_scaling_record,
+        proxmox_resource_scaling_record, proxmox_scaling_default, proxmox_scaling_item_override,
     };
 
     vec![
@@ -34,6 +34,12 @@ pub(crate) fn proxmox_db_migrate_tables()
         ),
         PluginTableDescriptor::for_entity::<proxmox_resource_scaling_record::Entity>(
             "proxmox_resource_scaling_records",
+        ),
+        PluginTableDescriptor::for_entity::<proxmox_scaling_default::Entity>(
+            "proxmox_scaling_defaults",
+        ),
+        PluginTableDescriptor::for_entity::<proxmox_scaling_item_override::Entity>(
+            "proxmox_scaling_item_overrides",
         ),
     ]
 }
