@@ -1090,6 +1090,41 @@ pub type InteractiveChannels = (mpsc::Sender<Vec<u8>>, mpsc::Sender<i32>, mpsc::
 struct ForwardingInteractiveExecutor {
     inner: Arc<dyn CommandExecutor>,
     channels_tx: parking_lot::Mutex<Option<tokio::sync::oneshot::Sender<InteractiveChannels>>>,
+    /// Update timeout from the dispatch payload, used to fill `spec.timeout`
+    /// on promotion when the plugin didn't set one (see [`CommandExecutor::execute`]
+    /// below). Plugin-set timeouts are always respected.
+    update_timeout: std::time::Duration,
+}
+
+/// Kills the PTY child's process group if the pipeline future is cancelled
+/// (e.g. the outer update timeout) while the interactive session is running.
+/// Defused on normal completion. Accepted PID-reuse TOCTOU: the guard can
+/// fire after the group exited; the window is the instant between exit and
+/// defusal on a freshly-vacated pgid — COMPARABLE, not identical, to the
+/// deadline path's theoretical window in `drive_interactive_session`: the
+/// deadline path reaps via `child.wait().await` after killing, while this
+/// sync guard cannot reap (and its `.abort()` of the session task may delay
+/// the reap to `kill_on_drop`/the OS), so this guard's recycle window is
+/// marginally wider.
+#[cfg(feature = "interactive")]
+struct InteractiveSessionGuard {
+    abort: tokio::task::AbortHandle,
+    child_pid: i32,
+    armed: bool,
+}
+
+#[cfg(feature = "interactive")]
+impl Drop for InteractiveSessionGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            // Group-kill FIRST, then abort: kill the group while the direct
+            // child is still a member — aborting first drops the session
+            // future, whose kill_on_drop reap of the leader races the
+            // group-kill window.
+            uptrakit_command::kill_process_group(self.child_pid);
+            self.abort.abort();
+        }
+    }
 }
 
 #[cfg(feature = "interactive")]
@@ -1104,14 +1139,37 @@ impl CommandExecutor for ForwardingInteractiveExecutor {
         // promotion. Subsequent calls pass through directly.
         let maybe_tx = self.channels_tx.lock().take();
         if let Some(tx) = maybe_tx {
-            match self.inner.execute_interactive(spec, output_tx).await {
+            // Propagate the update deadline into the PTY session when the plugin
+            // didn't set its own timeout — otherwise an interactive command could
+            // run unbounded. Plugin-set timeouts are always respected.
+            let mut promoted_spec = spec.clone();
+            if promoted_spec.timeout.is_none() {
+                promoted_spec.timeout = Some(self.update_timeout);
+            }
+            match self
+                .inner
+                .execute_interactive(&promoted_spec, output_tx)
+                .await
+            {
                 Ok(handle) => {
                     // Deliver channels to execute_update_interactive.
                     // Ignore send errors — the receiver may have been dropped if
                     // the outer function timed out (shouldn't happen in practice).
                     let _ = tx.send((handle.stdin_tx, handle.signal_tx, handle.attention_rx));
+                    // Arm a guard that group-kills the PTY child and aborts the
+                    // session task if this future is cancelled (e.g. by the
+                    // outer update timeout) while awaiting completion below.
+                    // Use abort_handle() so the guard never owns the JoinHandle;
+                    // we still await the owned `handle.completion` directly.
+                    let mut guard = InteractiveSessionGuard {
+                        abort: handle.completion.abort_handle(),
+                        child_pid: handle.child_pid,
+                        armed: true,
+                    };
                     // Drive the PTY process to completion.
-                    handle.completion.await.map_err(|e| {
+                    let result = handle.completion.await;
+                    guard.armed = false; // defuse: normal completion, nothing to kill
+                    result.map_err(|e| {
                         rootcause::report!(uptrakit_command::CommandError::UnsupportedOperation(
                             format!("interactive task panicked: {e}")
                         ))
@@ -1185,10 +1243,13 @@ pub fn execute_update_interactive(
     use uptrakit_plugin_infrastructure_registry::construct_host_runtime;
     let inner_executor = runtime.executor();
     let caps = runtime.capabilities().clone();
+    // Read before `payload` moves into the spawned pipeline task below.
+    let update_timeout = payload.timeout;
     let forwarding_executor: Arc<dyn uptrakit_command::CommandExecutor> =
         Arc::new(ForwardingInteractiveExecutor {
             inner: inner_executor,
             channels_tx: parking_lot::Mutex::new(Some(channels_tx)),
+            update_timeout,
         });
     let forwarding_runtime = construct_host_runtime(forwarding_executor, caps);
 
@@ -1455,6 +1516,186 @@ mod tests {
             }
         }
         assert!(found);
+    }
+}
+
+#[cfg(all(test, feature = "interactive"))]
+mod interactive_lifecycle_tests {
+    use super::*;
+    use std::time::Duration;
+    use uptrakit_command::{CommandSpec, InteractiveHandle, SudoAwareCommandExecutor, SudoContext};
+
+    /// `CommandExecutor` stub whose `execute_interactive` records the spec it
+    /// received and always fails, so callers fall back to non-interactive
+    /// execution without needing a real PTY.
+    struct RecordingExecutor {
+        recorded: parking_lot::Mutex<Option<CommandSpec>>,
+    }
+
+    #[async_trait::async_trait]
+    impl CommandExecutor for RecordingExecutor {
+        async fn execute(
+            &self,
+            _spec: &CommandSpec,
+            _output_tx: &mpsc::Sender<UpdateOutputLine>,
+        ) -> uptrakit_command::Result<uptrakit_command::CommandOutput> {
+            Ok(uptrakit_command::CommandOutput {
+                output: String::new(),
+                exit_code: 0,
+            })
+        }
+
+        async fn execute_quiet(
+            &self,
+            _spec: &CommandSpec,
+        ) -> uptrakit_command::Result<uptrakit_command::CommandOutput> {
+            Ok(uptrakit_command::CommandOutput {
+                output: String::new(),
+                exit_code: 0,
+            })
+        }
+
+        fn supports_interactive(&self) -> bool {
+            true
+        }
+
+        async fn execute_interactive(
+            &self,
+            spec: &CommandSpec,
+            _output_tx: &mpsc::Sender<UpdateOutputLine>,
+        ) -> uptrakit_command::Result<InteractiveHandle> {
+            *self.recorded.lock() = Some(spec.clone());
+            Err(rootcause::report!(
+                uptrakit_command::CommandError::UnsupportedOperation(
+                    "recording stub never supports interactive execution".to_string()
+                )
+            ))
+        }
+    }
+
+    /// Promotion fills `spec.timeout` from `update_timeout` only when the
+    /// plugin left it `None`; a plugin-set timeout survives untouched. Also
+    /// pins that the promoted timeout survives `SudoAwareCommandExecutor`'s
+    /// `apply_sudo` transform — the recording stub sits *behind* the sudo
+    /// layer, so observing the timeout there proves it reached the point
+    /// `run_command_interactive` would receive it.
+    #[tokio::test]
+    async fn promotion_fills_timeout_and_survives_sudo_layer() {
+        // Case 1: plugin left spec.timeout unset — promotion fills it in.
+        let stub = Arc::new(RecordingExecutor {
+            recorded: parking_lot::Mutex::new(None),
+        });
+        let sudo_wrapped: Arc<dyn CommandExecutor> = Arc::new(SudoAwareCommandExecutor::new(
+            stub.clone(),
+            SudoContext::default(),
+        ));
+        let (channels_tx, _channels_rx) = tokio::sync::oneshot::channel();
+        let forwarding = ForwardingInteractiveExecutor {
+            inner: sudo_wrapped,
+            channels_tx: parking_lot::Mutex::new(Some(channels_tx)),
+            update_timeout: Duration::from_secs(123),
+        };
+        let (output_tx, _output_rx) = mpsc::channel(10);
+        let spec = CommandSpec::shell("true");
+        let _ = forwarding.execute(&spec, &output_tx).await;
+
+        let got = stub
+            .recorded
+            .lock()
+            .take()
+            .expect("stub should record spec");
+        assert_eq!(got.timeout, Some(Duration::from_secs(123)));
+
+        // Case 2: plugin-set timeout survives promotion (not overwritten).
+        let stub2 = Arc::new(RecordingExecutor {
+            recorded: parking_lot::Mutex::new(None),
+        });
+        let sudo_wrapped2: Arc<dyn CommandExecutor> = Arc::new(SudoAwareCommandExecutor::new(
+            stub2.clone(),
+            SudoContext::default(),
+        ));
+        let (channels_tx2, _channels_rx2) = tokio::sync::oneshot::channel();
+        let forwarding2 = ForwardingInteractiveExecutor {
+            inner: sudo_wrapped2,
+            channels_tx: parking_lot::Mutex::new(Some(channels_tx2)),
+            update_timeout: Duration::from_secs(123),
+        };
+        let spec_with_timeout = CommandSpec::shell("true").with_timeout(Duration::from_secs(5));
+        let _ = forwarding2.execute(&spec_with_timeout, &output_tx).await;
+
+        let got2 = stub2
+            .recorded
+            .lock()
+            .take()
+            .expect("stub should record spec");
+        assert_eq!(got2.timeout, Some(Duration::from_secs(5)));
+    }
+
+    /// Through `ForwardingInteractiveExecutor` with a real `LocalCommandExecutor`
+    /// inner, cancel the pipeline future mid-await and assert the orphaned PTY
+    /// child's process group is killed. Uses real wall-clock time deliberately
+    /// (see AGENTS ledger #76): a real child's exit is OS-clock-driven, so
+    /// `start_paused` would hang or false-green here. Skipped when the initial
+    /// promotion errors (PTY unavailable in the sandbox).
+    #[tokio::test]
+    async fn cancelling_pipeline_group_kills_orphaned_pty_child() {
+        use uptrakit_command::LocalCommandExecutor;
+
+        let marker = format!("uptrakit-test-{}", uuid::Uuid::new_v4());
+        let local: Arc<dyn CommandExecutor> = Arc::new(LocalCommandExecutor);
+        let (channels_tx, _channels_rx) = tokio::sync::oneshot::channel();
+        let forwarding = Arc::new(ForwardingInteractiveExecutor {
+            inner: local,
+            channels_tx: parking_lot::Mutex::new(Some(channels_tx)),
+            update_timeout: Duration::from_secs(300),
+        });
+
+        let (output_tx, mut output_rx) = mpsc::channel(100);
+        // trap TERM so only a real SIGKILL (via group-kill) can end the child;
+        // marker makes the process uniquely identifiable via pgrep.
+        let spec = CommandSpec::shell(format!("trap '' TERM; sleep 300 # {marker}"));
+
+        let exec_future = {
+            let forwarding = Arc::clone(&forwarding);
+            async move { forwarding.execute(&spec, &output_tx).await }
+        };
+
+        let timed = tokio::time::timeout(Duration::from_millis(500), exec_future).await;
+        // Drain (and drop) the receiver so the channel doesn't back up; not
+        // asserted on, this test cares about process lifecycle only.
+        output_rx.close();
+        while output_rx.try_recv().is_ok() {}
+
+        if timed.is_ok() {
+            // Interactive execution finished within 500ms — PTY unavailable or
+            // command failed fast; nothing meaningful to assert. Skip.
+            return;
+        }
+
+        // The exec future (and the InteractiveSessionGuard inside it) was
+        // dropped when tokio::time::timeout cancelled it. Poll for the marked
+        // process to disappear, bounded so a real failure doesn't hang the run.
+        let mut still_alive = true;
+        for _ in 0..50 {
+            let found = std::process::Command::new("pgrep")
+                .arg("-f")
+                .arg(&marker)
+                .output();
+            match found {
+                Ok(out) if !out.stdout.is_empty() => {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                _ => {
+                    still_alive = false;
+                    break;
+                }
+            }
+        }
+
+        assert!(
+            !still_alive,
+            "orphaned PTY child (marker {marker}) should have been group-killed on cancellation"
+        );
     }
 }
 
