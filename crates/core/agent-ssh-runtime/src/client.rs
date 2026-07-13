@@ -750,6 +750,15 @@ pub async fn handle_execute_update_ssh(
                 }
             }
 
+            // Non-interactive fallback: a select! with only the non-PTY arms.
+            // The additive-only feature rule (coding-standards.md) cannot apply
+            // here: `tokio::select!` rejects `#[cfg]` attributes on individual
+            // arms, so a single unified select! gated per-arm does not compile.
+            // The only additive alternative would compile the entire PTY
+            // machinery (stdin/signal bridging, channel resolution) into the
+            // non-interactive agent binary. A paired `#[cfg(feature)]` /
+            // `#[cfg(not(feature))]` block is the sanctioned pattern for this —
+            // it mirrors the existing sites in agent-runtime/src/lib.rs.
             #[cfg(not(feature = "interactive"))]
             tokio::select! {
                 biased;

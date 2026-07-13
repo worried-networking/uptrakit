@@ -2631,8 +2631,10 @@ components:
           type: boolean
           default: false
           description: |
-            Whether a PTY was actually allocated for this update.
-            `false` for non-interactive updates or when PTY allocation failed.
+            Whether this update was dispatched in interactive mode and the
+            agent's executor supports PTY allocation (dispatch intent). The PTY
+            itself is allocated when the update command starts; on reconnect
+            replay the agent reports live reality instead (channels resolved).
             Old agents that do not send this field will be treated as `false`.
 
     updateOutputPayload:
