@@ -18,6 +18,11 @@ pub struct UpdateOutputLine {
 /// receives notifications when the process appears to be waiting for input.
 #[cfg(feature = "interactive")]
 pub struct InteractiveHandle {
+    /// PID of the PTY child. The child is made its own session leader via
+    /// `setsid()` in `pre_exec` before this pid is captured, so pid == pgid
+    /// and a group-kill targets only the update command's tree — never the
+    /// agent's own process group.
+    pub child_pid: i32,
     /// Send raw bytes to the process stdin (PTY master write end).
     pub stdin_tx: tokio::sync::mpsc::Sender<Vec<u8>>,
     /// Send a signal number to the process group (e.g., 2 = SIGINT, 15 = SIGTERM).

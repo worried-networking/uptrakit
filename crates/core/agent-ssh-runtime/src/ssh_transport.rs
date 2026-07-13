@@ -432,6 +432,12 @@ impl SshSession {
         });
 
         Ok(InteractiveHandle {
+            // No local child process exists for an SSH-backed session — the
+            // command runs on the remote host over the SSH channel, so there
+            // is no local pid/pgid to group-kill. `0` is the established
+            // sentinel: both `kill_process_group` and `send_signal` in
+            // uptrakit-command treat `pid <= 0` as a no-op.
+            child_pid: 0,
             stdin_tx,
             signal_tx,
             completion,

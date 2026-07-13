@@ -18,6 +18,8 @@ pub use executor::{
     CommandExecutor, CommandMode, CommandOutput, CommandSpec, LocalCommandExecutor,
     NoopCommandExecutor, StdioTunnel, build_remote_command_string,
 };
+#[cfg(feature = "interactive")]
+pub use interactive::kill_process_group;
 pub use remote_executor::{RemoteCommandResult, RemoteExecutor};
 pub use sudo::{ParseSudoPolicyError, SudoAwareCommandExecutor, SudoContext, SudoPolicy};
 pub use types::UpdateOutputLine;

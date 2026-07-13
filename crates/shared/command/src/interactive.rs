@@ -79,6 +79,7 @@ pub async fn run_command_interactive(
     });
 
     Ok(InteractiveHandle {
+        child_pid,
         stdin_tx,
         signal_tx,
         completion,
@@ -362,8 +363,22 @@ fn send_signal(pid: i32, signal: i32) {
     }
 }
 
-/// Kill the process group with SIGKILL.
-fn kill_process_group(pid: i32) {
+/// Kill the process group with `SIGKILL`.
+///
+/// Sends `SIGKILL` to every process in `pid`'s process group, not just `pid`
+/// itself — this reaches grandchildren and subshells spawned by the update
+/// command (e.g. a shell wrapper forking a package manager), which a
+/// single-process kill would leave orphaned. `pid <= 0` is a no-op: it never
+/// resolves to a valid `Pid`, so no signal is sent (this also avoids
+/// accidentally targeting the caller's own process group, which `pid == 0`
+/// would mean at the OS level).
+///
+/// PID-reuse TOCTOU is accepted: on a freshly-vacated pgid, the brief window
+/// between the child's normal exit and this guard being defused could in
+/// theory hit an unrelated process that reused the pid. This mirrors the
+/// pre-existing deadline-triggered kill path above, which carries the same
+/// theoretical window.
+pub fn kill_process_group(pid: i32) {
     if pid <= 0 {
         return;
     }
@@ -395,6 +410,8 @@ mod tests {
                 return;
             }
         };
+
+        assert!(handle.child_pid > 0);
 
         let result = handle.completion.await.expect("task should not panic");
         assert!(result.is_ok(), "echo should succeed: {result:?}");
