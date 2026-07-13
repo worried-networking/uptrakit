@@ -29,6 +29,9 @@ pub use super::host_tag::{Entity as HostTag, Model as HostTagModel};
 pub use super::host_tag_assignment::{
     Entity as HostTagAssignment, Model as HostTagAssignmentModel,
 };
+pub use super::instance_plugin_setting::{
+    Entity as InstancePluginSetting, Model as InstancePluginSettingModel,
+};
 pub use super::mfa_challenge::{Entity as MfaChallenge, Model as MfaChallengeModel};
 pub use super::notification_channel::{
     Entity as NotificationChannel, Model as NotificationChannelModel,

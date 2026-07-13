@@ -8,7 +8,7 @@ use sea_orm::DatabaseConnection;
 use super::error::Result;
 
 #[cfg(test)]
-pub(crate) use uptrakit_shared_db::migrate_core_tables::CORE_COPY_ORDER as COPY_ORDER;
+pub(crate) use uptrakit_shared_db::migrate_core_tables::core_tables;
 
 pub(crate) async fn copy_all(
     src: &DatabaseConnection,
@@ -47,17 +47,13 @@ pub(crate) async fn verify_all(src: &DatabaseConnection, dst: &DatabaseConnectio
 
 #[cfg(test)]
 mod tests {
-    // The previous `migration_coverage_complete` test (added in Phase D)
-    // imports `super::COPY_ORDER`, which now re-exports
-    // `shared-db::migrate_core_tables::CORE_COPY_ORDER`. The test body
-    // is unchanged.
-
     use super::*;
 
-    /// Schema-driven completeness check.
+    /// Standing drift gate: runs on every `cargo test` (no longer ignored) — the
+    /// coverage list cannot silently drift on any path that runs tests.
     ///
     /// Every live application table (after running migrations) must be
-    /// covered by either `COPY_ORDER` (core tables), a registered plugin's
+    /// covered by either `core_tables()` (core tables), a registered plugin's
     /// `db_migrate_tables` entry, or the explicit `AGENT_ONLY_TABLES` exclusion
     /// list below.
     ///
@@ -68,10 +64,9 @@ mod tests {
     ///
     /// Failure modes caught:
     /// - New entity migration without registering the table for db-migrate.
-    /// - Stale entry in `COPY_ORDER` or a plugin descriptor pointing at a
+    /// - Stale entry in `core_tables()` or a plugin descriptor pointing at a
     ///   dropped table.
     #[tokio::test]
-    #[ignore = "integration — runs schema migrations on in-memory SQLite"]
     async fn migration_coverage_complete() {
         use sea_orm::{
             ConnectOptions, ConnectionTrait, Database, DbBackend, Statement, TryGetable as _,
@@ -105,7 +100,8 @@ mod tests {
             .filter(|name| !AGENT_ONLY_TABLES.contains(&name.as_str()))
             .collect();
 
-        let mut covered: HashSet<String> = COPY_ORDER.iter().map(|s| (*s).to_owned()).collect();
+        let mut covered: HashSet<String> =
+            core_tables().iter().map(|d| d.name.to_owned()).collect();
         for descriptor in uptrakit_plugin_infrastructure_registry::all_descriptors() {
             if let Some(tables_fn) = descriptor.db_migrate_tables {
                 for td in tables_fn() {
@@ -120,7 +116,7 @@ mod tests {
         assert!(
             missing.is_empty() && extra.is_empty(),
             "schema drift between migrations and db-migrate coverage:\n  \
-             missing from migration: {missing:?}\n  \
+             missing from coverage: {missing:?}\n  \
              extra in lists: {extra:?}"
         );
     }

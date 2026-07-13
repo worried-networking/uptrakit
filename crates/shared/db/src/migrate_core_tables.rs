@@ -42,38 +42,32 @@ pub enum TableMigrateError {
 /// convention (see `docs/development/error-handling.md`).
 pub type Result<T> = std::result::Result<T, Report<TableMigrateError>>;
 
-// ── Per-table generic helpers (moved from controller-runtime/db_migrate/tables.rs) ─
+use std::pin::Pin;
 
 use sea_orm::{
-    ActiveModelBehavior, ActiveModelTrait, DatabaseConnection, EntityTrait, IntoActiveModel,
+    ActiveModelBehavior, ActiveModelTrait, DatabaseConnection, DbErr, EntityTrait, IntoActiveModel,
     PaginatorTrait, QuerySelect,
 };
 
-async fn migrate_table<E>(
-    name: &'static str,
+// ── Name-less per-entity helpers (DbErr-returning; the boundary fns below
+//    attach the table name). Local mirror of the shape in
+//    `plugin-infrastructure-core::db_migrate` — shared-db cannot depend on
+//    plugin crates (dependency direction + plugin-semantic-boundary gate).
+
+async fn copy_one<E>(
     src: &DatabaseConnection,
     dst: &DatabaseConnection,
     batch_size: u64,
-) -> Result<u64>
+) -> std::result::Result<u64, DbErr>
 where
     E: EntityTrait + 'static,
     E::Model: IntoActiveModel<E::ActiveModel> + Send + Sync + 'static,
     E::ActiveModel: ActiveModelTrait<Entity = E> + ActiveModelBehavior + Send + 'static,
 {
-    let total = E::find()
-        .count(src)
-        .await
-        .map_err(|err| report!(TableMigrateError::Db { table: name, err }))?;
-
     let mut copied = 0u64;
     let mut offset = 0u64;
     loop {
-        let batch = E::find()
-            .offset(offset)
-            .limit(batch_size)
-            .all(src)
-            .await
-            .map_err(|err| report!(TableMigrateError::Db { table: name, err }))?;
+        let batch = E::find().offset(offset).limit(batch_size).all(src).await?;
         if batch.is_empty() {
             break;
         }
@@ -82,117 +76,169 @@ where
             .into_iter()
             .map(IntoActiveModel::into_active_model)
             .collect();
-        E::insert_many(active)
-            .exec(dst)
-            .await
-            .map_err(|err| report!(TableMigrateError::Db { table: name, err }))?;
+        E::insert_many(active).exec(dst).await?;
         copied += n;
         offset += n;
-        eprintln!("  {name}: {copied}/{total} rows");
-    }
-    if total == 0 {
-        eprintln!("  {name}: 0 rows (empty)");
     }
     Ok(copied)
 }
 
-async fn clean_table<E: EntityTrait>(name: &'static str, dst: &DatabaseConnection) -> Result<()> {
-    E::delete_many()
-        .exec(dst)
-        .await
-        .map(|_| ())
-        .map_err(|err| report!(TableMigrateError::Db { table: name, err }))
+async fn clean_one<E: EntityTrait>(dst: &DatabaseConnection) -> std::result::Result<(), DbErr> {
+    E::delete_many().exec(dst).await.map(|_| ())
 }
 
-async fn verify_table<E>(
-    name: &'static str,
+async fn verify_one<E>(
     src: &DatabaseConnection,
     dst: &DatabaseConnection,
-) -> Result<u64>
+) -> std::result::Result<(u64, u64), DbErr>
 where
     E: EntityTrait + 'static,
     E::Model: Send + Sync + 'static,
 {
-    let src_count = E::find()
-        .count(src)
-        .await
-        .map_err(|err| report!(TableMigrateError::Db { table: name, err }))?;
-    let dst_count = E::find()
-        .count(dst)
-        .await
-        .map_err(|err| report!(TableMigrateError::Db { table: name, err }))?;
-    if src_count != dst_count {
-        bail!(TableMigrateError::Mismatch {
-            table: name,
-            src: src_count,
-            dst: dst_count,
-        });
-    }
-    Ok(src_count)
+    let src_count = E::find().count(src).await?;
+    let dst_count = E::find().count(dst).await?;
+    Ok((src_count, dst_count))
 }
 
-/// FK-safe order of all **core** application tables (no plugin tables).
+// ── Type-erased descriptor (local mirror of `PluginTableDescriptor`) ──────
+
+type CopyBatchFn = for<'a> fn(
+    src: &'a DatabaseConnection,
+    dst: &'a DatabaseConnection,
+    batch_size: u64,
+) -> Pin<
+    Box<dyn std::future::Future<Output = std::result::Result<u64, DbErr>> + Send + 'a>,
+>;
+
+type CleanFn = for<'a> fn(
+    dst: &'a DatabaseConnection,
+) -> Pin<
+    Box<dyn std::future::Future<Output = std::result::Result<(), DbErr>> + Send + 'a>,
+>;
+
+type VerifyFn = for<'a> fn(
+    src: &'a DatabaseConnection,
+    dst: &'a DatabaseConnection,
+) -> Pin<
+    Box<dyn std::future::Future<Output = std::result::Result<(u64, u64), DbErr>> + Send + 'a>,
+>;
+
+/// Per-table copy/clean/verify operations for one **core** table.
 ///
-/// Used by [`copy`] / [`clean`] / [`verify`] and by the
-/// `migration_coverage_complete` integration test in
-/// `controller-runtime`.
-pub const CORE_COPY_ORDER: &[&str] = &[
-    "tenants",
-    "users",
-    "ca_certificates",
-    "crl_cache",
-    "roles",
-    "permissions",
-    "global_settings",
-    "data_encryption_keys",
-    "role_permissions",
-    "oidc_providers",
-    "user_roles",
-    "user_oidc_links",
-    "sessions",
-    "api_tokens",
-    "revoked_token_jtis",
-    "revoked_token_users",
-    "email_change_requests",
-    "settings",
-    "settings_version",
-    "enrollment_tokens",
-    "services",
-    "service_certificates",
-    "system_services",
-    "system_service_certificates",
-    "global_service_config",
-    "embedded_service_runtime_states",
-    "hosts",
-    "service_hosts",
-    "host_tags",
-    "host_tag_assignments",
-    "plugin_configs",
-    "plugin_type_settings",
-    "tenant_discovery_allowlist",
-    "host_discovery_allowlist",
-    "software_items",
-    "host_software_items",
-    "host_software_item_plugins",
-    "software_ignores",
-    "tenant_service_config",
-    "update_batches",
-    "update_history",
-    "update_output_lines",
-    "pending_device_flows",
-    "pending_oidc_flows",
-    "pending_account_links",
-    "pending_oidc_token_exchanges",
-    "pending_oidc_registrations",
-    "api_rate_limits",
-    "scheduled_tasks",
-    "notification_channels",
-    "notification_rules",
-    "notification_log",
-    "audit_logs",
-    "system_audit_logs",
-    "system_enrollment_tokens",
-];
+/// Local mirror of `PluginTableDescriptor` in `plugin-infrastructure-core`
+/// (an import is impossible: dependency direction + the
+/// plugin-semantic-boundary CI gate).
+pub struct CoreTableDescriptor {
+    /// Table name as it appears in the database (matches
+    /// `#[sea_orm(table_name = "...")]` on the entity).
+    pub name: &'static str,
+    copy_batch: CopyBatchFn,
+    clean: CleanFn,
+    verify: VerifyFn,
+}
+
+impl CoreTableDescriptor {
+    fn for_entity<E>(name: &'static str) -> Self
+    where
+        E: EntityTrait + 'static,
+        E::Model: IntoActiveModel<E::ActiveModel> + Send + Sync + 'static,
+        E::ActiveModel: ActiveModelTrait<Entity = E> + ActiveModelBehavior + Send + 'static,
+    {
+        Self {
+            name,
+            copy_batch: |src, dst, batch| Box::pin(copy_one::<E>(src, dst, batch)),
+            clean: |dst| Box::pin(clean_one::<E>(dst)),
+            verify: |src, dst| Box::pin(verify_one::<E>(src, dst)),
+        }
+    }
+}
+
+/// Single authority for the **core** application tables db-migrate covers,
+/// in FK-safe order (parents before children).
+///
+/// To add a table: one `CoreTableDescriptor::for_entity::<PreludeAlias>("table_name")`
+/// line at an FK-safe position (after every table it references). `copy()`
+/// and `verify()` iterate forward, `clean()` iterates in reverse — there is
+/// no second list to sync. The `migration_coverage_complete` test in
+/// `controller-runtime/src/db_migrate/tables.rs` fails until every live
+/// table is either listed here, registered by a plugin descriptor, or in
+/// its `AGENT_ONLY_TABLES` exclusion.
+pub fn core_tables() -> Vec<CoreTableDescriptor> {
+    use crate::entity::prelude::*;
+
+    vec![
+        CoreTableDescriptor::for_entity::<Tenant>("tenants"),
+        CoreTableDescriptor::for_entity::<User>("users"),
+        CoreTableDescriptor::for_entity::<CaCertificate>("ca_certificates"),
+        CoreTableDescriptor::for_entity::<CrlCache>("crl_cache"),
+        CoreTableDescriptor::for_entity::<Role>("roles"),
+        CoreTableDescriptor::for_entity::<Permission>("permissions"),
+        CoreTableDescriptor::for_entity::<GlobalSetting>("global_settings"),
+        CoreTableDescriptor::for_entity::<DataEncryptionKey>("data_encryption_keys"),
+        CoreTableDescriptor::for_entity::<RolePermission>("role_permissions"),
+        CoreTableDescriptor::for_entity::<OidcProvider>("oidc_providers"),
+        CoreTableDescriptor::for_entity::<UserRole>("user_roles"),
+        CoreTableDescriptor::for_entity::<UserOidcLink>("user_oidc_links"),
+        CoreTableDescriptor::for_entity::<UserTotp>("user_totp"),
+        CoreTableDescriptor::for_entity::<UserRecoveryCode>("user_recovery_codes"),
+        CoreTableDescriptor::for_entity::<MfaChallenge>("mfa_challenges"),
+        CoreTableDescriptor::for_entity::<Session>("sessions"),
+        CoreTableDescriptor::for_entity::<ApiToken>("api_tokens"),
+        CoreTableDescriptor::for_entity::<RevokedTokenJti>("revoked_token_jtis"),
+        CoreTableDescriptor::for_entity::<RevokedTokenUser>("revoked_token_users"),
+        CoreTableDescriptor::for_entity::<EmailChangeRequest>("email_change_requests"),
+        CoreTableDescriptor::for_entity::<Setting>("settings"),
+        CoreTableDescriptor::for_entity::<SettingsVersion>("settings_version"),
+        CoreTableDescriptor::for_entity::<EnrollmentToken>("enrollment_tokens"),
+        CoreTableDescriptor::for_entity::<Service>("services"),
+        CoreTableDescriptor::for_entity::<ServiceCertificate>("service_certificates"),
+        CoreTableDescriptor::for_entity::<ServiceMergeRedirect>("service_merge_redirect"),
+        CoreTableDescriptor::for_entity::<SystemService>("system_services"),
+        CoreTableDescriptor::for_entity::<SystemServiceCertificate>("system_service_certificates"),
+        CoreTableDescriptor::for_entity::<GlobalServiceConfig>("global_service_config"),
+        CoreTableDescriptor::for_entity::<EmbeddedServiceRuntimeState>(
+            "embedded_service_runtime_states",
+        ),
+        CoreTableDescriptor::for_entity::<Host>("hosts"),
+        CoreTableDescriptor::for_entity::<ServiceHost>("service_hosts"),
+        CoreTableDescriptor::for_entity::<HostTag>("host_tags"),
+        CoreTableDescriptor::for_entity::<HostTagAssignment>("host_tag_assignments"),
+        CoreTableDescriptor::for_entity::<PluginConfig>("plugin_configs"),
+        CoreTableDescriptor::for_entity::<PluginTypeSetting>("plugin_type_settings"),
+        CoreTableDescriptor::for_entity::<InstancePluginSetting>("instance_plugin_setting"),
+        CoreTableDescriptor::for_entity::<TenantDiscoveryAllowlist>("tenant_discovery_allowlist"),
+        CoreTableDescriptor::for_entity::<HostDiscoveryAllowlist>("host_discovery_allowlist"),
+        CoreTableDescriptor::for_entity::<SoftwareItem>("software_items"),
+        CoreTableDescriptor::for_entity::<HostSoftwareItem>("host_software_items"),
+        CoreTableDescriptor::for_entity::<HostSoftwareItemPlugin>("host_software_item_plugins"),
+        CoreTableDescriptor::for_entity::<SoftwareIgnore>("software_ignores"),
+        CoreTableDescriptor::for_entity::<TenantServiceConfig>("tenant_service_config"),
+        CoreTableDescriptor::for_entity::<UpdateBatch>("update_batches"),
+        CoreTableDescriptor::for_entity::<UpdateHistory>("update_history"),
+        CoreTableDescriptor::for_entity::<UpdateOutputLine>("update_output_lines"),
+        CoreTableDescriptor::for_entity::<PendingDeviceFlow>("pending_device_flows"),
+        CoreTableDescriptor::for_entity::<PendingOidcFlow>("pending_oidc_flows"),
+        CoreTableDescriptor::for_entity::<PendingAccountLink>("pending_account_links"),
+        CoreTableDescriptor::for_entity::<PendingOidcTokenExchange>("pending_oidc_token_exchanges"),
+        CoreTableDescriptor::for_entity::<PendingOidcRegistration>("pending_oidc_registrations"),
+        CoreTableDescriptor::for_entity::<OauthClient>("oauth_clients"),
+        CoreTableDescriptor::for_entity::<OauthConsent>("oauth_consents"),
+        CoreTableDescriptor::for_entity::<OauthAuthorizationRequest>(
+            "oauth_authorization_requests",
+        ),
+        CoreTableDescriptor::for_entity::<OauthAuthorizationCode>("oauth_authorization_codes"),
+        CoreTableDescriptor::for_entity::<OauthRefreshToken>("oauth_refresh_tokens"),
+        CoreTableDescriptor::for_entity::<OauthControllerInstance>("oauth_controller_instances"),
+        CoreTableDescriptor::for_entity::<ApiRateLimit>("api_rate_limits"),
+        CoreTableDescriptor::for_entity::<ScheduledTask>("scheduled_tasks"),
+        CoreTableDescriptor::for_entity::<NotificationChannel>("notification_channels"),
+        CoreTableDescriptor::for_entity::<NotificationRule>("notification_rules"),
+        CoreTableDescriptor::for_entity::<NotificationLog>("notification_log"),
+        CoreTableDescriptor::for_entity::<AuditLog>("audit_logs"),
+        CoreTableDescriptor::for_entity::<SystemAuditLog>("system_audit_logs"),
+        CoreTableDescriptor::for_entity::<SystemEnrollmentToken>("system_enrollment_tokens"),
+    ]
+}
 
 /// Copy every core table from `src` to `dst`. Returns total rows.
 pub async fn copy(
@@ -200,221 +246,54 @@ pub async fn copy(
     dst: &DatabaseConnection,
     batch_size: u64,
 ) -> Result<u64> {
-    use crate::entity::prelude::*;
-
     let mut total = 0u64;
-
-    macro_rules! copy {
-        ($entity:ty, $name:literal) => {
-            total += migrate_table::<$entity>($name, src, dst, batch_size).await?;
-        };
+    for table in core_tables() {
+        let copied = (table.copy_batch)(src, dst, batch_size)
+            .await
+            .map_err(|err| {
+                report!(TableMigrateError::Db {
+                    table: table.name,
+                    err
+                })
+            })?;
+        eprintln!("  {}: {copied} rows", table.name);
+        total += copied;
     }
-
-    copy!(Tenant, "tenants");
-    copy!(User, "users");
-    copy!(CaCertificate, "ca_certificates");
-    copy!(CrlCache, "crl_cache");
-    copy!(Role, "roles");
-    copy!(Permission, "permissions");
-    copy!(GlobalSetting, "global_settings");
-    copy!(DataEncryptionKey, "data_encryption_keys");
-    copy!(RolePermission, "role_permissions");
-    copy!(OidcProvider, "oidc_providers");
-    copy!(UserRole, "user_roles");
-    copy!(UserOidcLink, "user_oidc_links");
-    copy!(Session, "sessions");
-    copy!(ApiToken, "api_tokens");
-    copy!(RevokedTokenJti, "revoked_token_jtis");
-    copy!(RevokedTokenUser, "revoked_token_users");
-    copy!(EmailChangeRequest, "email_change_requests");
-    copy!(Setting, "settings");
-    copy!(SettingsVersion, "settings_version");
-    copy!(EnrollmentToken, "enrollment_tokens");
-    copy!(Service, "services");
-    copy!(ServiceCertificate, "service_certificates");
-    copy!(SystemService, "system_services");
-    copy!(SystemServiceCertificate, "system_service_certificates");
-    copy!(GlobalServiceConfig, "global_service_config");
-    copy!(
-        EmbeddedServiceRuntimeState,
-        "embedded_service_runtime_states"
-    );
-    copy!(Host, "hosts");
-    copy!(ServiceHost, "service_hosts");
-    copy!(HostTag, "host_tags");
-    copy!(HostTagAssignment, "host_tag_assignments");
-    copy!(PluginConfig, "plugin_configs");
-    copy!(PluginTypeSetting, "plugin_type_settings");
-    copy!(TenantDiscoveryAllowlist, "tenant_discovery_allowlist");
-    copy!(HostDiscoveryAllowlist, "host_discovery_allowlist");
-    copy!(SoftwareItem, "software_items");
-    copy!(HostSoftwareItem, "host_software_items");
-    copy!(HostSoftwareItemPlugin, "host_software_item_plugins");
-    copy!(SoftwareIgnore, "software_ignores");
-    copy!(TenantServiceConfig, "tenant_service_config");
-    copy!(UpdateBatch, "update_batches");
-    copy!(UpdateHistory, "update_history");
-    copy!(UpdateOutputLine, "update_output_lines");
-    copy!(PendingDeviceFlow, "pending_device_flows");
-    copy!(PendingOidcFlow, "pending_oidc_flows");
-    copy!(PendingAccountLink, "pending_account_links");
-    copy!(PendingOidcTokenExchange, "pending_oidc_token_exchanges");
-    copy!(PendingOidcRegistration, "pending_oidc_registrations");
-    copy!(ApiRateLimit, "api_rate_limits");
-    copy!(ScheduledTask, "scheduled_tasks");
-    copy!(NotificationChannel, "notification_channels");
-    copy!(NotificationRule, "notification_rules");
-    copy!(NotificationLog, "notification_log");
-    copy!(AuditLog, "audit_logs");
-    copy!(SystemAuditLog, "system_audit_logs");
-    copy!(SystemEnrollmentToken, "system_enrollment_tokens");
-
     Ok(total)
 }
 
 /// Delete every core table on `dst` in reverse FK-safe order.
 pub async fn clean(dst: &DatabaseConnection) -> Result<()> {
-    use crate::entity::prelude::*;
-
-    macro_rules! clean {
-        ($entity:ty, $name:literal) => {
-            clean_table::<$entity>($name, dst).await?;
-        };
+    for table in core_tables().into_iter().rev() {
+        (table.clean)(dst).await.map_err(|err| {
+            report!(TableMigrateError::Db {
+                table: table.name,
+                err
+            })
+        })?;
     }
-
-    clean!(SystemEnrollmentToken, "system_enrollment_tokens");
-    clean!(SystemAuditLog, "system_audit_logs");
-    clean!(AuditLog, "audit_logs");
-    clean!(NotificationLog, "notification_log");
-    clean!(NotificationRule, "notification_rules");
-    clean!(NotificationChannel, "notification_channels");
-    clean!(ScheduledTask, "scheduled_tasks");
-    clean!(ApiRateLimit, "api_rate_limits");
-    clean!(PendingOidcRegistration, "pending_oidc_registrations");
-    clean!(PendingOidcTokenExchange, "pending_oidc_token_exchanges");
-    clean!(PendingAccountLink, "pending_account_links");
-    clean!(PendingOidcFlow, "pending_oidc_flows");
-    clean!(PendingDeviceFlow, "pending_device_flows");
-    clean!(UpdateOutputLine, "update_output_lines");
-    clean!(UpdateHistory, "update_history");
-    clean!(UpdateBatch, "update_batches");
-    clean!(TenantServiceConfig, "tenant_service_config");
-    clean!(SoftwareIgnore, "software_ignores");
-    clean!(HostSoftwareItemPlugin, "host_software_item_plugins");
-    clean!(HostSoftwareItem, "host_software_items");
-    clean!(SoftwareItem, "software_items");
-    clean!(HostDiscoveryAllowlist, "host_discovery_allowlist");
-    clean!(TenantDiscoveryAllowlist, "tenant_discovery_allowlist");
-    clean!(PluginTypeSetting, "plugin_type_settings");
-    clean!(PluginConfig, "plugin_configs");
-    clean!(HostTagAssignment, "host_tag_assignments");
-    clean!(HostTag, "host_tags");
-    clean!(ServiceHost, "service_hosts");
-    clean!(Host, "hosts");
-    clean!(SystemServiceCertificate, "system_service_certificates");
-    clean!(GlobalServiceConfig, "global_service_config");
-    clean!(
-        EmbeddedServiceRuntimeState,
-        "embedded_service_runtime_states"
-    );
-    clean!(SystemService, "system_services");
-    clean!(ServiceCertificate, "service_certificates");
-    clean!(Service, "services");
-    clean!(EnrollmentToken, "enrollment_tokens");
-    clean!(SettingsVersion, "settings_version");
-    clean!(Setting, "settings");
-    clean!(EmailChangeRequest, "email_change_requests");
-    clean!(RevokedTokenUser, "revoked_token_users");
-    clean!(RevokedTokenJti, "revoked_token_jtis");
-    clean!(ApiToken, "api_tokens");
-    clean!(Session, "sessions");
-    clean!(UserOidcLink, "user_oidc_links");
-    clean!(OidcProvider, "oidc_providers");
-    clean!(UserRole, "user_roles");
-    clean!(RolePermission, "role_permissions");
-    clean!(DataEncryptionKey, "data_encryption_keys");
-    clean!(GlobalSetting, "global_settings");
-    clean!(Permission, "permissions");
-    clean!(Role, "roles");
-    clean!(CrlCache, "crl_cache");
-    clean!(CaCertificate, "ca_certificates");
-    clean!(User, "users");
-    clean!(Tenant, "tenants");
-
     Ok(())
 }
 
 /// Verify row counts match between `src` and `dst` for every core table.
 /// Returns total rows verified.
 pub async fn verify(src: &DatabaseConnection, dst: &DatabaseConnection) -> Result<u64> {
-    use crate::entity::prelude::*;
-
     let mut total = 0u64;
-
-    macro_rules! verify {
-        ($entity:ty, $name:literal) => {
-            total += verify_table::<$entity>($name, src, dst).await?;
-        };
+    for table in core_tables() {
+        let (src_count, dst_count) = (table.verify)(src, dst).await.map_err(|err| {
+            report!(TableMigrateError::Db {
+                table: table.name,
+                err
+            })
+        })?;
+        if src_count != dst_count {
+            bail!(TableMigrateError::Mismatch {
+                table: table.name,
+                src: src_count,
+                dst: dst_count,
+            });
+        }
+        total += src_count;
     }
-
-    verify!(Tenant, "tenants");
-    verify!(User, "users");
-    verify!(CaCertificate, "ca_certificates");
-    verify!(CrlCache, "crl_cache");
-    verify!(Role, "roles");
-    verify!(Permission, "permissions");
-    verify!(GlobalSetting, "global_settings");
-    verify!(DataEncryptionKey, "data_encryption_keys");
-    verify!(RolePermission, "role_permissions");
-    verify!(OidcProvider, "oidc_providers");
-    verify!(UserRole, "user_roles");
-    verify!(UserOidcLink, "user_oidc_links");
-    verify!(Session, "sessions");
-    verify!(ApiToken, "api_tokens");
-    verify!(RevokedTokenJti, "revoked_token_jtis");
-    verify!(RevokedTokenUser, "revoked_token_users");
-    verify!(EmailChangeRequest, "email_change_requests");
-    verify!(Setting, "settings");
-    verify!(SettingsVersion, "settings_version");
-    verify!(EnrollmentToken, "enrollment_tokens");
-    verify!(Service, "services");
-    verify!(ServiceCertificate, "service_certificates");
-    verify!(SystemService, "system_services");
-    verify!(SystemServiceCertificate, "system_service_certificates");
-    verify!(GlobalServiceConfig, "global_service_config");
-    verify!(
-        EmbeddedServiceRuntimeState,
-        "embedded_service_runtime_states"
-    );
-    verify!(Host, "hosts");
-    verify!(ServiceHost, "service_hosts");
-    verify!(HostTag, "host_tags");
-    verify!(HostTagAssignment, "host_tag_assignments");
-    verify!(PluginConfig, "plugin_configs");
-    verify!(PluginTypeSetting, "plugin_type_settings");
-    verify!(TenantDiscoveryAllowlist, "tenant_discovery_allowlist");
-    verify!(HostDiscoveryAllowlist, "host_discovery_allowlist");
-    verify!(SoftwareItem, "software_items");
-    verify!(HostSoftwareItem, "host_software_items");
-    verify!(HostSoftwareItemPlugin, "host_software_item_plugins");
-    verify!(SoftwareIgnore, "software_ignores");
-    verify!(TenantServiceConfig, "tenant_service_config");
-    verify!(UpdateBatch, "update_batches");
-    verify!(UpdateHistory, "update_history");
-    verify!(UpdateOutputLine, "update_output_lines");
-    verify!(PendingDeviceFlow, "pending_device_flows");
-    verify!(PendingOidcFlow, "pending_oidc_flows");
-    verify!(PendingAccountLink, "pending_account_links");
-    verify!(PendingOidcTokenExchange, "pending_oidc_token_exchanges");
-    verify!(PendingOidcRegistration, "pending_oidc_registrations");
-    verify!(ApiRateLimit, "api_rate_limits");
-    verify!(ScheduledTask, "scheduled_tasks");
-    verify!(NotificationChannel, "notification_channels");
-    verify!(NotificationRule, "notification_rules");
-    verify!(NotificationLog, "notification_log");
-    verify!(AuditLog, "audit_logs");
-    verify!(SystemAuditLog, "system_audit_logs");
-    verify!(SystemEnrollmentToken, "system_enrollment_tokens");
-
     Ok(total)
 }
