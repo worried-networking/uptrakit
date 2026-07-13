@@ -26,6 +26,8 @@ pub(crate) mod entity;
 pub mod error;
 pub mod guest_exec;
 pub mod matching;
+#[cfg(all(test, feature = "migrations"))]
+mod matching_isolation_tests;
 pub mod plugin;
 pub mod policy_store;
 pub(crate) mod protection_store;
