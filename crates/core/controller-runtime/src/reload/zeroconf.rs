@@ -1,29 +1,31 @@
-use std::sync::Arc;
+//! Zeroconf config reload gate.
+//!
+//! [`ZeroconfReloadable`] is a validate-only gate: the zero-configuration
+//! auto-discovery advertiser is started once at boot from the config it was
+//! given, so this subsystem never changes any runtime state. It exists
+//! solely to reject a config reload that would silently leave a changed
+//! `[zeroconf]` section unapplied.
+
 use std::time::Duration;
 
-use parking_lot::Mutex;
 use rootcause::prelude::*;
-use tokio::sync::watch;
 use uptrakit_config_reload::config::ZeroconfConfig;
 use uptrakit_config_reload::defaults::WATCHDOG_ZEROCONF;
 use uptrakit_config_reload::delta::RuntimeConfigDelta;
+use uptrakit_config_reload::error::ConfigReloadError;
 use uptrakit_config_reload::reloadable::Reloadable;
 
+/// A [`Reloadable`] validate-reject gate for `[zeroconf]`.
+#[non_exhaustive]
 pub(crate) struct ZeroconfReloadable {
-    tx: watch::Sender<Arc<ZeroconfConfig>>,
-    snapshot: Mutex<Option<Arc<ZeroconfConfig>>>,
+    /// The zeroconf config this process booted with.
+    boot: ZeroconfConfig,
 }
 
 impl ZeroconfReloadable {
-    pub(crate) fn new(initial: ZeroconfConfig) -> (Self, watch::Receiver<Arc<ZeroconfConfig>>) {
-        let (tx, rx) = watch::channel(Arc::new(initial));
-        (
-            Self {
-                tx,
-                snapshot: Mutex::new(None),
-            },
-            rx,
-        )
+    /// Create a new `ZeroconfReloadable` bound to the boot-time config.
+    pub(crate) fn new(boot: ZeroconfConfig) -> Self {
+        Self { boot }
     }
 }
 
@@ -33,41 +35,38 @@ impl Reloadable for ZeroconfReloadable {
         "zeroconf"
     }
 
+    /// Reject any change to `[zeroconf]` — the advertiser is started once at
+    /// boot and cannot be reconfigured without a full restart.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConfigReloadError::Validate`] if the new config is
+    /// internally inconsistent (`enabled=true` with an empty `url`), or if
+    /// it differs from the boot-time config.
     fn validate(&self, new: &ZeroconfConfig) -> Result<(), Report> {
         new.validate()?;
-        Ok(())
-    }
-
-    async fn apply(&self, new: Arc<ZeroconfConfig>) -> Result<(), Report> {
-        let prior = self.tx.borrow().clone();
-        *self.snapshot.lock() = Some(prior);
-        tracing::info!(enabled = new.enabled, url = %new.url, "zeroconf config applied");
-        #[expect(
-            clippy::let_underscore_must_use,
-            reason = "watch send failure is non-fatal"
-        )]
-        let _ = self.tx.send(new);
-        Ok(())
-    }
-
-    async fn revert(&self) -> Result<(), Report> {
-        if let Some(prior) = self.snapshot.lock().clone() {
-            tracing::info!("zeroconf config reverted");
-            #[expect(
-                clippy::let_underscore_must_use,
-                reason = "watch send failure is non-fatal"
-            )]
-            let _ = self.tx.send(prior);
+        if *new != self.boot {
+            bail!(ConfigReloadError::Validate(
+                "zeroconf config change requires restart".into()
+            ));
         }
         Ok(())
     }
 
+    /// No-op — validate already rejected any change that would require
+    /// action here.
+    async fn apply(&self, _new: std::sync::Arc<ZeroconfConfig>) -> Result<(), Report> {
+        Ok(())
+    }
+
+    /// No-op — nothing was mutated by `apply`.
+    async fn revert(&self) -> Result<(), Report> {
+        Ok(())
+    }
+
+    /// Validate-only gate controls no live advertiser; health is always OK
+    /// if validate passed.
     async fn health_check(&self) -> Result<(), Report> {
-        // Zeroconf health: config is valid (no live mDNS probe needed here;
-        // the mDNS daemon handles its own liveness)
-        let cfg = self.tx.borrow().clone();
-        cfg.validate()?;
-        tracing::debug!("zeroconf health check ok");
         Ok(())
     }
 
@@ -83,27 +82,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn zeroconf_validate_accepts_disabled() {
-        let cfg = ZeroconfConfig::default(); // enabled = false
-        ZeroconfReloadable::new(cfg.clone())
-            .0
-            .validate(&cfg)
-            .unwrap();
+    fn zeroconf_validate_rejects_change() {
+        let boot = ZeroconfConfig::default();
+        let r = ZeroconfReloadable::new(boot);
+        let mut new = ZeroconfConfig::default();
+        new.enabled = true;
+        new.url = "https://controller.example".into();
+
+        let err = r.validate(&new).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("zeroconf config change requires restart")
+        );
+    }
+
+    #[test]
+    fn zeroconf_validate_accepts_unchanged() {
+        let boot = ZeroconfConfig::default();
+        let r = ZeroconfReloadable::new(boot.clone());
+
+        r.validate(&boot).unwrap();
     }
 
     #[test]
     fn zeroconf_validate_rejects_enabled_without_url() {
-        let mut cfg = ZeroconfConfig::default();
-        cfg.enabled = true;
-        let (r, _) = ZeroconfReloadable::new(ZeroconfConfig::default());
-        r.validate(&cfg).unwrap_err();
-    }
+        let boot = ZeroconfConfig::default();
+        let r = ZeroconfReloadable::new(boot);
+        let mut new = ZeroconfConfig::default();
+        new.enabled = true;
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn zeroconf_apply_updates_receiver() {
-        let (r, mut rx) = ZeroconfReloadable::new(ZeroconfConfig::default());
-        let new = Arc::new(ZeroconfConfig::default());
-        r.apply(new).await.unwrap();
-        rx.changed().await.unwrap();
+        r.validate(&new).unwrap_err();
     }
 }

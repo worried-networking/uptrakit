@@ -1,57 +1,38 @@
-//! PKI listener reloadable subsystem.
+//! PKI listener address reload gate.
 //!
-//! [`PkiListenerReloadable`] distributes updated PKI address strings to the
-//! running PKI (certificate authority) listener via a [`tokio::sync::watch`]
-//! channel so that consumers can react to address changes without a full
-//! process restart.
+//! [`PkiListenerReloadable`] is a validate-only gate: the PKI (certificate
+//! authority) listener's bound address is fixed at boot, so this subsystem
+//! never changes any runtime state. It exists solely to reject a config
+//! reload that would silently leave a changed `network.pki_addr` unapplied.
 //!
-//! The channel carries `Arc<String>` — the raw `pki_addr` value from
-//! `NetworkConfig`.  An empty string means the PKI listener is not configured.
-//! An `http://` URL is an advertisement address managed outside this subsystem.
-//! A bare `host:port` is both the bind address and the advertised address.
+//! `pki_addr` accepts either a bare `host:port` socket address (used as both
+//! bind and advertised address) or an `http://` URL (advertised only). Both
+//! forms are compared as opaque strings — any change, of either form,
+//! requires a restart.
 
-use std::sync::Arc;
 use std::time::Duration;
 
-use parking_lot::Mutex;
 use rootcause::prelude::*;
-use tokio::sync::watch;
 use uptrakit_config_reload::config::NetworkConfig;
 use uptrakit_config_reload::defaults::WATCHDOG_PKI;
 use uptrakit_config_reload::delta::RuntimeConfigDelta;
 use uptrakit_config_reload::error::ConfigReloadError;
 use uptrakit_config_reload::reloadable::Reloadable;
 
-use crate::reload::probe::pick_probe_addr;
-
-/// A [`Reloadable`] subsystem that distributes updated PKI address strings.
+/// A [`Reloadable`] validate-reject gate for `network.pki_addr`.
 ///
 /// Marked `#[non_exhaustive]` so that additional diagnostic fields can be
 /// added without a semver break.
 #[non_exhaustive]
 pub(crate) struct PkiListenerReloadable {
-    /// Sender half of the config broadcast channel.
-    tx: watch::Sender<Arc<String>>,
-    /// The previous address, stashed by `apply` so that `revert` can restore it.
-    snapshot: Mutex<Option<Arc<String>>>,
-    /// Set to `true` while a drain is in progress to suppress the pre-bind
-    /// address probe during validation.
-    draining: Mutex<bool>,
+    /// The PKI address this process booted with.
+    boot_pki_addr: String,
 }
 
 impl PkiListenerReloadable {
-    /// Create a new `PkiListenerReloadable` with the given initial PKI address.
-    ///
-    /// Returns the reloadable together with a receiver that always holds the
-    /// latest live address.
-    pub(crate) fn new(initial: String) -> (Self, watch::Receiver<Arc<String>>) {
-        let (tx, rx) = watch::channel(Arc::new(initial));
-        let this = Self {
-            tx,
-            snapshot: Mutex::new(None),
-            draining: Mutex::new(false),
-        };
-        (this, rx)
+    /// Create a new `PkiListenerReloadable` bound to the boot-time address.
+    pub(crate) fn new(boot_pki_addr: String) -> Self {
+        Self { boot_pki_addr }
     }
 }
 
@@ -63,113 +44,36 @@ impl Reloadable for PkiListenerReloadable {
         "pki_listener"
     }
 
-    /// Validate that the incoming config can be applied.
-    ///
-    /// If the address is unchanged, or is an `http://` URL (external bind),
-    /// or a drain is in progress, validation is a no-op.  Otherwise a pre-bind
-    /// probe is attempted to detect port conflicts.
+    /// Reject any change to `network.pki_addr` — the listener is bound once
+    /// at boot and cannot be rebound without a full restart.
     ///
     /// # Errors
     ///
-    /// Returns [`ConfigReloadError::Validate`] if the new address cannot be bound.
+    /// Returns [`ConfigReloadError::Validate`] if the address changed.
     fn validate(&self, new: &NetworkConfig) -> Result<(), Report> {
-        let current = self.tx.borrow().clone();
-        if new.pki_addr == current.as_str() {
-            return Ok(());
+        if new.pki_addr != self.boot_pki_addr {
+            bail!(ConfigReloadError::Validate(
+                "listener address change requires a full controller restart (network pki_addr)"
+                    .into()
+            ));
         }
-        if *self.draining.lock() {
-            return Ok(());
-        }
-        // http:// form is an advertisement URL, not a bind address — skip the probe.
-        if new.pki_addr.starts_with("http://") {
-            return Ok(());
-        }
-        if new.pki_addr.is_empty() {
-            return Ok(());
-        }
-        let probe = std::net::TcpListener::bind(&new.pki_addr).map_err(|e| {
-            report!(ConfigReloadError::Validate(format!(
-                "network.pki_addr bind probe failed: {e}"
-            )))
-        })?;
-        drop(probe);
         Ok(())
     }
 
-    /// Broadcast the new PKI address to all subscribers.
-    ///
-    /// The current address is stashed so that `revert` can restore it.
-    ///
-    /// # Errors
-    ///
-    /// Always returns `Ok(())`.
-    #[expect(
-        clippy::let_underscore_must_use,
-        reason = "watch::Sender::send returns Err only when all receivers are dropped; benign here"
-    )]
-    async fn apply(&self, new: Arc<NetworkConfig>) -> Result<(), Report> {
-        let current = self.tx.borrow().clone();
-        {
-            let mut guard = self.snapshot.lock();
-            *guard = Some(current);
-        } // guard dropped before the send/.await boundary
-
-        tracing::info!(addr = %new.pki_addr, "pki listener config applied");
-        let _ = self.tx.send(Arc::new(new.pki_addr.clone()));
+    /// No-op — validate already rejected any change that would require
+    /// action here.
+    async fn apply(&self, _new: std::sync::Arc<NetworkConfig>) -> Result<(), Report> {
         Ok(())
     }
 
-    /// Restore the previously stashed address.
-    ///
-    /// # Errors
-    ///
-    /// Always returns `Ok(())`.
-    #[expect(
-        clippy::let_underscore_must_use,
-        reason = "watch::Sender::send returns Err only when all receivers are dropped; benign here"
-    )]
+    /// No-op — nothing was mutated by `apply`.
     async fn revert(&self) -> Result<(), Report> {
-        let prior = self.snapshot.lock().clone();
-        if let Some(prior) = prior {
-            tracing::info!(addr = %prior, "pki listener config reverted");
-            let _ = self.tx.send(prior);
-        }
         Ok(())
     }
 
-    /// Confirm the PKI listener is accepting connections by probing the bound address.
-    ///
-    /// Skips the probe if the address is empty or an `http://` URL.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ConfigReloadError::HealthFailed`] if the probe times out or
-    /// the connection is refused.
+    /// Validate-only gate controls no socket; health is always OK if
+    /// validate passed.
     async fn health_check(&self) -> Result<(), Report> {
-        let cfg = self.tx.borrow().clone();
-        // Skip probe for empty or http:// advertisement URLs — not a bind address.
-        if cfg.is_empty() || cfg.starts_with("http://") {
-            return Ok(());
-        }
-        let probe_addr = pick_probe_addr(&cfg)?;
-        tokio::time::timeout(
-            Duration::from_secs(1),
-            tokio::net::TcpStream::connect(&probe_addr),
-        )
-        .await
-        .map_err(|_elapsed| {
-            report!(ConfigReloadError::HealthFailed {
-                subsystem: "pki_listener".into(),
-                message: format!("connect to {probe_addr} timed out after 1s"),
-            })
-        })?
-        .map_err(|e| {
-            report!(ConfigReloadError::HealthFailed {
-                subsystem: "pki_listener".into(),
-                message: e.to_string(),
-            })
-        })?;
-        tracing::debug!(addr = %probe_addr, "pki listener health check ok");
         Ok(())
     }
 
@@ -188,46 +92,27 @@ uptrakit_config_reload::reloadable_erased_impl!(PkiListenerReloadable, RuntimeCo
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn pki_reloadable_skip_pre_bind_on_same_addr() {
-        let addr = "127.0.0.1:0".to_string();
-        let (r, _rx) = PkiListenerReloadable::new(addr.clone());
-        let mut net = NetworkConfig::default();
-        net.pki_addr = addr;
-        r.validate(&net).unwrap();
-    }
-
-    #[tokio::test]
-    async fn pki_reloadable_apply_updates_receiver() {
-        let (r, rx) = PkiListenerReloadable::new("127.0.0.1:0".to_string());
-        let mut net = NetworkConfig::default();
-        net.pki_addr = "127.0.0.1:9".to_string();
-        r.apply(Arc::new(net)).await.unwrap();
-        assert!(rx.has_changed().unwrap());
-    }
-
-    #[tokio::test]
-    async fn pki_reloadable_revert_restores_prior() {
-        let initial = "127.0.0.1:0".to_string();
-        let (r, mut rx) = PkiListenerReloadable::new(initial.clone());
-
-        let mut net = NetworkConfig::default();
-        net.pki_addr = "127.0.0.1:9".to_string();
-        r.apply(Arc::new(net)).await.unwrap();
-        rx.changed().await.unwrap();
-
-        r.revert().await.unwrap();
-        assert!(rx.has_changed().unwrap());
-        let restored = rx.borrow_and_update().clone();
-        assert_eq!(restored.as_str(), initial.as_str());
-    }
-
-    #[tokio::test]
-    async fn pki_reloadable_skip_pre_bind_while_draining() {
-        let (r, _rx) = PkiListenerReloadable::new("127.0.0.1:0".to_string());
-        *r.draining.lock() = true;
+    #[test]
+    fn pki_validate_rejects_addr_change() {
+        let boot_addr = "127.0.0.1:0".to_string();
+        let r = PkiListenerReloadable::new(boot_addr);
         let mut net = NetworkConfig::default();
         net.pki_addr = "127.0.0.1:9999".to_string();
+
+        let err = r.validate(&net).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("requires a full controller restart")
+        );
+    }
+
+    #[test]
+    fn pki_validate_accepts_unchanged_addr() {
+        let boot_addr = "127.0.0.1:0".to_string();
+        let r = PkiListenerReloadable::new(boot_addr.clone());
+        let mut net = NetworkConfig::default();
+        net.pki_addr = boot_addr;
+
         r.validate(&net).unwrap();
     }
 }

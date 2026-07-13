@@ -83,10 +83,10 @@ pub(crate) async fn wire(
         booted.runtime.tls.clone(),
         Arc::clone(&identity.pki.server_cert_resolver),
     );
-    let (https_reloadable, _https_rx) = crate::reload::https_listener::HttpsListenerReloadable::new(
+    let https_reloadable = crate::reload::https_listener::HttpsListenerReloadable::new(
         booted.runtime.network.https.clone(),
     );
-    let (pki_reloadable, _pki_rx) = crate::reload::pki_listener::PkiListenerReloadable::new(
+    let pki_reloadable = crate::reload::pki_listener::PkiListenerReloadable::new(
         booted.runtime.network.pki_addr.clone(),
     );
     let (audit_reloadable, audit_log_filter_rx) =
@@ -94,7 +94,7 @@ pub(crate) async fn wire(
             components.audit.dispatcher.clone(),
             booted.runtime.audit.clone(),
         );
-    let (zeroconf_reloadable, _zeroconf_rx) =
+    let zeroconf_reloadable =
         crate::reload::zeroconf::ZeroconfReloadable::new(booted.runtime.zeroconf.clone());
     let (plugin_reloadable, _plugin_rx) =
         uptrakit_web_api_queries::reload::plugin_registry::PluginCatalogReloadable::new(
