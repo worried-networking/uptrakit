@@ -1,16 +1,17 @@
 ---
 title: Shared Surface Security
 weight: 170
-description: Shared surfaces security enforced by fail-closed contract admission, per-request authorization, and transport controls.
+description:
+  Shared surfaces security enforced by fail-closed contract admission, per-request authorization, and transport
+  controls.
 ---
 
 # Shared Surface Security
 
 ## Overview
 
-Shared surfaces let plugins and connected services project UI capabilities through the controller.
-Security is enforced by a fail-closed contract admission model plus per-request authorization and
-transport controls.
+Shared surfaces let plugins and connected services project UI capabilities through the controller. Security is enforced
+by a fail-closed contract admission model plus per-request authorization and transport controls.
 
 ## Permission model
 
@@ -23,8 +24,7 @@ Enforcement points:
 
 - `GET /api/v1/surfaces` — only tenant-visible surfaces are listed
 - `GET /api/v1/surfaces/{surface_id}/read` — descriptor permission check
-- `POST /api/v1/surfaces/{surface_id}/interactions/{interaction_id}` — descriptor and interaction
-  permission checks
+- `POST /api/v1/surfaces/{surface_id}/interactions/{interaction_id}` — descriptor and interaction permission checks
 
 Frontend filtering is convenience only; server checks are authoritative.
 
@@ -45,9 +45,8 @@ Invalid registrations are rejected with structured rejection reasons.
 
 ## Targeting and tenancy controls
 
-Targeted surfaces require explicit `target_provider_id` at invocation time.
-Provider resolution is tenant-aware; cross-tenant providers are excluded from availability and
-dispatch.
+Targeted surfaces require explicit `target_provider_id` at invocation time. Provider resolution is tenant-aware;
+cross-tenant providers are excluded from availability and dispatch.
 
 For service providers:
 
@@ -56,8 +55,8 @@ For service providers:
 
 ## Sensitive parameter handling
 
-Sensitive interaction values are not sent in plaintext `params`.
-Clients send `encrypted_sensitive_params` (ECIES P-256 metadata + ciphertext payload).
+Sensitive interaction values are not sent in plaintext `params`. Clients send `encrypted_sensitive_params` (ECIES P-256
+metadata + ciphertext payload).
 
 Controller behavior:
 
@@ -78,12 +77,16 @@ Invocation path is mediated by `SurfaceProxy`:
 - per-request timeout handling
 - provider disconnect and unavailability handling
 - typed error-code mapping for caller-safe failure semantics
+- in-flight budget/idempotency cancellation-safety: if a caller disconnects mid-request, the proxy releases the
+  provider/tenant in-flight budget and the idempotency reservation on future-drop (RAII guards) plus a deadline-keyed
+  backstop sweep, so a disconnecting client cannot permanently exhaust a provider's or tenant's in-flight budget or
+  wedge an idempotency key
 
 ## Capability gating
 
-UI/surface runtime participation is gated on protocol capability negotiation.
-Incompatible providers are excluded from the active surface catalog; their registrations are
-rejected at admission time rather than silently degrading runtime behavior.
+UI/surface runtime participation is gated on protocol capability negotiation. Incompatible providers are excluded from
+the active surface catalog; their registrations are rejected at admission time rather than silently degrading runtime
+behavior.
 
 ## Trust boundaries
 
