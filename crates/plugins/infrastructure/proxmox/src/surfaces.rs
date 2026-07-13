@@ -1576,6 +1576,7 @@ async fn handle_preload_scaling_item_overrides(
 ) -> std::result::Result<serde_json::Value, String> {
     let tenant_id = tenant_db.tenant_id();
     let software_item_id = request.software_item_id;
+    ensure_software_item_in_tenant(tenant_db, software_item_id).await?;
 
     let effective_config_id = match request.plugin_config_id {
         Some(id) => Some(id),
@@ -1648,6 +1649,7 @@ async fn handle_save_scaling_item_overrides(
     let plugin_config_id = request.plugin_config_id;
 
     ensure_proxmox_plugin_config_exists(tenant_db, plugin_config_id).await?;
+    ensure_software_item_in_tenant(tenant_db, software_item_id).await?;
 
     let mode_opt = parse_scaling_mode_item(&request.scaling_mode)?;
 
@@ -2672,5 +2674,65 @@ mod tests {
 
         let err = result.expect_err("preload should reject foreign software item");
         assert!(err.contains("not found in tenant scope"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn preload_scaling_item_overrides_rejects_foreign_software_item() {
+        let tenant_id = Uuid::now_v7();
+        let software_item_id = Uuid::now_v7();
+
+        let db = MockDatabase::new(DbBackend::MySql)
+            // ensure_software_item_in_tenant -> no row (foreign tenant)
+            .append_query_results([Vec::<uptrakit_shared_db::entity::software_item::Model>::new()])
+            .into_connection();
+        let tenant_db = TenantDb::new(db, tenant_id);
+
+        let result = handle_preload_scaling_item_overrides(
+            &tenant_db,
+            ProxmoxItemOverridePreloadRequest {
+                software_item_id,
+                plugin_config_id: None,
+            },
+        )
+        .await;
+
+        let err = result.expect_err("preload should reject foreign software item");
+        assert!(err.contains("not found in tenant scope"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn save_scaling_item_overrides_rejects_foreign_software_item() {
+        let tenant_id = Uuid::now_v7();
+        let software_item_id = Uuid::now_v7();
+        let plugin_config_id = Uuid::now_v7();
+
+        let db = MockDatabase::new(DbBackend::MySql)
+            // ensure_proxmox_plugin_config_exists -> config found
+            .append_query_results([vec![mock_plugin_config_model(tenant_id, plugin_config_id)]])
+            // ensure_software_item_in_tenant -> no row (foreign tenant)
+            .append_query_results([Vec::<uptrakit_shared_db::entity::software_item::Model>::new()])
+            .into_connection();
+        let tenant_db = TenantDb::new(db, tenant_id);
+
+        let result = handle_save_scaling_item_overrides(
+            &tenant_db,
+            ProxmoxScalingItemOverridesSaveRequest {
+                software_item_id,
+                plugin_config_id,
+                scaling_mode: "absolute".to_string(),
+                absolute_cores: Some(2),
+                absolute_memory_mb: Some(2048),
+                delta_cores: None,
+                delta_memory_mb: None,
+            },
+        )
+        .await;
+
+        let err = result.expect_err("save should reject foreign software item");
+        assert!(err.contains("not found in tenant scope"), "got: {err}");
+        // The guard runs before the clear/upsert branch split, so this also
+        // covers the clear-mode ("inherit") request path — no further
+        // statements are appended to the mock, so reaching either branch's
+        // delete/upsert call would have panicked the mock.
     }
 }
