@@ -178,6 +178,7 @@ struct IdempotencyKey {
 #[derive(Debug, Clone)]
 struct IdempotencyInFlight {
     request_fingerprint: u64,
+    owner: Uuid,
 }
 
 #[derive(Debug, Clone)]
@@ -291,15 +292,16 @@ impl SurfaceProxy {
                     ));
                 }
 
+                let request_id = Uuid::now_v7();
                 {
                     let mut state = self.pending.lock();
                     state.cleanup_expired();
                     state.ensure_idempotency_available(&idem_key, request_fingerprint)?;
-                    state.reserve_idempotency(idem_key.clone(), request_fingerprint);
+                    state.reserve_idempotency(idem_key.clone(), request_fingerprint, request_id);
                 }
 
                 let local_request = surfaces::SurfaceActionRequest {
-                    request_id: Uuid::now_v7(),
+                    request_id,
                     tenant_id: request.tenant_id.to_string(),
                     surface_id: resolved.descriptor.surface_id.clone(),
                     interaction_id: resolved.interaction.interaction_id.clone(),
@@ -312,7 +314,7 @@ impl SurfaceProxy {
                 let local_result = self.local_executor.execute(&resolved, &local_request).await;
                 {
                     let mut state = self.pending.lock();
-                    state.release_idempotency(&idem_key);
+                    state.release_idempotency(&idem_key, request_id);
                 }
                 let result = local_result?;
                 validate_result_schema(&resolved.interaction, Some(&result))?;
@@ -542,7 +544,7 @@ impl PendingState {
             .entry(provider_id.to_string())
             .or_default() += 1;
         *self.in_flight_per_tenant.entry(tenant_id).or_default() += 1;
-        self.reserve_idempotency(idempotency_key, request_fingerprint);
+        self.reserve_idempotency(idempotency_key, request_fingerprint, request_id);
     }
 
     fn take_pending(
@@ -552,7 +554,13 @@ impl PendingState {
         let pending = self.pending.remove(request_id)?;
         decrement_counter(&mut self.in_flight_per_provider, &pending.provider_id);
         decrement_counter(&mut self.in_flight_per_tenant, &pending.tenant_id);
-        self.in_flight_idempotency.remove(&pending.idempotency_key);
+        if self
+            .in_flight_idempotency
+            .get(&pending.idempotency_key)
+            .is_some_and(|in_flight| in_flight.owner == *request_id)
+        {
+            self.in_flight_idempotency.remove(&pending.idempotency_key);
+        }
         Some(pending.sender)
     }
 
@@ -560,17 +568,24 @@ impl PendingState {
         self.take_pending(request_id).is_some()
     }
 
-    fn reserve_idempotency(&mut self, key: IdempotencyKey, request_fingerprint: u64) {
+    fn reserve_idempotency(&mut self, key: IdempotencyKey, request_fingerprint: u64, owner: Uuid) {
         self.in_flight_idempotency.insert(
             key,
             IdempotencyInFlight {
                 request_fingerprint,
+                owner,
             },
         );
     }
 
-    fn release_idempotency(&mut self, key: &IdempotencyKey) {
-        self.in_flight_idempotency.remove(key);
+    fn release_idempotency(&mut self, key: &IdempotencyKey, owner: Uuid) {
+        if self
+            .in_flight_idempotency
+            .get(key)
+            .is_some_and(|in_flight| in_flight.owner == owner)
+        {
+            self.in_flight_idempotency.remove(key);
+        }
     }
 
     fn ensure_budget(&self, provider_id: &str, tenant_id: Uuid) -> Result<(), SurfaceProxyError> {

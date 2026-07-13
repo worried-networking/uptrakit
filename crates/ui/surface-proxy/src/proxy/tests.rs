@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 use super::PluginSurfaceActionInvoker;
 
+mod bookkeeping;
 mod controller_local;
 mod controller_owned;
 mod provider_proxied;
