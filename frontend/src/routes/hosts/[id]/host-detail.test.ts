@@ -140,6 +140,27 @@ const sampleHost: HostResponse = {
 	}
 };
 
+const sampleHost2: HostResponse = {
+	id: 'host-002',
+	machine_id: 'machine-def',
+	hostname: 'staging-server',
+	friendly_name: 'Staging Server',
+	os_type: 'Linux',
+	os_version: 'Ubuntu 22.04',
+	architecture: 'aarch64',
+	ip_address: '10.0.0.6',
+	last_seen_at: '2024-06-02T12:00:00Z',
+	created_at: '2024-01-02T00:00:00Z',
+	updated_at: '2024-01-02T00:00:00Z',
+	agents: [],
+	tags: [],
+	software_status: {
+		known: true,
+		update_count: 0,
+		error_count: 0
+	}
+};
+
 const sampleHistoryEntry: UpdateHistoryResponse = {
 	id: 'hist-001',
 	host_id: 'host-001',
@@ -759,5 +780,100 @@ describe('Button primitive contract — hosts/[id]/+page.svelte', () => {
 			.map((el) => el.className)
 			.join(' ');
 		expect(allButtonClasses).not.toMatch(/preset-filled-|preset-tonal-/);
+	});
+});
+
+describe('Host Detail Page — param-only navigation reload', () => {
+	beforeEach(() => {
+		page.params.id = 'host-001';
+		vi.mocked(auth.getUser).mockReturnValue(adminUser);
+		vi.mocked(api.listUpdateHistory).mockResolvedValue({ data: makeHistoryPage([]) } as unknown as Awaited<
+			ReturnType<typeof api.listUpdateHistory>
+		>);
+		vi.mocked(api.listPluginTypes).mockResolvedValue({ data: [] } as unknown as Awaited<
+			ReturnType<typeof api.listPluginTypes>
+		>);
+		vi.mocked(api.listHostDiscoveryAllowlist).mockResolvedValue({ data: [] } as unknown as Awaited<
+			ReturnType<typeof api.listHostDiscoveryAllowlist>
+		>);
+		vi.mocked(api.listHostTags).mockResolvedValue({
+			data: { items: [], total: 0, page: 1, per_page: 100, total_pages: 1 }
+		} as unknown as Awaited<ReturnType<typeof api.listHostTags>>);
+		vi.mocked(api.listSoftwareItems).mockResolvedValue({ data: makeSoftwareItemsPage() } as unknown as Awaited<
+			ReturnType<typeof api.listSoftwareItems>
+		>);
+	});
+
+	afterEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it('re-fetches the host when the route id param changes', async () => {
+		vi.mocked(api.getHost).mockImplementation(
+			({ path }: { path: { id: string } }) =>
+				Promise.resolve({
+					data: path.id === 'host-002' ? sampleHost2 : sampleHost
+				}) as ReturnType<typeof api.getHost>
+		);
+
+		render(HostDetailPage);
+		await waitFor(() => expect(screen.getByRole('heading', { name: 'Production Server' })).toBeInTheDocument());
+		expect(vi.mocked(api.getHost)).toHaveBeenCalledWith({ path: { id: 'host-001' } });
+
+		page.params.id = 'host-002';
+		await waitFor(() => expect(screen.getByRole('heading', { name: 'Staging Server' })).toBeInTheDocument());
+		expect(vi.mocked(api.getHost)).toHaveBeenCalledWith({ path: { id: 'host-002' } });
+		expect(screen.getByText('staging-server')).toBeInTheDocument();
+	});
+
+	it('does not re-fetch when the same id is re-assigned', async () => {
+		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
+			ReturnType<typeof api.getHost>
+		>);
+
+		render(HostDetailPage);
+		await waitFor(() => expect(screen.getByRole('heading', { name: 'Production Server' })).toBeInTheDocument());
+		expect(vi.mocked(api.getHost)).toHaveBeenCalledTimes(1);
+
+		page.params.id = 'host-001';
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(vi.mocked(api.getHost)).toHaveBeenCalledTimes(1);
+	});
+
+	it('discards a stale response that resolves after a newer navigation (out-of-order resolution guard)', async () => {
+		let resolveHost1!: (value: Awaited<ReturnType<typeof api.getHost>>) => void;
+		let resolveHost2!: (value: Awaited<ReturnType<typeof api.getHost>>) => void;
+
+		vi.mocked(api.getHost).mockImplementation(({ path }: { path: { id: string } }) => {
+			if (path.id === 'host-001') {
+				return new Promise((resolve) => {
+					resolveHost1 = resolve;
+				}) as ReturnType<typeof api.getHost>;
+			}
+			return new Promise((resolve) => {
+				resolveHost2 = resolve;
+			}) as ReturnType<typeof api.getHost>;
+		});
+
+		render(HostDetailPage);
+		await waitFor(() => expect(vi.mocked(api.getHost)).toHaveBeenCalledWith({ path: { id: 'host-001' } }));
+
+		// Navigate to host-002 before host-001's fetch resolves.
+		page.params.id = 'host-002';
+		await waitFor(() => expect(vi.mocked(api.getHost)).toHaveBeenCalledWith({ path: { id: 'host-002' } }));
+
+		// Resolve host-002 first (the current id), then host-001 (the stale, superseded id).
+		resolveHost2({ data: sampleHost2 } as unknown as Awaited<ReturnType<typeof api.getHost>>);
+		await waitFor(() => expect(screen.getByRole('heading', { name: 'Staging Server' })).toBeInTheDocument());
+
+		resolveHost1({ data: sampleHost } as unknown as Awaited<ReturnType<typeof api.getHost>>);
+
+		// Give the stale host-001 response a chance to (incorrectly) commit if the guard were absent.
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		// Committed state must remain host-002's — the generation guard must have discarded host-001's late response.
+		expect(screen.getByRole('heading', { name: 'Staging Server' })).toBeInTheDocument();
+		expect(screen.queryByRole('heading', { name: 'Production Server' })).not.toBeInTheDocument();
+		expect(screen.getByText('staging-server')).toBeInTheDocument();
 	});
 });

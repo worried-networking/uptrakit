@@ -279,7 +279,6 @@
 
 	onMount(() => {
 		if (canView) {
-			loadItem();
 			unsubscribers.push(
 				subscribeToEvent(AdminEventType.SoftwareItemUpdated, (data) => {
 					if (data.id === id) loadItem(true);
@@ -321,6 +320,16 @@
 				if (document.visibilityState === 'visible') loadItem(true);
 			}, 300_000);
 		}
+	});
+
+	$effect(() => {
+		void id;
+		if (!canView) {
+			return;
+		}
+		untrack(() => {
+			void loadItem();
+		});
 	});
 
 	// Validate activeTab — must be declared before URL-sync $effect
@@ -388,20 +397,27 @@
 	});
 
 	async function loadItem(background = false) {
+		const requestedId = id;
 		if (!background) {
 			loading = true;
 			error = null;
 		}
 		try {
-			const { data: detail } = await getSoftwareItem({ path: { id } });
+			const { data: detail } = await getSoftwareItem({ path: { id: requestedId } });
+			if (requestedId !== id) {
+				// A newer navigation started before this response resolved; discard —
+				// committing would clobber the current id's state with stale data
+				// (out-of-order resolution guard).
+				return;
+			}
 			item = detail;
 			softwareItemTabsReloadToken += 1;
 		} catch (e) {
-			if (!background) {
+			if (!background && requestedId === id) {
 				error = e instanceof Error ? e.message : 'Failed to load software item';
 			}
 		} finally {
-			if (!background) loading = false;
+			if (!background && requestedId === id) loading = false;
 		}
 	}
 

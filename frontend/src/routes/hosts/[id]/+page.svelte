@@ -139,13 +139,7 @@
 		if (!getUser()) {
 			return;
 		}
-		loadData();
 		loadAllTags();
-		if (canViewSoftware) {
-			loadPluginTypes();
-			loadHostAllowlist();
-			loadAssignedSoftware();
-		}
 		unsubscribers.push(
 			subscribeToEvent(AdminEventType.HostUpdated, (data) => {
 				if (data.id === id) loadData(true);
@@ -168,6 +162,21 @@
 	});
 
 	$effect(() => {
+		void id;
+		if (!getUser()) {
+			return;
+		}
+		untrack(() => {
+			void loadData();
+			if (canViewSoftware) {
+				void loadPluginTypes();
+				void loadHostAllowlist();
+				void loadAssignedSoftware();
+			}
+		});
+	});
+
+	$effect(() => {
 		const ids = hostDetailSlotRenderableSurfaces.map((surface) => surface.surface_id);
 		if (ids.length === 0) {
 			return;
@@ -181,24 +190,31 @@
 	});
 
 	async function loadData(background = false) {
+		const requestedId = id;
 		if (!background) {
 			loading = true;
 			error = null;
 		}
 		try {
 			const [hostData, { data: histResult }] = await Promise.all([
-				getHost({ path: { id } }),
-				listUpdateHistory({ query: { host_id: id, per_page: 5 } })
+				getHost({ path: { id: requestedId } }),
+				listUpdateHistory({ query: { host_id: requestedId, per_page: 5 } })
 			]);
+			if (requestedId !== id) {
+				// A newer navigation started before this response resolved; discard —
+				// committing would clobber the current id's state with stale data
+				// (out-of-order resolution guard).
+				return;
+			}
 			host = hostData.data as unknown as HostResponse;
 			recentHistory = histResult.items;
 			hostDetailReloadToken += 1;
 		} catch (e) {
-			if (!background) {
+			if (!background && requestedId === id) {
 				error = e instanceof Error ? e.message : 'Failed to load host';
 			}
 		} finally {
-			if (!background) loading = false;
+			if (!background && requestedId === id) loading = false;
 		}
 	}
 
