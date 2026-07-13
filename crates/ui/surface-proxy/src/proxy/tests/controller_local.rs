@@ -331,6 +331,79 @@ async fn invoke_controller_local_rejects_concurrent_duplicate_idempotency() {
     assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 1);
 }
 
+#[tokio::test]
+async fn controller_local_client_disconnect_releases_idempotency() {
+    let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+    registry
+        .bootstrap_plugin(plugin_registration("plugin.notifications_email"))
+        .expect("plugin registration should succeed");
+
+    let started = StdArc::new(tokio::sync::Notify::new());
+    let release = StdArc::new(tokio::sync::Notify::new());
+    let calls = StdArc::new(std::sync::atomic::AtomicUsize::new(0));
+    let invoker = BlockingPluginInvoker {
+        started: StdArc::clone(&started),
+        release: StdArc::clone(&release),
+        calls: StdArc::clone(&calls),
+    };
+    let proxy = Arc::new(SurfaceProxy::new().with_local_executor(Arc::new(
+        PluginSurfaceLocalExecutor::new_without_database(Arc::new(invoker)),
+    )));
+    let service_connections = ServiceConnectionRegistry::new();
+
+    // Register the `started` waiter BEFORE spawning. `BlockingPluginInvoker::invoke`
+    // signals via `notify_waiters()` (controller_local.rs:100), which — unlike
+    // `notify_one()` — stores NO permit and only wakes waiters already registered at
+    // the call instant. If the spawned task reached `notify_waiters()` before the main
+    // task polled `started.notified()`, the edge would be lost and this test would HANG
+    // (not fail). `Notified::enable()` registers the waiter now, without awaiting,
+    // closing the lost-wakeup race.
+    let started_fut = started.notified();
+    tokio::pin!(started_fut);
+    started_fut.as_mut().enable();
+
+    let proxy_clone = Arc::clone(&proxy);
+    let handle = tokio::spawn(async move {
+        proxy_clone
+            .invoke(
+                &service_connections,
+                &registry,
+                SurfaceInvokeRequest {
+                    tenant_id: tenant_id(),
+                    surface_id: "notifications.email.global_smtp".to_string(),
+                    interaction_id: "save_global_smtp".to_string(),
+                    idempotency_key: "idem-local-cancel".to_string(),
+                    target_provider_id: None,
+                    caller_origin: SurfaceCallerOrigin::UserSession {
+                        user_id: user_id(),
+                        session_id: "session-1".to_string(),
+                    },
+                    params: serde_json::Map::new(),
+                    encrypted_sensitive_params: None,
+                },
+                Some(Duration::from_secs(30)),
+            )
+            .await
+    });
+
+    // Wait until execute() has entered — reservation is live (non-vacuous baseline).
+    started_fut.await;
+    assert_eq!(
+        proxy.pending.lock().in_flight_idempotency.len(),
+        1,
+        "idempotency reservation must be live while the plugin is executing"
+    );
+
+    // Client disconnects: drop the invoke future mid-execute().
+    handle.abort();
+    let _ = handle.await;
+
+    assert!(
+        proxy.pending.lock().in_flight_idempotency.is_empty(),
+        "idempotency reservation leaked after ControllerLocal cancel"
+    );
+}
+
 #[tokio::test(start_paused = true)]
 async fn invoke_controller_local_allows_cleartext_sensitive_fields() {
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());

@@ -300,6 +300,9 @@ impl SurfaceProxy {
                     state.reserve_idempotency(idem_key.clone(), request_fingerprint, request_id);
                 }
 
+                let _idem_guard =
+                    IdempotencyGuard::new(Arc::clone(&self.pending), idem_key.clone(), request_id);
+
                 let local_request = surfaces::SurfaceActionRequest {
                     request_id,
                     tenant_id: request.tenant_id.to_string(),
@@ -312,10 +315,6 @@ impl SurfaceProxy {
                     encrypted_sensitive_params: request.encrypted_sensitive_params.clone(),
                 };
                 let local_result = self.local_executor.execute(&resolved, &local_request).await;
-                {
-                    let mut state = self.pending.lock();
-                    state.release_idempotency(&idem_key, request_id);
-                }
                 let result = local_result?;
                 validate_result_schema(&resolved.interaction, Some(&result))?;
                 validate_result_limits(&result)?;
@@ -722,6 +721,41 @@ impl PendingGuard {
 impl Drop for PendingGuard {
     fn drop(&mut self) {
         let _ = self.pending.lock().take_pending(&self.request_id);
+    }
+}
+
+/// RAII cleanup guard for an in-flight ControllerLocal idempotency reservation.
+///
+/// The ControllerLocal transport reserves only an idempotency entry (no pending
+/// map entry, no budget counters) before awaiting the plugin executor. If the
+/// future is dropped there, `Drop` releases the owner-tagged reservation so the
+/// key is not stuck at `DuplicateRequest`.
+///
+/// Sole release mechanism for the ControllerLocal reservation: the arm no
+/// longer releases explicitly, so `Drop` runs on every exit (success, executor
+/// error, validation error, future-drop). Drop-safety is the same as
+/// `PendingGuard` — synchronous lock, no await, idempotent (owner-checked).
+struct IdempotencyGuard {
+    pending: Arc<Mutex<PendingState>>,
+    idem_key: IdempotencyKey,
+    owner: Uuid,
+}
+
+impl IdempotencyGuard {
+    fn new(pending: Arc<Mutex<PendingState>>, idem_key: IdempotencyKey, owner: Uuid) -> Self {
+        Self {
+            pending,
+            idem_key,
+            owner,
+        }
+    }
+}
+
+impl Drop for IdempotencyGuard {
+    fn drop(&mut self) {
+        self.pending
+            .lock()
+            .release_idempotency(&self.idem_key, self.owner);
     }
 }
 
