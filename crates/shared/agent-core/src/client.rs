@@ -116,6 +116,18 @@ pub enum UpdateEvent {
     /// transition the update to `AwaitingRestart` ahead of the imminent
     /// restart signal.
     EarlyResult(uptrakit_wire::UpdateResultPayload),
+    /// The forwarding executor promoted the update command to a PTY and
+    /// delivered the stdin/signal/attention channels (or the sender was
+    /// dropped without ever promoting — a non-interactive completion of what
+    /// was dispatched as an interactive intent). The run loop applies `Ok`
+    /// results to the in-flight update's channel fields.
+    #[cfg(feature = "interactive")]
+    InteractiveChannelsResolved(
+        std::result::Result<
+            crate::update::InteractiveChannels,
+            tokio::sync::oneshot::error::RecvError,
+        >,
+    ),
 }
 
 /// Send an update output message to the controller.

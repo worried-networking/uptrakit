@@ -693,6 +693,9 @@ where
                                 None
                             }
                         }
+                        // SSH resolves interactive channels in the forwarder task (Task 4), never via poll events.
+                        #[cfg(feature = "interactive")]
+                        UpdateEvent::InteractiveChannelsResolved(_) => None,
                     }
                 } else {
                     tracing::error!(
@@ -764,6 +767,9 @@ where
                                     }
                                 }
                                 UpdateEvent::Attention(_) => {}
+                                // SSH resolves interactive channels in the forwarder task (Task 4), never via poll events.
+                                #[cfg(feature = "interactive")]
+                                UpdateEvent::InteractiveChannelsResolved(_) => {}
                                 UpdateEvent::EarlyResult(early_payload) => {
                                     if !update.early_sent {
                                         if let Err(error) = transport

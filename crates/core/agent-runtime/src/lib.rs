@@ -227,10 +227,19 @@ impl AgentRuntime {
             .await?;
 
         if let Some(update) = self.in_flight_update.as_ref() {
+            // Three-state derivation: `channels_rx.is_some()` means the
+            // oneshot is still pending — promotion to a PTY may yet happen,
+            // so intent is reported. `stdin_tx.is_some()` means the channels
+            // already resolved and are live. Neither set means the receiver
+            // resolved to an error (PTY never allocated) and was cleared —
+            // report non-interactive. A plain `stdin_tx.is_some()` would
+            // under-report during the pre-promotion window: the controller
+            // unconditionally overwrites the persisted `interactive` flag
+            // from replayed `UpdateStarted` on both the claim and replay
+            // paths, so a reconnect landing before promotion would otherwise
+            // permanently flip the DB/UI to non-interactive.
             #[cfg(feature = "interactive")]
-            let interactive = update.stdin_tx.is_some();
-            #[cfg(feature = "interactive")]
-            let _ = update;
+            let interactive = update.stdin_tx.is_some() || update.channels_rx.is_some();
             #[cfg(not(feature = "interactive"))]
             let interactive = false;
 
@@ -452,6 +461,27 @@ impl AgentRuntime {
                     let _ = update_history_id;
                 }
             }
+            #[cfg(feature = "interactive")]
+            AgentRuntimeEvent::Update(UpdateEvent::InteractiveChannelsResolved(Ok((
+                stdin_tx,
+                signal_tx,
+                attention_rx,
+            )))) => {
+                if let Some(update) = self.in_flight_update.as_mut() {
+                    update.stdin_tx = Some(stdin_tx);
+                    update.signal_tx = Some(signal_tx);
+                    update.attention_rx = Some(attention_rx);
+                }
+            }
+            #[cfg(feature = "interactive")]
+            AgentRuntimeEvent::Update(UpdateEvent::InteractiveChannelsResolved(Err(_))) => {
+                if let Some(update) = self.in_flight_update.as_ref() {
+                    tracing::warn!(
+                        update_history_id = %update.update_history_id,
+                        "interactive update ended without PTY promotion; stdin/signal channels unavailable"
+                    );
+                }
+            }
             AgentRuntimeEvent::BackgroundResult(msg) => {
                 outcome = send_background_result(transport, msg).await;
             }
@@ -651,6 +681,8 @@ async fn poll_in_flight_update(in_flight_update: &mut Option<InFlightUpdate>) ->
     #[cfg(feature = "interactive")]
     let mut attention_rx = update.attention_rx.take();
     #[cfg(feature = "interactive")]
+    let mut channels_rx = update.channels_rx.take();
+    #[cfg(feature = "interactive")]
     let update_history_id = update.update_history_id;
 
     #[cfg(feature = "interactive")]
@@ -658,8 +690,12 @@ async fn poll_in_flight_update(in_flight_update: &mut Option<InFlightUpdate>) ->
         biased;
         Some(early) = update.early_result_rx.recv() => UpdateEvent::EarlyResult(early),
         Some(output_msg) = update.output_rx.recv() => UpdateEvent::Output(output_msg),
-        result = &mut update.handle => UpdateEvent::Completed(result),
         Some(()) = recv_attention_rx(&mut attention_rx) => UpdateEvent::Attention(update_history_id),
+        resolved = recv_channels_rx(&mut channels_rx) => {
+            channels_rx = None;
+            UpdateEvent::InteractiveChannelsResolved(resolved)
+        }
+        result = &mut update.handle => UpdateEvent::Completed(result),
     };
 
     #[cfg(not(feature = "interactive"))]
@@ -673,6 +709,7 @@ async fn poll_in_flight_update(in_flight_update: &mut Option<InFlightUpdate>) ->
     #[cfg(feature = "interactive")]
     {
         update.attention_rx = attention_rx;
+        update.channels_rx = channels_rx;
     }
 
     event
@@ -686,6 +723,21 @@ async fn recv_attention_rx(
         return rx.recv().await;
     }
     std::future::pending().await
+}
+
+#[cfg(feature = "interactive")]
+async fn recv_channels_rx(
+    channels_rx: &mut Option<
+        tokio::sync::oneshot::Receiver<uptrakit_agent_core::update::InteractiveChannels>,
+    >,
+) -> std::result::Result<
+    uptrakit_agent_core::update::InteractiveChannels,
+    tokio::sync::oneshot::error::RecvError,
+> {
+    match channels_rx {
+        Some(rx) => rx.await,
+        None => std::future::pending().await,
+    }
 }
 
 #[cfg(feature = "interactive")]
@@ -835,6 +887,178 @@ mod tests {
         assert!(!replay_msg.interactive);
 
         if let Some(update) = runtime.in_flight_update.take() {
+            update.handle.abort();
+        }
+    }
+
+    #[cfg(feature = "interactive")]
+    #[tokio::test]
+    async fn reconnect_replays_interactive_intent_while_channels_rx_still_pending() {
+        // Three-state derivation regression test: during the pre-promotion
+        // window (detect + pre-hooks), `stdin_tx` is still `None` but
+        // `channels_rx` is `Some` (the oneshot hasn't resolved yet). A
+        // reconnect landing in this window must still report `interactive:
+        // true`, since the controller unconditionally overwrites the
+        // persisted flag from replayed `UpdateStarted` on both the claim and
+        // replay paths — under-reporting here would permanently flip the
+        // DB/UI to non-interactive even though promotion may still happen.
+        let temp = tempfile::tempdir().expect("tempdir");
+        let mut runtime = AgentRuntime::new(runtime_config(
+            temp.path().join("update-freeze"),
+            RuntimeAuditEmitter::new(),
+        ));
+
+        let update_history_id = uuid::Uuid::now_v7();
+        let (_output_tx, output_rx) = tokio::sync::mpsc::channel(1);
+        let (_early_tx, early_result_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (_channels_tx, channels_rx) =
+            tokio::sync::oneshot::channel::<uptrakit_agent_core::update::InteractiveChannels>();
+        runtime.in_flight_update = Some(InFlightUpdate {
+            update_history_id,
+            handle: tokio::spawn(async {
+                std::future::pending::<uptrakit_agent_core::update::UpdateExecutionResult>().await
+            }),
+            output_rx,
+            early_result_rx,
+            early_sent: false,
+            stdin_tx: None,
+            signal_tx: None,
+            attention_rx: None,
+            channels_rx: Some(channels_rx),
+        });
+
+        let mut transport = MockTransport::new();
+        runtime
+            .on_connected(&mut transport)
+            .await
+            .expect("connect should succeed");
+
+        let replay_msg = transport
+            .send_log()
+            .iter()
+            .find_map(|msg| match msg {
+                ServiceMessage::UpdateStarted(payload) => Some(payload),
+                _ => None,
+            })
+            .expect("expected UpdateStarted replay after reconnect");
+
+        assert_eq!(replay_msg.update_history_id, update_history_id);
+        assert!(
+            replay_msg.interactive,
+            "pending channels_rx must report interactive intent"
+        );
+
+        if let Some(update) = runtime.in_flight_update.take() {
+            update.handle.abort();
+        }
+    }
+
+    #[cfg(feature = "interactive")]
+    #[tokio::test]
+    async fn poll_in_flight_update_resolves_interactive_channels_ok() {
+        let update_history_id = uuid::Uuid::now_v7();
+        let (_output_tx, output_rx) = tokio::sync::mpsc::channel(1);
+        let (_early_tx, early_result_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (channels_tx, channels_rx) =
+            tokio::sync::oneshot::channel::<uptrakit_agent_core::update::InteractiveChannels>();
+
+        let mut in_flight_update = Some(InFlightUpdate {
+            update_history_id,
+            handle: tokio::spawn(async {
+                std::future::pending::<uptrakit_agent_core::update::UpdateExecutionResult>().await
+            }),
+            output_rx,
+            early_result_rx,
+            early_sent: false,
+            stdin_tx: None,
+            signal_tx: None,
+            attention_rx: None,
+            channels_rx: Some(channels_rx),
+        });
+
+        let (test_stdin_tx, mut test_stdin_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(4);
+        let (test_signal_tx, _test_signal_rx) = tokio::sync::mpsc::channel::<i32>(4);
+        let (_test_attention_tx, test_attention_rx) = tokio::sync::mpsc::channel::<()>(1);
+        channels_tx
+            .send((test_stdin_tx, test_signal_tx, test_attention_rx))
+            .expect("channels receiver still live");
+
+        let event = poll_in_flight_update(&mut in_flight_update).await;
+        let UpdateEvent::InteractiveChannelsResolved(Ok((stdin_tx, signal_tx, attention_rx))) =
+            event
+        else {
+            panic!("expected InteractiveChannelsResolved(Ok(..)), got a different event");
+        };
+
+        // Apply the event exactly as the run loop does.
+        if let Some(update) = in_flight_update.as_mut() {
+            update.stdin_tx = Some(stdin_tx);
+            update.signal_tx = Some(signal_tx);
+            update.attention_rx = Some(attention_rx);
+        }
+
+        let update = in_flight_update.as_ref().expect("update still in flight");
+        assert!(update.stdin_tx.is_some());
+        assert!(update.channels_rx.is_none());
+
+        update
+            .stdin_tx
+            .as_ref()
+            .expect("stdin_tx populated")
+            .try_send(vec![b'x'])
+            .expect("stdin channel accepts data");
+        let received = test_stdin_rx
+            .try_recv()
+            .expect("test receiver should observe the forwarded stdin bytes");
+        assert_eq!(received, vec![b'x']);
+
+        if let Some(update) = in_flight_update.take() {
+            update.handle.abort();
+        }
+    }
+
+    #[cfg(feature = "interactive")]
+    #[tokio::test]
+    async fn poll_in_flight_update_resolves_interactive_channels_err_and_clears_receiver() {
+        let update_history_id = uuid::Uuid::now_v7();
+        let (_output_tx, output_rx) = tokio::sync::mpsc::channel(1);
+        let (_early_tx, early_result_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (channels_tx, channels_rx) =
+            tokio::sync::oneshot::channel::<uptrakit_agent_core::update::InteractiveChannels>();
+
+        let mut in_flight_update = Some(InFlightUpdate {
+            update_history_id,
+            handle: tokio::spawn(async {
+                std::future::pending::<uptrakit_agent_core::update::UpdateExecutionResult>().await
+            }),
+            output_rx,
+            early_result_rx,
+            early_sent: false,
+            stdin_tx: None,
+            signal_tx: None,
+            attention_rx: None,
+            channels_rx: Some(channels_rx),
+        });
+
+        // Drop the sender without ever promoting — the receiver resolves to
+        // an error, mirroring an update that completes/falls back before the
+        // pipeline reaches PTY promotion.
+        drop(channels_tx);
+
+        let event = poll_in_flight_update(&mut in_flight_update).await;
+        assert!(
+            matches!(event, UpdateEvent::InteractiveChannelsResolved(Err(_))),
+            "expected InteractiveChannelsResolved(Err(_))"
+        );
+
+        let update = in_flight_update.as_ref().expect("update still in flight");
+        assert!(
+            update.channels_rx.is_none(),
+            "resolved receiver must be cleared, not re-polled"
+        );
+        assert!(update.stdin_tx.is_none());
+
+        if let Some(update) = in_flight_update.take() {
             update.handle.abort();
         }
     }
