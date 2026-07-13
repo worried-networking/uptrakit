@@ -10,7 +10,7 @@
 Audit `audit-2026-07-11` L876 (MEDIUM · stability · core-agent-ssh · verified): `bootstrap_execute` mutates the
 **remote host** (creates the target user, deploys the SSH key, writes sudoers) **before** any host-name-conflict
 check, deferring the uniqueness check to its last step (`save_host` → `host_ops::add_host`). On a name conflict
-(double-submit of the execute step, or a host added between the connect-review and execute) — or any DB failure —
+(a host added between the connect-review and execute, or a double-submit of execute) — or any DB failure —
 the in-memory Ed25519 private key is dropped: **the remote host is left holding an authorized key nobody
 possesses, with no DB record**, and the error carries **no** partial-configuration context.
 
@@ -49,11 +49,21 @@ recheck only to POSIX (which covers RouterOS).
 - Symbols: `host_ops::find_host(db, name_or_id) -> Result<Option<Model>>` (`host_ops.rs:117`; tries `Uuid::parse`
   first, else `Column::Name.eq` — identical call semantics to the existing connect-phase checks, no new risk);
   `add_host` does `bail!(Error::HostNameConflict(params.name))` on its UNIQUE-name check; `Error::HostNameConflict`
-  (`error.rs:29`); crate `Result<T> = Result<T, Report<Error>>` (`error.rs:60`). The rootcause context idiom is
-  `.attach(format!(…))` on a `Report<Error>` (used at `ui/cli/src/client.rs:57`, `ui/cli/src/commands/auth.rs:640`,
-  `web-api/src/oauth/canonical_url.rs:57`) — it appends a printable note and **preserves** `current_context` (the
-  error variant), so `HostNameConflict` stays matchable. (`rootcause` is pinned `0.13`; `.attach` is its only
-  context-attach method — `attach_printable`/`change_context` are error-stack APIs and do not exist here.)
+  (`error.rs:29`); crate `Result<T> = Result<T, Report<Error>>` (`error.rs:60`). The rootcause context idiom:
+  `.attach(…)` appends a printable note and **preserves** `current_context` (the error variant), so
+  `HostNameConflict` stays matchable. (`rootcause` is pinned `0.13`; `.attach` is its only context-attach method —
+  `attach_printable`/`change_context` are error-stack APIs and do not exist here.) **Precedent is composite, stated
+  plainly:** no site in the workspace combines `.map_err(|e| e.attach(format!(…)))` on the propagated error today —
+  `ui/cli/src/client.rs:57` and `ui/cli/src/commands/auth.rs:640` use `.map_err(|e| e.attach("…"))` with a **string
+  literal**, and `web-api/src/oauth/canonical_url.rs:57` attaches a `format!` string to a **fresh** `report!(…)`
+  (discarding `e`'s context). The proposed shape synthesizes the two known-good halves (attach-on-propagated-`e`
+  wiring + `format!` content); `Report::attach<A: Display + Debug>` accepts a `String`, so the composition is
+  sound — but this is its **first** instance in the workspace, not a copy of an existing one. **Render path
+  verified against rootcause 0.13 source** (not assumed): `Report`'s Display *and* Debug both delegate to the
+  default report formatter, whose `format_node_data` unconditionally iterates `report.attachments()` — and both
+  consumers format with Display (`surface_runtime.rs:1719-1745` builds the surface error via
+  `format!("bootstrap failed: {e}")`; the CLI's `main.rs:305` prints `eprintln!("Error: {e}")`), so the attached
+  note reaches the operator on every surface. The enrichment is not a silent no-op.
 
 ## Approach (chosen — recheck-early + enrich-error across all three paths, YAGNI)
 
@@ -71,8 +81,10 @@ if host_ops::find_host(db, &params.name).await?.is_some() {
 
 No shared helper — a 3-line guard at few call sites is below the repo's reuse-extraction threshold. **Proxmox
 needs no recheck** — `proxmox_bootstrap_execute` already runs this check via `load_and_validate_pve_host`
-(`:423`) before its remote connect. This closes the **common** windows — double-submit of execute, and a host
-added during the connect→execute human-review gap (minutes) — **before any remote mutation**.
+(`:423`) before its remote connect. This closes the **common** window — a host added during the connect→execute
+human-review gap (minutes) — **before any remote mutation**. (A concurrent double-submit of execute, if any UI
+surface permits one, is closed by the same guard; the review gap alone carries the justification — the
+double-submit scenario is a bonus, not the demonstrated premise.)
 
 ### 2. Enrich each `add_host` call site with partial-config context
 
@@ -80,11 +92,25 @@ At all three raw `add_host` call sites, attach the cleanup guidance via the crat
 preserving the underlying variant so a name conflict stays matchable:
 
 ```rust
-// bootstrap.rs:694 (save_host call), bootstrap_routeros.rs:272, bootstrap_proxmox.rs:752
+// bootstrap.rs:694 (save_host call) and bootstrap_proxmox.rs:752 — user creation on these
+// paths is existence-guarded (`id -u` check), so re-run genuinely reuses the account:
 … .await
   .map_err(|e| e.attach(format!(
       "The remote host '{}' has been partially configured (user/account created, key deployed, \
-       config written). Manual cleanup may be required.", params.name)))?;
+       config written). If the name is now taken by another host, choose a different name and \
+       remove the orphaned key/account from the remote; otherwise re-run bootstrap — the \
+       existing account is detected and reused.",
+      params.name)))?;
+
+// bootstrap_routeros.rs:272 — path-specific message: RouterOS `/user add`/`/user group add`
+// are NOT existence-guarded (bootstrap_routeros.rs:132-141), so there is no reuse path; the
+// crate's own verify-error (:234-237) already documents the manual removal:
+… .await
+  .map_err(|e| e.attach(format!(
+      "The router '{}' has been partially configured (uptrakit user/group created, key \
+       imported). Remove them before retrying (`/user remove uptrakit; /user group remove \
+       uptrakit`), and choose a different host name if this one is now taken.",
+      params.name)))?;
 ```
 
 The note is accurate at each site — the remote was already mutated by the time `add_host` runs. `.attach` keeps
@@ -98,19 +124,36 @@ the recheck and `add_host` (the seconds of remote-mutation work), and a generic 
 large/common windows *before* mutation; enrichment surfaces cleanup guidance for the small residual *after*
 mutation. Defense-in-depth, not a race-free guarantee.
 
-**Worst case is a dangling no-op pubkey, not an exposed credential.** On the residual failure, the remote holds
-an `authorized_keys` entry whose matching private key was **generated in memory and dropped/zeroized** (never
-persisted anywhere) — so no one holds it; the orphaned entry grants access to nobody. That is why a
-transaction/reservation fix is not warranted: there is no leaked secret to protect, only a stale public-key line
-for the operator to remove (which the enriched error tells them about). A security reviewer should read "orphaned
-key" as "dead pubkey line," not "exposed credential."
+**Worst case is three inert artifacts, not an exposed credential.** On the residual failure, the remote holds
+(1) an `authorized_keys` entry whose matching private key was **generated in memory and dropped/zeroized** (never
+persisted anywhere) — no one holds it, the entry grants access to nobody; (2) a created user account that is
+**password-locked** (`useradd` with no `-p` leaves `!` in shadow — no password-auth login path even with
+`PasswordAuthentication yes`); and (3) a sudoers drop-in **scoped to declared plugin commands, never `ALL`** (the
+architecture invariant). All three residuals are inert. Recovery splits by variant — and the `.attach` wording
+must not promise reuse unconditionally: on the **generic DB-failure** residual (pool/disk at `add_host`, no
+competing row), re-running bootstrap passes the recheck and the remote user-detection reuses the account
+(`docs/end-user/ssh-agent-bootstrap.md:401`) — idempotent recovery, the real reason a transaction/reservation fix
+is not warranted. On the **conflict** residual (a foreign host claimed the name inside the residual window),
+re-run with the same name fails fast at the new head recheck *before any remote work* — correct behavior, but no
+reuse: the operator must pick a different name and remove the orphaned key/account manually. **RouterOS carve-out
+(both variants):** the reuse claim is POSIX/Proxmox-only — their user creation is existence-guarded
+(`bootstrap.rs:594-606`, `bootstrap_proxmox.rs:437-462` run `id -u` first), but RouterOS `/user add` /
+`/user group add` are unconditional (`bootstrap_routeros.rs:132-141`), so *any* RouterOS re-run after a residual
+failure hits "user exists" and needs manual `/user remove uptrakit; /user group remove uptrakit` first (the
+path's own verify-error at `:234-237` already documents this) — hence the path-specific `.attach` message above.
+The RouterOS residual artifacts are a router `/user` + `/user group` + imported ssh-key (no shell account, no
+shadow entry), but the inert-credential conclusion is unchanged: the imported pubkey's private half was dropped,
+so the leftover principal grants access to nobody. A security reviewer should read "orphaned key" as "dead pubkey
+line plus a locked (or router-local) account," not "exposed credential."
 
 ## Tests
 
 The bootstrap.rs `mod tests` today are **`ScriptedRemoteExecutor` mock-only — there is no DB-backed test there**.
-The DB-test pattern must be **ported** (not "reused"): `crate::db::init_db(tempdir)` (runs migrations so
-`ssh_hosts` exists) plus `uptrakit_crypto::init_master_key(...)` + `register_column_aad(...)` so `EncryptedString`
-works — the same ~15 lines used by `surface_runtime.rs:2611+` / its `test_encrypted_key()` helper (`:2660-2669`).
+The DB-test pattern must be **ported** (not "reused"). Port from **`host_ops.rs:341-381`** — its `setup_db()`
+(tempdir + `crate::db::init_db`, which runs migrations so `ssh_hosts` exists), `test_encrypted_key()` (master-key
+init + `register_column_aad`) and `add_params()` helpers are the closest precedent: same crate, and the module
+that **owns** the `add_host`/`find_host` functions the new test exercises. (`surface_runtime.rs:2611+` carries the
+same ~15 lines but is farther from the code under test — do not port from there.)
 
 - **Primary (load-bearing, DB-only, no network):** insert a host named `"dup"` (via `host_ops::add_host` after the
   master-key setup), then call `bootstrap_execute` with `params.name = "dup"` + valid minimal params (e.g.
@@ -127,8 +170,8 @@ works — the same ~15 lines used by `surface_runtime.rs:2611+` / its `test_encr
 - `crates/core/agent-ssh-runtime/src/operations/bootstrap.rs` — recheck at the `bootstrap_execute` head;
   `.attach` enrichment at the `save_host` call site; the primary DB-backed test (with the ported setup).
 - `crates/core/agent-ssh-runtime/src/operations/bootstrap_routeros.rs` — `.attach` enrichment at the
-  `save_routeros_host_entry` `add_host` call (`:272`). (Recheck already covered via the shared `bootstrap_execute`
-  head.)
+  `save_routeros_host_entry` `add_host` call (`:272`), using the **path-specific RouterOS message** (no reuse
+  promise; names the `/user remove` cleanup). (Recheck already covered via the shared `bootstrap_execute` head.)
 - `crates/core/agent-ssh-runtime/src/operations/bootstrap_proxmox.rs` — `.attach` enrichment at the `add_host`
   call (`:752`) **only**. (Recheck already present via `load_and_validate_pve_host` — do not add a duplicate.)
 
