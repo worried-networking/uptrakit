@@ -89,7 +89,7 @@ async fn spawn_update_task(
 
     // Non-interactive fallback (always compiled, always reachable without the feature).
     let handle = tokio::spawn(async move {
-        crate::update::execute_update(payload, runtime, output_tx, early_result_tx).await
+        crate::update::execute_update(payload, runtime, output_tx, early_result_tx, None).await
     });
     SpawnedUpdate {
         handle,

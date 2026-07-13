@@ -110,6 +110,12 @@ async fn execute_update_pipeline(
     output_tx: &mpsc::Sender<UpdateOutputMessage>,
     runtime: Arc<dyn HostRuntime>,
     accumulated_output: &mut String,
+    // Runtime override used ONLY for the update command itself
+    // (`execute_plugin_update`). Hooks and version detection always run on
+    // `runtime`. The interactive path passes the forwarding runtime here so
+    // PTY promotion targets exactly the update command; `None` for the
+    // non-interactive path.
+    update_exec_runtime: Option<Arc<dyn HostRuntime>>,
 ) -> PipelineResult {
     // Run pre-update lifecycle hook plugins
     let lifecycle_ctx = UpdateLifecycleContext::for_pre_hook(
@@ -160,7 +166,8 @@ async fn execute_update_pipeline(
     .await;
 
     tracing::debug!("executing plugin update");
-    match execute_plugin_update(payload, output_tx, Arc::clone(&runtime)).await {
+    let exec_runtime = update_exec_runtime.unwrap_or_else(|| Arc::clone(&runtime));
+    match execute_plugin_update(payload, output_tx, exec_runtime).await {
         Ok(exec_result) => {
             tracing::debug!(
                 resumable = exec_result.resumable,
@@ -209,6 +216,12 @@ pub async fn execute_update(
     runtime: Arc<dyn HostRuntime>,
     output_tx: mpsc::Sender<UpdateOutputMessage>,
     early_result_tx: tokio::sync::mpsc::UnboundedSender<UpdateResultPayload>,
+    // Runtime override used ONLY for the update command itself
+    // (`execute_plugin_update`). Hooks and version detection always run on
+    // `runtime`. The interactive path passes the forwarding runtime here so
+    // PTY promotion targets exactly the update command; `None` for the
+    // non-interactive path.
+    update_exec_runtime: Option<Arc<dyn HostRuntime>>,
 ) -> UpdateExecutionResult {
     tracing::info!(software_item = %payload.software_item_name, "starting update");
     let update_history_id = payload.update_history_id;
@@ -232,6 +245,7 @@ pub async fn execute_update(
             &output_tx,
             Arc::clone(&runtime),
             &mut accumulated_output,
+            update_exec_runtime,
         ),
     )
     .await;
@@ -1052,9 +1066,11 @@ type InteractiveChannels = (mpsc::Sender<Vec<u8>>, mpsc::Sender<i32>, mpsc::Rece
 /// A [`CommandExecutor`] wrapper that intercepts the first `execute()` call
 /// and promotes it to `execute_interactive()`.
 ///
-/// This allows the generic update pipeline (which calls `plugin.execute_update`
+/// This allows `execute_plugin_update` (which calls `plugin.execute_update`
 /// → `executor.execute()`) to transparently use a PTY without requiring any
-/// changes to the `Plugin` trait.
+/// changes to the `Plugin` trait. It is passed as `update_exec_runtime` to
+/// [`execute_update`] so that only the update command runs through it — pre/post
+/// hooks and version detection use the plain `runtime` and are unaffected.
 ///
 /// On the first `execute()` call:
 /// - Calls the inner executor's `execute_interactive()`.
@@ -1136,15 +1152,13 @@ impl CommandExecutor for ForwardingInteractiveExecutor {
 
 /// Execute an update interactively with PTY support.
 ///
-/// Runs the same update pipeline as [`execute_update`] but wraps the executor
-/// in a [`ForwardingInteractiveExecutor`] so that the plugin's first
-/// `execute()` call is promoted to `execute_interactive()`. This allocates a
-/// real PTY for the update command, making `/dev/tty` available and keeping
-/// stdin open for forwarding — without any changes to the `Plugin` trait.
-///
-/// Pre/post hooks and version detection still run non-interactively via the
-/// inner executor's `execute()` / `execute_quiet()` paths. Only the plugin's
-/// primary `execute_update` call gets the PTY.
+/// Runs the same update pipeline as [`execute_update`] but constructs a
+/// [`ForwardingInteractiveExecutor`] and passes it as `update_exec_runtime`
+/// so that only `execute_plugin_update` runs through it — pre/post hooks and
+/// version detection still use the original `runtime` directly. The forwarding
+/// executor intercepts the plugin's first `execute()` call and promotes it to
+/// `execute_interactive()`, allocating a real PTY without any changes to the
+/// `Plugin` trait.
 ///
 /// Returns an [`InteractiveUpdateHandle`] whose `stdin_tx`, `signal_tx`, and
 /// `attention_rx` are `Some(...)` when the executor supports interactive mode
@@ -1176,7 +1190,14 @@ pub async fn execute_update_interactive(
     let forwarding_runtime = construct_host_runtime(forwarding_executor, caps);
 
     let handle = tokio::spawn(async move {
-        execute_update(payload, forwarding_runtime, output_tx, early_result_tx).await
+        execute_update(
+            payload,
+            runtime,
+            output_tx,
+            early_result_tx,
+            Some(forwarding_runtime),
+        )
+        .await
     });
 
     // Await delivery of the interactive channels from
@@ -1291,7 +1312,7 @@ mod tests {
         payload.release_info = None;
 
         let (early_tx, _early_rx) = tokio::sync::mpsc::unbounded_channel();
-        let result = execute_update(payload, test_runtime(), tx, early_tx).await;
+        let result = execute_update(payload, test_runtime(), tx, early_tx, None).await;
         assert_eq!(result.result.update_history_id, uuid::Uuid::nil());
 
         rx.close();
@@ -1316,7 +1337,7 @@ mod tests {
         }];
 
         let (early_tx, _early_rx) = tokio::sync::mpsc::unbounded_channel();
-        let result = execute_update(payload, test_runtime(), tx, early_tx).await;
+        let result = execute_update(payload, test_runtime(), tx, early_tx, None).await;
 
         assert_eq!(result.result.status, UpdateFinalStatus::Failed);
         assert!(result.result.error.is_some(), "Expected error but got None");
