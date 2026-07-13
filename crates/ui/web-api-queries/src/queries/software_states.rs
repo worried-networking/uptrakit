@@ -117,6 +117,7 @@ pub async fn load_software_states_for_tenant(
     } else {
         Host::find()
             .filter(host::Column::Id.is_in(host_ids))
+            .filter(host::Column::TenantId.eq(tenant_id))
             .filter(host::Column::DeactivatedAt.is_null())
             .all(db)
             .await?
@@ -276,7 +277,7 @@ pub async fn load_software_states_for_tenant(
     }
 
     // 8. Build HostStateMetadata for all active hosts.
-    let host_metadata = build_host_metadata(db, &active_hosts).await?;
+    let host_metadata = build_host_metadata(tenant_db, &active_hosts).await?;
 
     Ok(SoftwareStatesPayload {
         tenant_id,
@@ -537,7 +538,7 @@ pub async fn load_software_states_page_for_tenant(
     }
 
     // 8. Build HostStateMetadata for all page hosts.
-    let host_metadata = build_host_metadata(db, &page_hosts_map).await?;
+    let host_metadata = build_host_metadata(tenant_db, &page_hosts_map).await?;
 
     Ok(SoftwareStatesPayload {
         tenant_id,
@@ -573,13 +574,14 @@ struct AgentInfoRow {
 /// 1. `host_tag_assignments JOIN host_tags` to get tag names per host.
 /// 2. `service_hosts JOIN services` to get agent version and last_seen_at.
 async fn build_host_metadata(
-    db: &sea_orm::DatabaseConnection,
+    tenant_db: &TenantDb,
     active_hosts: &HashMap<Uuid, host::Model>,
 ) -> Result<Vec<HostStateMetadata>, sea_orm::DbErr> {
     if active_hosts.is_empty() {
         return Ok(vec![]);
     }
 
+    let db = tenant_db.db();
     let host_ids: Vec<Uuid> = active_hosts.keys().copied().collect();
 
     // 1. Load tags for all hosts in a single join query.
@@ -605,13 +607,23 @@ async fn build_host_metadata(
     }
 
     // 2. Load agent info (client_version, last_seen_at) for all hosts.
-    //    Uses service_hosts JOIN services, picking approved, non-deactivated agents.
-    let agent_rows: Vec<AgentInfoRow> = ServiceHost::find()
+    //    `service_host` has no `tenant_id` of its own; this query is
+    //    tenant-scoped both ways (see plan Task 3 / ledger row 50):
+    //      - service side: `find_via_tenant_join` supplies the inner-join to
+    //        `service` AND filters `service.tenant_id = tenant`.
+    //      - host side: `host_ids` are the keys of the caller's
+    //        `active_hosts` map, which every caller derives from a
+    //        `TenantDb`-scoped host query — so a foreign host can never
+    //        appear here either.
+    //    Only approved, non-deactivated agents are considered.
+    let agent_rows: Vec<AgentInfoRow> = tenant_db
+        .find_via_tenant_join::<service_host::Entity, service::Entity>(
+            service_host::Relation::Service.def(),
+        )
         .select_only()
         .column(service_host::Column::HostId)
         .column_as(service::Column::ClientVersion, "client_version")
         .column_as(service::Column::LastSeenAt, "last_seen_at")
-        .join(JoinType::InnerJoin, service_host::Relation::Service.def())
         .filter(service_host::Column::HostId.is_in(host_ids))
         .filter(service::Column::Status.eq(ServiceStatus::Approved))
         .filter(service::Column::DeactivatedAt.is_null())
@@ -694,6 +706,264 @@ fn extract_release_info(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sea_orm::{ActiveModelTrait, Database, Set};
+    use time::OffsetDateTime;
+    use uptrakit_shared_db::entity::{
+        host, host_software_item, service, service_host, software_item, tenant,
+    };
+
+    #[tokio::test]
+    async fn load_software_states_excludes_foreign_tenant_data() {
+        let db = Database::connect("sqlite::memory:")
+            .await
+            .expect("connect sqlite");
+        uptrakit_shared_db::migration::run_migrations(&db)
+            .await
+            .expect("migrations");
+        let now = OffsetDateTime::now_utc();
+
+        // --- tenant A: the querying tenant ---
+        let tenant_a = Uuid::now_v7();
+        let host_a = Uuid::now_v7();
+        let item_a = Uuid::now_v7();
+
+        tenant::ActiveModel {
+            id: Set(tenant_a),
+            name: Set("tenant-a".to_string()),
+            slug: Set(format!("t-{tenant_a}")),
+            is_default: Set(false),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert tenant_a");
+
+        host::ActiveModel {
+            id: Set(host_a),
+            tenant_id: Set(tenant_a),
+            machine_id: Set(format!("machine-{host_a}")),
+            hostname: Set("host-a".to_string()),
+            friendly_name: Set("Host A".to_string()),
+            os_type: Set(None),
+            os_version: Set(None),
+            architecture: Set(None),
+            ip_address: Set(None),
+            host_features: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert host_a");
+
+        software_item::ActiveModel {
+            id: Set(item_a),
+            tenant_id: Set(tenant_a),
+            name: Set("item-a".to_string()),
+            featured: Set(false),
+            icon_url: Set(None),
+            last_checked_at: Set(None),
+            awaiting_restart_timeout: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert item_a");
+
+        host_software_item::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            host_id: Set(host_a),
+            software_item_id: Set(item_a),
+            qualifier: Set(None),
+            plugin_config_id: Set(None),
+            package_identifier: Set(None),
+            installed_version: Set(None),
+            installed_version_detected_at: Set(None),
+            installed_display_version: Set(None),
+            latest_version: Set(None),
+            latest_version_fetched_at: Set(None),
+            latest_release_metadata: Set(None),
+            last_updated_at: Set(None),
+            linked_at: Set(now),
+            update_category: Set("unknown".to_string()),
+            deactivated_at: Set(None),
+            last_discovered_at: Set(None),
+            discovery_source: Set(None),
+            missing_since: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert host_software_item(item_a -> host_a)");
+
+        let t1 = now - time::Duration::seconds(10);
+        let service_a = service::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            tenant_id: Set(tenant_a),
+            capabilities: Set("[]".to_string()),
+            hostname: Set("host-a".to_string()),
+            friendly_name: Set("Agent A".to_string()),
+            ip_address: Set(None),
+            status: Set(ServiceStatus::Approved),
+            enrollment_secret_hash: Set("hash-a".to_string()),
+            client_version: Set(Some("1.0.0-a".to_string())),
+            last_seen_at: Set(Some(t1)),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
+            enrollment_token_id: Set(None),
+            cert_lifetime_hours: Set(None),
+            service_app_name: Set(None),
+            is_embedded: Set(false),
+            embedded_owner_key: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert service_a");
+
+        service_host::ActiveModel {
+            service_id: Set(service_a.id),
+            host_id: Set(host_a),
+            linked_at: Set(now),
+        }
+        .insert(&db)
+        .await
+        .expect("insert service_host(service_a -> host_a)");
+
+        // --- tenant B: the foreign tenant ---
+        let tenant_b = Uuid::now_v7();
+        let host_b = Uuid::now_v7();
+
+        tenant::ActiveModel {
+            id: Set(tenant_b),
+            name: Set("tenant-b".to_string()),
+            slug: Set(format!("t-{tenant_b}")),
+            is_default: Set(false),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert tenant_b");
+
+        host::ActiveModel {
+            id: Set(host_b),
+            tenant_id: Set(tenant_b),
+            machine_id: Set(format!("machine-{host_b}")),
+            hostname: Set("host-b".to_string()),
+            friendly_name: Set("Host B".to_string()),
+            os_type: Set(None),
+            os_version: Set(None),
+            architecture: Set(None),
+            ip_address: Set(None),
+            host_features: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert host_b");
+
+        // ROGUE link 1 (drives the :118 gap): tenant A's item pointing at
+        // tenant B's host.
+        host_software_item::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            host_id: Set(host_b),
+            software_item_id: Set(item_a),
+            qualifier: Set(None),
+            plugin_config_id: Set(None),
+            package_identifier: Set(None),
+            installed_version: Set(None),
+            installed_version_detected_at: Set(None),
+            installed_display_version: Set(None),
+            latest_version: Set(None),
+            latest_version_fetched_at: Set(None),
+            latest_release_metadata: Set(None),
+            last_updated_at: Set(None),
+            linked_at: Set(now),
+            update_category: Set("unknown".to_string()),
+            deactivated_at: Set(None),
+            last_discovered_at: Set(None),
+            discovery_source: Set(None),
+            missing_since: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert rogue host_software_item(item_a -> host_b)");
+
+        let service_b = service::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            tenant_id: Set(tenant_b),
+            capabilities: Set("[]".to_string()),
+            hostname: Set("host-b".to_string()),
+            friendly_name: Set("Agent B".to_string()),
+            ip_address: Set(None),
+            status: Set(ServiceStatus::Approved),
+            enrollment_secret_hash: Set("hash-b".to_string()),
+            client_version: Set(Some("9.9.9-b".to_string())),
+            last_seen_at: Set(Some(now)),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
+            enrollment_token_id: Set(None),
+            cert_lifetime_hours: Set(None),
+            service_app_name: Set(None),
+            is_embedded: Set(false),
+            embedded_owner_key: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert service_b");
+
+        // ROGUE link 2 (drives the build_host_metadata gap): a foreign
+        // tenant's service linked to tenant A's host.
+        service_host::ActiveModel {
+            service_id: Set(service_b.id),
+            host_id: Set(host_a),
+            linked_at: Set(now),
+        }
+        .insert(&db)
+        .await
+        .expect("insert rogue service_host(service_b -> host_a)");
+
+        let tenant_db = TenantDb::new(db.clone(), tenant_a);
+        let payload = super::load_software_states_for_tenant(&tenant_db)
+            .await
+            .expect("load states");
+
+        // Fix 1 (:118): the foreign host must never surface in the payload's host list.
+        assert!(
+            payload.hosts.iter().all(|h| h.host_id != host_b),
+            "foreign-tenant host leaked into payload.hosts"
+        );
+        // control: the tenant's own host is present.
+        let host_a_meta = payload
+            .hosts
+            .iter()
+            .find(|h| h.host_id == host_a)
+            .expect("host_a present in payload.hosts");
+
+        // Fix 2 (build_host_metadata): host_a's agent metadata must come from
+        // service_a, NEVER the foreign service_b — this is the primary,
+        // value-level assertion (a count check would false-green because
+        // build_host_metadata emits exactly one entry per active host
+        // regardless of the join).
+        assert_eq!(
+            host_a_meta.agent_version.as_deref(),
+            Some("1.0.0-a"),
+            "host_a enriched with foreign-tenant service metadata"
+        );
+    }
 
     #[test]
     fn extract_release_info_none_input() {
