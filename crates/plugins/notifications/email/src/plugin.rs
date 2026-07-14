@@ -406,6 +406,7 @@ impl uptrakit_plugin_infrastructure_core::NotificationTransport for EmailPlugin 
         // `"Name <addr>"` requires mail-builder to re-parse it, which can
         // produce malformed MAIL FROM commands rejected by strict servers
         // (e.g. Gmail 555 5.5.2 Syntax error).
+        let mut failed: Vec<String> = Vec::new();
         for to_addr in &cfg.to_addresses {
             let email = MessageBuilder::new();
             let email = if let Some(ref name) = cfg.from_name {
@@ -419,11 +420,18 @@ impl uptrakit_plugin_infrastructure_core::NotificationTransport for EmailPlugin 
                 .text_body(&message.body)
                 .html_body(&html_body);
 
-            send_email(&cfg, email).await?;
-
-            tracing::debug!(to = %to_addr, "email notification delivered");
+            match send_email(&cfg, email).await {
+                Ok(()) => tracing::debug!(to = %to_addr, "email notification delivered"),
+                Err(e) => {
+                    tracing::warn!(to = %to_addr, error = %e, "email delivery to recipient failed");
+                    failed.push(format!("{to_addr}: {e}"));
+                }
+            }
         }
 
+        if !failed.is_empty() {
+            bail!(NotificationPluginError::RecipientsFailed(failed));
+        }
         Ok(())
     }
 }
@@ -1634,6 +1642,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn deliver_reports_all_failed_recipients() {
+        let free_addr = {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.local_addr().unwrap()
+        };
+        let config = serde_json::json!({
+            "smtp_host": free_addr.ip().to_string(),
+            "smtp_port": free_addr.port(),
+            "from_address": "sender@example.com",
+            "to_addresses": ["a@example.com", "b@example.com", "c@example.com"],
+            "tls_mode": "none"
+        });
+        let msg = DeliveryMessage::new("Test", "Body", None, serde_json::json!({}), vec![]);
+        let empty_settings = serde_json::json!({});
+        let result = uptrakit_plugin_infrastructure_core::NotificationTransport::deliver(
+            &EmailPlugin,
+            &config,
+            &empty_settings,
+            &msg,
+        )
+        .await;
+        let err = result.unwrap_err();
+        match err.current_context() {
+            NotificationPluginError::RecipientsFailed(failed) => {
+                assert_eq!(
+                    failed.len(),
+                    3,
+                    "every recipient must be attempted; got {failed:?}"
+                );
+                for addr in ["a@example.com", "b@example.com", "c@example.com"] {
+                    assert!(
+                        failed.iter().any(|f| f.contains(addr)),
+                        "missing {addr} in {failed:?}"
+                    );
+                }
+            }
+            other => panic!("expected RecipientsFailed, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
     async fn deliver_returns_error_on_unreachable_smtp_host() {
         let free_addr = {
             let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -1664,10 +1713,10 @@ mod tests {
         assert!(
             matches!(
                 err.current_context(),
-                NotificationPluginError::DeliveryFailed(_)
+                NotificationPluginError::RecipientsFailed(_)
                     | NotificationPluginError::InvalidConfig(_)
             ),
-            "expected DeliveryFailed or InvalidConfig, got: {err}"
+            "expected RecipientsFailed or InvalidConfig, got: {err}"
         );
     }
 

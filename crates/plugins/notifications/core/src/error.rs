@@ -19,6 +19,13 @@ pub enum NotificationPluginError {
     #[error("delivery failed: {0}")]
     DeliveryFailed(String),
 
+    /// Delivery failed for one or more recipients. Each entry is
+    /// `"<recipient>: <error>"`. Reported as a total failure — there is no
+    /// partial-success delivery state (the controller notification loop maps
+    /// any `Err` to a `failed` log row; see `NotificationTransport::deliver`).
+    #[error("delivery failed for recipient(s): {}", .0.join("; "))]
+    RecipientsFailed(Vec<String>),
+
     /// An HTTP request to the channel's backend failed.
     #[error("HTTP request failed: {0}")]
     HttpRequest(String),

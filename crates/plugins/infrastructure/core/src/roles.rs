@@ -379,6 +379,13 @@ pub trait LifecycleHook: PluginMeta {
 #[async_trait]
 pub trait NotificationTransport: PluginMeta {
     /// Deliver a pre-built message using the given channel-specific config.
+    ///
+    /// Delivery is all-or-nothing from the controller's perspective: the
+    /// notification loop maps `Ok(())` to a `delivered` log row and any `Err`
+    /// to a `failed` row — there is no partial-success state. A multi-recipient
+    /// transport (e.g. email) that partially fails MUST therefore return `Err`
+    /// listing every failed recipient (see
+    /// `NotificationPluginError::RecipientsFailed`), never silently drop some.
     async fn deliver(
         &self,
         config: &serde_json::Value,
@@ -862,6 +869,7 @@ pub trait GuestExec: PluginMeta {
 
 #[cfg(test)]
 mod release_fetch_context_tests {
+    #[cfg(feature = "catalog")]
     use super::*;
 
     #[cfg(feature = "catalog")]

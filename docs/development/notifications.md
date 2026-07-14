@@ -210,6 +210,7 @@ All plugin operations return `Result<T>` which is `Result<T, Report<Notification
 
 - `InvalidConfig` -- plugin-specific config is invalid
 - `DeliveryFailed` -- delivery to the external service failed
+- `RecipientsFailed` -- delivery failed for one or more recipients (email attempt-all; carries the per-recipient list)
 - `HttpRequest` -- underlying HTTP request failed
 - `HttpClientBuild` -- `reqwest::Client` could not be constructed
 - `Serialization` -- payload serialization failed
