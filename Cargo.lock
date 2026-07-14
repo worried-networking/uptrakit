@@ -7745,7 +7745,6 @@ dependencies = [
  "uptrakit-notification-plugin-core",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-db",
- "uptrakit-shared-types",
  "uptrakit-tenant-db",
  "uuid",
 ]
@@ -7831,7 +7830,6 @@ dependencies = [
  "uptrakit-command",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-macros",
- "uptrakit-shared-types",
 ]
 
 [[package]]

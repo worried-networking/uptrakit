@@ -5,10 +5,10 @@ use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec};
 use uptrakit_plugin_infrastructure_core::{
     ConfigModel, ConfigTestKind, DiscoveredSoftware, DiscoveryTarget, HostCompatibility,
-    HostRequirements, HostRuntime, PluginError, PluginFamily, PluginRole, SudoCommandEntry,
-    SudoHelperScript, declare_plugin, plugin_ids,
+    HostRequirements, HostRuntime, PluginError, PluginFamily, PluginHttpClientConfig, PluginRole,
+    SsrfMode, SudoCommandEntry, SudoHelperScript, build_plugin_http_client, declare_plugin,
+    plugin_ids,
 };
-use uptrakit_shared_types::ssrf::{SsrfSafeResolver, webpki_client_config};
 
 use crate::config::ProxmoxHelperScriptsConfig;
 use crate::discovery::{
@@ -112,18 +112,15 @@ impl ProxmoxHelperScriptsPlugin {
     ) -> std::result::Result<Self, String> {
         let executor = runtime.executor();
 
-        let client = reqwest::Client::builder()
-            .user_agent(concat!(
+        let client = build_plugin_http_client(PluginHttpClientConfig {
+            user_agent: concat!(
                 "uptrakit-plugin-discovery-proxmox-helper-scripts/",
                 env!("CARGO_PKG_VERSION")
-            ))
-            .redirect(reqwest::redirect::Policy::none())
-            .use_preconfigured_tls(webpki_client_config())
-            .dns_resolver(Arc::new(SsrfSafeResolver::new()))
-            .connect_timeout(std::time::Duration::from_secs(10))
-            .timeout(std::time::Duration::from_secs(60))
-            .build()
-            .map_err(|e| format!("failed to build HTTP client: {e}"))?;
+            ),
+            ssrf_mode: SsrfMode::Strict,
+            ..Default::default()
+        })
+        .map_err(|e| format!("failed to build HTTP client: {e}"))?;
 
         Ok(Self {
             _config: config,

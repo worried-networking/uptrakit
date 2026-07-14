@@ -13,12 +13,12 @@ use async_trait::async_trait;
 use hmac::Mac as _;
 use rootcause::prelude::*;
 use sha2::Sha256;
-use uptrakit_shared_types::ssrf::{SsrfSafeResolver, webpki_client_config};
 
 use uptrakit_notification_plugin_core::{DeliveryMessage, NotificationPluginError, Result};
 use uptrakit_plugin_infrastructure_core::{
     ApiSubmitDescriptor, ConfigModel, FormFieldDescriptor, FormFieldType, PluginFamily,
-    SurfaceActionDescriptor, SurfaceActionUi, SurfaceFormDescriptor, declare_plugin, surfaces,
+    PluginHttpClientConfig, SsrfMode, SurfaceActionDescriptor, SurfaceActionUi,
+    SurfaceFormDescriptor, build_plugin_http_client, declare_plugin, surfaces,
 };
 
 use crate::config::{BLOCKED_HEADERS, WebhookChannelConfig};
@@ -47,11 +47,6 @@ fn check_header_allowed_delivery(key: &str) -> Result<()> {
 /// header as `sha256=<hex>`.
 pub struct WebhookPlugin {
     http: reqwest::Client,
-    #[expect(
-        dead_code,
-        reason = "retained for potential SSRF-bypass logic; field read path not yet implemented"
-    )]
-    allow_private_urls: bool,
 }
 
 impl WebhookPlugin {
@@ -68,23 +63,20 @@ impl WebhookPlugin {
     /// Returns [`NotificationPluginError::HttpClientBuild`] if the HTTP client
     /// cannot be constructed.
     pub fn new(allow_private_urls: bool) -> Result<Self> {
-        let resolver = if allow_private_urls {
-            SsrfSafeResolver::permissive()
-        } else {
-            SsrfSafeResolver::new()
-        };
-        let http = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .use_preconfigured_tls(webpki_client_config())
-            .dns_resolver(Arc::new(resolver))
-            .connect_timeout(std::time::Duration::from_secs(10))
-            .timeout(std::time::Duration::from_secs(60))
-            .build()
-            .map_err(|e| report!(NotificationPluginError::HttpClientBuild(e.to_string())))?;
-        Ok(Self {
-            http,
-            allow_private_urls,
+        let http = build_plugin_http_client(PluginHttpClientConfig {
+            user_agent: concat!(
+                "uptrakit-plugin-notification-webhook/",
+                env!("CARGO_PKG_VERSION")
+            ),
+            ssrf_mode: if allow_private_urls {
+                SsrfMode::Permissive
+            } else {
+                SsrfMode::Strict
+            },
+            ..Default::default()
         })
+        .map_err(|e| report!(NotificationPluginError::HttpClientBuild(e.to_string())))?;
+        Ok(Self { http })
     }
 }
 

@@ -10,14 +10,14 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use rootcause::prelude::*;
-use uptrakit_shared_types::ssrf::{SsrfSafeResolver, webpki_client_config};
 
 use uptrakit_notification_plugin_core::{
     DeliveryMessage, NotificationPluginError, Result, escape_html,
 };
 use uptrakit_plugin_infrastructure_core::{
     ApiSubmitDescriptor, ConfigModel, FormFieldDescriptor, FormFieldType, PluginFamily,
-    SurfaceActionDescriptor, SurfaceActionUi, SurfaceFormDescriptor, declare_plugin, surfaces,
+    PluginHttpClientConfig, SsrfMode, SurfaceActionDescriptor, SurfaceActionUi,
+    SurfaceFormDescriptor, build_plugin_http_client, declare_plugin, surfaces,
 };
 
 use crate::config::TelegramChannelConfig;
@@ -38,13 +38,15 @@ impl TelegramPlugin {
     /// Returns [`NotificationPluginError::HttpClientBuild`] if the HTTP client
     /// cannot be constructed.
     pub fn new() -> Result<Self> {
-        let http = reqwest::Client::builder()
-            .use_preconfigured_tls(webpki_client_config())
-            .connect_timeout(std::time::Duration::from_secs(10))
-            .timeout(std::time::Duration::from_secs(60))
-            .dns_resolver(Arc::new(SsrfSafeResolver::new()))
-            .build()
-            .map_err(|e| report!(NotificationPluginError::HttpClientBuild(e.to_string())))?;
+        let http = build_plugin_http_client(PluginHttpClientConfig {
+            user_agent: concat!(
+                "uptrakit-plugin-notification-telegram/",
+                env!("CARGO_PKG_VERSION")
+            ),
+            ssrf_mode: SsrfMode::Strict,
+            ..Default::default()
+        })
+        .map_err(|e| report!(NotificationPluginError::HttpClientBuild(e.to_string())))?;
         Ok(Self { http })
     }
 }
