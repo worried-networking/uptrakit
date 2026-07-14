@@ -2091,6 +2091,199 @@ mod tests {
             "no new session row should be minted before permissions are validated"
         );
     }
+
+    /// Renames one required role so assign_owner_roles fails mid-bootstrap.
+    async fn break_owner_role_assignment(db: &DatabaseConnection) {
+        use sea_orm::sea_query::Expr;
+        Role::update_many()
+            .col_expr(
+                role::Column::Name,
+                Expr::value("system_administrator_renamed"),
+            )
+            .filter(role::Column::Name.eq("system_administrator"))
+            .exec(db)
+            .await
+            .expect("rename role");
+    }
+
+    fn first_user_request() -> crate::extract::Validated<RegisterRequest> {
+        crate::extract::Validated(RegisterRequest {
+            email: "first-user@example.com".to_string(),
+            first_name: "First".to_string(),
+            last_name: "User".to_string(),
+            password: SecretString::new("correct-horse-battery-staple".to_string()),
+            registration_token: None,
+        })
+    }
+
+    /// Spec test 1: owner-role failure → 500, NO user committed, snapshot untouched.
+    /// RED pre-fix: the old code swallowed the error and committed a viewer-only user.
+    #[tokio::test]
+    async fn register_first_user_rolls_back_atomically_on_owner_role_failure() {
+        let db = setup_empty_test_db().await;
+        let state = test_state(db.clone()).await;
+        let mode_before = state.settings.registration().mode;
+
+        break_owner_role_assignment(&db).await;
+
+        let result = register(
+            State(state.clone()),
+            crate::extract::SessionSvc::new(SessionService::new(db.clone())),
+            first_user_request(),
+        )
+        .await;
+
+        let err = match result {
+            Ok(_) => panic!("register must fail when owner-role assignment fails"),
+            Err(e) => e,
+        };
+        assert_eq!(
+            err.into_response().status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(
+            User::find().count(&db).await.expect("count"),
+            0,
+            "transaction must roll back: no user row committed"
+        );
+        assert_eq!(
+            state.settings.registration().mode,
+            mode_before,
+            "registration snapshot must be untouched"
+        );
+        // Spec test 1 letter: the DB settings rows rolled back too.
+        // Verified paths: `crate::settings_store` re-exported at web-api/src/lib.rs:47,
+        // `crate::SettingKey` at web-api/src/lib.rs:65; load_setting(db, tenant_id, key)
+        // -> Result<Option<serde_json::Value>> (web-api-auth/src/settings_store.rs:143).
+        let mode_in_db = crate::settings_store::load_setting(
+            &db,
+            state.default_tenant_id,
+            crate::SettingKey::RegistrationMode,
+        )
+        .await
+        .expect("load registration-mode setting");
+        assert_ne!(
+            mode_in_db,
+            Some(serde_json::Value::String(
+                crate::auth::registration::RegistrationMode::Closed
+                    .as_str()
+                    .to_string()
+            )),
+            "DB must not record Closed after rollback"
+        );
+    }
+
+    /// Spec test 3 (publish-deferred integrity): a pre-commit failure AFTER a
+    /// successful first-user setup must not leave the snapshot Closed. Injected
+    /// via the in-transaction stateful audit emit (drop audit_logs → emit fails
+    /// → handler 500s before commit). RED pre-fix: the helper published Closed
+    /// before the failure.
+    ///
+    /// ORDERING DEPENDENCY: this test's power rests on the audit emit sitting
+    /// AFTER handle_first_user_setup and BEFORE txn.commit() in register(). If
+    /// that ordering ever changes, this test can pass while proving nothing —
+    /// re-point the injection at whatever failure site remains between setup
+    /// and commit.
+    #[tokio::test]
+    async fn register_pre_commit_failure_does_not_publish_closed_snapshot() {
+        let db = setup_empty_test_db().await;
+        let state = test_state(db.clone()).await;
+        let mode_before = state.settings.registration().mode;
+
+        drop_table(&db, "audit_logs").await;
+
+        let response = match register(
+            State(state.clone()),
+            crate::extract::SessionSvc::new(SessionService::new(db.clone())),
+            first_user_request(),
+        )
+        .await
+        {
+            Ok(r) => r.into_response(),
+            Err(e) => e.into_response(),
+        };
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            User::find().count(&db).await.expect("count"),
+            0,
+            "transaction must roll back"
+        );
+        assert_eq!(
+            state.settings.registration().mode,
+            mode_before,
+            "snapshot must not be published before commit"
+        );
+    }
+
+    /// Spec test 4: happy path — exactly the owner role set, snapshot Closed
+    /// after commit; a second user (snapshot re-opened) gets viewer only.
+    #[tokio::test]
+    async fn register_first_user_gets_owner_roles_then_second_gets_viewer() {
+        use crate::auth::registration::RegistrationMode;
+
+        let db = setup_empty_test_db().await;
+        let state = test_state(db.clone()).await;
+
+        let response = match register(
+            State(state.clone()),
+            crate::extract::SessionSvc::new(SessionService::new(db.clone())),
+            first_user_request(),
+        )
+        .await
+        {
+            Ok(r) => r.into_response(),
+            Err(_) => panic!("first registration must succeed"),
+        };
+        // register()'s success path returns 201 CREATED (auth.rs utoipa doc + handler tail).
+        assert_eq!(response.status(), StatusCode::CREATED);
+
+        let first = User::find().one(&db).await.expect("query").expect("user");
+        assert_eq!(
+            role_names_for_user(&db, state.default_tenant_id, first.id).await,
+            owner_role_names(),
+            "first user gets exactly the owner role set"
+        );
+        assert_eq!(
+            state.settings.registration().mode,
+            RegistrationMode::Closed,
+            "snapshot published Closed after commit"
+        );
+
+        // Re-open registration in the snapshot so a second user can register.
+        let mut reg = state.settings.registration();
+        reg.mode = RegistrationMode::Open;
+        state.settings.set_registration(reg).await;
+
+        let response2 = match register(
+            State(state.clone()),
+            crate::extract::SessionSvc::new(SessionService::new(db.clone())),
+            crate::extract::Validated(RegisterRequest {
+                email: "second-user@example.com".to_string(),
+                first_name: "Second".to_string(),
+                last_name: "User".to_string(),
+                password: SecretString::new("correct-horse-battery-staple".to_string()),
+                registration_token: None,
+            }),
+        )
+        .await
+        {
+            Ok(r) => r.into_response(),
+            Err(_) => panic!("second registration must succeed"),
+        };
+        assert_eq!(response2.status(), StatusCode::CREATED);
+
+        let second = User::find()
+            .filter(user::Column::Email.eq("second-user@example.com"))
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("second user");
+        assert_eq!(
+            role_names_for_user(&db, state.default_tenant_id, second.id).await,
+            vec!["viewer".to_string()],
+            "second user gets the default viewer role only"
+        );
+    }
 }
 
 /// Query parameters for the email-change confirmation endpoint.
