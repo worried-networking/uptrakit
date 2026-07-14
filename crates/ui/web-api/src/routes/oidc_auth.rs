@@ -2264,12 +2264,13 @@ mod audit_tests {
     use http::header;
     use openidconnect::{Nonce, PkceCodeChallenge};
     use sea_orm::{
-        ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Set,
+        ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter,
+        QueryOrder, Set,
     };
     use time::OffsetDateTime;
     use tower::ServiceExt;
-    use uptrakit_shared_db::entity::prelude::User;
-    use uptrakit_shared_db::entity::{audit_log, oidc_provider, session, user};
+    use uptrakit_shared_db::entity::prelude::{Role, User, UserRole};
+    use uptrakit_shared_db::entity::{audit_log, oidc_provider, role, session, user, user_role};
     use uptrakit_shared_types::MaskedEmail;
 
     const ACTION_AUTH_OIDC_EXCHANGE: uptrakit_audit_log::RegisteredAuditAction =
@@ -3156,5 +3157,370 @@ mod audit_tests {
             details["reason_code"],
             serde_json::json!("mint_auth_response_failed")
         );
+    }
+
+    async fn break_owner_role_assignment(db: &sea_orm::DatabaseConnection) {
+        use sea_orm::sea_query::Expr;
+        Role::update_many()
+            .col_expr(
+                role::Column::Name,
+                Expr::value("system_administrator_renamed"),
+            )
+            .filter(role::Column::Name.eq("system_administrator"))
+            .exec(db)
+            .await
+            .expect("rename role");
+    }
+
+    async fn role_names_for_user(
+        db: &sea_orm::DatabaseConnection,
+        tenant_id: uuid::Uuid,
+        user_id: uuid::Uuid,
+    ) -> Vec<String> {
+        let role_ids: Vec<uuid::Uuid> = UserRole::find()
+            .filter(user_role::Column::TenantId.eq(tenant_id))
+            .filter(user_role::Column::UserId.eq(user_id))
+            .all(db)
+            .await
+            .expect("user_role rows")
+            .into_iter()
+            .map(|r| r.role_id)
+            .collect();
+        let mut names: Vec<String> = Role::find()
+            .filter(role::Column::Id.is_in(role_ids))
+            .all(db)
+            .await
+            .expect("role rows")
+            .into_iter()
+            .map(|r| r.name)
+            .collect();
+        names.sort();
+        names
+    }
+
+    async fn insert_txn_user(txn: &sea_orm::DatabaseTransaction, email: &str) -> uuid::Uuid {
+        let user_id = uuid::Uuid::now_v7();
+        let now = OffsetDateTime::now_utc();
+        user::ActiveModel {
+            id: Set(user_id),
+            email: Set(MaskedEmail::new(email.to_string())),
+            first_name: Set("Oidc".to_string()),
+            last_name: Set("First".to_string()),
+            password_hash: Set(None),
+            is_active: Set(true),
+            deactivated_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(txn)
+        .await
+        .expect("insert user in txn");
+        user_id
+    }
+
+    /// Spec test 2 (callback path): owner-role failure inside handle_new_user →
+    /// Err(redirect), transaction dropped → nothing committed, snapshot untouched.
+    /// RED pre-fix: the hand-rolled copy logged the failure and returned Ok, so
+    /// the caller committed a first user with zero roles + closed registration.
+    #[tokio::test]
+    async fn oidc_callback_new_user_rolls_back_on_owner_role_failure() {
+        use sea_orm::TransactionTrait as _;
+
+        let app = TestApp::new().await;
+        let provider_id = insert_active_oidc_provider(
+            &app.db,
+            app.state.default_tenant_id,
+            "First User Rollback",
+            "first-user-rollback",
+        )
+        .await;
+        let provider = oidc_provider::Entity::find_by_id(provider_id)
+            .one(&app.db)
+            .await
+            .expect("provider query")
+            .expect("provider row");
+        let mode_before = app.state.settings.registration().mode;
+
+        break_owner_role_assignment(&app.db).await;
+
+        let txn = app.db.begin().await.expect("begin");
+        let user_id = insert_txn_user(&txn, "oidc-rollback@test.local").await;
+        if super::handle_new_user(&app.state, &txn, user_id, &provider, &serde_json::json!({}))
+            .await
+            .is_ok()
+        {
+            panic!("handle_new_user must fail when owner-role assignment fails");
+        }
+        drop(txn); // what execute_oidc_resolution does on Err: rollback
+
+        assert_eq!(
+            User::find().count(&app.db).await.expect("count"),
+            0,
+            "no user row may survive the rollback"
+        );
+        assert_eq!(app.state.settings.registration().mode, mode_before);
+    }
+
+    /// Spec test 5 (+ helper-publish split): first OIDC user's pre-assigned
+    /// default role is cleared, exactly the owner set remains, and the snapshot
+    /// is NOT published by handle_new_user (the NewUser commit owner does that).
+    #[tokio::test]
+    async fn oidc_callback_first_user_clears_preassigned_default_role() {
+        use crate::auth::registration::RegistrationMode;
+        use sea_orm::TransactionTrait as _;
+
+        let app = TestApp::new().await;
+        let provider_id = insert_active_oidc_provider(
+            &app.db,
+            app.state.default_tenant_id,
+            "First User Clear",
+            "first-user-clear",
+        )
+        .await;
+        let provider = oidc_provider::Entity::find_by_id(provider_id)
+            .one(&app.db)
+            .await
+            .expect("provider query")
+            .expect("provider row");
+
+        let txn = app.db.begin().await.expect("begin");
+        let user_id = insert_txn_user(&txn, "oidc-clear@test.local").await;
+        // Stand-in for resolve_oidc_user's best-effort default role (the legacy
+        // "user" role no longer exists; viewer overlaps the owner set, proving
+        // the Clear step ran — Keep would PK-conflict here).
+        super::super::auth::assign_viewer_role(&txn, app.state.default_tenant_id, user_id)
+            .await
+            .expect("pre-assign default role");
+        let (returned_id, reg) = match super::handle_new_user(
+            &app.state,
+            &txn,
+            user_id,
+            &provider,
+            &serde_json::json!({}),
+        )
+        .await
+        {
+            Ok(v) => v,
+            Err(_) => panic!("handle_new_user must succeed"),
+        };
+        txn.commit().await.expect("commit");
+
+        assert_eq!(returned_id, user_id);
+        assert!(
+            reg.is_some(),
+            "first user must yield a registration snapshot"
+        );
+        let mut expected: Vec<String> = [
+            "viewer",
+            "operator",
+            "service_manager",
+            "software_manager",
+            "host_manager",
+            "settings_manager",
+            "command_manager",
+            "system_administrator",
+        ]
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect();
+        expected.sort();
+        assert_eq!(
+            role_names_for_user(&app.db, app.state.default_tenant_id, user_id).await,
+            expected,
+            "exactly the owner role set — pre-assigned default cleared, no duplicates"
+        );
+        assert_ne!(
+            app.state.settings.registration().mode,
+            RegistrationMode::Closed,
+            "handle_new_user must not publish; the commit owner does"
+        );
+    }
+
+    /// Spec test 5b: pins the scoped-out sync_oidc_roles behavior — a
+    /// role-mapping provider governs the first user's roles (mapped set replaces
+    /// the owner set). Deliberate, pre-existing provider-as-role-authority
+    /// behavior; NOT a regression introduced by the bootstrap consolidation.
+    #[tokio::test]
+    async fn oidc_callback_role_mapping_provider_overrides_owner_roles() {
+        use sea_orm::TransactionTrait as _;
+
+        let app = TestApp::new().await;
+        let provider_id = insert_active_oidc_provider(
+            &app.db,
+            app.state.default_tenant_id,
+            "First User Mapped",
+            "first-user-mapped",
+        )
+        .await;
+        // Configure role mapping: claim "admin" → local role "operator".
+        // (ActiveModelTrait is already imported at audit_tests module level — do
+        // not re-import it here; only IntoActiveModel is new.)
+        {
+            use sea_orm::IntoActiveModel as _;
+            let provider_row = oidc_provider::Entity::find_by_id(provider_id)
+                .one(&app.db)
+                .await
+                .expect("provider query")
+                .expect("provider row");
+            let mut active = provider_row.into_active_model();
+            active.role_claim_path = Set(Some("roles".to_string()));
+            active.role_mapping = Set(oidc_provider::RoleMapping(std::collections::HashMap::from(
+                [("admin".to_string(), "operator".to_string())],
+            )));
+            active.update(&app.db).await.expect("update provider");
+        }
+        let provider = oidc_provider::Entity::find_by_id(provider_id)
+            .one(&app.db)
+            .await
+            .expect("provider query")
+            .expect("provider row");
+
+        let txn = app.db.begin().await.expect("begin");
+        let user_id = insert_txn_user(&txn, "oidc-mapped@test.local").await;
+        let claims = serde_json::json!({ "roles": ["admin"] });
+        if super::handle_new_user(&app.state, &txn, user_id, &provider, &claims)
+            .await
+            .is_err()
+        {
+            panic!("handle_new_user must succeed");
+        }
+        txn.commit().await.expect("commit");
+
+        assert_eq!(
+            role_names_for_user(&app.db, app.state.default_tenant_id, user_id).await,
+            vec!["operator".to_string()],
+            "role-mapping provider replaces the owner set with the mapped roles"
+        );
+    }
+
+    /// Spec test 4 (OIDC half) + post-commit publish coverage for the
+    /// oidc_complete_registration publish site: happy-path first user via the
+    /// route → 200, exactly the owner role set, snapshot Closed AFTER commit.
+    /// (The execute_oidc_resolution NewUser-arm publish site is not reachable
+    /// route-level without a mock IdP; it is covered by the final-verification
+    /// grep that every set_registration call sits after its commit.)
+    #[tokio::test]
+    async fn oidc_complete_registration_first_user_publishes_closed_after_commit() {
+        use crate::auth::registration::RegistrationMode;
+
+        let app = TestApp::new().await;
+        let client = app.client();
+        let provider_id = insert_active_oidc_provider(
+            &app.db,
+            app.state.default_tenant_id,
+            "Complete Registration Happy",
+            "complete-registration-happy",
+        )
+        .await;
+
+        let registration_code = "happy-first-user";
+        app.state
+            .oidc
+            .oidc_registration_store
+            .insert(PendingOidcRegistrationParams {
+                registration_code: registration_code.to_string(),
+                provider_id,
+                oidc_subject: "happy-subject".to_string(),
+                email: "happy@test.local".to_string(),
+                first_name: Some("Happy".to_string()),
+                last_name: Some("First".to_string()),
+                mapped_roles: Vec::new(),
+            })
+            .await
+            .expect("store pending registration");
+
+        let (status, _body): (http::StatusCode, serde_json::Value) = client
+            .post_json(
+                "/api/v1/auth/oidc/complete-registration",
+                &serde_json::json!({
+                    "registration_code": registration_code,
+                    "registration_token": "unused-for-open-registration"
+                }),
+            )
+            .send_json()
+            .await;
+        assert_eq!(status, http::StatusCode::OK);
+
+        let first = User::find()
+            .one(&app.db)
+            .await
+            .expect("query")
+            .expect("first user committed");
+        let mut expected: Vec<String> = [
+            "viewer",
+            "operator",
+            "service_manager",
+            "software_manager",
+            "host_manager",
+            "settings_manager",
+            "command_manager",
+            "system_administrator",
+        ]
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect();
+        expected.sort();
+        assert_eq!(
+            role_names_for_user(&app.db, app.state.default_tenant_id, first.id).await,
+            expected
+        );
+        assert_eq!(
+            app.state.settings.registration().mode,
+            RegistrationMode::Closed,
+            "snapshot published Closed after the route's commit"
+        );
+    }
+
+    /// Spec test 2 (complete-registration path, the fourth bug instance):
+    /// owner-role failure → 500 via the route, nothing committed, snapshot
+    /// untouched. RED pre-fix: the swallow committed a viewer-only first user.
+    #[tokio::test]
+    async fn oidc_complete_registration_rolls_back_first_user_on_owner_role_failure() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let provider_id = insert_active_oidc_provider(
+            &app.db,
+            app.state.default_tenant_id,
+            "Complete Registration Rollback",
+            "complete-registration-rollback",
+        )
+        .await;
+        let mode_before = app.state.settings.registration().mode;
+
+        break_owner_role_assignment(&app.db).await;
+
+        let registration_code = "rollback-first-user";
+        app.state
+            .oidc
+            .oidc_registration_store
+            .insert(PendingOidcRegistrationParams {
+                registration_code: registration_code.to_string(),
+                provider_id,
+                oidc_subject: "rollback-subject".to_string(),
+                email: "rollback@test.local".to_string(),
+                first_name: Some("Roll".to_string()),
+                last_name: Some("Back".to_string()),
+                mapped_roles: Vec::new(),
+            })
+            .await
+            .expect("store pending registration");
+
+        let (status, _body): (http::StatusCode, serde_json::Value) = client
+            .post_json(
+                "/api/v1/auth/oidc/complete-registration",
+                &serde_json::json!({
+                    "registration_code": registration_code,
+                    "registration_token": "unused-for-open-registration"
+                }),
+            )
+            .send_json()
+            .await;
+        assert_eq!(status, http::StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            User::find().count(&app.db).await.expect("count"),
+            0,
+            "transaction must roll back: no user row committed"
+        );
+        assert_eq!(app.state.settings.registration().mode, mode_before);
     }
 }
