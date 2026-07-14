@@ -616,11 +616,16 @@ Reusable helpers live in `crates/shared/db/src/migration/helpers.rs` (imported a
 
 | Helper                                       | Purpose                                                                |
 | -------------------------------------------- | ---------------------------------------------------------------------- |
-| `set_foreign_keys(manager, enabled)`         | Suspend/resume FK enforcement on SQLite (no-op on PostgreSQL)          |
 | `check_crash_recovery(manager, table, temp)` | Detect partial previous runs and return the appropriate recovery state |
 | `drop_original(manager, table)`              | Drop the original table after data has been copied to the temp table   |
 | `rename_temp(manager, temp, canonical)`      | Rename the temp table to the canonical name                            |
 | `is_sqlite(manager)`                         | Check whether the current backend is SQLite                            |
+
+FK enforcement during a table recreation is no longer a migration author's concern: it is owned
+end-to-end by the migration runner, not by individual migrations. See
+[Runner-owned FK lifecycle](#runner-owned-fk-lifecycle-file-backed-vs-in-memory-sqlite) below
+for the mechanism. Migrations only need `check_crash_recovery`, `drop_original`, `rename_temp`,
+and `is_sqlite`.
 
 #### Crash recovery (three-state model)
 
@@ -642,37 +647,120 @@ partial temp table and returns `Normal`. In State C it returns `RenameOnly`.
 use crate::migration::helpers::{self, CrashRecoveryState};
 
 async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-    // 1. Suspend FK enforcement (prevents violations during the swap).
-    helpers::set_foreign_keys(manager, false).await?;
-
-    // 2. Detect and recover from partial previous runs.
+    // 1. Detect and recover from partial previous runs.
     let state = helpers::check_crash_recovery(
         manager, "my_table", "my_table_new",
     ).await?;
 
     if state == CrashRecoveryState::Normal {
-        // 3. Create the replacement table with the new schema.
+        // 2. Create the replacement table with the new schema.
         manager.create_table(build_new_schema()).await?;
 
-        // 4. Copy data from old → new.
+        // 3. Copy data from old → new.
         copy_data(manager).await?;
 
-        // 5. Drop the original table (indexes are dropped implicitly).
+        // 4. Drop the original table (indexes are dropped implicitly).
         helpers::drop_original(manager, "my_table").await?;
     }
     // If RenameOnly, the temp table already has the complete dataset.
 
-    // 6. Rename temp → canonical.
+    // 5. Rename temp → canonical.
     helpers::rename_temp(manager, "my_table_new", "my_table").await?;
 
-    // 7. Recreate indexes (they were dropped with the old table).
+    // 6. Recreate indexes (they were dropped with the old table).
     create_indexes(manager).await?;
-
-    // 8. Re-enable FK enforcement.
-    helpers::set_foreign_keys(manager, true).await?;
     Ok(())
 }
 ```
+
+Note what is **absent** from this pattern: no `set_foreign_keys` calls. FK suspension is no
+longer a per-migration responsibility — the migration runner establishes it at the connection
+level before any migration code runs. See
+[Runner-owned FK lifecycle](#runner-owned-fk-lifecycle-file-backed-vs-in-memory-sqlite).
+
+#### Runner-owned FK lifecycle (file-backed vs. in-memory SQLite)
+
+`run_migrations_with_plugins()` (`crates/shared/db/src/migration/mod.rs`) owns the entire FK
+enforcement lifecycle for a migration run. No migration — table recreation or otherwise — needs
+to touch `PRAGMA foreign_keys` itself. The strategy differs by backend and, on SQLite, by
+whether the database is file-backed or in-memory:
+
+- **File-backed SQLite** (the production path): migrations run on a **dedicated
+  single-connection pool** that is opened with `foreign_keys(false)` at connect time — not via
+  a `PRAGMA` executed later. All pending migrations run inside one wrapping transaction on that
+  pool for all-or-nothing atomicity, matching the pre-existing single-transaction guarantee. The
+  caller's own connection pool (FK ON) is never touched. After the transaction commits, the
+  runner closes the dedicated pool and runs a post-commit `PRAGMA foreign_key_check` **on the
+  caller's pool**, which fails migration startup — naming every offending table — if it finds
+  any violation.
+- **In-memory SQLite** (test-only): migrations run inside the **caller's own pool**, with FK
+  enforcement **ON** for the whole run, still wrapped in one transaction, and still gated by the
+  same post-commit `foreign_key_check`. Any FK violation fails loudly at the offending
+  statement.
+- **PostgreSQL**: unchanged — a plain wrapping transaction, no FK toggling of any kind.
+
+**Why the in-memory path deliberately differs from the file-backed path:** `sqlite::memory:`
+cannot be reopened by a second connection pool — a second pool connecting to the same
+in-memory URL gets a **different, empty** database, not the caller's data. Since the dedicated
+FK-OFF pool trick used for file-backed databases is unavailable for `:memory:`, in-memory runs
+keep using the caller's pool directly, which means FK enforcement stays on for the duration of
+the migration run. This is a deliberate divergence, not an oversight: the two paths reach the
+same guarantee (a post-commit `foreign_key_check` gate) by different means because only one of
+them can use a second connection.
+
+**Why FK-OFF matters for table recreation specifically:** `DROP TABLE` on a table with FK
+enforcement ON implicitly performs `ON DELETE CASCADE` for every child row referencing it —
+silently deleting data with no `DELETE` statement to review. Opening the migration connection
+with FK enforcement off from the start (rather than toggling a `PRAGMA` mid-migration, which is
+what `set_foreign_keys()` used to do) guarantees the `DROP TABLE` in a table recreation never
+cascades, because the file-backed path never runs with FK ON at all during migrations.
+
+**What the post-commit gate does and does not catch:** `PRAGMA foreign_key_check` finds orphan
+rows — child rows whose FK target no longer exists. It **cannot** detect a cascade wipe,
+because a cascade delete leaves the database perfectly FK-consistent (the child rows are just
+gone). Cascade safety on the file-backed path comes entirely from the migration connection being
+born with FK OFF, not from this gate. The gate is a safety net for accidental orphan-creating
+mistakes, not a substitute for the FK-OFF connection.
+
+> **Migration-authoring invariant (human-enforced, no CI gate):** no recreated parent table may
+> have cascade-child rows seeded by an earlier migration. Since file-backed migrations always
+> run with FK OFF, a cascade wipe on that path would happen silently and would not be caught by
+> the post-commit `foreign_key_check` gate (see above). This is stated explicitly in the
+> [migration-authoring checklist](#migration-authoring-checklist-for-table-recreation) below —
+> verify it by hand for every table recreation migration that touches a table with existing
+> child rows.
+
+#### Migration-authoring checklist (for table recreation)
+
+Before merging a table recreation migration, verify:
+
+- [ ] The migration uses `check_crash_recovery`, `drop_original`, `rename_temp` — no
+      `set_foreign_keys` call (FK suspension is the runner's job, not the migration's).
+- [ ] **No recreated parent table has cascade-child rows seeded by an earlier migration.** This
+      is human-enforced — there is no CI gate for it. A cascade wipe on the file-backed
+      (FK-OFF) production path is silent and passes the post-commit `foreign_key_check` gate,
+      because cascades leave the database FK-consistent. If the parent table you are recreating
+      has child rows via `ON DELETE CASCADE` that earlier migrations may have populated, verify
+      by hand (or add an explicit pre-recreation row count / backup step) before merging.
+- [ ] `down()` is implemented, even if it is a documented no-op.
+- [ ] Both `up()` and `down()` are exercised by a test that runs against a real migrated
+      database (see [Running migrations in tests](#running-migrations-in-tests)).
+
+> **Data-loss advisory (SQLite upgrades through `m20260414_000001`, 2026-04):** every released
+> tag of every workspace binary (`uptrakit-controller-v0.0.1` through `uptrakit-controller-v0.0.5`
+> and all other per-crate release tags cut 2026-06-05 through 2026-06-11) ran the
+> `update_history` recreation in `m20260414_000001_update_execution_ownership.rs` with FK
+> enforcement active — the single-transaction migration wrapper (introduced 2026-03-04)
+> shipped without the FK-OFF dedicated connection this document now describes. The implicit
+> `ON DELETE CASCADE` fired by that migration's `DROP TABLE` cascade-cleared all
+> `update_output_lines` rows (per-update output history) for any populated SQLite installation
+> that upgraded through a version containing that migration. The data is not recoverable, and
+> no code remediation is possible for installs that already ran it — the runner-owned FK
+> lifecycle in this document fixes the underlying cause for all migrations going forward, but
+> cannot retroactively restore rows already cascade-deleted. If you administer a long-lived
+> SQLite deployment that upgraded through one of the affected releases, `update_output_lines`
+> for updates predating that upgrade will be empty; this does not affect `update_history` itself
+> or any other table.
 
 #### Data copy strategies
 
@@ -748,14 +836,16 @@ db.execute(&drop).await?;
 Raw SQL is accepted **only** for constructs that have no sea_query equivalent. Every such call
 **must** include an inline comment naming the specific limitation.
 
-| Construct                                            | Reason sea_query cannot express it                                   |
-| ---------------------------------------------------- | -------------------------------------------------------------------- |
-| `CREATE TABLE new AS SELECT * FROM old`              | SQLite-specific shorthand; no builder equivalent                     |
-| `INSERT INTO … SELECT strftime(…)`                   | `strftime` is a SQLite-specific function                             |
-| `SELECT typeof(col) FROM …`                          | `typeof()` is SQLite-specific; use `query_all_raw` / `query_one_raw` |
-| `PRAGMA foreign_keys`                                | SQLite-specific pragma; no sea_query equivalent                      |
-| `SELECT … WHERE col LIKE pattern` in `query_all_raw` | Read-only SQLite-specific pattern matching                           |
-| `CASE WHEN` in `ON CONFLICT DO UPDATE`               | SeaORM's `on_conflict` builder limitation                            |
+| Construct                                            | Reason sea_query cannot express it                                                                                                                                                      |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CREATE TABLE new AS SELECT * FROM old`              | SQLite-specific shorthand; no builder equivalent                                                                                                                                        |
+| `INSERT INTO … SELECT strftime(…)`                   | `strftime` is a SQLite-specific function                                                                                                                                                |
+| `SELECT typeof(col) FROM …`                          | `typeof()` is SQLite-specific; use `query_all_raw` / `query_one_raw`                                                                                                                    |
+| `PRAGMA foreign_keys`                                | SQLite-specific pragma; no sea_query equivalent                                                                                                                                         |
+| `PRAGMA foreign_key_check`                           | SQLite-specific statement with no sea_query equivalent; used only by the migration runner (`crates/shared/db/src/migration/mod.rs`); each call site carries the standard inline comment |
+| `PRAGMA database_list`                               | SQLite-specific statement with no sea_query equivalent; used only by the migration runner (`crates/shared/db/src/migration/mod.rs`); each call site carries the standard inline comment |
+| `SELECT … WHERE col LIKE pattern` in `query_all_raw` | Read-only SQLite-specific pattern matching                                                                                                                                              |
+| `CASE WHEN` in `ON CONFLICT DO UPDATE`               | SeaORM's `on_conflict` builder limitation                                                                                                                                               |
 
 **Inline comment requirement:**
 
@@ -939,6 +1029,12 @@ create parent rows rather than disabling FK checks.
 
 Disabling FK enforcement to avoid inserting parent rows is **forbidden**.
 Create the required parent rows instead:
+
+> This rule targets migration and test **authors** reaching for the pragma as a shortcut. It
+> does not apply to the migration runner's own connect-time FK-OFF connection for file-backed
+> SQLite table recreation — that is a distinct, deliberate mechanism owned by the runner, not a
+> violation of this rule. See
+> [Runner-owned FK lifecycle](#runner-owned-fk-lifecycle-file-backed-vs-in-memory-sqlite).
 
 ```rust
 // ✗ Wrong — disabling FKs to work around missing parent data
