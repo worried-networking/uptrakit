@@ -242,7 +242,17 @@ pub async fn run_migrations_debug(db: &DatabaseConnection) -> Result<(), sea_orm
 ///
 /// Core and plugin migrations are combined into a single migrator so that
 /// SeaORM sees the complete migration list and does not error on "missing"
-/// entries. All are executed inside a single transaction.
+/// entries.
+///
+/// Strategy by backend: file-backed SQLite runs on a dedicated
+/// single-connection pool born with `foreign_keys=false`, followed by a
+/// post-commit `PRAGMA foreign_key_check` gate; in-memory SQLite runs inside
+/// the caller-pool transaction (FK ON) and is gated by the same check;
+/// PostgreSQL runs inside a plain transaction, unchanged. On SQLite,
+/// sea-orm-migration runs each individual migration with `use_txn = false`
+/// (`should_use_transaction` is Postgres-only, `exec.rs:184–188` in the
+/// pinned crate), so the runner's outer transaction is the ONLY transaction
+/// and provides all-or-nothing atomicity.
 ///
 /// `plugin_provider` is a closure (not a `Vec`) because
 /// `Box<dyn MigrationTrait>` is not `Clone` and sea-orm-migration may call
@@ -252,16 +262,40 @@ pub async fn run_migrations_debug(db: &DatabaseConnection) -> Result<(), sea_orm
 /// # Errors
 ///
 /// Returns any [`sea_orm::DbErr`] from opening the transaction, applying a
-/// migration, or committing.
+/// migration, or committing. Also returns `DbErr::Custom` when the
+/// post-commit `foreign_key_check` finds violations, and connection errors
+/// from building the dedicated pool.
 pub async fn run_migrations_with_plugins(
     db: &DatabaseConnection,
     plugin_provider: impl Fn() -> Vec<Box<dyn MigrationTrait>> + Send + Sync + 'static,
 ) -> Result<(), sea_orm::DbErr> {
     use sea_orm::TransactionTrait;
-    use sea_orm_migration::MigratorTraitSelf as _;
     let migrator = CombinedMigrator {
         plugin_provider: Box::new(plugin_provider),
     };
+
+    // Backend gate BEFORE get_sqlite_connection_pool(): that accessor
+    // panics on non-SQLite backends.
+    #[cfg(feature = "db-sqlite")]
+    if db.get_database_backend() == sea_orm::DbBackend::Sqlite {
+        if sqlite_main_db_file(db).await?.is_some() {
+            return run_on_dedicated_sqlite_pool(db, &migrator).await;
+        }
+        // In-memory: a second pool would open a DIFFERENT empty database,
+        // so keep the caller-pool transaction. FK stays ON here —
+        // violations fail loudly at statement time — and the post-commit
+        // gate still runs. (No currently-recreated parent table has
+        // cascade-child rows populated by earlier migrations; the
+        // file-backed production path is immune by construction.)
+        use sea_orm_migration::MigratorTraitSelf as _;
+        let txn = db.begin().await?;
+        migrator.up(&txn, None).await?;
+        txn.commit().await?;
+        return sqlite_foreign_key_check(db).await;
+    }
+
+    // PostgreSQL (and any non-SQLite backend): unchanged.
+    use sea_orm_migration::MigratorTraitSelf as _;
     let txn = db.begin().await?;
     migrator.up(&txn, None).await?;
     txn.commit().await
@@ -289,6 +323,115 @@ impl sea_orm_migration::MigratorTraitSelf for CombinedMigrator {
         }
         all
     }
+}
+
+/// Return the backing file path of the `main` SQLite database, or `None`
+/// for in-memory/temporary databases.
+///
+/// Detection deliberately avoids `SqliteConnectOptions::get_filename()`:
+/// sqlx rewrites `sqlite::memory:` URLs to an internal
+/// `file:sqlx-in-memory-{n}` filename, which would misroute every in-memory
+/// caller onto the file-backed path. `PRAGMA database_list` reports an
+/// empty `file` column for in-memory databases and an absolute path for
+/// file-backed ones (documented SQLite behavior, independent of sqlx
+/// internals).
+#[cfg(feature = "db-sqlite")]
+async fn sqlite_main_db_file(db: &DatabaseConnection) -> Result<Option<String>, sea_orm::DbErr> {
+    use sea_orm::TryGetable;
+    // `PRAGMA database_list` is a SQLite-specific statement with no
+    // sea_query equivalent.
+    let rows = db
+        .query_all_raw(sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            "PRAGMA database_list",
+        ))
+        .await?;
+    for row in rows {
+        // Columns: seq(0), name(1), file(2).
+        let name = String::try_get_by_index(&row, 1)?;
+        if name == "main" {
+            let file = String::try_get_by_index(&row, 2)?;
+            return Ok((!file.is_empty()).then_some(file));
+        }
+    }
+    Ok(None)
+}
+
+/// Post-migration integrity gate: fail loud instead of silently committing
+/// FK-inconsistent data.
+///
+/// Note: a cascade wipe is UNDETECTABLE here — cascades leave the database
+/// FK-consistent. This gate catches orphan-class mistakes; cascade safety
+/// on the file-backed path comes from the migration connection being born
+/// with FK OFF.
+#[cfg(feature = "db-sqlite")]
+async fn sqlite_foreign_key_check(db: &DatabaseConnection) -> Result<(), sea_orm::DbErr> {
+    use sea_orm::TryGetable;
+    // `PRAGMA foreign_key_check` is a SQLite-specific statement with no
+    // sea_query equivalent.
+    let rows = db
+        .query_all_raw(sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            "PRAGMA foreign_key_check",
+        ))
+        .await?;
+    if rows.is_empty() {
+        return Ok(());
+    }
+    let mut tables = rows
+        .iter()
+        .map(|row| String::try_get_by_index(row, 0))
+        .collect::<Result<Vec<_>, _>>()?;
+    tables.sort();
+    tables.dedup();
+    Err(sea_orm::DbErr::Custom(format!(
+        "post-migration PRAGMA foreign_key_check found foreign key violations in: {}",
+        tables.join(", ")
+    )))
+}
+
+/// Run migrations on a dedicated single-connection pool born with
+/// `foreign_keys=false`.
+///
+/// `PRAGMA foreign_keys` is a documented no-op inside a transaction, so FK
+/// suspension must be a connection property established at connect time.
+/// The dedicated pool preserves the two properties the single wrapping
+/// transaction exists for (single-physical-connection DDL visibility,
+/// all-or-nothing atomicity) while guaranteeing table-recreation migrations
+/// never fire `ON DELETE CASCADE` via `DROP TABLE`. The caller's pool
+/// (FK ON) is untouched.
+#[cfg(feature = "db-sqlite")]
+async fn run_on_dedicated_sqlite_pool(
+    db: &DatabaseConnection,
+    migrator: &CombinedMigrator,
+) -> Result<(), sea_orm::DbErr> {
+    use sea_orm::{SqlxSqliteConnector, TransactionTrait};
+    use sea_orm_migration::MigratorTraitSelf as _;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    // Clone-with-override: busy_timeout / journal_mode / synchronous are
+    // plain struct fields on SqliteConnectOptions and carry over verbatim.
+    let connect_opts = (*db.get_sqlite_connection_pool().connect_options())
+        .clone()
+        .foreign_keys(false);
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(connect_opts)
+        .await
+        .map_err(|e| {
+            sea_orm::DbErr::Conn(sea_orm::RuntimeErr::SqlxError(std::sync::Arc::new(e)))
+        })?;
+    let migration_db = SqlxSqliteConnector::from_sqlx_sqlite_pool(pool);
+
+    let txn = migration_db.begin().await?;
+    migrator.up(&txn, None).await?;
+    txn.commit().await?;
+
+    let check = sqlite_foreign_key_check(&migration_db).await;
+    if let Err(e) = migration_db.close().await {
+        tracing::warn!(error = %e, "failed to close dedicated migration pool");
+    }
+    check
 }
 
 #[cfg(test)]
@@ -1146,6 +1289,267 @@ mod tests {
         let (a, b) = (h1.await.expect("task a"), h2.await.expect("task b"));
         assert!(a, "first concurrent run must apply plugin migrations");
         assert!(b, "second concurrent run must apply plugin migrations");
+    }
+
+    /// Regression for the FK-suspension no-op: `m20260414_000001` drops and
+    /// recreates `update_history`; with FK enforcement ON inside the migration
+    /// transaction, the implicit DELETE of `DROP TABLE` cascade-wiped all
+    /// `update_output_lines` rows. Runs on a FILE-backed DB (the production
+    /// path); asserts through the ORIGINAL caller pool to also pin cross-pool
+    /// schema visibility. Fails on the pre-fix runner, passes with the
+    /// dedicated FK-OFF migration pool.
+    #[tokio::test]
+    async fn file_backed_recreation_does_not_cascade_wipe_child_rows() {
+        use sea_orm::TryGetable;
+
+        let dir = tempfile::tempdir().expect("tmp dir");
+        let db_path = dir.path().join("cascade.db");
+        let url = format!("sqlite://{}?mode=rwc", db_path.display());
+        let mut opt = ConnectOptions::new(url);
+        // Single connection: the setup below calls `Migrator::up` with a
+        // partial step count directly (bypassing the transaction-wrapped
+        // runner) to stop short of the recreation migration. That raw,
+        // partial-step call is the pre-existing multi-connection DDL
+        // visibility bug this module's docs describe (`run_migrations`
+        // exists to wrap around it) — a multi-connection pool here would
+        // fail this fixture's setup before ever reaching the code path
+        // under test. The dedicated migration pool the fix opens in
+        // `run_on_dedicated_sqlite_pool` always uses `max_connections(1)`
+        // regardless of this pool's size, so the production path under
+        // test is unaffected by this connection count.
+        opt.max_connections(1).min_connections(1);
+        let db = Database::connect(opt).await.expect("file db");
+
+        // Apply everything strictly before the update_history recreation.
+        let before_recreation = Migrator::migrations()
+            .iter()
+            .position(|m| m.name() == "m20260414_000001_update_execution_ownership")
+            .expect("recreation migration must exist") as u32;
+        Migrator::up(&db, Some(before_recreation))
+            .await
+            .expect("migrations before the recreation should run");
+
+        // The initial migration seeds a default tenant — reuse it (FK ON here).
+        let tenant_row = db
+            .query_one(
+                &Query::select()
+                    .column(Alias::new("id"))
+                    .from(Alias::new("tenants"))
+                    .to_owned(),
+            )
+            .await
+            .expect("tenant query should succeed")
+            .expect("default tenant is seeded by the initial migration");
+        let tenant_id = uuid::Uuid::try_get_by_index(&tenant_row, 0).expect("tenant id");
+
+        let now = time::OffsetDateTime::now_utc();
+        let host_id = uuid::Uuid::now_v7();
+        db.execute(
+            &Query::insert()
+                .into_table(Alias::new("hosts"))
+                .columns([
+                    Alias::new("id"),
+                    Alias::new("tenant_id"),
+                    Alias::new("machine_id"),
+                    Alias::new("hostname"),
+                    Alias::new("friendly_name"),
+                    Alias::new("created_at"),
+                    Alias::new("updated_at"),
+                ])
+                .values_panic([
+                    host_id.into(),
+                    tenant_id.into(),
+                    "cascade-test-machine".into(),
+                    "cascade-test-host".into(),
+                    "Cascade Test Host".into(),
+                    now.into(),
+                    now.into(),
+                ])
+                .to_owned(),
+        )
+        .await
+        .expect("host insert should succeed");
+
+        let item_id = uuid::Uuid::now_v7();
+        db.execute(
+            &Query::insert()
+                .into_table(Alias::new("software_items"))
+                .columns([
+                    Alias::new("id"),
+                    Alias::new("tenant_id"),
+                    Alias::new("name"),
+                    Alias::new("created_at"),
+                    Alias::new("updated_at"),
+                ])
+                .values_panic([
+                    item_id.into(),
+                    tenant_id.into(),
+                    "cascade-test-item".into(),
+                    now.into(),
+                    now.into(),
+                ])
+                .to_owned(),
+        )
+        .await
+        .expect("software item insert should succeed");
+
+        let history_id = uuid::Uuid::now_v7();
+        db.execute(
+            &Query::insert()
+                .into_table(Alias::new("update_history"))
+                .columns([
+                    Alias::new("id"),
+                    Alias::new("tenant_id"),
+                    Alias::new("host_id"),
+                    Alias::new("software_item_id"),
+                    Alias::new("status"),
+                    Alias::new("created_at"),
+                ])
+                .values_panic([
+                    history_id.into(),
+                    tenant_id.into(),
+                    host_id.into(),
+                    item_id.into(),
+                    "completed".into(),
+                    now.into(),
+                ])
+                .to_owned(),
+        )
+        .await
+        .expect("update history insert should succeed");
+
+        for i in 0..2 {
+            db.execute(
+                &Query::insert()
+                    .into_table(Alias::new("update_output_lines"))
+                    .columns([
+                        Alias::new("id"),
+                        Alias::new("update_history_id"),
+                        Alias::new("stream"),
+                        Alias::new("output"),
+                        Alias::new("created_at"),
+                    ])
+                    .values_panic([
+                        uuid::Uuid::now_v7().into(),
+                        history_id.into(),
+                        "stdout".into(),
+                        format!("line {i}").into(),
+                        now.into(),
+                    ])
+                    .to_owned(),
+            )
+            .await
+            .expect("output line insert should succeed");
+        }
+
+        // Guard against false-RED: prove the children exist BEFORE the
+        // recreation, so a silently-failed fixture insert cannot masquerade
+        // as the cascade bug.
+        let rows_before = db
+            .query_all(
+                &Query::select()
+                    .column(Alias::new("id"))
+                    .from(Alias::new("update_output_lines"))
+                    .and_where(Expr::col(Alias::new("update_history_id")).eq(history_id))
+                    .to_owned(),
+            )
+            .await
+            .expect("pre-migration child row query should succeed");
+        assert_eq!(rows_before.len(), 2, "fixture must insert both child rows");
+
+        // Run the remaining migrations through the real runner.
+        run_migrations(&db)
+            .await
+            .expect("remaining migrations should run");
+
+        // Children must survive; query through the ORIGINAL caller pool.
+        let rows = db
+            .query_all(
+                &Query::select()
+                    .column(Alias::new("id"))
+                    .from(Alias::new("update_output_lines"))
+                    .and_where(Expr::col(Alias::new("update_history_id")).eq(history_id))
+                    .to_owned(),
+            )
+            .await
+            .expect("child row query should succeed");
+        assert_eq!(
+            rows.len(),
+            2,
+            "update_output_lines children must survive the update_history recreation"
+        );
+    }
+
+    /// The post-commit gate must FAIL LOUD, naming the offending table.
+    #[tokio::test]
+    async fn foreign_key_check_reports_violations() {
+        // Single-connection pool so the FK-OFF pragma and the inserts share a
+        // physical connection.
+        let mut opt = ConnectOptions::new("sqlite::memory:");
+        opt.max_connections(1);
+        let db = Database::connect(opt).await.expect("db");
+        db.execute_unprepared("PRAGMA foreign_keys = OFF")
+            .await
+            .expect("fk off");
+        db.execute_unprepared("CREATE TABLE parent (id INTEGER PRIMARY KEY)")
+            .await
+            .expect("parent table");
+        db.execute_unprepared(
+            "CREATE TABLE child (id INTEGER PRIMARY KEY, \
+             parent_id INTEGER NOT NULL REFERENCES parent(id))",
+        )
+        .await
+        .expect("child table");
+        db.execute_unprepared("INSERT INTO child (id, parent_id) VALUES (1, 999)")
+            .await
+            .expect("orphan insert");
+
+        let err = sqlite_foreign_key_check(&db)
+            .await
+            .expect_err("orphaned child row must be reported");
+        assert!(
+            err.to_string().contains("child"),
+            "error must name the offending table, got: {err}"
+        );
+    }
+
+    /// And the success path: a clean DB passes the gate.
+    #[tokio::test]
+    async fn foreign_key_check_passes_on_clean_db() {
+        let db = test_db().await;
+        run_migrations(&db).await.expect("migrations");
+        sqlite_foreign_key_check(&db)
+            .await
+            .expect("freshly migrated DB must be FK-consistent");
+    }
+
+    /// `PRAGMA database_list` probe: empty `file` for in-memory, path for file.
+    #[tokio::test]
+    async fn sqlite_main_db_file_detects_memory_vs_file() {
+        let mem = test_db().await;
+        assert!(
+            sqlite_main_db_file(&mem)
+                .await
+                .expect("probe should succeed")
+                .is_none(),
+            "in-memory DB must probe as None"
+        );
+
+        let dir = tempfile::tempdir().expect("tmp dir");
+        let url = format!(
+            "sqlite://{}?mode=rwc",
+            dir.path().join("probe.db").display()
+        );
+        let file_db = Database::connect(ConnectOptions::new(url))
+            .await
+            .expect("file db");
+        assert!(
+            sqlite_main_db_file(&file_db)
+                .await
+                .expect("probe should succeed")
+                .is_some(),
+            "file-backed DB must probe as Some(path)"
+        );
     }
 
     /// The viewer role must NOT have manage_commands.
