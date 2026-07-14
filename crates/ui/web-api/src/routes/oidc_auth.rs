@@ -1148,8 +1148,10 @@ async fn handle_linked_user(
 /// Handle the `NewUser` resolution: check if this is the first user (owner
 /// setup) and sync OIDC roles within the transaction.
 ///
-/// Returns `Ok(user_id)` so the caller can commit the transaction and create
-/// the exchange redirect, or `Err(Response)` on failure.
+/// Returns `Ok((user_id, registration))` so the caller can commit the
+/// transaction, publish the returned registration snapshot post-commit, and
+/// create the exchange redirect; `Err(Response)` on failure (the caller drops
+/// the transaction, rolling back).
 async fn handle_new_user(
     state: &AppState,
     txn: &sea_orm::DatabaseTransaction,
@@ -1160,7 +1162,7 @@ async fn handle_new_user(
     // Atomically check if this is the first user (threshold 1 because the
     // user was just created by resolve_oidc_user) and handle owner role +
     // initial setup inside the same transaction. Clear the default role
-    // resolve_oidc_user may have pre-assigned. Any failure aborts the OIDC
+    // resolve_oidc_user may have pre-assigned. A setup failure aborts the OIDC
     // registration; the caller drops the transaction (rollback).
     let first_user_registration = match super::auth::handle_first_user_setup(
         txn,
