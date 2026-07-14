@@ -975,14 +975,21 @@ with plugin-contributed ones into the combined migrator:
 
 ```rust
 // crates/core/controller-runtime/src/migration/mod.rs
-let mut plugin_migrations: Vec<Box<dyn MigrationTrait>> = /* plugin-supplied */;
+// `run_migrations_with_plugins` takes a provider CLOSURE, not a Vec:
+// `Box<dyn MigrationTrait>` is not `Clone` and sea-orm-migration may call
+// `migrations()` more than once per run, so each call regenerates the list.
+let plugin_provider = || {
+    let mut plugin_migrations: Vec<Box<dyn MigrationTrait>> = /* plugin-supplied */;
 
-#[cfg(feature = "embedded-ssh-agent")]
-plugin_migrations.extend(
-    uptrakit_agent_ssh_runtime::AgentSshHandler::service_migrations(),
-);
+    #[cfg(feature = "embedded-ssh-agent")]
+    plugin_migrations.extend(
+        uptrakit_agent_ssh_runtime::AgentSshHandler::service_migrations(),
+    );
 
-uptrakit_shared_db::migration::run_migrations_with_plugins(db, plugin_migrations).await?;
+    plugin_migrations
+};
+
+uptrakit_shared_db::migration::run_migrations_with_plugins(db, plugin_provider).await?;
 ```
 
 ### Existing deployments and the frozen-list constraint

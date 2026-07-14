@@ -423,15 +423,19 @@ async fn run_on_dedicated_sqlite_pool(
         })?;
     let migration_db = SqlxSqliteConnector::from_sqlx_sqlite_pool(pool);
 
-    let txn = migration_db.begin().await?;
-    migrator.up(&txn, None).await?;
-    txn.commit().await?;
-
-    let check = sqlite_foreign_key_check(&migration_db).await;
+    // Run migration + post-commit gate, then ALWAYS close the dedicated pool
+    // — even on a begin/up/commit error — so cleanup never depends on `Drop`.
+    let result = async {
+        let txn = migration_db.begin().await?;
+        migrator.up(&txn, None).await?;
+        txn.commit().await?;
+        sqlite_foreign_key_check(&migration_db).await
+    }
+    .await;
     if let Err(e) = migration_db.close().await {
         tracing::warn!(error = %e, "failed to close dedicated migration pool");
     }
-    check
+    result
 }
 
 #[cfg(test)]
