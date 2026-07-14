@@ -36,7 +36,7 @@ zeroize = { workspace = true }
 [dev-dependencies]
 sea-orm = { workspace = true, features = ["mock"] }
 tempfile = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
 
 [lints]
 workspace = true

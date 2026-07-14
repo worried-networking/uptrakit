@@ -189,11 +189,13 @@ impl MigratorTrait for Migrator {
 ///
 /// For the controller, prefer [`run_migrations_with_plugins`] to also include
 /// plugin-contributed migrations.
+///
+/// # Errors
+///
+/// Returns any [`sea_orm::DbErr`] from opening the transaction, applying a
+/// migration, or committing.
 pub async fn run_migrations(db: &DatabaseConnection) -> Result<(), sea_orm::DbErr> {
-    use sea_orm::TransactionTrait;
-    let txn = db.begin().await?;
-    Migrator::up(&txn, None).await?;
-    txn.commit().await
+    run_migrations_with_plugins(db, Vec::new).await
 }
 
 /// Run all pending migrations one at a time, reporting which migration fails.
@@ -241,54 +243,50 @@ pub async fn run_migrations_debug(db: &DatabaseConnection) -> Result<(), sea_orm
 /// Core and plugin migrations are combined into a single migrator so that
 /// SeaORM sees the complete migration list and does not error on "missing"
 /// entries. All are executed inside a single transaction.
+///
+/// `plugin_provider` is a closure (not a `Vec`) because
+/// `Box<dyn MigrationTrait>` is not `Clone` and sea-orm-migration may call
+/// `migrations()` more than once per run — each call must regenerate the
+/// full list.
+///
+/// # Errors
+///
+/// Returns any [`sea_orm::DbErr`] from opening the transaction, applying a
+/// migration, or committing.
 pub async fn run_migrations_with_plugins(
     db: &DatabaseConnection,
-    plugin_migrations: Vec<Box<dyn MigrationTrait>>,
+    plugin_provider: impl Fn() -> Vec<Box<dyn MigrationTrait>> + Send + Sync + 'static,
 ) -> Result<(), sea_orm::DbErr> {
     use sea_orm::TransactionTrait;
+    use sea_orm_migration::MigratorTraitSelf as _;
+    let migrator = CombinedMigrator {
+        plugin_provider: Box::new(plugin_provider),
+    };
     let txn = db.begin().await?;
-    CombinedMigrator::set(plugin_migrations);
-    CombinedMigrator::up(&txn, None).await?;
-    CombinedMigrator::clear();
+    migrator.up(&txn, None).await?;
     txn.commit().await
 }
 
-/// Dynamic migrator that combines core + plugin migrations into one list.
+/// Migrator that combines core + plugin migrations into one list.
 ///
-/// SeaORM's `MigratorTrait` requires a static `fn migrations()`, so we use a
-/// thread-local to pass the plugin migrations at runtime and combine them
-/// with the core migrations from [`Migrator`].
-struct CombinedMigrator;
-
-std::thread_local! {
-    static PLUGIN_MIGRATIONS: std::cell::RefCell<Vec<Box<dyn MigrationTrait>>> =
-        const { std::cell::RefCell::new(Vec::new()) };
+/// Instance-based (`MigratorTraitSelf`), so each run owns its migrator and
+/// there is no cross-task state: no thread-local, no global slot, and
+/// concurrent runs with different providers are trivially safe.
+struct CombinedMigrator {
+    plugin_provider: Box<dyn Fn() -> Vec<Box<dyn MigrationTrait>> + Send + Sync>,
 }
 
-impl CombinedMigrator {
-    fn set(migrations: Vec<Box<dyn MigrationTrait>>) {
-        PLUGIN_MIGRATIONS.with(|m| *m.borrow_mut() = migrations);
-    }
-
-    fn clear() {
-        PLUGIN_MIGRATIONS.with(|m| m.borrow_mut().clear());
-    }
-}
-
-#[async_trait::async_trait]
-impl MigratorTrait for CombinedMigrator {
-    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        let core = Migrator::migrations();
+impl sea_orm_migration::MigratorTraitSelf for CombinedMigrator {
+    fn migrations(&self) -> Vec<Box<dyn MigrationTrait>> {
+        let core = <Migrator as MigratorTrait>::migrations();
         let core_names: std::collections::HashSet<String> =
             core.iter().map(|m| m.name().to_owned()).collect();
         let mut all = core;
-        PLUGIN_MIGRATIONS.with(|pm| {
-            for m in pm.borrow_mut().drain(..) {
-                if !core_names.contains(m.name()) {
-                    all.push(m);
-                }
+        for m in (self.plugin_provider)() {
+            if !core_names.contains(m.name()) {
+                all.push(m);
             }
-        });
+        }
         all
     }
 }
@@ -1059,6 +1057,95 @@ mod tests {
         // Verify the schema is fully usable after all migrations.
         software_item::Entity::find().count(&db).await.unwrap();
         software_ignore::Entity::find().count(&db).await.unwrap();
+    }
+
+    struct SentinelPluginMigration;
+
+    impl MigrationName for SentinelPluginMigration {
+        fn name(&self) -> &str {
+            "m20990101_000001_sentinel_plugin"
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl MigrationTrait for SentinelPluginMigration {
+        async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .create_table(
+                    Table::create()
+                        .table(Alias::new("plugin_sentinel"))
+                        .col(
+                            ColumnDef::new(Alias::new("id"))
+                                .integer()
+                                .not_null()
+                                .primary_key(),
+                        )
+                        .to_owned(),
+                )
+                .await
+        }
+
+        async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .drop_table(
+                    Table::drop()
+                        .table(Alias::new("plugin_sentinel"))
+                        .to_owned(),
+                )
+                .await
+        }
+    }
+
+    fn sentinel_provider() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(SentinelPluginMigration)]
+    }
+
+    async fn has_sqlite_table(db: &DatabaseConnection, name: &str) -> bool {
+        let stmt = Query::select()
+            .column(Alias::new("name"))
+            .from(Alias::new("sqlite_master"))
+            .and_where(Expr::col(Alias::new("type")).eq("table"))
+            .and_where(Expr::col(Alias::new("name")).eq(name))
+            .to_owned();
+        db.query_one(&stmt)
+            .await
+            .expect("sqlite_master query should succeed")
+            .is_some()
+    }
+
+    /// Regression for the thread-local plugin-migration loss: on a multi-thread
+    /// runtime the old code could resume `CombinedMigrator::up` on a worker
+    /// thread whose thread-local was empty, silently dropping plugin migrations.
+    /// Iterations make the thread-hop loss probable on the old code; the
+    /// instance-based migrator passes deterministically.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn plugin_migrations_survive_thread_hops() {
+        for _ in 0..8 {
+            let db = test_db().await;
+            run_migrations_with_plugins(&db, sentinel_provider)
+                .await
+                .expect("combined migrations should run");
+            assert!(
+                has_sqlite_table(&db, "plugin_sentinel").await,
+                "plugin migration must be applied regardless of worker thread"
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_runs_each_get_plugin_migrations() {
+        async fn run_one() -> bool {
+            let db = test_db().await;
+            run_migrations_with_plugins(&db, sentinel_provider)
+                .await
+                .expect("combined migrations should run");
+            has_sqlite_table(&db, "plugin_sentinel").await
+        }
+        let h1 = tokio::spawn(run_one());
+        let h2 = tokio::spawn(run_one());
+        let (a, b) = (h1.await.expect("task a"), h2.await.expect("task b"));
+        assert!(a, "first concurrent run must apply plugin migrations");
+        assert!(b, "second concurrent run must apply plugin migrations");
     }
 
     /// The viewer role must NOT have manage_commands.

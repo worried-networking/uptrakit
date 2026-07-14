@@ -2,10 +2,9 @@ use sea_orm::{Database, DatabaseConnection};
 
 /// In-memory SQLite + combined core+proxmox migrations in one pass.
 ///
-/// `CombinedMigrator` uses a thread-local to merge plugin migrations with
-/// core migrations; calling core and plugin migrations in separate steps
-/// would double-run the schema, so this helper performs both in one
-/// `run_migrations_with_plugins` call.
+/// Core and plugin migrations must run through one
+/// `run_migrations_with_plugins` call so SeaORM sees the complete migration
+/// list; running them in separate steps would double-run the schema.
 pub(crate) async fn setup_test_db() -> DatabaseConnection {
     // EncryptedString columns appear indirectly in plugin_config payloads;
     // plaintext mode keeps them inspectable.
@@ -17,7 +16,7 @@ pub(crate) async fn setup_test_db() -> DatabaseConnection {
 
     uptrakit_shared_db::migration::run_migrations_with_plugins(
         &db,
-        uptrakit_plugin_infrastructure_proxmox::ProxmoxPlugin::controller_migrations(),
+        uptrakit_plugin_infrastructure_proxmox::ProxmoxPlugin::controller_migrations,
     )
     .await
     .expect("combined migrations");

@@ -78,7 +78,7 @@ async fn setup_proxmox_db() -> sea_orm::DatabaseConnection {
     let db = Database::connect(opt).await.expect("test db");
     uptrakit_shared_db::migration::run_migrations_with_plugins(
         &db,
-        uptrakit_plugin_infrastructure_proxmox::ProxmoxPlugin::controller_migrations(),
+        uptrakit_plugin_infrastructure_proxmox::ProxmoxPlugin::controller_migrations,
     )
     .await
     .expect("shared + proxmox migrations should run");

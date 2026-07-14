@@ -211,7 +211,7 @@ mod tests {
         uptrakit_crypto::enable_plaintext_mode();
         uptrakit_shared_db::migration::run_migrations_with_plugins(
             &db,
-            uptrakit_plugin_infrastructure_proxmox::ProxmoxPlugin::controller_migrations(),
+            uptrakit_plugin_infrastructure_proxmox::ProxmoxPlugin::controller_migrations,
         )
         .await
         .unwrap();

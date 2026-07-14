@@ -23,7 +23,7 @@ async fn setup_db() -> DatabaseConnection {
         .expect("connect in-memory sqlite");
     uptrakit_shared_db::migration::run_migrations_with_plugins(
         &db,
-        crate::ProxmoxPlugin::controller_migrations(),
+        crate::ProxmoxPlugin::controller_migrations,
     )
     .await
     .expect("shared + proxmox migrations should run");
