@@ -148,8 +148,6 @@ impl Migration {
     // ── SQLite table recreation (Steps B+C+D) ────────────────────────────
 
     async fn recreate_hsip_sqlite(&self, manager: &SchemaManager<'_>) -> Result<(), DbErr> {
-        helpers::set_foreign_keys(manager, false).await?;
-
         let state = helpers::check_crash_recovery(
             manager,
             "host_software_item_plugins",
@@ -254,7 +252,6 @@ impl Migration {
         // Recreate indexes.
         self.create_hsip_indexes(manager).await?;
 
-        helpers::set_foreign_keys(manager, true).await?;
         Ok(())
     }
 
@@ -435,8 +432,6 @@ impl Migration {
     // ── Reverse operations ───────────────────────────────────────────────
 
     async fn reverse_recreate_hsip_sqlite(&self, manager: &SchemaManager<'_>) -> Result<(), DbErr> {
-        helpers::set_foreign_keys(manager, false).await?;
-
         let state = helpers::check_crash_recovery(
             manager,
             "host_software_item_plugins",
@@ -521,7 +516,6 @@ impl Migration {
         // Recreate original indexes.
         self.create_hsip_indexes(manager).await?;
 
-        helpers::set_foreign_keys(manager, true).await?;
         Ok(())
     }
 

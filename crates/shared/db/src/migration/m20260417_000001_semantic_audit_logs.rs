@@ -8,8 +8,6 @@ pub(super) struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        helpers::set_foreign_keys(manager, false).await?;
-
         recreate_table(
             manager,
             "audit_logs",
@@ -27,7 +25,6 @@ impl MigrationTrait for Migration {
 
         create_indexes(manager).await?;
 
-        helpers::set_foreign_keys(manager, true).await?;
         Ok(())
     }
 

@@ -191,8 +191,6 @@ enum ScheduledTasks {
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        helpers::set_foreign_keys(manager, false).await?;
-
         if helpers::is_sqlite(manager) {
             up_sqlite(manager).await?;
         } else {
@@ -207,8 +205,6 @@ impl MigrationTrait for Migration {
 
         // ── Shared: Rename scheduler task ────────────────────────────────
         rename_scheduler_task(manager).await?;
-
-        helpers::set_foreign_keys(manager, true).await?;
 
         Ok(())
     }

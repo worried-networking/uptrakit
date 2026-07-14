@@ -82,7 +82,6 @@ impl Migration {
     }
 
     async fn up_sqlite(&self, manager: &SchemaManager<'_>) -> Result<(), DbErr> {
-        helpers::set_foreign_keys(manager, false).await?;
         let state =
             helpers::check_crash_recovery(manager, "update_history", "update_history_new").await?;
 
@@ -96,12 +95,10 @@ impl Migration {
 
         helpers::rename_temp(manager, "update_history_new", "update_history").await?;
         recreate_update_history_indexes(manager).await?;
-        helpers::set_foreign_keys(manager, true).await?;
         Ok(())
     }
 
     async fn down_sqlite(&self, manager: &SchemaManager<'_>) -> Result<(), DbErr> {
-        helpers::set_foreign_keys(manager, false).await?;
         let state =
             helpers::check_crash_recovery(manager, "update_history", "update_history_old").await?;
 
@@ -115,7 +112,6 @@ impl Migration {
 
         helpers::rename_temp(manager, "update_history_old", "update_history").await?;
         recreate_update_history_indexes(manager).await?;
-        helpers::set_foreign_keys(manager, true).await?;
         Ok(())
     }
 }

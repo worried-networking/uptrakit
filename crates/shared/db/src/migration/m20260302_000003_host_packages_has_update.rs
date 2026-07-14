@@ -181,8 +181,6 @@ impl MigrationTrait for Migration {
 impl Migration {
     /// SQLite path: table recreation (create new -> copy -> drop old -> rename).
     async fn up_sqlite(&self, manager: &SchemaManager<'_>) -> Result<(), DbErr> {
-        helpers::set_foreign_keys(manager, false).await?;
-
         let state =
             helpers::check_crash_recovery(manager, "host_packages", "host_packages_new").await?;
 
@@ -206,8 +204,6 @@ impl Migration {
 
         // Create the three new covering indexes on has_update.
         self.create_has_update_indexes(manager).await?;
-
-        helpers::set_foreign_keys(manager, true).await?;
 
         Ok(())
     }
@@ -242,8 +238,6 @@ impl Migration {
 
     /// SQLite down path: table recreation (create without has_update -> copy -> drop -> rename).
     async fn down_sqlite(&self, manager: &SchemaManager<'_>) -> Result<(), DbErr> {
-        helpers::set_foreign_keys(manager, false).await?;
-
         let state =
             helpers::check_crash_recovery(manager, "host_packages", "host_packages_bak").await?;
 
@@ -264,8 +258,6 @@ impl Migration {
 
         // Restore the original indexes.
         self.create_original_indexes(manager).await?;
-
-        helpers::set_foreign_keys(manager, true).await?;
 
         Ok(())
     }

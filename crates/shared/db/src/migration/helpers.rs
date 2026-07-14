@@ -29,8 +29,6 @@
 //! use crate::migration::helpers::{self, CrashRecoveryState};
 //!
 //! async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-//!     helpers::set_foreign_keys(manager, false).await?;
-//!
 //!     let state = helpers::check_crash_recovery(
 //!         manager, "my_table", "my_table_new",
 //!     ).await?;
@@ -55,10 +53,17 @@
 //!     // 5. Recreate indexes (they were dropped with the old table).
 //!     create_indexes(manager).await?;
 //!
-//!     helpers::set_foreign_keys(manager, true).await?;
 //!     Ok(())
 //! }
 //! ```
+//!
+//! FK enforcement during recreation is owned by the migration runner, not
+//! by individual migrations: on file-backed SQLite the runner executes all
+//! migrations on a dedicated connection born with `foreign_keys=false` and
+//! verifies integrity post-commit via `PRAGMA foreign_key_check`. On
+//! in-memory (test) databases FK stays ON and violations fail at statement
+//! time. Migrations must NOT toggle `PRAGMA foreign_keys` themselves — it
+//! is a no-op inside the runner's transaction.
 
 use sea_orm::DbBackend;
 use sea_orm_migration::prelude::*;
@@ -85,33 +90,6 @@ pub enum CrashRecoveryState {
     Normal,
     /// Only the temp table exists. Skip to the rename step.
     RenameOnly,
-}
-
-/// Suspend or resume FK enforcement on SQLite.
-///
-/// On PostgreSQL the `PRAGMA` statement is not recognised; this function
-/// is a no-op for that backend.
-///
-/// # When to use
-///
-/// Call `set_foreign_keys(manager, false)` at the **start** of a table
-/// recreation migration and `set_foreign_keys(manager, true)` at the **end**.
-/// This prevents FK constraint violations during the brief window when the
-/// old table has been dropped but the replacement has not yet been renamed.
-///
-/// **Never use this to skip inserting required parent rows in tests or normal
-/// migrations.** It is only appropriate during table recreation.
-pub async fn set_foreign_keys(manager: &SchemaManager<'_>, enabled: bool) -> Result<(), DbErr> {
-    if manager.get_database_backend() == DbBackend::Sqlite {
-        let pragma = if enabled {
-            "PRAGMA foreign_keys = ON"
-        } else {
-            "PRAGMA foreign_keys = OFF"
-        };
-        // `PRAGMA foreign_keys` is a SQLite-specific statement with no sea_query equivalent.
-        manager.get_connection().execute_unprepared(pragma).await?;
-    }
-    Ok(())
 }
 
 /// Check the crash recovery state for a table recreation migration.
@@ -152,8 +130,8 @@ pub async fn check_crash_recovery(
 /// original table's indexes are dropped implicitly by SQLite.
 ///
 /// **Important**: This helper is intended for the SQLite table recreation
-/// pattern where FK enforcement is disabled via `set_foreign_keys(false)`.
-/// On PostgreSQL, prefer `ALTER TABLE` instead of table recreation to
+/// pattern where FK enforcement is disabled by the migration runner's
+/// dedicated connection. On PostgreSQL, prefer `ALTER TABLE` instead of table recreation to
 /// avoid FK constraint issues. If table recreation is unavoidable on PG,
 /// the caller must handle dependent FK constraints manually.
 pub async fn drop_original(manager: &SchemaManager<'_>, table_name: &str) -> Result<(), DbErr> {
@@ -237,19 +215,6 @@ mod tests {
     async fn setup_db() -> DatabaseConnection {
         let opt = ConnectOptions::new("sqlite::memory:");
         Database::connect(opt).await.expect("test db")
-    }
-
-    #[tokio::test]
-    async fn set_foreign_keys_toggle() {
-        let db = setup_db().await;
-        // SchemaManager is not easily constructed in tests without a migration
-        // context; verify the underlying SQL works directly.
-        db.execute_unprepared("PRAGMA foreign_keys = OFF")
-            .await
-            .expect("disable FKs");
-        db.execute_unprepared("PRAGMA foreign_keys = ON")
-            .await
-            .expect("re-enable FKs");
     }
 
     #[tokio::test]

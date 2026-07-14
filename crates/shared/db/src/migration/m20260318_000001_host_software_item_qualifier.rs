@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use sea_orm::DbBackend;
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::schema::*;
 use uuid::Uuid;
@@ -155,22 +154,6 @@ const HSIP_COPY_COLS: [HostSoftwareItemPlugins; 11] = [
     HostSoftwareItemPlugins::CreatedAt,
     HostSoftwareItemPlugins::UpdatedAt,
 ];
-
-// ---------------------------------------------------------------------------
-// Helper: suspend / resume FK enforcement (SQLite only)
-// ---------------------------------------------------------------------------
-
-async fn set_foreign_keys(manager: &SchemaManager<'_>, enabled: bool) -> Result<(), DbErr> {
-    if manager.get_database_backend() == DbBackend::Sqlite {
-        let pragma = if enabled {
-            "PRAGMA foreign_keys = ON"
-        } else {
-            "PRAGMA foreign_keys = OFF"
-        };
-        manager.get_connection().execute_unprepared(pragma).await?;
-    }
-    Ok(())
-}
 
 // ---------------------------------------------------------------------------
 // Table builders
@@ -440,8 +423,6 @@ fn build_hsip_table_old(
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        set_foreign_keys(manager, false).await?;
-
         let db = manager.get_connection();
 
         // ── Step 1: Rebuild host_software_items ──────────────────────────────
@@ -742,14 +723,10 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        set_foreign_keys(manager, true).await?;
-
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        set_foreign_keys(manager, false).await?;
-
         let db = manager.get_connection();
 
         // ── Step 1: Rebuild host_software_items (old schema) ─────────────────
@@ -964,8 +941,6 @@ impl MigrationTrait for Migration {
                     .to_owned(),
             )
             .await?;
-
-        set_foreign_keys(manager, true).await?;
 
         Ok(())
     }

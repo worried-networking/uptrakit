@@ -151,8 +151,6 @@ impl MigrationTrait for Migration {
 impl Migration {
     /// SQLite path: table recreation (create new → copy with CASE mapping → drop old → rename).
     async fn up_sqlite(&self, manager: &SchemaManager<'_>) -> Result<(), DbErr> {
-        helpers::set_foreign_keys(manager, false).await?;
-
         let state =
             helpers::check_crash_recovery(manager, "scheduled_tasks", "scheduled_tasks_new")
                 .await?;
@@ -213,7 +211,6 @@ impl Migration {
 
         self.create_indexes(manager).await?;
 
-        helpers::set_foreign_keys(manager, true).await?;
         Ok(())
     }
 

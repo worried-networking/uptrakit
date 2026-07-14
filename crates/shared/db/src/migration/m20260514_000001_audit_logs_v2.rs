@@ -1,14 +1,11 @@
 use sea_orm_migration::prelude::*;
 
-use crate::migration::helpers;
-
 #[derive(DeriveMigrationName)]
 pub(super) struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
-        helpers::set_foreign_keys(m, false).await?;
         m.drop_table(
             Table::drop()
                 .table(Alias::new("system_audit_logs"))
@@ -26,7 +23,6 @@ impl MigrationTrait for Migration {
         m.create_table(build_audit_logs()).await?;
         m.create_table(build_system_audit_logs()).await?;
         create_indexes(m).await?;
-        helpers::set_foreign_keys(m, true).await?;
         Ok(())
     }
 
