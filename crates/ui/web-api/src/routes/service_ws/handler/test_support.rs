@@ -725,14 +725,16 @@ pub(super) async fn run_embedded_register_once(
     let handler_capabilities = capabilities.clone();
     let handle = tokio::spawn(async move {
         run_embedded_message_handler(
-            Arc::clone(&state),
-            service_id,
-            connection_id,
+            super::embedded::EmbeddedHandlerCallParams {
+                state: Arc::clone(&state),
+                service_id,
+                connection_id,
+                capabilities: &handler_capabilities,
+                app_name: "uptrakit-agent",
+                service_rx,
+                cancel: cancel.clone(),
+            },
             tenant_id,
-            &handler_capabilities,
-            "uptrakit-agent",
-            service_rx,
-            cancel.clone(),
         )
         .await
     });

@@ -5,10 +5,6 @@
 //! enrolled-session lifecycle.
 
 #![expect(
-    clippy::expect_used,
-    reason = "expect used for infallible operations; message documents the invariant"
-)]
-#![expect(
     clippy::let_underscore_must_use,
     reason = "fire-and-forget sends in WS handler intentionally drop results"
 )]
@@ -1334,8 +1330,8 @@ mod tests {
 
             // A registers, then B supersedes A (reconnect).
             let superseded_id = register_test_connection(&state, service_id).await;
-            let _replacement_id = register_test_connection(&state, service_id).await;
-            assert_ne!(superseded_id, _replacement_id);
+            let replacement_id = register_test_connection(&state, service_id).await;
+            assert_ne!(superseded_id, replacement_id);
 
             // A's session runs its finalize/cleanup after B is live.
             let session = test_authenticated_session(service_id, superseded_id);
@@ -1351,7 +1347,7 @@ mod tests {
                     .service_connections
                     .current_connection_id(&service_id)
                     .await,
-                Some(_replacement_id),
+                Some(replacement_id),
             );
         }
 
@@ -1365,7 +1361,7 @@ mod tests {
 
             // A registers (capture its id), then B supersedes A.
             let superseded_id = register_test_connection(&state, service_id).await;
-            let _replacement_id = register_test_connection(&state, service_id).await;
+            let replacement_id = register_test_connection(&state, service_id).await;
 
             // Drive cleanup for A's session directly, with A's now-stale id. No tenant /
             // workload claims — isolate the registry-removal branch.
@@ -1404,7 +1400,7 @@ mod tests {
                     .service_connections
                     .current_connection_id(&service_id)
                     .await,
-                Some(_replacement_id),
+                Some(replacement_id),
             );
         }
 

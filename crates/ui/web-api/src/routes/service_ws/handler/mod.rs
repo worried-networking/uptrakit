@@ -48,7 +48,9 @@ mod updates;
 mod workload;
 
 pub(crate) use discovery::trigger_discovery_for_agent_host;
-pub(crate) use embedded::{run_embedded_message_handler, run_embedded_system_message_handler};
+pub(crate) use embedded::{
+    EmbeddedHandlerCallParams, run_embedded_message_handler, run_embedded_system_message_handler,
+};
 pub(crate) use session_authenticated::handle_authenticated_loop;
 pub(crate) use session_enrolled::handle_enrolled_loop;
 pub(crate) use updates::dispatch_next_batch_update;

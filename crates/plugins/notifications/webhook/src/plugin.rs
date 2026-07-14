@@ -661,6 +661,24 @@ mod tests {
         assert_eq!(plugin.plugin_type_id().as_str(), "webhook");
     }
 
+    #[test]
+    fn both_ssrf_modes_build_via_shared_builder() {
+        // Conformance: `new()` routes through `build_plugin_http_client` for both
+        // the Strict (`false`) and Permissive (`true`) branches. reqwest::Client
+        // is not introspectable post-build, so the redirect-none/User-Agent
+        // guarantee comes from the builder; here we assert only that both call
+        // paths construct successfully (the Permissive branch is otherwise
+        // untested by construction elsewhere).
+        assert!(
+            WebhookPlugin::new(false).is_ok(),
+            "Strict client must build"
+        );
+        assert!(
+            WebhookPlugin::new(true).is_ok(),
+            "Permissive client must build"
+        );
+    }
+
     // ── Descriptor tests ─────────────────────────────────────────────────
 
     #[test]
@@ -927,8 +945,14 @@ mod tests {
     #[tokio::test]
     async fn map_send_error_strips_url_bearing_secret() {
         let secret = "SENTINEL-webhook-secret-7c1d";
+        // Secret embedded in BOTH basic-auth userinfo and the query string: the
+        // query copy guarantees the fixture precondition (reqwest always renders
+        // it), while userinfo exercises the exact basic-auth leak the spec names.
+        // `without_url()` nulls the whole URL, so both positions are covered.
         let err = reqwest::Client::new()
-            .get(format!("http://127.0.0.1:1/hook?token={secret}"))
+            .get(format!(
+                "http://user:{secret}@127.0.0.1:1/hook?token={secret}"
+            ))
             .send()
             .await
             .expect_err("connection to 127.0.0.1:1 must be refused");

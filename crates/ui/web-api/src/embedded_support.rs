@@ -43,6 +43,48 @@ pub trait EmbeddedServiceNotifier: Send + Sync {
     fn is_capability_yielded(&self, capability: &Capability) -> bool;
 }
 
+/// Shared transport/session parameters for an embedded service's message
+/// handler loop.
+///
+/// Bundles the fields common to [`run_embedded_message_handler`] and
+/// [`run_embedded_system_message_handler`] so each function stays within the
+/// `clippy::too_many_arguments` limit. The tenant-scoping argument (`Uuid` for
+/// tenant services, `Option<Uuid>` for system services) is passed separately
+/// since it is the one thing that differs between the two entry points.
+#[non_exhaustive]
+pub struct EmbeddedHandlerParams {
+    pub state: Arc<AppState>,
+    pub service_id: Uuid,
+    pub connection_id: Uuid,
+    pub capabilities: BTreeSet<Capability>,
+    pub app_name: String,
+    pub service_rx: tokio::sync::mpsc::Receiver<ServiceMessage>,
+    pub cancel: CancellationToken,
+}
+
+impl EmbeddedHandlerParams {
+    /// Construct a new set of embedded handler parameters.
+    pub fn new(
+        state: Arc<AppState>,
+        service_id: Uuid,
+        connection_id: Uuid,
+        capabilities: BTreeSet<Capability>,
+        app_name: String,
+        service_rx: tokio::sync::mpsc::Receiver<ServiceMessage>,
+        cancel: CancellationToken,
+    ) -> Self {
+        Self {
+            state,
+            service_id,
+            connection_id,
+            capabilities,
+            app_name,
+            service_rx,
+            cancel,
+        }
+    }
+}
+
 /// Run the server-side message handler for an embedded service.
 ///
 /// Reads [`ServiceMessage`] values from `service_rx` and dispatches them
@@ -53,49 +95,56 @@ pub trait EmbeddedServiceNotifier: Send + Sync {
 ///
 /// This function blocks until `cancel` is triggered or the sender side of
 /// `service_rx` is dropped.
-pub async fn run_embedded_message_handler(
-    state: Arc<AppState>,
-    service_id: Uuid,
-    connection_id: Uuid,
-    tenant_id: Uuid,
-    capabilities: BTreeSet<Capability>,
-    app_name: String,
-    service_rx: tokio::sync::mpsc::Receiver<ServiceMessage>,
-    cancel: CancellationToken,
-) {
-    crate::routes::service_ws::handler::run_embedded_message_handler(
+pub async fn run_embedded_message_handler(params: EmbeddedHandlerParams, tenant_id: Uuid) {
+    let EmbeddedHandlerParams {
         state,
         service_id,
         connection_id,
-        tenant_id,
-        &capabilities,
-        &app_name,
+        capabilities,
+        app_name,
         service_rx,
         cancel,
+    } = params;
+    crate::routes::service_ws::handler::run_embedded_message_handler(
+        crate::routes::service_ws::handler::EmbeddedHandlerCallParams {
+            state,
+            service_id,
+            connection_id,
+            capabilities: &capabilities,
+            app_name: &app_name,
+            service_rx,
+            cancel,
+        },
+        tenant_id,
     )
     .await;
 }
 
 /// Run the server-side message handler for an embedded system service.
 pub async fn run_embedded_system_message_handler(
-    state: Arc<AppState>,
-    service_id: Uuid,
-    connection_id: Uuid,
+    params: EmbeddedHandlerParams,
     service_tenant_id: Option<Uuid>,
-    capabilities: BTreeSet<Capability>,
-    app_name: String,
-    service_rx: tokio::sync::mpsc::Receiver<ServiceMessage>,
-    cancel: CancellationToken,
 ) {
-    crate::routes::service_ws::handler::run_embedded_system_message_handler(
+    let EmbeddedHandlerParams {
         state,
         service_id,
         connection_id,
-        service_tenant_id,
-        &capabilities,
-        &app_name,
+        capabilities,
+        app_name,
         service_rx,
         cancel,
+    } = params;
+    crate::routes::service_ws::handler::run_embedded_system_message_handler(
+        crate::routes::service_ws::handler::EmbeddedHandlerCallParams {
+            state,
+            service_id,
+            connection_id,
+            capabilities: &capabilities,
+            app_name: &app_name,
+            service_rx,
+            cancel,
+        },
+        service_tenant_id,
     )
     .await;
 }

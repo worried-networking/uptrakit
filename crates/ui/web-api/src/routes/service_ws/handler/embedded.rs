@@ -20,6 +20,23 @@ use crate::AppState;
 // Embedded service message handler
 // ---------------------------------------------------------------------------
 
+/// Shared transport parameters for a single embedded handler invocation.
+///
+/// Bundles the fields common to [`run_embedded_message_handler`] and
+/// [`run_embedded_system_message_handler`] so each stays within the
+/// `clippy::too_many_arguments` limit; the two functions still differ in how
+/// they resolve `service_tenant_id`/`is_system`, which callers pass alongside
+/// this struct.
+pub(crate) struct EmbeddedHandlerCallParams<'a> {
+    pub(crate) state: Arc<AppState>,
+    pub(crate) service_id: uuid::Uuid,
+    pub(crate) connection_id: uuid::Uuid,
+    pub(crate) capabilities: &'a BTreeSet<Capability>,
+    pub(crate) app_name: &'a str,
+    pub(crate) service_rx: tokio::sync::mpsc::Receiver<ServiceMessage>,
+    pub(crate) cancel: tokio_util::sync::CancellationToken,
+}
+
 /// Run a message handler loop for an embedded service.
 ///
 /// This creates a [`MessageProcessor`] configured for an embedded (in-process)
@@ -28,15 +45,18 @@ use crate::AppState;
 ///
 /// Used by `embedded_support::run_embedded_message_handler`.
 pub(crate) async fn run_embedded_message_handler(
-    state: Arc<AppState>,
-    service_id: uuid::Uuid,
-    connection_id: uuid::Uuid,
+    params: EmbeddedHandlerCallParams<'_>,
     tenant_id: uuid::Uuid,
-    capabilities: &BTreeSet<Capability>,
-    app_name: &str,
-    service_rx: tokio::sync::mpsc::Receiver<ServiceMessage>,
-    cancel: tokio_util::sync::CancellationToken,
 ) {
+    let EmbeddedHandlerCallParams {
+        state,
+        service_id,
+        connection_id,
+        capabilities,
+        app_name,
+        service_rx,
+        cancel,
+    } = params;
     run_embedded_message_handler_inner(
         state,
         EmbeddedHandlerSession {
@@ -54,15 +74,18 @@ pub(crate) async fn run_embedded_message_handler(
 }
 
 pub(crate) async fn run_embedded_system_message_handler(
-    state: Arc<AppState>,
-    service_id: uuid::Uuid,
-    connection_id: uuid::Uuid,
+    params: EmbeddedHandlerCallParams<'_>,
     service_tenant_id: Option<uuid::Uuid>,
-    capabilities: &BTreeSet<Capability>,
-    app_name: &str,
-    service_rx: tokio::sync::mpsc::Receiver<ServiceMessage>,
-    cancel: tokio_util::sync::CancellationToken,
 ) {
+    let EmbeddedHandlerCallParams {
+        state,
+        service_id,
+        connection_id,
+        capabilities,
+        app_name,
+        service_rx,
+        cancel,
+    } = params;
     run_embedded_message_handler_inner(
         state,
         EmbeddedHandlerSession {
@@ -313,14 +336,16 @@ mod tests {
             drop(service_tx);
 
             run_embedded_system_message_handler(
-                state.clone(),
-                service_id,
-                connection_id,
+                EmbeddedHandlerCallParams {
+                    state: state.clone(),
+                    service_id,
+                    connection_id,
+                    capabilities: &mqtt_capabilities,
+                    app_name: "uptrakit-mqtt",
+                    service_rx,
+                    cancel: CancellationToken::new(),
+                },
                 Some(tenant_id),
-                &mqtt_capabilities,
-                "uptrakit-mqtt",
-                service_rx,
-                CancellationToken::new(),
             )
             .await;
 

@@ -163,14 +163,16 @@ fn spawn_scheduler_bridge(
     let bridge_handle = match mode {
         EmbeddedBridgeMode::System { service_tenant_id } => tokio::spawn(
             uptrakit_web_api::embedded_support::run_embedded_system_message_handler(
-                Arc::clone(app_state),
-                service_id,
-                connection_id,
+                uptrakit_web_api::embedded_support::EmbeddedHandlerParams::new(
+                    Arc::clone(app_state),
+                    service_id,
+                    connection_id,
+                    capabilities,
+                    app_name,
+                    service_rx,
+                    bridge_cancel,
+                ),
                 service_tenant_id,
-                capabilities,
-                app_name,
-                service_rx,
-                bridge_cancel,
             ),
         ),
     };
@@ -306,14 +308,16 @@ pub(crate) async fn register_agent(
     let bridge_cancel = bg.child_token();
     let bridge_handle = tokio::spawn(
         uptrakit_web_api::embedded_support::run_embedded_message_handler(
-            Arc::clone(app_state),
-            add_result.service_id,
-            add_result.connection_id,
+            uptrakit_web_api::embedded_support::EmbeddedHandlerParams::new(
+                Arc::clone(app_state),
+                add_result.service_id,
+                add_result.connection_id,
+                agent_caps,
+                AGENT.app_name.to_string(),
+                add_result.service_rx,
+                bridge_cancel,
+            ),
             default_tenant_id,
-            agent_caps,
-            AGENT.app_name.to_string(),
-            add_result.service_rx,
-            bridge_cancel,
         ),
     );
     bg.track("Embedded Agent (bridge)", bridge_handle);
@@ -385,14 +389,16 @@ pub(crate) async fn register_agent_ssh(
     let bridge_cancel = bg.child_token();
     let bridge_handle = tokio::spawn(
         uptrakit_web_api::embedded_support::run_embedded_message_handler(
-            Arc::clone(app_state),
-            add_result.service_id,
-            add_result.connection_id,
+            uptrakit_web_api::embedded_support::EmbeddedHandlerParams::new(
+                Arc::clone(app_state),
+                add_result.service_id,
+                add_result.connection_id,
+                ssh_caps,
+                AGENT_SSH.app_name.to_string(),
+                add_result.service_rx,
+                bridge_cancel,
+            ),
             default_tenant_id,
-            ssh_caps,
-            AGENT_SSH.app_name.to_string(),
-            add_result.service_rx,
-            bridge_cancel,
         ),
     );
     bg.track("Embedded SSH Agent (bridge)", bridge_handle);
@@ -438,14 +444,16 @@ pub(crate) async fn register_mqtt(
     let bridge_cancel = bg.child_token();
     let bridge_handle = tokio::spawn(
         uptrakit_web_api::embedded_support::run_embedded_system_message_handler(
-            Arc::clone(app_state),
-            add_result.service_id,
-            add_result.connection_id,
+            uptrakit_web_api::embedded_support::EmbeddedHandlerParams::new(
+                Arc::clone(app_state),
+                add_result.service_id,
+                add_result.connection_id,
+                mqtt_caps,
+                MQTT.app_name.to_string(),
+                add_result.service_rx,
+                bridge_cancel,
+            ),
             Some(default_tenant_id),
-            mqtt_caps,
-            MQTT.app_name.to_string(),
-            add_result.service_rx,
-            bridge_cancel,
         ),
     );
     bg.track("Embedded MQTT (bridge)", bridge_handle);
