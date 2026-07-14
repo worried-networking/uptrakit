@@ -33,6 +33,7 @@ use uptrakit_shared_types::MaskedEmail;
 use uptrakit_web_api_types::mfa::{MfaChallengeResponse, MfaMethod};
 
 use crate::auth::AuthMethod;
+use crate::auth::registration::RegistrationSettings;
 use crate::extract::Validated;
 use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, Stateful};
 use uptrakit_web_api_queries::queries::users::UserView;
@@ -345,16 +346,18 @@ pub async fn register(
 
     // Atomically check if this is the first user (threshold 1 because we just inserted)
     // and assign owner role + complete initial setup inside the same transaction.
-    let is_first_user =
-        match handle_first_user_setup(&txn, &state.settings, state.default_tenant_id, user_id, 1)
-            .await
-        {
-            Ok(is_first) => is_first,
-            Err(e) => {
-                tracing::error!("Failed to handle first-user setup: {e:?}");
-                false
-            }
-        };
+    // A failure here must abort the whole registration (`?` → 500 via the
+    // Report<AuthError> → ApiError mapping); the dropped txn rolls back.
+    let first_user_registration = handle_first_user_setup(
+        &txn,
+        &state.settings,
+        state.default_tenant_id,
+        user_id,
+        1,
+        ClearDefaultRoles::Keep,
+    )
+    .await?;
+    let is_first_user = first_user_registration.is_some();
 
     if !is_first_user
         && let Err(e) = assign_viewer_role(&txn, state.default_tenant_id, user_id).await
@@ -407,6 +410,9 @@ pub async fn register(
         ));
     }
     hook.flush_after_commit().await;
+    if let Some(reg) = first_user_registration {
+        state.settings.set_registration(reg).await;
+    }
 
     // Get user permissions
     let permissions = match get_user_permissions(state.db(), state.default_tenant_id, user_id).await
@@ -882,12 +888,13 @@ mod tests {
     use super::*;
     use crate::ServiceCredentialSources;
     use crate::auth::permissions::Permission;
+    use crate::auth::registration::RegistrationMode;
     use crate::auth::session::SessionService;
     use axum::body::Body;
     use axum::http::Request;
     use sea_orm::{
-        ConnectOptions, ConnectionTrait, Database, DatabaseConnection, EntityTrait, QueryFilter,
-        QueryOrder,
+        ColumnTrait, ConnectOptions, ConnectionTrait, Database, DatabaseConnection, EntityTrait,
+        QueryFilter, QueryOrder,
     };
     use uptrakit_shared_db::entity::{audit_log, tenant};
 
@@ -918,7 +925,6 @@ mod tests {
     }
 
     async fn test_state(db: DatabaseConnection) -> Arc<AppState> {
-        use crate::auth::registration::{RegistrationMode, RegistrationSettings};
         use crate::cert_signer::{AgentCertSigner, CertSignerError, SignedCertBundle};
         use crate::settings::Settings;
 
@@ -1789,6 +1795,186 @@ mod tests {
             .expect("drop table");
     }
 
+    /// Sorted role names assigned to a user. Mirrors assign_owner_roles' list on
+    /// purpose — drift in that list must fail these tests loudly.
+    fn owner_role_names() -> Vec<String> {
+        let mut names: Vec<String> = [
+            "viewer",
+            "operator",
+            "service_manager",
+            "software_manager",
+            "host_manager",
+            "settings_manager",
+            "command_manager",
+            "system_administrator",
+        ]
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect();
+        names.sort();
+        names
+    }
+
+    async fn role_names_for_user(
+        db: &DatabaseConnection,
+        tenant_id: uuid::Uuid,
+        user_id: uuid::Uuid,
+    ) -> Vec<String> {
+        let role_ids: Vec<uuid::Uuid> = user_role::Entity::find()
+            .filter(user_role::Column::TenantId.eq(tenant_id))
+            .filter(user_role::Column::UserId.eq(user_id))
+            .all(db)
+            .await
+            .expect("user_role rows")
+            .into_iter()
+            .map(|r| r.role_id)
+            .collect();
+        let mut names: Vec<String> = Role::find()
+            .filter(role::Column::Id.is_in(role_ids))
+            .all(db)
+            .await
+            .expect("role rows")
+            .into_iter()
+            .map(|r| r.name)
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// The helper must return the mutated snapshot WITHOUT publishing it —
+    /// publishing is the commit owner's post-commit responsibility. On the old
+    /// code this fails: the helper called settings.set_registration() itself.
+    #[tokio::test]
+    async fn first_user_setup_returns_snapshot_without_publishing() {
+        let db = setup_empty_test_db().await;
+        let state = test_state(db.clone()).await;
+        let mode_before = state.settings.registration().mode;
+
+        let now = OffsetDateTime::now_utc();
+        let user = user::ActiveModel {
+            id: Set(generate_uuid()),
+            email: Set(MaskedEmail::new("first@example.com")),
+            first_name: Set("First".to_string()),
+            last_name: Set("User".to_string()),
+            password_hash: Set(None),
+            is_active: Set(true),
+            deactivated_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        let inserted = user.insert(&db).await.expect("insert user");
+
+        let txn = db.begin().await.expect("begin");
+        let reg = handle_first_user_setup(
+            &txn,
+            &state.settings,
+            state.default_tenant_id,
+            inserted.id,
+            1,
+            ClearDefaultRoles::Keep,
+        )
+        .await
+        .expect("first-user setup")
+        .expect("must detect the first user");
+        txn.commit().await.expect("commit");
+
+        assert_eq!(
+            reg.mode,
+            RegistrationMode::Closed,
+            "returned snapshot must be Closed"
+        );
+        assert_eq!(
+            state.settings.registration().mode,
+            mode_before,
+            "helper must NOT publish the snapshot"
+        );
+    }
+
+    /// Above-threshold count → Ok(None), no roles assigned by the helper.
+    #[tokio::test]
+    async fn first_user_setup_skips_when_not_first() {
+        let db = setup_test_db().await; // seeds one user already
+        let state = test_state(db.clone()).await;
+
+        let now = OffsetDateTime::now_utc();
+        let second = user::ActiveModel {
+            id: Set(generate_uuid()),
+            email: Set(MaskedEmail::new("second@example.com")),
+            first_name: Set("Second".to_string()),
+            last_name: Set("User".to_string()),
+            password_hash: Set(None),
+            is_active: Set(true),
+            deactivated_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        let inserted = second.insert(&db).await.expect("insert user");
+
+        let txn = db.begin().await.expect("begin");
+        let reg = handle_first_user_setup(
+            &txn,
+            &state.settings,
+            state.default_tenant_id,
+            inserted.id,
+            1,
+            ClearDefaultRoles::Keep,
+        )
+        .await
+        .expect("setup call");
+        txn.commit().await.expect("commit");
+
+        assert!(reg.is_none(), "second user must not be treated as first");
+    }
+
+    /// ClearDefaultRoles::Clear deletes pre-assigned rows before owner assignment
+    /// (also proves no PK conflict when a pre-assigned role overlaps the owner set).
+    #[tokio::test]
+    async fn first_user_setup_clear_removes_preassigned_default_role() {
+        let db = setup_empty_test_db().await;
+        let state = test_state(db.clone()).await;
+
+        let now = OffsetDateTime::now_utc();
+        let user = user::ActiveModel {
+            id: Set(generate_uuid()),
+            email: Set(MaskedEmail::new("oidc-first@example.com")),
+            first_name: Set("Oidc".to_string()),
+            last_name: Set("First".to_string()),
+            password_hash: Set(None),
+            is_active: Set(true),
+            deactivated_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        let inserted = user.insert(&db).await.expect("insert user");
+
+        let txn = db.begin().await.expect("begin");
+        // Stand-in for resolve_oidc_user's best-effort default role (the legacy
+        // "user" role no longer exists post-m20260310; viewer overlaps the owner
+        // set, so Keep would PK-conflict — Clear must make this succeed).
+        assign_viewer_role(&txn, state.default_tenant_id, inserted.id)
+            .await
+            .expect("pre-assign default role");
+        let reg = handle_first_user_setup(
+            &txn,
+            &state.settings,
+            state.default_tenant_id,
+            inserted.id,
+            1,
+            ClearDefaultRoles::Clear,
+        )
+        .await
+        .expect("first-user setup")
+        .expect("must detect the first user");
+        txn.commit().await.expect("commit");
+        drop(reg);
+
+        assert_eq!(
+            role_names_for_user(&db, state.default_tenant_id, inserted.id).await,
+            owner_role_names(),
+            "exactly the owner role set, each exactly once"
+        );
+    }
+
     #[tokio::test]
     async fn register_returns_500_on_permission_load_failure() {
         let db = setup_empty_test_db().await;
@@ -2381,30 +2567,70 @@ pub async fn refresh(
         .into_response()
 }
 
+/// Boolean-like flag: whether the bootstrap should delete roles pre-assigned
+/// to the user (OIDC's `resolve_oidc_user` best-effort default) before
+/// assigning the owner set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive] // matches the SchedulerStopMode precedent for pub 2-variant discriminators
+pub enum ClearDefaultRoles {
+    /// Delete existing `user_role` rows for the user first (OIDC paths).
+    Clear,
+    /// Leave pre-assigned roles untouched (password path — none exist).
+    Keep,
+}
+
 /// Atomically handle first-user registration within a transaction.
 ///
-/// Counts users, and if `count <= threshold`, assigns all roles (owner preset)
-/// and completes initial setup (closes registration, clears token).
-/// Returns `Ok(true)` if this was the first user.
+/// Counts users; if `count <= threshold`, optionally clears pre-assigned
+/// default roles, assigns all owner roles, and completes initial setup in
+/// the DB (closes registration, clears token). Returns `Ok(Some(reg))` with
+/// the mutated registration snapshot for the FIRST user, `Ok(None)` otherwise.
+///
+/// # Contract: publish only after commit
+///
+/// This function never touches the process-wide settings snapshot. The
+/// caller that owns `txn.commit()` MUST call
+/// `settings.set_registration(reg)` only AFTER the commit succeeds —
+/// publishing earlier re-introduces the closed-registration brick: a failed
+/// commit rolls the DB back while the in-memory snapshot stays `Closed`,
+/// rejecting every registration on a zero-user instance.
+///
+/// Deferring is safe: on restart `RegistrationSettings` is re-derived from
+/// the DB (zero users → fresh invite token), so a lost post-commit publish
+/// self-corrects. Do not "fix" a lost publish by persisting the in-memory
+/// snapshot.
+///
+/// # Errors
+///
+/// Propagates every DB/setup error so the caller can roll back atomically —
+/// callers must NOT demote a failure to "not the first user".
 pub async fn handle_first_user_setup(
     txn: &impl ConnectionTrait,
     settings: &crate::settings::Settings,
     tenant_id: uuid::Uuid,
     user_id: uuid::Uuid,
     threshold: u64,
-) -> crate::auth::Result<bool> {
+    clear_default_roles: ClearDefaultRoles,
+) -> crate::auth::Result<Option<RegistrationSettings>> {
     let user_count = User::find().count(txn).await.context_to()?;
     if user_count > threshold {
-        return Ok(false);
+        return Ok(None);
+    }
+
+    if clear_default_roles == ClearDefaultRoles::Clear {
+        user_role::Entity::delete_many()
+            .filter(user_role::Column::TenantId.eq(tenant_id))
+            .filter(user_role::Column::UserId.eq(user_id))
+            .exec(txn)
+            .await
+            .context_to()?;
     }
 
     assign_owner_roles(txn, tenant_id, user_id).await?;
 
     let mut reg = settings.registration();
     reg.complete_initial_setup(txn, tenant_id).await?;
-    settings.set_registration(reg).await;
-
-    Ok(true)
+    Ok(Some(reg))
 }
 
 // Helper functions

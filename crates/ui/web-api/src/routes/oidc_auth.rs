@@ -33,7 +33,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::prelude::*;
-use uptrakit_shared_db::entity::{oidc_provider, user_oidc_link, user_role};
+use uptrakit_shared_db::entity::{oidc_provider, user_oidc_link};
 use uptrakit_shared_types::MaskedEmail;
 use uptrakit_web_api_queries::queries::users::oidc_sync::{
     build_fake_claims_for_sync, find_active_provider,
@@ -45,7 +45,7 @@ use uptrakit_web_api_types::SecretString;
 use uuid::Uuid;
 
 pub use super::auth::AuthResponse;
-use crate::auth::registration::RegistrationMode;
+use crate::auth::registration::{RegistrationMode, RegistrationSettings};
 pub use uptrakit_web_api_types::oidc_auth::{
     AuthMethodsResponse, OidcAuthorizeResponse, OidcCompleteRegistrationRequest,
     OidcExchangeRequest, OidcLinkRequest, OidcProviderInfo,
@@ -914,7 +914,7 @@ async fn execute_oidc_resolution(
             create_oidc_exchange_and_redirect(state, user_id, provider_id).await
         }
         OidcUserResolution::NewUser(user_id) => {
-            let (user_id, is_first_user) =
+            let (user_id, first_user_registration) =
                 match handle_new_user(state, &txn, user_id, provider, additional_claims).await {
                     Ok(uid) => uid,
                     Err(response) => return response,
@@ -922,6 +922,10 @@ async fn execute_oidc_resolution(
             if let Err(e) = txn.commit().await {
                 tracing::error!(error = %e, "Failed to commit OIDC callback transaction");
                 return Redirect::to("/login?error=oidc_internal_error").into_response();
+            }
+            let is_first_user = first_user_registration.is_some();
+            if let Some(reg) = first_user_registration {
+                state.settings.set_registration(reg).await;
             }
             emit_oidc_user_create_audit(
                 state,
@@ -1152,41 +1156,29 @@ async fn handle_new_user(
     user_id: Uuid,
     provider: &oidc_provider::Model,
     additional_claims: &serde_json::Value,
-) -> Result<(Uuid, bool), Response> {
+) -> Result<(Uuid, Option<RegistrationSettings>), Response> {
     // Atomically check if this is the first user (threshold 1 because the
     // user was just created by resolve_oidc_user) and handle owner role +
-    // initial setup inside the same transaction.
-    let user_count = match User::find().count(txn).await {
-        Ok(n) => n,
+    // initial setup inside the same transaction. Clear the default role
+    // resolve_oidc_user may have pre-assigned. Any failure aborts the OIDC
+    // registration; the caller drops the transaction (rollback).
+    let first_user_registration = match super::auth::handle_first_user_setup(
+        txn,
+        &state.settings,
+        state.default_tenant_id,
+        user_id,
+        1,
+        super::auth::ClearDefaultRoles::Clear,
+    )
+    .await
+    {
+        Ok(reg) => reg,
         Err(e) => {
-            tracing::error!(error = %e, "Failed to count users during OIDC registration");
+            tracing::error!(error = ?e, "Failed to handle first-user setup for OIDC registration");
             return Err(Redirect::to("/login?error=oidc_internal_error").into_response());
         }
     };
-    if user_count == 1 {
-        // Delete the default 'user' role assigned by resolve_oidc_user
-        let _ = UserRole::delete_many()
-            .filter(user_role::Column::TenantId.eq(state.default_tenant_id))
-            .filter(user_role::Column::UserId.eq(user_id))
-            .exec(txn)
-            .await;
-
-        // Assign all roles (owner preset)
-        if let Err(e) = super::auth::assign_owner_roles(txn, state.default_tenant_id, user_id).await
-        {
-            tracing::error!(error = ?e, "Failed to assign owner roles to first OIDC user");
-        }
-
-        // Complete initial setup (close registration, remove token)
-        let mut reg = state.settings.registration();
-        if let Err(e) = reg
-            .complete_initial_setup(txn, state.default_tenant_id)
-            .await
-        {
-            tracing::error!(error = ?e, "Failed to complete initial setup for first OIDC user");
-        }
-        state.settings.set_registration(reg).await;
-
+    if first_user_registration.is_some() {
         tracing::info!("first user registered via OIDC, assigned owner role");
     }
 
@@ -1200,7 +1192,7 @@ async fn handle_new_user(
     )
     .await;
 
-    Ok((user_id, user_count == 1))
+    Ok((user_id, first_user_registration))
 }
 
 /// Handle the `LinkViaPasswordRequired` resolution: store a pending link and
@@ -1607,21 +1599,21 @@ pub async fn oidc_complete_registration(
 
     // 7. Atomically check if this is the first user (threshold 1 because we just created)
     //    and assign owner role + complete initial setup inside the same transaction.
-    let is_first_user = match super::auth::handle_first_user_setup(
+    //    A failure aborts the whole registration (`?` → 500); the dropped txn rolls back.
+    //    Note: the one-time `registration_code` is consumed on the pooled connection BEFORE
+    //    this transaction — a `?`-500 rolls back user/roles/settings but does NOT restore the
+    //    code; re-initiating the OIDC registration flow is required. Pre-existing burn
+    //    behavior; the delta is that the old swallow committed a demoted user on failure.
+    let first_user_registration = super::auth::handle_first_user_setup(
         &txn,
         &state.settings,
         state.default_tenant_id,
         user_id,
         1,
+        super::auth::ClearDefaultRoles::Keep,
     )
-    .await
-    {
-        Ok(is_first) => is_first,
-        Err(e) => {
-            tracing::error!(error = ?e, "Failed to handle first-user setup for OIDC complete-registration");
-            false
-        }
-    };
+    .await?;
+    let is_first_user = first_user_registration.is_some();
 
     if is_first_user {
         tracing::info!("first user registered via OIDC complete-registration, assigned all roles");
@@ -1665,6 +1657,9 @@ pub async fn oidc_complete_registration(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Internal server error",
         ));
+    }
+    if let Some(reg) = first_user_registration {
+        state.settings.set_registration(reg).await;
     }
 
     emit_oidc_user_create_audit(
