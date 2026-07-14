@@ -49,6 +49,12 @@ impl TelegramPlugin {
     }
 }
 
+fn map_send_error(e: reqwest::Error) -> Report<NotificationPluginError> {
+    report!(NotificationPluginError::HttpRequest(
+        e.without_url().to_string()
+    ))
+}
+
 // ── NotificationTransport role implementation ────────────────────────────────
 
 #[async_trait]
@@ -139,7 +145,7 @@ impl uptrakit_plugin_infrastructure_core::NotificationTransport for TelegramPlug
             .json(&body)
             .send()
             .await
-            .map_err(|e| report!(NotificationPluginError::HttpRequest(e.to_string())))?;
+            .map_err(map_send_error)?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -990,5 +996,28 @@ mod tests {
     #[test]
     fn escape_html_preserves_plain_text() {
         assert_eq!(escape_html("hello world"), "hello world");
+    }
+
+    #[tokio::test]
+    async fn map_send_error_strips_url_bearing_token() {
+        let token = "SENTINEL-bot-token-3f9a";
+        let err = reqwest::Client::new()
+            .get(format!("http://127.0.0.1:1/bot{token}/sendMessage"))
+            .send()
+            .await
+            .expect_err("connection to 127.0.0.1:1 must be refused");
+        assert!(
+            format!("{err:?}").contains(token),
+            "fixture precondition: raw reqwest error must carry the token"
+        );
+        let mapped = map_send_error(err);
+        assert!(
+            !format!("{mapped}").contains(token),
+            "Display must not leak the token"
+        );
+        assert!(
+            !format!("{mapped:?}").contains(token),
+            "Debug must not leak the token"
+        );
     }
 }

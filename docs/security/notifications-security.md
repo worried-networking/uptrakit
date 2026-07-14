@@ -39,6 +39,15 @@ Masked fields per channel type:
 
 All other config fields (e.g. `url`, `chat_id`) are returned unmasked.
 
+## HTTP Error-Text Redaction
+
+`reqwest` errors embed the request URL in both their `Display` and `Debug` output. For notification plugins that URL
+carries secrets — the Telegram send URL is `https://api.telegram.org/bot<token>/sendMessage`, and a signed webhook URL
+can carry a secret query string. Because the controller persists a failed delivery's error text verbatim to
+`notification_log.error_message`, any HTTP send error MUST be passed through `reqwest::Error::without_url()` before
+stringification. Each plugin does this in a `map_send_error` helper (telegram, webhook); the `DeliveryFailed` sites that
+format response status/body carry no URL and are unaffected.
+
 ## Email Channel Security
 
 The email channel uses a three-layer config model that keeps SMTP credentials separate from per-channel

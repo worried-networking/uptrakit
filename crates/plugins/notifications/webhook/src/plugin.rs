@@ -88,6 +88,12 @@ impl WebhookPlugin {
     }
 }
 
+fn map_send_error(e: reqwest::Error) -> Report<NotificationPluginError> {
+    report!(NotificationPluginError::HttpRequest(
+        e.without_url().to_string()
+    ))
+}
+
 // ── NotificationTransport ──────────────────────────────────────────────────
 
 #[async_trait]
@@ -146,11 +152,7 @@ impl uptrakit_plugin_infrastructure_core::NotificationTransport for WebhookPlugi
             req = req.header("X-Uptrakit-Signature", format!("sha256={signature}"));
         }
 
-        let resp = req
-            .body(body_bytes)
-            .send()
-            .await
-            .map_err(|e| report!(NotificationPluginError::HttpRequest(e.to_string())))?;
+        let resp = req.body(body_bytes).send().await.map_err(map_send_error)?;
 
         // Reject redirect responses explicitly. Redirect following is disabled
         // to prevent SSRF via attacker-controlled redirect targets.
@@ -928,5 +930,28 @@ mod tests {
         assert!(ids.contains(&"edit"));
         assert!(ids.contains(&"test"));
         assert!(ids.contains(&"delete"));
+    }
+
+    #[tokio::test]
+    async fn map_send_error_strips_url_bearing_secret() {
+        let secret = "SENTINEL-webhook-secret-7c1d";
+        let err = reqwest::Client::new()
+            .get(format!("http://127.0.0.1:1/hook?token={secret}"))
+            .send()
+            .await
+            .expect_err("connection to 127.0.0.1:1 must be refused");
+        assert!(
+            format!("{err:?}").contains(secret),
+            "fixture precondition: raw reqwest error must carry the secret"
+        );
+        let mapped = map_send_error(err);
+        assert!(
+            !format!("{mapped}").contains(secret),
+            "Display must not leak the secret"
+        );
+        assert!(
+            !format!("{mapped:?}").contains(secret),
+            "Debug must not leak the secret"
+        );
     }
 }
