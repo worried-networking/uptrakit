@@ -42,13 +42,20 @@ use types::{CoexistencePolicy, EmbeddedTransport, ExternalServiceInfo};
 /// Tokens passed to each embedded service's run closure to control its lifecycle.
 pub(crate) struct EmbeddedShutdownTokens {
     /// Cancel to stop claiming new work. In-flight work completes naturally.
-    #[cfg_attr(
-        not(any(feature = "embedded-scheduler", feature = "embedded-ssh-agent")),
-        expect(
-            dead_code,
-            reason = "only read inside embedded-scheduler or embedded-ssh-agent feature blocks"
-        )
-    )]
+    ///
+    /// Present only when at least one embedded service that drains
+    /// (scheduler, ssh-agent, mqtt) is compiled in. `#[cfg]`-gated rather than
+    /// `#[cfg_attr(not(...), expect(dead_code))]`: rustc's never-read analysis
+    /// for this constructed-but-conditionally-read field diverges across
+    /// toolchains (1.96 flags it dead → `expect` fulfilled; 1.97 does not →
+    /// `expect` unfulfilled under `-D unfulfilled-lint-expectations`), so a
+    /// static `expect` cannot be correct on both. Gating the field to exactly
+    /// its readers removes the lint question entirely and is version-proof.
+    #[cfg(any(
+        feature = "embedded-scheduler",
+        feature = "embedded-ssh-agent",
+        feature = "embedded-mqtt"
+    ))]
     pub drain: CancellationToken,
     /// Cancel to abort in-flight work immediately.
     pub abort: CancellationToken,
@@ -289,6 +296,11 @@ impl EmbeddedServiceHost {
         let drain_token = CancellationToken::new();
         let abort_token = bg.child_token();
         let tokens = EmbeddedShutdownTokens {
+            #[cfg(any(
+                feature = "embedded-scheduler",
+                feature = "embedded-ssh-agent",
+                feature = "embedded-mqtt"
+            ))]
             drain: drain_token.clone(),
             abort: abort_token,
         };

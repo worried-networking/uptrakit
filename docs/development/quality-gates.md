@@ -91,6 +91,23 @@ cargo test -p uptrakit-web-api --no-default-features                            
 The workspace-level `--no-default-features` commands already cover the baseline OIDC-disabled
 state (the controller's default features include both `db-sqlite` and `oidc`).
 
+### Embedded-service zero-embedded check
+
+The shutdown-token fields in `uptrakit-controller-runtime` (`src/embedded/mod.rs`) are `#[cfg]`-gated
+to exactly their readers across the `embedded-*` features (see `service_host/builtins.rs`). The
+workspace-level minimal gate (`cargo check --no-default-features --features db-sqlite`) does **not**
+verify the gating: Cargo unifies features across workspace members, which enables **all** `embedded-*`
+features on controller-runtime, so every field is present and read. The release image build
+(`cargo build -p uptrakit-controller`, no embedded readers) instead compiles controller-runtime in
+**package isolation** with **zero** embedded features — the only state where a mis-gated field becomes
+dead code. This CI-enforced (`backend-lint`) check reproduces that isolation:
+
+```sh
+cargo check -p uptrakit-controller-runtime --no-default-features --features db-sqlite
+```
+
+The `-p` package flag is load-bearing: without it, feature unification masks the zero-embedded path.
+
 ### Reverse proxy-sensitive changes (mandatory)
 
 If the change can affect reverse proxy behavior, you must also run ignored reverse proxy integration tests:
