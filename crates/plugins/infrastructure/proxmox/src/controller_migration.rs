@@ -1321,11 +1321,32 @@ enum ProxmoxResourceScalingRecords {
 #[derive(DeriveIden)]
 enum ProxmoxScalingDefaults {
     Table,
+    Id,
+    TenantId,
+    PluginConfigId,
+    ScalingMode,
+    AbsoluteCores,
+    AbsoluteMemoryMb,
+    DeltaCores,
+    DeltaMemoryMb,
+    CreatedAt,
+    UpdatedAt,
 }
 
 #[derive(DeriveIden)]
 enum ProxmoxScalingItemOverrides {
     Table,
+    Id,
+    TenantId,
+    SoftwareItemId,
+    PluginConfigId,
+    ScalingMode,
+    AbsoluteCores,
+    AbsoluteMemoryMb,
+    DeltaCores,
+    DeltaMemoryMb,
+    CreatedAt,
+    UpdatedAt,
 }
 
 // ── Migration A: create proxmox_scaling_defaults ────────────────────────────
@@ -1341,26 +1362,102 @@ impl MigrationName for CreateProxmoxScalingDefaults {
 #[async_trait::async_trait]
 impl MigrationTrait for CreateProxmoxScalingDefaults {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        // Uuid columns use the `.uuid()` builder (uuid_text on SQLite, uuid on
+        // Postgres) like every sibling proxmox table — the entity layer binds
+        // Value::Uuid, which a raw TEXT column rejects on Postgres.
+        // Deliberately no foreign keys: the shipped schema had none, and adding
+        // them now would drift from already-applied SQLite databases (which
+        // never re-run this migration).
         manager
-            .get_connection()
-            .execute_unprepared(
-                "CREATE TABLE proxmox_scaling_defaults (
-                    id TEXT NOT NULL PRIMARY KEY,
-                    tenant_id TEXT NOT NULL,
-                    plugin_config_id TEXT NOT NULL,
-                    scaling_mode VARCHAR(16) NOT NULL DEFAULT 'none',
-                    absolute_cores INTEGER
-                        CHECK (absolute_cores IS NULL OR absolute_cores >= 1),
-                    absolute_memory_mb INTEGER
-                        CHECK (absolute_memory_mb IS NULL OR absolute_memory_mb >= 1),
-                    delta_cores INTEGER
-                        CHECK (delta_cores IS NULL OR delta_cores >= 1),
-                    delta_memory_mb INTEGER
-                        CHECK (delta_memory_mb IS NULL OR delta_memory_mb >= 1),
-                    created_at TIMESTAMP NOT NULL,
-                    updated_at TIMESTAMP NOT NULL,
-                    UNIQUE (tenant_id, plugin_config_id)
-                )",
+            .create_table(
+                Table::create()
+                    .table(ProxmoxScalingDefaults::Table)
+                    .col(
+                        ColumnDef::new(ProxmoxScalingDefaults::Id)
+                            .uuid()
+                            .not_null()
+                            .primary_key(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxScalingDefaults::TenantId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxScalingDefaults::PluginConfigId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxScalingDefaults::ScalingMode)
+                            .string_len(16)
+                            .not_null()
+                            .default("none"),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxScalingDefaults::AbsoluteCores)
+                            .integer()
+                            .null()
+                            .check(
+                                Expr::col(ProxmoxScalingDefaults::AbsoluteCores)
+                                    .is_null()
+                                    .or(Expr::col(ProxmoxScalingDefaults::AbsoluteCores).gte(1)),
+                            ),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxScalingDefaults::AbsoluteMemoryMb)
+                            .integer()
+                            .null()
+                            .check(
+                                Expr::col(ProxmoxScalingDefaults::AbsoluteMemoryMb)
+                                    .is_null()
+                                    .or(Expr::col(ProxmoxScalingDefaults::AbsoluteMemoryMb).gte(1)),
+                            ),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxScalingDefaults::DeltaCores)
+                            .integer()
+                            .null()
+                            .check(
+                                Expr::col(ProxmoxScalingDefaults::DeltaCores)
+                                    .is_null()
+                                    .or(Expr::col(ProxmoxScalingDefaults::DeltaCores).gte(1)),
+                            ),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxScalingDefaults::DeltaMemoryMb)
+                            .integer()
+                            .null()
+                            .check(
+                                Expr::col(ProxmoxScalingDefaults::DeltaMemoryMb)
+                                    .is_null()
+                                    .or(Expr::col(ProxmoxScalingDefaults::DeltaMemoryMb).gte(1)),
+                            ),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxScalingDefaults::CreatedAt)
+                            .timestamp()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxScalingDefaults::UpdatedAt)
+                            .timestamp()
+                            .not_null(),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        // Preserves the shipped `UNIQUE (tenant_id, plugin_config_id)`.
+        manager
+            .create_index(
+                Index::create()
+                    .name("uq_proxmox_scaling_defaults_tenant_config")
+                    .table(ProxmoxScalingDefaults::Table)
+                    .col(ProxmoxScalingDefaults::TenantId)
+                    .col(ProxmoxScalingDefaults::PluginConfigId)
+                    .unique()
+                    .to_owned(),
             )
             .await?;
         Ok(())
@@ -1390,27 +1487,109 @@ impl MigrationName for CreateProxmoxScalingItemOverrides {
 #[async_trait::async_trait]
 impl MigrationTrait for CreateProxmoxScalingItemOverrides {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        // Uuid columns use the `.uuid()` builder (uuid_text on SQLite, uuid on
+        // Postgres) like every sibling proxmox table — the entity layer binds
+        // Value::Uuid, which a raw TEXT column rejects on Postgres.
+        // Deliberately no foreign keys: the shipped schema had none, and adding
+        // them now would drift from already-applied SQLite databases (which
+        // never re-run this migration).
         manager
-            .get_connection()
-            .execute_unprepared(
-                "CREATE TABLE proxmox_scaling_item_overrides (
-                    id TEXT NOT NULL PRIMARY KEY,
-                    tenant_id TEXT NOT NULL,
-                    software_item_id TEXT NOT NULL,
-                    plugin_config_id TEXT NOT NULL,
-                    scaling_mode VARCHAR(16) NOT NULL DEFAULT 'none',
-                    absolute_cores INTEGER
-                        CHECK (absolute_cores IS NULL OR absolute_cores >= 1),
-                    absolute_memory_mb INTEGER
-                        CHECK (absolute_memory_mb IS NULL OR absolute_memory_mb >= 1),
-                    delta_cores INTEGER
-                        CHECK (delta_cores IS NULL OR delta_cores >= 1),
-                    delta_memory_mb INTEGER
-                        CHECK (delta_memory_mb IS NULL OR delta_memory_mb >= 1),
-                    created_at TIMESTAMP NOT NULL,
-                    updated_at TIMESTAMP NOT NULL,
-                    UNIQUE (software_item_id, plugin_config_id)
-                )",
+            .create_table(
+                Table::create()
+                    .table(ProxmoxScalingItemOverrides::Table)
+                    .col(
+                        ColumnDef::new(ProxmoxScalingItemOverrides::Id)
+                            .uuid()
+                            .not_null()
+                            .primary_key(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxScalingItemOverrides::TenantId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxScalingItemOverrides::SoftwareItemId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxScalingItemOverrides::PluginConfigId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxScalingItemOverrides::ScalingMode)
+                            .string_len(16)
+                            .not_null()
+                            .default("none"),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxScalingItemOverrides::AbsoluteCores)
+                            .integer()
+                            .null()
+                            .check(
+                                Expr::col(ProxmoxScalingItemOverrides::AbsoluteCores)
+                                    .is_null()
+                                    .or(Expr::col(ProxmoxScalingItemOverrides::AbsoluteCores)
+                                        .gte(1)),
+                            ),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxScalingItemOverrides::AbsoluteMemoryMb)
+                            .integer()
+                            .null()
+                            .check(
+                                Expr::col(ProxmoxScalingItemOverrides::AbsoluteMemoryMb)
+                                    .is_null()
+                                    .or(Expr::col(ProxmoxScalingItemOverrides::AbsoluteMemoryMb)
+                                        .gte(1)),
+                            ),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxScalingItemOverrides::DeltaCores)
+                            .integer()
+                            .null()
+                            .check(
+                                Expr::col(ProxmoxScalingItemOverrides::DeltaCores)
+                                    .is_null()
+                                    .or(Expr::col(ProxmoxScalingItemOverrides::DeltaCores).gte(1)),
+                            ),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxScalingItemOverrides::DeltaMemoryMb)
+                            .integer()
+                            .null()
+                            .check(
+                                Expr::col(ProxmoxScalingItemOverrides::DeltaMemoryMb)
+                                    .is_null()
+                                    .or(Expr::col(ProxmoxScalingItemOverrides::DeltaMemoryMb)
+                                        .gte(1)),
+                            ),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxScalingItemOverrides::CreatedAt)
+                            .timestamp()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxScalingItemOverrides::UpdatedAt)
+                            .timestamp()
+                            .not_null(),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("uq_proxmox_scaling_item_overrides_item_config")
+                    .table(ProxmoxScalingItemOverrides::Table)
+                    .col(ProxmoxScalingItemOverrides::SoftwareItemId)
+                    .col(ProxmoxScalingItemOverrides::PluginConfigId)
+                    .unique()
+                    .to_owned(),
             )
             .await?;
         Ok(())
@@ -1762,6 +1941,27 @@ mod tests {
             .collect()
     }
 
+    async fn column_decl_types(
+        db: &sea_orm::DatabaseConnection,
+        table: &str,
+    ) -> std::collections::HashMap<String, String> {
+        let rows = db
+            .query_all_raw(Statement::from_string(
+                DbBackend::Sqlite,
+                format!("PRAGMA table_info({table})"),
+            ))
+            .await
+            .unwrap();
+        rows.into_iter()
+            .map(|row| {
+                (
+                    String::try_get(&row, "", "name").unwrap(),
+                    String::try_get(&row, "", "type").unwrap(),
+                )
+            })
+            .collect()
+    }
+
     #[tokio::test]
     async fn forward_timeout_migration_is_noop_after_fresh_create() {
         let db = Database::connect("sqlite::memory:").await.unwrap();
@@ -1844,6 +2044,71 @@ mod tests {
                 "missing column: {expected}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn scaling_tables_declare_uuid_typed_id_columns() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        let manager = SchemaManager::new(&db);
+        CreateProxmoxScalingDefaults.up(&manager).await.unwrap();
+        CreateProxmoxScalingItemOverrides
+            .up(&manager)
+            .await
+            .unwrap();
+
+        // sea_query renders ColumnType::Uuid as `uuid_text` on SQLite; the raw
+        // legacy declaration was `TEXT`. Postgres gets a real `uuid` column.
+        // The INTENT of this assertion is "no longer raw TEXT". If the rendered
+        // token differs from `uuid_text`, confirm the actual token in vendored
+        // sea-query-1.0.1/src/backend/sqlite/table.rs (ColumnType::Uuid arm)
+        // and pin the assertion to that token — do not weaken it to a
+        // not-equals-TEXT check.
+        let defaults = column_decl_types(&db, "proxmox_scaling_defaults").await;
+        for col in ["id", "tenant_id", "plugin_config_id"] {
+            assert!(
+                defaults[col].eq_ignore_ascii_case("uuid_text"),
+                "proxmox_scaling_defaults.{col} declared {} — want uuid_text",
+                defaults[col]
+            );
+        }
+        let overrides = column_decl_types(&db, "proxmox_scaling_item_overrides").await;
+        for col in ["id", "tenant_id", "software_item_id", "plugin_config_id"] {
+            assert!(
+                overrides[col].eq_ignore_ascii_case("uuid_text"),
+                "proxmox_scaling_item_overrides.{col} declared {} — want uuid_text",
+                overrides[col]
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn scaling_store_roundtrips_on_builder_schema() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        let manager = SchemaManager::new(&db);
+        CreateProxmoxScalingDefaults.up(&manager).await.unwrap();
+
+        let tenant_id = uuid::Uuid::now_v7();
+        let plugin_config_id = uuid::Uuid::now_v7();
+        let policy = crate::scaling_store::ScalingPolicy {
+            mode: crate::scaling_mode::ScalingMode::Absolute,
+            absolute_cores: Some(4),
+            ..Default::default()
+        };
+
+        crate::scaling_store::upsert_scaling_global_default(
+            &db,
+            tenant_id,
+            plugin_config_id,
+            &policy,
+        )
+        .await
+        .expect("runtime upsert must work against the builder schema");
+        let loaded =
+            crate::scaling_store::load_scaling_global_default(&db, tenant_id, plugin_config_id)
+                .await
+                .expect("entity read-back must decode");
+        assert_eq!(loaded.absolute_cores, Some(4));
+        assert_eq!(loaded.mode, crate::scaling_mode::ScalingMode::Absolute);
     }
 
     #[tokio::test]
