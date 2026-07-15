@@ -2027,6 +2027,189 @@ impl MigrationTrait for CreateProxmoxResourceScalingRecord {
     }
 }
 
+// ── Migration F: repair TEXT-stored uuid cells in scaling tables ────────────
+
+/// Repair SQLite databases where the original Migration C wrote scaling-row
+/// UUIDs as 36-character TEXT (via `lower(hex(randomblob(...)))`) instead of
+/// the 16-byte BLOBs sqlx decodes (`Uuid::from_slice` — blob-only, so every
+/// entity read of a text row fails with `ParseByteLength { len: 36 }`).
+///
+/// Direct precedent: `m20260308_000002_fix_permission_uuid_storage` in
+/// `crates/shared/db` repairs the identical failure class for
+/// `permissions.id`. Same repair strategy (detect via `typeof()` raw read,
+/// parse in Rust, fix or abort); two deliberate differences: binds are
+/// `Value::Uuid` instead of the precedent's `Value::Bytes` (equivalent on
+/// SQLite — sqlx encodes both as the 16-byte blob; `Value::Uuid` matches
+/// Migration C), and the WHERE keys on the old text `id` itself (the
+/// precedent keyed on `name` — these tables have no uncorrupted column).
+///
+/// Per text row: parse the stored uuid text in Rust, then either
+/// - DELETE the row if a blob row already occupies its table's UNIQUE tuple
+///   (`proxmox_scaling_defaults`: (tenant_id, plugin_config_id);
+///   `proxmox_scaling_item_overrides`: (software_item_id, plugin_config_id) —
+///   tenant_id is NOT part of it). Such a sibling exists when a runtime
+///   upsert ran after the old migration: its blob-bind read cannot match the
+///   text row, so it inserted a fresh blob row for the same logical key. The
+///   blob row is strictly newer and wins; converting the text row instead
+///   would collide with the UNIQUE constraint. Its older created_at (and, on
+///   item_overrides, a possibly differing tenant_id) is discarded with it —
+///   the constraint makes the blob row the sole authoritative row.
+/// - otherwise UPDATE all uuid columns in place to Value::Uuid binds, keyed
+///   on the old text id (the pre-image WHERE matches before SET overwrites).
+///
+/// SQLite-only: Postgres never committed the old Migration C (the batch runs
+/// in one transaction and rolled back), so no Postgres rows can need repair.
+/// Unparseable text aborts with an actionable error instead of skipping:
+/// every value the old migration could produce parses (valid 8-4-4-4-12 hex
+/// layout), so anything else is corruption from no known code path.
+///
+/// Runs at startup on one dedicated connection — plain `begin()` (a SAVEPOINT
+/// under the batch transaction); no `BEGIN IMMEDIATE` needed.
+pub struct RepairProxmoxScalingUuidStorage;
+
+impl MigrationName for RepairProxmoxScalingUuidStorage {
+    fn name(&self) -> &str {
+        "m20260714_000001_repair_proxmox_scaling_uuid_storage"
+    }
+}
+
+#[async_trait::async_trait]
+impl MigrationTrait for RepairProxmoxScalingUuidStorage {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        let db = manager.get_connection();
+        if db.get_database_backend() != sea_orm::DatabaseBackend::Sqlite {
+            return Ok(());
+        }
+        let txn = db.begin().await?;
+        repair_scaling_table(
+            &txn,
+            "proxmox_scaling_defaults",
+            &["id", "tenant_id", "plugin_config_id"],
+            [1, 2], // UNIQUE tuple: (tenant_id, plugin_config_id)
+        )
+        .await?;
+        repair_scaling_table(
+            &txn,
+            "proxmox_scaling_item_overrides",
+            &["id", "tenant_id", "software_item_id", "plugin_config_id"],
+            [2, 3], // UNIQUE tuple: (software_item_id, plugin_config_id)
+        )
+        .await?;
+        txn.commit().await?;
+        Ok(())
+    }
+
+    /// No-op: re-introducing TEXT storage would re-introduce the decode bug.
+    async fn down(&self, _manager: &SchemaManager) -> Result<(), DbErr> {
+        Ok(())
+    }
+}
+
+/// Repair one scaling table's TEXT-stored uuid rows (SQLite only). See
+/// [`RepairProxmoxScalingUuidStorage`] for the rules; `key_col_indices`
+/// indexes into `uuid_cols` and names the table's UNIQUE tuple.
+/// Invariant: `uuid_cols[0]` MUST be `"id"` — the detection predicate,
+/// the UPDATE/DELETE key, and `old_texts[0]` all assume it.
+async fn repair_scaling_table(
+    txn: &sea_orm::DatabaseTransaction,
+    table: &str,
+    uuid_cols: &[&str],
+    key_col_indices: [usize; 2],
+) -> Result<(), DbErr> {
+    // `typeof()` is a SQLite-specific function with no sea_query equivalent;
+    // query_all_raw with a raw Statement is the approved exception for this
+    // pattern. See docs/development/database-migrations.md.
+    let cols = uuid_cols.join(", ");
+    let broken_rows = txn
+        .query_all_raw(sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            format!("SELECT {cols} FROM {table} WHERE typeof(id) = 'text'"),
+        ))
+        .await?;
+
+    for row in &broken_rows {
+        let mut old_texts: Vec<String> = Vec::with_capacity(uuid_cols.len());
+        let mut parsed: Vec<Uuid> = Vec::with_capacity(uuid_cols.len());
+        for (i, col) in uuid_cols.iter().enumerate() {
+            let text = String::try_get_by_index(row, i).map_err(|e| {
+                DbErr::Custom(format!("scaling uuid repair: read {table}.{col}: {e:?}"))
+            })?;
+            let value = Uuid::parse_str(&text).map_err(|e| {
+                DbErr::Custom(format!(
+                    "scaling uuid repair: {table}.{col} holds non-uuid text '{text}' ({e}). \
+                     This row was not written by any known Uptrakit version; \
+                     delete it manually and restart the controller."
+                ))
+            })?;
+            old_texts.push(text);
+            parsed.push(value);
+        }
+        // `uuid_cols[0]` is always `"id"` (documented invariant), so the id
+        // text sits at `old_texts[0]`; read it via `.first()` rather than the
+        // indexing operator (denied by `clippy::indexing_slicing`).
+        let old_id_text = old_texts.first().ok_or_else(|| {
+            DbErr::Custom(format!("scaling uuid repair: {table} row has no id column"))
+        })?;
+        let key_col_bounds_err = || {
+            DbErr::Custom(format!(
+                "scaling uuid repair: key_col_indices out of range for {table}"
+            ))
+        };
+        let key_col_0 = *uuid_cols
+            .get(key_col_indices[0])
+            .ok_or_else(key_col_bounds_err)?;
+        let key_col_1 = *uuid_cols
+            .get(key_col_indices[1])
+            .ok_or_else(key_col_bounds_err)?;
+        let key_val_0 = *parsed
+            .get(key_col_indices[0])
+            .ok_or_else(key_col_bounds_err)?;
+        let key_val_1 = *parsed
+            .get(key_col_indices[1])
+            .ok_or_else(key_col_bounds_err)?;
+
+        // Duplicate probe on THIS table's UNIQUE tuple, with blob binds — it
+        // can only match a blob sibling (a post-migration runtime upsert that
+        // couldn't see the text row), never a text row. Two TEXT rows sharing
+        // a tuple cannot arise (old Migration C copied from a source table
+        // whose own uniqueness held), and if one somehow did, the first
+        // converts and the second dedup-deletes against it — benign.
+        let blob_sibling = txn
+            .query_all(
+                &Query::select()
+                    .column(Alias::new("id"))
+                    .from(Alias::new(table))
+                    .and_where(Expr::col(Alias::new(key_col_0)).eq(key_val_0))
+                    .and_where(Expr::col(Alias::new(key_col_1)).eq(key_val_1))
+                    .to_owned(),
+            )
+            .await?;
+
+        if blob_sibling.is_empty() {
+            // Convert in place: every uuid column → Value::Uuid, keyed on the
+            // old text id (WHERE evaluates the pre-image before SET applies).
+            let mut update = Query::update();
+            update.table(Alias::new(table));
+            for (col, value) in uuid_cols.iter().zip(parsed.iter()) {
+                update.value(Alias::new(*col), *value);
+            }
+            update.and_where(Expr::col(Alias::new("id")).eq(old_id_text.as_str()));
+            txn.execute(&update.to_owned()).await?;
+        } else {
+            // The blob sibling is strictly newer and constraint-authoritative;
+            // converting the text row would violate the UNIQUE tuple.
+            txn.execute(
+                &Query::delete()
+                    .from_table(Alias::new(table))
+                    .and_where(Expr::col(Alias::new("id")).eq(old_id_text.as_str()))
+                    .to_owned(),
+            )
+            .await?;
+        }
+    }
+    Ok(())
+}
+
 /// Return all controller-side migrations owned by the Proxmox plugin.
 ///
 /// Migration names are hardcoded to match the original names from when
@@ -2051,6 +2234,7 @@ pub fn migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
         Box::new(MigrateProxmoxScalingFromProtectionTables),
         Box::new(DropProxmoxScalingColumnsFromProtectionTables),
         Box::new(AddScalingModeUsedToScalingRecord),
+        Box::new(RepairProxmoxScalingUuidStorage),
     ]
 }
 
@@ -2895,5 +3079,284 @@ mod tests {
         assert!(defaults.contains(&"backup_timeout_seconds".to_string()));
         assert!(overrides.contains(&"snapshot_timeout_seconds".to_string()));
         assert!(overrides.contains(&"backup_timeout_seconds".to_string()));
+    }
+
+    #[tokio::test]
+    async fn repair_converts_text_uuid_rows_and_is_idempotent() {
+        let db = scaling_migration_test_db().await;
+        let manager = SchemaManager::new(&db);
+        let seeded_at = time::OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
+
+        // Reproduce the corruption: uuid cells bound as Value::String
+        // (.to_string()), exactly what the old Migration C left behind.
+        // ≥2 rows so a botched set-based rewrite is caught.
+        let ids = [uuid::Uuid::now_v7(), uuid::Uuid::now_v7()];
+        let tenants = [uuid::Uuid::now_v7(), uuid::Uuid::now_v7()];
+        let cfgs = [uuid::Uuid::now_v7(), uuid::Uuid::now_v7()];
+        for i in 0..2 {
+            db.execute(
+                &Query::insert()
+                    .into_table(Alias::new("proxmox_scaling_defaults"))
+                    .columns([
+                        Alias::new("id"),
+                        Alias::new("tenant_id"),
+                        Alias::new("plugin_config_id"),
+                        Alias::new("scaling_mode"),
+                        Alias::new("absolute_cores"),
+                        Alias::new("absolute_memory_mb"),
+                        Alias::new("delta_cores"),
+                        Alias::new("delta_memory_mb"),
+                        Alias::new("created_at"),
+                        Alias::new("updated_at"),
+                    ])
+                    .values_panic([
+                        ids[i].to_string().into(),
+                        tenants[i].to_string().into(),
+                        cfgs[i].to_string().into(),
+                        "absolute".into(),
+                        8i32.into(),
+                        Option::<i32>::None.into(),
+                        Option::<i32>::None.into(),
+                        Option::<i32>::None.into(),
+                        seeded_at.into(),
+                        seeded_at.into(),
+                    ])
+                    .to_owned(),
+            )
+            .await
+            .unwrap();
+        }
+
+        use sea_orm::EntityTrait as _;
+        // Corruption reproduced: the entity read fails before the repair.
+        assert!(
+            crate::entity::proxmox_scaling_default::Entity::find()
+                .all(&db)
+                .await
+                .is_err(),
+            "text-stored uuids must be unreadable before the repair"
+        );
+
+        RepairProxmoxScalingUuidStorage.up(&manager).await.unwrap();
+
+        let rows = crate::entity::proxmox_scaling_default::Entity::find()
+            .all(&db)
+            .await
+            .expect("repaired rows must decode");
+        assert_eq!(rows.len(), 2);
+        for row in &rows {
+            // UUID EQUALITY, never version checks: legacy randomblob ids carry
+            // arbitrary version bits and are not v7 — the repair must preserve
+            // the value, not mint a new id.
+            assert!(ids.contains(&row.id), "repair must preserve the uuid value");
+            assert_eq!(row.absolute_cores, Some(8));
+            assert_eq!(row.created_at, seeded_at);
+        }
+
+        // Idempotent: a second run finds no text rows and changes nothing.
+        RepairProxmoxScalingUuidStorage.up(&manager).await.unwrap();
+        let again = crate::entity::proxmox_scaling_default::Entity::find()
+            .all(&db)
+            .await
+            .unwrap();
+        assert_eq!(again.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn repair_leaves_blob_rows_untouched_in_mixed_state() {
+        let db = scaling_migration_test_db().await;
+        let manager = SchemaManager::new(&db);
+        let seeded_at = time::OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
+
+        let text_id = uuid::Uuid::now_v7();
+        let blob_id = uuid::Uuid::now_v7();
+        // One corrupted text row and one healthy runtime-style blob row
+        // (distinct logical keys — no duplicate here).
+        for (id, tenant, cfg, as_text) in [
+            (text_id, uuid::Uuid::now_v7(), uuid::Uuid::now_v7(), true),
+            (blob_id, uuid::Uuid::now_v7(), uuid::Uuid::now_v7(), false),
+        ] {
+            let (idv, tv, cv): (sea_orm::Value, sea_orm::Value, sea_orm::Value) = if as_text {
+                (
+                    id.to_string().into(),
+                    tenant.to_string().into(),
+                    cfg.to_string().into(),
+                )
+            } else {
+                (id.into(), tenant.into(), cfg.into())
+            };
+            db.execute(
+                &Query::insert()
+                    .into_table(Alias::new("proxmox_scaling_defaults"))
+                    .columns([
+                        Alias::new("id"),
+                        Alias::new("tenant_id"),
+                        Alias::new("plugin_config_id"),
+                        Alias::new("scaling_mode"),
+                        Alias::new("absolute_cores"),
+                        Alias::new("created_at"),
+                        Alias::new("updated_at"),
+                    ])
+                    .values_panic([
+                        Expr::val(idv),
+                        Expr::val(tv),
+                        Expr::val(cv),
+                        Expr::val("absolute"),
+                        Expr::val(4i32),
+                        Expr::val(seeded_at),
+                        Expr::val(seeded_at),
+                    ])
+                    .to_owned(),
+            )
+            .await
+            .unwrap();
+        }
+
+        RepairProxmoxScalingUuidStorage.up(&manager).await.unwrap();
+
+        use sea_orm::EntityTrait as _;
+        let rows = crate::entity::proxmox_scaling_default::Entity::find()
+            .all(&db)
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().any(|r| r.id == text_id), "text row converted");
+        assert!(rows.iter().any(|r| r.id == blob_id), "blob row untouched");
+    }
+
+    #[tokio::test]
+    async fn repair_deletes_text_row_when_blob_sibling_occupies_unique_tuple() {
+        let db = scaling_migration_test_db().await;
+        let manager = SchemaManager::new(&db);
+        let seeded_at = time::OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
+
+        // defaults arm: text row and blob row share (tenant_id, plugin_config_id).
+        let tenant = uuid::Uuid::now_v7();
+        let cfg = uuid::Uuid::now_v7();
+        let text_id = uuid::Uuid::now_v7();
+        let blob_id = uuid::Uuid::now_v7();
+        let defaults_cols = [
+            Alias::new("id"),
+            Alias::new("tenant_id"),
+            Alias::new("plugin_config_id"),
+            Alias::new("scaling_mode"),
+            Alias::new("absolute_cores"),
+            Alias::new("created_at"),
+            Alias::new("updated_at"),
+        ];
+        db.execute(
+            &Query::insert()
+                .into_table(Alias::new("proxmox_scaling_defaults"))
+                .columns(defaults_cols.clone())
+                .values_panic([
+                    text_id.to_string().into(),
+                    tenant.to_string().into(),
+                    cfg.to_string().into(),
+                    "absolute".into(),
+                    8i32.into(),
+                    seeded_at.into(),
+                    seeded_at.into(),
+                ])
+                .to_owned(),
+        )
+        .await
+        .unwrap();
+        db.execute(
+            &Query::insert()
+                .into_table(Alias::new("proxmox_scaling_defaults"))
+                .columns(defaults_cols)
+                .values_panic([
+                    blob_id.into(),
+                    tenant.into(),
+                    cfg.into(),
+                    "absolute".into(),
+                    16i32.into(),
+                    seeded_at.into(),
+                    seeded_at.into(),
+                ])
+                .to_owned(),
+        )
+        .await
+        .unwrap();
+
+        // item_overrides arm: pair shares (software_item_id, plugin_config_id)
+        // while tenant_ids DIFFER — tenant_id is not in this table's UNIQUE
+        // tuple, the arm a uniform two-column probe would get wrong.
+        let item = uuid::Uuid::now_v7();
+        let ocfg = uuid::Uuid::now_v7();
+        let o_text_id = uuid::Uuid::now_v7();
+        let o_blob_id = uuid::Uuid::now_v7();
+        let override_cols = [
+            Alias::new("id"),
+            Alias::new("tenant_id"),
+            Alias::new("software_item_id"),
+            Alias::new("plugin_config_id"),
+            Alias::new("scaling_mode"),
+            Alias::new("absolute_cores"),
+            Alias::new("created_at"),
+            Alias::new("updated_at"),
+        ];
+        db.execute(
+            &Query::insert()
+                .into_table(Alias::new("proxmox_scaling_item_overrides"))
+                .columns(override_cols.clone())
+                .values_panic([
+                    o_text_id.to_string().into(),
+                    uuid::Uuid::now_v7().to_string().into(),
+                    item.to_string().into(),
+                    ocfg.to_string().into(),
+                    "absolute".into(),
+                    2i32.into(),
+                    seeded_at.into(),
+                    seeded_at.into(),
+                ])
+                .to_owned(),
+        )
+        .await
+        .unwrap();
+        db.execute(
+            &Query::insert()
+                .into_table(Alias::new("proxmox_scaling_item_overrides"))
+                .columns(override_cols)
+                .values_panic([
+                    o_blob_id.into(),
+                    uuid::Uuid::now_v7().into(),
+                    item.into(),
+                    ocfg.into(),
+                    "absolute".into(),
+                    6i32.into(),
+                    seeded_at.into(),
+                    seeded_at.into(),
+                ])
+                .to_owned(),
+        )
+        .await
+        .unwrap();
+
+        RepairProxmoxScalingUuidStorage
+            .up(&manager)
+            .await
+            .expect("repair must not hit a UNIQUE violation on duplicate pairs");
+
+        use sea_orm::EntityTrait as _;
+        let defaults = crate::entity::proxmox_scaling_default::Entity::find()
+            .all(&db)
+            .await
+            .unwrap();
+        assert_eq!(defaults.len(), 1, "text duplicate must be deleted");
+        assert_eq!(defaults[0].id, blob_id, "blob sibling survives");
+        assert_eq!(
+            defaults[0].absolute_cores,
+            Some(16),
+            "blob values untouched"
+        );
+
+        let overrides = crate::entity::proxmox_scaling_item_override::Entity::find()
+            .all(&db)
+            .await
+            .unwrap();
+        assert_eq!(overrides.len(), 1);
+        assert_eq!(overrides[0].id, o_blob_id);
+        assert_eq!(overrides[0].absolute_cores, Some(6));
     }
 }
