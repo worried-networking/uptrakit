@@ -8,8 +8,9 @@
 //! name recorded in `seaql_migrations` matches the original name from when
 //! these migrations lived in `crates/shared/db`.
 
-use sea_orm::TransactionTrait as _;
+use sea_orm::{ConnectionTrait as _, TransactionTrait as _, TryGetable as _};
 use sea_orm_migration::prelude::*;
+use uuid::Uuid;
 
 // ── Migration: create proxmox_host_mappings ─────────────────────────────────
 
@@ -1624,43 +1625,174 @@ impl MigrationTrait for MigrateProxmoxScalingFromProtectionTables {
         // broken: on retry, C.1 hits the UNIQUE constraint and fails again with no recovery path.
         let txn = manager.get_connection().begin().await?;
 
-        // C.1 — copy from proxmox_protection_defaults
-        txn.execute_unprepared(
-            "INSERT INTO proxmox_scaling_defaults \
-             (id, tenant_id, plugin_config_id, scaling_mode, \
-              absolute_cores, absolute_memory_mb, delta_cores, delta_memory_mb, \
-              created_at, updated_at) \
-             SELECT \
-               lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-' || \
-               lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(2))) || '-' || \
-               lower(hex(randomblob(6))), \
-               tenant_id, plugin_config_id, 'absolute', \
-               update_cores, update_memory_mb, NULL, NULL, \
-               created_at, updated_at \
-             FROM proxmox_protection_defaults \
-             WHERE update_cores IS NOT NULL OR update_memory_mb IS NOT NULL",
-        )
-        .await?;
+        // C.1 — copy proxmox_protection_defaults → proxmox_scaling_defaults.
+        // Ids are generated in Rust (Uuid::now_v7()) and bound as Value::Uuid:
+        // the previous SQLite-only random-blob-hex id concatenation trick
+        // fails to parse on Postgres, and a .to_string() text id is
+        // unreadable through sqlx's blob-only SQLite uuid codec. Columns are
+        // read by ordinal index
+        // against the explicit SELECT order. Deliberate exception to the
+        // batch-queries rule: this runs once at migration time over a bounded
+        // handful of rows, and the per-row insert is the empty-batch guard (a
+        // zero-row Query::insert() emits INSERT with no VALUES clause — a
+        // syntax error on both backends).
+        let defaults_select = Query::select()
+            .column(Alias::new("tenant_id"))
+            .column(Alias::new("plugin_config_id"))
+            .column(Alias::new("update_cores"))
+            .column(Alias::new("update_memory_mb"))
+            .column(Alias::new("created_at"))
+            .column(Alias::new("updated_at"))
+            .from(Alias::new("proxmox_protection_defaults"))
+            .and_where(
+                Expr::col(Alias::new("update_cores"))
+                    .is_not_null()
+                    .or(Expr::col(Alias::new("update_memory_mb")).is_not_null()),
+            )
+            .to_owned();
+        let default_rows = txn.query_all(&defaults_select).await?;
+        for row in &default_rows {
+            let tenant_id = Uuid::try_get_by_index(row, 0)
+                .map_err(|e| DbErr::Custom(format!("migration C.1: read tenant_id: {e:?}")))?;
+            let plugin_config_id = Uuid::try_get_by_index(row, 1).map_err(|e| {
+                DbErr::Custom(format!("migration C.1: read plugin_config_id: {e:?}"))
+            })?;
+            let update_cores = Option::<i32>::try_get_by_index(row, 2)
+                .map_err(|e| DbErr::Custom(format!("migration C.1: read update_cores: {e:?}")))?;
+            let update_memory_mb = Option::<i32>::try_get_by_index(row, 3).map_err(|e| {
+                DbErr::Custom(format!("migration C.1: read update_memory_mb: {e:?}"))
+            })?;
+            let created_at = time::OffsetDateTime::try_get_by_index(row, 4)
+                .map_err(|e| DbErr::Custom(format!("migration C.1: read created_at: {e:?}")))?;
+            let updated_at = time::OffsetDateTime::try_get_by_index(row, 5)
+                .map_err(|e| DbErr::Custom(format!("migration C.1: read updated_at: {e:?}")))?;
 
-        // C.2 — copy from proxmox_protection_item_overrides (join plugin_configs for tenant_id)
-        txn.execute_unprepared(
-            "INSERT INTO proxmox_scaling_item_overrides \
-             (id, tenant_id, software_item_id, plugin_config_id, scaling_mode, \
-              absolute_cores, absolute_memory_mb, delta_cores, delta_memory_mb, \
-              created_at, updated_at) \
-             SELECT \
-               lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-' || \
-               lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(2))) || '-' || \
-               lower(hex(randomblob(6))), \
-               pc.tenant_id, \
-               pio.software_item_id, pio.plugin_config_id, 'absolute', \
-               pio.update_cores, pio.update_memory_mb, NULL, NULL, \
-               pio.created_at, pio.updated_at \
-             FROM proxmox_protection_item_overrides pio \
-             JOIN plugin_configs pc ON pc.id = pio.plugin_config_id \
-             WHERE pio.update_cores IS NOT NULL OR pio.update_memory_mb IS NOT NULL",
-        )
-        .await?;
+            txn.execute(
+                &Query::insert()
+                    .into_table(ProxmoxScalingDefaults::Table)
+                    .columns([
+                        ProxmoxScalingDefaults::Id,
+                        ProxmoxScalingDefaults::TenantId,
+                        ProxmoxScalingDefaults::PluginConfigId,
+                        ProxmoxScalingDefaults::ScalingMode,
+                        ProxmoxScalingDefaults::AbsoluteCores,
+                        ProxmoxScalingDefaults::AbsoluteMemoryMb,
+                        ProxmoxScalingDefaults::DeltaCores,
+                        ProxmoxScalingDefaults::DeltaMemoryMb,
+                        ProxmoxScalingDefaults::CreatedAt,
+                        ProxmoxScalingDefaults::UpdatedAt,
+                    ])
+                    .values_panic([
+                        Uuid::now_v7().into(),
+                        tenant_id.into(),
+                        plugin_config_id.into(),
+                        "absolute".into(),
+                        update_cores.into(),
+                        update_memory_mb.into(),
+                        Option::<i32>::None.into(),
+                        Option::<i32>::None.into(),
+                        created_at.into(),
+                        updated_at.into(),
+                    ])
+                    .to_owned(),
+            )
+            .await?;
+        }
+
+        // C.2 — copy proxmox_protection_item_overrides → proxmox_scaling_item_overrides.
+        // tenant_id is resolved by joining plugin_configs (as the original
+        // SELECT did). Both joined tables expose id/created_at/updated_at, so
+        // every column is read by ordinal index, never by name.
+        let overrides_select = Query::select()
+            .expr(Expr::col((Alias::new("pc"), Alias::new("tenant_id"))))
+            .expr(Expr::col((
+                Alias::new("pio"),
+                Alias::new("software_item_id"),
+            )))
+            .expr(Expr::col((
+                Alias::new("pio"),
+                Alias::new("plugin_config_id"),
+            )))
+            .expr(Expr::col((Alias::new("pio"), Alias::new("update_cores"))))
+            .expr(Expr::col((
+                Alias::new("pio"),
+                Alias::new("update_memory_mb"),
+            )))
+            .expr(Expr::col((Alias::new("pio"), Alias::new("created_at"))))
+            .expr(Expr::col((Alias::new("pio"), Alias::new("updated_at"))))
+            .from_as(
+                Alias::new("proxmox_protection_item_overrides"),
+                Alias::new("pio"),
+            )
+            .join_as(
+                JoinType::InnerJoin,
+                Alias::new("plugin_configs"),
+                Alias::new("pc"),
+                Expr::col((Alias::new("pc"), Alias::new("id")))
+                    .equals((Alias::new("pio"), Alias::new("plugin_config_id"))),
+            )
+            .and_where(
+                Expr::col((Alias::new("pio"), Alias::new("update_cores")))
+                    .is_not_null()
+                    .or(
+                        Expr::col((Alias::new("pio"), Alias::new("update_memory_mb")))
+                            .is_not_null(),
+                    ),
+            )
+            .to_owned();
+        let override_rows = txn.query_all(&overrides_select).await?;
+        for row in &override_rows {
+            let tenant_id = Uuid::try_get_by_index(row, 0)
+                .map_err(|e| DbErr::Custom(format!("migration C.2: read tenant_id: {e:?}")))?;
+            let software_item_id = Uuid::try_get_by_index(row, 1).map_err(|e| {
+                DbErr::Custom(format!("migration C.2: read software_item_id: {e:?}"))
+            })?;
+            let plugin_config_id = Uuid::try_get_by_index(row, 2).map_err(|e| {
+                DbErr::Custom(format!("migration C.2: read plugin_config_id: {e:?}"))
+            })?;
+            let update_cores = Option::<i32>::try_get_by_index(row, 3)
+                .map_err(|e| DbErr::Custom(format!("migration C.2: read update_cores: {e:?}")))?;
+            let update_memory_mb = Option::<i32>::try_get_by_index(row, 4).map_err(|e| {
+                DbErr::Custom(format!("migration C.2: read update_memory_mb: {e:?}"))
+            })?;
+            let created_at = time::OffsetDateTime::try_get_by_index(row, 5)
+                .map_err(|e| DbErr::Custom(format!("migration C.2: read created_at: {e:?}")))?;
+            let updated_at = time::OffsetDateTime::try_get_by_index(row, 6)
+                .map_err(|e| DbErr::Custom(format!("migration C.2: read updated_at: {e:?}")))?;
+
+            txn.execute(
+                &Query::insert()
+                    .into_table(ProxmoxScalingItemOverrides::Table)
+                    .columns([
+                        ProxmoxScalingItemOverrides::Id,
+                        ProxmoxScalingItemOverrides::TenantId,
+                        ProxmoxScalingItemOverrides::SoftwareItemId,
+                        ProxmoxScalingItemOverrides::PluginConfigId,
+                        ProxmoxScalingItemOverrides::ScalingMode,
+                        ProxmoxScalingItemOverrides::AbsoluteCores,
+                        ProxmoxScalingItemOverrides::AbsoluteMemoryMb,
+                        ProxmoxScalingItemOverrides::DeltaCores,
+                        ProxmoxScalingItemOverrides::DeltaMemoryMb,
+                        ProxmoxScalingItemOverrides::CreatedAt,
+                        ProxmoxScalingItemOverrides::UpdatedAt,
+                    ])
+                    .values_panic([
+                        Uuid::now_v7().into(),
+                        tenant_id.into(),
+                        software_item_id.into(),
+                        plugin_config_id.into(),
+                        "absolute".into(),
+                        update_cores.into(),
+                        update_memory_mb.into(),
+                        Option::<i32>::None.into(),
+                        Option::<i32>::None.into(),
+                        created_at.into(),
+                        updated_at.into(),
+                    ])
+                    .to_owned(),
+            )
+            .await?;
+        }
 
         // C.3 — null out source columns (D will drop them; C leaves DB coherent if D fails)
         txn.execute_unprepared(
@@ -1925,7 +2057,7 @@ pub fn migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{ConnectionTrait, Database, DbBackend, Statement, TryGetable as _};
+    use sea_orm::{ConnectionTrait, Database, DbBackend, Statement};
     use sea_orm_migration::{MigrationTrait, SchemaManager};
 
     async fn column_names(db: &sea_orm::DatabaseConnection, table: &str) -> Vec<String> {
@@ -2191,124 +2323,11 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn migration_c_transfers_protection_rows_to_scaling_tables() {
+    /// Shared setup for Migration C / repair tests: in-memory DB, stub parent
+    /// tables (FK targets of the protection tables), and all prerequisite
+    /// migrations through A/B. Seeds no rows.
+    async fn scaling_migration_test_db() -> sea_orm::DatabaseConnection {
         let db = Database::connect("sqlite::memory:").await.unwrap();
-        let manager = SchemaManager::new(&db);
-
-        // Create stub parent tables so FK constraints on protection tables are satisfied
-        db.execute_unprepared("CREATE TABLE IF NOT EXISTS tenants (id TEXT PRIMARY KEY)")
-            .await
-            .unwrap();
-        db.execute_unprepared(
-            "CREATE TABLE IF NOT EXISTS plugin_configs \
-             (id TEXT PRIMARY KEY, tenant_id TEXT, name TEXT, plugin_type TEXT, \
-              config TEXT, created_at TEXT, updated_at TEXT)",
-        )
-        .await
-        .unwrap();
-        db.execute_unprepared(
-            "INSERT INTO tenants (id) VALUES \
-             ('aaaaaaaa-0000-0000-0000-000000000001'), \
-             ('aaaaaaaa-0000-0000-0000-000000000002')",
-        )
-        .await
-        .unwrap();
-        db.execute_unprepared(
-            "INSERT INTO plugin_configs (id, tenant_id, name, plugin_type, config, created_at, updated_at) \
-             VALUES \
-             ('bbbbbbbb-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001', \
-              'cfg1', 'infrastructure_proxmox', '{}', '2026-01-01', '2026-01-01'), \
-             ('bbbbbbbb-0000-0000-0000-000000000002', 'aaaaaaaa-0000-0000-0000-000000000002', \
-              'cfg2', 'infrastructure_proxmox', '{}', '2026-01-01', '2026-01-01')",
-        )
-        .await
-        .unwrap();
-
-        // Run prerequisites
-        CreateProxmoxProtectionPolicyTables
-            .up(&manager)
-            .await
-            .unwrap();
-        AddProxmoxProtectionTimeoutColumns
-            .up(&manager)
-            .await
-            .unwrap();
-        AddProxmoxResourceScalingPolicyColumns
-            .up(&manager)
-            .await
-            .unwrap();
-        CreateProxmoxScalingDefaults.up(&manager).await.unwrap();
-        CreateProxmoxScalingItemOverrides
-            .up(&manager)
-            .await
-            .unwrap();
-
-        // Seed: one row with scaling, one without
-        db.execute_unprepared(
-            "INSERT INTO proxmox_protection_defaults \
-             (tenant_id, plugin_config_id, mode, update_cores, update_memory_mb, \
-              created_at, updated_at) \
-             VALUES \
-             ('aaaaaaaa-0000-0000-0000-000000000001', \
-              'bbbbbbbb-0000-0000-0000-000000000001', \
-              'do_nothing', 8, 4096, '2026-01-01', '2026-01-01'), \
-             ('aaaaaaaa-0000-0000-0000-000000000002', \
-              'bbbbbbbb-0000-0000-0000-000000000002', \
-              'do_nothing', NULL, NULL, '2026-01-01', '2026-01-01')",
-        )
-        .await
-        .unwrap();
-
-        MigrateProxmoxScalingFromProtectionTables
-            .up(&manager)
-            .await
-            .unwrap();
-
-        let count: i64 = db
-            .query_one_raw(Statement::from_string(
-                DbBackend::Sqlite,
-                "SELECT COUNT(*) as c FROM proxmox_scaling_defaults WHERE scaling_mode = 'absolute'",
-            ))
-            .await.unwrap().unwrap()
-            .try_get("", "c").unwrap();
-        assert_eq!(count, 1, "one row should be migrated");
-
-        let count2: i64 = db
-            .query_one_raw(Statement::from_string(
-                DbBackend::Sqlite,
-                "SELECT COUNT(*) as c FROM proxmox_scaling_defaults",
-            ))
-            .await
-            .unwrap()
-            .unwrap()
-            .try_get("", "c")
-            .unwrap();
-        assert_eq!(count2, 1, "null-only row must not generate a scaling row");
-
-        let cores: Option<i64> = db
-            .query_one_raw(Statement::from_string(
-                DbBackend::Sqlite,
-                "SELECT update_cores FROM proxmox_protection_defaults \
-                 WHERE tenant_id = 'aaaaaaaa-0000-0000-0000-000000000001'",
-            ))
-            .await
-            .unwrap()
-            .unwrap()
-            .try_get("", "update_cores")
-            .unwrap();
-        assert!(
-            cores.is_none(),
-            "source update_cores must be NULL'd after migration C"
-        );
-    }
-
-    #[tokio::test]
-    async fn migration_c_transfers_item_override_rows_to_scaling_tables() {
-        let db = Database::connect("sqlite::memory:").await.unwrap();
-        let manager = SchemaManager::new(&db);
-
-        // Create stub parent tables before protection tables (they have FKs to these)
         db.execute_unprepared("CREATE TABLE IF NOT EXISTS tenants (id TEXT PRIMARY KEY)")
             .await
             .unwrap();
@@ -2322,7 +2341,7 @@ mod tests {
         )
         .await
         .unwrap();
-
+        let manager = SchemaManager::new(&db);
         CreateProxmoxProtectionPolicyTables
             .up(&manager)
             .await
@@ -2340,27 +2359,218 @@ mod tests {
             .up(&manager)
             .await
             .unwrap();
+        db
+    }
 
-        let tid = "cccccccc-0000-0000-0000-000000000001";
-        let cid = "dddddddd-0000-0000-0000-000000000001";
-        let sid = "eeeeeeee-0000-0000-0000-000000000001";
-        db.execute_unprepared(&format!("INSERT INTO tenants (id) VALUES ('{tid}')"))
+    #[tokio::test]
+    async fn migration_c_transfers_protection_rows_to_scaling_tables() {
+        let db = scaling_migration_test_db().await;
+        let manager = SchemaManager::new(&db);
+
+        // Production-parity seeds: uuid cells bound as Value::Uuid (runtime
+        // rows are blobs on SQLite); timestamps as OffsetDateTime values.
+        // FK enforcement is ON, so parents get the same binds as children.
+        let seeded_at = time::OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
+        let tenant_a = uuid::Uuid::now_v7();
+        let tenant_b = uuid::Uuid::now_v7();
+        let cfg_a = uuid::Uuid::now_v7();
+        let cfg_b = uuid::Uuid::now_v7();
+
+        for t in [tenant_a, tenant_b] {
+            db.execute(
+                &Query::insert()
+                    .into_table(Alias::new("tenants"))
+                    .columns([Alias::new("id")])
+                    .values_panic([t.into()])
+                    .to_owned(),
+            )
             .await
             .unwrap();
-        db.execute_unprepared(&format!("INSERT INTO software_items (id) VALUES ('{sid}')"))
+        }
+        for (c, t) in [(cfg_a, tenant_a), (cfg_b, tenant_b)] {
+            db.execute(
+                &Query::insert()
+                    .into_table(Alias::new("plugin_configs"))
+                    .columns([
+                        Alias::new("id"),
+                        Alias::new("tenant_id"),
+                        Alias::new("name"),
+                        Alias::new("plugin_type"),
+                        Alias::new("config"),
+                        Alias::new("created_at"),
+                        Alias::new("updated_at"),
+                    ])
+                    .values_panic([
+                        c.into(),
+                        t.into(),
+                        "cfg".into(),
+                        "infrastructure_proxmox".into(),
+                        "{}".into(),
+                        seeded_at.into(),
+                        seeded_at.into(),
+                    ])
+                    .to_owned(),
+            )
             .await
             .unwrap();
-        db.execute_unprepared(&format!(
-            "INSERT INTO plugin_configs (id, tenant_id, name, plugin_type, config, created_at, updated_at) \
-             VALUES ('{cid}', '{tid}', 'test', 'infrastructure_proxmox', '{{}}', '2026-01-01', '2026-01-01')"
-        ))
+        }
+        // One scaling-bearing row, one null-only row (must NOT migrate).
+        for (t, c, cores, mem) in [
+            (tenant_a, cfg_a, Some(8i32), Some(4096i32)),
+            (tenant_b, cfg_b, None, None),
+        ] {
+            db.execute(
+                &Query::insert()
+                    .into_table(Alias::new("proxmox_protection_defaults"))
+                    .columns([
+                        Alias::new("tenant_id"),
+                        Alias::new("plugin_config_id"),
+                        Alias::new("mode"),
+                        Alias::new("update_cores"),
+                        Alias::new("update_memory_mb"),
+                        Alias::new("created_at"),
+                        Alias::new("updated_at"),
+                    ])
+                    .values_panic([
+                        t.into(),
+                        c.into(),
+                        "do_nothing".into(),
+                        cores.into(),
+                        mem.into(),
+                        seeded_at.into(),
+                        seeded_at.into(),
+                    ])
+                    .to_owned(),
+            )
+            .await
+            .unwrap();
+        }
+
+        MigrateProxmoxScalingFromProtectionTables
+            .up(&manager)
+            .await
+            .unwrap();
+
+        // Assert through the entity — the production decode path.
+        use sea_orm::EntityTrait as _;
+        let migrated = crate::entity::proxmox_scaling_default::Entity::find()
+            .all(&db)
+            .await
+            .expect("entity read must decode migrated rows");
+        assert_eq!(migrated.len(), 1, "null-only row must not migrate");
+        let row = &migrated[0];
+        assert_eq!(row.id.get_version_num(), 7, "id must be a fresh v7 uuid");
+        assert_eq!(row.tenant_id, tenant_a);
+        assert_eq!(row.plugin_config_id, cfg_a);
+        assert_eq!(row.scaling_mode, crate::scaling_mode::ScalingMode::Absolute);
+        assert_eq!(row.absolute_cores, Some(8));
+        assert_eq!(row.absolute_memory_mb, Some(4096));
+        assert_eq!(row.delta_cores, None);
+        assert_eq!(row.delta_memory_mb, None);
+        assert_eq!(
+            row.created_at, seeded_at,
+            "created_at must round-trip exactly"
+        );
+        assert_eq!(
+            row.updated_at, seeded_at,
+            "updated_at must round-trip exactly"
+        );
+
+        // C.3 nulled the source columns (count non-null, no uuid comparison).
+        let remaining: i64 = db
+            .query_one_raw(Statement::from_string(
+                DbBackend::Sqlite,
+                "SELECT COUNT(*) AS c FROM proxmox_protection_defaults \
+                 WHERE update_cores IS NOT NULL OR update_memory_mb IS NOT NULL",
+            ))
+            .await
+            .unwrap()
+            .unwrap()
+            .try_get("", "c")
+            .unwrap();
+        assert_eq!(remaining, 0, "source scaling columns must be NULL'd by C.3");
+    }
+
+    #[tokio::test]
+    async fn migration_c_transfers_item_override_rows_to_scaling_tables() {
+        let db = scaling_migration_test_db().await;
+        let manager = SchemaManager::new(&db);
+
+        // Production-parity seeds, same binds as the defaults-table test
+        // above. The plugin_configs tenant_id is the value the C.2 JOIN must
+        // resolve — kept distinct from every other uuid in this test so a
+        // JOIN bug (e.g. reading the wrong column) can't accidentally match.
+        let seeded_at = time::OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
+        let tenant = uuid::Uuid::now_v7();
+        let software_item = uuid::Uuid::now_v7();
+        let plugin_config = uuid::Uuid::now_v7();
+
+        db.execute(
+            &Query::insert()
+                .into_table(Alias::new("tenants"))
+                .columns([Alias::new("id")])
+                .values_panic([tenant.into()])
+                .to_owned(),
+        )
         .await
         .unwrap();
-        db.execute_unprepared(&format!(
-            "INSERT INTO proxmox_protection_item_overrides \
-             (software_item_id, plugin_config_id, mode, update_cores, update_memory_mb, created_at, updated_at) \
-             VALUES ('{sid}', '{cid}', 'do_nothing', 4, 2048, '2026-01-01', '2026-01-01')"
-        ))
+        db.execute(
+            &Query::insert()
+                .into_table(Alias::new("software_items"))
+                .columns([Alias::new("id")])
+                .values_panic([software_item.into()])
+                .to_owned(),
+        )
+        .await
+        .unwrap();
+        db.execute(
+            &Query::insert()
+                .into_table(Alias::new("plugin_configs"))
+                .columns([
+                    Alias::new("id"),
+                    Alias::new("tenant_id"),
+                    Alias::new("name"),
+                    Alias::new("plugin_type"),
+                    Alias::new("config"),
+                    Alias::new("created_at"),
+                    Alias::new("updated_at"),
+                ])
+                .values_panic([
+                    plugin_config.into(),
+                    tenant.into(),
+                    "cfg".into(),
+                    "infrastructure_proxmox".into(),
+                    "{}".into(),
+                    seeded_at.into(),
+                    seeded_at.into(),
+                ])
+                .to_owned(),
+        )
+        .await
+        .unwrap();
+        db.execute(
+            &Query::insert()
+                .into_table(Alias::new("proxmox_protection_item_overrides"))
+                .columns([
+                    Alias::new("software_item_id"),
+                    Alias::new("plugin_config_id"),
+                    Alias::new("mode"),
+                    Alias::new("update_cores"),
+                    Alias::new("update_memory_mb"),
+                    Alias::new("created_at"),
+                    Alias::new("updated_at"),
+                ])
+                .values_panic([
+                    software_item.into(),
+                    plugin_config.into(),
+                    "do_nothing".into(),
+                    Some(4i32).into(),
+                    Some(2048i32).into(),
+                    seeded_at.into(),
+                    seeded_at.into(),
+                ])
+                .to_owned(),
+        )
         .await
         .unwrap();
 
@@ -2369,16 +2579,100 @@ mod tests {
             .await
             .unwrap();
 
-        let count: i64 = db
-            .query_one_raw(Statement::from_string(
-                DbBackend::Sqlite,
-                "SELECT COUNT(*) as c FROM proxmox_scaling_item_overrides WHERE scaling_mode = 'absolute'",
-            ))
-            .await.unwrap().unwrap()
-            .try_get("", "c").unwrap();
+        use sea_orm::EntityTrait as _;
+        let migrated = crate::entity::proxmox_scaling_item_override::Entity::find()
+            .all(&db)
+            .await
+            .expect("entity read must decode migrated rows");
+        assert_eq!(migrated.len(), 1, "one override row should be migrated");
+        let row = &migrated[0];
+        assert_eq!(row.id.get_version_num(), 7, "id must be a fresh v7 uuid");
+        assert_eq!(row.tenant_id, tenant, "tenant_id must resolve via the JOIN");
+        assert_eq!(row.software_item_id, software_item);
+        assert_eq!(row.plugin_config_id, plugin_config);
+        assert_eq!(row.scaling_mode, crate::scaling_mode::ScalingMode::Absolute);
+        assert_eq!(row.absolute_cores, Some(4));
+        assert_eq!(row.absolute_memory_mb, Some(2048));
+        assert_eq!(row.delta_cores, None);
+        assert_eq!(row.delta_memory_mb, None);
         assert_eq!(
-            count, 1,
-            "item override row must be migrated to proxmox_scaling_item_overrides"
+            row.created_at, seeded_at,
+            "created_at must round-trip exactly"
+        );
+        assert_eq!(
+            row.updated_at, seeded_at,
+            "updated_at must round-trip exactly"
+        );
+    }
+
+    #[tokio::test]
+    async fn migration_c_with_no_scaling_source_rows_succeeds_and_inserts_nothing() {
+        // The empty-batch guard: with zero source rows the per-row loop never
+        // builds an insert, so nothing emits an empty-VALUES statement (the
+        // case that failed on Postgres at parse time with the old raw SQL).
+        let db = scaling_migration_test_db().await;
+        let manager = SchemaManager::new(&db);
+        MigrateProxmoxScalingFromProtectionTables
+            .up(&manager)
+            .await
+            .expect("migration must succeed with zero source rows");
+
+        use sea_orm::EntityTrait as _;
+        assert!(
+            crate::entity::proxmox_scaling_default::Entity::find()
+                .all(&db)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            crate::entity::proxmox_scaling_item_override::Entity::find()
+                .all(&db)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn scaling_migrations_use_no_dialect_specific_sql() {
+        // Tripwire against reintroducing backend-specific SQL. The banner
+        // comments bracket the A/B and C migration blocks; first-find hits the
+        // real banners (the test module sits after them in the file — the
+        // assertion below pins that ordering so a future file reshuffle can't
+        // silently retarget the slices).
+        let source = include_str!("controller_migration.rs");
+        let a_start = source
+            .find("// ── Migration A:")
+            .expect("Migration A banner");
+        let c_start = source
+            .find("// ── Migration C:")
+            .expect("Migration C banner");
+        let d_start = source
+            .find("// ── Migration D:")
+            .expect("Migration D banner");
+        let tests_start = source.find("#[cfg(test)]").expect("test module marker");
+        assert!(
+            d_start < tests_start,
+            "migration banners must precede the test module for the slices to be valid"
+        );
+        let ab_block = source
+            .get(a_start..c_start)
+            .expect("banner offsets are on ASCII comment boundaries");
+        let c_block = source
+            .get(c_start..d_start)
+            .expect("banner offsets are on ASCII comment boundaries");
+        assert!(
+            !ab_block.contains("execute_unprepared"),
+            "Migrations A/B must use sea_query builders, not raw SQL"
+        );
+        assert!(
+            !c_block.contains("randomblob"),
+            "Migration C must not use SQLite-only randomblob()"
+        );
+        assert!(
+            !c_block.contains("hex("),
+            "Migration C must not use SQLite-only hex()"
         );
     }
 
