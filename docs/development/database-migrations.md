@@ -330,6 +330,27 @@ db.execute_unprepared(&format!(
 .await?;
 ```
 
+### Dialect-portable uuid handling in data migrations (plugin migrations included)
+
+Plugin-contributed migrations run on whichever backend is active — they must be dialect-portable
+**and** bind-compatible with the entity layer:
+
+- Declare uuid columns with the `.uuid()` builder (`uuid_text` on SQLite, `uuid` on Postgres),
+  never raw `TEXT`. A `TEXT` column rejects the `Value::Uuid` binds every SeaORM entity write
+  produces on Postgres.
+- Generate new primary keys in Rust (`uuid::Uuid::now_v7()`) and bind them as `Value::Uuid`
+  (`.into()`), never with backend SQL (`randomblob()`/`hex()` fail to parse on Postgres) and never
+  as `.to_string()` (sqlx's SQLite uuid codec is blob-only — text uuid cells fail every entity read
+  with `ParseByteLength { len: 36 }`).
+- Read source rows with `txn.query_all(&Query::select()...)` and ordinal `<T>::try_get_by_index(row,
+n)` reads; insert one row per loop iteration so a zero-row batch emits no `INSERT` (an empty
+  `VALUES` list is a syntax error on both backends).
+- Carried-over timestamps round-trip as `time::OffsetDateTime` values, never as strings.
+
+Reference implementations: `m20260504_000001..3` + `m20260714_000001` in the Proxmox plugin's
+`controller_migration.rs` (builder tables, Rust-side id generation, and the TEXT→BLOB repair),
+alongside the `m20260307_000001` / `m20260308_000002` precedents in this crate.
+
 ### INSERT via sea_query
 
 In a `MigrationTrait` impl use `manager.exec_stmt(stmt)`, which takes ownership of the built

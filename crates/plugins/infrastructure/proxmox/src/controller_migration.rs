@@ -1609,6 +1609,26 @@ impl MigrationTrait for CreateProxmoxScalingItemOverrides {
 
 // ── Migration C: migrate scaling config from protection tables ──────────────
 
+/// Migrate resource-scaling data out of the `proxmox_protection_*` tables
+/// into the dedicated `proxmox_scaling_*` tables (C.1/C.2 copy, C.3/C.4 null
+/// the source columns; Migration D drops them).
+///
+/// Ids are generated in Rust (`Uuid::now_v7()`) and every uuid value is bound
+/// as `Value::Uuid` — never the SQLite-only random-blob-hex id-concatenation
+/// trick (fails to parse on Postgres) and never `.to_string()` (sqlx's
+/// SQLite uuid codec is blob-only, so text uuid cells are unreadable through
+/// the entities). Timestamps round-trip as `OffsetDateTime` values, never as
+/// strings.
+///
+/// Editing this shipped migration's body was safe: `seaql_migrations` tracks
+/// by name only, so applied SQLite databases skip it (their text rows are
+/// healed by `RepairProxmoxScalingUuidStorage`), and no Postgres instance
+/// ever recorded it — the batch runner wraps all migrations in ONE
+/// transaction, and the inner `begin()` here nests as a SAVEPOINT on the same
+/// connection, so the old parse failure rolled the whole batch back.
+///
+/// The remaining raw statements in this migration (the C.3/C.4
+/// `UPDATE … SET … = NULL` cleanups) are standard SQL, portable as written.
 pub struct MigrateProxmoxScalingFromProtectionTables;
 
 impl MigrationName for MigrateProxmoxScalingFromProtectionTables {
@@ -1623,6 +1643,7 @@ impl MigrationTrait for MigrateProxmoxScalingFromProtectionTables {
         // Wrap all five statements in an explicit transaction.
         // Without this, if C.2 fails after C.1 succeeds, the migration is permanently
         // broken: on retry, C.1 hits the UNIQUE constraint and fails again with no recovery path.
+        // Under the batch runner this nests as a SAVEPOINT on the same connection.
         let txn = manager.get_connection().begin().await?;
 
         // C.1 — copy proxmox_protection_defaults → proxmox_scaling_defaults.
