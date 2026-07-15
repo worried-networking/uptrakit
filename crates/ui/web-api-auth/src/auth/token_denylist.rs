@@ -208,8 +208,17 @@ impl TokenDenylist {
                             revoked_token_user::Column::IatCutoff,
                             revoked_token_user::Column::PurgeAfter,
                         ])
+                        // Qualify to the target table: in `ON CONFLICT DO UPDATE ... WHERE`,
+                        // Postgres exposes both the existing row and the proposed row (EXCLUDED),
+                        // so a bare `iat_cutoff` is ambiguous (SQLite is lax and picks the stored
+                        // row). We want the STORED value — advance only when it is older than the
+                        // incoming cutoff.
                         .action_and_where(
-                            Expr::col(revoked_token_user::Column::IatCutoff).lt(iat_cutoff),
+                            Expr::col((
+                                revoked_token_user::Entity,
+                                revoked_token_user::Column::IatCutoff,
+                            ))
+                            .lt(iat_cutoff),
                         )
                         .to_owned(),
                 )
