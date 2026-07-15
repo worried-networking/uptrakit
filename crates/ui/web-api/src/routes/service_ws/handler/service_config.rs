@@ -319,8 +319,8 @@ pub(super) async fn handle_store_service_config(
 
                 // Emit fire-and-forget failed event via dispatcher.
                 let target_id = match tenant_id {
-                    Some(tid) => format!("{}:{}:{}", service_app_name, tid, &key),
-                    None => format!("{}:global:{}", service_app_name, &key),
+                    Some(tid) => format!("{}:{}:{}", service_app_name, tid, key),
+                    None => format!("{}:global:{}", service_app_name, key),
                 };
                 let failed_builder =
                     AuditEntry::<Event>::builder_event(AuditActionType::SERVICE_CONFIG_STORE)
@@ -514,8 +514,8 @@ pub(super) async fn handle_delete_service_config(
 
             // Emit fire-and-forget failed event.
             let del_target_id = match tenant_id {
-                Some(tid) => format!("{}:{}:{}", service_app_name, tid, &key),
-                None => format!("{}:global:{}", service_app_name, &key),
+                Some(tid) => format!("{}:{}:{}", service_app_name, tid, key),
+                None => format!("{}:global:{}", service_app_name, key),
             };
             let del_failed_builder =
                 AuditEntry::<Event>::builder_event(AuditActionType::SERVICE_CONFIG_DELETE)
