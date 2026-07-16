@@ -1651,12 +1651,10 @@ impl MigrationTrait for MigrateProxmoxScalingFromProtectionTables {
         // the previous SQLite-only random-blob-hex id concatenation trick
         // fails to parse on Postgres, and a .to_string() text id is
         // unreadable through sqlx's blob-only SQLite uuid codec. Columns are
-        // read by ordinal index
-        // against the explicit SELECT order. Deliberate exception to the
-        // batch-queries rule: this runs once at migration time over a bounded
-        // handful of rows, and the per-row insert is the empty-batch guard (a
-        // zero-row Query::insert() emits INSERT with no VALUES clause — a
-        // syntax error on both backends).
+        // read by ordinal index against the explicit SELECT order. All source
+        // rows are accumulated into one batched INSERT, guarded by an emptiness
+        // check because a zero-row Query::insert() emits INSERT with no VALUES
+        // clause — a syntax error on both backends.
         let defaults_select = Query::select()
             .column(Alias::new("tenant_id"))
             .column(Alias::new("plugin_config_id"))
@@ -1672,58 +1670,59 @@ impl MigrationTrait for MigrateProxmoxScalingFromProtectionTables {
             )
             .to_owned();
         let default_rows = txn.query_all(&defaults_select).await?;
-        for row in &default_rows {
-            let tenant_id = Uuid::try_get_by_index(row, 0)
-                .map_err(|e| DbErr::Custom(format!("migration C.1: read tenant_id: {e:?}")))?;
-            let plugin_config_id = Uuid::try_get_by_index(row, 1).map_err(|e| {
-                DbErr::Custom(format!("migration C.1: read plugin_config_id: {e:?}"))
-            })?;
-            let update_cores = Option::<i32>::try_get_by_index(row, 2)
-                .map_err(|e| DbErr::Custom(format!("migration C.1: read update_cores: {e:?}")))?;
-            let update_memory_mb = Option::<i32>::try_get_by_index(row, 3).map_err(|e| {
-                DbErr::Custom(format!("migration C.1: read update_memory_mb: {e:?}"))
-            })?;
-            let created_at = time::OffsetDateTime::try_get_by_index(row, 4)
-                .map_err(|e| DbErr::Custom(format!("migration C.1: read created_at: {e:?}")))?;
-            let updated_at = time::OffsetDateTime::try_get_by_index(row, 5)
-                .map_err(|e| DbErr::Custom(format!("migration C.1: read updated_at: {e:?}")))?;
+        if !default_rows.is_empty() {
+            let mut insert = Query::insert();
+            insert.into_table(ProxmoxScalingDefaults::Table).columns([
+                ProxmoxScalingDefaults::Id,
+                ProxmoxScalingDefaults::TenantId,
+                ProxmoxScalingDefaults::PluginConfigId,
+                ProxmoxScalingDefaults::ScalingMode,
+                ProxmoxScalingDefaults::AbsoluteCores,
+                ProxmoxScalingDefaults::AbsoluteMemoryMb,
+                ProxmoxScalingDefaults::DeltaCores,
+                ProxmoxScalingDefaults::DeltaMemoryMb,
+                ProxmoxScalingDefaults::CreatedAt,
+                ProxmoxScalingDefaults::UpdatedAt,
+            ]);
+            for row in &default_rows {
+                let tenant_id = Uuid::try_get_by_index(row, 0)
+                    .map_err(|e| DbErr::Custom(format!("migration C.1: read tenant_id: {e:?}")))?;
+                let plugin_config_id = Uuid::try_get_by_index(row, 1).map_err(|e| {
+                    DbErr::Custom(format!("migration C.1: read plugin_config_id: {e:?}"))
+                })?;
+                let update_cores = Option::<i32>::try_get_by_index(row, 2).map_err(|e| {
+                    DbErr::Custom(format!("migration C.1: read update_cores: {e:?}"))
+                })?;
+                let update_memory_mb = Option::<i32>::try_get_by_index(row, 3).map_err(|e| {
+                    DbErr::Custom(format!("migration C.1: read update_memory_mb: {e:?}"))
+                })?;
+                let created_at = time::OffsetDateTime::try_get_by_index(row, 4)
+                    .map_err(|e| DbErr::Custom(format!("migration C.1: read created_at: {e:?}")))?;
+                let updated_at = time::OffsetDateTime::try_get_by_index(row, 5)
+                    .map_err(|e| DbErr::Custom(format!("migration C.1: read updated_at: {e:?}")))?;
 
-            txn.execute(
-                &Query::insert()
-                    .into_table(ProxmoxScalingDefaults::Table)
-                    .columns([
-                        ProxmoxScalingDefaults::Id,
-                        ProxmoxScalingDefaults::TenantId,
-                        ProxmoxScalingDefaults::PluginConfigId,
-                        ProxmoxScalingDefaults::ScalingMode,
-                        ProxmoxScalingDefaults::AbsoluteCores,
-                        ProxmoxScalingDefaults::AbsoluteMemoryMb,
-                        ProxmoxScalingDefaults::DeltaCores,
-                        ProxmoxScalingDefaults::DeltaMemoryMb,
-                        ProxmoxScalingDefaults::CreatedAt,
-                        ProxmoxScalingDefaults::UpdatedAt,
-                    ])
-                    .values_panic([
-                        Uuid::now_v7().into(),
-                        tenant_id.into(),
-                        plugin_config_id.into(),
-                        "absolute".into(),
-                        update_cores.into(),
-                        update_memory_mb.into(),
-                        Option::<i32>::None.into(),
-                        Option::<i32>::None.into(),
-                        created_at.into(),
-                        updated_at.into(),
-                    ])
-                    .to_owned(),
-            )
-            .await?;
+                insert.values_panic([
+                    Uuid::now_v7().into(),
+                    tenant_id.into(),
+                    plugin_config_id.into(),
+                    "absolute".into(),
+                    update_cores.into(),
+                    update_memory_mb.into(),
+                    Option::<i32>::None.into(),
+                    Option::<i32>::None.into(),
+                    created_at.into(),
+                    updated_at.into(),
+                ]);
+            }
+            txn.execute(&insert).await?;
         }
 
         // C.2 — copy proxmox_protection_item_overrides → proxmox_scaling_item_overrides.
         // tenant_id is resolved by joining plugin_configs (as the original
         // SELECT did). Both joined tables expose id/created_at/updated_at, so
-        // every column is read by ordinal index, never by name.
+        // every column is read by ordinal index, never by name. Rows are
+        // accumulated into one batched INSERT, guarded by the same emptiness
+        // check as C.1.
         let overrides_select = Query::select()
             .expr(Expr::col((Alias::new("pc"), Alias::new("tenant_id"))))
             .expr(Expr::col((
@@ -1762,66 +1761,87 @@ impl MigrationTrait for MigrateProxmoxScalingFromProtectionTables {
             )
             .to_owned();
         let override_rows = txn.query_all(&overrides_select).await?;
-        for row in &override_rows {
-            let tenant_id = Uuid::try_get_by_index(row, 0)
-                .map_err(|e| DbErr::Custom(format!("migration C.2: read tenant_id: {e:?}")))?;
-            let software_item_id = Uuid::try_get_by_index(row, 1).map_err(|e| {
-                DbErr::Custom(format!("migration C.2: read software_item_id: {e:?}"))
-            })?;
-            let plugin_config_id = Uuid::try_get_by_index(row, 2).map_err(|e| {
-                DbErr::Custom(format!("migration C.2: read plugin_config_id: {e:?}"))
-            })?;
-            let update_cores = Option::<i32>::try_get_by_index(row, 3)
-                .map_err(|e| DbErr::Custom(format!("migration C.2: read update_cores: {e:?}")))?;
-            let update_memory_mb = Option::<i32>::try_get_by_index(row, 4).map_err(|e| {
-                DbErr::Custom(format!("migration C.2: read update_memory_mb: {e:?}"))
-            })?;
-            let created_at = time::OffsetDateTime::try_get_by_index(row, 5)
-                .map_err(|e| DbErr::Custom(format!("migration C.2: read created_at: {e:?}")))?;
-            let updated_at = time::OffsetDateTime::try_get_by_index(row, 6)
-                .map_err(|e| DbErr::Custom(format!("migration C.2: read updated_at: {e:?}")))?;
+        if !override_rows.is_empty() {
+            let mut insert = Query::insert();
+            insert
+                .into_table(ProxmoxScalingItemOverrides::Table)
+                .columns([
+                    ProxmoxScalingItemOverrides::Id,
+                    ProxmoxScalingItemOverrides::TenantId,
+                    ProxmoxScalingItemOverrides::SoftwareItemId,
+                    ProxmoxScalingItemOverrides::PluginConfigId,
+                    ProxmoxScalingItemOverrides::ScalingMode,
+                    ProxmoxScalingItemOverrides::AbsoluteCores,
+                    ProxmoxScalingItemOverrides::AbsoluteMemoryMb,
+                    ProxmoxScalingItemOverrides::DeltaCores,
+                    ProxmoxScalingItemOverrides::DeltaMemoryMb,
+                    ProxmoxScalingItemOverrides::CreatedAt,
+                    ProxmoxScalingItemOverrides::UpdatedAt,
+                ]);
+            for row in &override_rows {
+                let tenant_id = Uuid::try_get_by_index(row, 0)
+                    .map_err(|e| DbErr::Custom(format!("migration C.2: read tenant_id: {e:?}")))?;
+                let software_item_id = Uuid::try_get_by_index(row, 1).map_err(|e| {
+                    DbErr::Custom(format!("migration C.2: read software_item_id: {e:?}"))
+                })?;
+                let plugin_config_id = Uuid::try_get_by_index(row, 2).map_err(|e| {
+                    DbErr::Custom(format!("migration C.2: read plugin_config_id: {e:?}"))
+                })?;
+                let update_cores = Option::<i32>::try_get_by_index(row, 3).map_err(|e| {
+                    DbErr::Custom(format!("migration C.2: read update_cores: {e:?}"))
+                })?;
+                let update_memory_mb = Option::<i32>::try_get_by_index(row, 4).map_err(|e| {
+                    DbErr::Custom(format!("migration C.2: read update_memory_mb: {e:?}"))
+                })?;
+                let created_at = time::OffsetDateTime::try_get_by_index(row, 5)
+                    .map_err(|e| DbErr::Custom(format!("migration C.2: read created_at: {e:?}")))?;
+                let updated_at = time::OffsetDateTime::try_get_by_index(row, 6)
+                    .map_err(|e| DbErr::Custom(format!("migration C.2: read updated_at: {e:?}")))?;
 
-            txn.execute(
-                &Query::insert()
-                    .into_table(ProxmoxScalingItemOverrides::Table)
-                    .columns([
-                        ProxmoxScalingItemOverrides::Id,
-                        ProxmoxScalingItemOverrides::TenantId,
-                        ProxmoxScalingItemOverrides::SoftwareItemId,
-                        ProxmoxScalingItemOverrides::PluginConfigId,
-                        ProxmoxScalingItemOverrides::ScalingMode,
-                        ProxmoxScalingItemOverrides::AbsoluteCores,
-                        ProxmoxScalingItemOverrides::AbsoluteMemoryMb,
-                        ProxmoxScalingItemOverrides::DeltaCores,
-                        ProxmoxScalingItemOverrides::DeltaMemoryMb,
-                        ProxmoxScalingItemOverrides::CreatedAt,
-                        ProxmoxScalingItemOverrides::UpdatedAt,
-                    ])
-                    .values_panic([
-                        Uuid::now_v7().into(),
-                        tenant_id.into(),
-                        software_item_id.into(),
-                        plugin_config_id.into(),
-                        "absolute".into(),
-                        update_cores.into(),
-                        update_memory_mb.into(),
-                        Option::<i32>::None.into(),
-                        Option::<i32>::None.into(),
-                        created_at.into(),
-                        updated_at.into(),
-                    ])
-                    .to_owned(),
-            )
-            .await?;
+                insert.values_panic([
+                    Uuid::now_v7().into(),
+                    tenant_id.into(),
+                    software_item_id.into(),
+                    plugin_config_id.into(),
+                    "absolute".into(),
+                    update_cores.into(),
+                    update_memory_mb.into(),
+                    Option::<i32>::None.into(),
+                    Option::<i32>::None.into(),
+                    created_at.into(),
+                    updated_at.into(),
+                ]);
+            }
+            txn.execute(&insert).await?;
         }
 
-        // C.3 — null out source columns (D will drop them; C leaves DB coherent if D fails)
-        txn.execute_unprepared(
-            "UPDATE proxmox_protection_defaults SET update_cores = NULL, update_memory_mb = NULL",
+        // C.3 — null out source columns (D will drop them; C leaves DB coherent if D fails).
+        // update_cores/update_memory_mb were added to the protection tables by a later
+        // migration and have no DeriveIden variant here, so reference them via Alias.
+        txn.execute(
+            &Query::update()
+                .table(ProxmoxProtectionDefaults::Table)
+                .values([
+                    (Alias::new("update_cores"), Expr::value(Option::<i32>::None)),
+                    (
+                        Alias::new("update_memory_mb"),
+                        Expr::value(Option::<i32>::None),
+                    ),
+                ])
+                .to_owned(),
         )
         .await?;
-        txn.execute_unprepared(
-            "UPDATE proxmox_protection_item_overrides SET update_cores = NULL, update_memory_mb = NULL",
+        txn.execute(
+            &Query::update()
+                .table(ProxmoxProtectionItemOverrides::Table)
+                .values([
+                    (Alias::new("update_cores"), Expr::value(Option::<i32>::None)),
+                    (
+                        Alias::new("update_memory_mb"),
+                        Expr::value(Option::<i32>::None),
+                    ),
+                ])
+                .to_owned(),
         )
         .await?;
 
@@ -1832,11 +1852,19 @@ impl MigrationTrait for MigrateProxmoxScalingFromProtectionTables {
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
             .get_connection()
-            .execute_unprepared("DELETE FROM proxmox_scaling_defaults")
+            .execute(
+                &Query::delete()
+                    .from_table(ProxmoxScalingDefaults::Table)
+                    .to_owned(),
+            )
             .await?;
         manager
             .get_connection()
-            .execute_unprepared("DELETE FROM proxmox_scaling_item_overrides")
+            .execute(
+                &Query::delete()
+                    .from_table(ProxmoxScalingItemOverrides::Table)
+                    .to_owned(),
+            )
             .await?;
         Ok(())
     }
@@ -2282,6 +2310,8 @@ mod tests {
         db: &sea_orm::DatabaseConnection,
         table: &str,
     ) -> std::collections::HashMap<String, String> {
+        // Raw statement: `PRAGMA table_info` is a SQLite introspection command
+        // with no sea_query builder equivalent (approved raw-SQL exception).
         let rows = db
             .query_all_raw(Statement::from_string(
                 DbBackend::Sqlite,

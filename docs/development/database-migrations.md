@@ -342,9 +342,10 @@ Plugin-contributed migrations run on whichever backend is active — they must b
   (`.into()`), never with backend SQL (`randomblob()`/`hex()` fail to parse on Postgres) and never
   as `.to_string()` (sqlx's SQLite uuid codec is blob-only — text uuid cells fail every entity read
   with `ParseByteLength { len: 36 }`).
-- Read source rows with `txn.query_all(&Query::select()...)` and ordinal `<T>::try_get_by_index(row,
-n)` reads; insert one row per loop iteration so a zero-row batch emits no `INSERT` (an empty
-  `VALUES` list is a syntax error on both backends).
+- Read source rows with `txn.query_all(&Query::select()...)` and ordinal
+  `<T>::try_get_by_index(row, n)` reads; accumulate every row into one batched `Query::insert()`
+  (generating a fresh `now_v7()` id per row) and execute it once, guarded by a `!rows.is_empty()`
+  check because a zero-row insert emits an empty `VALUES` list — a syntax error on both backends.
 - Carried-over timestamps round-trip as `time::OffsetDateTime` values, never as strings.
 
 Reference implementations: `m20260504_000001..3` + `m20260714_000001` in the Proxmox plugin's
