@@ -128,9 +128,9 @@ pub(super) fn surface_registry_lookup_error_to_wire(
             uptrakit_wire::surfaces::SurfaceActionErrorCode::InvalidRequest,
             "target_provider_id is required for targeted surface interactions".to_string(),
         ),
-        crate::surface_registry::SurfaceRegistryLookupError::InvalidProvider(message) => (
+        crate::surface_registry::SurfaceRegistryLookupError::InvalidProvider(provider_id) => (
             uptrakit_wire::surfaces::SurfaceActionErrorCode::InvalidRequest,
-            message,
+            format!("no surface provider '{provider_id}' is registered for the requested surface"),
         ),
         crate::surface_registry::SurfaceRegistryLookupError::NoTenantCompatibleProvider => (
             uptrakit_wire::surfaces::SurfaceActionErrorCode::ProviderUnavailable,

@@ -1315,6 +1315,110 @@ async fn provider_origin_unmatched_guests_executes_and_audits_service_actor() {
     );
 }
 
+/// The real agent path: nested provider→plugin calls arrive with
+/// `target_provider_id: None` (the agent cannot know the controller-side plugin's
+/// provider id). Same as `provider_origin_unmatched_guests_executes_and_audits_service_actor`
+/// but with `target_provider_id: None`, so implicit resolution — not a hardcoded
+/// target — routes to `plugin.infrastructure_proxmox`.
+#[cfg(feature = "db-sqlite")]
+#[tokio::test]
+async fn provider_origin_unmatched_guests_resolves_target_from_surface() {
+    let db = crate::test_harness::setup_migrated_db_with_plugins().await;
+    let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+    let plugin_config_id = insert_test_proxmox_plugin_config(&db, tenant_id).await;
+    let mapping_id =
+        uptrakit_plugin_infrastructure_proxmox::testing::insert_unmatched_host_mapping(
+            &db,
+            tenant_id,
+            plugin_config_id,
+            "pve-node-1",
+            103,
+            "qemu",
+            "unmatched-guest-implicit",
+        )
+        .await;
+    let (state, _jwt) =
+        crate::test_harness::build_test_state_with_plugin_surfaces(db.clone(), tenant_id).await;
+    let service_id = Uuid::now_v7();
+    insert_test_service_row(&db, tenant_id, service_id, "uptrakit-agent-ssh").await;
+    register_calling_service_as_provider(&state, service_id, tenant_id);
+
+    let processor = MessageProcessor {
+        state: Arc::clone(&state),
+        service_id,
+        cert: None,
+        is_system: false,
+        has_update_tracking: false,
+        has_software_discovery: false,
+        has_update_hooks: false,
+        has_ui_surfaces: true,
+        has_workload_claims: false,
+        runtime_instance_id: None,
+        service_app_name: Some("uptrakit-agent-ssh".to_string()),
+        service_tenant_id: Some(tenant_id),
+        linked_host_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
+        report_tracker: ReportTracker::new(),
+    };
+    let request_id = Uuid::now_v7();
+
+    let response = processor
+        .handle_surface_action_request(surfaces::SurfaceActionRequest {
+            request_id,
+            tenant_id: tenant_id.to_string(),
+            surface_id: surfaces::SurfaceId::new("proxmox.hosts").unwrap(),
+            interaction_id: surfaces::InteractionId::new("unmatched-guests").unwrap(),
+            idempotency_key: "provider-origin-unmatched-guests-implicit".to_string(),
+            target_provider_id: None,
+            caller_origin: surfaces::CallerOrigin::Provider {
+                provider_id: "provider-a".to_string(),
+            },
+            params: serde_json::Map::from_iter([(
+                "per_page".to_string(),
+                serde_json::Value::Number(1000.into()),
+            )]),
+            encrypted_sensitive_params: None,
+        })
+        .await;
+
+    let [ControllerMessage::SurfaceActionResponse(reply)] = response.replies.as_slice() else {
+        panic!("expected exactly one SurfaceActionResponse reply");
+    };
+    assert_eq!(reply.request_id, request_id);
+    assert!(
+        reply.success,
+        "unmatched-guests with target=None should resolve and execute: {:?}",
+        reply.error
+    );
+    let result = reply
+        .result
+        .as_ref()
+        .expect("success response has a result");
+    let items = result["items"]
+        .as_array()
+        .expect("result.items should be an array");
+    assert!(
+        items
+            .iter()
+            .any(|item| item["mapping_id"] == mapping_id.to_string()),
+        "seeded unmatched mapping should appear in result.items: {items:?}"
+    );
+
+    let row = tenant_audit_row_for_action(
+        &db,
+        uptrakit_audit_log::AuditActionType::SURFACE_ACTION_INVOKE,
+    )
+    .await;
+    assert_eq!(
+        row.actor_type,
+        uptrakit_audit_log::AuditActorType::Service.as_str()
+    );
+    assert_eq!(row.actor_id, Some(service_id));
+    assert_eq!(
+        row.outcome,
+        uptrakit_audit_log::AuditOutcome::Success.as_str()
+    );
+}
+
 #[cfg(feature = "db-sqlite")]
 #[tokio::test]
 async fn provider_origin_match_completes_handler() {

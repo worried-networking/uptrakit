@@ -690,6 +690,168 @@ async fn invoke_provider_origin_allowed_when_provider_invocable() {
     assert!(response.success);
 }
 
+/// Regression for the production break: the agent sends nested provider→plugin
+/// calls with `target_provider_id: None` (it cannot know the controller-side
+/// plugin's provider id). Before the resolution fix, implicit resolution forced
+/// the caller's own provider (`provider-a`) as the target and failed with
+/// `InvalidProvider("provider-a")` — the `provider_invocable` gate was never
+/// reached. Same setup as `invoke_provider_origin_allowed_when_provider_invocable`
+/// but with `target_provider_id: None`, exercising the real agent path.
+#[tokio::test(start_paused = true)]
+async fn invoke_provider_origin_resolves_target_from_surface_when_target_none() {
+    let registry = registry();
+    let service_connections = ServiceConnectionRegistry::new();
+    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
+        PluginSurfaceLocalExecutor::new_without_database(Arc::new(TestPluginInvoker {
+            response: serde_json::json!({"routed": true}),
+            seen: Arc::new(Mutex::new(Vec::new())),
+        })),
+    ));
+
+    let service_a = Uuid::now_v7();
+    registry
+        .register_service(
+            service_a,
+            "uptrakit-agent-ssh",
+            Some(tenant_id()),
+            registration("provider-a", tenant_id()),
+        )
+        .expect("provider-a registration should succeed");
+
+    registry
+        .bootstrap_plugin(plugin_registration_with_permission("provider-b", true))
+        .expect("provider-b registration should succeed");
+
+    let request = SurfaceInvokeRequest {
+        tenant_id: tenant_id(),
+        surface_id: "proxmox.guest.invocable_panel".to_string(),
+        interaction_id: "refresh".to_string(),
+        idempotency_key: "idem-provider-origin-target-none".to_string(),
+        target_provider_id: None,
+        caller_origin: SurfaceCallerOrigin::Provider {
+            service_id: service_a,
+        },
+        params: serde_json::Map::new(),
+        encrypted_sensitive_params: None,
+    };
+
+    let response = proxy
+        .invoke(
+            &service_connections,
+            &registry,
+            request,
+            Some(Duration::from_secs(5)),
+        )
+        .await
+        .expect("target=None provider-origin invoke should resolve to the surface's plugin");
+    assert!(response.success);
+}
+
+/// A service invoking its *own* surface with `target_provider_id: None` still
+/// self-resolves: the caller provides the requested surface, so it names the
+/// provider unambiguously even for a `Targeted` surface (no `TargetProviderRequired`).
+#[tokio::test(start_paused = true)]
+async fn invoke_provider_origin_self_target_when_target_none() {
+    let registry = registry();
+    let service_connections = ServiceConnectionRegistry::new();
+    let proxy = Arc::new(SurfaceProxy::new());
+
+    let service_a = Uuid::now_v7();
+    let mut reg_a = registration("provider-a", tenant_id());
+    reg_a.surfaces[0].interactions[0].required_permission = None;
+    registry
+        .register_service(service_a, "uptrakit-agent-ssh", Some(tenant_id()), reg_a)
+        .expect("provider-a registration should succeed");
+
+    let (mut rx_a, _cancel_a) = service_connections
+        .register(
+            service_a,
+            BTreeSet::new(),
+            None,
+            None,
+            Some("uptrakit-agent-ssh".to_string()),
+        )
+        .await;
+
+    let proxy_clone = Arc::clone(&proxy);
+    tokio::spawn(async move {
+        if let Some(ControllerMessage::SurfaceActionRequest(request)) = rx_a.recv().await {
+            proxy_clone.complete(
+                request.request_id,
+                surfaces::SurfaceActionResponse {
+                    request_id: request.request_id,
+                    success: true,
+                    result: Some(serde_json::json!({"self": true})),
+                    error: None,
+                },
+            );
+        }
+    });
+
+    let mut request = request_with_idem("idem-provider-origin-self-target");
+    request.target_provider_id = None;
+    request.caller_origin = SurfaceCallerOrigin::Provider {
+        service_id: service_a,
+    };
+
+    let response = proxy
+        .invoke(
+            &service_connections,
+            &registry,
+            request,
+            Some(Duration::from_secs(5)),
+        )
+        .await
+        .expect("service self-invoking its own surface should route to itself");
+    assert!(response.success);
+}
+
+/// An explicit but unknown `target_provider_id` still errors `InvalidProvider`;
+/// the message now names the provider id instead of surfacing it bare.
+#[tokio::test(start_paused = true)]
+async fn invoke_explicit_bogus_target_errors_with_named_provider() {
+    let registry = registry();
+    let service_connections = ServiceConnectionRegistry::new();
+    let proxy = SurfaceProxy::new();
+
+    registry
+        .bootstrap_plugin(plugin_registration_with_permission("provider-b", true))
+        .expect("provider-b registration should succeed");
+
+    let request = SurfaceInvokeRequest {
+        tenant_id: tenant_id(),
+        surface_id: "proxmox.guest.invocable_panel".to_string(),
+        interaction_id: "refresh".to_string(),
+        idempotency_key: "idem-bogus-target".to_string(),
+        target_provider_id: Some("provider-ghost".to_string()),
+        caller_origin: SurfaceCallerOrigin::UserSession {
+            user_id: user_id(),
+            session_id: "session-1".to_string(),
+        },
+        params: serde_json::Map::new(),
+        encrypted_sensitive_params: None,
+    };
+
+    let err = proxy
+        .invoke(
+            &service_connections,
+            &registry,
+            request,
+            Some(Duration::from_secs(5)),
+        )
+        .await
+        .expect_err("unknown explicit target provider must error");
+    match err {
+        SurfaceProxyError::InvalidProvider(message) => {
+            assert!(
+                message.contains("provider-ghost"),
+                "message should name the provider id: {message}"
+            );
+        }
+        other => panic!("expected InvalidProvider, got {other:?}"),
+    }
+}
+
 #[tokio::test(start_paused = true)]
 async fn invoke_returns_no_provider_for_yielded_service_provider() {
     let registry = registry();
