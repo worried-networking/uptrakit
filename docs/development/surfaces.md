@@ -103,10 +103,22 @@ In service handlers:
 4. Respond with `ServiceMessage::SurfaceActionResponse`.
 
 Service-initiated action calls are supported via `ServiceMessage::SurfaceActionRequest`, with
-correlated `ControllerMessage::SurfaceActionResponse`. `ServiceSurfaceProxy`
-(`crates/shared/service-sdk/src/surface_proxy.rs`) implements the service-side oneshot-correlation
-pattern for these session-scoped messages: each outbound request is tracked by a generated
-correlation ID mapped to a `tokio::sync::oneshot::Sender`, and the matching response resolves it.
+correlated `ControllerMessage::SurfaceActionResponse` — but only when the target interaction is
+unpermissioned or opts in via `InteractionDescriptor.provider_invocable`. `provider_invocable` is
+a wire field with a fail-closed default: omitted on the wire, it deserializes to `false`, so a
+permissioned interaction stays closed to provider-origin calls until it explicitly opts in.
+Registration admission rejects the flag on permissioned interactions owned by `Service`-kind
+providers — only `Plugin`/`BuiltIn` providers may combine it with `required_permission`. See
+[Surface Security](../security/surfaces.md#provider-origin-invocation) for the caller-origin gate.
+
+`ServiceSurfaceProxy` (`crates/shared/service-sdk/src/surface_proxy.rs`) implements the
+service-side oneshot-correlation pattern for these session-scoped messages: each outbound request
+is tracked by a generated correlation ID mapped to a `tokio::sync::oneshot::Sender`, and the
+matching response resolves it.
+
+Interaction IDs follow a naming convention by kind: data-retrieval interactions use noun phrases
+(`discovered-guests`, `unmatched-guests`); mutations keep verbs (`bootstrap-proxmox-guest`,
+`match`).
 
 ## Plugin integration pattern
 

@@ -105,6 +105,13 @@ Routing then follows declared transport:
 `SurfaceProxy` enforces idempotency and timeout behavior and maps failures to typed surface error
 codes.
 
+Before dispatch, provider-origin requests (`CallerOrigin::Provider`) additionally pass the
+provider-permission gate in `invoke_inner` (`crates/ui/surface-proxy/src/proxy.rs`): a permissioned
+interaction is denied to a provider caller unless it sets `provider_invocable`, since a
+service-initiated call carries no user to check the permission against. See
+[Surface Security](../security/surfaces.md#provider-origin-invocation) for the policy and
+privilege-expansion rationale.
+
 ## Frontend unified renderer path
 
 The frontend path is unified for built-in and provider-backed surfaces:

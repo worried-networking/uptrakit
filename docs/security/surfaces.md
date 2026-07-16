@@ -28,6 +28,23 @@ Enforcement points:
 
 Frontend filtering is convenience only; server checks are authoritative.
 
+### Provider-origin invocation
+
+Provider-origin (service-initiated) calls carry no user; they are gated by tenant scope plus the provider-permission
+gate: an interaction with `required_permission` is denied to `CallerOrigin::Provider` unless it sets
+`provider_invocable`.
+
+`provider_invocable = true` means **any same-tenant provider with the `UiSurfaces` capability may invoke the
+interaction, subject only to tenant scope** and the standard idempotency/timeout/rate controls. It is a deliberate
+privilege expansion, accepted because tenant services are co-trusted (enrolled by the tenant admin), writes are
+tenant-scoped and recoverable, and every provider-origin invocation is audit-attributed to the calling service.
+
+Registration admission rejects the flag on permissioned interactions from `Service`-kind providers (Plugin/BuiltIn-owned
+interactions only); per-caller narrowing is deliberately outside the flag — a future optional allowlist field composes
+with it.
+
+Handlers of flagged interactions must not treat provider origin as privileged beyond tenant membership.
+
 ## Registration admission controls
 
 Service and plugin providers are admitted through `SurfaceRegistry` with strict validation:
