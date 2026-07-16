@@ -68,6 +68,12 @@ pub struct InteractionDescriptor {
     pub icon: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub submit_label: Option<String>,
+    /// Allows same-tenant provider-origin (service-initiated) invocation of
+    /// this interaction even when `required_permission` is set. Fail-closed:
+    /// absent on the wire deserializes to `false`. Honored only for
+    /// `Plugin`/`BuiltIn`-registered interactions — see `validate_for_provider`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub provider_invocable: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -124,6 +130,10 @@ pub enum InteractionValidationError {
         interaction_id: InteractionId,
         reason: String,
     },
+    #[error(
+        "interaction `{interaction_id}` sets provider_invocable with a required_permission — not allowed for service-registered surfaces"
+    )]
+    ProviderInvocableForbiddenForServiceProviders { interaction_id: InteractionId },
 }
 
 impl InteractionDescriptor {
@@ -149,6 +159,7 @@ impl InteractionDescriptor {
             form_ui: None,
             icon: None,
             submit_label: None,
+            provider_invocable: false,
         }
     }
 
@@ -172,6 +183,10 @@ impl InteractionDescriptor {
     /// any workflow step has an empty or whitespace-only label.
     /// Returns [`InteractionValidationError::IconInvalid`] when `icon` is
     /// `Some` but fails kebab-case validation.
+    /// Returns
+    /// [`InteractionValidationError::ProviderInvocableForbiddenForServiceProviders`]
+    /// when a `Service` provider sets `provider_invocable` on an interaction
+    /// that also declares `required_permission`.
     pub fn validate_for_provider(
         &self,
         provider_kind: ProviderKind,
@@ -184,6 +199,17 @@ impl InteractionDescriptor {
         {
             return Err(
                 InteractionValidationError::DirectBuiltInApiForbiddenForProvider {
+                    interaction_id: self.interaction_id.clone(),
+                },
+            );
+        }
+
+        if self.provider_invocable
+            && self.required_permission.is_some()
+            && provider_kind == ProviderKind::Service
+        {
+            return Err(
+                InteractionValidationError::ProviderInvocableForbiddenForServiceProviders {
                     interaction_id: self.interaction_id.clone(),
                 },
             );
@@ -371,5 +397,68 @@ mod tests {
         descriptor
             .validate_for_provider(ProviderKind::Plugin)
             .unwrap();
+    }
+
+    #[test]
+    fn provider_invocable_defaults_false_when_absent_on_wire() {
+        let json = serde_json::json!({
+            "interaction_id": "act",
+            "kind": "data_load",
+            "label": "Act",
+            "transport": { "mode": "controller_local" }
+        });
+        let descriptor: InteractionDescriptor =
+            serde_json::from_value(json).expect("deserialize without provider_invocable");
+        assert!(!descriptor.provider_invocable);
+        // Round-trip: default false is not serialized (skip_serializing_if).
+        let value = serde_json::to_value(&descriptor).unwrap();
+        assert!(value.get("provider_invocable").is_none());
+    }
+
+    #[test]
+    fn validate_for_provider_rejects_provider_invocable_permissioned_service_interaction() {
+        let mut descriptor = InteractionDescriptor::new(
+            InteractionId::new("act").unwrap(),
+            InteractionKind::DataLoad,
+            "Act",
+            InteractionTransport::ProviderProxied,
+        );
+        descriptor.required_permission = Some("update_hosts".to_string());
+        descriptor.provider_invocable = true;
+        let result = descriptor.validate_for_provider(ProviderKind::Service);
+        assert!(matches!(
+            result,
+            Err(InteractionValidationError::ProviderInvocableForbiddenForServiceProviders { .. })
+        ));
+    }
+
+    #[test]
+    fn validate_for_provider_accepts_provider_invocable_for_plugin_and_unpermissioned_service() {
+        let mut plugin_owned = InteractionDescriptor::new(
+            InteractionId::new("act").unwrap(),
+            InteractionKind::DataLoad,
+            "Act",
+            InteractionTransport::ControllerLocal,
+        );
+        plugin_owned.required_permission = Some("update_hosts".to_string());
+        plugin_owned.provider_invocable = true;
+        // matches! form — clippy::assertions_on_result_states is denied and this
+        // tests mod may not carry the #![expect] header sibling mods use.
+        assert!(matches!(
+            plugin_owned.validate_for_provider(ProviderKind::Plugin),
+            Ok(())
+        ));
+
+        let mut unpermissioned_service = InteractionDescriptor::new(
+            InteractionId::new("act2").unwrap(),
+            InteractionKind::DataLoad,
+            "Act2",
+            InteractionTransport::ProviderProxied,
+        );
+        unpermissioned_service.provider_invocable = true;
+        assert!(matches!(
+            unpermissioned_service.validate_for_provider(ProviderKind::Service),
+            Ok(())
+        ));
     }
 }
