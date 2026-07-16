@@ -106,7 +106,8 @@ tracing-subscriber = { workspace = true }
 uptrakit-shared-db = { workspace = true, features = ["migration", "db-sqlite"] }
 uptrakit-surface-proxy = { workspace = true, features = ["testing"] }
 uptrakit-controller-core = { workspace = true, features = ["testing"] }
-uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["test-support"] }
+uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["test-support", "migrations"] }
+uptrakit-plugin-infrastructure-proxmox = { workspace = true, features = ["testing", "migrations", "db-sqlite"] }
 tokio-tungstenite = { workspace = true }
 
 [lints]

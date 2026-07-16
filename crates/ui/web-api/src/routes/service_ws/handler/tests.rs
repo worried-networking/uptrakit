@@ -1071,3 +1071,325 @@ async fn surface_registration_rejection_does_not_broadcast() {
         "no broadcast expected on rejected registration"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Provider-origin e2e coverage: real plugin (proxmox) surface actions invoked
+// end to end through the shared-surface stack — bootstrap_plugin +
+// PluginSurfaceLocalExecutor wired via
+// `crate::test_harness::build_test_state_with_plugin_surfaces`. See
+// `.superpowers/sdd/task-10-brief.md`.
+// ---------------------------------------------------------------------------
+
+/// Seed a `plugin_configs` row (`plugin_type = "infrastructure_proxmox"`) —
+/// the FK parent required by `proxmox_host_mapping.plugin_config_id`.
+#[cfg(feature = "db-sqlite")]
+async fn insert_test_proxmox_plugin_config(
+    db: &sea_orm::DatabaseConnection,
+    tenant_id: Uuid,
+) -> Uuid {
+    use sea_orm::{ActiveModelTrait, Set};
+    use uptrakit_shared_db::entity::plugin_config;
+
+    let id = Uuid::now_v7();
+    let now = time::OffsetDateTime::now_utc();
+    plugin_config::ActiveModel {
+        id: Set(id),
+        tenant_id: Set(tenant_id),
+        name: Set("Test Proxmox Config".to_string()),
+        plugin_type: Set("infrastructure_proxmox".to_string()),
+        config: Set(serde_json::json!({})),
+        enabled: Set(true),
+        created_at: Set(now),
+        updated_at: Set(now),
+        deactivated_at: Set(None),
+    }
+    .insert(db)
+    .await
+    .expect("insert test plugin_config");
+    id
+}
+
+/// Register the calling service as a surface provider so
+/// `caller_origin_for_request` can resolve `SurfaceCallerOrigin::Provider {
+/// service_id }` — required unconditionally for every `CallerOrigin::Provider`
+/// invocation, even when the request also carries an explicit
+/// `target_provider_id` for the real plugin provider.
+#[cfg(feature = "db-sqlite")]
+fn register_calling_service_as_provider(
+    state: &Arc<crate::AppState>,
+    service_id: Uuid,
+    tenant_id: Uuid,
+) {
+    state
+        .surface_proxy_deps
+        .registry
+        .register_service(
+            service_id,
+            "uptrakit-agent-ssh",
+            Some(tenant_id),
+            test_surface_registration("provider-a", tenant_id),
+        )
+        .expect("calling service should register as a surface provider");
+}
+
+#[cfg(feature = "db-sqlite")]
+#[tokio::test]
+async fn provider_origin_denied_for_unflagged_permissioned_interaction() {
+    let db = crate::test_harness::setup_migrated_db_with_plugins().await;
+    let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+    let (state, _jwt) =
+        crate::test_harness::build_test_state_with_plugin_surfaces(db.clone(), tenant_id).await;
+    let service_id = Uuid::now_v7();
+    insert_test_service_row(&db, tenant_id, service_id, "uptrakit-agent-ssh").await;
+    register_calling_service_as_provider(&state, service_id, tenant_id);
+
+    let processor = MessageProcessor {
+        state: Arc::clone(&state),
+        service_id,
+        cert: None,
+        is_system: false,
+        has_update_tracking: false,
+        has_software_discovery: false,
+        has_update_hooks: false,
+        has_ui_surfaces: true,
+        has_workload_claims: false,
+        runtime_instance_id: None,
+        service_app_name: Some("uptrakit-agent-ssh".to_string()),
+        service_tenant_id: Some(tenant_id),
+        linked_host_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
+        report_tracker: ReportTracker::new(),
+    };
+    let request_id = Uuid::now_v7();
+
+    // "discover" is a registered, permissioned (`UpdateHosts`) ControllerLocal
+    // interaction on `proxmox.hosts` that is NOT `provider_invocable` — a
+    // provider-origin caller must be denied even though the surface/interaction
+    // both resolve successfully.
+    let response = processor
+        .handle_surface_action_request(surfaces::SurfaceActionRequest {
+            request_id,
+            tenant_id: tenant_id.to_string(),
+            surface_id: surfaces::SurfaceId::new("proxmox.hosts").unwrap(),
+            interaction_id: surfaces::InteractionId::new("discover").unwrap(),
+            idempotency_key: "provider-origin-discover-denied".to_string(),
+            target_provider_id: Some("plugin.infrastructure_proxmox".to_string()),
+            caller_origin: surfaces::CallerOrigin::Provider {
+                provider_id: "provider-a".to_string(),
+            },
+            params: serde_json::Map::new(),
+            encrypted_sensitive_params: None,
+        })
+        .await;
+
+    let [ControllerMessage::SurfaceActionResponse(reply)] = response.replies.as_slice() else {
+        panic!("expected exactly one SurfaceActionResponse reply");
+    };
+    assert_eq!(reply.request_id, request_id);
+    assert!(!reply.success);
+    let error = reply.error.as_ref().expect("error payload should exist");
+    assert_eq!(
+        error.code,
+        surfaces::SurfaceActionErrorCode::PermissionDenied
+    );
+
+    let row = tenant_audit_row_for_action(
+        &db,
+        uptrakit_audit_log::AuditActionType::SURFACE_ACTION_INVOKE,
+    )
+    .await;
+    assert_eq!(
+        row.actor_type,
+        uptrakit_audit_log::AuditActorType::Service.as_str()
+    );
+    assert_eq!(row.actor_id, Some(service_id));
+    assert_eq!(
+        row.outcome,
+        uptrakit_audit_log::AuditOutcome::Denied.as_str()
+    );
+    let details = row
+        .details_json
+        .as_ref()
+        .expect("permission denial audit should include details");
+    assert_eq!(details["surface_id"], "proxmox.hosts");
+    assert_eq!(details["interaction_id"], "discover");
+    assert_eq!(details["reason_code"], "permission_denied");
+}
+
+#[cfg(feature = "db-sqlite")]
+#[tokio::test]
+async fn provider_origin_unmatched_guests_executes_and_audits_service_actor() {
+    let db = crate::test_harness::setup_migrated_db_with_plugins().await;
+    let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+    let plugin_config_id = insert_test_proxmox_plugin_config(&db, tenant_id).await;
+    let mapping_id =
+        uptrakit_plugin_infrastructure_proxmox::testing::insert_unmatched_host_mapping(
+            &db,
+            tenant_id,
+            plugin_config_id,
+            "pve-node-1",
+            101,
+            "qemu",
+            "unmatched-guest",
+        )
+        .await;
+    let (state, _jwt) =
+        crate::test_harness::build_test_state_with_plugin_surfaces(db.clone(), tenant_id).await;
+    let service_id = Uuid::now_v7();
+    insert_test_service_row(&db, tenant_id, service_id, "uptrakit-agent-ssh").await;
+    register_calling_service_as_provider(&state, service_id, tenant_id);
+
+    let processor = MessageProcessor {
+        state: Arc::clone(&state),
+        service_id,
+        cert: None,
+        is_system: false,
+        has_update_tracking: false,
+        has_software_discovery: false,
+        has_update_hooks: false,
+        has_ui_surfaces: true,
+        has_workload_claims: false,
+        runtime_instance_id: None,
+        service_app_name: Some("uptrakit-agent-ssh".to_string()),
+        service_tenant_id: Some(tenant_id),
+        linked_host_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
+        report_tracker: ReportTracker::new(),
+    };
+    let request_id = Uuid::now_v7();
+
+    let response = processor
+        .handle_surface_action_request(surfaces::SurfaceActionRequest {
+            request_id,
+            tenant_id: tenant_id.to_string(),
+            surface_id: surfaces::SurfaceId::new("proxmox.hosts").unwrap(),
+            interaction_id: surfaces::InteractionId::new("unmatched-guests").unwrap(),
+            idempotency_key: "provider-origin-unmatched-guests".to_string(),
+            target_provider_id: Some("plugin.infrastructure_proxmox".to_string()),
+            caller_origin: surfaces::CallerOrigin::Provider {
+                provider_id: "provider-a".to_string(),
+            },
+            params: serde_json::Map::from_iter([(
+                "per_page".to_string(),
+                serde_json::Value::Number(1000.into()),
+            )]),
+            encrypted_sensitive_params: None,
+        })
+        .await;
+
+    let [ControllerMessage::SurfaceActionResponse(reply)] = response.replies.as_slice() else {
+        panic!("expected exactly one SurfaceActionResponse reply");
+    };
+    assert_eq!(reply.request_id, request_id);
+    assert!(
+        reply.success,
+        "unmatched-guests should execute successfully: {:?}",
+        reply.error
+    );
+    let result = reply
+        .result
+        .as_ref()
+        .expect("success response has a result");
+    let items = result["items"]
+        .as_array()
+        .expect("result.items should be an array");
+    assert!(
+        items
+            .iter()
+            .any(|item| item["mapping_id"] == mapping_id.to_string()),
+        "seeded unmatched mapping should appear in result.items: {items:?}"
+    );
+
+    let row = tenant_audit_row_for_action(
+        &db,
+        uptrakit_audit_log::AuditActionType::SURFACE_ACTION_INVOKE,
+    )
+    .await;
+    assert_eq!(
+        row.actor_type,
+        uptrakit_audit_log::AuditActorType::Service.as_str()
+    );
+    assert_eq!(row.actor_id, Some(service_id));
+    assert_eq!(row.actor_display.as_deref(), Some("uptrakit-agent-ssh"));
+    assert_eq!(
+        row.outcome,
+        uptrakit_audit_log::AuditOutcome::Success.as_str()
+    );
+}
+
+#[cfg(feature = "db-sqlite")]
+#[tokio::test]
+async fn provider_origin_match_completes_handler() {
+    let db = crate::test_harness::setup_migrated_db_with_plugins().await;
+    let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+    let plugin_config_id = insert_test_proxmox_plugin_config(&db, tenant_id).await;
+    let mapping_id =
+        uptrakit_plugin_infrastructure_proxmox::testing::insert_unmatched_host_mapping(
+            &db,
+            tenant_id,
+            plugin_config_id,
+            "pve-node-1",
+            102,
+            "qemu",
+            "to-be-matched-guest",
+        )
+        .await;
+    let host = crate::test_harness::fixtures::insert_host(&db, tenant_id).await;
+    let (state, _jwt) =
+        crate::test_harness::build_test_state_with_plugin_surfaces(db.clone(), tenant_id).await;
+    let service_id = Uuid::now_v7();
+    insert_test_service_row(&db, tenant_id, service_id, "uptrakit-agent-ssh").await;
+    register_calling_service_as_provider(&state, service_id, tenant_id);
+
+    let processor = MessageProcessor {
+        state: Arc::clone(&state),
+        service_id,
+        cert: None,
+        is_system: false,
+        has_update_tracking: false,
+        has_software_discovery: false,
+        has_update_hooks: false,
+        has_ui_surfaces: true,
+        has_workload_claims: false,
+        runtime_instance_id: None,
+        service_app_name: Some("uptrakit-agent-ssh".to_string()),
+        service_tenant_id: Some(tenant_id),
+        linked_host_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
+        report_tracker: ReportTracker::new(),
+    };
+    let request_id = Uuid::now_v7();
+
+    let response = processor
+        .handle_surface_action_request(surfaces::SurfaceActionRequest {
+            request_id,
+            tenant_id: tenant_id.to_string(),
+            surface_id: surfaces::SurfaceId::new("proxmox.hosts").unwrap(),
+            interaction_id: surfaces::InteractionId::new("match").unwrap(),
+            idempotency_key: "provider-origin-match".to_string(),
+            target_provider_id: Some("plugin.infrastructure_proxmox".to_string()),
+            caller_origin: surfaces::CallerOrigin::Provider {
+                provider_id: "provider-a".to_string(),
+            },
+            params: serde_json::Map::from_iter([
+                ("mapping_id".to_string(), serde_json::json!(mapping_id)),
+                ("host_id".to_string(), serde_json::json!(host.id)),
+            ]),
+            encrypted_sensitive_params: None,
+        })
+        .await;
+
+    let [ControllerMessage::SurfaceActionResponse(reply)] = response.replies.as_slice() else {
+        panic!("expected exactly one SurfaceActionResponse reply");
+    };
+    assert_eq!(reply.request_id, request_id);
+    assert!(
+        reply.success,
+        "match should complete successfully: {:?}",
+        reply.error
+    );
+
+    // Gate-pass is not the same as handler-runs (spec D7): confirm the
+    // handler actually executed by re-reading the mapping row's `host_id`.
+    let bound_host_id =
+        uptrakit_plugin_infrastructure_proxmox::testing::host_mapping_host_id(&db, mapping_id)
+            .await;
+    assert_eq!(bound_host_id, Some(host.id));
+}

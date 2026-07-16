@@ -8616,6 +8616,7 @@ dependencies = [
  "uptrakit-global-github-provider",
  "uptrakit-nats",
  "uptrakit-notification-delivery",
+ "uptrakit-plugin-infrastructure-proxmox",
  "uptrakit-plugin-infrastructure-registry",
  "uptrakit-service-connections",
  "uptrakit-shared-db",

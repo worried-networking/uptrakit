@@ -76,6 +76,32 @@ pub(crate) async fn setup_migrated_db() -> DatabaseConnection {
     db
 }
 
+/// Create an in-memory SQLite database with core **and plugin** migrations
+/// applied — mirrors production's plugin-aware migration set
+/// (`uptrakit_shared_db::migration::run_migrations_with_plugins`, driven by
+/// `controller-runtime`'s boot sequence) rather than [`setup_migrated_db`]'s
+/// core-only set.
+///
+/// Needed by tests that seed plugin-owned tables (e.g.
+/// `proxmox_host_mapping`) directly, or that exercise `ControllerLocal`
+/// surface dispatch via [`build_test_state_with_plugin_surfaces`] — without
+/// this, plugin tables don't exist and inserts/queries fail with
+/// "no such table".
+pub(crate) async fn setup_migrated_db_with_plugins() -> DatabaseConnection {
+    let opt = ConnectOptions::new("sqlite::memory:".to_owned());
+    let db = Database::connect(opt).await.expect("test db");
+    uptrakit_shared_db::migration::run_migrations_with_plugins(&db, || {
+        uptrakit_plugin_infrastructure_registry::all_descriptors()
+            .into_iter()
+            .filter_map(|descriptor| descriptor.migrations)
+            .flat_map(|migrations_fn| migrations_fn())
+            .collect()
+    })
+    .await
+    .expect("run core + plugin migrations");
+    db
+}
+
 /// Insert a default tenant row and return its UUID.
 pub(crate) async fn insert_default_tenant(db: &DatabaseConnection) -> uuid::Uuid {
     use sea_orm::ActiveModelTrait;
@@ -121,6 +147,52 @@ pub(crate) async fn build_test_state_with_external_tls_cert(
     server.has_external_tls_cert = true;
     let mut app_state = (*state).clone();
     app_state.server = server;
+    (Arc::new(app_state), jwt)
+}
+
+/// Build a test [`AppState`] wired to execute `ControllerLocal` plugin
+/// surface actions end to end.
+///
+/// The default [`build_test_state`] leaves the [`SurfaceRegistry`] empty and
+/// the [`SurfaceProxy`] on its no-op local executor (every `ControllerLocal`
+/// action errors unconditionally) — other tests depend on that inert
+/// behaviour, so it is left untouched. This variant instead mirrors the
+/// production wiring in `controller-runtime/src/boot/components.rs`:
+/// bootstrap every plugin's [`surfaces::SurfaceRegistration`] into the
+/// registry, then construct the proxy with a real
+/// [`crate::surface_proxy::PluginSurfaceLocalExecutor`] backed by the same
+/// `db` connection and `plugin_ops` catalog.
+///
+/// Pair with [`setup_migrated_db_with_plugins`] so plugin-owned tables exist
+/// on `db` before seeding/querying them.
+pub(crate) async fn build_test_state_with_plugin_surfaces(
+    db: DatabaseConnection,
+    tenant_id: uuid::Uuid,
+) -> (Arc<AppState>, Arc<JwtManager>) {
+    let (state, jwt) = build_test_state_with_plugin_ops(db.clone(), tenant_id, None).await;
+
+    let surface_registry = Arc::new(crate::surface_registry::SurfaceRegistry::new(
+        crate::surface_registry::SurfaceRegistryConfig::default(),
+    ));
+    for registration in state.plugin.plugin_ops.surface_registrations() {
+        surface_registry
+            .bootstrap_plugin(registration)
+            .expect("bootstrap plugin surfaces in test harness");
+    }
+
+    let surface_proxy = Arc::new(
+        crate::surface_proxy::SurfaceProxy::new().with_local_executor(Arc::new(
+            crate::surface_proxy::PluginSurfaceLocalExecutor::new(
+                Arc::new(db),
+                Arc::clone(&state.plugin.plugin_ops),
+            )
+            .with_audit_emitter(state.audit_emitter.clone()),
+        )),
+    );
+
+    let mut app_state = (*state).clone();
+    app_state.surface_proxy_deps =
+        crate::app_state::SurfaceProxyDeps::new(surface_registry, surface_proxy);
     (Arc::new(app_state), jwt)
 }
 

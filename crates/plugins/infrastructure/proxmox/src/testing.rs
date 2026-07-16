@@ -49,6 +49,57 @@ pub async fn insert_host_mapping(
     id
 }
 
+/// Insert an **unmatched** `proxmox_host_mapping` row (`host_id = NULL`),
+/// i.e. a discovered guest awaiting matching to an Uptrakit host.
+///
+/// Distinct from [`insert_host_mapping`], which always assigns `host_id`.
+pub async fn insert_unmatched_host_mapping(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    plugin_config_id: Uuid,
+    node: &str,
+    vmid: i32,
+    vm_type: &str,
+    name: &str,
+) -> Uuid {
+    let id = Uuid::now_v7();
+    let now = OffsetDateTime::now_utc();
+    proxmox_host_mapping::ActiveModel {
+        id: Set(id),
+        tenant_id: Set(tenant_id),
+        plugin_config_id: Set(plugin_config_id),
+        host_id: Set(None),
+        proxmox_node: Set(node.to_string()),
+        proxmox_vmid: Set(vmid),
+        proxmox_type: Set(vm_type.to_string()),
+        proxmox_name: Set(Some(name.to_string())),
+        proxmox_status: Set("running".to_string()),
+        hostname: Set(None),
+        ip_addresses: Set(None),
+        machine_id: Set(None),
+        match_method: Set(None),
+        discovered_at: Set(now),
+        updated_at: Set(now),
+    }
+    .insert(db)
+    .await
+    .expect("insert unmatched proxmox_host_mapping");
+    id
+}
+
+/// Read back the `host_id` column of a `proxmox_host_mapping` row by id.
+///
+/// Used to confirm a match handler actually ran to completion (gate-pass is
+/// not the same as handler-runs).
+pub async fn host_mapping_host_id(db: &DatabaseConnection, mapping_id: Uuid) -> Option<Uuid> {
+    proxmox_host_mapping::Entity::find_by_id(mapping_id)
+        .one(db)
+        .await
+        .expect("query proxmox_host_mapping")
+        .expect("mapping present")
+        .host_id
+}
+
 pub async fn insert_protection_default(
     db: &DatabaseConnection,
     tenant_id: Uuid,
