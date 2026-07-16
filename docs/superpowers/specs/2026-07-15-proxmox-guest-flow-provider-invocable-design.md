@@ -99,10 +99,13 @@ pub provider_invocable: bool,
   will need a `WireValidate` limit constant. Stated here so a future maintainer neither overloads this field nor
   assumes it can express caller scoping.
 
-### D2 — Gate: extract and extend
+### D2 — Gate: extend the single live site
 
-The provider-permission gate exists byte-identically in `proxy.rs:276-282` and `proxy/prepared.rs:55-61`. Extract into
-one shared function in the `surface-proxy` crate (e.g. alongside `caller_origin_for_request`), called from both sites:
+**Plan-review correction (2026-07-16):** the `proxy/prepared.rs:55-61` "duplicate" is a byte-identical copy inside an
+ORPHANED file — `proxy.rs` declares no `mod prepared;`/`mod validation;` (only `controller_local`, `local_executor`,
+`tests`, `entity_enrichment`), and the orphans are owned by the pending "Remove Orphaned surface-proxy Module Files"
+spec. The only live gate is `proxy.rs:276-282`; with one live site there is nothing to extract — modify the condition
+in place and leave the orphaned files untouched:
 
 ```rust
 if matches!(&caller_origin, surfaces::CallerOrigin::Provider { .. })
@@ -317,7 +320,7 @@ web-api crate (`routes/service_ws/handler/tests.rs`, existing `handle_surface_ac
 | `crates/shared/wire/asyncapi.yaml` | Surface registration payloads are **not currently modeled** (verified: zero hits for `SurfaceRegistration`/`InteractionDescriptor`/`interactions`). Record this pre-existing gap in the spec's implementation notes rather than silently skipping; adding full surface-message modeling is out of scope |
 | `docs/api/wire-protocol.md` | No `InteractionDescriptor` field inventory exists (only a `UiSurfaces` capability row); no change required beyond D8 rows above — verified by grep |
 
-Rustdoc: the new field, the shared gate fn, and the changed handlers get doc comments; every function whose signature
+Rustdoc: the new field and the changed handlers get doc comments; every function whose signature
 or failure semantics change gets its doc-comment re-checked in the same edit.
 
 ### D9 — Follow-up (deferred, registered in backlog): unify the two interaction systems
