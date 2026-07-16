@@ -286,6 +286,7 @@ fn proxmox_hosts_surface() -> surfaces::RegisteredSurface {
                     surfaces::InteractionTransport::ControllerLocal,
                 );
                 i.required_permission = Some(Permission::UpdateHosts.to_string());
+                i.provider_invocable = true;
                 i.input_schema = Some(surfaces::SchemaContract::Object);
                 i.result_schema = Some(surfaces::SchemaContract::Any);
                 i.form_ui = Some(surfaces::FormUiDescriptor {
@@ -346,6 +347,18 @@ fn proxmox_hosts_surface() -> surfaces::RegisteredSurface {
                     severity: surfaces::ConfirmationSeverity::Danger,
                 });
                 i.icon = Some("unlink".to_string());
+                i
+            },
+            {
+                let mut i = surfaces::InteractionDescriptor::new(
+                    surfaces::InteractionId::new("unmatched-guests").expect("literal"),
+                    surfaces::InteractionKind::DataLoad,
+                    "Unmatched Guests",
+                    surfaces::InteractionTransport::ControllerLocal,
+                );
+                i.required_permission = Some(Permission::UpdateHosts.to_string());
+                i.result_schema = Some(surfaces::SchemaContract::Any);
+                i.provider_invocable = true;
                 i
             },
         ],
@@ -1674,6 +1687,35 @@ mod tests {
                 .contains(&surfaces::Capability::ContextSelector),
             "must declare ContextSelector capability"
         );
+    }
+
+    #[test]
+    fn proxmox_hosts_registers_unmatched_guests_and_provider_invocable_match() {
+        let registrations = proxmox_surface_registrations();
+        let reg = &registrations[0];
+        let hosts = reg
+            .surfaces
+            .iter()
+            .find(|s| s.descriptor.surface_id.as_str() == "proxmox.hosts")
+            .expect("proxmox.hosts surface must be registered");
+
+        let unmatched = hosts
+            .interactions
+            .iter()
+            .find(|i| i.interaction_id.as_str() == "unmatched-guests")
+            .expect("unmatched-guests must be a registered interaction");
+        assert!(unmatched.provider_invocable);
+        assert_eq!(
+            unmatched.required_permission.as_deref(),
+            Some(Permission::UpdateHosts.to_string().as_str())
+        );
+
+        let match_interaction = hosts
+            .interactions
+            .iter()
+            .find(|i| i.interaction_id.as_str() == "match")
+            .expect("match must be a registered interaction");
+        assert!(match_interaction.provider_invocable);
     }
 
     #[test]

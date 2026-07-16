@@ -919,7 +919,7 @@ See [shared surface security](../security/surfaces.md) for the trust model and
 - **`bootstrap`**: Spawned as a background task via the `bg_tx` channel. The
   `SurfaceActionResponse` is sent asynchronously when the task completes. The surface proxy's
   120-second timeout handles the case where the task runs too long.
-- **`list-discovered-guests`**: Invokes `proxmox.hosts/list-all-unmatched` via
+- **`list-discovered-guests`**: Invokes `proxmox.hosts/unmatched-guests` via
   `ServiceSurfaceProxy`. Returns empty options if the Proxmox plugin is not installed.
 - **`bootstrap-proxmox-guest`**: Spawned as a background task. Resolves guest metadata
   from the Proxmox plugin via `ServiceSurfaceProxy`, auto-detects the PVE host by

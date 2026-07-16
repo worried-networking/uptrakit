@@ -43,7 +43,7 @@ async fn handle_list_discovered_guests(
         .action_invoker
         .invoke(
             "proxmox.hosts",
-            "list-all-unmatched",
+            "unmatched-guests",
             json!({ "per_page": 1000 }),
         )
         .await;
@@ -56,14 +56,14 @@ async fn handle_list_discovered_guests(
         Ok(proxy_resp) => {
             tracing::debug!(
                 error = ?proxy_resp.error,
-                "list-all-unmatched returned error, returning empty options"
+                "unmatched-guests returned error, returning empty options"
             );
             make_success_response(request_id, json!({ "options": [] }))
         }
         Err(e) => {
             tracing::debug!(
                 error = %e,
-                "list-all-unmatched proxy call failed, returning empty options"
+                "unmatched-guests proxy call failed, returning empty options"
             );
             make_success_response(request_id, json!({ "options": [] }))
         }
@@ -92,7 +92,7 @@ async fn handle_bootstrap_proxmox_guest(
         .action_invoker
         .invoke(
             "proxmox.hosts",
-            "list-all-unmatched",
+            "unmatched-guests",
             json!({ "per_page": 1000 }),
         )
         .await

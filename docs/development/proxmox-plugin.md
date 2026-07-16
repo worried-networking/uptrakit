@@ -138,7 +138,7 @@ commands or REST routes exist.
 | `proxmox.hosts`     | `match`              | `mapping_id`, `host_id`                     | Manual match                                                         |
 | `proxmox.hosts`     | `approve-match`      | `mapping_id`, `host_id`/`suggested_host_id` | Approve a suggested match (accepts `suggested_host_id` as fallback)  |
 | `proxmox.hosts`     | `unmatch`            | `mapping_id`                                | Remove match (destructive, confirmation dialog shows `proxmox_name`) |
-| `proxmox.hosts`     | `list-all-unmatched` | (none)                                      | List unmatched guests sorted by name across all configs              |
+| `proxmox.hosts`     | `unmatched-guests`   | (none)                                      | List unmatched guests sorted by name across all configs              |
 | `proxmox.host-info` | `get-info`           | `host_id`                                   | Get Proxmox info for host                                            |
 
 In the current shared-surface slice, `proxmox.hosts` is intentionally **not**
@@ -166,7 +166,7 @@ row data:
 
 ### Cross-config guest listing
 
-The `list-all-unmatched` action returns unmatched guests across **all** Proxmox
+The `unmatched-guests` action returns unmatched guests across **all** Proxmox
 configurations for the tenant, sorted by name (case-insensitive) with VMID as a
 tiebreaker. Unlike `list` (which requires a `plugin_config_id`), this action is
 designed for service-initiated invocations where the calling service does not

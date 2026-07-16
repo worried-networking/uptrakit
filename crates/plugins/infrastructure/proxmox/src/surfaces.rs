@@ -173,7 +173,7 @@ fn resolve_controller_surface_action(
         ("proxmox.hosts", "match") => Some(ControllerSurfaceAction::MatchHost),
         ("proxmox.hosts", "approve-match") => Some(ControllerSurfaceAction::ApproveMatch),
         ("proxmox.hosts", "unmatch") => Some(ControllerSurfaceAction::UnmatchHost),
-        ("proxmox.hosts", "list-all-unmatched") => Some(ControllerSurfaceAction::ListAllUnmatched),
+        ("proxmox.hosts", "unmatched-guests") => Some(ControllerSurfaceAction::ListAllUnmatched),
         ("proxmox.host-info", "get-info") => Some(ControllerSurfaceAction::GetHostInfo),
         (SURFACE_SETTINGS_UPDATE_HOOKS, ACTION_PRELOAD_GLOBAL_DEFAULTS) => {
             Some(ControllerSurfaceAction::PreloadGlobalDefaults)
@@ -339,7 +339,7 @@ fn test_connection_action() -> SurfaceActionDescriptor {
 }
 
 fn list_all_unmatched_action() -> SurfaceActionDescriptor {
-    SurfaceActionDescriptor::new("list-all-unmatched", "List All Unmatched Guests")
+    SurfaceActionDescriptor::new("unmatched-guests", "Unmatched Guests")
         .with_permission(Permission::UpdateHosts)
         .with_timeout(10)
 }
@@ -2030,7 +2030,7 @@ mod tests {
         assert!(ids.contains(&"unmatch"));
         assert!(ids.contains(&"discover"));
         assert!(ids.contains(&"test-connection"));
-        assert!(ids.contains(&"list-all-unmatched"));
+        assert!(ids.contains(&"unmatched-guests"));
         assert!(ids.contains(&"get-info"));
         assert!(ids.contains(&ACTION_PRELOAD_GLOBAL_DEFAULTS));
         assert!(ids.contains(&ACTION_SAVE_GLOBAL_DEFAULTS));
