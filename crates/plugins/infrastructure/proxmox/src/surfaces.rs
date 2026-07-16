@@ -1053,7 +1053,7 @@ async fn handle_list_all_unmatched(
     use crate::entity::proxmox_host_mapping;
 
     let page = request.page.unwrap_or(1).max(1);
-    let per_page = request.per_page.unwrap_or(50).clamp(1, 1000).min(200);
+    let per_page = request.per_page.unwrap_or(50).clamp(1, 1000);
 
     let base_query = tenant_db
         .find::<proxmox_host_mapping::Entity>()
@@ -1986,8 +1986,10 @@ mod tests {
         reason = "test assertions use assert!(result.is_ok()) pattern"
     )]
     use super::*;
-    use sea_orm::{DatabaseConnection, DbBackend, MockDatabase};
+    use sea_orm::{ActiveModelTrait, DatabaseConnection, DbBackend, MockDatabase, Set};
     use time::OffsetDateTime;
+
+    use crate::entity::proxmox_host_mapping;
 
     #[test]
     fn surface_actions_include_scaling_actions_with_correct_permissions() {
@@ -2734,5 +2736,107 @@ mod tests {
         // covers the clear-mode ("inherit") request path — no further
         // statements are appended to the mock, so reaching either branch's
         // delete/upsert call would have panicked the mock.
+    }
+
+    // Real-SQLite regression test for the `per_page` cap: `MockDatabase`
+    // can't prove pagination limits actually reach the query (it ignores
+    // LIMIT clauses), so this runs the shared-db + proxmox migrations on an
+    // in-memory SQLite DB. Idiom copied from `matching_isolation_tests.rs`.
+    async fn setup_db() -> DatabaseConnection {
+        let db = sea_orm::Database::connect("sqlite::memory:")
+            .await
+            .expect("connect in-memory sqlite");
+        uptrakit_shared_db::migration::run_migrations_with_plugins(
+            &db,
+            crate::ProxmoxPlugin::controller_migrations,
+        )
+        .await
+        .expect("shared + proxmox migrations should run");
+        db
+    }
+
+    async fn insert_tenant(db: &DatabaseConnection) -> Uuid {
+        let id = Uuid::now_v7();
+        let now = OffsetDateTime::now_utc();
+        uptrakit_shared_db::entity::tenant::ActiveModel {
+            id: Set(id),
+            name: Set(format!("tenant-{id}")),
+            slug: Set(id.to_string()),
+            is_default: Set(false),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert tenant");
+        id
+    }
+
+    async fn insert_plugin_config(db: &DatabaseConnection, tenant_id: Uuid) -> Uuid {
+        let id = Uuid::now_v7();
+        let now = OffsetDateTime::now_utc();
+        uptrakit_shared_db::entity::plugin_config::ActiveModel {
+            id: Set(id),
+            tenant_id: Set(tenant_id),
+            name: Set(format!("pve-{id}")),
+            plugin_type: Set("infrastructure_proxmox".to_string()),
+            config: Set(serde_json::json!({})),
+            enabled: Set(true),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: sea_orm::ActiveValue::NotSet,
+        }
+        .insert(db)
+        .await
+        .expect("insert plugin_config");
+        id
+    }
+
+    #[tokio::test]
+    async fn list_all_unmatched_honors_requested_per_page_beyond_200() {
+        let db = setup_db().await;
+        let tenant_id = insert_tenant(&db).await;
+        let plugin_config_id = insert_plugin_config(&db, tenant_id).await;
+        let now = OffsetDateTime::now_utc();
+        for vmid in 0..250 {
+            // Distinct proxmox_vmid per row (upsert key is (plugin_config_id, vmid));
+            // multiple host_id = NULL rows are fine under the host-uniqueness index.
+            proxmox_host_mapping::ActiveModel {
+                id: Set(Uuid::now_v7()),
+                tenant_id: Set(tenant_id),
+                plugin_config_id: Set(plugin_config_id),
+                host_id: Set(None),
+                proxmox_node: Set("node1".to_string()),
+                proxmox_vmid: Set(vmid),
+                proxmox_type: Set("lxc".to_string()),
+                proxmox_name: Set(Some(format!("guest-{vmid}"))),
+                proxmox_status: Set("running".to_string()),
+                hostname: Set(None),
+                ip_addresses: Set(None),
+                machine_id: Set(None),
+                match_method: Set(None),
+                discovered_at: Set(now),
+                updated_at: Set(now),
+            }
+            .insert(&db)
+            .await
+            .expect("insert unmatched mapping");
+        }
+
+        let tenant_db = TenantDb::new(db, tenant_id);
+        let result = handle_list_all_unmatched(
+            &tenant_db,
+            ProxmoxUnmatchedGuestsRequest {
+                page: Some(1),
+                per_page: Some(1000),
+            },
+        )
+        .await
+        .expect("list should succeed");
+
+        let items = result["items"].as_array().expect("items array");
+        assert_eq!(items.len(), 250);
+        assert_eq!(result["total"], 250);
     }
 }
