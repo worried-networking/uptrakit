@@ -1,7 +1,8 @@
 //! Agent-local database migrations for the Proxmox infrastructure plugin.
 //!
-//! These migrations are contributed to the SSH agent's migration set via
-//! [`PluginBase::service_migrations()`](uptrakit_plugin_infrastructure_core::PluginBase::service_migrations).
+//! Contributed to the SSH agent's migration set via the plugin descriptor's
+//! `agent_migrations` field (`declare_plugin!` → collected by
+//! `uptrakit-agent-ssh-runtime`'s `Migrator::migrations()`).
 
 use sea_orm_migration::prelude::*;
 
@@ -206,4 +207,12 @@ enum ProxmoxPendingMatches {
     HostId,
     MappingId,
     CreatedAt,
+}
+
+/// All agent-local migrations for this plugin, in application order.
+pub fn agent_migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
+    vec![
+        Box::new(CreateProxmoxHostState),
+        Box::new(CreateProxmoxPendingMatches),
+    ]
 }

@@ -115,6 +115,7 @@ mod tests {
             raw_settings_keys: &[],
             global_provider_consumers: &[],
             migrations: None,
+            agent_migrations: None,
             reset_tenant_data: None,
             db_migrate_tables: None,
         })
@@ -162,6 +163,7 @@ mod tests {
             raw_settings_keys: &[],
             global_provider_consumers: &[],
             migrations: None,
+            agent_migrations: None,
             reset_tenant_data: None,
             db_migrate_tables: None,
         })

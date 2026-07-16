@@ -1277,6 +1277,23 @@ fn __proxmox_migrations() -> Vec<Box<dyn std::any::Any>> {
     vec![]
 }
 
+// Agent-migrations wrapper — adapts to whatever MigrationsFn type alias is
+// active (same paired-stub pattern as __proxmox_migrations above; the middle
+// branch covers migrations-on/agent-infra-off builds where the agent module
+// does not compile).
+#[cfg(all(feature = "migrations", feature = "agent-infra"))]
+fn __proxmox_agent_migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
+    crate::agent::migration::agent_migrations()
+}
+#[cfg(all(feature = "migrations", not(feature = "agent-infra")))]
+fn __proxmox_agent_migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
+    vec![]
+}
+#[cfg(not(feature = "migrations"))]
+fn __proxmox_agent_migrations() -> Vec<Box<dyn std::any::Any>> {
+    vec![]
+}
+
 fn __proxmox_create_controller_update_protection(
     config: &uptrakit_plugin_infrastructure_core::CatalogConfig,
 ) -> uptrakit_plugin_infrastructure_core::error::Result<
@@ -1343,6 +1360,7 @@ declare_plugin!(ProxmoxPlugin, ProxmoxConfig, "infrastructure_proxmox", {
         registrations: descriptor_surface_registrations,
     },
     migrations: __proxmox_migrations,
+    agent_migrations: __proxmox_agent_migrations,
     reset_tenant_data: crate::reset::proxmox_reset_tenant_data,
     db_migrate_tables: crate::db_migrate::proxmox_db_migrate_tables,
 });

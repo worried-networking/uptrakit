@@ -869,6 +869,7 @@ mod tests {
         raw_settings_keys: &[],
         global_provider_consumers: &[],
         migrations: None,
+        agent_migrations: None,
         reset_tenant_data: None,
         db_migrate_tables: None,
     };
@@ -911,6 +912,7 @@ mod tests {
         sudo: None,
         raw_settings_keys: &[],
         migrations: None,
+        agent_migrations: None,
         reset_tenant_data: None,
         db_migrate_tables: None,
         global_provider_consumers: &[],
@@ -954,6 +956,7 @@ mod tests {
         sudo: None,
         raw_settings_keys: &[],
         migrations: None,
+        agent_migrations: None,
         reset_tenant_data: None,
         db_migrate_tables: None,
         global_provider_consumers: &[],
@@ -998,6 +1001,7 @@ mod tests {
         raw_settings_keys: &[],
         global_provider_consumers: &[],
         migrations: None,
+        agent_migrations: None,
         reset_tenant_data: None,
         db_migrate_tables: None,
     };
@@ -1043,6 +1047,7 @@ mod tests {
             GlobalProviderConsumerDecl::new("gitlab"),
         ],
         migrations: None,
+        agent_migrations: None,
         reset_tenant_data: None,
         db_migrate_tables: None,
     };
@@ -1278,6 +1283,7 @@ mod tests {
         raw_settings_keys: &[],
         global_provider_consumers: &[],
         migrations: None,
+        agent_migrations: None,
         reset_tenant_data: None,
         db_migrate_tables: None,
     };
@@ -1342,6 +1348,7 @@ mod tests {
         raw_settings_keys: &[],
         global_provider_consumers: &[],
         migrations: None,
+        agent_migrations: None,
         reset_tenant_data: None,
         db_migrate_tables: None,
     };

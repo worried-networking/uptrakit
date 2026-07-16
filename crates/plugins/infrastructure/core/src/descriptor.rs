@@ -599,6 +599,10 @@ pub struct PluginDescriptor {
     // Always present so `declare_plugin!` macro expansions always see the field.
     // The actual type is only meaningful when `migrations` feature is active.
     pub migrations: Option<MigrationsFn>,
+    /// Agent-local (service-side SQLite) migrations contributed by this plugin.
+    /// Collected by the agent-ssh runtime's migrator; `None` for plugins with
+    /// no agent-local tables. Same feature semantics as `migrations`.
+    pub agent_migrations: Option<MigrationsFn>,
     /// Plugin-owned tenant data deletion callback.
     ///
     /// The actual type is only meaningful when `migrations` feature is active.
