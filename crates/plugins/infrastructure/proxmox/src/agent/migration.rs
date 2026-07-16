@@ -207,6 +207,48 @@ enum ProxmoxPendingMatches {
     HostId,
     MappingId,
     CreatedAt,
+    Attempts,
+}
+
+// ── Migration: add attempts to proxmox_pending_matches ──────────────────────
+
+/// Adds the `attempts` retry counter used by the drain's poison-row guard.
+pub struct AddPendingMatchAttempts;
+
+impl MigrationName for AddPendingMatchAttempts {
+    fn name(&self) -> &str {
+        "m20260716_000001_pending_match_attempts"
+    }
+}
+
+#[async_trait::async_trait]
+impl MigrationTrait for AddPendingMatchAttempts {
+    async fn up(&self, manager: &SchemaManager) -> std::result::Result<(), DbErr> {
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(ProxmoxPendingMatches::Table)
+                    .add_column(
+                        ColumnDef::new(ProxmoxPendingMatches::Attempts)
+                            .integer()
+                            .not_null()
+                            .default(0),
+                    )
+                    .to_owned(),
+            )
+            .await
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> std::result::Result<(), DbErr> {
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(ProxmoxPendingMatches::Table)
+                    .drop_column(ProxmoxPendingMatches::Attempts)
+                    .to_owned(),
+            )
+            .await
+    }
 }
 
 /// All agent-local migrations for this plugin, in application order.
@@ -214,5 +256,6 @@ pub fn agent_migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
     vec![
         Box::new(CreateProxmoxHostState),
         Box::new(CreateProxmoxPendingMatches),
+        Box::new(AddPendingMatchAttempts),
     ]
 }

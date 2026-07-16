@@ -17,8 +17,8 @@ use sea_orm::DatabaseConnection;
 use serde_json::json;
 use uptrakit_command::RemoteExecutor;
 use uptrakit_plugin_infrastructure_core::agent_infra::{
-    BootstrapInfraResult, GuestExecProvider, InfraPluginContext, InfraResolvedSudo,
-    PluginConfigReport, SyncInfraResult,
+    BootstrapInfraResult, GuestExecProvider, InfraActionInvoker, InfraPluginContext,
+    InfraResolvedSudo, PluginConfigReport, SyncInfraResult,
 };
 use uptrakit_plugin_infrastructure_core::error::{PluginError, Result};
 use uptrakit_plugin_infrastructure_core::{
@@ -293,64 +293,7 @@ impl HostLifecycle for crate::ProxmoxPlugin {
     }
 
     async fn on_post_report_hosts(&self, ctx: &InfraPluginContext<'_>) -> Result<()> {
-        let pending = db_ops::drain_pending_matches(ctx.db)
-            .await
-            .context_to::<PluginError>()?;
-
-        if pending.is_empty() {
-            return Ok(());
-        }
-
-        tracing::info!(
-            count = pending.len(),
-            "draining pending Proxmox host matches"
-        );
-
-        for entry in pending {
-            let match_params = json!({
-                "mapping_id": entry.mapping_id,
-                "host_id": entry.host_id,
-            });
-
-            match ctx
-                .action_invoker
-                .invoke("proxmox.hosts", "match", match_params)
-                .await
-            {
-                Ok(resp) if resp.success => {
-                    tracing::info!(
-                        host_id = %entry.host_id,
-                        mapping_id = %entry.mapping_id,
-                        "auto-matched bootstrapped guest to Proxmox host mapping"
-                    );
-                    if let Err(e) = db_ops::delete_pending_match(ctx.db, entry.id).await {
-                        tracing::warn!(
-                            id = entry.id,
-                            error = %e,
-                            "matched but failed to delete pending Proxmox match row"
-                        );
-                    }
-                }
-                Ok(resp) => {
-                    tracing::warn!(
-                        host_id = %entry.host_id,
-                        mapping_id = %entry.mapping_id,
-                        error = ?resp.error,
-                        "pending Proxmox match failed; will retry on next ReportHosts"
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        host_id = %entry.host_id,
-                        mapping_id = %entry.mapping_id,
-                        error = %e,
-                        "pending Proxmox match proxy call failed; will retry on next ReportHosts"
-                    );
-                }
-            }
-        }
-
-        Ok(())
+        drain_pending_matches_cycle(ctx.db, ctx.action_invoker).await
     }
 
     async fn on_plugin_config_reported(
@@ -379,6 +322,94 @@ impl HostLifecycle for crate::ProxmoxPlugin {
         }
         Ok(())
     }
+}
+
+// ── Pending-match drain (poison-row protection) ─────────────────────────────
+
+/// Drains at most one cycle's worth of pending Proxmox host matches.
+///
+/// Caps the number of rows processed per call at `MAX_DRAIN_PER_CYCLE` so a
+/// burst of pending rows cannot block a single `ReportHosts` cycle
+/// indefinitely, and gives up on (deletes) any row that has failed
+/// `MAX_MATCH_ATTEMPTS` times so a permanently-broken mapping cannot retry
+/// forever.
+async fn drain_pending_matches_cycle(
+    db: &DatabaseConnection,
+    action_invoker: &dyn InfraActionInvoker,
+) -> Result<()> {
+    const MAX_DRAIN_PER_CYCLE: usize = 50;
+    const MAX_MATCH_ATTEMPTS: i32 = 10;
+
+    let pending = db_ops::drain_pending_matches(db)
+        .await
+        .context_to::<PluginError>()?;
+
+    if pending.is_empty() {
+        return Ok(());
+    }
+
+    tracing::info!(
+        count = pending.len(),
+        "draining pending Proxmox host matches"
+    );
+
+    for entry in pending.into_iter().take(MAX_DRAIN_PER_CYCLE) {
+        let match_params = json!({
+            "mapping_id": entry.mapping_id,
+            "host_id": entry.host_id,
+        });
+
+        match action_invoker
+            .invoke("proxmox.hosts", "match", match_params)
+            .await
+        {
+            Ok(resp) if resp.success => {
+                tracing::info!(
+                    host_id = %entry.host_id,
+                    mapping_id = %entry.mapping_id,
+                    "auto-matched bootstrapped guest to Proxmox host mapping"
+                );
+                if let Err(e) = db_ops::delete_pending_match(db, entry.id).await {
+                    tracing::warn!(
+                        id = entry.id,
+                        error = %e,
+                        "matched but failed to delete pending Proxmox match row"
+                    );
+                }
+            }
+            outcome => {
+                match &outcome {
+                    Ok(resp) => tracing::warn!(
+                        host_id = %entry.host_id,
+                        mapping_id = %entry.mapping_id,
+                        error = ?resp.error,
+                        "pending Proxmox match failed; will retry on next ReportHosts"
+                    ),
+                    Err(e) => tracing::warn!(
+                        host_id = %entry.host_id,
+                        mapping_id = %entry.mapping_id,
+                        error = %e,
+                        "pending Proxmox match proxy call failed; will retry on next ReportHosts"
+                    ),
+                }
+                if entry.attempts + 1 >= MAX_MATCH_ATTEMPTS {
+                    tracing::warn!(
+                        host_id = %entry.host_id,
+                        mapping_id = %entry.mapping_id,
+                        attempts = entry.attempts + 1,
+                        "giving up on pending Proxmox match; re-run matching manually from the Proxmox VE Hosts page"
+                    );
+                    if let Err(e) = db_ops::delete_pending_match(db, entry.id).await {
+                        tracing::warn!(id = entry.id, error = %e, "failed to delete dead pending match row");
+                    }
+                } else if let Err(e) = db_ops::increment_match_attempts(db, entry.id).await {
+                    tracing::warn!(id = entry.id, error = %e, "failed to record pending match attempt");
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 #[async_trait]
@@ -629,11 +660,134 @@ fn bootstrap_proxmox_guest_action() -> SurfaceActionDescriptor {
 #[cfg(test)]
 mod tests {
     use super::bootstrap_proxmox_guest_action;
+    use super::drain_pending_matches_cycle;
+    use crate::agent::db_ops;
+    use uptrakit_plugin_infrastructure_core::surfaces::SurfaceActionResponse;
+    use uptrakit_plugin_infrastructure_core::testing::RecordingActionInvoker;
 
     #[test]
     fn bootstrap_proxmox_guest_action_has_boxes_icon() {
         let action = bootstrap_proxmox_guest_action();
         assert_eq!(action.action_id, "bootstrap-proxmox-guest");
         assert_eq!(action.icon.as_deref(), Some("boxes"));
+    }
+
+    async fn setup_agent_db() -> sea_orm::DatabaseConnection {
+        let db = sea_orm::Database::connect("sqlite::memory:")
+            .await
+            .expect("connect in-memory sqlite");
+        let manager = sea_orm_migration::SchemaManager::new(&db);
+        for migration in crate::agent::migration::agent_migrations() {
+            migration.up(&manager).await.expect("agent migration");
+        }
+        db
+    }
+
+    fn success_response() -> SurfaceActionResponse {
+        SurfaceActionResponse {
+            request_id: uuid::Uuid::nil(),
+            success: true,
+            result: None,
+            error: None,
+        }
+    }
+
+    fn failure_response() -> SurfaceActionResponse {
+        SurfaceActionResponse {
+            request_id: uuid::Uuid::nil(),
+            success: false,
+            result: None,
+            error: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn drain_succeeds_deletes_row() {
+        let db = setup_agent_db().await;
+        db_ops::insert_pending_match(&db, "host-1", "mapping-1")
+            .await
+            .expect("insert pending match");
+
+        let invoker = RecordingActionInvoker::new();
+        invoker.push_response(Ok(success_response()));
+
+        drain_pending_matches_cycle(&db, &invoker)
+            .await
+            .expect("drain cycle");
+
+        let remaining = db_ops::drain_pending_matches(&db).await.expect("drain");
+        assert!(remaining.is_empty());
+
+        let calls = invoker.calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "proxmox.hosts");
+        assert_eq!(calls[0].1, "match");
+    }
+
+    #[tokio::test]
+    async fn drain_failure_increments_attempts() {
+        let db = setup_agent_db().await;
+        db_ops::insert_pending_match(&db, "host-1", "mapping-1")
+            .await
+            .expect("insert pending match");
+
+        let invoker = RecordingActionInvoker::new();
+        invoker.push_response(Ok(failure_response()));
+
+        drain_pending_matches_cycle(&db, &invoker)
+            .await
+            .expect("drain cycle");
+
+        let remaining = db_ops::drain_pending_matches(&db).await.expect("drain");
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].attempts, 1);
+    }
+
+    #[tokio::test]
+    async fn drain_dead_letters_at_max_attempts() {
+        let db = setup_agent_db().await;
+        db_ops::insert_pending_match(&db, "host-1", "mapping-1")
+            .await
+            .expect("insert pending match");
+        let pending = db_ops::drain_pending_matches(&db).await.expect("drain");
+        let id = pending[0].id;
+
+        for _ in 0..9 {
+            db_ops::increment_match_attempts(&db, id)
+                .await
+                .expect("increment attempts");
+        }
+
+        let invoker = RecordingActionInvoker::new();
+        invoker.push_response(Ok(failure_response()));
+
+        drain_pending_matches_cycle(&db, &invoker)
+            .await
+            .expect("drain cycle");
+
+        let remaining = db_ops::drain_pending_matches(&db).await.expect("drain");
+        assert!(remaining.is_empty());
+    }
+
+    #[tokio::test]
+    async fn drain_respects_per_cycle_cap() {
+        let db = setup_agent_db().await;
+        for i in 0..51 {
+            db_ops::insert_pending_match(&db, "host-1", &format!("mapping-{i}"))
+                .await
+                .expect("insert pending match");
+        }
+
+        let invoker = RecordingActionInvoker::new();
+        // Queue nothing — RecordingActionInvoker yields a default success
+        // response for every call when the response queue is empty.
+
+        drain_pending_matches_cycle(&db, &invoker)
+            .await
+            .expect("drain cycle");
+
+        assert_eq!(invoker.calls().len(), 50);
+        let remaining = db_ops::drain_pending_matches(&db).await.expect("drain");
+        assert_eq!(remaining.len(), 1);
     }
 }

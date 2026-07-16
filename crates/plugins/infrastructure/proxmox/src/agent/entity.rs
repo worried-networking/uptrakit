@@ -48,6 +48,7 @@ pub mod proxmox_pending_match {
         pub host_id: String,
         pub mapping_id: String,
         pub created_at: String,
+        pub attempts: i32,
     }
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

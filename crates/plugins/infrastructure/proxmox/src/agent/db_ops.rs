@@ -84,6 +84,7 @@ pub struct PendingMatch {
     pub id: i32,
     pub host_id: String,
     pub mapping_id: String,
+    pub attempts: i32,
 }
 
 /// Insert a pending match record.
@@ -100,6 +101,7 @@ pub async fn insert_pending_match(
         host_id: Set(host_id.to_string()),
         mapping_id: Set(mapping_id.to_string()),
         created_at: Set(now),
+        attempts: Set(0),
         ..Default::default()
     };
 
@@ -123,6 +125,7 @@ pub async fn drain_pending_matches(db: &DatabaseConnection) -> Result<Vec<Pendin
             id: r.id,
             host_id: r.host_id,
             mapping_id: r.mapping_id,
+            attempts: r.attempts,
         })
         .collect())
 }
@@ -135,4 +138,59 @@ pub async fn delete_pending_match(db: &DatabaseConnection, id: i32) -> Result<()
         .await
         .context_to::<ProxmoxError>()?;
     Ok(())
+}
+
+/// Increment the retry counter on a pending match after a failed drain attempt.
+pub async fn increment_match_attempts(db: &DatabaseConnection, id: i32) -> Result<()> {
+    use sea_orm::{ExprTrait, sea_query::Expr};
+    proxmox_pending_match::Entity::update_many()
+        .col_expr(
+            proxmox_pending_match::Column::Attempts,
+            Expr::col(proxmox_pending_match::Column::Attempts).add(1),
+        )
+        .filter(proxmox_pending_match::Column::Id.eq(id))
+        .exec(db)
+        .await
+        .context_to::<ProxmoxError>()?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn setup_agent_db() -> sea_orm::DatabaseConnection {
+        let db = sea_orm::Database::connect("sqlite::memory:")
+            .await
+            .expect("connect in-memory sqlite");
+        let manager = sea_orm_migration::SchemaManager::new(&db);
+        for migration in crate::agent::migration::agent_migrations() {
+            migration.up(&manager).await.expect("agent migration");
+        }
+        db
+    }
+
+    #[tokio::test]
+    async fn increment_match_attempts_increments_counter() {
+        let db = setup_agent_db().await;
+        insert_pending_match(&db, "host-1", "mapping-1")
+            .await
+            .expect("insert pending match");
+
+        let pending = drain_pending_matches(&db).await.expect("drain");
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].attempts, 0);
+        let id = pending[0].id;
+
+        increment_match_attempts(&db, id)
+            .await
+            .expect("increment 1");
+        increment_match_attempts(&db, id)
+            .await
+            .expect("increment 2");
+
+        let pending = drain_pending_matches(&db).await.expect("drain again");
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].attempts, 2);
+    }
 }
