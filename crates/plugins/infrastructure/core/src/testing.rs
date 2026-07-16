@@ -21,6 +21,13 @@ use crate::host_runtime::{HostRuntime, StandardHostRuntime};
 use crate::{CommandExecutor, CommandOutput, CommandSpec, UpdateOutputLine};
 use uptrakit_shared_types::HostCapabilities;
 
+#[cfg(feature = "agent-infra")]
+use crate::agent_infra::{InfraActionInvokeError, InfraActionInvoker};
+#[cfg(feature = "agent-infra")]
+use crate::surfaces::SurfaceActionResponse;
+#[cfg(feature = "agent-infra")]
+use std::collections::VecDeque;
+
 /// Returns the same output and exit code for every command.
 ///
 /// - [`execute`]: always returns `Ok(CommandOutput { output, exit_code })`
@@ -198,4 +205,64 @@ pub fn test_runtime_with_executor(executor: Arc<dyn CommandExecutor>) -> Arc<dyn
         executor,
         HostCapabilities::default(),
     ))
+}
+
+/// Recording test double for [`crate::agent_infra::InfraActionInvoker`].
+///
+/// Records every `(surface_id, action_id, params)` invocation and replays
+/// queued responses FIFO; an empty queue yields a generic success response.
+#[cfg(feature = "agent-infra")]
+pub struct RecordingActionInvoker {
+    calls: parking_lot::Mutex<Vec<(String, String, serde_json::Value)>>,
+    responses: parking_lot::Mutex<VecDeque<Result<SurfaceActionResponse, InfraActionInvokeError>>>,
+}
+
+#[cfg(feature = "agent-infra")]
+impl RecordingActionInvoker {
+    pub fn new() -> Self {
+        Self {
+            calls: parking_lot::Mutex::new(Vec::new()),
+            responses: parking_lot::Mutex::new(VecDeque::new()),
+        }
+    }
+
+    /// Queue the response returned by the next `invoke` call (FIFO).
+    pub fn push_response(&self, response: Result<SurfaceActionResponse, InfraActionInvokeError>) {
+        self.responses.lock().push_back(response);
+    }
+
+    /// All invocations recorded so far.
+    pub fn calls(&self) -> Vec<(String, String, serde_json::Value)> {
+        self.calls.lock().clone()
+    }
+}
+
+#[cfg(feature = "agent-infra")]
+impl Default for RecordingActionInvoker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "agent-infra")]
+#[async_trait]
+impl InfraActionInvoker for RecordingActionInvoker {
+    async fn invoke(
+        &self,
+        surface_id: &str,
+        action_id: &str,
+        params: serde_json::Value,
+    ) -> std::result::Result<SurfaceActionResponse, InfraActionInvokeError> {
+        self.calls
+            .lock()
+            .push((surface_id.to_string(), action_id.to_string(), params));
+        self.responses.lock().pop_front().unwrap_or_else(|| {
+            Ok(SurfaceActionResponse {
+                request_id: uuid::Uuid::nil(),
+                success: true,
+                result: None,
+                error: None,
+            })
+        })
+    }
 }

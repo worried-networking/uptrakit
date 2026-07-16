@@ -7917,6 +7917,7 @@ name = "uptrakit-plugin-infrastructure-core"
 version = "0.0.1"
 dependencies = [
  "async-trait",
+ "parking_lot",
  "paste",
  "reqwest",
  "rootcause",

@@ -19,7 +19,7 @@ migrations = [
     "uptrakit-shared-db/db-migrate",
 ]
 plugin-ops = ["dep:sea-orm", "dep:uptrakit-tenant-db"]
-testing = []
+testing = ["dep:parking_lot"]
 
 [dependencies]
 serde = { workspace = true }
@@ -45,6 +45,7 @@ uptrakit-crypto = { workspace = true, optional = true }
 sea-orm-migration = { workspace = true, optional = true }
 tokio-util = { workspace = true, features = ["rt"], optional = true }
 uuid = { workspace = true }
+parking_lot = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
