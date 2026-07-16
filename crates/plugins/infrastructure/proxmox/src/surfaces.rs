@@ -2873,7 +2873,7 @@ mod tests {
             assert!(
                 !carriers.is_empty(),
                 "legacy action `{action_id}` is not registered on any surface — \
-                 the list-all-unmatched drift class"
+                 the unmatched-guests drift class"
             );
             for surface_id in &carriers {
                 assert!(
