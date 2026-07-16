@@ -2,11 +2,15 @@ use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
+use parking_lot::Mutex;
 use uptrakit_wire::{ControllerMessage, surfaces};
 use uuid::Uuid;
 
-use super::super::{SurfaceCallerOrigin, SurfaceInvokeRequest, SurfaceProxy, SurfaceProxyError};
-use super::{tenant_id, user_id};
+use super::super::{
+    PluginSurfaceLocalExecutor, SurfaceCallerOrigin, SurfaceInvokeRequest, SurfaceProxy,
+    SurfaceProxyError,
+};
+use super::{TestPluginInvoker, tenant_id, user_id};
 use crate::registry::{SurfaceRegistry, SurfaceRegistryConfig};
 use uptrakit_service_connections::ServiceConnectionRegistry;
 
@@ -69,6 +73,72 @@ fn registration(provider_id: &str, service_tenant: Uuid) -> surfaces::SurfaceReg
             algorithm: surfaces::ProviderEncryptionAlgorithm::EciesP256,
             public_key: "pubkey".to_string(),
         }),
+    }
+}
+
+/// A `Plugin`-kind registration with a permissioned, `ControllerLocal`
+/// interaction, used by the `provider_invocable` gate tests below.
+///
+/// This module's shared `registration()` fixture above registers a
+/// `Service`-kind provider, which admission (task 1) forbids from setting
+/// `provider_invocable` alongside `required_permission` — that combination
+/// is currently allowed only for `Plugin`/`BuiltIn` providers. `ControllerLocal`
+/// transport lets the interaction resolve without a connected service.
+fn plugin_registration_with_permission(
+    provider_id: &str,
+    provider_invocable: bool,
+) -> surfaces::SurfaceRegistration {
+    surfaces::SurfaceRegistration {
+        provider: surfaces::ProviderIdentity {
+            provider_id: provider_id.to_string(),
+            provider_kind: surfaces::ProviderKind::Plugin,
+            provider_namespace: "plugin".to_string(),
+        },
+        framework_generation: surfaces::FrameworkGeneration::new(1, 0),
+        capabilities: surfaces::CapabilitySet::from_capabilities([
+            surfaces::Capability::TextBlockNode,
+            surfaces::Capability::UniversalTargeting,
+            surfaces::Capability::MutationAction,
+        ]),
+        effective_tenant_binding: surfaces::EffectiveTenantBinding {
+            scope: surfaces::Scope::Tenant,
+            tenant_id: Some(tenant_id().to_string()),
+        },
+        surfaces: vec![surfaces::RegisteredSurface {
+            descriptor: surfaces::SurfaceDescriptor::builder()
+                .surface_id(surfaces::SurfaceId::new("proxmox.guest.invocable_panel").unwrap())
+                .label("Guest Panel")
+                .priority(100)
+                .slot(surfaces::SLOT_SETTINGS_BELOW_GLOBAL)
+                .scope(surfaces::Scope::Global)
+                .targeting(surfaces::Targeting::Universal)
+                .provider_kind(surfaces::ProviderKind::Plugin)
+                .required_capabilities(surfaces::CapabilitySet::from_capabilities([
+                    surfaces::Capability::TextBlockNode,
+                    surfaces::Capability::MutationAction,
+                    surfaces::Capability::UniversalTargeting,
+                ]))
+                .root_node(surfaces::SurfaceNode::TextBlock {
+                    text: "ok".to_string(),
+                })
+                .build(),
+            interactions: vec![{
+                let mut i = surfaces::InteractionDescriptor::new(
+                    surfaces::InteractionId::new("refresh").unwrap(),
+                    surfaces::InteractionKind::MutationAction,
+                    "Action",
+                    surfaces::InteractionTransport::ControllerLocal,
+                );
+                i.required_permission = Some("update_hosts".to_string());
+                i.provider_invocable = provider_invocable;
+                i.input_schema = Some(surfaces::SchemaContract::Object);
+                i.result_schema = Some(surfaces::SchemaContract::Object);
+                i.timeout_seconds = Some(30);
+                i
+            }],
+            data_sources: vec![],
+        }],
+        encryption_metadata: None,
     }
 }
 
@@ -499,6 +569,124 @@ async fn invoke_provider_origin_can_route_to_another_provider() {
         )
         .await
         .expect("controller-authorized cross-provider invoke should succeed");
+    assert!(response.success);
+}
+
+/// Regression pin, not the RED: this denial is the gate's current behavior
+/// both before and after the `provider_invocable` gate change — it stays
+/// green throughout. It exists so the permission-gated deny path has a
+/// direct test, independent of the `provider_invocable` opt-in exercised by
+/// `invoke_provider_origin_allowed_when_provider_invocable` below.
+///
+/// Targets a `bootstrap_plugin`-registered interaction (see
+/// `plugin_registration_with_permission`) rather than reusing this module's
+/// shared `Service`-kind `registration()` fixture: admission (task 1) forbids
+/// `provider_invocable` together with `required_permission` on
+/// Service-registered interactions, so that combination cannot be expressed
+/// via `register_service`.
+#[tokio::test(start_paused = true)]
+async fn invoke_provider_origin_denied_for_permission_gated_interaction() {
+    let registry = registry();
+    let service_connections = ServiceConnectionRegistry::new();
+    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
+        PluginSurfaceLocalExecutor::new_without_database(Arc::new(TestPluginInvoker {
+            response: serde_json::json!({"routed": true}),
+            seen: Arc::new(Mutex::new(Vec::new())),
+        })),
+    ));
+
+    let service_a = Uuid::now_v7();
+    registry
+        .register_service(
+            service_a,
+            "uptrakit-agent-ssh",
+            Some(tenant_id()),
+            registration("provider-a", tenant_id()),
+        )
+        .expect("provider-a registration should succeed");
+
+    registry
+        .bootstrap_plugin(plugin_registration_with_permission("provider-b", false))
+        .expect("provider-b registration should succeed");
+
+    let request = SurfaceInvokeRequest {
+        tenant_id: tenant_id(),
+        surface_id: "proxmox.guest.invocable_panel".to_string(),
+        interaction_id: "refresh".to_string(),
+        idempotency_key: "idem-cross-provider-denied".to_string(),
+        target_provider_id: Some("provider-b".to_string()),
+        caller_origin: SurfaceCallerOrigin::Provider {
+            service_id: service_a,
+        },
+        params: serde_json::Map::new(),
+        encrypted_sensitive_params: None,
+    };
+
+    let result = proxy
+        .invoke(
+            &service_connections,
+            &registry,
+            request,
+            Some(Duration::from_secs(5)),
+        )
+        .await;
+    assert!(matches!(
+        result,
+        Err(SurfaceProxyError::PermissionDenied(_))
+    ));
+}
+
+/// Behavioral RED: fails with `PermissionDenied` until the provider-permission
+/// gate honors `provider_invocable` (task 2's gate change). Same setup as
+/// `invoke_provider_origin_denied_for_permission_gated_interaction` above,
+/// plus the target interaction opting in via `provider_invocable = true`.
+#[tokio::test(start_paused = true)]
+async fn invoke_provider_origin_allowed_when_provider_invocable() {
+    let registry = registry();
+    let service_connections = ServiceConnectionRegistry::new();
+    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
+        PluginSurfaceLocalExecutor::new_without_database(Arc::new(TestPluginInvoker {
+            response: serde_json::json!({"routed": true}),
+            seen: Arc::new(Mutex::new(Vec::new())),
+        })),
+    ));
+
+    let service_a = Uuid::now_v7();
+    registry
+        .register_service(
+            service_a,
+            "uptrakit-agent-ssh",
+            Some(tenant_id()),
+            registration("provider-a", tenant_id()),
+        )
+        .expect("provider-a registration should succeed");
+
+    registry
+        .bootstrap_plugin(plugin_registration_with_permission("provider-b", true))
+        .expect("provider-b registration should succeed");
+
+    let request = SurfaceInvokeRequest {
+        tenant_id: tenant_id(),
+        surface_id: "proxmox.guest.invocable_panel".to_string(),
+        interaction_id: "refresh".to_string(),
+        idempotency_key: "idem-cross-provider-invocable".to_string(),
+        target_provider_id: Some("provider-b".to_string()),
+        caller_origin: SurfaceCallerOrigin::Provider {
+            service_id: service_a,
+        },
+        params: serde_json::Map::new(),
+        encrypted_sensitive_params: None,
+    };
+
+    let response = proxy
+        .invoke(
+            &service_connections,
+            &registry,
+            request,
+            Some(Duration::from_secs(5)),
+        )
+        .await
+        .expect("provider_invocable interaction should allow provider-origin invoke");
     assert!(response.success);
 }
 

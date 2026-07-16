@@ -275,6 +275,7 @@ impl SurfaceProxy {
 
         if matches!(&caller_origin, surfaces::CallerOrigin::Provider { .. })
             && resolved.interaction.required_permission.is_some()
+            && !resolved.interaction.provider_invocable
         {
             return Err(SurfaceProxyError::PermissionDenied(
                 "provider-initiated requests cannot satisfy user permission gates".to_string(),
