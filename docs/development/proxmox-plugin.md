@@ -53,7 +53,7 @@ Controller
 | `api_types.rs`             | Serde structs for PVE API JSON responses                                            |
 | `plugin.rs`                | `ProxmoxPlugin` — unified `PluginMeta` + role trait impls (controller + agent)      |
 | `agent/plugin.rs`          | Role trait impls (`HostLifecycle`, `HostReport`, `GuestExec`) on `ProxmoxPlugin`    |
-| `agent/surface_actions.rs` | Agent surface action handlers (`list-discovered-guests`, `bootstrap-proxmox-guest`) |
+| `agent/surface_actions.rs` | Agent surface action handlers (`discovered-guests`, `bootstrap-proxmox-guest`)      |
 | `agent/db_ops.rs`          | Agent-local DB operations (PVE host state, pending matches)                         |
 | `agent/migration.rs`       | Agent-local DB migrations (`proxmox_host_state`, `proxmox_pending_matches`)         |
 | `discovery.rs`             | `discover_guests()` — queries nodes for VMs/CTs                                     |

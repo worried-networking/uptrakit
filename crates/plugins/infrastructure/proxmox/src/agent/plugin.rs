@@ -37,7 +37,7 @@ use super::db_ops;
 /// the Proxmox plugin.
 pub fn agent_surface_actions() -> Vec<SurfaceActionDescriptor> {
     vec![
-        SurfaceActionDescriptor::new("list-discovered-guests", "List Discovered Guests")
+        SurfaceActionDescriptor::new("discovered-guests", "List Discovered Guests")
             .with_permission(uptrakit_shared_types::Permission::UpdateHosts)
             .with_timeout(15),
         bootstrap_proxmox_guest_action(),
@@ -609,7 +609,7 @@ fn bootstrap_proxmox_guest_action() -> SurfaceActionDescriptor {
                      Names are auto-derived from the guest's hostname.",
                 )
                 .with_select_source(FormSelectSourceDescriptor::Action {
-                    action_id: "list-discovered-guests".to_string(),
+                    action_id: "discovered-guests".to_string(),
                 }),
             FormFieldDescriptor::new("target_username", "Target Username")
                 .with_help_text("User to create/use in each guest.")

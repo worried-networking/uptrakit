@@ -4,10 +4,12 @@
 )]
 //! Surface action handlers for the Proxmox agent infrastructure plugin.
 //!
-//! Handles: `list-discovered-guests`, `bootstrap-proxmox-guest`.
+//! Handles: `discovered-guests`, `bootstrap-proxmox-guest`.
 
 use serde_json::json;
-use uptrakit_plugin_infrastructure_core::agent_infra::{GuestBootstrapParams, InfraPluginContext};
+use uptrakit_plugin_infrastructure_core::agent_infra::{
+    GuestBootstrapParams, InfraActionInvoker, InfraPluginContext,
+};
 use uptrakit_plugin_infrastructure_core::surfaces::{
     SurfaceActionError, SurfaceActionErrorCode, SurfaceActionRequest, SurfaceActionResponse,
 };
@@ -22,8 +24,8 @@ pub async fn handle_surface_action(
     request: &SurfaceActionRequest,
 ) -> Option<SurfaceActionResponse> {
     match request.interaction_id.as_str() {
-        "list-discovered-guests" => {
-            Some(handle_list_discovered_guests(request.request_id, ctx).await)
+        "discovered-guests" => {
+            Some(handle_list_discovered_guests(request.request_id, ctx.action_invoker).await)
         }
         "bootstrap-proxmox-guest" => {
             Some(handle_bootstrap_proxmox_guest(request.request_id, &request.params, ctx).await)
@@ -32,15 +34,14 @@ pub async fn handle_surface_action(
     }
 }
 
-// ── list-discovered-guests ───────────────────────────────────────────────────
+// ── discovered-guests ────────────────────────────────────────────────────────
 
 /// List discovered Proxmox guests via the controller's Proxmox plugin.
 async fn handle_list_discovered_guests(
     request_id: uuid::Uuid,
-    ctx: &InfraPluginContext<'_>,
+    action_invoker: &dyn InfraActionInvoker,
 ) -> SurfaceActionResponse {
-    let response = ctx
-        .action_invoker
+    let response = action_invoker
         .invoke(
             "proxmox.hosts",
             "unmatched-guests",
@@ -54,18 +55,23 @@ async fn handle_list_discovered_guests(
             make_success_response(request_id, json!({ "options": options }))
         }
         Ok(proxy_resp) => {
-            tracing::debug!(
+            tracing::warn!(
                 error = ?proxy_resp.error,
-                "unmatched-guests returned error, returning empty options"
+                "unmatched-guests returned error"
             );
-            make_success_response(request_id, json!({ "options": [] }))
+            let message = surface_action_error_message(proxy_resp)
+                .unwrap_or_else(|| "Proxmox plugin returned error".to_string());
+            make_error_response(request_id, &message)
         }
         Err(e) => {
-            tracing::debug!(
+            tracing::warn!(
                 error = %e,
-                "unmatched-guests proxy call failed, returning empty options"
+                "unmatched-guests proxy call failed"
             );
-            make_success_response(request_id, json!({ "options": [] }))
+            make_error_response(
+                request_id,
+                &format!("failed to query Proxmox plugin (is it installed?): {e}"),
+            )
         }
     }
 }
@@ -87,7 +93,7 @@ async fn handle_bootstrap_proxmox_guest(
     }
 
     // 2. Fetch all unmatched guests (one proxy call).
-    //    Pass per_page=1000 to avoid pagination truncation (same as list-discovered-guests).
+    //    Pass per_page=1000 to avoid pagination truncation (same as discovered-guests).
     let guests_data = match ctx
         .action_invoker
         .invoke(
@@ -511,5 +517,53 @@ mod tests {
             surface_action_error_message(response).as_deref(),
             Some("boom")
         );
+    }
+
+    #[tokio::test]
+    async fn list_discovered_guests_maps_items_to_options() {
+        use uptrakit_plugin_infrastructure_core::testing::RecordingActionInvoker;
+        let invoker = RecordingActionInvoker::new();
+        let request_id = uuid::Uuid::now_v7();
+        invoker.push_response(Ok(SurfaceActionResponse {
+            request_id,
+            success: true,
+            result: Some(serde_json::json!({ "items": [{"value": "g1"}] })),
+            error: None,
+        }));
+        let response = handle_list_discovered_guests(request_id, &invoker).await;
+        assert!(response.success);
+        assert_eq!(
+            surface_action_result_or_null(&response)["options"],
+            serde_json::json!([{"value": "g1"}])
+        );
+        let calls = invoker.calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "proxmox.hosts");
+        assert_eq!(calls[0].1, "unmatched-guests");
+    }
+
+    #[tokio::test]
+    async fn list_discovered_guests_propagates_invoker_error() {
+        use uptrakit_plugin_infrastructure_core::testing::RecordingActionInvoker;
+        let invoker = RecordingActionInvoker::new();
+        invoker.push_response(Err("send failed".into()));
+        let response = handle_list_discovered_guests(uuid::Uuid::now_v7(), &invoker).await;
+        assert!(!response.success);
+        assert!(response.error.is_some());
+    }
+
+    #[tokio::test]
+    async fn list_discovered_guests_propagates_unsuccessful_proxy_response() {
+        use uptrakit_plugin_infrastructure_core::testing::RecordingActionInvoker;
+        let invoker = RecordingActionInvoker::new();
+        let request_id = uuid::Uuid::now_v7();
+        invoker.push_response(Ok(SurfaceActionResponse {
+            request_id,
+            success: false,
+            result: None,
+            error: None,
+        }));
+        let response = handle_list_discovered_guests(request_id, &invoker).await;
+        assert!(!response.success);
     }
 }

@@ -725,7 +725,7 @@ crates/core/agent-ssh-runtime/         # Library — uptrakit-agent-ssh-runtime
     │                    # all accept &mut dyn ServiceTransport
     ├── surface_runtime.rs # Shared-surface registration builder and action dispatch
     │                    # (list-hosts, bootstrap, sync-host, remove-host,
-    │                    # list-discovered-guests, bootstrap-proxmox-guest); ECIES
+    │                    # discovered-guests, bootstrap-proxmox-guest); ECIES
     │                    # decryption of sensitive params; ServiceSurfaceProxy invocation
     │                    # helpers — accepts &mut dyn ServiceTransport
     ├── surface_runtime/  # (sub-modules of surface_runtime.rs)
@@ -885,7 +885,7 @@ handler's `on_surface_action_response` method calls `proxy.complete()` to delive
 | `bootstrap`               | primary_action (wizard)  | 120s    | Bootstrap a new remote host via multi-step wizard: Connect -> Review -> Execute                                      |
 | `sync-host`               | row_action (wizard)      | 120s    | Sync host via multi-step wizard: update sudoers, detect PVE node name, verify PVE privileges; optional auth override |
 | `remove-host`             | row_action (destructive) | 30s     | Remove a host from local DB                                                                                          |
-| `list-discovered-guests`  | select_source (action)   | 15s     | List unmatched Proxmox guests (via ServiceSurfaceProxy)                                                              |
+| `discovered-guests`       | select_source (action)   | 15s     | List unmatched Proxmox guests (via ServiceSurfaceProxy)                                                              |
 | `bootstrap-proxmox-guest` | primary_action (form)    | 120s    | Bootstrap a discovered Proxmox guest with auto-matching                                                              |
 
 ### E2E encryption for sensitive parameters
@@ -919,8 +919,9 @@ See [shared surface security](../security/surfaces.md) for the trust model and
 - **`bootstrap`**: Spawned as a background task via the `bg_tx` channel. The
   `SurfaceActionResponse` is sent asynchronously when the task completes. The surface proxy's
   120-second timeout handles the case where the task runs too long.
-- **`list-discovered-guests`**: Invokes `proxmox.hosts/unmatched-guests` via
-  `ServiceSurfaceProxy`. Returns empty options if the Proxmox plugin is not installed.
+- **`discovered-guests`**: Invokes `proxmox.hosts/unmatched-guests` via
+  `ServiceSurfaceProxy`. Returns an error response if the Proxmox plugin is not installed or
+  the nested call fails.
 - **`bootstrap-proxmox-guest`**: Spawned as a background task. Resolves guest metadata
   from the Proxmox plugin via `ServiceSurfaceProxy`, auto-detects the PVE host by
   matching `(pve_node_name, pve_plugin_config_id)` in the local DB, auto-fills the
