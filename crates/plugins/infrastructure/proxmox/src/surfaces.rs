@@ -2839,4 +2839,48 @@ mod tests {
         assert_eq!(items.len(), 250);
         assert_eq!(result["total"], 250);
     }
+
+    #[test]
+    fn every_legacy_dispatchable_action_is_a_registered_interaction() {
+        let registrations = crate::plugin::proxmox_surface_registrations();
+        // `api_submit` actions (currently only `add-config`) are delivered by the
+        // frontend POSTing straight to a generic REST endpoint; they never flow
+        // through `handle_surface_action`/`resolve_controller_surface_action`, so
+        // they fall outside the controller-dispatch drift class this guard checks.
+        let legacy_ids: Vec<String> = surface_actions()
+            .iter()
+            .filter(|a| a.api_submit.is_none())
+            .map(|a| a.action_id.clone())
+            .collect();
+
+        // Green-on-empty protection: the sets must be non-empty and contain
+        // the two interactions this guard exists for.
+        assert!(!legacy_ids.is_empty());
+        assert!(legacy_ids.iter().any(|id| id == "unmatched-guests"));
+        assert!(legacy_ids.iter().any(|id| id == "match"));
+
+        for action_id in &legacy_ids {
+            let carriers: Vec<&str> = registrations
+                .iter()
+                .flat_map(|r| r.surfaces.iter())
+                .filter(|s| {
+                    s.interactions
+                        .iter()
+                        .any(|i| i.interaction_id.as_str() == action_id)
+                })
+                .map(|s| s.descriptor.surface_id.as_str())
+                .collect();
+            assert!(
+                !carriers.is_empty(),
+                "legacy action `{action_id}` is not registered on any surface — \
+                 the list-all-unmatched drift class"
+            );
+            for surface_id in &carriers {
+                assert!(
+                    resolve_controller_surface_action(surface_id, action_id).is_some(),
+                    "registered pair ({surface_id}, {action_id}) must be dispatchable"
+                );
+            }
+        }
+    }
 }

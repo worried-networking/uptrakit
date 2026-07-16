@@ -100,7 +100,7 @@ fn collect_registration_capabilities(
     surfaces::CapabilitySet(caps)
 }
 
-fn proxmox_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
+pub(crate) fn proxmox_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
     let surfaces = vec![
         proxmox_hosts_surface(),
         proxmox_host_info_surface(),
