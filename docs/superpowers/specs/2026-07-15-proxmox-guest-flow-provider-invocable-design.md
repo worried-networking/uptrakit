@@ -45,6 +45,17 @@ Secondary defects found during investigation:
 - `on_post_report_hosts` retries every `proxmox_pending_matches` row on every `ReportHosts` forever — a permanently
   failing row (deleted mapping, gone host) is unbounded retry noise. (No live backlog exists: the reporting
   deployment has 0 pending rows, because bootstrap never succeeded.)
+- **The Proxmox plugin's agent-local migrations are dead code — fresh installs never get the drain's tables.**
+  `CreateProxmoxHostState`/`CreateProxmoxPendingMatches` (`agent/migration.rs:12`, `:127`) are referenced nowhere: the
+  module doc-comment claims wiring "via `PluginBase::service_migrations()`", but no such hook exists in
+  `infrastructure-core`, and `AgentSshHandler::service_migrations()` (`crates/core/agent-ssh-runtime/src/handler.rs:172-178`)
+  returns only the runtime's own `Migrator::migrations()` list (`db/migration/mod.rs:22-38`), which creates the
+  *legacy* `pending_proxmox_matches` table, not `proxmox_pending_matches`. Wiring existed historically
+  (`f3b89f071` "fix(agent-ssh): run plugin migrations at startup") and was dropped by the 2026-03 descriptor/catalog
+  unification refactors. Existing deployments carry the tables from that era (verified: the reporting DB has both
+  `proxmox_pending_matches` and `proxmox_host_state`, with neither `m20260308_00000{1,2}_create_proxmox_*` recorded in
+  `seaql_migrations`); a fresh install today would fail the first successful bootstrap at
+  `db_ops::insert_pending_match` with "no such table: proxmox_pending_matches".
 - No test covers the nested provider→controller invoke path; no test asserts the provider-permission-gate denial; no
   parity check ties the legacy dispatch map to registered interactions; `docs/development/surfaces.md` promises
   "Service-initiated action calls are supported" with no permission caveat, and `docs/security/surfaces.md` documents
@@ -54,8 +65,9 @@ Secondary defects found during investigation:
 
 ### D1 — Wire contract: `provider_invocable` opt-in on `InteractionDescriptor`
 
-Add to `InteractionDescriptor` (`crates/shared/surfaces/src/interaction.rs:44-71`, `#[non_exhaustive]`), following the
-in-file bool idiom of `render_previous_response` (`interaction.rs:38`):
+Add to `InteractionDescriptor` (`crates/shared/surfaces/src/interaction.rs:44-71`, `#[non_exhaustive]`). The serde
+attribute copies the in-file bool idiom of `render_previous_response` (`interaction.rs:38`); the rustdoc comment is a
+deliberate first instance — no field in this struct is documented today, and a security-relevant flag warrants it:
 
 ```rust
 /// Allows same-tenant provider-origin (service-initiated) invocation of this
@@ -71,11 +83,21 @@ pub provider_invocable: bool,
   review does not reflexively demand one.
 - Admission hardening (fail-closed policy surface): `InteractionDescriptor::validate_for_provider(provider_kind)`
   (`interaction.rs:175-255`) rejects `provider_invocable == true` when `required_permission.is_some()` **and** the
-  registering provider kind is `ProviderKind::Service`. The flag is honored only for in-tree `Plugin`/`BuiltIn`
+  registering provider kind is `ProviderKind::Service`, via a new `InteractionValidationError` variant (e.g.
+  `ProviderInvocableForbiddenForServiceProviders`) — every existing check in that function maps to its own variant;
+  callers stringify at `protocol.rs:291-292`. The flag is honored only for in-tree `Plugin`/`BuiltIn`
   interactions for now; relaxing later for service-owned interactions is an additive change. Rationale: for
   plugin-owned interactions, flag authorship and enforcement ship in the same binary (the controller); for
   service-owned permissioned interactions, honoring a remotely-registered flag would let service B invoke service A's
   privileged interaction on co-tenancy alone — defer that policy question until a real use case exists.
+- **Two distinct policy axes — do not conflate.** The admission rule above governs *who may declare* a flagged
+  interaction (Plugin/BuiltIn only). The invoke-time gate (D2) governs *who may call* one, and it is deliberately
+  caller-identity-blind: flag set ⇒ **any** same-tenant provider may invoke. Per-caller narrowing is outside this
+  field's expressive range **by design** — if a future tenant runs mutually-distrusting services, the additive path is
+  a new optional field (e.g. `provider_allowlist: Option<Vec<ProviderId>>`, absent = any tenant provider) composing
+  with this bool, not a breaking bool→enum mutation of it — note that unlike today's bool, that future `Vec` field
+  will need a `WireValidate` limit constant. Stated here so a future maintainer neither overloads this field nor
+  assumes it can express caller scoping.
 
 ### D2 — Gate: extract and extend
 
@@ -99,10 +121,15 @@ enforce **both** `descriptor.required_permission` and `interaction.required_perm
 
 Security semantics (this is the whole argument; it goes in the docs, D8): `provider_invocable = true` on a permissioned
 interaction means **any same-tenant provider with the `UiSurfaces` capability may invoke it, subject only to tenant
-scope** (`message_processor.rs` rejects cross-tenant requests) plus existing rate/idempotency/timeout controls. For the
-two interactions flagged here this grants nothing new: the agent-ssh service already authors the discovery data
-(`ReportHosts`, discovery emissions) that creates the mappings and hosts `match` binds together, and mis-binding is
-recoverable via `unmatch`.
+scope** (`message_processor.rs` rejects cross-tenant requests) plus existing rate/idempotency/timeout controls. Stated
+honestly, flagging `match` **is** a privilege expansion, not a no-op: the mapping side of a match is authored by the
+controller-side `discover` action querying the PVE API with stored credentials (`surfaces.rs:574-579` →
+`handle_discover`) — agent-ssh does not create that data — and after this change any same-tenant service (MQTT,
+scheduler, future services), not just agent-ssh, can bind any unmatched guest to any host in its tenant. Accepted
+because: tenant services are co-trusted (enrolled by the tenant admin, and a service can already fabricate the entire
+host side via `ReportHosts`), the write is tenant-scoped and recoverable via `unmatch`, and every provider-origin
+invocation is audit-attributed to the calling service. This framing — expansion, accepted, why — is what goes into
+`docs/security/surfaces.md`, not a "grants nothing new" claim.
 
 ### D3 — Register the missing interaction; flag opt-ins; REST-friendly ids
 
@@ -153,9 +180,14 @@ recorded in `docs/development/surfaces.md`: **data-retrieval interactions use no
    client is unaffected (interaction ids are runtime path *data*, not OpenAPI paths — no `regen-api.sh` needed for the
    renames themselves).
 
-   **Version-skew note**: a new agent-ssh binary against an old controller (or vice versa) fails the nested call with
-   `InteractionNotFound` — which is exactly today's behavior, now surfaced as an error (D4) instead of a fake empty
-   list. Acceptable: the path is entirely broken today, and both binaries release in lockstep.
+   **Version-skew note**: agent-ssh is a separately-versioned, manually-updated binary — controller/agent skew is the
+   normal steady state, not an edge case. A new agent-ssh against an old controller (or vice versa) fails the nested
+   call with `InteractionNotFound` — which is exactly today's behavior in **every** version combination, now surfaced
+   as an error (D4) instead of a fake empty list. The renames are safe **only** because this specific path is
+   non-functional in all combinations today, so no rename can regress a working path. This argument does NOT
+   generalize: renaming a *working* interaction id (D9's deferred `list`, `discover`, …) is a breaking change on a
+   non-lockstep binary and requires transitional dual-registration (old + new id for a release) — recorded as a D9
+   constraint.
 
 ### D4 — De-swallow list errors (intentional behavior change)
 
@@ -175,15 +207,46 @@ spec, not a reason to keep the swallow.
 `"rows"`/top-level arrays; byte cap bounds the payload). Update the pagination note in
 `docs/development/proxmox-plugin.md:169` if it states the old cap.
 
-### D6 — Drain poison-row protection
+### D6 — Re-wire agent-plugin migrations; drain poison-row protection
 
-`proxmox_pending_matches` (agent-local SQLite, entity `agent/entity.rs:40-57`, ops `agent/db_ops.rs:89-138`,
-migration `agent/migration.rs:127-193`):
+**Prerequisite — re-wire the dead migration set** (see Root cause: fresh installs lack the tables):
 
-- New migration (follow the existing in-file migration idiom) adding `attempts INTEGER NOT NULL DEFAULT 0`.
-- `on_post_report_hosts` (`agent/plugin.rs:295-354`): bound each drain cycle to `MAX_DRAIN_PER_CYCLE = 50` rows; on
-  per-row failure, increment `attempts`; when `attempts` reaches `MAX_MATCH_ATTEMPTS = 10`, delete the row and
-  `tracing::warn!` a dead-letter message naming mapping_id/host_id so the operator can re-run matching manually.
+- Collect the plugin's agent-local migrations descriptor-driven, mirroring how controller migrations are already
+  collected (`declare_plugin!` `migrations:` → `PluginDescriptor.migrations`): add an agent-migrations source to the
+  descriptor, and extend `db/migration/mod.rs::Migrator::migrations()` to append them **after** the runtime's own list.
+  Right-sizing: proxmox is the **only** plugin in the tree with an agent-local migration module (verified:
+  `find crates/plugins -path '*agent/migration.rs'` → one file), so build the mechanism to what today needs — one
+  descriptor field, one collection point — and leave generalization to the D9 unification; do not present a framework
+  validated by a single consumer.
+- **Ordering is load-bearing, not stylistic**: the runtime's own `m20260307_000002` creates the *legacy*
+  `pending_proxmox_matches` table, and `CreateProxmoxPendingMatches` copies **from** it — the plugin migrations must
+  run after the runtime list or the data copy sees nothing. Appending also complies with "never reorder existing
+  migration entries" (the runtime list is already non-chronological; append-order is the established idiom). State
+  this dependency in a comment at the append site so a later reorder doesn't silently drop the copy.
+- The extension must land in `db/migration/mod.rs::Migrator::migrations()` itself (not only `handler.rs`): standalone
+  agent-ssh runs migrations via `db/mod.rs:31` → `run_migrations` directly, while embedded deployments go through
+  `AgentSshHandler::service_migrations()` — both bottom out in `Migrator::migrations()`, so that is the single point
+  covering both deployment shapes.
+- Safe on existing DBs by construction: both plugin migrations are `if_not_exists` creates + `INSERT OR IGNORE` data
+  copies (`agent/migration.rs:28`, `:93`, `:142`, `:186`), and their names
+  (`m20260308_00000{1,2}_create_proxmox_*`) are unrecorded in existing `seaql_migrations` — first run after the fix
+  executes them idempotently.
+- Fix the false module doc-comment (`agent/migration.rs:3-4`) that cites the nonexistent
+  `PluginBase::service_migrations()` hook — point it at the real collection path introduced here.
+- Test: fresh in-memory agent DB after `run_migrations` contains `proxmox_pending_matches` **and**
+  `proxmox_host_state`; second run is a no-op.
+
+**Poison-row protection** — `proxmox_pending_matches` (entity `agent/entity.rs:40-57`, ops `agent/db_ops.rs:89-138`):
+
+- New migration adding the `attempts` integer column (not null, default 0) via the `Table::alter().add_column(...)`
+  sea_query builder — precedent in this same plugin: `controller_migration.rs:187-194`. Do **not** copy
+  `agent/migration.rs`'s raw-SQL statements; those are the approved data-copy exceptions, not the column-add idiom
+  (database-migrations.md: builders everywhere, raw SQL only for the documented exceptions).
+- `on_post_report_hosts` (`agent/plugin.rs:295-354`): bound each drain cycle to `MAX_DRAIN_PER_CYCLE: usize = 50`
+  rows; on per-row failure, increment `attempts`; when `attempts` reaches `MAX_MATCH_ATTEMPTS = 10`, delete the row
+  and `tracing::warn!` a dead-letter message naming mapping_id/host_id so the operator can re-run matching manually.
+  Both constants function-local at point of use, per the sibling idiom (`MAX_CONCURRENT_BOOTSTRAPS` inside
+  `handle_bootstrap_proxmox_guest`, `agent/surface_actions.rs:81`); `agent/plugin.rs` has no module-level consts.
   No backoff machinery — `ReportHosts` cadence already spaces retries.
 - Success path unchanged (invoke `match`, delete row).
 
@@ -199,17 +262,30 @@ surface-proxy crate:
 
 proxmox crate:
 
-- **Parity guard test** (kills the drift class that caused this bug): for every action in the legacy
-  `surface_actions()` library (`surfaces.rs:214`), assert (a) `resolve_controller_surface_action` dispatches it and
-  (b) a registered `InteractionDescriptor` with the same id exists on the matching surface in
-  `proxmox_surface_registrations()`. Green-on-empty protection: assert the iterated set is non-empty **and** contains
+- **Parity guard test** (kills the drift class that caused this bug). Pair derivation must be stated because
+  `SurfaceActionDescriptor` carries only a bare `action_id` (`surface_form_authoring.rs:249-251`) — there is no
+  action→surface mapping to iterate (that missing link *is* the bug class). Mechanism: iterate every action id in the
+  legacy `surface_actions()` library (`surfaces.rs:214`); for each, scan all surfaces in
+  `proxmox_surface_registrations()` for a registered `InteractionDescriptor` with that id; assert exactly one surface
+  carries it **and** `resolve_controller_surface_action(that_surface_id, action_id)` returns `Some`. This derives the
+  pair from the registrations rather than hand-authoring a surface/action table (which would recreate the drift-prone
+  parallel list inside the test). Green-on-empty protection: assert the iterated set is non-empty **and** contains
   named known members (`unmatched-guests`, `match`) before asserting parity. If genuinely non-registered actions
   exist, each exclusion must be an explicit allowlist entry with an inline justification — derive the exact membership
   empirically at implementation time (do not hand-author from memory), and RED the test by removing one registration.
-- Agent handler behavioral tests with a mock `InfraActionInvoker` (extend the canonical shared testing module if the
-  existing doubles cannot record invocations or inject errors — do not hand-roll a private mock):
-  `handle_list_discovered_guests` maps items → options on success, returns an error response on invoker error and on
-  `success == false`; drain increments `attempts` on failure, dead-letters at the cap, respects the per-cycle cap.
+- Agent handler behavioral tests with a mock `InfraActionInvoker`. **No double exists today** — the trait
+  (`agent_infra.rs:214-225`) has only production impls; neither `infrastructure-core/src/testing.rs` (command-executor
+  doubles only) nor `proxmox/src/testing.rs` (DB fixtures only) covers it. Add a `RecordingActionInvoker` (records
+  `(surface_id, action_id, params)`, returns queued responses/errors) to `infrastructure-core::testing` — gated
+  `#[cfg(all(feature = "testing", feature = "agent-infra"))]`, because the trait lives behind `agent-infra`
+  (`lib.rs:1-2`) and the `testing = []` feature (Cargo.toml:22) does not pull it in; do not make `testing` imply
+  `agent-infra` (would bloat every existing testing consumer). Named manifest deliverable: the proxmox crate adds
+  `uptrakit-plugin-infrastructure-core = { workspace = true, features = ["testing", "agent-infra"] }` under
+  `[dev-dependencies]` — its current dependency requests only `plugin-ops` (proxmox `Cargo.toml:23`), so without the
+  dev-dep entry the mock-invoker tests do not compile. Do not hand-roll a private per-test mock. Tests:
+  `handle_list_discovered_guests` maps
+  items → options on success, returns an error response on invoker error and on `success == false`; drain increments
+  `attempts` on failure, dead-letters at the cap, respects the per-cycle cap.
 - `handle_list_all_unmatched` honors `per_page = 1000` (seed >200 unmatched rows — distinct `proxmox_vmid` per row to
   respect the table's upsert key; multiple `host_id = NULL` rows are fine under the host-uniqueness index — assert no
   truncation).
@@ -217,10 +293,16 @@ proxmox crate:
 web-api crate (`routes/service_ws/handler/tests.rs`, existing `handle_surface_action_request` harness):
 
 - Provider-origin e2e: request for `proxmox.hosts`/`unmatched-guests` resolves, passes the gate, executes, and the
-  audit row's actor identifies the **service** (not a user). Verify the emitted audit action/actor fields on this
-  path; if actor attribution is missing or wrong, fixing it is in scope (precedent: MQTT-triggered updates set
-  `actor_type = "mqtt"`).
+  audit row's actor identifies the **service** (not a user). Audit attribution already exists and is provider-tested —
+  `emit_surface_action_invoke_audit_event` sets `.actor_service(ctx.service_id)` (`audit_surface.rs:227-286`), and
+  `surface_action_success_emits_success_tenant_audit_row` (`tests.rs:550`) already asserts actor fields for a
+  `CallerOrigin::Provider` payload — so this is an *extension* of that existing test to the two target interactions,
+  not a fix hunt. (Cross-subsystem precedent, if needed: MQTT-triggered updates record `actor_type = "uptrakit-mqtt"`,
+  `ActorType::Mqtt`.)
 - Provider-origin request for a permissioned, un-flagged interaction still yields the denial + audit row.
+- Provider-origin `proxmox.hosts`/`match` **reaches and completes its handler** (assert the mapping's `host_id` is
+  set), not merely resolves and passes the gate — locks in that `handle_match` needs no user identity, so a future
+  change adding one fails a test instead of the manual verification step.
 
 ### D8 — Documentation deliverables
 
@@ -252,10 +334,17 @@ resolvability; only (a) drives `handle_surface_action` dispatch. Nothing links t
 
 1. Extend the registration types (or a parallel plugin-local table keyed by `InteractionId`) to carry what the legacy
    descriptors add today: handler routing (the `ControllerSurfaceAction` enum), sudo/timeout metadata, and the
-   agent-side conversion input (the agent-ssh runtime currently converts `SurfaceActionDescriptor`s to registered
-   interactions at `surface_runtime.rs:75-76` — that conversion inverts once descriptors die).
+   agent-side conversion input (the agent-ssh runtime converts `SurfaceActionDescriptor`s to registered interactions
+   in `build_interactions()` at `surface_runtime.rs:560-635` — `InteractionDescriptor::new` at `:616`, always
+   `InteractionTransport::ProviderProxied` and `ProviderKind::Service`, so nothing this conversion produces may carry
+   `provider_invocable` under D1's admission rule; the conversion inverts once descriptors die).
 2. Migrate plugin-by-plugin: derive `resolve_controller_surface_action` from a match on `InteractionId` colocated with
-   the registration; delete the plugin's `surface_actions()` list once its dispatch is derived.
+   the registration; delete the plugin's `surface_actions()` list once its dispatch is derived. Generalize D6's
+   single-consumer agent-migrations collection here if a second plugin ever needs it.
+   **Constraint**: any renaming of *working* interaction ids (`list`, `discover`, …) requires transitional
+   dual-registration (old + new id for at least one release) — agent-ssh is not released in lockstep with the
+   controller, so a bare rename of a functioning id breaks mixed-version deployments (see D3's version-skew note for
+   why the current renames are exempt).
 3. Delete the `SurfaceActionDescriptor` type, the `catalog.rs` `.actions` plumbing, and the parity guard test (D7)
    once the drift class is structurally impossible.
 
@@ -289,10 +378,16 @@ lands, the D7 parity test is the guard.
 
   ```sh
   cargo clippy --all-targets -p uptrakit-surfaces -p uptrakit-surface-proxy \
-    -p uptrakit-plugin-infrastructure-proxmox -p uptrakit-agent-ssh-runtime -p uptrakit-web-api
+    -p uptrakit-plugin-infrastructure-proxmox --features agent-infra \
+    -p uptrakit-agent-ssh-runtime -p uptrakit-web-api
   ```
 
-- `cargo test` for the same crates; full `cargo test --all-features` before push (requires `frontend/build/`)
+  The `--features agent-infra` (confirm the exact feature name and per-`-p` applicability at plan time) is
+  load-bearing: the proxmox crate's `default = []` and `#[cfg(feature = "agent-infra")]`-gated `mod agent`
+  (`lib.rs:16-17`) mean a bare scoped clippy never compiles `agent/surface_actions.rs`, `agent/plugin.rs`, or
+  `agent/migration.rs` — the exact files D3/D4/D6/D7 touch.
+- `cargo test` for the same crates with the same feature flags; full `cargo test --all-features` before push
+  (requires `frontend/build/`)
 - Re-run the consumer-inventory greps and assert zero stale hits outside CHANGELOGs/historical specs:
   `grep -rn "list-discovered-guests\|list-all-unmatched" --include="*.rs" --include="*.md" crates/ docs/development docs/architecture docs/security`
 - `markdownlint --config .markdownlint.json` on every touched doc
