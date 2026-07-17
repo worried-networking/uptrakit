@@ -2,23 +2,18 @@
 
 use uptrakit_plugin_infrastructure_core::{SurfaceActionContext, SurfaceActionError};
 
-/// Handle a surface action for the webhook notification plugin.
-///
-/// Supported actions:
-/// - `list` — list webhook channels with masked secrets.
-#[tracing::instrument(skip_all, fields(surface_id, action_id))]
-pub async fn handle_surface_action(
-    ctx: &SurfaceActionContext<'_>,
-    surface_id: &str,
-    action_id: &str,
+/// Dispatch shim for the `list` interaction (exact-id dispatch map entry).
+pub(crate) fn webhook_list_handler<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
     params: serde_json::Value,
-) -> std::result::Result<serde_json::Value, SurfaceActionError> {
-    match action_id {
-        "list" => handle_list(ctx, &params).await,
-        _ => Err(SurfaceActionError::InvalidInput(format!(
-            "unknown action '{action_id}' for surface '{surface_id}'",
-        ))),
-    }
+) -> std::pin::Pin<
+    Box<
+        dyn std::future::Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>>
+            + Send
+            + 'a,
+    >,
+> {
+    Box::pin(async move { handle_list(ctx, &params).await })
 }
 
 async fn handle_list(
