@@ -8,8 +8,17 @@ set -euo pipefail
 
 BASE_REF="${1:-}"
 
+refresh_index() {
+    # cargo deny's yanked check reads the local crates.io sparse-index cache but never updates it;
+    # a stale cache silently misses newly-yanked crates (caught only in CI's fresh checkout). Refresh
+    # it here. --dry-run fetches the index delta but never writes Cargo.lock. Best-effort: offline dev
+    # falls back to the stale cache, same as before.
+    cargo update --dry-run > /dev/null 2>&1 || true
+}
+
 if [ -z "$BASE_REF" ]; then
     echo "[deny] Running full cargo deny check..."
+    refresh_index
     if deny_output=$(cargo deny --color=never check 2>&1); then
         printf '%s\n' "$deny_output"
         if printf '%s\n' "$deny_output" | grep -qE '^warning\['; then
@@ -58,6 +67,7 @@ sanity_check() {
 # Unset git hook env vars so git-fetch-with-cli child process doesn't inherit GIT_DIR
 # and accidentally fetch into the project repo instead of ~/.cargo/advisory-dbs.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE 2>/dev/null || true
+refresh_index
 cargo deny -f json check > /dev/null 2> "$DENY_HEAD_TMP" || true
 sanity_check "$DENY_HEAD_TMP" "HEAD"
 
