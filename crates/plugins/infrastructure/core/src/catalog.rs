@@ -323,15 +323,15 @@ impl PluginCatalog {
                             seen_unified_surface_ids.insert(surface_id.clone(), desc.type_id);
                         }
 
+                        let actions = unified_surface_dispatch
+                            .entry(surface_id.clone())
+                            .or_default();
                         for interaction in &surface.interactions {
                             if let InteractionDelivery::PluginHandled(handler) =
                                 interaction.delivery()
                             {
                                 let interaction_id =
                                     interaction.descriptor().interaction_id.as_str();
-                                let actions = unified_surface_dispatch
-                                    .entry(surface_id.clone())
-                                    .or_default();
                                 if actions.contains_key(interaction_id) {
                                     return Err(rootcause::report!(
                                         PluginError::UnsupportedOperation(format!(
