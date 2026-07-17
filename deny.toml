@@ -317,8 +317,8 @@ skip = [
     { crate = "ordered-float@4.6.0", reason = "pulled by sea-query older pin; newer 5.x used by sea-query current" },
 
     # rand: 0.8.x via openidconnect/rsa, 0.9.x via tungstenite/uptrakit, 0.10.x via russh 0.60
-    { crate = "rand@0.8.6", reason = "pulled by openidconnect/rsa; newer 0.9.x used by tungstenite, uptrakit" },
-    { crate = "rand@0.9.4", reason = "workspace pins rand 0.9; bollard 0.21 would use rand 0.10 but testcontainers 0.27 pins bollard ^0.20 (bollard-stubs exact-version conflict blocks bollard 0.21 upgrade)" },
+    { crate = "rand@0.8.7", reason = "pulled by openidconnect/rsa; newer 0.9.x used by tungstenite, uptrakit" },
+    { crate = "rand@0.9.5", reason = "workspace pins rand 0.9; bollard 0.21 would use rand 0.10 but testcontainers 0.27 pins bollard ^0.20 (bollard-stubs exact-version conflict blocks bollard 0.21 upgrade)" },
     { crate = "rand_chacha@0.3.1", reason = "pulled by rand 0.8; newer 0.9.x used by rand 0.9" },
     { crate = "rand_core@0.6.4", reason = "pulled by crypto crates (openidconnect); newer 0.9.x used by rand 0.9" },
 
@@ -334,7 +334,7 @@ skip = [
     { crate = "digest@0.10.7", reason = "pulled by argon2, blake2, ecdsa, ed25519-dalek (openidconnect); newer 0.11 used by sha2, hmac" },
     { crate = "generic-array@0.14.9", reason = "pulled by crypto-common 0.1 (digest 0.10 chain); newer 1.x used by crypto-common 0.2" },
     { crate = "const-oid@0.9.6", reason = "pulled by spki/pkcs8 0.7 (openidconnect ecdsa/rsa chain); newer 0.10 used by spki/pkcs8 0.8" },
-    { crate = "sha1@0.10.6", reason = "pulled by openidconnect (oauth2); newer 0.11 used by russh 0.60" },
+    { crate = "sha1@0.10.7", reason = "pulled by openidconnect (oauth2); newer 0.11 used by russh 0.60" },
     { crate = "signature@2.2.0", reason = "pulled by ecdsa/ed25519 (openidconnect); newer 3.x-rc used by russh 0.60 crypto" },
 
     # getrandom: 0.3 via jobserver/cc (build dep), 0.4 via rand 0.9
