@@ -60,6 +60,15 @@ isolated venv — exactly the kind of per-item software Uptrakit tracks.
     unusable as the update command.
   - Reinstall without `--with` **silently drops** the original extra requirements; re-passing the receipt's
     requirements as `--with` preserves them.
+  - The receipt's `[tool]` level also records `python = "<request>"` (for `--python` installs) and a
+    structured `[tool.options] index = [{ url = …, default = true, … }]` array (for `--default-index`/
+    `--index` installs); a reinstall without the corresponding flag silently drops each (probed on
+    uv 0.11.29 — the rewritten receipt loses `python`). Flag-free installs on an unconfigured host record
+    neither — but a host-level default index (`UV_DEFAULT_INDEX` env or `uv.toml` `[[index]]
+    default = true`, i.e. exactly how a mirror host configures uv) bakes `[tool.options].index` into
+    **every** plain-install receipt (probed).
+  - uv PEP 503-normalizes the tool name consistently across `uv tool list`, the tools-dir entry, and the
+    receipt's primary requirement (probed: `ruamel.yaml.cmd` → `ruamel-yaml-cmd` in all three).
 - Shared `Version` (`crates/plugins/infrastructure/core/src/version.rs`) parses strict semver only and falls
   back to raw-string ordering. PEP 440 versions (`1.0`, `1.2.3.post1`, `2024.1.1`, `1.2.3rc1`) fail semver parse
   and mis-sort lexically (`"1.9" > "1.10"`). The scheduler trusts plugin-provided order verbatim
@@ -125,7 +134,10 @@ mode fork. No new UI work: type settings render schema-driven in `PluginConfigsT
 `execute_and_capture(executor, cmd, context)` (`infrastructure-core/src/command.rs` — new package-manager
 plugins must use it instead of hand-rolling `execute_quiet` → `map_err` → exit-code checks; cargo's manual
 pattern predates the helper and is NOT the template here; uv has no rpm-style meaningful non-zero exit, so
-the helper's non-zero ⇒ `CommandFailed` contract fits). Note the returned string is the **merged
+the helper's uniform-failure contract fits; real executors return `Err(CommandError::CommandFailed)` on
+non-zero exit (`crates/shared/command/src/command.rs:190-192`) and the helper folds any executor `Err` into
+`PluginError::PluginInternal` — its own `CommandFailed` re-bail arm is reachable only for doubles that
+return `Ok` with a non-zero exit). Note the returned string is the **merged
 stdout+stderr stream** (`crates/shared/command/src/command.rs:167-180`), so the parser must be hard-anchored
 (contrarian finding — loose matching can false-match stderr noise like `warning: foo v2 ...`).
 
@@ -158,8 +170,9 @@ pre-existing limitation as cargo's `~/.cargo/bin`.
 ### Version detection
 
 `detect_installed_version(package_identifier)` runs the same `execute_and_capture` + parser and selects
-the row matching the identifier (uv has no per-package query). Absent row ⇒ the standard "not installed"
-error path used by cargo's `detection.rs`. This is the scheduled-check path that keeps `featured` items'
+the row matching the identifier (uv has no per-package query). Absent row ⇒ `Ok(None)` — the standard
+not-installed outcome in cargo's `detection.rs` (`installed.get(..).map(Version::new)`; never an error —
+no package-manager plugin in the repo treats "not installed" as an error). This is the scheduled-check path that keeps `featured` items'
 versions current (rediscovery intentionally skips `installed_version` for featured items,
 `discovery_items.rs:400-403`).
 
@@ -177,14 +190,22 @@ versions current (rediscovery intentionally skips `installed_version` for featur
    - **fallback** (contrarian finding — most self-hosted indexes lack PEP 700): derive the version set from
      `files[].filename`, **anchored on the known name, never naive-split** — hyphenated projects make
      `{name}-{version}` splitting ambiguous (`zope-interface-4.5.0.tar.gz`: is the version `4.5.0` or
-     `interface-4.5.0`?). Normalize the filename stem (`_`→`-`, lowercase), strip the PEP 503-normalized
-     project name + one `-` as a prefix, and take the next `-`- or extension-delimited segment as the
-     version. Wheels are preferred over sdists when both exist for a version (PEP 427 underscore-escapes the
+     `interface-4.5.0`?). Match the prefix under **full PEP 503 normalization** (lowercase, collapse
+     `[._-]+` runs to `-`) with an index-tracking walk over the stem: normalize characters until the
+     output equals `{normalized_name}-`, then take the **raw** remainder's next `-`- or
+     extension-delimited segment as the version. A `_`→`-`-only replacement misses dotted legacy sdists
+     (`zope.interface-5.4.0.tar.gz` never matches prefix `zope-interface-` → that version silently
+     vanishes → wrong "latest" when no wheel exists), while normalizing the whole stem would corrupt the
+     version's own dots (`5.4.0` → `5-4-0`) — hence normalized matching for the name region, raw text for
+     the version region (`str::get`/`split_at`, never range-indexing — `string_slice`/`indexing_slicing`
+     are denied). Wheels are preferred over sdists when both exist for a version (PEP 427 underscore-escapes the
      name, so wheels are unambiguous); legacy pre-PEP-625 sdists are exactly what old self-hosted mirrors
      serve. Deduplicate.
    - JSON body that parses but yields zero versions via both paths ⇒ `bail!` (`PluginError`-typed), never a
-     silent empty list (npm parse-contract precedent, commit `61c7d4358`). Same for non-JSON (HTML-negotiated)
-     responses and HTTP errors.
+     silent empty list — this spec's own contract decision: a valid Simple-API project page always carries at
+     least one version or file, so zero extractable versions signals a wrong index URL or lossy negotiation.
+     Non-JSON (HTML-negotiated) responses and HTTP errors also `bail!`; the npm parse-contract precedent
+     (commit `61c7d4358`) covers exactly that unparseable-body case (it does NOT bail on valid-but-empty).
 4. Parse every version with `pep440_rs`; skip unparseable strings (item-level tolerance, homebrew-style).
 5. `is_prerelease` = `Version::any_prerelease()` (pre-release **or** dev segment; verified present in
    pep440_rs 0.7.3). Filter prereleases unless `include_prereleases`. **Post-filter emptiness is NOT an
@@ -207,7 +228,10 @@ for marginal value on a user-triggered update flow). Deferred.
 
 1. **Preflight — read the tool's receipt** (`uv tool list --show-with` is lossy and must not be used here;
    see Current reality):
-   - `execute_and_capture` `uv tool dir` → absolute tools directory (single line of stdout, trimmed).
+   - `execute_and_capture` `uv tool dir` → absolute tools directory. The stream is merged stdout+stderr
+     (uv notices/warnings are `warning:`/`error:`/`note:`-prefixed lines), so select the **unique** line
+     matching the path shape — starts with `/`, no whitespace — and typed-error on zero or multiple
+     matches; never blind-trim the whole output (robust against notices before or after the path).
    - `execute_and_capture` `cat <tools_dir>/<package_identifier>/uv-receipt.toml`. Path traversal is
      structurally excluded: `package_identifier` has already passed `IDENTIFIER_RULES` (charset has no `/`;
      `reject_double_dot` blocks `..`).
@@ -220,12 +244,42 @@ for marginal value on a user-triggered update flow). Deferred.
      `{ name = "idna", url = "…" }`), and ignoring them would reconstruct a bare name ⇒ **silent source
      swap** from the pinned artifact to the index — exactly the silent-strip class this preflight exists to
      kill. Any unknown field ⇒ typed error, update fails loud. Non-index `--with` sources are a documented
-     unsupported case (deferred).
+     unsupported case (deferred). Deliberate trade: a future benign per-requirement field in uv's receipt
+     schema fails updates loudly until the struct learns it — preferred over a source-field allowlist that
+     could silently admit a future source-discriminating field.
+   - **The `[tool]` table carries two more install-determining fields the struct must read** (probed on
+     uv 0.11.29; the `[tool]` level itself stays tolerant of unknown keys — `entrypoints` etc.):
+     - `python: Option<String>` — `uv tool install --python 3.12` records `python = "3.12"`, and a
+       reinstall without `--python` **silently drops it** (verified: the receipt loses the field),
+       reinterpreting the tool against the agent's default interpreter. When present, re-pass it as
+       `--python <value>` in the update argv, guarded like every other receipt string (no leading `-`,
+       no control characters, no whitespace, length-bounded).
+     - `[tool.options]` — `uv tool install --default-index <url>` records a structured
+       `index = [{ url = …, default = true, … }]` array; `--no-binary` records `no-binary = true`;
+       `--index-strategy` records `index-strategy = …`. A bare pinned reinstall **drops the whole table**
+       (probed: the rewritten receipt loses `[tool.options]`) — a silent index swap is the same
+       dependency-confusion class the requirement-level `deny_unknown_fields` kills, and a dropped
+       `no-binary` silently swaps a from-source build for a wheel at the same version (the `==<version>`
+       pin dominates only the version, not the artifact form or resolution mode). v1 policy: **any
+       non-empty `[tool.options]` table ⇒ typed error, update fails loud** — enumerating
+       "pin-dominated" keys could misjudge a future option — with exactly one carve-out, because a
+       host-level default index bakes `index` into every receipt on mirror-configured hosts (see Current
+       reality) and blanket loud-fail would block updates on the very hosts the configurable `index_url`
+       serves: when the table contains **only** the `index` key, with a **single** entry whose
+       `default = true` and whose `url` (trailing-slash-trimmed) equals the plugin's trimmed
+       `effective_index_url()`, proceed and re-pass `--default-index <effective_index_url>` (round-trip
+       probed: exit 0, receipt re-records the index). Any other shape — mismatched URL, `explicit`
+       entries, extra keys (`no-binary`, `index-strategy`, …) — ⇒ typed error (re-passing deferred).
    - The tool's own entry is **index 0** (verified: uv always records the primary requirement first), and
-     it must be identified **by position, guarded by name**: assert `entries[0].name == package_identifier`,
-     typed error on mismatch (converts a future uv reordering into a loud failure instead of silent argv
-     corruption). Name-equality alone cannot identify it:
+     it must be identified **by position, guarded by name**: take it via `requirements.split_first()` —
+     never `entries[0]`, which is the workspace-denied `indexing_slicing` lint, and `split_first()`'s
+     `None` arm is the typed-error path for an empty `requirements` array — then assert the primary's
+     `name == package_identifier`, typed error on mismatch (converts a future uv reordering into a loud
+     failure instead of silent argv corruption). Name-equality alone cannot identify it:
      `uv tool install celery --with 'celery[redis,auth]'` records two entries both named `celery`.
+     Exact equality is safe across name spellings: uv PEP 503-normalizes identically in `uv tool list`,
+     the tools-dir directory name, and the receipt (probed on uv 0.11.29:
+     `uv tool install 'ruamel.yaml.cmd'` yields `ruamel-yaml-cmd` in all three).
    - **Index 0's payload is NOT discarded** — it feeds the primary install argument. The dominant
      extras form is `uv tool install 'celery[redis]'`, which records
      `{ name = "celery", extras = ["redis"] }` at index 0; a bare pinned reinstall would silently strip
@@ -243,7 +297,8 @@ for marginal value on a user-triggered update flow). Deferred.
      update with a typed error, do not skip-and-continue — never proceed blind and strip extras.
 2. Run `uv tool install '<pkg>[<primary extras>]==<to_version>'` (extras segment only when index 0 recorded
    extras; verified round-trip: `uv tool install 'celery[redis]==5.6.3'` re-installs `redis` and the receipt
-   keeps `extras = ["redis"]`) plus one `--with <req>` per reconstructed remaining requirement, through the
+   keeps `extras = ["redis"]`) plus `--python <recorded>` when the receipt carries `[tool].python`, plus one
+   `--with <req>` per reconstructed remaining requirement, through the
    mandatory shared helper `execute_command_update(CommandUpdateParams { binary: "uv", privileged: false,
    .. }, output_tx)` — copy the call shape from `cargo/src/update.rs`. `resumable` is NOT a
    `CommandUpdateParams` field: the trait result is built afterwards as
@@ -252,9 +307,12 @@ for marginal value on a user-triggered update flow). Deferred.
 This closes the contrarian-flagged silent-extras drop for **index-sourced requirements**, on both the
 primary entry (`celery[redis]` installed directly) and `--with` entries (`httpx[http2]`, ranges
 `rich>=13,<14`, environment markers) — all reconstructed from the receipt's structured fields, never
-re-parsed from lossy display output. Non-index
-sources (URL/path/git/editable `--with` entries) and receipts missing entirely (tools installed by a
-pre-receipt uv) fail the update **loudly** with a typed error — never a silent downgrade.
+re-parsed from lossy display output. It also closes the two silent swaps the receipt's `[tool]` level
+carries: a recorded `python` pin is re-passed, and a recorded custom index fails loud. Non-index
+sources (URL/path/git/editable `--with` entries), non-empty recorded `[tool.options]` tables (save the
+matched-mirror default-index carve-out), and receipts missing entirely (tools installed by a pre-receipt
+uv) fail the update **loudly** with a typed error — never a silent downgrade or silent
+source/interpreter/artifact-form swap.
 
 ### Identifier rules
 
@@ -274,10 +332,10 @@ cargo's shape (`cargo/src/config.rs`). Do **not** copy homebrew/npm's hand-rolle
 
 ### New dependency
 
-`pep440_rs = "0.7"` — added to `[workspace.dependencies]` first (dependency-registration rule), referenced
-`workspace = true` in the plugin crate. Two-component range (the dominant workspace style and the
-dependency-policy doc's own example shape; a handful of entries do pin patch versions where needed);
-resolves to 0.7.3, the latest stable on crates.io (verified 2026-07-16). License
+`pep440_rs = "0.7.3"` — added to `[workspace.dependencies]` first (dependency-registration rule), referenced
+`workspace = true` in the plugin crate. Full three-component pin — the workspace's plurality style (71
+three-component vs 37 two-component `version =` entries in the root `Cargo.toml` at review time); 0.7.3 is
+the latest stable on crates.io (verified 2026-07-17). License
 `Apache-2.0 OR BSD-2-Clause` — cargo-deny resolves clean via the **Apache-2.0** branch of the OR
 (BSD-2-Clause itself is not in the `deny.toml` allowlist; BSD-3-Clause is). Maintenance status,
 recorded for future audits: last publish 2024-12; PEP 440 is a frozen standard, so a complete parser does not
@@ -293,19 +351,30 @@ contract, `cargo deny` multiple-versions risk. Run `cargo deny check` after addi
    (package-managers block, unconditional — pm plugins are not feature-gated), `PACKAGE_MANAGER_UV` in
    `PACKAGE_MANAGER_IDS`, **and** in the manually-maintained array inside the
    `package_manager_lookup_covers_all_current_package_managers` test (same file — it duplicates
-   `PACKAGE_MANAGER_IDS` and drifts silently if skipped).
+   `PACKAGE_MANAGER_IDS` and drifts silently if skipped). Also add the id to the `always_on` array in the
+   `always_on_ids_have_descriptors` test (same file, third hand-maintained list; one-directional, so
+   omission passes CI but drifts).
 3. `crates/plugins/infrastructure/registry/Cargo.toml`: plain (non-optional) dependency on the new crate.
 4. Root `Cargo.toml` `[workspace.dependencies]`: path entry for the new crate + `pep440_rs` (`toml` is
    already registered there; the plugin manifest just references it `workspace = true`).
 5. Workspace member: picked up automatically by the `crates/*/*` glob — no member-list edit.
 6. Boundary: the new crate must only be reachable via the registry (`ci/check_plugin_semantic_boundary.py`);
    no other manifest gains a dependency on it.
+7. `release-plz.toml`: new `[[package]]` entry `name = "uptrakit-plugin-package-manager-uv"` with
+   `git_only = true`, `git_release_enable = false`, `publish = false` (sibling-plugin shape — the cargo
+   entry), **and** add the crate name to the `changelog_include` arrays of `uptrakit-controller` and
+   `uptrakit-controller-standalone` (the two arrays enumerating every package-manager plugin; cargo appears
+   in both). Every workspace package has a `[[package]]` entry in this file; omitting it drops uv commits
+   from the controller changelogs.
 
 ### Error contract
 
 - uv binary absent ⇒ `HostCompatibility::Incompatible` from the probe; discovery on an incompatible host is
   not an error.
-- `uv tool list` non-zero exit ⇒ `bail!` `PluginError::CommandFailed` (tool malfunction, not "empty").
+- `uv tool list` failure (non-zero exit or spawn error) ⇒ `Err` from `execute_and_capture`, surfacing as
+  `PluginError::PluginInternal` (tool malfunction, not "empty"). `LocalCommandExecutor::execute_quiet`
+  returns `Err(CommandError::CommandFailed)` on non-zero exit, so the helper's own `CommandFailed` re-bail
+  is production-unreachable — never assert `PluginError::CommandFailed` for this path in tests.
 - Empty tool list (exit 0) ⇒ `Ok(vec![])`.
 - Release fetch: HTTP error, non-JSON body, or zero-version JSON ⇒ typed `bail!`; per-version parse failures
   skipped item-level.
@@ -318,26 +387,38 @@ Use `uptrakit_plugin_infrastructure_core::testing` doubles (`FixedOutputExecutor
 `test_runtime_with_executor`) — dev-dep `features = ["testing"]`; never local mocks (cargo's local mock is the
 flagged legacy exception, npm/homebrew are the pattern). Before relying on a double, check its behavior on the
 *specific* trait method the code under test calls (`execute` vs `execute_quiet` differ on non-zero exits).
+For "`uv tool list` fails" coverage use `FixedOutputExecutor::failure(n)` — its `execute_quiet` `Err`s on
+non-zero, matching `LocalCommandExecutor` — and assert `PluginError::PluginInternal`;
+`RoutedOutputExecutor`'s `Ok`-with-non-zero shape would exercise `execute_and_capture`'s
+production-unreachable `CommandFailed` arm.
 
 Required coverage (success + failure per invariant):
 
 - Parser: plain rows, entrypoint bullets skipped, `No tools installed` stderr-merged case, interleaved
   `warning: foo v2 is deprecated` line (must NOT produce a phantom package — merged-stream fixture),
   empty input.
-- Discovery: emission shape (`featured: true`, target roles, empty config), non-zero exit bails.
+- Discovery: emission shape (`featured: true`, target roles, empty config); command failure
+  (`FixedOutputExecutor::failure`) surfaces `PluginError::PluginInternal`.
 - Detection: found, not-found, command-failure paths.
 - Releases (HTTP mocked at the parse layer like cargo's tests): PEP 700 body; PEP 691 body **without**
   `versions` (filename fallback yields non-empty, including a **hyphenated project name** —
-  `zope-interface`-style — proving name-anchored parsing, not naive splitting); HTML body ⇒ error;
+  `zope-interface`-style — proving name-anchored parsing, not naive splitting, and a **dotted legacy
+  sdist filename** — `zope.interface-4.5.0.tar.gz` under project `zope-interface` — proving
+  full-PEP-503 prefix matching with the version's dots preserved); HTML body ⇒ error;
   prerelease filtering (`1.2.3rc1`, `1.0a1`, `.dev` — no-hyphen forms); all-prerelease package under
   `include_prereleases: false` ⇒ `Ok(vec![])`; descending PEP 440 order incl. `1.9` vs `1.10` and `.post1`.
 - Update: receipt-based preservation — **primary-extras regression case** (`celery[redis]` at index 0 ⇒
   install arg `celery[redis]==<ver>`, extras never stripped); `--with` reconstruction fidelity for extras
   (`httpx[http2]`), specifier ranges (`rich>=13,<14`), and markers; same-name `--with` entry
   (`celery` + `celery[redis,auth]`) survives the positional primary identification;
-  `entries[0].name != package_identifier` ⇒ typed error; a `url`/`git`/`path`-sourced entry (primary OR
-  `--with`) ⇒ typed error (deny_unknown_fields); missing/unparseable receipt aborts the update;
-  pinned-install arg shape.
+  primary-entry `name != package_identifier` ⇒ typed error; empty `requirements` array ⇒ typed error; a `url`/`git`/`path`-sourced entry (primary OR
+  `--with`) ⇒ typed error (deny_unknown_fields); `[tool].python` present ⇒ `--python <value>` in the
+  argv (absent ⇒ no flag); `[tool.options]` cases — sole matched default index (url ==
+  `effective_index_url()`) ⇒ proceeds with `--default-index` in the argv, mismatched url ⇒ typed error,
+  extra key alongside a matched index (`no-binary = true`) ⇒ typed error; multi-line `uv tool dir`
+  output (stderr-merged warning plus the path) resolves to the unique path-shaped line, zero or multiple
+  path-shaped lines ⇒ typed error; missing/unparseable
+  receipt aborts the update; pinned-install arg shape.
 - Identifier rules: accepted/rejected names.
 - No sudo entries declared (mirror cargo's descriptor test).
 
@@ -356,7 +437,11 @@ extra feature flags to thread). `cargo deny check` required for the new dependen
    time** (hand-written counts there are pre-existing drift hazards).
 2. `docs/end-user/plugin-configs.md` — new `package_manager_uv` row in the plugin table + a
    `### package_manager_uv configuration fields` subsection (fields, discovery behaviour, tools-only scope,
-   agent-user visibility, `PATH`/`~/.local/bin` operator note, "No sudo required") — cargo's subsection is the
+   agent-user visibility, `PATH`/`~/.local/bin` operator note, "No sudo required", and the
+   update-preservation contract with its loud-failure cases: recorded `[tool.options]` beyond the
+   matched-mirror default-index carve-out (`no-binary`, mismatched index, …), non-index sources, missing
+   receipt, whitespace-bearing tools-dir or recorded-python paths, plus the mixed-index "latest"
+   limitation) — cargo's subsection is the
    template. This is the primary end-user doc; no standalone `docs/end-user/uv-plugin.md` (follow the
    cargo-in-table precedent, not the npm/snap standalone-page one).
 3. `docs/development/plugin-guidelines.md` — add uv to the "Featured flag routing" table with
@@ -364,7 +449,15 @@ extra feature flags to thread). `cargo deny check` required for the new dependen
    `cargo/src/plugin.rs:221`) so the table matches reality.
 4. Root `AGENTS.md` — codebase-layout tree line for `package-managers/`: append `uv` (the list is already
    missing `routeros`/`skills`; fix those in the same edit).
-5. Rustdoc on the new crate's public items (parser contract, PEP 503 normalization, `--with` preservation
+5. `docs/development/plugin-system.md` — "First-Party Plugin Crates" table: new `package_manager_uv` row
+   (`uptrakit-plugin-package-manager-uv`, Family Software, Discovery Yes, Controller-side fetch Yes, Host
+   compat Yes, Lifecycle hooks No), and fix the stale `package_manager_cargo` "Controller-side fetch" cell
+   in the same edit (table says No; cargo declares `PluginCapability::ControllerSideFetchReleases`,
+   `cargo/src/plugin.rs:168`). The table is also missing rows for `package_manager_skills`,
+   `package_manager_routeros`, and `discovery_uptrakit_self_update` — add them in the same edit (same drift
+   class as the AGENTS.md tree-line fix), deriving each row's cells from that crate's `declare_plugin!`
+   block at edit time, not from this spec.
+6. Rustdoc on the new crate's public items (parser contract, PEP 503 normalization, `--with` preservation
    rationale).
 
 No ADR: no new architecture decision — the plugin instantiates existing, documented extension points.
@@ -393,6 +486,17 @@ No `CONTEXT.md` change: no new domain vocabulary ("uv tool" is plugin-internal).
 - Yanked-version filtering in release lists.
 - Updating tools whose receipt carries non-index `--with` sources (URL/path/git/editable) — v1 fails these
   loudly; preserving them needs source-kind-aware reconstruction.
+- Updating tools whose receipt records `[tool.options]` beyond the matched-mirror default-index
+  carve-out (mismatched/explicit index entries, `no-binary`, `index-strategy`, …) — v1 fails these
+  loudly; support needs option-aware reconstruction, and the index case interacts with the
+  release-fetch limitation below.
+- Per-tool release-fetch index: `fetch_releases` runs controller-side with only the package identifier —
+  the agent-side receipt is unreachable there, so "latest" is always computed against the configured
+  `index_url`. Hosts with tools from mixed indexes see `index_url`-relative latest for the off-index
+  subset (documented limitation).
+- Tools installed from non-index sources (git/path/URL primaries) still appear in `uv tool list` and are
+  discovered as featured items; their release fetch errors each cycle (name absent from the index).
+  Suppressing them needs receipt-aware discovery (rejected in Alternatives) — documented limitation.
 - Discovery of other users' uv tools (would need sudo/root traversal; conflicts with the unprivileged-agent
   invariant).
 - Tracking uv itself as a software item (it is installed via other managers — brew/curl — already covered or
@@ -407,5 +511,8 @@ No `CONTEXT.md` change: no new domain vocabulary ("uv tool" is plugin-internal).
 - `grep -c "featured: true" crates/plugins/package-managers/uv/src/*.rs` → non-zero.
 - `grep -n "uv" docs/end-user/plugin-configs.md docs/development/autodiscovery-internals.md docs/development/plugin-guidelines.md`
   → table row, emission entry, featured-routing row present.
+- `grep -n "package_manager_uv" docs/development/plugin-system.md` → First-Party Plugin Crates row present.
+- `grep -c "uptrakit-plugin-package-manager-uv" release-plz.toml` → `3` (`[[package]]` entry + two
+  `changelog_include` rows).
 - Full canonical gate list from `docs/development/quality-gates.md`, plus `cargo deny check` and
   `python3 ci/check_plugin_semantic_boundary.py`.
