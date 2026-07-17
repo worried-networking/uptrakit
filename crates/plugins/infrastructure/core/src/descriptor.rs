@@ -235,6 +235,16 @@ pub struct SurfaceRegistrationOps {
     pub registrations: fn() -> Vec<surfaces::SurfaceRegistration>,
 }
 
+/// Unified single-source surface registration ops (ADR-0028). Replaces both
+/// `SurfaceActionLibrary` and `SurfaceRegistrationOps` once every plugin is
+/// migrated (transitional coexistence until then).
+pub struct PluginSurfaceRegistrationOps {
+    /// Wire provider id, e.g. `"plugin.webhook"`.
+    pub provider_id: &'static str,
+    /// Returns the plugin's surface registrations with paired deliveries.
+    pub registrations: fn() -> Vec<crate::registration::PluginSurfaceRegistration>,
+}
+
 // ── Type aliases ────────────────────────────────────────────────────────────
 
 /// Sync creation for a software/hook role.
@@ -587,6 +597,9 @@ pub struct PluginDescriptor {
     // ── Optional sections ──
     pub surface_actions: Option<&'static SurfaceActionLibrary>,
     pub surfaces: Option<&'static SurfaceRegistrationOps>,
+    /// Unified surface registrations (single-source; supersedes
+    /// `surface_actions` + `surfaces` — transitional coexistence).
+    pub unified_surfaces: Option<&'static PluginSurfaceRegistrationOps>,
     pub type_settings: Option<&'static TypeSettingsOps>,
     pub config_test: Option<&'static ConfigTestOps>,
     /// Sudo commands required by this plugin.

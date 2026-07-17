@@ -50,6 +50,8 @@ use crate::plugin_ops::{
     ControllerUpdateHookOps, ControllerUpdateProtectionOps, NotificationOps, PluginConfigOps,
     PluginMetadataOps, PluginSurfaceActionOps, PluginSurfaceOps, SoftwareItemLifecycleOps,
 };
+use crate::registration::InteractionHandler as UnifiedInteractionHandler;
+use crate::registration::{InteractionDelivery, InteractionDeliveryKind};
 use crate::roles::{
     ControllerUpdateProtection, NotificationTransport, SoftwareItemCreatedEvent,
     SoftwareItemLifecycle, SoftwareItemLifecycleContext, SoftwareItemPatch,
@@ -105,6 +107,7 @@ pub struct PluginCatalog {
     )]
     controller_update_hook: ControllerUpdateHookValue,
     surface_action_routes: Vec<(&'static str, SurfaceActionHandler)>,
+    unified_surface_dispatch: BTreeMap<(String, String), UnifiedInteractionHandler>,
     instance_states: InstancePluginStates,
 }
 
@@ -140,6 +143,10 @@ impl PluginCatalog {
         let mut surface_action_routes = Vec::new();
         // (prefix, owner_type_id) pairs for overlap detection
         let mut seen_surface_prefixes: Vec<(&'static str, &'static str)> = Vec::new();
+        let mut unified_surface_dispatch: BTreeMap<(String, String), UnifiedInteractionHandler> =
+            BTreeMap::new();
+        // surface_id -> owner_type_id, for exact-id duplicate detection
+        let mut seen_unified_surface_ids: BTreeMap<String, &'static str> = BTreeMap::new();
 
         // Validate scope/instance_config invariant: tenant-scoped plugins must
         // not declare instance_config (only meaningful for scope=Instance).
@@ -293,6 +300,49 @@ impl PluginCatalog {
                     surface_action_routes.push((*prefix, ext.handle_action));
                 }
             }
+
+            // ── Uniqueness: unified surface ids + exact-id interaction dispatch ──
+            if let Some(ops) = desc.unified_surfaces {
+                for registration in (ops.registrations)() {
+                    for surface in &registration.surfaces {
+                        let surface_id = surface.descriptor.surface_id.as_str().to_string();
+
+                        if let Some(&owner) = seen_unified_surface_ids.get(&surface_id) {
+                            if owner != desc.type_id {
+                                return Err(rootcause::report!(PluginError::UnsupportedOperation(
+                                    format!(
+                                        "duplicate surface id: '{surface_id}' registered by both \
+                                         {owner} and {}",
+                                        desc.type_id
+                                    )
+                                )));
+                            }
+                        } else {
+                            seen_unified_surface_ids.insert(surface_id.clone(), desc.type_id);
+                        }
+
+                        for interaction in &surface.interactions {
+                            if let InteractionDelivery::PluginHandled(handler) =
+                                interaction.delivery()
+                            {
+                                let key = (
+                                    surface_id.clone(),
+                                    interaction.descriptor().interaction_id.as_str().to_string(),
+                                );
+                                if unified_surface_dispatch.contains_key(&key) {
+                                    return Err(rootcause::report!(
+                                        PluginError::UnsupportedOperation(format!(
+                                            "duplicate interaction '{}' on surface '{surface_id}'",
+                                            key.1
+                                        ))
+                                    ));
+                                }
+                                unified_surface_dispatch.insert(key, *handler);
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // Longest prefix first for greedy matching
@@ -305,6 +355,7 @@ impl PluginCatalog {
             controller_update_protection,
             controller_update_hook,
             surface_action_routes,
+            unified_surface_dispatch,
             instance_states,
         })
     }
@@ -315,6 +366,33 @@ impl PluginCatalog {
             .iter()
             .find(|(prefix, _)| surface_id.starts_with(prefix))
             .map(|(_, handler)| *handler)
+    }
+
+    /// Every unified-surfaces interaction, as `(surface_id, interaction_id, kind)`
+    /// triples. Used by consumers (e.g. the D5 executor-allowlist guard) that need
+    /// to enumerate how each registered interaction is delivered without exposing
+    /// the underlying handler function pointer.
+    #[must_use]
+    pub fn interaction_deliveries(&self) -> Vec<(String, String, InteractionDeliveryKind)> {
+        self.descriptors
+            .values()
+            .filter_map(|descriptor| descriptor.unified_surfaces)
+            .flat_map(|ops| (ops.registrations)())
+            .flat_map(|registration| registration.surfaces)
+            .flat_map(|surface| {
+                let surface_id = surface.descriptor.surface_id.as_str().to_string();
+                surface
+                    .interactions
+                    .into_iter()
+                    .map(move |interaction| {
+                        let interaction_id =
+                            interaction.descriptor().interaction_id.as_str().to_string();
+                        let kind = interaction.delivery().kind();
+                        (surface_id.clone(), interaction_id, kind)
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect()
     }
 
     /// Collect all controller-side database migrations contributed by plugins.
@@ -374,8 +452,15 @@ impl PluginSurfaceActionOps for PluginCatalog {
         action_id: &str,
         params: serde_json::Value,
     ) -> std::result::Result<serde_json::Value, SurfaceActionError> {
+        let key = (surface_id.to_string(), action_id.to_string());
+        if let Some(handler) = self.unified_surface_dispatch.get(&key) {
+            return handler(ctx, params).await;
+        }
+
         let handler = self.route_surface_action(surface_id).ok_or_else(|| {
-            SurfaceActionError::InvalidInput(format!("no plugin handles surface '{surface_id}'"))
+            SurfaceActionError::InvalidInput(format!(
+                "no plugin handles surface '{surface_id}' interaction '{action_id}'"
+            ))
         })?;
         handler(ctx, surface_id, action_id, params).await
     }
@@ -383,11 +468,26 @@ impl PluginSurfaceActionOps for PluginCatalog {
 
 impl PluginSurfaceOps for PluginCatalog {
     fn surface_registrations(&self) -> Vec<uptrakit_surfaces::SurfaceRegistration> {
-        self.descriptors
+        let legacy = self
+            .descriptors
             .values()
             .filter_map(|descriptor| descriptor.surfaces)
-            .flat_map(|surface_ops| (surface_ops.registrations)())
-            .collect()
+            .flat_map(|surface_ops| (surface_ops.registrations)());
+        let unified = self
+            .descriptors
+            .values()
+            .filter_map(|descriptor| {
+                descriptor
+                    .unified_surfaces
+                    .map(|ops| (ops, (ops.registrations)()))
+            })
+            .flat_map(|(ops, registrations)| {
+                registrations
+                    .into_iter()
+                    .map(|registration| registration.to_wire(ops.provider_id))
+                    .collect::<Vec<_>>()
+            });
+        legacy.chain(unified).collect()
     }
 }
 
@@ -647,6 +747,10 @@ mod tests {
         ControllerPostUpdateContext, ControllerProtectionContext, ControllerProtectionDecision,
         ControllerUpdateProtection, PostUpdateOutcome, SoftwareItemLifecycleContext,
     };
+    use crate::{
+        InteractionDelivery, InteractionDeliveryKind, PluginSurface, PluginSurfaceRegistration,
+        RegisteredInteraction,
+    };
 
     fn noop_validate(
         _: &serde_json::Value,
@@ -699,6 +803,367 @@ mod tests {
             global_provider_consumers: ["github"],
         }
     );
+
+    // ── A2: unified-surfaces test fixtures ──────────────────────────────────
+
+    struct TestController {
+        tenant_id: uuid::Uuid,
+        user_id: Option<uuid::Uuid>,
+    }
+
+    impl crate::roles::SurfaceActionController for TestController {
+        fn tenant_id(&self) -> uuid::Uuid {
+            self.tenant_id
+        }
+
+        fn user_id(&self) -> Option<uuid::Uuid> {
+            self.user_id
+        }
+
+        #[cfg(feature = "plugin-ops")]
+        #[expect(
+            clippy::unimplemented,
+            reason = "tenant_db is never called by these unit tests"
+        )]
+        fn tenant_db(&self) -> &uptrakit_tenant_db::TenantDb {
+            unimplemented!("tenant_db not used in descriptor.rs surface action context tests")
+        }
+    }
+
+    mod unified_demo_surface_plugin {
+        use super::*;
+
+        fn ping_handler<'a>(
+            _ctx: &'a SurfaceActionContext<'a>,
+            _params: serde_json::Value,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = std::result::Result<serde_json::Value, SurfaceActionError>,
+                    > + Send
+                    + 'a,
+            >,
+        > {
+            Box::pin(async { Ok(serde_json::json!({ "pong": true })) })
+        }
+
+        fn demo_surface_descriptor() -> surfaces::SurfaceDescriptor {
+            surfaces::SurfaceDescriptor::builder()
+                .surface_id(
+                    surfaces::SurfaceId::new("demo.surface").expect("literal surface id is valid"),
+                )
+                .label("Demo Surface")
+                .priority(100)
+                .slot(surfaces::SLOT_SETTINGS_TABS)
+                .scope(surfaces::Scope::Global)
+                .targeting(surfaces::Targeting::Universal)
+                .provider_kind(surfaces::ProviderKind::Plugin)
+                .required_capabilities(surfaces::CapabilitySet::from_capabilities([
+                    surfaces::Capability::TextBlockNode,
+                ]))
+                .root_node(surfaces::SurfaceNode::TextBlock {
+                    text: "ok".to_string(),
+                })
+                .build()
+        }
+
+        fn registrations() -> Vec<PluginSurfaceRegistration> {
+            vec![PluginSurfaceRegistration {
+                surfaces: vec![PluginSurface {
+                    descriptor: demo_surface_descriptor(),
+                    interactions: vec![
+                        RegisteredInteraction::new(
+                            surfaces::InteractionDescriptor::new(
+                                surfaces::InteractionId::new("ping")
+                                    .expect("literal interaction id is valid"),
+                                surfaces::InteractionKind::MutationAction,
+                                "Ping",
+                                surfaces::InteractionTransport::ControllerLocal,
+                            ),
+                            InteractionDelivery::PluginHandled(ping_handler),
+                        ),
+                        RegisteredInteraction::new(
+                            surfaces::InteractionDescriptor::new(
+                                surfaces::InteractionId::new("confirm")
+                                    .expect("literal interaction id is valid"),
+                                surfaces::InteractionKind::MutationAction,
+                                "Confirm",
+                                surfaces::InteractionTransport::ControllerLocal,
+                            ),
+                            InteractionDelivery::ControllerExecutor,
+                        ),
+                    ],
+                    data_sources: vec![],
+                }],
+            }]
+        }
+
+        #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+        struct Config;
+
+        impl crate::PluginConfig for Config {}
+
+        #[expect(
+            dead_code,
+            reason = "constructed by declare_plugin! generated code; not directly instantiated in tests"
+        )]
+        struct Plugin;
+
+        const TYPE_ID: &str = "__test_unified_demo_surface_plugin";
+
+        crate::declare_plugin!(
+            Plugin,
+            Config,
+            TYPE_ID,
+            {
+                display_name: "Test Unified Demo Surface Plugin",
+                family: PluginFamily::Enhancement,
+                config_model: ConfigModel::None,
+                roles: [],
+                unified_surfaces: {
+                    provider_id: "plugin.test_unified_demo_surface",
+                    registrations: registrations,
+                },
+            }
+        );
+    }
+
+    mod unified_dup_surface_plugin_a {
+        use super::*;
+
+        fn dup_surface_descriptor() -> surfaces::SurfaceDescriptor {
+            surfaces::SurfaceDescriptor::builder()
+                .surface_id(
+                    surfaces::SurfaceId::new("demo.shared").expect("literal surface id is valid"),
+                )
+                .label("Dup Surface A")
+                .priority(100)
+                .slot(surfaces::SLOT_SETTINGS_TABS)
+                .scope(surfaces::Scope::Global)
+                .targeting(surfaces::Targeting::Universal)
+                .provider_kind(surfaces::ProviderKind::Plugin)
+                .required_capabilities(surfaces::CapabilitySet::from_capabilities([
+                    surfaces::Capability::TextBlockNode,
+                ]))
+                .root_node(surfaces::SurfaceNode::TextBlock {
+                    text: "a".to_string(),
+                })
+                .build()
+        }
+
+        fn registrations() -> Vec<PluginSurfaceRegistration> {
+            vec![PluginSurfaceRegistration {
+                surfaces: vec![PluginSurface {
+                    descriptor: dup_surface_descriptor(),
+                    interactions: vec![],
+                    data_sources: vec![],
+                }],
+            }]
+        }
+
+        #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+        struct Config;
+
+        impl crate::PluginConfig for Config {}
+
+        #[expect(
+            dead_code,
+            reason = "constructed by declare_plugin! generated code; not directly instantiated in tests"
+        )]
+        struct Plugin;
+
+        const TYPE_ID: &str = "__test_unified_dup_surface_plugin_a";
+
+        crate::declare_plugin!(
+            Plugin,
+            Config,
+            TYPE_ID,
+            {
+                display_name: "Test Unified Dup Surface Plugin A",
+                family: PluginFamily::Enhancement,
+                config_model: ConfigModel::None,
+                roles: [],
+                unified_surfaces: {
+                    provider_id: "plugin.test_unified_dup_surface_a",
+                    registrations: registrations,
+                },
+            }
+        );
+    }
+
+    mod unified_dup_surface_plugin_b {
+        use super::*;
+
+        fn dup_surface_descriptor() -> surfaces::SurfaceDescriptor {
+            surfaces::SurfaceDescriptor::builder()
+                .surface_id(
+                    surfaces::SurfaceId::new("demo.shared").expect("literal surface id is valid"),
+                )
+                .label("Dup Surface B")
+                .priority(100)
+                .slot(surfaces::SLOT_SETTINGS_TABS)
+                .scope(surfaces::Scope::Global)
+                .targeting(surfaces::Targeting::Universal)
+                .provider_kind(surfaces::ProviderKind::Plugin)
+                .required_capabilities(surfaces::CapabilitySet::from_capabilities([
+                    surfaces::Capability::TextBlockNode,
+                ]))
+                .root_node(surfaces::SurfaceNode::TextBlock {
+                    text: "b".to_string(),
+                })
+                .build()
+        }
+
+        fn registrations() -> Vec<PluginSurfaceRegistration> {
+            vec![PluginSurfaceRegistration {
+                surfaces: vec![PluginSurface {
+                    descriptor: dup_surface_descriptor(),
+                    interactions: vec![],
+                    data_sources: vec![],
+                }],
+            }]
+        }
+
+        #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+        struct Config;
+
+        impl crate::PluginConfig for Config {}
+
+        #[expect(
+            dead_code,
+            reason = "constructed by declare_plugin! generated code; not directly instantiated in tests"
+        )]
+        struct Plugin;
+
+        const TYPE_ID: &str = "__test_unified_dup_surface_plugin_b";
+
+        crate::declare_plugin!(
+            Plugin,
+            Config,
+            TYPE_ID,
+            {
+                display_name: "Test Unified Dup Surface Plugin B",
+                family: PluginFamily::Enhancement,
+                config_model: ConfigModel::None,
+                roles: [],
+                unified_surfaces: {
+                    provider_id: "plugin.test_unified_dup_surface_b",
+                    registrations: registrations,
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn duplicate_unified_surface_id_across_plugins_is_rejected() {
+        let result = PluginCatalog::new(
+            vec![
+                &unified_dup_surface_plugin_a::DESCRIPTOR,
+                &unified_dup_surface_plugin_b::DESCRIPTOR,
+            ],
+            &CatalogConfig::default(),
+            InstancePluginStates::all_disabled(),
+        );
+        let err = result
+            .err()
+            .expect("duplicate unified surface id must fail catalog construction");
+        assert!(
+            err.to_string().contains("duplicate surface id"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn unified_dispatch_map_resolves_plugin_handled_interaction() {
+        let catalog = PluginCatalog::new(
+            vec![&unified_demo_surface_plugin::DESCRIPTOR],
+            &CatalogConfig::default(),
+            InstancePluginStates::all_disabled(),
+        )
+        .expect("catalog should build");
+
+        let controller = TestController {
+            tenant_id: uuid::Uuid::nil(),
+            user_id: None,
+        };
+        let ctx = SurfaceActionContext {
+            controller: &controller,
+        };
+
+        let value = catalog
+            .handle_surface_action(&ctx, "demo.surface", "ping", serde_json::json!({}))
+            .await
+            .expect("plugin-handled interaction should resolve");
+
+        assert_eq!(value, serde_json::json!({ "pong": true }));
+    }
+
+    #[tokio::test]
+    async fn unified_dispatch_map_miss_is_invalid_input() {
+        let catalog = PluginCatalog::new(
+            vec![&unified_demo_surface_plugin::DESCRIPTOR],
+            &CatalogConfig::default(),
+            InstancePluginStates::all_disabled(),
+        )
+        .expect("catalog should build");
+
+        let controller = TestController {
+            tenant_id: uuid::Uuid::nil(),
+            user_id: None,
+        };
+        let ctx = SurfaceActionContext {
+            controller: &controller,
+        };
+
+        let err = catalog
+            .handle_surface_action(&ctx, "demo.surface", "missing", serde_json::json!({}))
+            .await
+            .expect_err("unknown interaction id must not resolve");
+
+        match err {
+            SurfaceActionError::InvalidInput(msg) => {
+                assert!(
+                    msg.contains("demo.surface"),
+                    "message should name the surface id: {msg}"
+                );
+                assert!(
+                    msg.contains("missing"),
+                    "message should name the interaction id: {msg}"
+                );
+            }
+            other => panic!("expected InvalidInput, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn interaction_deliveries_reports_surface_interaction_kind_triples() {
+        let catalog = PluginCatalog::new(
+            vec![&unified_demo_surface_plugin::DESCRIPTOR],
+            &CatalogConfig::default(),
+            InstancePluginStates::all_disabled(),
+        )
+        .expect("catalog should build");
+
+        let deliveries = catalog.interaction_deliveries();
+
+        assert!(!deliveries.is_empty(), "must report at least one delivery");
+        assert!(
+            deliveries.contains(&(
+                "demo.surface".to_string(),
+                "ping".to_string(),
+                InteractionDeliveryKind::PluginHandled,
+            )),
+            "must report the PluginHandled interaction: {deliveries:?}"
+        );
+        assert!(
+            deliveries.contains(&(
+                "demo.surface".to_string(),
+                "confirm".to_string(),
+                InteractionDeliveryKind::ControllerExecutor,
+            )),
+            "must report the ControllerExecutor interaction: {deliveries:?}"
+        );
+    }
 
     struct RecordingLifecyclePlugin;
 
@@ -863,6 +1328,7 @@ mod tests {
         },
         surface_actions: None,
         surfaces: Some(&TEST_SURFACE_OPS),
+        unified_surfaces: None,
         type_settings: None,
         config_test: None,
         sudo: None,
@@ -907,6 +1373,7 @@ mod tests {
         },
         surface_actions: None,
         surfaces: None,
+        unified_surfaces: None,
         type_settings: None,
         config_test: None,
         sudo: None,
@@ -951,6 +1418,7 @@ mod tests {
         },
         surface_actions: None,
         surfaces: None,
+        unified_surfaces: None,
         type_settings: None,
         config_test: None,
         sudo: None,
@@ -995,6 +1463,7 @@ mod tests {
         },
         surface_actions: None,
         surfaces: None,
+        unified_surfaces: None,
         type_settings: None,
         config_test: None,
         sudo: None,
@@ -1038,6 +1507,7 @@ mod tests {
         },
         surface_actions: None,
         surfaces: None,
+        unified_surfaces: None,
         type_settings: None,
         config_test: None,
         sudo: None,
@@ -1277,6 +1747,7 @@ mod tests {
         },
         surface_actions: None,
         surfaces: None,
+        unified_surfaces: None,
         type_settings: None,
         config_test: None,
         sudo: None,
@@ -1342,6 +1813,7 @@ mod tests {
         },
         surface_actions: None,
         surfaces: None,
+        unified_surfaces: None,
         type_settings: None,
         config_test: None,
         sudo: None,

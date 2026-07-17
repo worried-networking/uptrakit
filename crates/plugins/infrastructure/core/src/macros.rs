@@ -68,6 +68,10 @@ macro_rules! declare_plugin {
             $(, surfaces: {
                 registrations: $surface_registrations_fn:expr $(,)?
             } )?
+            $(, unified_surfaces: {
+                provider_id: $unified_provider_id:expr,
+                registrations: $unified_registrations_fn:expr $(,)?
+            } )?
             $(, migrations: $migrations_fn:expr )?
             $(, agent_migrations: $agent_migrations_fn:expr )?
             $(, reset_tenant_data: $reset_fn:expr )?
@@ -190,6 +194,13 @@ macro_rules! declare_plugin {
             $crate::__declare_surface_ops_static!($surface_registrations_fn);
         )?
 
+        // Unified surface ops static — $unified_registrations_fn drives this repetition
+        $(
+            $crate::__declare_unified_surface_ops_static!(
+                $unified_provider_id, $unified_registrations_fn
+            );
+        )?
+
         // ── 5. Static descriptor ────────────────────────────────────────
         pub static DESCRIPTOR: $crate::PluginDescriptor = $crate::PluginDescriptor {
             type_id: $type_id,
@@ -297,6 +308,9 @@ macro_rules! declare_plugin {
             ),
             surfaces: $crate::__optional_static_ref!(surfaces
                 $(, surfaces: { registrations: $surface_registrations_fn } )?
+            ),
+            unified_surfaces: $crate::__optional_static_ref!(unified_surfaces
+                $(, unified_surfaces: { provider_id: $unified_provider_id } )?
             ),
             type_settings: $crate::__optional_static_ref!(type_settings
                 $(, type_settings: $ts_marker )?
@@ -823,6 +837,19 @@ macro_rules! __declare_surface_ops_static {
     };
 }
 
+#[macro_export]
+#[doc(hidden)]
+macro_rules! __declare_unified_surface_ops_static {
+    ($provider_id:expr, $registrations_fn:expr) => {
+        #[doc(hidden)]
+        static __PLUGIN_UNIFIED_SURFACES: $crate::PluginSurfaceRegistrationOps =
+            $crate::PluginSurfaceRegistrationOps {
+                provider_id: $provider_id,
+                registrations: $registrations_fn,
+            };
+    };
+}
+
 /// Reference to an optional static section. Returns `Some(&STATIC)` or `None`.
 #[macro_export]
 #[doc(hidden)]
@@ -849,6 +876,12 @@ macro_rules! __optional_static_ref {
         Some(&__PLUGIN_SURFACES)
     };
     (surfaces) => {
+        None
+    };
+    (unified_surfaces, unified_surfaces: { provider_id: $unified_provider_id:expr }) => {
+        Some(&__PLUGIN_UNIFIED_SURFACES)
+    };
+    (unified_surfaces) => {
         None
     };
 }

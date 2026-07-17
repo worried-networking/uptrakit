@@ -111,11 +111,12 @@ pub use descriptor::{
     CreateControllerProtectionFn, CreateEnhancementFn, CreateInstalledVersionEnricherFn,
     CreateReleaseFetcherFn, CreateRoleFn, CreateTransportFn, GlobalProviderConsumerDecl,
     GlobalProviderLookup, InstalledVersionEnricherSlot, InstanceConfigOps, PluginDescriptor,
-    PluginFamily, PluginScope, ReleaseFetcherSlot, RoleCreators, RoleSlot, SurfaceActionContext,
-    SurfaceActionDescriptor, SurfaceActionError, SurfaceActionHandler, SurfaceActionLibrary,
-    SurfaceActionUi, SurfaceFormDescriptor, SurfaceManifest, SurfacePlacement,
-    SurfaceRegistrationOps, SurfaceRowCondition, SurfaceRowVisibleWhen, SurfaceTableColumn,
-    SurfaceTargeting, SurfaceUiDefinition, SurfaceWorkflowStep, TypeSettingsOps,
+    PluginFamily, PluginScope, PluginSurfaceRegistrationOps, ReleaseFetcherSlot, RoleCreators,
+    RoleSlot, SurfaceActionContext, SurfaceActionDescriptor, SurfaceActionError,
+    SurfaceActionHandler, SurfaceActionLibrary, SurfaceActionUi, SurfaceFormDescriptor,
+    SurfaceManifest, SurfacePlacement, SurfaceRegistrationOps, SurfaceRowCondition,
+    SurfaceRowVisibleWhen, SurfaceTableColumn, SurfaceTargeting, SurfaceUiDefinition,
+    SurfaceWorkflowStep, TypeSettingsOps,
 };
 pub use descriptor::{DbMigrateTablesFn, InfraBundle, InfraSlot, MigrationsFn};
 pub use form_schema::{
