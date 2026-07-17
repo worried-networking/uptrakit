@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.5](https://github.com/worried-networking/uptrakit/compare/uptrakit-agent-v0.0.4...uptrakit-agent-v0.0.5) - 2026-07-17
+
+### Added
+
+- *(backoff)* [**breaking**] rewrite API with consuming guard pattern
+
+### Fixed
+
+- *(build-info)* align --version with binary crate via build_info! macro
+- *(agent-runtime)* resolve interactive channels in the event loop select
+- *(agent-core)* interactive updates return immediately; UpdateStarted carries dispatch intent
+- *(agent-core)* bound and group-kill interactive PTY child on cancellation
+- *(agent-core)* PTY promotion targets only the update command via update_exec_runtime seam
+
+### Other
+
+- *(agent-core)* deadlock and PTY-targeting regressions with stub lifecycle-hook plugin
+- *(agent-core)* migrate version_check retry to backon
+- *(backoff)* [**breaking**] drop AttemptGuard, ship plain methods
+
 ## [0.0.4](https://github.com/worried-networking/uptrakit/compare/uptrakit-agent-v0.0.3...uptrakit-agent-v0.0.4) - 2026-06-04
 
 ### Added
