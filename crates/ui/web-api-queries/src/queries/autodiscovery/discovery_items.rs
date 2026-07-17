@@ -397,92 +397,87 @@ async fn find_or_create_software_item(
             linked_item
         };
 
-        // Only update installed_version for non-featured (not yet approved) items.
-        // Featured items get their version from the DetectVersion scheduled
-        // task using the user's assigned plugin config.
-        if !effective_item.featured {
-            // Collision rule 1: prefer an ACTIVE link row for the *target*
-            // (host, effective_item, qualifier) key over repointing/reactivating
-            // a deactivated duplicate. This also covers the cascade-repoint case:
-            // if the active item already has an active link, prefer it and leave
-            // the originally deactivated link (still keyed to `linked_item_id`)
-            // untouched.
-            let mut target_hsi_query = HostSoftwareItem::find()
-                .filter(host_software_item::Column::HostId.eq(host_id))
-                .filter(host_software_item::Column::SoftwareItemId.eq(effective_item.id))
-                .filter(host_software_item::Column::DeactivatedAt.is_null());
-            target_hsi_query = match item.qualifier {
-                Some(q) => target_hsi_query.filter(host_software_item::Column::Qualifier.eq(q)),
-                None => target_hsi_query.filter(host_software_item::Column::Qualifier.is_null()),
-            };
-            let active_target_hsi = target_hsi_query.one(db).await.context_to()?;
+        // Update installed version + discovery provenance for the matched link.
+        // `featured` is only a presentation flag (individual list entry vs
+        // aggregated per-host summary), not an approval/version-ownership signal,
+        // so it must NOT gate this write: discovery is the source of truth for the
+        // installed version and for reconciliation provenance
+        // (`last_discovered_at`/`discovery_source`) on every discovered item.
+        //
+        // Collision rule 1: prefer an ACTIVE link row for the *target*
+        // (host, effective_item, qualifier) key over repointing/reactivating
+        // a deactivated duplicate. This also covers the cascade-repoint case:
+        // if the active item already has an active link, prefer it and leave
+        // the originally deactivated link (still keyed to `linked_item_id`)
+        // untouched.
+        let mut target_hsi_query = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .filter(host_software_item::Column::SoftwareItemId.eq(effective_item.id))
+            .filter(host_software_item::Column::DeactivatedAt.is_null());
+        target_hsi_query = match item.qualifier {
+            Some(q) => target_hsi_query.filter(host_software_item::Column::Qualifier.eq(q)),
+            None => target_hsi_query.filter(host_software_item::Column::Qualifier.is_null()),
+        };
+        let active_target_hsi = target_hsi_query.one(db).await.context_to()?;
 
-            let hsi_to_update = if let Some(active_hsi) = active_target_hsi {
-                Some(active_hsi)
-            } else {
-                // No active row at the target key yet: reactivate/repoint the
-                // link row currently keyed to `linked_item_id` (the row Phase 1
-                // actually matched).
-                let mut orig_hsi_query = HostSoftwareItem::find()
-                    .filter(host_software_item::Column::HostId.eq(host_id))
-                    .filter(host_software_item::Column::SoftwareItemId.eq(linked_item_id));
-                orig_hsi_query = match item.qualifier {
-                    Some(q) => orig_hsi_query.filter(host_software_item::Column::Qualifier.eq(q)),
-                    None => orig_hsi_query.filter(host_software_item::Column::Qualifier.is_null()),
-                };
-                orig_hsi_query.one(db).await.context_to()?
-            };
-
-            if let Some(hsi) = hsi_to_update {
-                let target_hsi_id = hsi.id;
-                let was_deactivated = hsi.deactivated_at.is_some();
-                let mut active: host_software_item::ActiveModel = hsi.into();
-                active.software_item_id = Set(effective_item.id);
-                active.installed_version = Set(Some(installed_version.to_string()));
-                active.installed_version_detected_at = Set(Some(now));
-                active.installed_display_version =
-                    Set(item.installed_display_version.map(str::to_string));
-                active.last_discovered_at = Set(Some(now));
-                active.discovery_source = Set(Some(discovery_source.to_string()));
-                active.missing_since = Set(None);
-                active.deactivated_at = Set(None);
-                let updated_hsi = active.update(db).await.context_to()?;
-                if was_deactivated {
-                    emit_reactivation_event(
-                        ctx.audit,
-                        tenant_id,
-                        AuditActionType::HOST_SOFTWARE_ITEM_REACTIVATE,
-                        &HostSoftwareItemLinkView::from(&updated_hsi),
-                    );
-                }
-
-                // Cascade repoint (collision rule 2) moved the live identity
-                // from `linked_item_id` to `effective_item.id`. The matched
-                // `plugin_link` -- and any sibling role rows for the same
-                // `(host, linked_item)` identity, since Phase 1 only matched
-                // one role -- still reference the pre-repoint identity via
-                // their own `software_item_id`/`host_software_item_id`
-                // columns (set once at insert time, never updated above).
-                // Bring every such row in line with the live target so role
-                // dispatch never desyncs from the reactivated item.
-                if effective_item.id != linked_item_id {
-                    reconcile_stale_plugin_links(
-                        db,
-                        host_id,
-                        linked_item_id,
-                        effective_item.id,
-                        target_hsi_id,
-                    )
-                    .await?;
-                }
-            }
+        let hsi_to_update = if let Some(active_hsi) = active_target_hsi {
+            Some(active_hsi)
         } else {
-            tracing::debug!(
-                software_item_id = %effective_item.id,
-                featured = effective_item.featured,
-                %package_identifier,
-                "skipping installed_version update for featured software item"
-            );
+            // No active row at the target key yet: reactivate/repoint the
+            // link row currently keyed to `linked_item_id` (the row Phase 1
+            // actually matched).
+            let mut orig_hsi_query = HostSoftwareItem::find()
+                .filter(host_software_item::Column::HostId.eq(host_id))
+                .filter(host_software_item::Column::SoftwareItemId.eq(linked_item_id));
+            orig_hsi_query = match item.qualifier {
+                Some(q) => orig_hsi_query.filter(host_software_item::Column::Qualifier.eq(q)),
+                None => orig_hsi_query.filter(host_software_item::Column::Qualifier.is_null()),
+            };
+            orig_hsi_query.one(db).await.context_to()?
+        };
+
+        if let Some(hsi) = hsi_to_update {
+            let target_hsi_id = hsi.id;
+            let was_deactivated = hsi.deactivated_at.is_some();
+            let mut active: host_software_item::ActiveModel = hsi.into();
+            active.software_item_id = Set(effective_item.id);
+            active.installed_version = Set(Some(installed_version.to_string()));
+            active.installed_version_detected_at = Set(Some(now));
+            active.installed_display_version =
+                Set(item.installed_display_version.map(str::to_string));
+            active.last_discovered_at = Set(Some(now));
+            active.discovery_source = Set(Some(discovery_source.to_string()));
+            active.missing_since = Set(None);
+            active.deactivated_at = Set(None);
+            let updated_hsi = active.update(db).await.context_to()?;
+            if was_deactivated {
+                emit_reactivation_event(
+                    ctx.audit,
+                    tenant_id,
+                    AuditActionType::HOST_SOFTWARE_ITEM_REACTIVATE,
+                    &HostSoftwareItemLinkView::from(&updated_hsi),
+                );
+            }
+
+            // Cascade repoint (collision rule 2) moved the live identity
+            // from `linked_item_id` to `effective_item.id`. The matched
+            // `plugin_link` -- and any sibling role rows for the same
+            // `(host, linked_item)` identity, since Phase 1 only matched
+            // one role -- still reference the pre-repoint identity via
+            // their own `software_item_id`/`host_software_item_id`
+            // columns (set once at insert time, never updated above).
+            // Bring every such row in line with the live target so role
+            // dispatch never desyncs from the reactivated item.
+            if effective_item.id != linked_item_id {
+                reconcile_stale_plugin_links(
+                    db,
+                    host_id,
+                    linked_item_id,
+                    effective_item.id,
+                    target_hsi_id,
+                )
+                .await?;
+            }
         }
         return Ok(None);
     }
@@ -1137,12 +1132,12 @@ mod tests {
         );
     }
 
-    /// When a software item is featured (approved), periodic re-discovery
-    /// must NOT overwrite `installed_version`. The proper `DetectVersion`
-    /// scheduled task handles version detection for featured items using
-    /// the user's assigned plugin config.
+    /// `featured` is only a presentation flag, not an approval/version-ownership
+    /// signal: re-discovery of a featured item must update `installed_version`
+    /// AND stamp discovery provenance (`last_discovered_at`/`discovery_source`),
+    /// exactly like a non-featured item, so reconciliation can track it.
     #[tokio::test]
-    async fn process_one_discovery_featured_item_skips_version_update() {
+    async fn process_one_discovery_featured_item_updates_version_and_provenance() {
         let db = setup_db().await;
         let tenant_id = Uuid::now_v7();
         let host_id = Uuid::now_v7();
@@ -1154,7 +1149,7 @@ mod tests {
         insert_host(&db, host_id, tenant_id).await;
         insert_plugin_config(&db, pc_id, tenant_id).await;
 
-        // Insert a featured software item (user has approved it).
+        // Insert a featured software item.
         let model = software_item::ActiveModel {
             id: Set(item_id),
             tenant_id: Set(tenant_id),
@@ -1172,6 +1167,7 @@ mod tests {
             .await
             .expect("insert featured software_item");
 
+        // insert_host_link seeds installed_version="1.0.0" and NULL provenance.
         insert_host_link(&db, host_id, item_id, pc_id, "wget").await;
 
         let args = DiscoveredItemInfo {
@@ -1213,15 +1209,24 @@ mod tests {
             .expect("link must exist");
         assert_eq!(
             link.installed_version.as_deref(),
-            Some("1.0.0"),
-            "installed_version must NOT be overwritten for featured items"
+            Some("2.0.0"),
+            "installed_version must be updated from discovery for featured items"
+        );
+        assert!(
+            link.last_discovered_at.is_some(),
+            "last_discovered_at must be stamped for featured items"
+        );
+        assert_eq!(
+            link.discovery_source.as_deref(),
+            Some("package_manager_homebrew"),
+            "discovery_source must be stamped for featured items"
         );
     }
 
-    /// When a software item is featured (manually created and enabled),
-    /// periodic re-discovery must NOT overwrite `installed_version`.
+    /// A manually-created featured item is likewise updated by re-discovery:
+    /// `featured` never suppresses the version/provenance write.
     #[tokio::test]
-    async fn process_one_discovery_manual_featured_item_skips_version_update() {
+    async fn process_one_discovery_manual_featured_item_updates_version_and_provenance() {
         let db = setup_db().await;
         let tenant_id = Uuid::now_v7();
         let host_id = Uuid::now_v7();
@@ -1284,8 +1289,12 @@ mod tests {
             .expect("link must exist");
         assert_eq!(
             link.installed_version.as_deref(),
-            Some("1.0.0"),
-            "installed_version must NOT be overwritten for manual items"
+            Some("2.0.0"),
+            "installed_version must be updated from discovery for manual featured items"
+        );
+        assert!(
+            link.last_discovered_at.is_some(),
+            "last_discovered_at must be stamped for manual featured items"
         );
     }
 
