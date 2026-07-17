@@ -4,9 +4,6 @@
 )]
 //! Email notification plugin implementation and `declare_plugin!` invocation.
 
-use std::collections::BTreeSet;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -21,9 +18,8 @@ use uptrakit_notification_plugin_core::{
     DeliveryMessage, NotificationPluginError, Result, escape_html,
 };
 use uptrakit_plugin_infrastructure_core::{
-    ApiSubmitDescriptor, ConfigModel, FormFieldDescriptor, FormFieldType,
-    FormSelectOptionDescriptor, PluginFamily, SurfaceActionDescriptor, SurfaceActionUi,
-    SurfaceFormDescriptor, declare_plugin, surfaces,
+    ConfigModel, InteractionDelivery, PluginFamily, PluginSurface, PluginSurfaceRegistration,
+    RegisteredInteraction, declare_plugin, surfaces,
 };
 
 use crate::config::EmailChannelConfig;
@@ -436,143 +432,6 @@ impl uptrakit_plugin_infrastructure_core::NotificationTransport for EmailPlugin 
     }
 }
 
-/// Return surface action definitions for the email plugin.
-fn email_surface_actions() -> Vec<SurfaceActionDescriptor> {
-    vec![
-        SurfaceActionDescriptor::new("list", "List"),
-        SurfaceActionDescriptor::new("create", "Add Email Channel")
-            .with_permission("manage_notifications")
-            .with_ui(SurfaceActionUi::Form(SurfaceFormDescriptor::new(vec![
-                FormFieldDescriptor::new("name", "Name").required(),
-                FormFieldDescriptor::new("to_addresses", "Recipients")
-                    .required()
-                    .with_type(FormFieldType::Textarea)
-                    .with_placeholder("user@example.com\nadmin@example.com")
-                    .with_help_text("One email address per line"),
-                FormFieldDescriptor::new("enabled", "Enabled")
-                    .with_type(FormFieldType::Toggle)
-                    .with_default_value(serde_json::json!("true")),
-            ])))
-            .with_api_submit(
-                ApiSubmitDescriptor::new(
-                    "POST",
-                    "/api/v1/notifications/channels",
-                    serde_json::json!({
-                        "name": "{{name}}",
-                        "channel_type": "email",
-                        "config": {
-                            "to_addresses": "{{to_addresses}}"
-                        },
-                        "enabled": "{{enabled:bool}}"
-                    }),
-                )
-                .with_response_id_field("id"),
-            ),
-        SurfaceActionDescriptor::new("edit", "Edit")
-            .with_permission("manage_notifications")
-            .with_ui(SurfaceActionUi::Form(SurfaceFormDescriptor::new(vec![
-                FormFieldDescriptor::new("id", "ID").with_type(FormFieldType::Hidden),
-                FormFieldDescriptor::new("name", "Name").required(),
-                FormFieldDescriptor::new("to_addresses", "Recipients")
-                    .required()
-                    .with_type(FormFieldType::Textarea)
-                    .with_placeholder("user@example.com\nadmin@example.com")
-                    .with_help_text("One email address per line"),
-                FormFieldDescriptor::new("enabled", "Enabled")
-                    .with_type(FormFieldType::Toggle)
-                    .with_default_value(serde_json::json!("true")),
-            ])))
-            .with_api_submit(ApiSubmitDescriptor::new(
-                "PUT",
-                "/api/v1/notifications/channels/{{id}}",
-                serde_json::json!({
-                    "name": "{{name}}",
-                    "config": {
-                        "to_addresses": "{{to_addresses}}"
-                    },
-                    "enabled": "{{enabled:bool}}"
-                }),
-            )),
-        SurfaceActionDescriptor::new("test", "Test")
-            .with_permission("manage_notifications")
-            .with_api_submit(ApiSubmitDescriptor::new(
-                "POST",
-                "/api/v1/notifications/channels/{{id}}/test",
-                serde_json::json!({}),
-            )),
-        SurfaceActionDescriptor::new("delete", "Delete")
-            .with_permission("manage_notifications")
-            .destructive()
-            .with_confirm_entity_field("name")
-            .with_api_submit(ApiSubmitDescriptor::new(
-                "DELETE",
-                "/api/v1/notifications/channels/{{id}}",
-                serde_json::json!({}),
-            )),
-        SurfaceActionDescriptor::new("configure_smtp", "Override SMTP")
-            .with_permission("manage_notifications")
-            .with_ui(SurfaceActionUi::Form(
-                SurfaceFormDescriptor::new(vec![
-                    FormFieldDescriptor::new("host", "SMTP Host")
-                        .with_placeholder("smtp.example.com"),
-                    FormFieldDescriptor::new("port", "Port")
-                        .with_type(FormFieldType::Number)
-                        .with_default_value(serde_json::json!("587")),
-                    FormFieldDescriptor::new("tls_mode", "TLS Mode")
-                        .with_type(FormFieldType::Select)
-                        .with_options(vec![
-                            FormSelectOptionDescriptor::new("starttls", "STARTTLS (port 587)"),
-                            FormSelectOptionDescriptor::new("tls", "TLS (port 465)"),
-                            FormSelectOptionDescriptor::new("none", "None (port 25)"),
-                        ])
-                        .with_default_value(serde_json::json!("starttls")),
-                    FormFieldDescriptor::new("from_address", "From Address")
-                        .with_placeholder("noreply@example.com"),
-                    FormFieldDescriptor::new("from_name", "From Name")
-                        .with_placeholder("Uptrakit Notifications"),
-                    FormFieldDescriptor::new("username", "Username")
-                        .with_placeholder("SMTP username"),
-                    FormFieldDescriptor::new("password", "Password")
-                        .with_type(FormFieldType::Password)
-                        .with_help_text("Leave empty to keep current password"),
-                ])
-                .with_pre_load_action("get_smtp"),
-            )),
-        SurfaceActionDescriptor::new("get_smtp", "Get SMTP Settings"),
-        SurfaceActionDescriptor::new("test_global_smtp_email", "Send Test Email")
-            .with_permission("manage_global_settings"),
-        SurfaceActionDescriptor::new("get_global_smtp", "Get Global SMTP Defaults"),
-        SurfaceActionDescriptor::new("save_global_smtp", "Save Global SMTP Defaults")
-            .with_permission("manage_global_settings"),
-    ]
-}
-
-/// Surface action handler wrapper for the `declare_plugin!` macro.
-///
-/// Matches the `SurfaceActionHandler` type signature, which receives a typed
-/// `SurfaceActionContext` exposing the controller through
-/// `SurfaceActionController`, and delegates to `surfaces::handle_surface_action`.
-fn email_handle_surface_action<'a>(
-    ctx: &'a uptrakit_plugin_infrastructure_core::SurfaceActionContext<'a>,
-    surface_id: &'a str,
-    action_id: &'a str,
-    params: serde_json::Value,
-) -> Pin<
-    Box<
-        dyn Future<
-                Output = std::result::Result<
-                    serde_json::Value,
-                    uptrakit_plugin_infrastructure_core::SurfaceActionError,
-                >,
-            > + Send
-            + 'a,
-    >,
-> {
-    Box::pin(async move {
-        crate::surfaces::handle_surface_action(ctx, surface_id, action_id, params).await
-    })
-}
-
 /// Create the email transport singleton from catalog config.
 fn create_email_transport(
     _config: &uptrakit_plugin_infrastructure_core::CatalogConfig,
@@ -582,21 +441,11 @@ fn create_email_transport(
     Ok(Arc::new(EmailPlugin))
 }
 
-fn collect_registration_capabilities(
-    surfaces: &[surfaces::RegisteredSurface],
-) -> surfaces::CapabilitySet {
-    let mut caps = BTreeSet::new();
-    for surface in surfaces {
-        caps.extend(surface.descriptor.required_capabilities.0.iter().cloned());
-    }
-    surfaces::CapabilitySet(caps)
-}
-
-fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
+fn email_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
     let channel_surface = {
         let data_source_id =
             surfaces::DataSourceId::new("data.primary").expect("literal data source id is valid");
-        surfaces::RegisteredSurface {
+        PluginSurface {
             descriptor: surfaces::SurfaceDescriptor::builder()
                 .surface_id(
                     surfaces::SurfaceId::new("notifications.email")
@@ -663,332 +512,357 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                 ))
                 .build(),
             interactions: vec![
-                {
-                    let mut i = surfaces::InteractionDescriptor::new(
-                        surfaces::InteractionId::new("list")
-                            .expect("literal interaction id is valid"),
-                        surfaces::InteractionKind::DataLoad,
-                        "List",
-                        surfaces::InteractionTransport::ControllerLocal,
-                    );
-                    i.result_schema = Some(surfaces::SchemaContract::Any);
-                    i
-                },
-                {
-                    let mut i = surfaces::InteractionDescriptor::new(
-                        surfaces::InteractionId::new("create")
-                            .expect("literal interaction id is valid"),
-                        surfaces::InteractionKind::FormSubmit,
-                        "Add Email Channel",
-                        surfaces::InteractionTransport::ControllerLocal,
-                    );
-                    i.required_permission = Some("manage_notifications".to_string());
-                    i.input_schema = Some(surfaces::SchemaContract::Object);
-                    i.result_schema = Some(surfaces::SchemaContract::Any);
-                    i.form_ui = Some(surfaces::FormUiDescriptor {
-                        fields: vec![
-                            surfaces::FormFieldDescriptor {
-                                key: "name".to_string(),
-                                label: "Name".to_string(),
-                                field_type: "text".to_string(),
-                                required: true,
-                                placeholder: None,
-                                help_text: None,
-                                default_value: None,
-                                options: vec![],
-                                select_source: None,
-                                sensitive: false,
-                                list: false,
-                                visible_when: None,
-                            },
-                            surfaces::FormFieldDescriptor {
-                                key: "to_addresses".to_string(),
-                                label: "Recipients".to_string(),
-                                field_type: "textarea".to_string(),
-                                required: true,
-                                placeholder: Some(
-                                    "user@example.com\nadmin@example.com".to_string(),
-                                ),
-                                help_text: Some("One email address per line".to_string()),
-                                default_value: None,
-                                options: vec![],
-                                select_source: None,
-                                sensitive: false,
-                                list: false,
-                                visible_when: None,
-                            },
-                            surfaces::FormFieldDescriptor {
-                                key: "enabled".to_string(),
-                                label: "Enabled".to_string(),
-                                field_type: "toggle".to_string(),
-                                required: false,
-                                placeholder: None,
-                                help_text: None,
-                                default_value: Some("true".to_string()),
-                                options: vec![],
-                                select_source: None,
-                                sensitive: false,
-                                list: false,
-                                visible_when: None,
-                            },
-                        ],
-                        pre_load_interaction_id: None,
-                    });
-                    i
-                },
-                {
-                    let mut i = surfaces::InteractionDescriptor::new(
-                        surfaces::InteractionId::new("edit")
-                            .expect("literal interaction id is valid"),
-                        surfaces::InteractionKind::FormSubmit,
-                        "Edit",
-                        surfaces::InteractionTransport::ControllerLocal,
-                    );
-                    i.required_permission = Some("manage_notifications".to_string());
-                    i.input_schema = Some(surfaces::SchemaContract::Object);
-                    i.result_schema = Some(surfaces::SchemaContract::Any);
-                    i.form_ui = Some(surfaces::FormUiDescriptor {
-                        fields: vec![
-                            surfaces::FormFieldDescriptor {
-                                key: "id".to_string(),
-                                label: "ID".to_string(),
-                                field_type: "hidden".to_string(),
-                                required: false,
-                                placeholder: None,
-                                help_text: None,
-                                default_value: None,
-                                options: vec![],
-                                select_source: None,
-                                sensitive: false,
-                                list: false,
-                                visible_when: None,
-                            },
-                            surfaces::FormFieldDescriptor {
-                                key: "name".to_string(),
-                                label: "Name".to_string(),
-                                field_type: "text".to_string(),
-                                required: true,
-                                placeholder: None,
-                                help_text: None,
-                                default_value: None,
-                                options: vec![],
-                                select_source: None,
-                                sensitive: false,
-                                list: false,
-                                visible_when: None,
-                            },
-                            surfaces::FormFieldDescriptor {
-                                key: "to_addresses".to_string(),
-                                label: "Recipients".to_string(),
-                                field_type: "textarea".to_string(),
-                                required: true,
-                                placeholder: Some(
-                                    "user@example.com\nadmin@example.com".to_string(),
-                                ),
-                                help_text: Some("One email address per line".to_string()),
-                                default_value: None,
-                                options: vec![],
-                                select_source: None,
-                                sensitive: false,
-                                list: false,
-                                visible_when: None,
-                            },
-                            surfaces::FormFieldDescriptor {
-                                key: "enabled".to_string(),
-                                label: "Enabled".to_string(),
-                                field_type: "toggle".to_string(),
-                                required: false,
-                                placeholder: None,
-                                help_text: None,
-                                default_value: Some("true".to_string()),
-                                options: vec![],
-                                select_source: None,
-                                sensitive: false,
-                                list: false,
-                                visible_when: None,
-                            },
-                        ],
-                        pre_load_interaction_id: None,
-                    });
-                    i
-                },
-                {
-                    let mut i = surfaces::InteractionDescriptor::new(
-                        surfaces::InteractionId::new("test")
-                            .expect("literal interaction id is valid"),
-                        surfaces::InteractionKind::MutationAction,
-                        "Test",
-                        surfaces::InteractionTransport::ControllerLocal,
-                    );
-                    i.required_permission = Some("manage_notifications".to_string());
-                    i.input_schema = Some(surfaces::SchemaContract::Object);
-                    i.result_schema = Some(surfaces::SchemaContract::Any);
-                    i
-                },
-                {
-                    let mut i = surfaces::InteractionDescriptor::new(
-                        surfaces::InteractionId::new("delete")
-                            .expect("literal interaction id is valid"),
-                        surfaces::InteractionKind::ConfirmableAction,
-                        "Delete",
-                        surfaces::InteractionTransport::ControllerLocal,
-                    );
-                    i.required_permission = Some("manage_notifications".to_string());
-                    i.input_schema = Some(surfaces::SchemaContract::Object);
-                    i.result_schema = Some(surfaces::SchemaContract::Any);
-                    i.confirmation = Some(surfaces::InteractionConfirmation {
-                        title: "Confirm Delete".to_string(),
-                        message: "This action may modify existing data.".to_string(),
-                        confirm_label: None,
-                        cancel_label: None,
-                        severity: surfaces::ConfirmationSeverity::Danger,
-                    });
-                    i
-                },
-                {
-                    let mut i = surfaces::InteractionDescriptor::new(
-                        surfaces::InteractionId::new("configure_smtp")
-                            .expect("literal interaction id is valid"),
-                        surfaces::InteractionKind::FormSubmit,
-                        "Override SMTP",
-                        surfaces::InteractionTransport::ControllerLocal,
-                    );
-                    i.required_permission = Some("manage_notifications".to_string());
-                    i.input_schema = Some(surfaces::SchemaContract::Object);
-                    i.result_schema = Some(surfaces::SchemaContract::Any);
-                    i.sensitive_fields = vec!["password".to_string()];
-                    i.form_ui = Some(surfaces::FormUiDescriptor {
-                        fields: vec![
-                            surfaces::FormFieldDescriptor {
-                                key: "host".to_string(),
-                                label: "SMTP Host".to_string(),
-                                field_type: "text".to_string(),
-                                required: false,
-                                placeholder: Some("smtp.example.com".to_string()),
-                                help_text: None,
-                                default_value: None,
-                                options: vec![],
-                                select_source: None,
-                                sensitive: false,
-                                list: false,
-                                visible_when: None,
-                            },
-                            surfaces::FormFieldDescriptor {
-                                key: "port".to_string(),
-                                label: "Port".to_string(),
-                                field_type: "number".to_string(),
-                                required: false,
-                                placeholder: None,
-                                help_text: None,
-                                default_value: Some("587".to_string()),
-                                options: vec![],
-                                select_source: None,
-                                sensitive: false,
-                                list: false,
-                                visible_when: None,
-                            },
-                            surfaces::FormFieldDescriptor {
-                                key: "tls_mode".to_string(),
-                                label: "TLS Mode".to_string(),
-                                field_type: "select".to_string(),
-                                required: false,
-                                placeholder: None,
-                                help_text: None,
-                                default_value: Some("starttls".to_string()),
-                                options: vec![
-                                    surfaces::FormSelectOption {
-                                        value: "starttls".to_string(),
-                                        label: "STARTTLS (port 587)".to_string(),
-                                    },
-                                    surfaces::FormSelectOption {
-                                        value: "tls".to_string(),
-                                        label: "TLS (port 465)".to_string(),
-                                    },
-                                    surfaces::FormSelectOption {
-                                        value: "none".to_string(),
-                                        label: "None (port 25)".to_string(),
-                                    },
-                                ],
-                                select_source: None,
-                                sensitive: false,
-                                list: false,
-                                visible_when: None,
-                            },
-                            surfaces::FormFieldDescriptor {
-                                key: "from_address".to_string(),
-                                label: "From Address".to_string(),
-                                field_type: "text".to_string(),
-                                required: false,
-                                placeholder: Some("noreply@example.com".to_string()),
-                                help_text: None,
-                                default_value: None,
-                                options: vec![],
-                                select_source: None,
-                                sensitive: false,
-                                list: false,
-                                visible_when: None,
-                            },
-                            surfaces::FormFieldDescriptor {
-                                key: "from_name".to_string(),
-                                label: "From Name".to_string(),
-                                field_type: "text".to_string(),
-                                required: false,
-                                placeholder: Some("Uptrakit Notifications".to_string()),
-                                help_text: None,
-                                default_value: None,
-                                options: vec![],
-                                select_source: None,
-                                sensitive: false,
-                                list: false,
-                                visible_when: None,
-                            },
-                            surfaces::FormFieldDescriptor {
-                                key: "username".to_string(),
-                                label: "Username".to_string(),
-                                field_type: "text".to_string(),
-                                required: false,
-                                placeholder: Some("SMTP username".to_string()),
-                                help_text: None,
-                                default_value: None,
-                                options: vec![],
-                                select_source: None,
-                                sensitive: false,
-                                list: false,
-                                visible_when: None,
-                            },
-                            surfaces::FormFieldDescriptor {
-                                key: "password".to_string(),
-                                label: "Password".to_string(),
-                                field_type: "password".to_string(),
-                                required: false,
-                                placeholder: None,
-                                help_text: Some("Leave empty to keep current password".to_string()),
-                                default_value: None,
-                                options: vec![],
-                                select_source: None,
-                                sensitive: false,
-                                list: false,
-                                visible_when: None,
-                            },
-                        ],
-                        pre_load_interaction_id: Some(
+                RegisteredInteraction::new(
+                    {
+                        let mut i = surfaces::InteractionDescriptor::new(
+                            surfaces::InteractionId::new("list")
+                                .expect("literal interaction id is valid"),
+                            surfaces::InteractionKind::DataLoad,
+                            "List",
+                            surfaces::InteractionTransport::ControllerLocal,
+                        );
+                        i.result_schema = Some(surfaces::SchemaContract::Any);
+                        i
+                    },
+                    InteractionDelivery::PluginHandled(crate::surfaces::email_list_handler),
+                ),
+                RegisteredInteraction::new(
+                    {
+                        let mut i = surfaces::InteractionDescriptor::new(
+                            surfaces::InteractionId::new("create")
+                                .expect("literal interaction id is valid"),
+                            surfaces::InteractionKind::FormSubmit,
+                            "Add Email Channel",
+                            surfaces::InteractionTransport::ControllerLocal,
+                        );
+                        i.required_permission = Some("manage_notifications".to_string());
+                        i.input_schema = Some(surfaces::SchemaContract::Object);
+                        i.result_schema = Some(surfaces::SchemaContract::Any);
+                        i.form_ui = Some(surfaces::FormUiDescriptor {
+                            fields: vec![
+                                surfaces::FormFieldDescriptor {
+                                    key: "name".to_string(),
+                                    label: "Name".to_string(),
+                                    field_type: "text".to_string(),
+                                    required: true,
+                                    placeholder: None,
+                                    help_text: None,
+                                    default_value: None,
+                                    options: vec![],
+                                    select_source: None,
+                                    sensitive: false,
+                                    list: false,
+                                    visible_when: None,
+                                },
+                                surfaces::FormFieldDescriptor {
+                                    key: "to_addresses".to_string(),
+                                    label: "Recipients".to_string(),
+                                    field_type: "textarea".to_string(),
+                                    required: true,
+                                    placeholder: Some(
+                                        "user@example.com\nadmin@example.com".to_string(),
+                                    ),
+                                    help_text: Some("One email address per line".to_string()),
+                                    default_value: None,
+                                    options: vec![],
+                                    select_source: None,
+                                    sensitive: false,
+                                    list: false,
+                                    visible_when: None,
+                                },
+                                surfaces::FormFieldDescriptor {
+                                    key: "enabled".to_string(),
+                                    label: "Enabled".to_string(),
+                                    field_type: "toggle".to_string(),
+                                    required: false,
+                                    placeholder: None,
+                                    help_text: None,
+                                    default_value: Some("true".to_string()),
+                                    options: vec![],
+                                    select_source: None,
+                                    sensitive: false,
+                                    list: false,
+                                    visible_when: None,
+                                },
+                            ],
+                            pre_load_interaction_id: None,
+                        });
+                        i
+                    },
+                    InteractionDelivery::ControllerExecutor,
+                ),
+                RegisteredInteraction::new(
+                    {
+                        let mut i = surfaces::InteractionDescriptor::new(
+                            surfaces::InteractionId::new("edit")
+                                .expect("literal interaction id is valid"),
+                            surfaces::InteractionKind::FormSubmit,
+                            "Edit",
+                            surfaces::InteractionTransport::ControllerLocal,
+                        );
+                        i.required_permission = Some("manage_notifications".to_string());
+                        i.input_schema = Some(surfaces::SchemaContract::Object);
+                        i.result_schema = Some(surfaces::SchemaContract::Any);
+                        i.form_ui = Some(surfaces::FormUiDescriptor {
+                            fields: vec![
+                                surfaces::FormFieldDescriptor {
+                                    key: "id".to_string(),
+                                    label: "ID".to_string(),
+                                    field_type: "hidden".to_string(),
+                                    required: false,
+                                    placeholder: None,
+                                    help_text: None,
+                                    default_value: None,
+                                    options: vec![],
+                                    select_source: None,
+                                    sensitive: false,
+                                    list: false,
+                                    visible_when: None,
+                                },
+                                surfaces::FormFieldDescriptor {
+                                    key: "name".to_string(),
+                                    label: "Name".to_string(),
+                                    field_type: "text".to_string(),
+                                    required: true,
+                                    placeholder: None,
+                                    help_text: None,
+                                    default_value: None,
+                                    options: vec![],
+                                    select_source: None,
+                                    sensitive: false,
+                                    list: false,
+                                    visible_when: None,
+                                },
+                                surfaces::FormFieldDescriptor {
+                                    key: "to_addresses".to_string(),
+                                    label: "Recipients".to_string(),
+                                    field_type: "textarea".to_string(),
+                                    required: true,
+                                    placeholder: Some(
+                                        "user@example.com\nadmin@example.com".to_string(),
+                                    ),
+                                    help_text: Some("One email address per line".to_string()),
+                                    default_value: None,
+                                    options: vec![],
+                                    select_source: None,
+                                    sensitive: false,
+                                    list: false,
+                                    visible_when: None,
+                                },
+                                surfaces::FormFieldDescriptor {
+                                    key: "enabled".to_string(),
+                                    label: "Enabled".to_string(),
+                                    field_type: "toggle".to_string(),
+                                    required: false,
+                                    placeholder: None,
+                                    help_text: None,
+                                    default_value: Some("true".to_string()),
+                                    options: vec![],
+                                    select_source: None,
+                                    sensitive: false,
+                                    list: false,
+                                    visible_when: None,
+                                },
+                            ],
+                            pre_load_interaction_id: None,
+                        });
+                        i
+                    },
+                    InteractionDelivery::ControllerExecutor,
+                ),
+                RegisteredInteraction::new(
+                    {
+                        let mut i = surfaces::InteractionDescriptor::new(
+                            surfaces::InteractionId::new("test")
+                                .expect("literal interaction id is valid"),
+                            surfaces::InteractionKind::MutationAction,
+                            "Test",
+                            surfaces::InteractionTransport::ControllerLocal,
+                        );
+                        i.required_permission = Some("manage_notifications".to_string());
+                        i.input_schema = Some(surfaces::SchemaContract::Object);
+                        i.result_schema = Some(surfaces::SchemaContract::Any);
+                        i
+                    },
+                    InteractionDelivery::ControllerExecutor,
+                ),
+                RegisteredInteraction::new(
+                    {
+                        let mut i = surfaces::InteractionDescriptor::new(
+                            surfaces::InteractionId::new("delete")
+                                .expect("literal interaction id is valid"),
+                            surfaces::InteractionKind::ConfirmableAction,
+                            "Delete",
+                            surfaces::InteractionTransport::ControllerLocal,
+                        );
+                        i.required_permission = Some("manage_notifications".to_string());
+                        i.input_schema = Some(surfaces::SchemaContract::Object);
+                        i.result_schema = Some(surfaces::SchemaContract::Any);
+                        i.confirmation = Some(surfaces::InteractionConfirmation {
+                            title: "Confirm Delete".to_string(),
+                            message: "This action may modify existing data.".to_string(),
+                            confirm_label: None,
+                            cancel_label: None,
+                            severity: surfaces::ConfirmationSeverity::Danger,
+                        });
+                        i
+                    },
+                    InteractionDelivery::ControllerExecutor,
+                ),
+                RegisteredInteraction::new(
+                    {
+                        let mut i = surfaces::InteractionDescriptor::new(
+                            surfaces::InteractionId::new("configure_smtp")
+                                .expect("literal interaction id is valid"),
+                            surfaces::InteractionKind::FormSubmit,
+                            "Override SMTP",
+                            surfaces::InteractionTransport::ControllerLocal,
+                        );
+                        i.required_permission = Some("manage_notifications".to_string());
+                        i.input_schema = Some(surfaces::SchemaContract::Object);
+                        i.result_schema = Some(surfaces::SchemaContract::Any);
+                        i.sensitive_fields = vec!["password".to_string()];
+                        i.form_ui = Some(surfaces::FormUiDescriptor {
+                            fields: vec![
+                                surfaces::FormFieldDescriptor {
+                                    key: "host".to_string(),
+                                    label: "SMTP Host".to_string(),
+                                    field_type: "text".to_string(),
+                                    required: false,
+                                    placeholder: Some("smtp.example.com".to_string()),
+                                    help_text: None,
+                                    default_value: None,
+                                    options: vec![],
+                                    select_source: None,
+                                    sensitive: false,
+                                    list: false,
+                                    visible_when: None,
+                                },
+                                surfaces::FormFieldDescriptor {
+                                    key: "port".to_string(),
+                                    label: "Port".to_string(),
+                                    field_type: "number".to_string(),
+                                    required: false,
+                                    placeholder: None,
+                                    help_text: None,
+                                    default_value: Some("587".to_string()),
+                                    options: vec![],
+                                    select_source: None,
+                                    sensitive: false,
+                                    list: false,
+                                    visible_when: None,
+                                },
+                                surfaces::FormFieldDescriptor {
+                                    key: "tls_mode".to_string(),
+                                    label: "TLS Mode".to_string(),
+                                    field_type: "select".to_string(),
+                                    required: false,
+                                    placeholder: None,
+                                    help_text: None,
+                                    default_value: Some("starttls".to_string()),
+                                    options: vec![
+                                        surfaces::FormSelectOption {
+                                            value: "starttls".to_string(),
+                                            label: "STARTTLS (port 587)".to_string(),
+                                        },
+                                        surfaces::FormSelectOption {
+                                            value: "tls".to_string(),
+                                            label: "TLS (port 465)".to_string(),
+                                        },
+                                        surfaces::FormSelectOption {
+                                            value: "none".to_string(),
+                                            label: "None (port 25)".to_string(),
+                                        },
+                                    ],
+                                    select_source: None,
+                                    sensitive: false,
+                                    list: false,
+                                    visible_when: None,
+                                },
+                                surfaces::FormFieldDescriptor {
+                                    key: "from_address".to_string(),
+                                    label: "From Address".to_string(),
+                                    field_type: "text".to_string(),
+                                    required: false,
+                                    placeholder: Some("noreply@example.com".to_string()),
+                                    help_text: None,
+                                    default_value: None,
+                                    options: vec![],
+                                    select_source: None,
+                                    sensitive: false,
+                                    list: false,
+                                    visible_when: None,
+                                },
+                                surfaces::FormFieldDescriptor {
+                                    key: "from_name".to_string(),
+                                    label: "From Name".to_string(),
+                                    field_type: "text".to_string(),
+                                    required: false,
+                                    placeholder: Some("Uptrakit Notifications".to_string()),
+                                    help_text: None,
+                                    default_value: None,
+                                    options: vec![],
+                                    select_source: None,
+                                    sensitive: false,
+                                    list: false,
+                                    visible_when: None,
+                                },
+                                surfaces::FormFieldDescriptor {
+                                    key: "username".to_string(),
+                                    label: "Username".to_string(),
+                                    field_type: "text".to_string(),
+                                    required: false,
+                                    placeholder: Some("SMTP username".to_string()),
+                                    help_text: None,
+                                    default_value: None,
+                                    options: vec![],
+                                    select_source: None,
+                                    sensitive: false,
+                                    list: false,
+                                    visible_when: None,
+                                },
+                                surfaces::FormFieldDescriptor {
+                                    key: "password".to_string(),
+                                    label: "Password".to_string(),
+                                    field_type: "password".to_string(),
+                                    required: false,
+                                    placeholder: None,
+                                    help_text: Some(
+                                        "Leave empty to keep current password".to_string(),
+                                    ),
+                                    default_value: None,
+                                    options: vec![],
+                                    select_source: None,
+                                    sensitive: false,
+                                    list: false,
+                                    visible_when: None,
+                                },
+                            ],
+                            pre_load_interaction_id: Some(
+                                surfaces::InteractionId::new("get_smtp")
+                                    .expect("literal interaction id is valid"),
+                            ),
+                        });
+                        i
+                    },
+                    InteractionDelivery::PluginHandled(
+                        crate::surfaces::email_configure_smtp_handler,
+                    ),
+                ),
+                RegisteredInteraction::new(
+                    {
+                        let mut i = surfaces::InteractionDescriptor::new(
                             surfaces::InteractionId::new("get_smtp")
                                 .expect("literal interaction id is valid"),
-                        ),
-                    });
-                    i
-                },
-                {
-                    let mut i = surfaces::InteractionDescriptor::new(
-                        surfaces::InteractionId::new("get_smtp")
-                            .expect("literal interaction id is valid"),
-                        surfaces::InteractionKind::DataLoad,
-                        "Get SMTP Settings",
-                        surfaces::InteractionTransport::ControllerLocal,
-                    );
-                    i.result_schema = Some(surfaces::SchemaContract::Any);
-                    i
-                },
+                            surfaces::InteractionKind::DataLoad,
+                            "Get SMTP Settings",
+                            surfaces::InteractionTransport::ControllerLocal,
+                        );
+                        i.result_schema = Some(surfaces::SchemaContract::Any);
+                        i
+                    },
+                    InteractionDelivery::PluginHandled(crate::surfaces::email_get_smtp_handler),
+                ),
             ],
             data_sources: vec![surfaces::DataSourceDescriptor {
                 data_source_id,
@@ -1011,7 +885,7 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
     let global_smtp_surface = {
         let save_global_smtp_interaction = surfaces::InteractionId::new("save_global_smtp")
             .expect("literal interaction id is valid");
-        surfaces::RegisteredSurface {
+        PluginSurface {
             descriptor: surfaces::SurfaceDescriptor::builder()
                 .surface_id(
                     surfaces::SurfaceId::new("notifications.email.global_smtp")
@@ -1049,40 +923,51 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                 ))
                 .build(),
             interactions: vec![
-                {
-                    let mut i = surfaces::InteractionDescriptor::new(
-                        surfaces::InteractionId::new("get_global_smtp")
-                            .expect("literal interaction id is valid"),
-                        surfaces::InteractionKind::DataLoad,
-                        "Get Global SMTP Defaults",
-                        surfaces::InteractionTransport::ControllerLocal,
-                    );
-                    i.result_schema = Some(surfaces::SchemaContract::Any);
-                    i
-                },
-                {
-                    let mut i = surfaces::InteractionDescriptor::new(
-                        surfaces::InteractionId::new("test_global_smtp_email")
-                            .expect("literal interaction id is valid"),
-                        surfaces::InteractionKind::MutationAction,
-                        "Send Test Email",
-                        surfaces::InteractionTransport::ControllerLocal,
-                    );
-                    i.required_permission = Some("manage_global_settings".to_string());
-                    i.result_schema = Some(surfaces::SchemaContract::Any);
-                    i
-                },
-                {
-                    let mut i = surfaces::InteractionDescriptor::new(
-                        save_global_smtp_interaction,
-                        surfaces::InteractionKind::MutationAction,
-                        "Save Global SMTP Defaults",
-                        surfaces::InteractionTransport::ControllerLocal,
-                    );
-                    i.required_permission = Some("manage_global_settings".to_string());
-                    i.result_schema = Some(surfaces::SchemaContract::Any);
-                    i.sensitive_fields = vec!["password".to_string()];
-                    i.form_ui = Some(surfaces::FormUiDescriptor {
+                RegisteredInteraction::new(
+                    {
+                        let mut i = surfaces::InteractionDescriptor::new(
+                            surfaces::InteractionId::new("get_global_smtp")
+                                .expect("literal interaction id is valid"),
+                            surfaces::InteractionKind::DataLoad,
+                            "Get Global SMTP Defaults",
+                            surfaces::InteractionTransport::ControllerLocal,
+                        );
+                        i.result_schema = Some(surfaces::SchemaContract::Any);
+                        i
+                    },
+                    InteractionDelivery::PluginHandled(
+                        crate::surfaces::email_get_global_smtp_handler,
+                    ),
+                ),
+                RegisteredInteraction::new(
+                    {
+                        let mut i = surfaces::InteractionDescriptor::new(
+                            surfaces::InteractionId::new("test_global_smtp_email")
+                                .expect("literal interaction id is valid"),
+                            surfaces::InteractionKind::MutationAction,
+                            "Send Test Email",
+                            surfaces::InteractionTransport::ControllerLocal,
+                        );
+                        i.required_permission = Some("manage_global_settings".to_string());
+                        i.result_schema = Some(surfaces::SchemaContract::Any);
+                        i
+                    },
+                    InteractionDelivery::PluginHandled(
+                        crate::surfaces::email_test_global_smtp_handler,
+                    ),
+                ),
+                RegisteredInteraction::new(
+                    {
+                        let mut i = surfaces::InteractionDescriptor::new(
+                            save_global_smtp_interaction,
+                            surfaces::InteractionKind::MutationAction,
+                            "Save Global SMTP Defaults",
+                            surfaces::InteractionTransport::ControllerLocal,
+                        );
+                        i.required_permission = Some("manage_global_settings".to_string());
+                        i.result_schema = Some(surfaces::SchemaContract::Any);
+                        i.sensitive_fields = vec!["password".to_string()];
+                        i.form_ui = Some(surfaces::FormUiDescriptor {
                         fields: vec![
                             surfaces::FormFieldDescriptor {
                                 key: "host".to_string(),
@@ -1217,29 +1102,19 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                                 .expect("literal interaction id is valid"),
                         ),
                     });
-                    i
-                },
+                        i
+                    },
+                    InteractionDelivery::PluginHandled(
+                        crate::surfaces::email_save_global_smtp_handler,
+                    ),
+                ),
             ],
             data_sources: vec![],
         }
     };
 
     let surfaces = vec![channel_surface, global_smtp_surface];
-    vec![surfaces::SurfaceRegistration {
-        provider: surfaces::ProviderIdentity {
-            provider_id: "plugin.email".to_string(),
-            provider_kind: surfaces::ProviderKind::Plugin,
-            provider_namespace: "plugin".to_string(),
-        },
-        framework_generation: surfaces::FrameworkGeneration::new(1, 0),
-        capabilities: collect_registration_capabilities(&surfaces),
-        effective_tenant_binding: surfaces::EffectiveTenantBinding {
-            scope: surfaces::Scope::Global,
-            tenant_id: None,
-        },
-        surfaces,
-        encryption_metadata: None,
-    }]
+    vec![PluginSurfaceRegistration { surfaces }]
 }
 
 // ── declare_plugin! ──────────────────────────────────────────────────────────
@@ -1250,7 +1125,6 @@ declare_plugin!(EmailPlugin, EmailChannelConfig, "email", {
     config_model: ConfigModel::NotificationChannel,
     roles: [NotificationTransport],
     notification_transport: create_email_transport,
-    owned_surface_ids: &["notifications.email", "notifications.email.global_smtp"],
     raw_settings_keys: &[
         "smtp.host", "smtp.port", "smtp.username", "smtp.password",
         "smtp.from_address", "smtp.from_name", "smtp.tls_mode",
@@ -1258,12 +1132,9 @@ declare_plugin!(EmailPlugin, EmailChannelConfig, "email", {
         "global_smtp.from_address", "global_smtp.from_name", "global_smtp.tls_mode",
         "global_smtp.helo_host",
     ],
-    surface_actions: {
-        actions: email_surface_actions,
-        handle_action: email_handle_surface_action,
-    },
-    surfaces: {
-        registrations: email_surface_registrations,
+    unified_surfaces: {
+        provider_id: "plugin.email",
+        registrations: email_plugin_surfaces,
     },
 });
 
@@ -1326,27 +1197,104 @@ mod tests {
     }
 
     #[test]
-    fn descriptor_has_surface_actions() {
-        assert!(DESCRIPTOR.surface_actions.is_some());
-        let surface_actions = DESCRIPTOR.surface_actions.unwrap();
-        assert!(
-            surface_actions
-                .owned_surface_ids()
-                .contains(&"notifications.email")
+    fn unified_registrations_pair_every_interaction_with_expected_delivery() {
+        use uptrakit_plugin_infrastructure_core::InteractionDeliveryKind;
+        let registrations = email_plugin_surfaces();
+        let mut seen: Vec<(String, String, InteractionDeliveryKind)> = Vec::new();
+        for registration in &registrations {
+            for surface in &registration.surfaces {
+                for interaction in &surface.interactions {
+                    assert_eq!(
+                        interaction.descriptor().transport,
+                        surfaces::InteractionTransport::ControllerLocal
+                    );
+                    seen.push((
+                        surface.descriptor.surface_id.as_str().to_string(),
+                        interaction.descriptor().interaction_id.as_str().to_string(),
+                        interaction.delivery().kind(),
+                    ));
+                }
+            }
+        }
+        // Expected (surface, interaction, delivery) table (spec D6); the table's
+        // own length is the count source of truth below — no bare literal count
+        // is asserted separately.
+        let expected: Vec<(&str, &str, InteractionDeliveryKind)> = vec![
+            (
+                "notifications.email",
+                "list",
+                InteractionDeliveryKind::PluginHandled,
+            ),
+            (
+                "notifications.email",
+                "create",
+                InteractionDeliveryKind::ControllerExecutor,
+            ),
+            (
+                "notifications.email",
+                "edit",
+                InteractionDeliveryKind::ControllerExecutor,
+            ),
+            (
+                "notifications.email",
+                "test",
+                InteractionDeliveryKind::ControllerExecutor,
+            ),
+            (
+                "notifications.email",
+                "delete",
+                InteractionDeliveryKind::ControllerExecutor,
+            ),
+            (
+                "notifications.email",
+                "configure_smtp",
+                InteractionDeliveryKind::PluginHandled,
+            ),
+            (
+                "notifications.email",
+                "get_smtp",
+                InteractionDeliveryKind::PluginHandled,
+            ),
+            (
+                "notifications.email.global_smtp",
+                "get_global_smtp",
+                InteractionDeliveryKind::PluginHandled,
+            ),
+            (
+                "notifications.email.global_smtp",
+                "test_global_smtp_email",
+                InteractionDeliveryKind::PluginHandled,
+            ),
+            (
+                "notifications.email.global_smtp",
+                "save_global_smtp",
+                InteractionDeliveryKind::PluginHandled,
+            ),
+        ];
+        for (surface, id, kind) in &expected {
+            assert!(
+                seen.iter()
+                    .any(|(s, i, k)| s == surface && i == id && k == kind),
+                "missing ({surface}, {id}, {kind:?})"
+            );
+        }
+        assert_eq!(
+            seen.len(),
+            expected.len(),
+            "unexpected total interaction count across email_plugin_surfaces()"
         );
-        assert!(
-            surface_actions
-                .owned_surface_ids()
-                .contains(&"notifications.email.global_smtp")
-        );
+        // Migration left no legacy arm behind — a leftover `surfaces:` or
+        // `surface_actions:` block would double-register on the wire.
+        assert!(DESCRIPTOR.surface_actions.is_none());
+        assert!(DESCRIPTOR.surfaces.is_none());
     }
 
     #[test]
     fn descriptor_has_plugin_surface_registrations() {
-        let registrations = (DESCRIPTOR
-            .surfaces
-            .expect("surfaces are registered")
-            .registrations)();
+        let registrations = email_plugin_surfaces()
+            .iter()
+            .map(|r| r.to_wire("plugin.email"))
+            .collect::<Vec<_>>();
         assert!(!registrations.is_empty());
         assert!(registrations.iter().all(|registration| {
             registration.provider.provider_kind
@@ -1370,10 +1318,10 @@ mod tests {
 
     #[test]
     fn email_channel_surface_keeps_table_data_and_action_contract() {
-        let registrations = (DESCRIPTOR
-            .surfaces
-            .expect("surfaces are registered")
-            .registrations)();
+        let registrations = email_plugin_surfaces()
+            .iter()
+            .map(|r| r.to_wire("plugin.email"))
+            .collect::<Vec<_>>();
         let channel_surface = registrations
             .iter()
             .flat_map(|registration| registration.surfaces.iter())
@@ -1468,10 +1416,10 @@ mod tests {
 
     #[test]
     fn email_global_smtp_surface_keeps_form_submit_shape() {
-        let registrations = (DESCRIPTOR
-            .surfaces
-            .expect("surfaces are registered")
-            .registrations)();
+        let registrations = email_plugin_surfaces()
+            .iter()
+            .map(|r| r.to_wire("plugin.email"))
+            .collect::<Vec<_>>();
         let smtp_surface = registrations
             .iter()
             .flat_map(|registration| registration.surfaces.iter())
@@ -1908,24 +1856,5 @@ mod tests {
             merged.get("helo_host").is_none(),
             "helo_host must not appear in merged config when neither global nor tenant sets it"
         );
-    }
-
-    // ── Extension actions ─────────────────────────────────────────────────
-
-    #[test]
-    fn surface_actions_not_empty() {
-        let actions = email_surface_actions();
-        assert!(!actions.is_empty());
-        let ids: Vec<&str> = actions.iter().map(|a| a.action_id.as_str()).collect();
-        assert!(ids.contains(&"list"));
-        assert!(ids.contains(&"create"));
-        assert!(ids.contains(&"edit"));
-        assert!(ids.contains(&"test"));
-        assert!(ids.contains(&"delete"));
-        assert!(ids.contains(&"configure_smtp"));
-        assert!(ids.contains(&"get_smtp"));
-        assert!(ids.contains(&"test_global_smtp_email"));
-        assert!(ids.contains(&"get_global_smtp"));
-        assert!(ids.contains(&"save_global_smtp"));
     }
 }

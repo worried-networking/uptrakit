@@ -83,25 +83,91 @@ pub const RAW_SETTINGS_KEYS: &[&str] = &[
     KEY_GLOBAL_SMTP_HELO_HOST,
 ];
 
-/// Handle a surface action for the email notification plugin.
-#[tracing::instrument(skip_all, fields(surface_id, action_id))]
-pub async fn handle_surface_action(
-    ctx: &SurfaceActionContext<'_>,
-    surface_id: &str,
-    action_id: &str,
+/// Dispatch shim for the `list` interaction (exact-id dispatch map entry).
+pub(crate) fn email_list_handler<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
     params: serde_json::Value,
-) -> std::result::Result<serde_json::Value, SurfaceActionError> {
-    match action_id {
-        "list" => handle_list(ctx, &params).await,
-        "get_smtp" => handle_get_smtp(ctx).await,
-        "configure_smtp" => handle_configure_smtp(ctx, &params).await,
-        "get_global_smtp" => handle_get_global_smtp(ctx).await,
-        "save_global_smtp" => handle_save_global_smtp(ctx, &params).await,
-        "test_global_smtp_email" => handle_test_global_smtp_email(ctx).await,
-        _ => Err(SurfaceActionError::InvalidInput(format!(
-            "unknown action '{action_id}' for surface '{surface_id}'",
-        ))),
-    }
+) -> std::pin::Pin<
+    Box<
+        dyn std::future::Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>>
+            + Send
+            + 'a,
+    >,
+> {
+    Box::pin(async move { handle_list(ctx, &params).await })
+}
+
+/// Dispatch shim for the `get_smtp` interaction (exact-id dispatch map entry).
+pub(crate) fn email_get_smtp_handler<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
+    params: serde_json::Value,
+) -> std::pin::Pin<
+    Box<
+        dyn std::future::Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>>
+            + Send
+            + 'a,
+    >,
+> {
+    let _ = params;
+    Box::pin(async move { handle_get_smtp(ctx).await })
+}
+
+/// Dispatch shim for the `configure_smtp` interaction (exact-id dispatch map entry).
+pub(crate) fn email_configure_smtp_handler<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
+    params: serde_json::Value,
+) -> std::pin::Pin<
+    Box<
+        dyn std::future::Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>>
+            + Send
+            + 'a,
+    >,
+> {
+    Box::pin(async move { handle_configure_smtp(ctx, &params).await })
+}
+
+/// Dispatch shim for the `get_global_smtp` interaction (exact-id dispatch map entry).
+pub(crate) fn email_get_global_smtp_handler<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
+    params: serde_json::Value,
+) -> std::pin::Pin<
+    Box<
+        dyn std::future::Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>>
+            + Send
+            + 'a,
+    >,
+> {
+    let _ = params;
+    Box::pin(async move { handle_get_global_smtp(ctx).await })
+}
+
+/// Dispatch shim for the `save_global_smtp` interaction (exact-id dispatch map entry).
+pub(crate) fn email_save_global_smtp_handler<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
+    params: serde_json::Value,
+) -> std::pin::Pin<
+    Box<
+        dyn std::future::Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>>
+            + Send
+            + 'a,
+    >,
+> {
+    Box::pin(async move { handle_save_global_smtp(ctx, &params).await })
+}
+
+/// Dispatch shim for the `test_global_smtp_email` interaction (exact-id dispatch map entry).
+pub(crate) fn email_test_global_smtp_handler<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
+    params: serde_json::Value,
+) -> std::pin::Pin<
+    Box<
+        dyn std::future::Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>>
+            + Send
+            + 'a,
+    >,
+> {
+    let _ = params;
+    Box::pin(async move { handle_test_global_smtp_email(ctx).await })
 }
 
 // ── List channels ────────────────────────────────────────────────────────────
