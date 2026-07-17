@@ -47,6 +47,7 @@ isolated venv — exactly the kind of per-item software Uptrakit tracks.
   ```
 
   Empty state: stdout empty, `No tools installed` on **stderr**, exit 0.
+
 - `uv tool list --show-with` is **lossy** (verified empirically): `--with 'httpx[http2]' --with 'rich>=13,<14'`
   renders as `[with: httpx, rich>=13, <14]` — extras and environment markers are dropped, and specifier
   commas collide with the list separator. It must NOT be used as the source for `--with` preservation. The
@@ -65,7 +66,7 @@ isolated venv — exactly the kind of per-item software Uptrakit tracks.
     `--index` installs); a reinstall without the corresponding flag silently drops each (probed on
     uv 0.11.29 — the rewritten receipt loses `python`). Flag-free installs on an unconfigured host record
     neither — but a host-level default index (`UV_DEFAULT_INDEX` env or `uv.toml` `[[index]]
-    default = true`, i.e. exactly how a mirror host configures uv) bakes `[tool.options].index` into
+default = true`, i.e. exactly how a mirror host configures uv) bakes `[tool.options].index` into
     **every** plain-install receipt (probed).
   - uv PEP 503-normalizes the tool name consistently across `uv tool list`, the tools-dir entry, and the
     receipt's primary requirement (probed: `ruamel.yaml.cmd` → `ruamel-yaml-cmd` in all three).
@@ -172,9 +173,9 @@ pre-existing limitation as cargo's `~/.cargo/bin`.
 `detect_installed_version(package_identifier)` runs the same `execute_and_capture` + parser and selects
 the row matching the identifier (uv has no per-package query). Absent row ⇒ `Ok(None)` — the standard
 not-installed outcome in cargo's `detection.rs` (`installed.get(..).map(Version::new)`; never an error —
-no package-manager plugin in the repo treats "not installed" as an error). This is the scheduled-check path that keeps `featured` items'
-versions current (rediscovery intentionally skips `installed_version` for featured items,
-`discovery_items.rs:400-403`).
+no package-manager plugin in the repo treats "not installed" as an error). This is the scheduled-check
+path that keeps `featured` items' versions current; rediscovery also updates `installed_version` (and
+discovery provenance) for every discovered item, featured or not.
 
 ### Release fetching (controller-side)
 
@@ -300,7 +301,7 @@ for marginal value on a user-triggered update flow). Deferred.
    keeps `extras = ["redis"]`) plus `--python <recorded>` when the receipt carries `[tool].python`, plus one
    `--with <req>` per reconstructed remaining requirement, through the
    mandatory shared helper `execute_command_update(CommandUpdateParams { binary: "uv", privileged: false,
-   .. }, output_tx)` — copy the call shape from `cargo/src/update.rs`. `resumable` is NOT a
+.. }, output_tx)` — copy the call shape from `cargo/src/update.rs`. `resumable` is NOT a
    `CommandUpdateParams` field: the trait result is built afterwards as
    `Ok(ExecuteUpdateResult::new(output, false))` (`cargo/src/update.rs:59`).
 
@@ -386,7 +387,7 @@ contract, `cargo deny` multiple-versions risk. Run `cargo deny check` after addi
 Use `uptrakit_plugin_infrastructure_core::testing` doubles (`FixedOutputExecutor`, `RoutedOutputExecutor`,
 `test_runtime_with_executor`) — dev-dep `features = ["testing"]`; never local mocks (cargo's local mock is the
 flagged legacy exception, npm/homebrew are the pattern). Before relying on a double, check its behavior on the
-*specific* trait method the code under test calls (`execute` vs `execute_quiet` differ on non-zero exits).
+_specific_ trait method the code under test calls (`execute` vs `execute_quiet` differ on non-zero exits).
 For "`uv tool list` fails" coverage use `FixedOutputExecutor::failure(n)` — its `execute_quiet` `Err`s on
 non-zero, matching `LocalCommandExecutor` — and assert `PluginError::PluginInternal`;
 `RoutedOutputExecutor`'s `Ok`-with-non-zero shape would exercise `execute_and_capture`'s
