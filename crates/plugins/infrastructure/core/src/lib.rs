@@ -25,6 +25,7 @@ pub use service_metadata::{DeploymentTopology, ServiceMetadata, ServiceMetadataP
 pub mod macros;
 pub mod plugin_config;
 pub mod plugin_ops;
+pub mod registration;
 pub mod roles;
 pub mod serde_helpers;
 mod surface_form_authoring;
@@ -129,6 +130,10 @@ pub use host_runtime::{
     StandardHostRuntime, construct_host_runtime, construct_routeros_host_runtime,
 };
 pub use plugin_config::{PluginConfig, PluginConfigValidationError, TypeSettings};
+pub use registration::{
+    InteractionDelivery, InteractionDeliveryKind, InteractionHandler, PluginSurface,
+    PluginSurfaceRegistration, RegisteredInteraction,
+};
 #[cfg(feature = "plugin-ops")]
 pub use roles::{
     ControllerUpdateHook, UpdateHookController, UpdateHookPostContext, UpdateHookPreContext,
