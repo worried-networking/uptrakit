@@ -165,6 +165,17 @@ impl uptrakit_plugin_infrastructure_core::NotificationTransport for TelegramPlug
         tracing::debug!(chat_id, "telegram notification delivered");
         Ok(())
     }
+
+    async fn handle_callback(
+        &self,
+        ctx: &uptrakit_plugin_infrastructure_core::SurfaceActionContext<'_>,
+        params: &serde_json::Value,
+    ) -> std::result::Result<
+        serde_json::Value,
+        uptrakit_plugin_infrastructure_core::SurfaceActionError,
+    > {
+        crate::surfaces::handle_callback(ctx, params).await
+    }
 }
 
 fn telegram_surface_actions() -> Vec<SurfaceActionDescriptor> {

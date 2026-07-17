@@ -35,7 +35,10 @@ const CALLBACK_ERR_NOTIFICATION_LOG_UPDATE_FAILED: &str =
 /// - `list` -- list Telegram channels with masked secrets.
 /// - `get_global_telegram` -- load global Telegram settings.
 /// - `save_global_telegram` -- save global Telegram settings.
-/// - `handle_callback` -- handle Telegram Bot API webhook callback.
+///
+/// `handle_callback` is no longer dispatched here — it moved to
+/// [`crate::plugin`]'s `NotificationTransport::handle_callback` override
+/// (ADR-0028 / spec D2a), which calls [`handle_callback`] directly.
 #[tracing::instrument(skip_all, fields(surface_id, action_id))]
 pub async fn handle_surface_action(
     ctx: &SurfaceActionContext<'_>,
@@ -47,7 +50,6 @@ pub async fn handle_surface_action(
         "list" => handle_list(ctx, &params).await,
         "get_global_telegram" => handle_get_global_telegram(ctx).await,
         "save_global_telegram" => handle_save_global_telegram(ctx, &params).await,
-        "handle_callback" => handle_callback(ctx, &params).await,
         _ => Err(SurfaceActionError::InvalidInput(format!(
             "unknown action '{action_id}' for surface '{surface_id}'",
         ))),
@@ -100,7 +102,7 @@ async fn handle_save_global_telegram(
 ///
 /// Verifies the secret token, extracts the action token from the callback
 /// query data, and updates the notification log.
-async fn handle_callback(
+pub(crate) async fn handle_callback(
     ctx: &SurfaceActionContext<'_>,
     params: &serde_json::Value,
 ) -> std::result::Result<serde_json::Value, SurfaceActionError> {

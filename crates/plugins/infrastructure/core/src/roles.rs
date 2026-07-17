@@ -392,6 +392,24 @@ pub trait NotificationTransport: PluginMeta {
         settings: &serde_json::Value,
         message: &uptrakit_notification_plugin_core::DeliveryMessage,
     ) -> uptrakit_notification_plugin_core::Result<()>;
+
+    /// Handles an inbound provider callback (e.g. Telegram Bot API webhook).
+    /// This is NOT a surface interaction: it is invoked unauthenticated by
+    /// external services through the public notification-callback route, with
+    /// channel-specific verification inside the plugin (ADR-0028 / spec D2a).
+    async fn handle_callback(
+        &self,
+        ctx: &crate::descriptor::SurfaceActionContext<'_>,
+        params: &serde_json::Value,
+    ) -> std::result::Result<serde_json::Value, crate::descriptor::SurfaceActionError> {
+        let _ = (ctx, params);
+        Err(crate::descriptor::SurfaceActionError::InvalidInput(
+            format!(
+                "callback not supported for channel type '{}'",
+                self.plugin_type_id()
+            ),
+        ))
+    }
 }
 
 /// Typed controller boundary for surface-action handlers.

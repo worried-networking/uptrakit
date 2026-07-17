@@ -1449,8 +1449,7 @@ pub async fn notification_callback(
         "body": body_value,
     });
 
-    // Delegate to the plugin's surface action handler.
-    let surface_id = format!("notifications.{channel_type}");
+    // Delegate to the channel's notification transport.
     let controller =
         uptrakit_surface_proxy::AppStateSurfaceActionController::from_database_connection(
             state.db(),
@@ -1461,12 +1460,16 @@ pub async fn notification_callback(
         controller: &controller,
     };
 
-    match state
-        .plugin
-        .plugin_ops
-        .handle_surface_action(&ctx, &surface_id, "handle_callback", params)
-        .await
-    {
+    let channel_type_id = uptrakit_shared_types::PluginTypeId::new(&channel_type);
+    let callback_result = match state.plugin.plugin_ops.transport(&channel_type_id) {
+        Some(transport) => transport.handle_callback(&ctx, &params).await,
+        None => Err(
+            uptrakit_plugin_infrastructure_registry::SurfaceActionError::InvalidInput(format!(
+                "notification transport for channel type '{channel_type}' is not available"
+            )),
+        ),
+    };
+    match callback_result {
         Ok(result) => {
             emit_notification_callback_audit(
                 &state.audit_emitter,
@@ -1607,6 +1610,34 @@ mod tests {
         .expect("insert callback log");
 
         (channel_id, log_id, action_token)
+    }
+
+    async fn insert_webhook_callback_fixture(app: &TestApp) -> Uuid {
+        let now = time::OffsetDateTime::now_utc();
+        let channel_id = Uuid::now_v7();
+        let channel_config = serde_json::json!({
+            "url": "https://example.com/webhook",
+        });
+
+        notification_channel::ActiveModel {
+            id: Set(channel_id),
+            tenant_id: Set(app.tenant_id),
+            name: Set("Webhook Callback Channel".to_string()),
+            channel_type: Set("webhook".to_string()),
+            config: Set(uptrakit_crypto::EncryptedString::new(
+                channel_config.to_string(),
+                "notification_channels.config",
+            )
+            .expect("encrypt test channel config")),
+            enabled: Set(true),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(&app.db)
+        .await
+        .expect("insert callback channel");
+
+        channel_id
     }
 
     fn callback_body(action_token: Option<&str>) -> serde_json::Value {
@@ -1798,6 +1829,23 @@ mod tests {
             details["reason_code"],
             serde_json::json!("notification_log_lookup_failed")
         );
+    }
+
+    #[tokio::test]
+    async fn notification_callback_unsupported_channel_type_returns_bad_request() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let channel_id = insert_webhook_callback_fixture(&app).await;
+
+        let status = client
+            .post_json(
+                &format!("/api/v1/notifications/callback/webhook/{channel_id}"),
+                &serde_json::json!({}),
+            )
+            .send_status()
+            .await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 }
 
