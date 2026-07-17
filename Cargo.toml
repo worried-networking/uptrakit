@@ -73,11 +73,11 @@ metrics-util = "0.20"
 utoipa = { version = "5.5", features = ["uuid"] }
 x509-ocsp = "0.2"
 # der/const-oid/spki stay at 0.7/0.9/0.7 — blocked by openidconnect 4.x pulling ecdsa/rsa → pkcs8 0.10 → spki 0.7 chain
-der = { version = "0.7", features = ["alloc", "derive", "oid", "pem"] }
-spki = { version = "0.7", features = ["alloc"] }
+der = { version = "0.8", features = ["alloc", "derive", "oid", "pem"] }
+spki = { version = "0.8", features = ["alloc"] }
 # x509-cert stays at 0.2 — x509-ocsp 0.2 (latest) requires x509-cert ^0.2; 0.3 also needs der 0.8 (same crypto chain)
-x509-cert = { version = "0.2", default-features = false, features = ["pem"] }
-const-oid = { version = "0.9", features = ["db"] }
+x509-cert = { version = "0.3", default-features = false, features = ["pem"] }
+const-oid = { version = "0.10", features = ["db"] }
 aws-lc-rs = "1"
 strum = { version = "0.28", features = ["derive"] }
 syn = { version = "2", features = ["full", "extra-traits"] }
