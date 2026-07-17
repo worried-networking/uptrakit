@@ -72,7 +72,9 @@ impl InteractionDelivery {
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InteractionDeliveryKind {
+    /// Mirror of [`InteractionDelivery::PluginHandled`].
     PluginHandled,
+    /// Mirror of [`InteractionDelivery::ControllerExecutor`].
     ControllerExecutor,
 }
 
@@ -127,8 +129,12 @@ impl RegisteredInteraction {
 /// declared by a plugin.
 #[derive(Debug, Clone)]
 pub struct PluginSurface {
+    /// The surface's wire descriptor (slot, targeting, capabilities, node tree).
     pub descriptor: surfaces::SurfaceDescriptor,
+    /// Interactions declared on this surface, each pairing a wire descriptor
+    /// with its [`InteractionDelivery`].
     pub interactions: Vec<RegisteredInteraction>,
+    /// Data sources backing this surface's nodes.
     pub data_sources: Vec<surfaces::DataSourceDescriptor>,
 }
 
@@ -153,6 +159,7 @@ impl PluginSurface {
 /// registration served to the controller.
 #[derive(Debug, Clone, Default)]
 pub struct PluginSurfaceRegistration {
+    /// The surfaces this plugin registers under one provider identity.
     pub surfaces: Vec<PluginSurface>,
 }
 

@@ -1850,10 +1850,22 @@ mod tests {
         let mut saw_webhook_provider = false;
 
         for descriptor in uptrakit_plugin_infrastructure_registry::all_descriptors() {
-            let Some(surface_ops) = descriptor.surfaces else {
-                continue;
-            };
-            for registration in (surface_ops.registrations)() {
+            // Mirror the production bootstrap union (controller-runtime boot):
+            // legacy `surfaces` ops plus migrated `unified_surfaces` ops. Since
+            // webhook moved to `unified_surfaces`, iterating only the legacy
+            // field would silently drop it.
+            let mut registrations: Vec<surfaces::SurfaceRegistration> = Vec::new();
+            if let Some(surface_ops) = descriptor.surfaces {
+                registrations.extend((surface_ops.registrations)());
+            }
+            if let Some(unified_ops) = descriptor.unified_surfaces {
+                registrations.extend(
+                    (unified_ops.registrations)()
+                        .into_iter()
+                        .map(|registration| registration.to_wire(unified_ops.provider_id)),
+                );
+            }
+            for registration in registrations {
                 let provider_id = registration.provider.provider_id.clone();
                 registry
                     .bootstrap_plugin(registration)

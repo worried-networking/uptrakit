@@ -620,39 +620,48 @@ mod tests {
                 }
             }
         }
-        let expect = |surface: &str, id: &str, kind: InteractionDeliveryKind| {
+        // Expected (surface, interaction, delivery) table (spec D6); the table's
+        // own length is the count source of truth below — no bare literal count
+        // is asserted separately.
+        let expected: Vec<(&str, &str, InteractionDeliveryKind)> = vec![
+            (
+                "notifications.webhook",
+                "list",
+                InteractionDeliveryKind::PluginHandled,
+            ),
+            (
+                "notifications.webhook",
+                "create",
+                InteractionDeliveryKind::ControllerExecutor,
+            ),
+            (
+                "notifications.webhook",
+                "edit",
+                InteractionDeliveryKind::ControllerExecutor,
+            ),
+            (
+                "notifications.webhook",
+                "test",
+                InteractionDeliveryKind::ControllerExecutor,
+            ),
+            (
+                "notifications.webhook",
+                "delete",
+                InteractionDeliveryKind::ControllerExecutor,
+            ),
+        ];
+        for (surface, id, kind) in &expected {
             assert!(
                 seen.iter()
-                    .any(|(s, i, k)| s == surface && i == id && *k == kind),
+                    .any(|(s, i, k)| s == surface && i == id && k == kind),
                 "missing ({surface}, {id}, {kind:?})"
             );
-        };
-        expect(
-            "notifications.webhook",
-            "list",
-            InteractionDeliveryKind::PluginHandled,
+        }
+        assert_eq!(
+            seen.len(),
+            expected.len(),
+            "unexpected total interaction count across webhook_plugin_surfaces()"
         );
-        expect(
-            "notifications.webhook",
-            "create",
-            InteractionDeliveryKind::ControllerExecutor,
-        );
-        expect(
-            "notifications.webhook",
-            "edit",
-            InteractionDeliveryKind::ControllerExecutor,
-        );
-        expect(
-            "notifications.webhook",
-            "test",
-            InteractionDeliveryKind::ControllerExecutor,
-        );
-        expect(
-            "notifications.webhook",
-            "delete",
-            InteractionDeliveryKind::ControllerExecutor,
-        );
-        assert_eq!(seen.len(), 5);
         // Migration left no legacy arm behind — a leftover `surfaces:` or
         // `surface_actions:` block would double-register on the wire.
         assert!(DESCRIPTOR.surface_actions.is_none());

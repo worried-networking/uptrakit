@@ -107,7 +107,7 @@ pub struct PluginCatalog {
     )]
     controller_update_hook: ControllerUpdateHookValue,
     surface_action_routes: Vec<(&'static str, SurfaceActionHandler)>,
-    unified_surface_dispatch: BTreeMap<(String, String), UnifiedInteractionHandler>,
+    unified_surface_dispatch: BTreeMap<String, BTreeMap<String, UnifiedInteractionHandler>>,
     instance_states: InstancePluginStates,
 }
 
@@ -143,8 +143,10 @@ impl PluginCatalog {
         let mut surface_action_routes = Vec::new();
         // (prefix, owner_type_id) pairs for overlap detection
         let mut seen_surface_prefixes: Vec<(&'static str, &'static str)> = Vec::new();
-        let mut unified_surface_dispatch: BTreeMap<(String, String), UnifiedInteractionHandler> =
-            BTreeMap::new();
+        let mut unified_surface_dispatch: BTreeMap<
+            String,
+            BTreeMap<String, UnifiedInteractionHandler>,
+        > = BTreeMap::new();
         // surface_id -> owner_type_id, for exact-id duplicate detection
         let mut seen_unified_surface_ids: BTreeMap<String, &'static str> = BTreeMap::new();
 
@@ -325,19 +327,20 @@ impl PluginCatalog {
                             if let InteractionDelivery::PluginHandled(handler) =
                                 interaction.delivery()
                             {
-                                let key = (
-                                    surface_id.clone(),
-                                    interaction.descriptor().interaction_id.as_str().to_string(),
-                                );
-                                if unified_surface_dispatch.contains_key(&key) {
+                                let interaction_id =
+                                    interaction.descriptor().interaction_id.as_str();
+                                let actions = unified_surface_dispatch
+                                    .entry(surface_id.clone())
+                                    .or_default();
+                                if actions.contains_key(interaction_id) {
                                     return Err(rootcause::report!(
                                         PluginError::UnsupportedOperation(format!(
-                                            "duplicate interaction '{}' on surface '{surface_id}'",
-                                            key.1
+                                            "duplicate interaction '{interaction_id}' on surface \
+                                             '{surface_id}'"
                                         ))
                                     ));
                                 }
-                                unified_surface_dispatch.insert(key, *handler);
+                                actions.insert(interaction_id.to_string(), *handler);
                             }
                         }
                     }
@@ -452,14 +455,17 @@ impl PluginSurfaceActionOps for PluginCatalog {
         action_id: &str,
         params: serde_json::Value,
     ) -> std::result::Result<serde_json::Value, SurfaceActionError> {
-        let key = (surface_id.to_string(), action_id.to_string());
-        if let Some(handler) = self.unified_surface_dispatch.get(&key) {
+        if let Some(handler) = self
+            .unified_surface_dispatch
+            .get(surface_id)
+            .and_then(|actions| actions.get(action_id))
+        {
             return handler(ctx, params).await;
         }
 
         let handler = self.route_surface_action(surface_id).ok_or_else(|| {
             SurfaceActionError::InvalidInput(format!(
-                "no plugin handles surface '{surface_id}' interaction '{action_id}'"
+                "no registered interaction '{action_id}' on surface '{surface_id}'"
             ))
         })?;
         handler(ctx, surface_id, action_id, params).await
