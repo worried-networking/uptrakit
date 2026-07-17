@@ -29,31 +29,47 @@ const CALLBACK_ERR_NOTIFICATION_LOG_LOOKUP_FAILED: &str =
 const CALLBACK_ERR_NOTIFICATION_LOG_UPDATE_FAILED: &str =
     "Internal server error: notification_log_update_failed";
 
-/// Handle a surface action for the Telegram notification plugin.
-///
-/// Supported actions:
-/// - `list` -- list Telegram channels with masked secrets.
-/// - `get_global_telegram` -- load global Telegram settings.
-/// - `save_global_telegram` -- save global Telegram settings.
-///
-/// `handle_callback` is no longer dispatched here — it moved to
-/// [`crate::plugin`]'s `NotificationTransport::handle_callback` override
-/// (ADR-0028 / spec D2a), which calls [`handle_callback`] directly.
-#[tracing::instrument(skip_all, fields(surface_id, action_id))]
-pub async fn handle_surface_action(
-    ctx: &SurfaceActionContext<'_>,
-    surface_id: &str,
-    action_id: &str,
+/// Dispatch shim for the `list` interaction (exact-id dispatch map entry).
+pub(crate) fn telegram_list_handler<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
     params: serde_json::Value,
-) -> std::result::Result<serde_json::Value, SurfaceActionError> {
-    match action_id {
-        "list" => handle_list(ctx, &params).await,
-        "get_global_telegram" => handle_get_global_telegram(ctx).await,
-        "save_global_telegram" => handle_save_global_telegram(ctx, &params).await,
-        _ => Err(SurfaceActionError::InvalidInput(format!(
-            "unknown action '{action_id}' for surface '{surface_id}'",
-        ))),
-    }
+) -> std::pin::Pin<
+    Box<
+        dyn std::future::Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>>
+            + Send
+            + 'a,
+    >,
+> {
+    Box::pin(async move { handle_list(ctx, &params).await })
+}
+
+/// Dispatch shim for the `get_global_telegram` interaction (exact-id dispatch map entry).
+pub(crate) fn telegram_get_global_handler<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
+    params: serde_json::Value,
+) -> std::pin::Pin<
+    Box<
+        dyn std::future::Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>>
+            + Send
+            + 'a,
+    >,
+> {
+    let _ = params;
+    Box::pin(async move { handle_get_global_telegram(ctx).await })
+}
+
+/// Dispatch shim for the `save_global_telegram` interaction (exact-id dispatch map entry).
+pub(crate) fn telegram_save_global_handler<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
+    params: serde_json::Value,
+) -> std::pin::Pin<
+    Box<
+        dyn std::future::Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>>
+            + Send
+            + 'a,
+    >,
+> {
+    Box::pin(async move { handle_save_global_telegram(ctx, &params).await })
 }
 
 async fn handle_list(
