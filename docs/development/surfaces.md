@@ -147,9 +147,12 @@ and it must use the same visual primitives and token adapter as the built-in UI.
 REST endpoints:
 
 - `GET /api/v1/surfaces`
+- `GET /api/v1/surfaces/{surface_id}`
 - `GET /api/v1/surfaces/{surface_id}/providers`
-- `GET /api/v1/surfaces/{surface_id}/read`
 - `POST /api/v1/surfaces/{surface_id}/interactions/{interaction_id}`
+
+These endpoints are utoipa-registered; frontend access goes through the generated SDK (the hand-written
+`frontend/src/lib/api/surfaces.ts` is retired).
 
 ## Migration notes
 

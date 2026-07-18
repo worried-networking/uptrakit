@@ -22,9 +22,16 @@ Permissions are evaluated at two levels:
 
 Enforcement points:
 
-- `GET /api/v1/surfaces` — only tenant-visible surfaces are listed
-- `GET /api/v1/surfaces/{surface_id}/read` — descriptor permission check
+- `GET /api/v1/surfaces` and `GET /api/v1/surfaces/{surface_id}/providers` — authenticated-only; no static permission
+  variant exists for surface listing and inventing one is out of scope, so results are visibility-filtered per
+  descriptor instead
+- `GET /api/v1/surfaces/{surface_id}` — descriptor permission check
 - `POST /api/v1/surfaces/{surface_id}/interactions/{interaction_id}` — descriptor and interaction permission checks
+
+Read and invoke enforce the dynamic descriptor/interaction permissions in-handler via `enforce_required_permission` —
+this is the documented exception to the platform's typed-permission-extractor rule, because the required permission is
+runtime descriptor data no static extractor can carry; the OpenAPI operations advertise it via a human-readable
+dynamic `x-required-permission` extension.
 
 Frontend filtering is convenience only; server checks are authoritative.
 
@@ -44,6 +51,11 @@ interactions only); per-caller narrowing is deliberately outside the flag — a 
 with it.
 
 Handlers of flagged interactions must not treat provider origin as privileged beyond tenant membership.
+
+## Response caching
+
+Surface GET responses set `Cache-Control: private, no-store`; results are per-tenant and per-permission data that must
+not be cached by shared caches or bfcache.
 
 ## Registration admission controls
 
