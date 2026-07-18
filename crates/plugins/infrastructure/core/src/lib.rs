@@ -1,3 +1,7 @@
+pub mod agent_interaction;
+#[cfg(feature = "agent-infra")]
+pub use agent_interaction::AgentInteractionHandler;
+pub use agent_interaction::{AgentInteraction, AgentInteractionPlacement};
 #[cfg(feature = "agent-infra")]
 pub mod agent_infra;
 #[cfg(feature = "http-client")]

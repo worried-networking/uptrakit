@@ -1342,6 +1342,7 @@ mod tests {
         global_provider_consumers: &[],
         migrations: None,
         agent_migrations: None,
+        agent_surfaces: None,
         reset_tenant_data: None,
         db_migrate_tables: None,
     };
@@ -1386,6 +1387,7 @@ mod tests {
         raw_settings_keys: &[],
         migrations: None,
         agent_migrations: None,
+        agent_surfaces: None,
         reset_tenant_data: None,
         db_migrate_tables: None,
         global_provider_consumers: &[],
@@ -1431,6 +1433,7 @@ mod tests {
         raw_settings_keys: &[],
         migrations: None,
         agent_migrations: None,
+        agent_surfaces: None,
         reset_tenant_data: None,
         db_migrate_tables: None,
         global_provider_consumers: &[],
@@ -1477,6 +1480,7 @@ mod tests {
         global_provider_consumers: &[],
         migrations: None,
         agent_migrations: None,
+        agent_surfaces: None,
         reset_tenant_data: None,
         db_migrate_tables: None,
     };
@@ -1524,6 +1528,7 @@ mod tests {
         ],
         migrations: None,
         agent_migrations: None,
+        agent_surfaces: None,
         reset_tenant_data: None,
         db_migrate_tables: None,
     };
@@ -1761,6 +1766,7 @@ mod tests {
         global_provider_consumers: &[],
         migrations: None,
         agent_migrations: None,
+        agent_surfaces: None,
         reset_tenant_data: None,
         db_migrate_tables: None,
     };
@@ -1827,6 +1833,7 @@ mod tests {
         global_provider_consumers: &[],
         migrations: None,
         agent_migrations: None,
+        agent_surfaces: None,
         reset_tenant_data: None,
         db_migrate_tables: None,
     };

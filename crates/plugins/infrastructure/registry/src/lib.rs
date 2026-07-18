@@ -57,8 +57,16 @@ pub use uptrakit_command::{CommandExecutor, LocalCommandExecutor};
 
 // --- Additive re-exports (DESIGN-0001 / ST-0015) ---
 
+#[cfg(feature = "agent-infra")]
+pub use uptrakit_plugin_infrastructure_core::AgentInteractionHandler;
 pub use uptrakit_plugin_infrastructure_core::host_requirements::RoleKey;
 pub use uptrakit_plugin_infrastructure_core::roles::{ReleaseFetchContext, ReleaseFetcher};
+pub use uptrakit_plugin_infrastructure_core::{
+    AgentInteraction, AgentInteractionPlacement, ConfigOps, FormFieldDescriptor, FormFieldType,
+    FormSelectOptionDescriptor, FormSelectSourceDescriptor, RoleCreators, SurfaceActionDescriptor,
+    SurfaceActionLibrary, SurfaceActionUi, SurfaceFormDescriptor, SurfaceRowCondition,
+    SurfaceRowVisibleWhen, SurfaceWorkflowStep,
+};
 pub use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchFetchItem, BatchFetchResult, BatchUpdateItem, ExecuteUpdateResult,
     HostCapabilities, HostCompatibility, InfraBundle, InstalledVersionDisplay,
@@ -66,12 +74,6 @@ pub use uptrakit_plugin_infrastructure_core::{
     InstalledVersionItem, PluginError, RouterOsExecutor, RouterOsHostRuntime,
     ServiceMetadataProvider, UpdateLifecycleContext, construct_host_runtime,
     construct_routeros_host_runtime,
-};
-pub use uptrakit_plugin_infrastructure_core::{
-    ConfigOps, FormFieldDescriptor, FormFieldType, FormSelectOptionDescriptor,
-    FormSelectSourceDescriptor, RoleCreators, SurfaceActionDescriptor, SurfaceActionLibrary,
-    SurfaceActionUi, SurfaceFormDescriptor, SurfaceRowCondition, SurfaceRowVisibleWhen,
-    SurfaceWorkflowStep,
 };
 pub use uptrakit_plugin_infrastructure_core::{HostCompatibilityError, HostRequirements};
 

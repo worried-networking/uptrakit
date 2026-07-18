@@ -616,6 +616,9 @@ pub struct PluginDescriptor {
     /// Collected by the agent-ssh runtime's migrator; `None` for plugins with
     /// no agent-local tables. Same feature semantics as `migrations`.
     pub agent_migrations: Option<MigrationsFn>,
+    /// Agent-surface interactions (agent-infra plugins; collected by the
+    /// agent-ssh runtime). Replaces the legacy `.actions` collection path.
+    pub agent_surfaces: Option<fn() -> Vec<crate::agent_interaction::AgentInteraction>>,
     /// Plugin-owned tenant data deletion callback.
     ///
     /// The actual type is only meaningful when `migrations` feature is active.

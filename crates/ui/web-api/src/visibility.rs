@@ -117,6 +117,7 @@ mod tests {
             global_provider_consumers: &[],
             migrations: None,
             agent_migrations: None,
+            agent_surfaces: None,
             reset_tenant_data: None,
             db_migrate_tables: None,
         })
@@ -166,6 +167,7 @@ mod tests {
             global_provider_consumers: &[],
             migrations: None,
             agent_migrations: None,
+            agent_surfaces: None,
             reset_tenant_data: None,
             db_migrate_tables: None,
         })
