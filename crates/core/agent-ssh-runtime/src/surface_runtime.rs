@@ -19,10 +19,11 @@ use uptrakit_plugin_infrastructure_registry::agent_infra::{
     InfraActionInvokeError, InfraActionInvoker, InfraPluginContext,
 };
 use uptrakit_plugin_infrastructure_registry::{
-    FormFieldDescriptor as PluginFormFieldDescriptor, FormFieldType as PluginFormFieldType,
+    AgentInteraction, AgentInteractionPlacement, FormFieldDescriptor as PluginFormFieldDescriptor,
+    FormFieldType as PluginFormFieldType,
     FormSelectOptionDescriptor as PluginFormSelectOptionDescriptor,
     FormSelectSourceDescriptor as PluginFormSelectSourceDescriptor, InfraBundle, PluginFamily,
-    SurfaceActionDescriptor, SurfaceActionUi, SurfaceFormDescriptor as PluginSurfaceFormDescriptor,
+    SurfaceActionUi, SurfaceFormDescriptor as PluginSurfaceFormDescriptor,
     SurfaceRowCondition as PluginSurfaceRowCondition,
     SurfaceRowVisibleWhen as PluginSurfaceRowVisibleWhen,
     SurfaceWorkflowStep as PluginSurfaceWorkflowStep,
@@ -53,8 +54,6 @@ const SSH_HOSTS_SURFACE_LABEL: &str = "SSH Hosts";
 const SSH_HOSTS_SURFACE_PRIORITY: i32 = 450;
 const SSH_HOSTS_DATA_ACTION_ID: &str = "list-hosts";
 const SSH_HOSTS_DEFAULT_PER_PAGE: u32 = 50;
-const SSH_HOSTS_PRIMARY_ACTION_ID: &str = "bootstrap";
-const SSH_HOSTS_ROW_ACTION_IDS: [&str; 2] = ["sync-host", "remove-host"];
 const SSH_HOSTS_COLUMNS: [(&str, &str); 5] = [
     ("id", "ID"),
     ("name", "Name"),
@@ -66,33 +65,24 @@ const SSH_HOSTS_COLUMNS: [(&str, &str); 5] = [
 static REGISTERED_INTERACTION_IDS: LazyLock<BTreeSet<String>> =
     LazyLock::new(collect_registered_interaction_ids);
 
-fn collect_infra_primary_actions() -> Vec<String> {
-    use uptrakit_plugin_infrastructure_registry::all_descriptors;
-
-    all_descriptors()
+/// Action-bar ids in authored order (`AgentInteractionPlacement::Primary`).
+fn primary_action_ids(interactions: &[AgentInteraction]) -> Vec<String> {
+    interactions
         .iter()
-        .filter(|descriptor| descriptor.family == PluginFamily::Infrastructure)
-        .filter_map(|descriptor| descriptor.surface_actions)
-        .flat_map(|surface_actions| (surface_actions.actions)())
-        .filter(|action| action.action_id == "bootstrap-proxmox-guest")
-        .map(|action| action.action_id)
+        .filter(|interaction| matches!(interaction.placement, AgentInteractionPlacement::Primary))
+        .map(|interaction| interaction.action_id.clone())
         .collect()
 }
 
-fn build_primary_actions(infra_primary_actions: &[String]) -> Vec<String> {
-    let mut primary_actions = vec![SSH_HOSTS_PRIMARY_ACTION_ID.to_string()];
-    primary_actions.extend(infra_primary_actions.iter().cloned());
-    primary_actions
-}
-
 fn collect_registered_interaction_ids() -> BTreeSet<String> {
-    let infra_primary_actions = collect_infra_primary_actions();
-    let actions = build_actions();
-    let action_index: BTreeMap<&str, &SurfaceActionDescriptor> = actions
+    let interactions = build_agent_interactions();
+    let action_index: BTreeMap<&str, &AgentInteraction> = interactions
         .iter()
-        .map(|action| (action.action_id.as_str(), action))
+        .map(|interaction| (interaction.action_id.as_str(), interaction))
         .collect();
-    let Some(surface) = build_registered_surface(&action_index, &infra_primary_actions) else {
+    let primary_actions = primary_action_ids(&interactions);
+    let Some(surface) = build_registered_surface(&action_index, &primary_actions, &interactions)
+    else {
         return BTreeSet::new();
     };
 
@@ -115,15 +105,16 @@ pub fn build_surface_registration(
     service_id: Option<uuid::Uuid>,
     tenant_id: Option<uuid::Uuid>,
 ) -> SurfaceRegistration {
-    let infra_primary_actions = collect_infra_primary_actions();
-    let actions = build_actions();
-    let action_index: BTreeMap<&str, &SurfaceActionDescriptor> = actions
+    let interactions = build_agent_interactions();
+    let action_index: BTreeMap<&str, &AgentInteraction> = interactions
         .iter()
-        .map(|action| (action.action_id.as_str(), action))
+        .map(|interaction| (interaction.action_id.as_str(), interaction))
         .collect();
+    let primary_actions = primary_action_ids(&interactions);
 
     let mut registered_surfaces = Vec::new();
-    if let Some(surface) = build_registered_surface(&action_index, &infra_primary_actions) {
+    if let Some(surface) = build_registered_surface(&action_index, &primary_actions, &interactions)
+    {
         registered_surfaces.push(surface);
     }
 
@@ -159,47 +150,50 @@ pub fn build_surface_registration(
     }
 }
 
-/// Build the surface action library for runtime registration.
-pub fn build_actions() -> Vec<SurfaceActionDescriptor> {
+/// Build the agent interaction library for runtime registration.
+///
+/// Row order is wire-visible: sync-host BEFORE remove-host (the legacy
+/// `SSH_HOSTS_ROW_ACTION_IDS` order); the fixture test pins it.
+fn build_agent_interactions() -> Vec<AgentInteraction> {
     use uptrakit_plugin_infrastructure_registry::all_descriptors;
 
-    let mut actions = vec![
+    let mut interactions = vec![
         // Data-load action: populates the hosts table.
-        SurfaceActionDescriptor::new("list-hosts", "List Hosts")
+        AgentInteraction::new("list-hosts", "List Hosts")
             .with_permission(Permission::UpdateHosts)
             .with_timeout(15),
-        SurfaceActionDescriptor::new("remove-host", "Remove Host")
+        sync_host_interaction().placement(AgentInteractionPlacement::Row),
+        AgentInteraction::new("remove-host", "Remove Host")
             .with_permission(Permission::UpdateHosts)
             .destructive()
             .with_confirm_entity_field("name")
             .with_timeout(30)
             .with_icon("trash-2")
-            .batch(),
-        sync_host_action(),
-        bootstrap_action(),
+            .placement(AgentInteractionPlacement::Row),
+        bootstrap_interaction().placement(AgentInteractionPlacement::Primary),
         // Internal wizard-step actions (not shown in UI directly).
-        SurfaceActionDescriptor::new("bootstrap-connect", "Bootstrap Connect")
+        AgentInteraction::new("bootstrap-connect", "Bootstrap Connect")
             .with_permission(Permission::UpdateHosts)
             .with_timeout(60),
-        SurfaceActionDescriptor::new("bootstrap-execute", "Bootstrap Execute")
+        AgentInteraction::new("bootstrap-execute", "Bootstrap Execute")
             .with_permission(Permission::UpdateHosts)
             .with_timeout(120),
-        SurfaceActionDescriptor::new("sync-connect", "Sync Connect")
+        AgentInteraction::new("sync-connect", "Sync Connect")
             .with_permission(Permission::UpdateHosts)
             .with_timeout(60),
-        SurfaceActionDescriptor::new("sync-execute", "Sync Execute")
+        AgentInteraction::new("sync-execute", "Sync Execute")
             .with_permission(Permission::UpdateHosts)
             .with_timeout(120),
     ];
-    // Collect surface actions from infrastructure plugin descriptors.
-    let infra_actions: Vec<SurfaceActionDescriptor> = all_descriptors()
+    // Collect agent interactions from infrastructure plugin descriptors.
+    let infra_interactions: Vec<AgentInteraction> = all_descriptors()
         .iter()
-        .filter(|d| d.family == PluginFamily::Infrastructure)
-        .filter_map(|d| d.surface_actions)
-        .flat_map(|surface_actions| (surface_actions.actions)())
+        .filter(|descriptor| descriptor.family == PluginFamily::Infrastructure)
+        .filter_map(|descriptor| descriptor.agent_surfaces)
+        .flat_map(|agent_surfaces| agent_surfaces())
         .collect();
-    actions.extend(infra_actions);
-    actions
+    interactions.extend(infra_interactions);
+    interactions
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -225,8 +219,9 @@ enum ActionDisposition {
 }
 
 fn build_registered_surface(
-    action_index: &BTreeMap<&str, &SurfaceActionDescriptor>,
-    infra_primary_actions: &[String],
+    action_index: &BTreeMap<&str, &AgentInteraction>,
+    primary_actions: &[String],
+    agent_interactions: &[AgentInteraction],
 ) -> Option<surfaces::RegisteredSurface> {
     let surface_id = surfaces::SurfaceId::new(SSH_HOSTS_SURFACE_ID.to_string()).ok()?;
     let slot = surfaces::SLOT_SURFACE_PAGE.to_string();
@@ -237,8 +232,8 @@ fn build_registered_surface(
                 slot_def.provider_priority_max,
             )
         });
-    let primary_actions = build_primary_actions(infra_primary_actions);
-    let (root_node, data_sources, refs) = build_surface_parts(action_index, &primary_actions)?;
+    let (root_node, data_sources, refs) =
+        build_surface_parts(action_index, primary_actions, agent_interactions)?;
     let interactions = build_interactions(&refs, action_index);
     let targeting = Targeting::Targeted;
     let required_capabilities =
@@ -263,8 +258,9 @@ fn build_registered_surface(
 }
 
 fn build_surface_parts(
-    action_index: &BTreeMap<&str, &SurfaceActionDescriptor>,
+    action_index: &BTreeMap<&str, &AgentInteraction>,
     primary_actions: &[String],
+    agent_interactions: &[AgentInteraction],
 ) -> Option<(SurfaceNode, Vec<DataSourceDescriptor>, Vec<InteractionRef>)> {
     let data_source_id = DataSourceId::new("data.primary").ok()?;
     let mut refs = vec![InteractionRef {
@@ -302,11 +298,12 @@ fn build_surface_parts(
         }
     }
 
-    for action_id in SSH_HOSTS_ROW_ACTION_IDS {
-        let Some(action) = action_index.get(action_id).copied() else {
-            continue;
-        };
-        match action_disposition(action) {
+    for interaction in agent_interactions
+        .iter()
+        .filter(|interaction| matches!(interaction.placement, AgentInteractionPlacement::Row))
+    {
+        let action_id = interaction.action_id.as_str();
+        match action_disposition(interaction) {
             ActionDisposition::Unsupported => {}
             ActionDisposition::Immediate
             | ActionDisposition::Form
@@ -316,20 +313,20 @@ fn build_surface_parts(
                 };
                 row_ids.push(SurfaceTableRowAction {
                     interaction_id,
-                    visible_when: action
+                    visible_when: interaction
                         .row_visible_when
                         .as_ref()
                         .map(row_visible_when_from_extension),
                 });
-                let form_ui = action.ui.as_ref().and_then(action_ui_to_form_ui);
+                let form_ui = interaction.ui.as_ref().and_then(action_ui_to_form_ui);
                 refs.push(InteractionRef {
                     action_id: action_id.to_string(),
                     hint: InteractionHint::Action,
                     form_ui: form_ui.clone(),
-                    sensitive_fields: sensitive_fields_for_action(action),
+                    sensitive_fields: sensitive_fields_for_action(interaction),
                 });
                 collect_select_source_action_refs(form_ui.as_ref(), &mut refs);
-                collect_workflow_step_refs(action, &mut refs);
+                collect_workflow_step_refs(interaction, &mut refs);
             }
         }
     }
@@ -370,7 +367,7 @@ fn build_surface_parts(
     Some((root, data_sources, refs))
 }
 
-fn action_disposition(action: &SurfaceActionDescriptor) -> ActionDisposition {
+fn action_disposition(action: &AgentInteraction) -> ActionDisposition {
     match action.ui.as_ref() {
         Some(SurfaceActionUi::Form(_)) => ActionDisposition::Form,
         Some(SurfaceActionUi::Wizard { .. }) => ActionDisposition::Workflow,
@@ -417,7 +414,7 @@ fn form_ui_from_form(form: &PluginSurfaceFormDescriptor) -> FormUiDescriptor {
     }
 }
 
-fn collect_workflow_step_refs(action: &SurfaceActionDescriptor, refs: &mut Vec<InteractionRef>) {
+fn collect_workflow_step_refs(action: &AgentInteraction, refs: &mut Vec<InteractionRef>) {
     let Some(SurfaceActionUi::Wizard { steps }) = action.ui.as_ref() else {
         return;
     };
@@ -523,7 +520,7 @@ fn row_visible_when_from_extension(
     }
 }
 
-fn sensitive_fields_for_action(action: &SurfaceActionDescriptor) -> Vec<String> {
+fn sensitive_fields_for_action(action: &AgentInteraction) -> Vec<String> {
     let mut sensitive = BTreeSet::new();
     match action.ui.as_ref() {
         Some(SurfaceActionUi::Form(form)) => {
@@ -559,7 +556,7 @@ fn sensitive_fields_for_action(action: &SurfaceActionDescriptor) -> Vec<String> 
 
 fn build_interactions(
     refs: &[InteractionRef],
-    action_index: &BTreeMap<&str, &SurfaceActionDescriptor>,
+    action_index: &BTreeMap<&str, &AgentInteraction>,
 ) -> Vec<InteractionDescriptor> {
     let mut merged: BTreeMap<
         String,
@@ -635,7 +632,7 @@ fn build_interactions(
 }
 
 fn workflow_steps_from_action(
-    action: Option<&SurfaceActionDescriptor>,
+    action: Option<&AgentInteraction>,
 ) -> Vec<surfaces::WorkflowStepDescriptor> {
     let Some(action) = action else {
         return vec![];
@@ -661,7 +658,7 @@ fn workflow_steps_from_action(
         .collect()
 }
 
-fn action_kind_for_action(action: Option<&SurfaceActionDescriptor>) -> InteractionKind {
+fn action_kind_for_action(action: Option<&AgentInteraction>) -> InteractionKind {
     let Some(action) = action else {
         return InteractionKind::MutationAction;
     };
@@ -809,8 +806,8 @@ fn collect_node_caps(node: &SurfaceNode, caps: &mut BTreeSet<surfaces::Capabilit
     }
 }
 
-/// Build the sync-host action definition as a 3-step wizard.
-fn sync_host_action() -> SurfaceActionDescriptor {
+/// Build the sync-host interaction definition as a 3-step wizard.
+fn sync_host_interaction() -> AgentInteraction {
     let connect_step = PluginSurfaceWorkflowStep::new(
         "connect",
         "Connection & Authentication",
@@ -867,18 +864,17 @@ fn sync_host_action() -> SurfaceActionDescriptor {
     )
     .with_submit_action("sync-execute");
 
-    SurfaceActionDescriptor::new("sync-host", "Sync Host")
+    AgentInteraction::new("sync-host", "Sync Host")
         .with_permission(Permission::UpdateHosts)
         .with_timeout(120)
         .with_ui(SurfaceActionUi::Wizard {
             steps: vec![connect_step, review_step, execute_step],
         })
         .with_icon("refresh-cw")
-        .batch()
 }
 
-/// Build the bootstrap host action definition as a 3-step wizard.
-fn bootstrap_action() -> SurfaceActionDescriptor {
+/// Build the bootstrap host interaction definition as a 3-step wizard.
+fn bootstrap_interaction() -> AgentInteraction {
     let connect_step = PluginSurfaceWorkflowStep::new(
         "connect",
         "Connection & Authentication",
@@ -949,7 +945,7 @@ fn bootstrap_action() -> SurfaceActionDescriptor {
     )
     .with_submit_action("bootstrap-execute");
 
-    SurfaceActionDescriptor::new("bootstrap", "Bootstrap Host")
+    AgentInteraction::new("bootstrap", "Bootstrap Host")
         .with_permission(Permission::UpdateHosts)
         .with_timeout(120)
         .with_ui(SurfaceActionUi::Wizard {
@@ -2491,17 +2487,30 @@ mod tests {
             .iter()
             .map(|action| action.interaction_id.as_str())
             .collect();
-        assert_eq!(row_action_ids, SSH_HOSTS_ROW_ACTION_IDS);
+        assert_eq!(row_action_ids, ["sync-host", "remove-host"]);
+        let interactions = build_agent_interactions();
+        let expected_row_action_ids: Vec<&str> = interactions
+            .iter()
+            .filter(|interaction| matches!(interaction.placement, AgentInteractionPlacement::Row))
+            .map(|interaction| interaction.action_id.as_str())
+            .collect();
+        assert_eq!(row_action_ids, expected_row_action_ids);
     }
 
     #[test]
     fn dynamic_primary_action_is_included_in_action_bar_when_available() {
-        let actions = build_actions();
+        let interactions = build_agent_interactions();
+        let primary_ids: BTreeSet<&str> = interactions
+            .iter()
+            .filter(|interaction| {
+                matches!(interaction.placement, AgentInteractionPlacement::Primary)
+            })
+            .map(|interaction| interaction.action_id.as_str())
+            .collect();
+        assert!(primary_ids.contains("bootstrap"));
         assert!(
-            actions
-                .iter()
-                .any(|action| action.action_id == "bootstrap-proxmox-guest"),
-            "expected infra action bootstrap-proxmox-guest to be present in action library"
+            primary_ids.contains("bootstrap-proxmox-guest"),
+            "expected infra interaction bootstrap-proxmox-guest to be present in the Primary set"
         );
 
         let registration = build_surface_registration(None, &test_catalog(), None, None);
@@ -2518,7 +2527,7 @@ mod tests {
             panic!("first section child should be an action bar");
         };
         let action_ids: BTreeSet<&str> = action_ids.iter().map(|id| id.as_str()).collect();
-        assert!(action_ids.contains(SSH_HOSTS_PRIMARY_ACTION_ID));
+        assert!(action_ids.contains("bootstrap"));
         assert!(action_ids.contains("bootstrap-proxmox-guest"));
     }
 
@@ -3050,8 +3059,8 @@ mod tests {
 
     #[test]
     fn ssh_host_actions_carry_their_icons() {
-        let actions = build_actions();
-        let by_id: std::collections::HashMap<&str, &SurfaceActionDescriptor> =
+        let actions = build_agent_interactions();
+        let by_id: std::collections::HashMap<&str, &AgentInteraction> =
             actions.iter().map(|a| (a.action_id.as_str(), a)).collect();
 
         assert_eq!(by_id["bootstrap"].icon.as_deref(), Some("server-cog"));
