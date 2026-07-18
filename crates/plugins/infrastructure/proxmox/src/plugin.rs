@@ -63,9 +63,6 @@ impl ProxmoxPlugin {
         if !cfg!(feature = "agent-infra") {
             actions.extend(crate::surfaces::surface_actions());
         }
-        // Agent-side actions (module only exists with the feature).
-        #[cfg(feature = "agent-infra")]
-        actions.extend(crate::agent::plugin::agent_surface_actions());
         actions
     }
 

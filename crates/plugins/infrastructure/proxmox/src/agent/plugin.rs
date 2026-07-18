@@ -23,7 +23,7 @@ use uptrakit_plugin_infrastructure_core::agent_infra::{
 use uptrakit_plugin_infrastructure_core::error::{PluginError, Result};
 use uptrakit_plugin_infrastructure_core::{
     AgentInteraction, AgentInteractionPlacement, FormFieldDescriptor, FormFieldType,
-    FormSelectSourceDescriptor, SurfaceActionDescriptor, SurfaceActionUi, SurfaceFormDescriptor,
+    FormSelectSourceDescriptor, SurfaceActionUi, SurfaceFormDescriptor,
     surfaces::{SurfaceActionRequest, SurfaceActionResponse},
 };
 
@@ -32,17 +32,6 @@ use crate::pve_setup;
 use super::db_ops;
 
 // ── Agent surface actions ───────────────────────────────────────────────────
-
-/// Returns the surface action definitions contributed by the agent side of
-/// the Proxmox plugin.
-pub fn agent_surface_actions() -> Vec<SurfaceActionDescriptor> {
-    vec![
-        SurfaceActionDescriptor::new("discovered-guests", "List Discovered Guests")
-            .with_permission(uptrakit_shared_types::Permission::UpdateHosts)
-            .with_timeout(15),
-        bootstrap_proxmox_guest_action(),
-    ]
-}
 
 /// Returns the agent interaction declarations contributed by the agent side
 /// of the Proxmox plugin (table-dispatched via `AgentInteractionHandler`).
@@ -638,37 +627,6 @@ async fn reconcile_pve_config(
 
 // ── Action definitions ───────────────────────────────────────────────────────
 
-fn bootstrap_proxmox_guest_action() -> SurfaceActionDescriptor {
-    SurfaceActionDescriptor::new("bootstrap-proxmox-guest", "Bootstrap Discovered Guest")
-        .with_icon("boxes")
-        .with_permission(uptrakit_shared_types::Permission::UpdateHosts)
-        .with_timeout(300)
-        .with_ui(SurfaceActionUi::Form(SurfaceFormDescriptor::new(vec![
-            FormFieldDescriptor::new("discovered_guests", "Discovered Guests")
-                .with_type(FormFieldType::MultiSelect)
-                .required()
-                .with_help_text(
-                    "Select one or more Proxmox guests to bootstrap. \
-                     Names are auto-derived from the guest's hostname.",
-                )
-                .with_select_source(FormSelectSourceDescriptor::Action {
-                    action_id: "discovered-guests".to_string(),
-                }),
-            FormFieldDescriptor::new("target_username", "Target Username")
-                .with_help_text("User to create/use in each guest.")
-                .with_default_value("uptrakit"),
-            FormFieldDescriptor::new("allow_all", "Allow All (NOPASSWD: ALL)")
-                .with_type(FormFieldType::Toggle)
-                .with_help_text("Use NOPASSWD: ALL in sudoers (less secure)."),
-            FormFieldDescriptor::new("remove_stale_keys", "Remove Stale Keys")
-                .with_type(FormFieldType::Toggle)
-                .with_help_text(
-                    "Remove existing Uptrakit-managed keys from authorized_keys before \
-                     writing the new entry. Same-service keys are always removed regardless.",
-                ),
-        ])))
-}
-
 fn bootstrap_proxmox_guest_interaction() -> AgentInteraction {
     AgentInteraction::new("bootstrap-proxmox-guest", "Bootstrap Discovered Guest")
         .with_icon("boxes")
@@ -704,7 +662,7 @@ fn bootstrap_proxmox_guest_interaction() -> AgentInteraction {
 
 #[cfg(test)]
 mod tests {
-    use super::bootstrap_proxmox_guest_action;
+    use super::bootstrap_proxmox_guest_interaction;
     use super::drain_pending_matches_cycle;
     use crate::agent::db_ops;
     use uptrakit_plugin_infrastructure_core::surfaces::SurfaceActionResponse;
@@ -712,7 +670,7 @@ mod tests {
 
     #[test]
     fn bootstrap_proxmox_guest_action_has_boxes_icon() {
-        let action = bootstrap_proxmox_guest_action();
+        let action = bootstrap_proxmox_guest_interaction();
         assert_eq!(action.action_id, "bootstrap-proxmox-guest");
         assert_eq!(action.icon.as_deref(), Some("boxes"));
     }
