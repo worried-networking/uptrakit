@@ -6943,6 +6943,241 @@
         "x-required-permission": "trigger_updates"
       }
     },
+    "/api/v1/surfaces": {
+      "get": {
+        "tags": [
+          "Surfaces"
+        ],
+        "summary": "List registered surfaces visible to the authenticated tenant.",
+        "operationId": "list_surfaces",
+        "parameters": [
+          {
+            "name": "slot",
+            "in": "query",
+            "description": "Return only surfaces registered in this slot.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "Page alias filter (`settings`, `software`, `hosts`, `surfaces`).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Surfaces visible to the caller, filtered by descriptor visibility",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SurfaceResponse"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ],
+        "x-required-permission": "authenticated-only: results filtered by descriptor visibility"
+      }
+    },
+    "/api/v1/surfaces/{surface_id}": {
+      "get": {
+        "tags": [
+          "Surfaces"
+        ],
+        "summary": "Read a surface: descriptor, interactions, and data sources.",
+        "operationId": "get_surface_read",
+        "parameters": [
+          {
+            "name": "surface_id",
+            "in": "path",
+            "description": "Surface ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Surface read model",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SurfaceReadResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated"
+          },
+          "403": {
+            "description": "Missing the permission declared by the surface descriptor"
+          },
+          "404": {
+            "description": "Surface not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ],
+        "x-required-permission": "dynamic: declared by the surface descriptor / interaction"
+      }
+    },
+    "/api/v1/surfaces/{surface_id}/interactions/{interaction_id}": {
+      "post": {
+        "tags": [
+          "Surfaces"
+        ],
+        "summary": "Invoke a surface interaction. The success body is a free-form,\nprovider-defined JSON value.",
+        "operationId": "invoke_surface_interaction",
+        "parameters": [
+          {
+            "name": "surface_id",
+            "in": "path",
+            "description": "Surface ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "interaction_id",
+            "in": "path",
+            "description": "Interaction ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvokeSurfaceInteractionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Provider-defined free-form JSON result",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or missing target provider"
+          },
+          "401": {
+            "description": "Not authenticated"
+          },
+          "403": {
+            "description": "Missing a permission declared by the descriptor or interaction"
+          },
+          "404": {
+            "description": "Surface, interaction, or provider not found"
+          },
+          "409": {
+            "description": "Duplicate idempotency key or provider-reported conflict"
+          },
+          "422": {
+            "description": "Schema validation failed or provider-reported failure"
+          },
+          "429": {
+            "description": "Rate limited"
+          },
+          "503": {
+            "description": "Provider unavailable"
+          },
+          "504": {
+            "description": "Surface action timed out"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ],
+        "x-required-permission": "dynamic: declared by the surface descriptor / interaction"
+      }
+    },
+    "/api/v1/surfaces/{surface_id}/providers": {
+      "get": {
+        "tags": [
+          "Surfaces"
+        ],
+        "summary": "List targeted providers for a surface.",
+        "operationId": "list_surface_providers",
+        "parameters": [
+          {
+            "name": "surface_id",
+            "in": "path",
+            "description": "Surface ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Providers targeting this surface",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SurfaceProviderInfo"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated"
+          },
+          "404": {
+            "description": "Surface not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ],
+        "x-required-permission": "authenticated-only: results filtered by descriptor visibility"
+      }
+    },
     "/api/v1/system-audit-logs": {
       "get": {
         "tags": [
@@ -10454,6 +10689,40 @@
               "null"
             ],
             "format": "date-time"
+          }
+        }
+      },
+      "InvokeSurfaceInteractionRequest": {
+        "type": "object",
+        "description": "Request body for invoking a surface interaction.",
+        "properties": {
+          "encrypted_sensitive_params": {
+            "description": "Sealed-box-encrypted sensitive parameters (wire-defined shape)."
+          },
+          "idempotency_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional idempotency key. If omitted, the server generates one."
+          },
+          "params": {
+            "description": "Interaction parameters (free-form JSON object)."
+          },
+          "target_provider_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "timeout_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Optional timeout override for this invocation.",
+            "minimum": 0
           }
         }
       },
@@ -14301,6 +14570,85 @@
           }
         }
       },
+      "SurfaceProviderAvailability": {
+        "type": "string",
+        "description": "Tenant-compatibility/availability state for a targeted provider.",
+        "enum": [
+          "available",
+          "disconnected",
+          "incompatible_tenant"
+        ]
+      },
+      "SurfaceProviderInfo": {
+        "type": "object",
+        "description": "Provider information returned for a targeted surface.",
+        "required": [
+          "provider_id",
+          "display_label",
+          "availability"
+        ],
+        "properties": {
+          "availability": {
+            "$ref": "#/components/schemas/SurfaceProviderAvailability"
+          },
+          "display_label": {
+            "type": "string"
+          },
+          "encryption_metadata": {},
+          "provider_id": {
+            "type": "string"
+          },
+          "service_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "SurfaceReadResponse": {
+        "type": "object",
+        "description": "Surface read payload used by frontend route rendering.",
+        "required": [
+          "descriptor"
+        ],
+        "properties": {
+          "data_sources": {
+            "type": "array",
+            "items": {},
+            "description": "Data-source descriptors (wire-defined shape; free-form in the spec)."
+          },
+          "descriptor": {
+            "description": "Surface descriptor (wire-defined shape; free-form in the spec)."
+          },
+          "interactions": {
+            "type": "array",
+            "items": {},
+            "description": "Interaction descriptors (wire-defined shape; free-form in the spec)."
+          }
+        }
+      },
+      "SurfaceResponse": {
+        "allOf": [
+          {
+            "description": "Flattened surface descriptor (wire-defined shape; free-form in the spec)."
+          },
+          {
+            "type": "object",
+            "required": [
+              "provider_count"
+            ],
+            "properties": {
+              "provider_count": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        ],
+        "description": "Surface list item returned by `/api/v1/surfaces`."
+      },
       "SystemAlert": {
         "type": "object",
         "required": [
@@ -16108,6 +16456,10 @@
     {
       "name": "OAuth",
       "description": "OAuth 2.0 device authorization grant (RFC 8628) and server metadata (RFC 8414)"
+    },
+    {
+      "name": "Surfaces",
+      "description": "Shared surface read models, providers, and interactions"
     }
   ]
 }

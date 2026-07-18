@@ -32,6 +32,8 @@ pub const RENAME_MAP: &[(&str, &str)] = &[
     ("get_channel", "get_notification_channel"),
     ("get_provider", "get_oidc_provider"),
     ("get_rule", "get_notification_rule"),
+    // Surfaces: spec says get_surface_read, client keeps the read_surface verb
+    ("get_surface_read", "read_surface"),
     ("list_autodiscovery_ignores", "list_software_ignores"),
     ("list_batches", "list_update_batches"),
     ("list_channels", "list_notification_channels"),
@@ -95,11 +97,6 @@ pub const CLIENT_ONLY: &[&str] = &[
     "ca_crl",
     // Health check: intentionally outside the /api/v1 prefix, excluded from spec
     "healthz",
-    // Surfaces: runtime UI extension points served by plugins, not in the core spec
-    "invoke_surface_interaction",
-    "list_surface_providers",
-    "list_surfaces",
-    "read_surface",
     // Raw helpers and streaming methods have no single spec operation counterpart
     "raw_request",
     "stream_batch_progress",
@@ -116,11 +113,6 @@ pub const PATHS_CLIENT_ONLY: &[&str] = &[
     // PKI binary downloads — outside the typed API spec
     "/api/v1/pki/ca.crt",
     "/api/v1/pki/ca.crl",
-    // Surfaces — runtime extension-point paths not in the core spec
-    "/api/v1/surfaces",
-    "/api/v1/surfaces/{}/interactions/{}",
-    "/api/v1/surfaces/{}/providers",
-    "/api/v1/surfaces/{}/read",
     // Health check — intentionally outside the /api/v1 versioned prefix
     "/healthz",
 ];

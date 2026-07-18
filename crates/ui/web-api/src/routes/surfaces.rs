@@ -10,7 +10,7 @@ use std::time::Duration;
 use axum::{
     Json,
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use sea_orm::EntityTrait;
@@ -33,6 +33,19 @@ use crate::surface_proxy::entity_enrichment::enrich_entity_links;
 use crate::surface_proxy::{SurfaceCallerOrigin, SurfaceInvokeRequest, SurfaceProxyError};
 use crate::surface_registry::{SurfaceCatalogItem, SurfaceRegistryLookupError};
 
+/// List registered surfaces visible to the authenticated tenant.
+#[utoipa::path(
+    get,
+    path = "/api/v1/surfaces",
+    params(ListSurfacesQuery),
+    responses(
+        (status = 200, description = "Surfaces visible to the caller, filtered by descriptor visibility", body = Vec<SurfaceResponse>),
+        (status = 401, description = "Not authenticated")
+    ),
+    tag = "Surfaces",
+    extensions(("x-required-permission" = json!("authenticated-only: results filtered by descriptor visibility"))),
+    security(("bearer_token" = []))
+)]
 #[tracing::instrument(skip_all)]
 pub async fn list_surfaces(
     State(state): State<Arc<AppState>>,
@@ -64,7 +77,17 @@ pub async fn list_surfaces(
         })
         .collect();
 
-    (StatusCode::OK, Json(group_surface_catalog(filtered))).into_response()
+    with_private_no_store((StatusCode::OK, Json(group_surface_catalog(filtered))).into_response())
+}
+
+/// Surface GET responses are per-tenant and per-permission; shared caches and
+/// bfcache must never serve them across users (spec 2026-07-16 §1).
+fn with_private_no_store(mut response: Response) -> Response {
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("private, no-store"),
+    );
+    response
 }
 
 fn group_surface_catalog(catalog: Vec<SurfaceCatalogItem>) -> Vec<SurfaceResponse> {
@@ -83,87 +106,124 @@ fn group_surface_catalog(catalog: Vec<SurfaceCatalogItem>) -> Vec<SurfaceRespons
     grouped.into_values().collect()
 }
 
+/// List targeted providers for a surface.
+#[utoipa::path(
+    get,
+    path = "/api/v1/surfaces/{surface_id}/providers",
+    params(("surface_id" = String, Path, description = "Surface ID")),
+    responses(
+        (status = 200, description = "Providers targeting this surface", body = Vec<SurfaceProviderInfo>),
+        (status = 401, description = "Not authenticated"),
+        (status = 404, description = "Surface not found")
+    ),
+    tag = "Surfaces",
+    extensions(("x-required-permission" = json!("authenticated-only: results filtered by descriptor visibility"))),
+    security(("bearer_token" = []))
+)]
 #[tracing::instrument(skip_all)]
 pub async fn list_surface_providers(
     State(state): State<Arc<AppState>>,
     tenant_ctx: TenantContext,
     Path(surface_id): Path<String>,
 ) -> Response {
-    let providers = state
-        .surface_proxy_deps
-        .registry
-        .list_targeted_providers_for_surface(&surface_id, tenant_ctx.tenant_id);
-    if providers.is_empty() {
-        return error_response_with_code(StatusCode::NOT_FOUND, "Surface not found", "not_found");
-    }
+    let response = async {
+        let providers = state
+            .surface_proxy_deps
+            .registry
+            .list_targeted_providers_for_surface(&surface_id, tenant_ctx.tenant_id);
+        if providers.is_empty() {
+            return error_response_with_code(
+                StatusCode::NOT_FOUND,
+                "Surface not found",
+                "not_found",
+            );
+        }
 
-    let mut response = Vec::with_capacity(providers.len());
-    for provider in providers {
-        let availability = if !provider.tenant_compatible {
-            SurfaceProviderAvailability::IncompatibleTenant
-        } else if let Some(service_id) = provider.service_id {
-            if state.service_connections.is_connected(&service_id).await
-                && !state.service_connections.is_yielded(&service_id)
-            {
-                SurfaceProviderAvailability::Available
+        let mut response = Vec::with_capacity(providers.len());
+        for provider in providers {
+            let availability = if !provider.tenant_compatible {
+                SurfaceProviderAvailability::IncompatibleTenant
+            } else if let Some(service_id) = provider.service_id {
+                if state.service_connections.is_connected(&service_id).await
+                    && !state.service_connections.is_yielded(&service_id)
+                {
+                    SurfaceProviderAvailability::Available
+                } else {
+                    SurfaceProviderAvailability::Disconnected
+                }
             } else {
-                SurfaceProviderAvailability::Disconnected
-            }
-        } else {
-            SurfaceProviderAvailability::Available
-        };
+                SurfaceProviderAvailability::Available
+            };
 
-        let display_label = if let Some(service_id) = provider.service_id {
-            match uptrakit_shared_db::entity::prelude::Service::find_by_id(service_id)
-                .one(state.db())
-                .await
-            {
-                Ok(Some(svc)) => svc.friendly_name,
-                Ok(None) => {
-                    match system_service::Entity::find_by_id(service_id)
-                        .one(state.db())
-                        .await
-                    {
-                        Ok(Some(sys_svc)) => sys_svc.friendly_name,
-                        Ok(None) => provider
-                            .service_app_name
-                            .unwrap_or_else(|| provider.provider_id.clone()),
-                        Err(error) => {
-                            tracing::error!(%error, %service_id, "failed to look up system service");
-                            return error_response(
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                "Internal server error",
-                            );
+            let display_label = if let Some(service_id) = provider.service_id {
+                match uptrakit_shared_db::entity::prelude::Service::find_by_id(service_id)
+                    .one(state.db())
+                    .await
+                {
+                    Ok(Some(svc)) => svc.friendly_name,
+                    Ok(None) => {
+                        match system_service::Entity::find_by_id(service_id)
+                            .one(state.db())
+                            .await
+                        {
+                            Ok(Some(sys_svc)) => sys_svc.friendly_name,
+                            Ok(None) => provider
+                                .service_app_name
+                                .unwrap_or_else(|| provider.provider_id.clone()),
+                            Err(error) => {
+                                tracing::error!(%error, %service_id, "failed to look up system service");
+                                return error_response(
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                    "Internal server error",
+                                );
+                            }
                         }
                     }
+                    Err(error) => {
+                        tracing::error!(%error, %service_id, "failed to look up service");
+                        return error_response(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Internal server error",
+                        );
+                    }
                 }
-                Err(error) => {
-                    tracing::error!(%error, %service_id, "failed to look up service");
-                    return error_response(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "Internal server error",
-                    );
-                }
-            }
-        } else {
-            provider
-                .service_app_name
-                .map(|name| format!("Built-in ({name})"))
-                .unwrap_or_else(|| format!("Built-in ({})", provider.provider_id))
-        };
+            } else {
+                provider
+                    .service_app_name
+                    .map(|name| format!("Built-in ({name})"))
+                    .unwrap_or_else(|| format!("Built-in ({})", provider.provider_id))
+            };
 
-        response.push(SurfaceProviderInfo {
-            provider_id: provider.provider_id,
-            display_label,
-            service_id: provider.service_id,
-            availability,
-            encryption_metadata: provider.encryption_metadata,
-        });
+            response.push(SurfaceProviderInfo {
+                provider_id: provider.provider_id,
+                display_label,
+                service_id: provider.service_id,
+                availability,
+                encryption_metadata: provider.encryption_metadata,
+            });
+        }
+
+        (StatusCode::OK, Json(response)).into_response()
     }
-
-    (StatusCode::OK, Json(response)).into_response()
+    .await;
+    with_private_no_store(response)
 }
 
+/// Read a surface: descriptor, interactions, and data sources.
+#[utoipa::path(
+    get,
+    path = "/api/v1/surfaces/{surface_id}",
+    params(("surface_id" = String, Path, description = "Surface ID")),
+    responses(
+        (status = 200, description = "Surface read model", body = SurfaceReadResponse),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Missing the permission declared by the surface descriptor"),
+        (status = 404, description = "Surface not found")
+    ),
+    tag = "Surfaces",
+    extensions(("x-required-permission" = json!("dynamic: declared by the surface descriptor / interaction"))),
+    security(("bearer_token" = []))
+)]
 #[tracing::instrument(skip_all)]
 pub async fn get_surface_read(
     State(state): State<Arc<AppState>>,
@@ -171,35 +231,65 @@ pub async fn get_surface_read(
     axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
     Path(surface_id): Path<String>,
 ) -> Response {
-    let resolved = match state
-        .surface_proxy_deps
-        .registry
-        .resolve_surface_read(tenant_ctx.tenant_id, &surface_id)
-    {
-        Ok(resolved) => resolved,
-        Err(error) => return map_lookup_error(error),
-    };
+    let response = async {
+        let resolved = match state
+            .surface_proxy_deps
+            .registry
+            .resolve_surface_read(tenant_ctx.tenant_id, &surface_id)
+        {
+            Ok(resolved) => resolved,
+            Err(error) => return map_lookup_error(error),
+        };
 
-    if let Some(response) = enforce_required_permission(
-        resolved.descriptor.required_permission.as_deref(),
-        &auth_user,
-        &surface_id,
-        "surface",
-    ) {
-        return response;
+        if let Some(response) = enforce_required_permission(
+            resolved.descriptor.required_permission.as_deref(),
+            &auth_user,
+            &surface_id,
+            "surface",
+        ) {
+            return response;
+        }
+
+        (
+            StatusCode::OK,
+            Json(SurfaceReadResponse {
+                descriptor: resolved.descriptor,
+                interactions: resolved.interactions,
+                data_sources: resolved.data_sources,
+            }),
+        )
+            .into_response()
     }
-
-    (
-        StatusCode::OK,
-        Json(SurfaceReadResponse {
-            descriptor: resolved.descriptor,
-            interactions: resolved.interactions,
-            data_sources: resolved.data_sources,
-        }),
-    )
-        .into_response()
+    .await;
+    with_private_no_store(response)
 }
 
+/// Invoke a surface interaction. The success body is a free-form,
+/// provider-defined JSON value.
+#[utoipa::path(
+    post,
+    path = "/api/v1/surfaces/{surface_id}/interactions/{interaction_id}",
+    params(
+        ("surface_id" = String, Path, description = "Surface ID"),
+        ("interaction_id" = String, Path, description = "Interaction ID")
+    ),
+    request_body = InvokeSurfaceInteractionRequest,
+    responses(
+        (status = 200, description = "Provider-defined free-form JSON result", body = serde_json::Value),
+        (status = 400, description = "Invalid or missing target provider"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Missing a permission declared by the descriptor or interaction"),
+        (status = 404, description = "Surface, interaction, or provider not found"),
+        (status = 409, description = "Duplicate idempotency key or provider-reported conflict"),
+        (status = 422, description = "Schema validation failed or provider-reported failure"),
+        (status = 429, description = "Rate limited"),
+        (status = 503, description = "Provider unavailable"),
+        (status = 504, description = "Surface action timed out")
+    ),
+    tag = "Surfaces",
+    extensions(("x-required-permission" = json!("dynamic: declared by the surface descriptor / interaction"))),
+    security(("bearer_token" = []))
+)]
 #[tracing::instrument(skip_all)]
 pub async fn invoke_surface_interaction(
     State(state): State<Arc<AppState>>,

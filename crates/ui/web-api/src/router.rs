@@ -35,7 +35,8 @@ use crate::extractors::{GlobalSettingsVersion, SettingsVersion};
         (name = "Global Settings", description = "Infrastructure-scoped settings requiring global administrator access"),
         (name = "Audit Logs", description = "Tenant and system-level audit log access"),
         (name = "Users", description = "User management, roles, and access presets"),
-        (name = "OAuth", description = "OAuth 2.0 device authorization grant (RFC 8628) and server metadata (RFC 8414)")
+        (name = "OAuth", description = "OAuth 2.0 device authorization grant (RFC 8628) and server metadata (RFC 8414)"),
+        (name = "Surfaces", description = "Shared surface read models, providers, and interactions")
     ),
     paths(
         crate::routes::auth::register,
@@ -767,24 +768,12 @@ pub fn build_router_with_openapi(state: Arc<AppState>) -> (Router, utoipa::opena
             get(crate::routes::events::stream_events),
         );
 
-    // Surface endpoints — plain axum routes (no OpenAPI annotations).
+    // Surface endpoints
     let auth_routes = auth_routes
-        .route(
-            "/api/v1/surfaces",
-            axum::routing::get(crate::routes::surfaces::list_surfaces),
-        )
-        .route(
-            "/api/v1/surfaces/{surface_id}/providers",
-            axum::routing::get(crate::routes::surfaces::list_surface_providers),
-        )
-        .route(
-            "/api/v1/surfaces/{surface_id}/read",
-            axum::routing::get(crate::routes::surfaces::get_surface_read),
-        )
-        .route(
-            "/api/v1/surfaces/{surface_id}/interactions/{interaction_id}",
-            axum::routing::post(crate::routes::surfaces::invoke_surface_interaction),
-        );
+        .routes(routes!(crate::routes::surfaces::list_surfaces))
+        .routes(routes!(crate::routes::surfaces::get_surface_read))
+        .routes(routes!(crate::routes::surfaces::list_surface_providers))
+        .routes(routes!(crate::routes::surfaces::invoke_surface_interaction));
 
     // Reset data
     #[cfg(feature = "reset-data")]

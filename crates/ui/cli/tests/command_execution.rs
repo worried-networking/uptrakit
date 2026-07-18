@@ -617,7 +617,7 @@ async fn surfaces_read_success() {
     let server = MockApiServer::start();
     let surface_id = sample_surface_id();
     let _m = server
-        .on("GET", &format!("/api/v1/surfaces/{surface_id}/read"))
+        .on("GET", &format!("/api/v1/surfaces/{surface_id}"))
         .ok(&sample_surface_read());
 
     let result = surfaces::read(surfaces::ReadParams {
@@ -659,7 +659,7 @@ async fn surfaces_dynamic_form_submit_success() {
     let interaction_id = sample_interaction_id();
     let provider_id = "provider.sample";
     let _read = server
-        .on("GET", &format!("/api/v1/surfaces/{surface_id}/read"))
+        .on("GET", &format!("/api/v1/surfaces/{surface_id}"))
         .ok(&sample_proxied_surface_read());
     let _providers = server
         .on("GET", &format!("/api/v1/surfaces/{surface_id}/providers"))
@@ -702,7 +702,7 @@ async fn surfaces_invoke_splits_sensitive_and_encrypts() {
     let interaction_id = sample_interaction_id();
     let provider_id = "provider.sample";
     let _read = server
-        .on("GET", &format!("/api/v1/surfaces/{surface_id}/read"))
+        .on("GET", &format!("/api/v1/surfaces/{surface_id}"))
         .ok(&sample_proxied_surface_read());
     let _providers = server
         .on("GET", &format!("/api/v1/surfaces/{surface_id}/providers"))
@@ -747,7 +747,7 @@ async fn surfaces_invoke_errors_without_encryption_metadata() {
     let surface_id = sample_surface_id();
     let interaction_id = sample_interaction_id();
     let _read = server
-        .on("GET", &format!("/api/v1/surfaces/{surface_id}/read"))
+        .on("GET", &format!("/api/v1/surfaces/{surface_id}"))
         .ok(&sample_proxied_surface_read());
     let _providers = server
         .on("GET", &format!("/api/v1/surfaces/{surface_id}/providers"))
@@ -787,7 +787,7 @@ async fn surfaces_invoke_requires_target_provider_id_for_targeted_surface() {
     let surface_id = sample_surface_id();
     let interaction_id = sample_interaction_id();
     let _read = server
-        .on("GET", &format!("/api/v1/surfaces/{surface_id}/read"))
+        .on("GET", &format!("/api/v1/surfaces/{surface_id}"))
         .ok(&sample_proxied_surface_read());
 
     let params = serde_json::json!({

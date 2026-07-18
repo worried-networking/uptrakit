@@ -400,9 +400,9 @@ pub(crate) mod surfaces {
     pub(crate) fn providers(surface_id: &str) -> String {
         format!("/api/v1/surfaces/{surface_id}/providers")
     }
-    /// `GET /api/v1/surfaces/{surface_id}/read`
+    /// `GET /api/v1/surfaces/{surface_id}`
     pub(crate) fn read(surface_id: &str) -> String {
-        format!("/api/v1/surfaces/{surface_id}/read")
+        format!("/api/v1/surfaces/{surface_id}")
     }
     /// `POST /api/v1/surfaces/{surface_id}/interactions/{interaction_id}`
     pub(crate) fn interaction(surface_id: &str, interaction_id: &str) -> String {

@@ -887,6 +887,29 @@ export type InstancePluginSummary = {
 };
 
 /**
+ * Request body for invoking a surface interaction.
+ */
+export type InvokeSurfaceInteractionRequest = {
+    /**
+     * Sealed-box-encrypted sensitive parameters (wire-defined shape).
+     */
+    encrypted_sensitive_params?: unknown;
+    /**
+     * Optional idempotency key. If omitted, the server generates one.
+     */
+    idempotency_key?: string | null;
+    /**
+     * Interaction parameters (free-form JSON object).
+     */
+    params?: unknown;
+    target_provider_id?: string | null;
+    /**
+     * Optional timeout override for this invocation.
+     */
+    timeout_seconds?: number | null;
+};
+
+/**
  * Request body for `POST /api/v1/software-items/{id}/batch-update`.
  *
  * Rolls out a software item to all (or selected) assigned hosts.
@@ -2503,6 +2526,56 @@ export type SoftwareItemResponse = {
      */
     update_available: boolean;
     updated_at: string;
+};
+
+/**
+ * Tenant-compatibility/availability state for a targeted provider.
+ */
+export const SurfaceProviderAvailability = {
+    AVAILABLE: 'available',
+    DISCONNECTED: 'disconnected',
+    INCOMPATIBLE_TENANT: 'incompatible_tenant'
+} as const;
+
+/**
+ * Tenant-compatibility/availability state for a targeted provider.
+ */
+export type SurfaceProviderAvailability = typeof SurfaceProviderAvailability[keyof typeof SurfaceProviderAvailability];
+
+/**
+ * Provider information returned for a targeted surface.
+ */
+export type SurfaceProviderInfo = {
+    availability: SurfaceProviderAvailability;
+    display_label: string;
+    encryption_metadata?: unknown;
+    provider_id: string;
+    service_id?: string | null;
+};
+
+/**
+ * Surface read payload used by frontend route rendering.
+ */
+export type SurfaceReadResponse = {
+    /**
+     * Data-source descriptors (wire-defined shape; free-form in the spec).
+     */
+    data_sources?: Array<unknown>;
+    /**
+     * Surface descriptor (wire-defined shape; free-form in the spec).
+     */
+    descriptor: unknown;
+    /**
+     * Interaction descriptors (wire-defined shape; free-form in the spec).
+     */
+    interactions?: Array<unknown>;
+};
+
+/**
+ * Surface list item returned by `/api/v1/surfaces`.
+ */
+export type SurfaceResponse = unknown & {
+    provider_count: number;
 };
 
 export type SystemAlert = {
@@ -8075,6 +8148,168 @@ export type TriggerUpdateResponses = {
 };
 
 export type TriggerUpdateResponse2 = TriggerUpdateResponses[keyof TriggerUpdateResponses];
+
+export type ListSurfacesData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Return only surfaces registered in this slot.
+         */
+        slot?: string | null;
+        /**
+         * Page alias filter (`settings`, `software`, `hosts`, `surfaces`).
+         */
+        page?: string | null;
+    };
+    url: '/api/v1/surfaces';
+};
+
+export type ListSurfacesErrors = {
+    /**
+     * Not authenticated
+     */
+    401: unknown;
+};
+
+export type ListSurfacesResponses = {
+    /**
+     * Surfaces visible to the caller, filtered by descriptor visibility
+     */
+    200: Array<SurfaceResponse>;
+};
+
+export type ListSurfacesResponse = ListSurfacesResponses[keyof ListSurfacesResponses];
+
+export type GetSurfaceReadData = {
+    body?: never;
+    path: {
+        /**
+         * Surface ID
+         */
+        surface_id: string;
+    };
+    query?: never;
+    url: '/api/v1/surfaces/{surface_id}';
+};
+
+export type GetSurfaceReadErrors = {
+    /**
+     * Not authenticated
+     */
+    401: unknown;
+    /**
+     * Missing the permission declared by the surface descriptor
+     */
+    403: unknown;
+    /**
+     * Surface not found
+     */
+    404: unknown;
+};
+
+export type GetSurfaceReadResponses = {
+    /**
+     * Surface read model
+     */
+    200: SurfaceReadResponse;
+};
+
+export type GetSurfaceReadResponse = GetSurfaceReadResponses[keyof GetSurfaceReadResponses];
+
+export type InvokeSurfaceInteractionData = {
+    body: InvokeSurfaceInteractionRequest;
+    path: {
+        /**
+         * Surface ID
+         */
+        surface_id: string;
+        /**
+         * Interaction ID
+         */
+        interaction_id: string;
+    };
+    query?: never;
+    url: '/api/v1/surfaces/{surface_id}/interactions/{interaction_id}';
+};
+
+export type InvokeSurfaceInteractionErrors = {
+    /**
+     * Invalid or missing target provider
+     */
+    400: unknown;
+    /**
+     * Not authenticated
+     */
+    401: unknown;
+    /**
+     * Missing a permission declared by the descriptor or interaction
+     */
+    403: unknown;
+    /**
+     * Surface, interaction, or provider not found
+     */
+    404: unknown;
+    /**
+     * Duplicate idempotency key or provider-reported conflict
+     */
+    409: unknown;
+    /**
+     * Schema validation failed or provider-reported failure
+     */
+    422: unknown;
+    /**
+     * Rate limited
+     */
+    429: unknown;
+    /**
+     * Provider unavailable
+     */
+    503: unknown;
+    /**
+     * Surface action timed out
+     */
+    504: unknown;
+};
+
+export type InvokeSurfaceInteractionResponses = {
+    /**
+     * Provider-defined free-form JSON result
+     */
+    200: unknown;
+};
+
+export type ListSurfaceProvidersData = {
+    body?: never;
+    path: {
+        /**
+         * Surface ID
+         */
+        surface_id: string;
+    };
+    query?: never;
+    url: '/api/v1/surfaces/{surface_id}/providers';
+};
+
+export type ListSurfaceProvidersErrors = {
+    /**
+     * Not authenticated
+     */
+    401: unknown;
+    /**
+     * Surface not found
+     */
+    404: unknown;
+};
+
+export type ListSurfaceProvidersResponses = {
+    /**
+     * Providers targeting this surface
+     */
+    200: Array<SurfaceProviderInfo>;
+};
+
+export type ListSurfaceProvidersResponse = ListSurfaceProvidersResponses[keyof ListSurfaceProvidersResponses];
 
 export type ListSystemAuditLogsData = {
     body?: never;
