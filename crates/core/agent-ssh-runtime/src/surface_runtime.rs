@@ -2392,6 +2392,40 @@ mod tests {
         );
     }
 
+    fn fixture_path() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/ssh_hosts_registration.json")
+    }
+
+    fn fixture_registration_value() -> serde_json::Value {
+        let tenant_id = uuid::Uuid::nil();
+        let registration = build_surface_registration(None, &test_catalog(), None, Some(tenant_id));
+
+        serde_json::to_value(&registration).expect("registration serializes")
+    }
+
+    /// One-shot fixture (re)generator. Run manually with:
+    /// `cargo test -p uptrakit-agent-ssh-runtime dump_ssh_hosts_registration_fixture -- --ignored`
+    #[test]
+    #[ignore = "fixture regenerator, run manually"]
+    fn dump_ssh_hosts_registration_fixture() {
+        let pretty = serde_json::to_string_pretty(&fixture_registration_value())
+            .expect("registration serializes");
+        std::fs::write(fixture_path(), pretty + "\n").expect("fixture written");
+    }
+
+    /// Agent-side wire-output equivalence gate (spec D4): the inversion must not change the
+    /// registered interaction set, kinds, workflow steps, timeouts, permissions, visible_when,
+    /// or icons.
+    #[test]
+    fn ssh_hosts_registration_wire_output_matches_fixture() {
+        let expected: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(fixture_path()).expect("fixture readable"),
+        )
+        .expect("fixture parses");
+        assert_eq!(fixture_registration_value(), expected);
+    }
+
     #[test]
     fn ssh_hosts_surface_descriptor_and_data_source_parity_is_preserved() {
         let registration = build_surface_registration(None, &test_catalog(), None, None);

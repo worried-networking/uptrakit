@@ -1,0 +1,621 @@
+{
+  "provider": {
+    "provider_id": "service.uptrakit-agent-ssh",
+    "provider_kind": "service",
+    "provider_namespace": "service"
+  },
+  "framework_generation": {
+    "major": 1,
+    "minor": 0
+  },
+  "capabilities": [
+    "section_node",
+    "table_node",
+    "action_bar_node",
+    "mutation_action",
+    "form_submit",
+    "workflow",
+    "data_load",
+    "confirmable_action",
+    "provider_query_data_source",
+    "targeted_targeting",
+    "sensitive_fields",
+    "provider_initiated_actions"
+  ],
+  "effective_tenant_binding": {
+    "scope": "tenant",
+    "tenant_id": "00000000-0000-0000-0000-000000000000"
+  },
+  "surfaces": [
+    {
+      "descriptor": {
+        "surface_id": "ssh-agent.hosts",
+        "label": "SSH Hosts",
+        "priority": 450,
+        "slot": "surface.page",
+        "scope": "tenant",
+        "targeting": "targeted",
+        "required_permission": "update_hosts",
+        "provider_kind": "service",
+        "required_capabilities": [
+          "section_node",
+          "table_node",
+          "action_bar_node",
+          "mutation_action",
+          "form_submit",
+          "workflow",
+          "data_load",
+          "confirmable_action",
+          "provider_query_data_source",
+          "targeted_targeting",
+          "sensitive_fields",
+          "provider_initiated_actions"
+        ],
+        "root_node": {
+          "kind": "section",
+          "children": [
+            {
+              "kind": "action_bar",
+              "action_ids": [
+                "bootstrap",
+                "bootstrap-proxmox-guest"
+              ]
+            },
+            {
+              "kind": "table",
+              "data_source_id": "data.primary",
+              "columns": [
+                {
+                  "key": "id",
+                  "label": "ID"
+                },
+                {
+                  "key": "name",
+                  "label": "Name"
+                },
+                {
+                  "key": "hostname",
+                  "label": "Hostname"
+                },
+                {
+                  "key": "port",
+                  "label": "Port"
+                },
+                {
+                  "key": "username",
+                  "label": "Username"
+                }
+              ],
+              "row_actions": [
+                {
+                  "interaction_id": "sync-host"
+                },
+                {
+                  "interaction_id": "remove-host"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "interactions": [
+        {
+          "interaction_id": "bootstrap",
+          "kind": "workflow",
+          "label": "Bootstrap Host",
+          "required_permission": "update_hosts",
+          "input_schema": {
+            "type": "object"
+          },
+          "result_schema": {
+            "type": "any"
+          },
+          "sensitive_fields": [
+            "auth_password",
+            "auth_private_key"
+          ],
+          "timeout_seconds": 120,
+          "transport": {
+            "mode": "provider_proxied"
+          },
+          "workflow_steps": [
+            {
+              "step_id": "connect",
+              "label": "Connection & Authentication",
+              "form_ui": {
+                "fields": [
+                  {
+                    "key": "target",
+                    "label": "SSH Target",
+                    "field_type": "text",
+                    "required": true,
+                    "placeholder": "[user@]host[:port]",
+                    "help_text": "SSH target in [user@]host[:port] format. Default user: root, port: 22."
+                  },
+                  {
+                    "key": "name",
+                    "label": "Host Name",
+                    "field_type": "text",
+                    "required": false,
+                    "placeholder": "my-server",
+                    "help_text": "Optional. Defaults to the hostname from the SSH target."
+                  },
+                  {
+                    "key": "auth_method",
+                    "label": "Auth Method",
+                    "field_type": "select",
+                    "required": true,
+                    "default_value": "password",
+                    "options": [
+                      {
+                        "value": "password",
+                        "label": "Password"
+                      },
+                      {
+                        "value": "private_key",
+                        "label": "Private Key"
+                      }
+                    ]
+                  },
+                  {
+                    "key": "auth_password",
+                    "label": "SSH Password",
+                    "field_type": "password",
+                    "required": false,
+                    "help_text": "Required when auth method is 'password'.",
+                    "sensitive": true,
+                    "visible_when": {
+                      "field": "auth_method",
+                      "values": [
+                        "password"
+                      ]
+                    }
+                  },
+                  {
+                    "key": "auth_private_key",
+                    "label": "SSH Private Key",
+                    "field_type": "ssh_private_key",
+                    "required": false,
+                    "placeholder": "-----BEGIN OPENSSH PRIVATE KEY-----",
+                    "help_text": "PEM-encoded private key. Required when auth method is 'private_key'.",
+                    "sensitive": true,
+                    "visible_when": {
+                      "field": "auth_method",
+                      "values": [
+                        "private_key"
+                      ]
+                    }
+                  },
+                  {
+                    "key": "target_username",
+                    "label": "Target Username",
+                    "field_type": "text",
+                    "required": false,
+                    "help_text": "User to create/use on the remote host.",
+                    "default_value": "uptrakit"
+                  },
+                  {
+                    "key": "host_key_fingerprint",
+                    "label": "Host Key Fingerprint",
+                    "field_type": "text",
+                    "required": false,
+                    "placeholder": "SHA256:...",
+                    "help_text": "Expected SHA-256 fingerprint of the host key."
+                  },
+                  {
+                    "key": "strict_host_key_checking",
+                    "label": "Strict Host Key Checking",
+                    "field_type": "toggle",
+                    "required": false,
+                    "help_text": "Require fingerprint match (disables TOFU)."
+                  },
+                  {
+                    "key": "allow_all",
+                    "label": "Allow All (NOPASSWD: ALL)",
+                    "field_type": "toggle",
+                    "required": false,
+                    "help_text": "Use NOPASSWD: ALL in sudoers (less secure)."
+                  },
+                  {
+                    "key": "remove_stale_keys",
+                    "label": "Remove Stale Keys",
+                    "field_type": "toggle",
+                    "required": false,
+                    "help_text": "Remove existing Uptrakit-managed keys before writing new ones."
+                  },
+                  {
+                    "key": "auto",
+                    "label": "Auto",
+                    "field_type": "toggle",
+                    "required": false,
+                    "help_text": "Skip review and execute immediately."
+                  }
+                ]
+              },
+              "submit_interaction_id": "bootstrap-connect",
+              "input_schema": {
+                "type": "object"
+              },
+              "result_schema": {
+                "type": "any"
+              }
+            },
+            {
+              "step_id": "review",
+              "label": "Review Plan",
+              "form_ui": {},
+              "render_previous_response": true,
+              "input_schema": {
+                "type": "object"
+              },
+              "result_schema": {
+                "type": "any"
+              }
+            },
+            {
+              "step_id": "execute",
+              "label": "Execute",
+              "form_ui": {},
+              "submit_interaction_id": "bootstrap-execute",
+              "input_schema": {
+                "type": "object"
+              },
+              "result_schema": {
+                "type": "any"
+              }
+            }
+          ],
+          "icon": "server-cog"
+        },
+        {
+          "interaction_id": "bootstrap-connect",
+          "kind": "mutation_action",
+          "label": "Bootstrap Connect",
+          "required_permission": "update_hosts",
+          "input_schema": {
+            "type": "object"
+          },
+          "result_schema": {
+            "type": "any"
+          },
+          "sensitive_fields": [
+            "auth_password",
+            "auth_private_key"
+          ],
+          "timeout_seconds": 60,
+          "transport": {
+            "mode": "provider_proxied"
+          }
+        },
+        {
+          "interaction_id": "bootstrap-execute",
+          "kind": "mutation_action",
+          "label": "Bootstrap Execute",
+          "required_permission": "update_hosts",
+          "input_schema": {
+            "type": "object"
+          },
+          "result_schema": {
+            "type": "any"
+          },
+          "sensitive_fields": [
+            "auth_password",
+            "auth_private_key"
+          ],
+          "timeout_seconds": 120,
+          "transport": {
+            "mode": "provider_proxied"
+          }
+        },
+        {
+          "interaction_id": "bootstrap-proxmox-guest",
+          "kind": "form_submit",
+          "label": "Bootstrap Discovered Guest",
+          "required_permission": "update_hosts",
+          "input_schema": {
+            "type": "object"
+          },
+          "result_schema": {
+            "type": "any"
+          },
+          "timeout_seconds": 300,
+          "transport": {
+            "mode": "provider_proxied"
+          },
+          "form_ui": {
+            "fields": [
+              {
+                "key": "discovered_guests",
+                "label": "Discovered Guests",
+                "field_type": "multi_select",
+                "required": true,
+                "help_text": "Select one or more Proxmox guests to bootstrap. Names are auto-derived from the guest's hostname.",
+                "select_source": {
+                  "type": "action",
+                  "action_id": "discovered-guests"
+                }
+              },
+              {
+                "key": "target_username",
+                "label": "Target Username",
+                "field_type": "text",
+                "required": false,
+                "help_text": "User to create/use in each guest.",
+                "default_value": "uptrakit"
+              },
+              {
+                "key": "allow_all",
+                "label": "Allow All (NOPASSWD: ALL)",
+                "field_type": "toggle",
+                "required": false,
+                "help_text": "Use NOPASSWD: ALL in sudoers (less secure)."
+              },
+              {
+                "key": "remove_stale_keys",
+                "label": "Remove Stale Keys",
+                "field_type": "toggle",
+                "required": false,
+                "help_text": "Remove existing Uptrakit-managed keys from authorized_keys before writing the new entry. Same-service keys are always removed regardless."
+              }
+            ]
+          },
+          "icon": "boxes"
+        },
+        {
+          "interaction_id": "discovered-guests",
+          "kind": "data_load",
+          "label": "List Discovered Guests",
+          "required_permission": "update_hosts",
+          "input_schema": {
+            "type": "object"
+          },
+          "result_schema": {
+            "type": "any"
+          },
+          "timeout_seconds": 15,
+          "transport": {
+            "mode": "provider_proxied"
+          }
+        },
+        {
+          "interaction_id": "list-hosts",
+          "kind": "data_load",
+          "label": "List Hosts",
+          "required_permission": "update_hosts",
+          "input_schema": {
+            "type": "object"
+          },
+          "result_schema": {
+            "type": "any"
+          },
+          "timeout_seconds": 15,
+          "transport": {
+            "mode": "provider_proxied"
+          }
+        },
+        {
+          "interaction_id": "remove-host",
+          "kind": "confirmable_action",
+          "label": "Remove Host",
+          "required_permission": "update_hosts",
+          "input_schema": {
+            "type": "object"
+          },
+          "result_schema": {
+            "type": "any"
+          },
+          "timeout_seconds": 30,
+          "confirmation": {
+            "title": "Confirm Remove Host",
+            "message": "This action may modify existing data.",
+            "severity": "danger"
+          },
+          "transport": {
+            "mode": "provider_proxied"
+          },
+          "icon": "trash-2"
+        },
+        {
+          "interaction_id": "sync-connect",
+          "kind": "mutation_action",
+          "label": "Sync Connect",
+          "required_permission": "update_hosts",
+          "input_schema": {
+            "type": "object"
+          },
+          "result_schema": {
+            "type": "any"
+          },
+          "sensitive_fields": [
+            "auth_password",
+            "auth_private_key"
+          ],
+          "timeout_seconds": 60,
+          "transport": {
+            "mode": "provider_proxied"
+          }
+        },
+        {
+          "interaction_id": "sync-execute",
+          "kind": "mutation_action",
+          "label": "Sync Execute",
+          "required_permission": "update_hosts",
+          "input_schema": {
+            "type": "object"
+          },
+          "result_schema": {
+            "type": "any"
+          },
+          "sensitive_fields": [
+            "auth_password",
+            "auth_private_key"
+          ],
+          "timeout_seconds": 120,
+          "transport": {
+            "mode": "provider_proxied"
+          }
+        },
+        {
+          "interaction_id": "sync-host",
+          "kind": "workflow",
+          "label": "Sync Host",
+          "required_permission": "update_hosts",
+          "input_schema": {
+            "type": "object"
+          },
+          "result_schema": {
+            "type": "any"
+          },
+          "sensitive_fields": [
+            "auth_password",
+            "auth_private_key"
+          ],
+          "timeout_seconds": 120,
+          "transport": {
+            "mode": "provider_proxied"
+          },
+          "workflow_steps": [
+            {
+              "step_id": "connect",
+              "label": "Connection & Authentication",
+              "form_ui": {
+                "fields": [
+                  {
+                    "key": "auth_method",
+                    "label": "Auth Method",
+                    "field_type": "select",
+                    "required": false,
+                    "default_value": "stored",
+                    "options": [
+                      {
+                        "value": "stored",
+                        "label": "Stored Credentials"
+                      },
+                      {
+                        "value": "password",
+                        "label": "Password"
+                      },
+                      {
+                        "value": "private_key",
+                        "label": "Private Key"
+                      }
+                    ]
+                  },
+                  {
+                    "key": "username",
+                    "label": "SSH Username",
+                    "field_type": "text",
+                    "required": false,
+                    "help_text": "User to connect as (e.g. root). Only used with custom auth.",
+                    "default_value": "root",
+                    "visible_when": {
+                      "field": "auth_method",
+                      "values": [
+                        "password",
+                        "private_key"
+                      ]
+                    }
+                  },
+                  {
+                    "key": "auth_password",
+                    "label": "SSH Password",
+                    "field_type": "password",
+                    "required": false,
+                    "help_text": "Required when auth method is 'password'.",
+                    "sensitive": true,
+                    "visible_when": {
+                      "field": "auth_method",
+                      "values": [
+                        "password"
+                      ]
+                    }
+                  },
+                  {
+                    "key": "auth_private_key",
+                    "label": "SSH Private Key",
+                    "field_type": "ssh_private_key",
+                    "required": false,
+                    "placeholder": "-----BEGIN OPENSSH PRIVATE KEY-----",
+                    "help_text": "PEM-encoded private key. Required when auth method is 'private_key'.",
+                    "sensitive": true,
+                    "visible_when": {
+                      "field": "auth_method",
+                      "values": [
+                        "private_key"
+                      ]
+                    }
+                  },
+                  {
+                    "key": "allow_all",
+                    "label": "Allow All (NOPASSWD: ALL)",
+                    "field_type": "toggle",
+                    "required": false,
+                    "help_text": "Use NOPASSWD: ALL in sudoers (less secure)."
+                  },
+                  {
+                    "key": "auto",
+                    "label": "Auto",
+                    "field_type": "toggle",
+                    "required": false,
+                    "help_text": "Skip review and execute immediately."
+                  }
+                ]
+              },
+              "submit_interaction_id": "sync-connect",
+              "input_schema": {
+                "type": "object"
+              },
+              "result_schema": {
+                "type": "any"
+              }
+            },
+            {
+              "step_id": "review",
+              "label": "Review Plan",
+              "form_ui": {},
+              "render_previous_response": true,
+              "input_schema": {
+                "type": "object"
+              },
+              "result_schema": {
+                "type": "any"
+              }
+            },
+            {
+              "step_id": "execute",
+              "label": "Execute",
+              "form_ui": {},
+              "submit_interaction_id": "sync-execute",
+              "input_schema": {
+                "type": "object"
+              },
+              "result_schema": {
+                "type": "any"
+              }
+            }
+          ],
+          "icon": "refresh-cw"
+        }
+      ],
+      "data_sources": [
+        {
+          "data_source_id": "data.primary",
+          "kind": {
+            "kind": "provider_query",
+            "operation_id": "list-hosts"
+          },
+          "result_schema": {
+            "type": "any"
+          },
+          "pagination": {
+            "default_page_size": 50,
+            "max_page_size": 1000
+          },
+          "refresh_policy": {
+            "type": "manual"
+          }
+        }
+      ]
+    }
+  ]
+}
