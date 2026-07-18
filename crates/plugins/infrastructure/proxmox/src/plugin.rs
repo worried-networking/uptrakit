@@ -6,8 +6,8 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use uptrakit_plugin_infrastructure_core::{
-    ConfigModel, HostRequirements, HostRuntime, PluginFamily, SurfaceActionDescriptor,
-    declare_plugin, surfaces,
+    AgentInteraction, ConfigModel, HostRequirements, HostRuntime, PluginFamily,
+    SurfaceActionDescriptor, declare_plugin, surfaces,
 };
 use uptrakit_shared_types::Permission;
 
@@ -1294,6 +1294,15 @@ fn __proxmox_agent_migrations() -> Vec<Box<dyn std::any::Any>> {
     vec![]
 }
 
+/// Ungated `declare_plugin!` hook: agent interactions exist only in the
+/// agent-infra world; other builds register none.
+fn proxmox_agent_surfaces() -> Vec<AgentInteraction> {
+    let interactions = std::iter::empty();
+    #[cfg(feature = "agent-infra")]
+    let interactions = interactions.chain(crate::agent::plugin::agent_interactions());
+    interactions.collect()
+}
+
 fn __proxmox_create_controller_update_protection(
     config: &uptrakit_plugin_infrastructure_core::CatalogConfig,
 ) -> uptrakit_plugin_infrastructure_core::error::Result<
@@ -1361,6 +1370,7 @@ declare_plugin!(ProxmoxPlugin, ProxmoxConfig, "infrastructure_proxmox", {
     },
     migrations: __proxmox_migrations,
     agent_migrations: __proxmox_agent_migrations,
+    agent_surfaces: proxmox_agent_surfaces,
     reset_tenant_data: crate::reset::proxmox_reset_tenant_data,
     db_migrate_tables: crate::db_migrate::proxmox_db_migrate_tables,
 });

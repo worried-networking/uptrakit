@@ -22,8 +22,8 @@ use uptrakit_plugin_infrastructure_core::agent_infra::{
 };
 use uptrakit_plugin_infrastructure_core::error::{PluginError, Result};
 use uptrakit_plugin_infrastructure_core::{
-    FormFieldDescriptor, FormFieldType, FormSelectSourceDescriptor, SurfaceActionDescriptor,
-    SurfaceActionUi, SurfaceFormDescriptor,
+    AgentInteraction, AgentInteractionPlacement, FormFieldDescriptor, FormFieldType,
+    FormSelectSourceDescriptor, SurfaceActionDescriptor, SurfaceActionUi, SurfaceFormDescriptor,
     surfaces::{SurfaceActionRequest, SurfaceActionResponse},
 };
 
@@ -41,6 +41,18 @@ pub fn agent_surface_actions() -> Vec<SurfaceActionDescriptor> {
             .with_permission(uptrakit_shared_types::Permission::UpdateHosts)
             .with_timeout(15),
         bootstrap_proxmox_guest_action(),
+    ]
+}
+
+/// Returns the agent interaction declarations contributed by the agent side
+/// of the Proxmox plugin (table-dispatched via `AgentInteractionHandler`).
+pub(crate) fn agent_interactions() -> Vec<AgentInteraction> {
+    vec![
+        AgentInteraction::new("discovered-guests", "List Discovered Guests")
+            .with_permission(uptrakit_shared_types::Permission::UpdateHosts)
+            .with_timeout(15)
+            .with_agent_handler(super::surface_actions::discovered_guests_dispatch),
+        bootstrap_proxmox_guest_interaction(),
     ]
 }
 
@@ -657,6 +669,39 @@ fn bootstrap_proxmox_guest_action() -> SurfaceActionDescriptor {
         ])))
 }
 
+fn bootstrap_proxmox_guest_interaction() -> AgentInteraction {
+    AgentInteraction::new("bootstrap-proxmox-guest", "Bootstrap Discovered Guest")
+        .with_icon("boxes")
+        .with_permission(uptrakit_shared_types::Permission::UpdateHosts)
+        .with_timeout(300)
+        .with_ui(SurfaceActionUi::Form(SurfaceFormDescriptor::new(vec![
+            FormFieldDescriptor::new("discovered_guests", "Discovered Guests")
+                .with_type(FormFieldType::MultiSelect)
+                .required()
+                .with_help_text(
+                    "Select one or more Proxmox guests to bootstrap. \
+                     Names are auto-derived from the guest's hostname.",
+                )
+                .with_select_source(FormSelectSourceDescriptor::Action {
+                    action_id: "discovered-guests".to_string(),
+                }),
+            FormFieldDescriptor::new("target_username", "Target Username")
+                .with_help_text("User to create/use in each guest.")
+                .with_default_value("uptrakit"),
+            FormFieldDescriptor::new("allow_all", "Allow All (NOPASSWD: ALL)")
+                .with_type(FormFieldType::Toggle)
+                .with_help_text("Use NOPASSWD: ALL in sudoers (less secure)."),
+            FormFieldDescriptor::new("remove_stale_keys", "Remove Stale Keys")
+                .with_type(FormFieldType::Toggle)
+                .with_help_text(
+                    "Remove existing Uptrakit-managed keys from authorized_keys before \
+                     writing the new entry. Same-service keys are always removed regardless.",
+                ),
+        ])))
+        .placement(AgentInteractionPlacement::Primary)
+        .with_agent_handler(super::surface_actions::bootstrap_proxmox_guest_dispatch)
+}
+
 #[cfg(test)]
 mod tests {
     use super::bootstrap_proxmox_guest_action;
@@ -670,6 +715,28 @@ mod tests {
         let action = bootstrap_proxmox_guest_action();
         assert_eq!(action.action_id, "bootstrap-proxmox-guest");
         assert_eq!(action.icon.as_deref(), Some("boxes"));
+    }
+
+    #[test]
+    fn agent_interactions_registers_both_entries_with_handlers() {
+        let interactions = super::agent_interactions();
+        assert_eq!(interactions.len(), 2);
+
+        let discovered_guests = interactions
+            .iter()
+            .find(|i| i.action_id == "discovered-guests")
+            .expect("discovered-guests interaction registered");
+        assert!(discovered_guests.agent_handler.is_some());
+
+        let bootstrap = interactions
+            .iter()
+            .find(|i| i.action_id == "bootstrap-proxmox-guest")
+            .expect("bootstrap-proxmox-guest interaction registered");
+        assert!(bootstrap.agent_handler.is_some());
+        assert!(matches!(
+            bootstrap.placement,
+            super::AgentInteractionPlacement::Primary
+        ));
     }
 
     async fn setup_agent_db() -> sea_orm::DatabaseConnection {

@@ -7,6 +7,7 @@
 //! Handles: `discovered-guests`, `bootstrap-proxmox-guest`.
 
 use serde_json::json;
+use uptrakit_plugin_infrastructure_core::AgentInteractionHandler;
 use uptrakit_plugin_infrastructure_core::agent_infra::{
     GuestBootstrapParams, InfraActionInvoker, InfraPluginContext,
 };
@@ -16,6 +17,33 @@ use uptrakit_plugin_infrastructure_core::surfaces::{
 
 use super::db_ops;
 
+pub(crate) fn discovered_guests_dispatch<'a>(
+    ctx: &'a InfraPluginContext<'a>,
+    request: &'a SurfaceActionRequest,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = SurfaceActionResponse> + Send + 'a>> {
+    Box::pin(
+        async move { handle_list_discovered_guests(request.request_id, ctx.action_invoker).await },
+    )
+}
+
+pub(crate) fn bootstrap_proxmox_guest_dispatch<'a>(
+    ctx: &'a InfraPluginContext<'a>,
+    request: &'a SurfaceActionRequest,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = SurfaceActionResponse> + Send + 'a>> {
+    Box::pin(async move {
+        handle_bootstrap_proxmox_guest(request.request_id, &request.params, ctx).await
+    })
+}
+
+/// Resolves the agent handler registered for an interaction id.
+pub(crate) fn find_agent_handler(interaction_id: &str) -> Option<AgentInteractionHandler> {
+    let interactions = super::plugin::agent_interactions();
+    let interaction = interactions
+        .iter()
+        .find(|interaction| interaction.action_id == interaction_id)?;
+    interaction.agent_handler
+}
+
 /// Dispatch a surface action to the appropriate handler.
 ///
 /// Returns `Some(response)` if this plugin handles the action, `None` otherwise.
@@ -23,15 +51,8 @@ pub async fn handle_surface_action(
     ctx: &InfraPluginContext<'_>,
     request: &SurfaceActionRequest,
 ) -> Option<SurfaceActionResponse> {
-    match request.interaction_id.as_str() {
-        "discovered-guests" => {
-            Some(handle_list_discovered_guests(request.request_id, ctx.action_invoker).await)
-        }
-        "bootstrap-proxmox-guest" => {
-            Some(handle_bootstrap_proxmox_guest(request.request_id, &request.params, ctx).await)
-        }
-        _ => None,
-    }
+    let handler = find_agent_handler(request.interaction_id.as_str())?;
+    Some(handler(ctx, request).await)
 }
 
 // ── discovered-guests ────────────────────────────────────────────────────────
@@ -440,6 +461,13 @@ fn make_error_response(request_id: uuid::Uuid, message: &str) -> SurfaceActionRe
 mod tests {
     use super::*;
     use uptrakit_plugin_infrastructure_core::surfaces::SurfaceActionErrorCode;
+
+    #[test]
+    fn agent_handler_table_resolves_registered_ids_and_rejects_unknown() {
+        assert!(super::find_agent_handler("discovered-guests").is_some());
+        assert!(super::find_agent_handler("bootstrap-proxmox-guest").is_some());
+        assert!(super::find_agent_handler("no-such-interaction").is_none());
+    }
 
     #[test]
     fn error_response_preserves_request_id_and_structured_error() {
