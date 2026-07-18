@@ -463,8 +463,8 @@ for (const [method, verb] of Object.entries(HTTP_METHOD_VERBS)) {
 // `apiClient` is the configured client with refresh-retry layered over every HTTP
 // method (and `request`). A Proxy forwards method calls through `requestWithRefresh`
 // while leaving non-call members (interceptors, setConfig, buildUrl, sse, …) intact.
-// Retained because api/raw.ts and api/surfaces.ts consume `apiClient.*`; new code can
-// rely on the now-refresh-aware singleton directly.
+// Retained because api/raw.ts consumes `apiClient.*`; new code can rely on the
+// now-refresh-aware singleton directly.
 
 const apiClient: Client = new Proxy(client, {
 	get(target, prop, receiver) {

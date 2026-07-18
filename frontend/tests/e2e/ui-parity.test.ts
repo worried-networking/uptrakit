@@ -404,7 +404,7 @@ async function mockParityApi(page: Page, scenario: MockScenario = {}): Promise<M
 		if (method === 'GET' && /^\/api\/v1\/surfaces\/[^/]+\/providers$/.test(path)) {
 			return json([buildParityProvider()]);
 		}
-		const readMatch = path.match(/^\/api\/v1\/surfaces\/([^/]+)\/read$/);
+		const readMatch = path.match(/^\/api\/v1\/surfaces\/([^/]+)$/);
 		if (method === 'GET' && readMatch) {
 			const surfaceId = decodeURIComponent(readMatch[1] ?? '');
 			readRequests.push(surfaceId);
