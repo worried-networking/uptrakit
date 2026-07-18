@@ -92,7 +92,9 @@ describe('/surfaces/[id] canonical surface page', () => {
 		vi.mocked(getSurfaceReadRequested).mockReturnValue(false);
 		vi.mocked(getSurfaceReadLoading).mockReturnValue(false);
 		vi.mocked(getSurfaceProviders).mockReturnValue(buildSurfacePageParity().providers);
-		vi.mocked(invokeSurfaceInteraction).mockResolvedValue({});
+		vi.mocked(invokeSurfaceInteraction).mockResolvedValue({ data: {} } as unknown as Awaited<
+			ReturnType<typeof invokeSurfaceInteraction>
+		>);
 	});
 
 	afterEach(() => {
@@ -276,13 +278,12 @@ describe('/surfaces/[id] canonical surface page', () => {
 		expect(screen.getByRole('heading', { name: 'Surface One' })).toBeInTheDocument();
 		expect(await screen.findByText('Unable to load surface data')).toBeInTheDocument();
 		expect(screen.getByText('Failed to load surface data. Please try again.')).toBeInTheDocument();
-		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledWith(
-			'surface.one',
-			'surface.load',
-			expect.objectContaining({
+		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledWith({
+			path: { surface_id: 'surface.one', interaction_id: 'surface.load' },
+			body: expect.objectContaining({
 				params: {}
 			})
-		);
+		});
 	});
 
 	it('renders normally when the page component is mounted (goto not called on mount)', () => {

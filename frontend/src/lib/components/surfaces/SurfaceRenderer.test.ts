@@ -19,7 +19,9 @@ import type { InteractionDescriptor, SurfaceNode } from '$lib/surfaces/contract'
 describe('SurfaceRenderer', () => {
 	beforeEach(() => {
 		vi.mocked(sealedBoxEncrypt).mockResolvedValue('ciphertext');
-		vi.mocked(invokeSurfaceInteraction).mockResolvedValue({});
+		vi.mocked(invokeSurfaceInteraction).mockResolvedValue({ data: {} } as unknown as Awaited<
+			ReturnType<typeof invokeSurfaceInteraction>
+		>);
 	});
 
 	afterEach(() => {
@@ -71,14 +73,17 @@ describe('SurfaceRenderer', () => {
 		});
 
 		expect(sealedBoxEncrypt).toHaveBeenCalledWith(JSON.stringify({ password: 'secret' }), 'public-key');
-		expect(invokeSurfaceInteraction).toHaveBeenCalledWith('surface.page', 'surface.submit', {
-			params: { username: 'admin' },
-			target_provider_id: 'provider.a',
-			timeout_seconds: undefined,
-			encrypted_sensitive_params: {
-				key_id: 'enc-key',
-				algorithm: 'ecies_p256',
-				ciphertext_b64: 'ciphertext'
+		expect(invokeSurfaceInteraction).toHaveBeenCalledWith({
+			path: { surface_id: 'surface.page', interaction_id: 'surface.submit' },
+			body: {
+				params: { username: 'admin' },
+				target_provider_id: 'provider.a',
+				timeout_seconds: undefined,
+				encrypted_sensitive_params: {
+					key_id: 'enc-key',
+					algorithm: 'ecies_p256',
+					ciphertext_b64: 'ciphertext'
+				}
 			}
 		});
 	});

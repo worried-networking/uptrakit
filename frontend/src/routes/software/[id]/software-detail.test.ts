@@ -1,12 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import type {
-	SoftwareItemDetailResponse,
-	SoftwareItemHostSummary,
-	SurfaceReadResponse,
-	SurfaceResponse
-} from '$lib/api';
+import type { SoftwareItemDetailResponse, SoftwareItemHostSummary } from '$lib/api';
 import { Permission } from '$lib/api';
+import type { SurfaceReadResponse, SurfaceResponse } from '$lib/surfaces/contract';
 
 vi.mock('$lib/api', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/api')>()),
@@ -21,7 +17,7 @@ vi.mock('$lib/api', async (importOriginal) => ({
 	getUpdateHistory: vi.fn(),
 	previewSoftwareItemMerge: vi.fn(),
 	executeSoftwareItemMerge: vi.fn(),
-	invokeSurfaceInteraction: vi.fn(() => Promise.resolve({}))
+	invokeSurfaceInteraction: vi.fn(() => Promise.resolve({ data: {} }))
 }));
 
 vi.mock('$lib/auth.svelte', () => ({
@@ -219,14 +215,13 @@ describe('Software Detail shared-surface slots', () => {
 		// Click the tab — panel mounts, preload fires
 		await fireEvent.click(tabBtn);
 		await waitFor(() =>
-			expect(vi.mocked(api.invokeSurfaceInteraction)).toHaveBeenCalledWith(
-				'software.item.tab.surface',
-				'load_software_item_tab',
-				{
+			expect(vi.mocked(api.invokeSurfaceInteraction)).toHaveBeenCalledWith({
+				path: { surface_id: 'software.item.tab.surface', interaction_id: 'load_software_item_tab' },
+				body: {
 					params: { software_item_id: 'software-1' },
 					target_provider_id: undefined
 				}
-			)
+			})
 		);
 	});
 
@@ -327,14 +322,13 @@ describe('Software Detail shared-surface slots', () => {
 
 		await waitFor(() => expect(screen.getByRole('heading', { name: /Run Host Action/ })).toBeInTheDocument());
 		await waitFor(() =>
-			expect(vi.mocked(api.invokeSurfaceInteraction)).toHaveBeenCalledWith(
-				'software.item.host.context.surface',
-				'load_host_context',
-				{
+			expect(vi.mocked(api.invokeSurfaceInteraction)).toHaveBeenCalledWith({
+				path: { surface_id: 'software.item.host.context.surface', interaction_id: 'load_host_context' },
+				body: {
 					params: { software_item_id: 'software-1', host_id: 'host-1' },
 					target_provider_id: undefined
 				}
-			)
+			})
 		);
 	});
 });

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import Button from '$lib/components/Button.svelte';
 	import { invokeSurfaceInteraction } from '$lib/api';
+	import type { InvokeSurfaceInteractionRequest } from '$lib/api';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import SchemaForm from '$lib/components/surfaces/SchemaForm.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
@@ -50,7 +51,10 @@
 				targetProviderId,
 				encryption: encryptionContext
 			});
-			const result = await invokeSurfaceInteraction(surfaceId, interaction.interaction_id, request);
+			const { data: result } = await invokeSurfaceInteraction({
+				path: { surface_id: surfaceId, interaction_id: interaction.interaction_id },
+				body: request as unknown as InvokeSurfaceInteractionRequest
+			});
 			showSuccess(`${actionLabel} completed`);
 			await oncomplete?.(result);
 			return result;
@@ -97,7 +101,10 @@
 		const request = await buildSurfaceInteractionRequest(preLoadInteraction, requestBaseParams, {
 			targetProviderId
 		});
-		const result = await invokeSurfaceInteraction(surfaceId, preLoadInteraction.interaction_id, request);
+		const { data: result } = await invokeSurfaceInteraction({
+			path: { surface_id: surfaceId, interaction_id: preLoadInteraction.interaction_id },
+			body: request as unknown as InvokeSurfaceInteractionRequest
+		});
 		if (result && typeof result === 'object' && !Array.isArray(result)) {
 			return result as Record<string, unknown>;
 		}
@@ -113,7 +120,10 @@
 			targetProviderId,
 			encryption: encryptionContext
 		});
-		const result = await invokeSurfaceInteraction(surfaceId, loadOptionsInteraction.interaction_id, request);
+		const { data: result } = await invokeSurfaceInteraction({
+			path: { surface_id: surfaceId, interaction_id: loadOptionsInteraction.interaction_id },
+			body: request as unknown as InvokeSurfaceInteractionRequest
+		});
 		if (!result || typeof result !== 'object' || Array.isArray(result)) {
 			return [];
 		}

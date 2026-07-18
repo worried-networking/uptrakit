@@ -3,6 +3,7 @@
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import SurfaceActionButton from './SurfaceActionButton.svelte';
 	import { invokeSurfaceInteraction } from '$lib/api';
+	import type { InvokeSurfaceInteractionRequest } from '$lib/api';
 	import SurfaceForm from './SurfaceForm.svelte';
 	import SurfaceWorkflow from './SurfaceWorkflow.svelte';
 	import SurfaceModal from './SurfaceModal.svelte';
@@ -63,7 +64,10 @@
 				targetProviderId,
 				encryption: encryptionContext
 			});
-			const result = await invokeSurfaceInteraction(surfaceId, interaction.interaction_id, request);
+			const { data: result } = await invokeSurfaceInteraction({
+				path: { surface_id: surfaceId, interaction_id: interaction.interaction_id },
+				body: request as unknown as InvokeSurfaceInteractionRequest
+			});
 			showSuccess(`${actionLabel} completed`);
 			showModal = false;
 			await oncomplete?.(result);

@@ -97,29 +97,31 @@ describe('surface registry', () => {
 	});
 
 	it('indexes surfaces by slot and orders deterministically by priority, label, and id', async () => {
-		vi.mocked(listSurfaces).mockResolvedValue([
-			makeSurface({
-				surfaceId: 'surface.zed',
-				label: 'Zed',
-				priority: 200,
-				slot: 'surface.page',
-				targeting: 'universal'
-			}),
-			makeSurface({
-				surfaceId: 'surface.alpha',
-				label: 'Alpha',
-				priority: 200,
-				slot: 'surface.page',
-				targeting: 'universal'
-			}),
-			makeSurface({
-				surfaceId: 'surface.early',
-				label: 'Early',
-				priority: 100,
-				slot: 'surface.page',
-				targeting: 'universal'
-			})
-		]);
+		vi.mocked(listSurfaces).mockResolvedValue({
+			data: [
+				makeSurface({
+					surfaceId: 'surface.zed',
+					label: 'Zed',
+					priority: 200,
+					slot: 'surface.page',
+					targeting: 'universal'
+				}),
+				makeSurface({
+					surfaceId: 'surface.alpha',
+					label: 'Alpha',
+					priority: 200,
+					slot: 'surface.page',
+					targeting: 'universal'
+				}),
+				makeSurface({
+					surfaceId: 'surface.early',
+					label: 'Early',
+					priority: 100,
+					slot: 'surface.page',
+					targeting: 'universal'
+				})
+			]
+		} as unknown as Awaited<ReturnType<typeof listSurfaces>>);
 
 		await loadSurfaceRegistry();
 
@@ -131,33 +133,37 @@ describe('surface registry', () => {
 	});
 
 	it('indexes targeted providers per surface', async () => {
-		vi.mocked(listSurfaces).mockResolvedValue([
-			makeSurface({
-				surfaceId: 'surface.targeted',
-				label: 'Targeted',
-				priority: 100,
-				slot: 'surface.page',
-				targeting: 'targeted'
-			}),
-			makeSurface({
-				surfaceId: 'surface.universal',
-				label: 'Universal',
-				priority: 200,
-				slot: 'surface.page',
-				targeting: 'universal'
-			})
-		]);
-		vi.mocked(listSurfaceProviders).mockImplementation(async (surfaceId) => {
-			if (surfaceId === 'surface.targeted') {
-				return [makeProvider('provider.b'), makeProvider('provider.a')];
+		vi.mocked(listSurfaces).mockResolvedValue({
+			data: [
+				makeSurface({
+					surfaceId: 'surface.targeted',
+					label: 'Targeted',
+					priority: 100,
+					slot: 'surface.page',
+					targeting: 'targeted'
+				}),
+				makeSurface({
+					surfaceId: 'surface.universal',
+					label: 'Universal',
+					priority: 200,
+					slot: 'surface.page',
+					targeting: 'universal'
+				})
+			]
+		} as unknown as Awaited<ReturnType<typeof listSurfaces>>);
+		vi.mocked(listSurfaceProviders).mockImplementation(({ path }: { path: { surface_id: string } }) => {
+			if (path.surface_id === 'surface.targeted') {
+				return Promise.resolve({
+					data: [makeProvider('provider.b'), makeProvider('provider.a')]
+				}) as unknown as ReturnType<typeof listSurfaceProviders>;
 			}
-			return [];
+			return Promise.resolve({ data: [] }) as unknown as ReturnType<typeof listSurfaceProviders>;
 		});
 
 		await loadSurfaceRegistry();
 
 		expect(listSurfaceProviders).toHaveBeenCalledTimes(1);
-		expect(listSurfaceProviders).toHaveBeenCalledWith('surface.targeted');
+		expect(listSurfaceProviders).toHaveBeenCalledWith({ path: { surface_id: 'surface.targeted' } });
 		expect(getSurfaceProviders('surface.targeted').map((provider) => provider.provider_id)).toEqual([
 			'provider.a',
 			'provider.b'
@@ -166,40 +172,54 @@ describe('surface registry', () => {
 	});
 
 	it('loads and caches surface read payloads for requested surfaces', async () => {
-		vi.mocked(listSurfaces).mockResolvedValue([
-			makeSurface({
-				surfaceId: 'surface.targeted',
-				label: 'Targeted',
-				priority: 100,
-				slot: 'software.tabs',
-				targeting: 'targeted'
-			})
-		]);
-		vi.mocked(listSurfaceProviders).mockResolvedValue([makeProvider('provider.a')]);
-		vi.mocked(getSurfaceRead).mockImplementation(async (surfaceId: string) => makeRead(surfaceId));
+		vi.mocked(listSurfaces).mockResolvedValue({
+			data: [
+				makeSurface({
+					surfaceId: 'surface.targeted',
+					label: 'Targeted',
+					priority: 100,
+					slot: 'software.tabs',
+					targeting: 'targeted'
+				})
+			]
+		} as unknown as Awaited<ReturnType<typeof listSurfaces>>);
+		vi.mocked(listSurfaceProviders).mockResolvedValue({ data: [makeProvider('provider.a')] } as unknown as Awaited<
+			ReturnType<typeof listSurfaceProviders>
+		>);
+		vi.mocked(getSurfaceRead).mockImplementation(
+			({ path }: { path: { surface_id: string } }) =>
+				Promise.resolve({ data: makeRead(path.surface_id) }) as unknown as ReturnType<typeof getSurfaceRead>
+		);
 
 		await loadSurfaceRegistry();
 		await loadSurfaceReadModels(['surface.targeted', 'surface.targeted']);
 
 		expect(getSurfaceRead).toHaveBeenCalledTimes(1);
-		expect(getSurfaceRead).toHaveBeenCalledWith('surface.targeted');
+		expect(getSurfaceRead).toHaveBeenCalledWith({ path: { surface_id: 'surface.targeted' } });
 		expect(getSurfaceReadModel('surface.targeted')?.descriptor.surface_id).toBe('surface.targeted');
 		expect(getSurfaceReadRequested('surface.targeted')).toBe(true);
 		expect(getSurfaceReadLoading('surface.targeted')).toBe(false);
 	});
 
 	it('does not refetch a surface read payload once it is already cached', async () => {
-		vi.mocked(listSurfaces).mockResolvedValue([
-			makeSurface({
-				surfaceId: 'surface.targeted',
-				label: 'Targeted',
-				priority: 100,
-				slot: 'software.tabs',
-				targeting: 'targeted'
-			})
-		]);
-		vi.mocked(listSurfaceProviders).mockResolvedValue([makeProvider('provider.a')]);
-		vi.mocked(getSurfaceRead).mockImplementation(async (surfaceId: string) => makeRead(surfaceId));
+		vi.mocked(listSurfaces).mockResolvedValue({
+			data: [
+				makeSurface({
+					surfaceId: 'surface.targeted',
+					label: 'Targeted',
+					priority: 100,
+					slot: 'software.tabs',
+					targeting: 'targeted'
+				})
+			]
+		} as unknown as Awaited<ReturnType<typeof listSurfaces>>);
+		vi.mocked(listSurfaceProviders).mockResolvedValue({ data: [makeProvider('provider.a')] } as unknown as Awaited<
+			ReturnType<typeof listSurfaceProviders>
+		>);
+		vi.mocked(getSurfaceRead).mockImplementation(
+			({ path }: { path: { surface_id: string } }) =>
+				Promise.resolve({ data: makeRead(path.surface_id) }) as unknown as ReturnType<typeof getSurfaceRead>
+		);
 
 		await loadSurfaceRegistry();
 		await loadSurfaceReadModels(['surface.targeted']);
@@ -210,16 +230,20 @@ describe('surface registry', () => {
 	});
 
 	it('marks a surface read as failed and does not refetch on a second load call (loop prevention)', async () => {
-		vi.mocked(listSurfaces).mockResolvedValue([
-			makeSurface({
-				surfaceId: 'surface.targeted',
-				label: 'Targeted',
-				priority: 100,
-				slot: 'software.tabs',
-				targeting: 'targeted'
-			})
-		]);
-		vi.mocked(listSurfaceProviders).mockResolvedValue([makeProvider('provider.a')]);
+		vi.mocked(listSurfaces).mockResolvedValue({
+			data: [
+				makeSurface({
+					surfaceId: 'surface.targeted',
+					label: 'Targeted',
+					priority: 100,
+					slot: 'software.tabs',
+					targeting: 'targeted'
+				})
+			]
+		} as unknown as Awaited<ReturnType<typeof listSurfaces>>);
+		vi.mocked(listSurfaceProviders).mockResolvedValue({ data: [makeProvider('provider.a')] } as unknown as Awaited<
+			ReturnType<typeof listSurfaceProviders>
+		>);
 		vi.mocked(getSurfaceRead).mockRejectedValue(new Error('boom'));
 
 		await loadSurfaceRegistry();
@@ -237,19 +261,26 @@ describe('surface registry', () => {
 	});
 
 	it('refreshSurfaceReadModel clears the failed mark and re-fetches successfully', async () => {
-		vi.mocked(listSurfaces).mockResolvedValue([
-			makeSurface({
-				surfaceId: 'surface.targeted',
-				label: 'Targeted',
-				priority: 100,
-				slot: 'software.tabs',
-				targeting: 'targeted'
-			})
-		]);
-		vi.mocked(listSurfaceProviders).mockResolvedValue([makeProvider('provider.a')]);
+		vi.mocked(listSurfaces).mockResolvedValue({
+			data: [
+				makeSurface({
+					surfaceId: 'surface.targeted',
+					label: 'Targeted',
+					priority: 100,
+					slot: 'software.tabs',
+					targeting: 'targeted'
+				})
+			]
+		} as unknown as Awaited<ReturnType<typeof listSurfaces>>);
+		vi.mocked(listSurfaceProviders).mockResolvedValue({ data: [makeProvider('provider.a')] } as unknown as Awaited<
+			ReturnType<typeof listSurfaceProviders>
+		>);
 		vi.mocked(getSurfaceRead)
 			.mockRejectedValueOnce(new Error('boom'))
-			.mockImplementation(async (surfaceId: string) => makeRead(surfaceId));
+			.mockImplementation(
+				({ path }: { path: { surface_id: string } }) =>
+					Promise.resolve({ data: makeRead(path.surface_id) }) as unknown as ReturnType<typeof getSurfaceRead>
+			);
 
 		await loadSurfaceRegistry();
 		await loadSurfaceReadModel('surface.targeted');
@@ -263,19 +294,26 @@ describe('surface registry', () => {
 	});
 
 	it('clears a pre-existing failed mark on a subsequent successful load', async () => {
-		vi.mocked(listSurfaces).mockResolvedValue([
-			makeSurface({
-				surfaceId: 'surface.targeted',
-				label: 'Targeted',
-				priority: 100,
-				slot: 'software.tabs',
-				targeting: 'targeted'
-			})
-		]);
-		vi.mocked(listSurfaceProviders).mockResolvedValue([makeProvider('provider.a')]);
+		vi.mocked(listSurfaces).mockResolvedValue({
+			data: [
+				makeSurface({
+					surfaceId: 'surface.targeted',
+					label: 'Targeted',
+					priority: 100,
+					slot: 'software.tabs',
+					targeting: 'targeted'
+				})
+			]
+		} as unknown as Awaited<ReturnType<typeof listSurfaces>>);
+		vi.mocked(listSurfaceProviders).mockResolvedValue({ data: [makeProvider('provider.a')] } as unknown as Awaited<
+			ReturnType<typeof listSurfaceProviders>
+		>);
 		vi.mocked(getSurfaceRead)
 			.mockRejectedValueOnce(new Error('boom'))
-			.mockImplementation(async (surfaceId: string) => makeRead(surfaceId));
+			.mockImplementation(
+				({ path }: { path: { surface_id: string } }) =>
+					Promise.resolve({ data: makeRead(path.surface_id) }) as unknown as ReturnType<typeof getSurfaceRead>
+			);
 
 		await loadSurfaceRegistry();
 		await loadSurfaceReadModel('surface.targeted');
@@ -289,16 +327,20 @@ describe('surface registry', () => {
 	});
 
 	it('clearSurfaceRegistry evicts failed marks, making a previously-failed id re-fetchable', async () => {
-		vi.mocked(listSurfaces).mockResolvedValue([
-			makeSurface({
-				surfaceId: 'surface.targeted',
-				label: 'Targeted',
-				priority: 100,
-				slot: 'software.tabs',
-				targeting: 'targeted'
-			})
-		]);
-		vi.mocked(listSurfaceProviders).mockResolvedValue([makeProvider('provider.a')]);
+		vi.mocked(listSurfaces).mockResolvedValue({
+			data: [
+				makeSurface({
+					surfaceId: 'surface.targeted',
+					label: 'Targeted',
+					priority: 100,
+					slot: 'software.tabs',
+					targeting: 'targeted'
+				})
+			]
+		} as unknown as Awaited<ReturnType<typeof listSurfaces>>);
+		vi.mocked(listSurfaceProviders).mockResolvedValue({ data: [makeProvider('provider.a')] } as unknown as Awaited<
+			ReturnType<typeof listSurfaceProviders>
+		>);
 		vi.mocked(getSurfaceRead).mockRejectedValue(new Error('boom'));
 
 		await loadSurfaceRegistry();
@@ -309,23 +351,30 @@ describe('surface registry', () => {
 
 		expect(getSurfaceReadFailed('surface.targeted')).toBe(false);
 
-		vi.mocked(getSurfaceRead).mockImplementation(async (surfaceId: string) => makeRead(surfaceId));
+		vi.mocked(getSurfaceRead).mockImplementation(
+			({ path }: { path: { surface_id: string } }) =>
+				Promise.resolve({ data: makeRead(path.surface_id) }) as unknown as ReturnType<typeof getSurfaceRead>
+		);
 		await loadSurfaceReadModel('surface.targeted');
 
 		expect(getSurfaceReadModel('surface.targeted')?.descriptor.surface_id).toBe('surface.targeted');
 	});
 
 	it('loadSurfaceRegistry evicts failed marks, making a previously-failed id re-fetchable', async () => {
-		vi.mocked(listSurfaces).mockResolvedValue([
-			makeSurface({
-				surfaceId: 'surface.targeted',
-				label: 'Targeted',
-				priority: 100,
-				slot: 'software.tabs',
-				targeting: 'targeted'
-			})
-		]);
-		vi.mocked(listSurfaceProviders).mockResolvedValue([makeProvider('provider.a')]);
+		vi.mocked(listSurfaces).mockResolvedValue({
+			data: [
+				makeSurface({
+					surfaceId: 'surface.targeted',
+					label: 'Targeted',
+					priority: 100,
+					slot: 'software.tabs',
+					targeting: 'targeted'
+				})
+			]
+		} as unknown as Awaited<ReturnType<typeof listSurfaces>>);
+		vi.mocked(listSurfaceProviders).mockResolvedValue({ data: [makeProvider('provider.a')] } as unknown as Awaited<
+			ReturnType<typeof listSurfaceProviders>
+		>);
 		vi.mocked(getSurfaceRead).mockRejectedValue(new Error('boom'));
 
 		await loadSurfaceRegistry();
@@ -337,23 +386,30 @@ describe('surface registry', () => {
 
 		expect(getSurfaceReadFailed('surface.targeted')).toBe(false);
 
-		vi.mocked(getSurfaceRead).mockImplementation(async (surfaceId: string) => makeRead(surfaceId));
+		vi.mocked(getSurfaceRead).mockImplementation(
+			({ path }: { path: { surface_id: string } }) =>
+				Promise.resolve({ data: makeRead(path.surface_id) }) as unknown as ReturnType<typeof getSurfaceRead>
+		);
 		await loadSurfaceReadModel('surface.targeted');
 
 		expect(getSurfaceReadModel('surface.targeted')?.descriptor.surface_id).toBe('surface.targeted');
 	});
 
 	it('does not re-fire loadSurfaceReadModel on repeated per-navigation refresh-then-fail churn (loop freedom)', async () => {
-		vi.mocked(listSurfaces).mockResolvedValue([
-			makeSurface({
-				surfaceId: 'surface.targeted',
-				label: 'Targeted',
-				priority: 100,
-				slot: 'software.tabs',
-				targeting: 'targeted'
-			})
-		]);
-		vi.mocked(listSurfaceProviders).mockResolvedValue([makeProvider('provider.a')]);
+		vi.mocked(listSurfaces).mockResolvedValue({
+			data: [
+				makeSurface({
+					surfaceId: 'surface.targeted',
+					label: 'Targeted',
+					priority: 100,
+					slot: 'software.tabs',
+					targeting: 'targeted'
+				})
+			]
+		} as unknown as Awaited<ReturnType<typeof listSurfaces>>);
+		vi.mocked(listSurfaceProviders).mockResolvedValue({ data: [makeProvider('provider.a')] } as unknown as Awaited<
+			ReturnType<typeof listSurfaceProviders>
+		>);
 		vi.mocked(getSurfaceRead).mockRejectedValue(new Error('boom'));
 
 		await loadSurfaceRegistry();

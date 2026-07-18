@@ -22,10 +22,14 @@ describe('SurfaceWorkflow', () => {
 		vi.mocked(sealedBoxEncrypt).mockResolvedValue('ciphertext');
 		vi.mocked(invokeSurfaceInteraction)
 			.mockResolvedValueOnce({
-				host_info: { hostname: 'example-host' },
-				actions: [{ id: 'sudoers', label: 'Install sudoers', description: 'Configure sudo', skippable: false }]
-			})
-			.mockResolvedValueOnce({ host_id: 'host-1' });
+				data: {
+					host_info: { hostname: 'example-host' },
+					actions: [{ id: 'sudoers', label: 'Install sudoers', description: 'Configure sudo', skippable: false }]
+				}
+			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>)
+			.mockResolvedValueOnce({ data: { host_id: 'host-1' } } as unknown as Awaited<
+				ReturnType<typeof invokeSurfaceInteraction>
+			>);
 	});
 
 	afterEach(() => {
@@ -126,11 +130,9 @@ describe('SurfaceWorkflow', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 
 		await waitFor(() => {
-			expect(invokeSurfaceInteraction).toHaveBeenNthCalledWith(
-				1,
-				'ssh-agent.hosts',
-				'bootstrap-connect',
-				expect.objectContaining({
+			expect(invokeSurfaceInteraction).toHaveBeenNthCalledWith(1, {
+				path: { surface_id: 'ssh-agent.hosts', interaction_id: 'bootstrap-connect' },
+				body: expect.objectContaining({
 					params: {
 						host_id: 'host-1',
 						target: 'root@example:22'
@@ -142,17 +144,15 @@ describe('SurfaceWorkflow', () => {
 						ciphertext_b64: 'ciphertext'
 					}
 				})
-			);
+			});
 		});
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Execute' }));
 
 		await waitFor(() => {
-			expect(invokeSurfaceInteraction).toHaveBeenNthCalledWith(
-				2,
-				'ssh-agent.hosts',
-				'bootstrap-execute',
-				expect.objectContaining({
+			expect(invokeSurfaceInteraction).toHaveBeenNthCalledWith(2, {
+				path: { surface_id: 'ssh-agent.hosts', interaction_id: 'bootstrap-execute' },
+				body: expect.objectContaining({
 					params: {
 						host_id: 'host-1',
 						target: 'root@example:22'
@@ -164,10 +164,10 @@ describe('SurfaceWorkflow', () => {
 						ciphertext_b64: 'ciphertext'
 					}
 				})
-			);
+			});
 		});
 
-		expect(vi.mocked(invokeSurfaceInteraction).mock.calls.map((call) => call[1])).toEqual([
+		expect(vi.mocked(invokeSurfaceInteraction).mock.calls.map((call) => call[0].path.interaction_id)).toEqual([
 			'bootstrap-connect',
 			'bootstrap-execute'
 		]);
@@ -244,7 +244,7 @@ describe('SurfaceWorkflow', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 
 		await waitFor(() => {
-			expect(vi.mocked(invokeSurfaceInteraction).mock.calls.map((call) => call[1])).toEqual([
+			expect(vi.mocked(invokeSurfaceInteraction).mock.calls.map((call) => call[0].path.interaction_id)).toEqual([
 				'bootstrap-connect',
 				'bootstrap-execute'
 			]);
@@ -257,9 +257,11 @@ describe('SurfaceWorkflow', () => {
 		vi.mocked(invokeSurfaceInteraction).mockReset();
 		vi.mocked(invokeSurfaceInteraction)
 			.mockResolvedValueOnce({
-				host_info: { hostname: 'example-host' },
-				actions: [{ id: 'sudoers', label: 'Install sudoers', description: 'Configure sudo', skippable: false }]
-			})
+				data: {
+					host_info: { hostname: 'example-host' },
+					actions: [{ id: 'sudoers', label: 'Install sudoers', description: 'Configure sudo', skippable: false }]
+				}
+			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>)
 			.mockRejectedValueOnce(new Error('execute failed'));
 
 		const interaction: InteractionDescriptor = {
@@ -331,7 +333,7 @@ describe('SurfaceWorkflow', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 
 		await waitFor(() => {
-			expect(vi.mocked(invokeSurfaceInteraction).mock.calls.map((call) => call[1])).toEqual([
+			expect(vi.mocked(invokeSurfaceInteraction).mock.calls.map((call) => call[0].path.interaction_id)).toEqual([
 				'bootstrap-connect',
 				'bootstrap-execute'
 			]);
@@ -414,18 +416,22 @@ describe('SurfaceWorkflow', () => {
 		vi.mocked(invokeSurfaceInteraction).mockReset();
 		vi.mocked(invokeSurfaceInteraction)
 			.mockResolvedValueOnce({
-				host_info: { hostname: 'example-host' },
-				actions: [
-					{
-						id: 'sudoers',
-						label: 'Install sudoers',
-						description: 'Configure sudo',
-						skippable: false,
-						security_impact: 'high'
-					}
-				]
-			})
-			.mockResolvedValueOnce({ host_id: 'host-1' });
+				data: {
+					host_info: { hostname: 'example-host' },
+					actions: [
+						{
+							id: 'sudoers',
+							label: 'Install sudoers',
+							description: 'Configure sudo',
+							skippable: false,
+							security_impact: 'high'
+						}
+					]
+				}
+			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>)
+			.mockResolvedValueOnce({ data: { host_id: 'host-1' } } as unknown as Awaited<
+				ReturnType<typeof invokeSurfaceInteraction>
+			>);
 
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'bootstrap',
@@ -679,7 +685,9 @@ describe('SurfaceWorkflow', () => {
 
 	it('clears transient workflow contract callout after interactions update to valid descriptors', async () => {
 		vi.mocked(invokeSurfaceInteraction).mockReset();
-		vi.mocked(invokeSurfaceInteraction).mockResolvedValue({});
+		vi.mocked(invokeSurfaceInteraction).mockResolvedValue({ data: {} } as unknown as Awaited<
+			ReturnType<typeof invokeSurfaceInteraction>
+		>);
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'bootstrap',
 			kind: 'workflow',
@@ -730,7 +738,10 @@ describe('SurfaceWorkflow', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Run' }));
 
 		await waitFor(() => {
-			expect(invokeSurfaceInteraction).toHaveBeenCalledWith('ssh-agent.hosts', 'bootstrap-execute', expect.any(Object));
+			expect(invokeSurfaceInteraction).toHaveBeenCalledWith({
+				path: { surface_id: 'ssh-agent.hosts', interaction_id: 'bootstrap-execute' },
+				body: expect.any(Object)
+			});
 		});
 	});
 
@@ -795,7 +806,9 @@ describe('SurfaceWorkflow', () => {
 	});
 
 	it('renders Cancel and Back as secondary variant buttons (not ghost)', async () => {
-		vi.mocked(invokeSurfaceInteraction).mockResolvedValue({});
+		vi.mocked(invokeSurfaceInteraction).mockResolvedValue({ data: {} } as unknown as Awaited<
+			ReturnType<typeof invokeSurfaceInteraction>
+		>);
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'multi-step',
 			kind: 'workflow',
@@ -852,7 +865,9 @@ describe('SurfaceWorkflow', () => {
 	});
 
 	it('renders four primary step buttons with correct children text', async () => {
-		vi.mocked(invokeSurfaceInteraction).mockResolvedValue({});
+		vi.mocked(invokeSurfaceInteraction).mockResolvedValue({ data: {} } as unknown as Awaited<
+			ReturnType<typeof invokeSurfaceInteraction>
+		>);
 		// Single-step workflow with form fields — renders Run/Continue form-submit path
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'single',
@@ -896,7 +911,9 @@ describe('SurfaceWorkflow', () => {
 
 	it('trigger loading state sets aria-busy and preserves label (no text-swap)', async () => {
 		vi.mocked(invokeSurfaceInteraction).mockReset();
-		vi.mocked(invokeSurfaceInteraction).mockImplementation(() => new Promise(() => {}));
+		vi.mocked(invokeSurfaceInteraction).mockImplementation(
+			() => new Promise(() => {}) as unknown as ReturnType<typeof invokeSurfaceInteraction>
+		);
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'long-workflow',
 			kind: 'workflow',
@@ -966,7 +983,9 @@ describe('SurfaceWorkflow', () => {
 	});
 
 	it('no raw preset-filled-* or preset-tonal-* classes on any button in modal', async () => {
-		vi.mocked(invokeSurfaceInteraction).mockResolvedValue({});
+		vi.mocked(invokeSurfaceInteraction).mockResolvedValue({ data: {} } as unknown as Awaited<
+			ReturnType<typeof invokeSurfaceInteraction>
+		>);
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'bootstrap',
 			kind: 'workflow',

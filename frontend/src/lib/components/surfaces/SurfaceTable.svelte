@@ -2,6 +2,7 @@
 	import DataTable from '$lib/components/ui/DataTable.svelte';
 	import TableFooterBar from '$lib/components/ui/TableFooterBar.svelte';
 	import { invokeSurfaceInteraction } from '$lib/api';
+	import type { InvokeSurfaceInteractionRequest } from '$lib/api';
 	import SurfaceInteractionButton from './SurfaceInteractionButton.svelte';
 	import { buildSurfaceInteractionRequest, type SurfaceEncryptionContext } from '$lib/surfaces/interactions';
 	import type {
@@ -170,7 +171,10 @@
 					encryption: encryptionContext
 				}
 			);
-			const result = await invokeSurfaceInteraction(surfaceId, dataLoadInteraction.interaction_id, request);
+			const { data: result } = await invokeSurfaceInteraction({
+				path: { surface_id: surfaceId, interaction_id: dataLoadInteraction.interaction_id },
+				body: request as unknown as InvokeSurfaceInteractionRequest
+			});
 			const resultObj = result as Record<string, unknown>;
 			if (requestId !== latestRequestId) {
 				return;

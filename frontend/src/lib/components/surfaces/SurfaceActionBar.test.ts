@@ -19,7 +19,9 @@ import { invokeSurfaceInteraction, sealedBoxEncrypt } from '$lib/api';
 describe('SurfaceActionBar', () => {
 	beforeEach(() => {
 		vi.mocked(sealedBoxEncrypt).mockResolvedValue('ciphertext');
-		vi.mocked(invokeSurfaceInteraction).mockResolvedValue({});
+		vi.mocked(invokeSurfaceInteraction).mockResolvedValue({ data: {} } as unknown as Awaited<
+			ReturnType<typeof invokeSurfaceInteraction>
+		>);
 	});
 
 	afterEach(() => {

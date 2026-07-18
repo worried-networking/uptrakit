@@ -19,7 +19,9 @@ import { invokeSurfaceInteraction, sealedBoxEncrypt } from '$lib/api';
 describe('SurfaceInteractionButton', () => {
 	beforeEach(() => {
 		vi.mocked(sealedBoxEncrypt).mockResolvedValue('ciphertext');
-		vi.mocked(invokeSurfaceInteraction).mockResolvedValue({});
+		vi.mocked(invokeSurfaceInteraction).mockResolvedValue({ data: {} } as unknown as Awaited<
+			ReturnType<typeof invokeSurfaceInteraction>
+		>);
 	});
 
 	afterEach(() => {
@@ -60,13 +62,16 @@ describe('SurfaceInteractionButton', () => {
 		await fireEvent.click(buttons[buttons.length - 1]);
 
 		await waitFor(() => {
-			expect(invokeSurfaceInteraction).toHaveBeenCalledWith('notifications.email', 'create', {
-				params: {
-					channel_type: 'email',
-					name: 'Alerts'
-				},
-				target_provider_id: undefined,
-				timeout_seconds: undefined
+			expect(invokeSurfaceInteraction).toHaveBeenCalledWith({
+				path: { surface_id: 'notifications.email', interaction_id: 'create' },
+				body: {
+					params: {
+						channel_type: 'email',
+						name: 'Alerts'
+					},
+					target_provider_id: undefined,
+					timeout_seconds: undefined
+				}
 			});
 		});
 	});
@@ -111,16 +116,15 @@ describe('SurfaceInteractionButton', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Run' }));
 
 		await waitFor(() => {
-			expect(invokeSurfaceInteraction).toHaveBeenCalledWith(
-				'ssh-agent.hosts',
-				'bootstrap-connect',
-				expect.objectContaining({
+			expect(invokeSurfaceInteraction).toHaveBeenCalledWith({
+				path: { surface_id: 'ssh-agent.hosts', interaction_id: 'bootstrap-connect' },
+				body: expect.objectContaining({
 					params: {
 						id: 'host-1',
 						target: 'root@example:22'
 					}
 				})
-			);
+			});
 		});
 	});
 
@@ -152,15 +156,14 @@ describe('SurfaceInteractionButton', () => {
 		await fireEvent.click(submitButtons[submitButtons.length - 1]);
 
 		await waitFor(() => {
-			expect(invokeSurfaceInteraction).toHaveBeenCalledWith(
-				'provider.surface',
-				'provider.action.reset',
-				expect.objectContaining({
+			expect(invokeSurfaceInteraction).toHaveBeenCalledWith({
+				path: { surface_id: 'provider.surface', interaction_id: 'provider.action.reset' },
+				body: expect.objectContaining({
 					params: {
 						name: 'alpha'
 					}
 				})
-			);
+			});
 		});
 	});
 
@@ -249,7 +252,7 @@ describe('SurfaceInteractionButton', () => {
 
 	it('sets aria-busy and preserves label text during loading', async () => {
 		vi.mocked(invokeSurfaceInteraction).mockImplementation(
-			() => new Promise(() => {}) // never resolves — keeps loading=true
+			() => new Promise(() => {}) as unknown as ReturnType<typeof invokeSurfaceInteraction> // never resolves — keeps loading=true
 		);
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'slow-thing',

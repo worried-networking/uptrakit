@@ -1,6 +1,7 @@
 <script lang="ts">
 	import SurfaceRenderer from './SurfaceRenderer.svelte';
 	import { apiGet, invokeSurfaceInteraction } from '$lib/api';
+	import type { InvokeSurfaceInteractionRequest } from '$lib/api';
 	import Button from '$lib/components/Button.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
@@ -155,9 +156,12 @@
 			let failureMessage: string | null = null;
 			for (const request of hydrationRequests) {
 				try {
-					const response = await invokeSurfaceInteraction(descriptor.surface_id, request.interactionId, {
-						params: requestParams,
-						target_provider_id: targetProviderId
+					const { data: response } = await invokeSurfaceInteraction({
+						path: { surface_id: descriptor.surface_id, interaction_id: request.interactionId },
+						body: {
+							params: requestParams,
+							target_provider_id: targetProviderId
+						} as unknown as InvokeSurfaceInteractionRequest
 					});
 					loadedData[request.dataSourceId] = normalizeKeyValuePayload(response);
 				} catch (error) {

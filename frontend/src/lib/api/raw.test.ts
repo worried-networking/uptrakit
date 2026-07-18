@@ -429,10 +429,10 @@ describe('apiGet', () => {
 		vi.mocked(getAccessToken).mockReturnValue(null);
 		const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 200 }));
 
-		await apiGet('/api/v1/surfaces/foo/read');
+		await apiGet('/api/v1/surfaces/foo');
 
 		const req = fetchSpy.mock.calls[0][0] as Request;
 		expect(req.url).not.toContain('/api/v1/api/v1/');
-		expect(req.url).toContain('/api/v1/surfaces/foo/read');
+		expect(req.url).toContain('/api/v1/surfaces/foo');
 	});
 });

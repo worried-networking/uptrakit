@@ -5,6 +5,7 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import SchemaForm from '$lib/components/surfaces/SchemaForm.svelte';
 	import { invokeSurfaceInteraction } from '$lib/api';
+	import type { InvokeSurfaceInteractionRequest } from '$lib/api';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import SectionCard from '$lib/components/ui/SectionCard.svelte';
 	import StatusBadge from '$lib/components/ui/StatusBadge.svelte';
@@ -194,7 +195,10 @@
 						encryption: encryptionContext
 					}
 				);
-				const result = await invokeSurfaceInteraction(surfaceId, stepDescriptor.submit_interaction_id, request);
+				const { data: result } = await invokeSurfaceInteraction({
+					path: { surface_id: surfaceId, interaction_id: stepDescriptor.submit_interaction_id },
+					body: request as unknown as InvokeSurfaceInteractionRequest
+				});
 				stepResponses.set(stepIndex, result);
 
 				if (stepIndex === workflowSteps.length - 1) {
@@ -309,7 +313,10 @@
 			{ ...requestBaseParams, ...accumulatedParams },
 			{ targetProviderId }
 		);
-		const result = await invokeSurfaceInteraction(surfaceId, preLoadInteraction.interaction_id, request);
+		const { data: result } = await invokeSurfaceInteraction({
+			path: { surface_id: surfaceId, interaction_id: preLoadInteraction.interaction_id },
+			body: request as unknown as InvokeSurfaceInteractionRequest
+		});
 		if (result && typeof result === 'object' && !Array.isArray(result)) {
 			return result as Record<string, unknown>;
 		}
@@ -329,7 +336,10 @@
 				encryption: encryptionContext
 			}
 		);
-		const result = await invokeSurfaceInteraction(surfaceId, loadOptionsInteraction.interaction_id, request);
+		const { data: result } = await invokeSurfaceInteraction({
+			path: { surface_id: surfaceId, interaction_id: loadOptionsInteraction.interaction_id },
+			body: request as unknown as InvokeSurfaceInteractionRequest
+		});
 		if (!result || typeof result !== 'object' || Array.isArray(result)) {
 			return [];
 		}

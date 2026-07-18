@@ -126,7 +126,8 @@ export async function loadSurfaceReadModel(surfaceId: string): Promise<void> {
 
 	const promise = (async () => {
 		try {
-			const read = await getSurfaceRead(surfaceId);
+			const { data } = await getSurfaceRead({ path: { surface_id: surfaceId } });
+			const read = data as unknown as SurfaceReadResponse;
 			readsBySurface.set(surfaceId, read);
 			failedReads.delete(surfaceId);
 		} catch (error) {
@@ -166,7 +167,8 @@ export async function loadSurfaceRegistry(): Promise<void> {
 	loadPromise = (async () => {
 		surfacesLoading = true;
 		try {
-			const fetchedSurfaces = await listSurfaces();
+			const { data } = await listSurfaces();
+			const fetchedSurfaces = (data ?? []) as unknown as SurfaceResponse[];
 			const sortedSurfaces = [...fetchedSurfaces].sort(compareSurfaces);
 			surfaces = sortedSurfaces;
 			rebuildIndexes(sortedSurfaces);
@@ -180,7 +182,10 @@ export async function loadSurfaceRegistry(): Promise<void> {
 			const providerResults: Array<[string, SurfaceProviderInfo[]]> = await Promise.all(
 				targetedSurfaces.map(async (surface): Promise<[string, SurfaceProviderInfo[]]> => {
 					try {
-						const providers = await listSurfaceProviders(surface.surface_id);
+						const { data: providerData } = await listSurfaceProviders({
+							path: { surface_id: surface.surface_id }
+						});
+						const providers = (providerData ?? []) as unknown as SurfaceProviderInfo[];
 						return [surface.surface_id, [...providers].sort(compareProviders)];
 					} catch (error) {
 						console.error(`Failed to load providers for surface ${surface.surface_id}:`, error);

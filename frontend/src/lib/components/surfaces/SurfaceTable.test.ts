@@ -31,20 +31,24 @@ describe('SurfaceTable', () => {
 		vi.mocked(sealedBoxEncrypt).mockResolvedValue('ciphertext');
 		vi.mocked(invokeSurfaceInteraction)
 			.mockResolvedValueOnce({
-				items: [{ id: 'chan-1', name: 'Alpha' }],
-				total: 1,
-				page: 1,
-				per_page: 20,
-				total_pages: 1
-			})
-			.mockResolvedValueOnce({})
+				data: {
+					items: [{ id: 'chan-1', name: 'Alpha' }],
+					total: 1,
+					page: 1,
+					per_page: 20,
+					total_pages: 1
+				}
+			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>)
+			.mockResolvedValueOnce({ data: {} } as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>)
 			.mockResolvedValueOnce({
-				items: [{ id: 'chan-1', name: 'Alpha' }],
-				total: 1,
-				page: 1,
-				per_page: 20,
-				total_pages: 1
-			});
+				data: {
+					items: [{ id: 'chan-1', name: 'Alpha' }],
+					total: 1,
+					page: 1,
+					per_page: 20,
+					total_pages: 1
+				}
+			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>);
 	});
 
 	afterEach(() => {
@@ -95,27 +99,33 @@ describe('SurfaceTable', () => {
 
 		expect(await screen.findByText('Alpha')).toBeInTheDocument();
 		expect(container.querySelector('[data-ui="data-table"]')).toBeInTheDocument();
-		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenNthCalledWith(1, 'notifications.email', 'list', {
-			params: {
-				channel_type: 'email',
-				page: 1,
-				per_page: 20
-			},
-			target_provider_id: undefined,
-			timeout_seconds: undefined
+		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenNthCalledWith(1, {
+			path: { surface_id: 'notifications.email', interaction_id: 'list' },
+			body: {
+				params: {
+					channel_type: 'email',
+					page: 1,
+					per_page: 20
+				},
+				target_provider_id: undefined,
+				timeout_seconds: undefined
+			}
 		});
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
 
 		await waitFor(() => {
-			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenNthCalledWith(2, 'notifications.email', 'delete', {
-				params: {
-					channel_type: 'email',
-					id: 'chan-1',
-					name: 'Alpha'
-				},
-				target_provider_id: undefined,
-				timeout_seconds: undefined
+			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenNthCalledWith(2, {
+				path: { surface_id: 'notifications.email', interaction_id: 'delete' },
+				body: {
+					params: {
+						channel_type: 'email',
+						id: 'chan-1',
+						name: 'Alpha'
+					},
+					target_provider_id: undefined,
+					timeout_seconds: undefined
+				}
 			});
 		});
 	});
@@ -204,19 +214,23 @@ describe('SurfaceTable', () => {
 		vi.mocked(invokeSurfaceInteraction)
 			.mockReset()
 			.mockResolvedValueOnce({
-				items: [{ id: 'chan-1', name: 'Alpha' }],
-				total: 2,
-				page: 1,
-				per_page: 20,
-				total_pages: 2
-			})
+				data: {
+					items: [{ id: 'chan-1', name: 'Alpha' }],
+					total: 2,
+					page: 1,
+					per_page: 20,
+					total_pages: 2
+				}
+			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>)
 			.mockResolvedValueOnce({
-				items: [{ id: 'chan-2', name: 'Beta' }],
-				total: 2,
-				page: 2,
-				per_page: 20,
-				total_pages: 2
-			});
+				data: {
+					items: [{ id: 'chan-2', name: 'Beta' }],
+					total: 2,
+					page: 2,
+					per_page: 20,
+					total_pages: 2
+				}
+			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>);
 
 		const node: Extract<SurfaceNode, { kind: 'table' }> = {
 			kind: 'table',
@@ -256,13 +270,16 @@ describe('SurfaceTable', () => {
 
 		expect(await screen.findByText('Beta')).toBeInTheDocument();
 		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledTimes(2);
-		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenNthCalledWith(2, 'notifications.email', 'list', {
-			params: {
-				page: 2,
-				per_page: 20
-			},
-			target_provider_id: undefined,
-			timeout_seconds: undefined
+		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenNthCalledWith(2, {
+			path: { surface_id: 'notifications.email', interaction_id: 'list' },
+			body: {
+				params: {
+					page: 2,
+					per_page: 20
+				},
+				target_provider_id: undefined,
+				timeout_seconds: undefined
+			}
 		});
 	});
 
@@ -270,19 +287,23 @@ describe('SurfaceTable', () => {
 		vi.mocked(invokeSurfaceInteraction)
 			.mockReset()
 			.mockResolvedValueOnce({
-				items: [{ id: 'chan-1', name: 'Alpha' }],
-				total: 1,
-				page: 1,
-				per_page: 20,
-				total_pages: 1
-			})
+				data: {
+					items: [{ id: 'chan-1', name: 'Alpha' }],
+					total: 1,
+					page: 1,
+					per_page: 20,
+					total_pages: 1
+				}
+			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>)
 			.mockResolvedValueOnce({
-				items: [{ id: 'chan-1', name: 'Gamma' }],
-				total: 1,
-				page: 1,
-				per_page: 20,
-				total_pages: 1
-			});
+				data: {
+					items: [{ id: 'chan-1', name: 'Gamma' }],
+					total: 1,
+					page: 1,
+					per_page: 20,
+					total_pages: 1
+				}
+			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>);
 
 		const node: Extract<SurfaceNode, { kind: 'table' }> = {
 			kind: 'table',
@@ -333,18 +354,20 @@ describe('SurfaceTable', () => {
 
 	it('ignores stale provider-query responses when newer loads finish first', async () => {
 		vi.mocked(invokeSurfaceInteraction).mockReset();
-		const olderReload = deferred<Record<string, unknown>>();
-		const newerReload = deferred<Record<string, unknown>>();
+		const olderReload = deferred<Awaited<ReturnType<typeof invokeSurfaceInteraction>>>();
+		const newerReload = deferred<Awaited<ReturnType<typeof invokeSurfaceInteraction>>>();
 		vi.mocked(invokeSurfaceInteraction)
 			.mockResolvedValueOnce({
-				items: [{ id: 'chan-1', name: 'Alpha' }],
-				total: 1,
-				page: 1,
-				per_page: 20,
-				total_pages: 1
-			})
-			.mockImplementationOnce(() => olderReload.promise)
-			.mockImplementationOnce(() => newerReload.promise);
+				data: {
+					items: [{ id: 'chan-1', name: 'Alpha' }],
+					total: 1,
+					page: 1,
+					per_page: 20,
+					total_pages: 1
+				}
+			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>)
+			.mockImplementationOnce(() => olderReload.promise as unknown as ReturnType<typeof invokeSurfaceInteraction>)
+			.mockImplementationOnce(() => newerReload.promise as unknown as ReturnType<typeof invokeSurfaceInteraction>);
 
 		const node: Extract<SurfaceNode, { kind: 'table' }> = {
 			kind: 'table',
@@ -400,21 +423,25 @@ describe('SurfaceTable', () => {
 		});
 
 		newerReload.resolve({
-			items: [{ id: 'chan-1', name: 'Gamma' }],
-			total: 1,
-			page: 1,
-			per_page: 20,
-			total_pages: 1
-		});
+			data: {
+				items: [{ id: 'chan-1', name: 'Gamma' }],
+				total: 1,
+				page: 1,
+				per_page: 20,
+				total_pages: 1
+			}
+		} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>);
 		expect(await screen.findByText('Gamma')).toBeInTheDocument();
 
 		olderReload.resolve({
-			items: [{ id: 'chan-1', name: 'Beta' }],
-			total: 1,
-			page: 1,
-			per_page: 20,
-			total_pages: 1
-		});
+			data: {
+				items: [{ id: 'chan-1', name: 'Beta' }],
+				total: 1,
+				page: 1,
+				per_page: 20,
+				total_pages: 1
+			}
+		} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>);
 		await olderReload.promise;
 		await waitFor(() => {
 			expect(screen.getByText('Gamma')).toBeInTheDocument();
@@ -424,8 +451,10 @@ describe('SurfaceTable', () => {
 
 	it('cancels in-flight provider-query loads when switching to static data', async () => {
 		vi.mocked(invokeSurfaceInteraction).mockReset();
-		const inFlightLoad = deferred<Record<string, unknown>>();
-		vi.mocked(invokeSurfaceInteraction).mockImplementationOnce(() => inFlightLoad.promise);
+		const inFlightLoad = deferred<Awaited<ReturnType<typeof invokeSurfaceInteraction>>>();
+		vi.mocked(invokeSurfaceInteraction).mockImplementationOnce(
+			() => inFlightLoad.promise as unknown as ReturnType<typeof invokeSurfaceInteraction>
+		);
 
 		const node: Extract<SurfaceNode, { kind: 'table' }> = {
 			kind: 'table',
@@ -479,12 +508,14 @@ describe('SurfaceTable', () => {
 		expect(screen.queryByText('Loading...')).not.toBeInTheDocument();
 
 		inFlightLoad.resolve({
-			items: [{ id: 'chan-provider', name: 'Provider Row' }],
-			total: 1,
-			page: 1,
-			per_page: 20,
-			total_pages: 1
-		});
+			data: {
+				items: [{ id: 'chan-provider', name: 'Provider Row' }],
+				total: 1,
+				page: 1,
+				per_page: 20,
+				total_pages: 1
+			}
+		} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>);
 		await inFlightLoad.promise;
 
 		await waitFor(() => {
@@ -497,12 +528,14 @@ describe('SurfaceTable', () => {
 		vi.mocked(invokeSurfaceInteraction)
 			.mockReset()
 			.mockResolvedValueOnce({
-				items: [{ id: 'chan-1', name: 'Alpha' }],
-				total: 40,
-				page: 2,
-				per_page: 20,
-				total_pages: 2
-			});
+				data: {
+					items: [{ id: 'chan-1', name: 'Alpha' }],
+					total: 40,
+					page: 2,
+					per_page: 20,
+					total_pages: 2
+				}
+			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>);
 
 		const node: Extract<SurfaceNode, { kind: 'table' }> = {
 			kind: 'table',
@@ -532,10 +565,13 @@ describe('SurfaceTable', () => {
 
 		expect(await screen.findByText('Alpha')).toBeInTheDocument();
 		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledOnce();
-		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledWith('notifications.email', 'list', {
-			params: { page: 2, per_page: 20 },
-			target_provider_id: undefined,
-			timeout_seconds: undefined
+		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledWith({
+			path: { surface_id: 'notifications.email', interaction_id: 'list' },
+			body: {
+				params: { page: 2, per_page: 20 },
+				target_provider_id: undefined,
+				timeout_seconds: undefined
+			}
 		});
 	});
 
@@ -543,19 +579,23 @@ describe('SurfaceTable', () => {
 		vi.mocked(invokeSurfaceInteraction)
 			.mockReset()
 			.mockResolvedValueOnce({
-				items: [{ id: 'chan-1', name: 'Alpha' }],
-				total: 40,
-				page: 1,
-				per_page: 20,
-				total_pages: 2
-			})
+				data: {
+					items: [{ id: 'chan-1', name: 'Alpha' }],
+					total: 40,
+					page: 1,
+					per_page: 20,
+					total_pages: 2
+				}
+			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>)
 			.mockResolvedValueOnce({
-				items: [{ id: 'chan-2', name: 'Beta' }],
-				total: 40,
-				page: 2,
-				per_page: 20,
-				total_pages: 2
-			});
+				data: {
+					items: [{ id: 'chan-2', name: 'Beta' }],
+					total: 40,
+					page: 2,
+					per_page: 20,
+					total_pages: 2
+				}
+			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>);
 
 		const onPageChange = vi.fn();
 		const node: Extract<SurfaceNode, { kind: 'table' }> = {
@@ -597,12 +637,14 @@ describe('SurfaceTable', () => {
 		vi.mocked(invokeSurfaceInteraction)
 			.mockReset()
 			.mockResolvedValue({
-				items: [{ id: 'chan-1', name: 'Alpha' }],
-				total: 40,
-				page: 1,
-				per_page: 20,
-				total_pages: 2
-			});
+				data: {
+					items: [{ id: 'chan-1', name: 'Alpha' }],
+					total: 40,
+					page: 1,
+					per_page: 20,
+					total_pages: 2
+				}
+			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>);
 
 		const node: Extract<SurfaceNode, { kind: 'table' }> = {
 			kind: 'table',
@@ -631,11 +673,10 @@ describe('SurfaceTable', () => {
 		});
 
 		await waitFor(() => {
-			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledWith(
-				'notifications.email',
-				'list',
-				expect.objectContaining({ params: expect.objectContaining({ page: 2 }) })
-			);
+			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledWith({
+				path: { surface_id: 'notifications.email', interaction_id: 'list' },
+				body: expect.objectContaining({ params: expect.objectContaining({ page: 2 }) })
+			});
 		});
 
 		vi.mocked(invokeSurfaceInteraction).mockClear();
@@ -650,11 +691,10 @@ describe('SurfaceTable', () => {
 		});
 
 		await waitFor(() => {
-			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledWith(
-				'notifications.email',
-				'list',
-				expect.objectContaining({ params: expect.objectContaining({ page: 1 }) })
-			);
+			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledWith({
+				path: { surface_id: 'notifications.email', interaction_id: 'list' },
+				body: expect.objectContaining({ params: expect.objectContaining({ page: 1 }) })
+			});
 			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledTimes(1);
 		});
 	});
@@ -814,19 +854,23 @@ describe('SurfaceTable', () => {
 		vi.mocked(invokeSurfaceInteraction)
 			.mockReset()
 			.mockResolvedValueOnce({
-				items: [],
-				total: 60,
-				page: 1,
-				per_page: 20,
-				total_pages: 3
-			})
+				data: {
+					items: [],
+					total: 60,
+					page: 1,
+					per_page: 20,
+					total_pages: 3
+				}
+			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>)
 			.mockResolvedValueOnce({
-				items: [],
-				total: 60,
-				page: 1,
-				per_page: 20,
-				total_pages: 3
-			});
+				data: {
+					items: [],
+					total: 60,
+					page: 1,
+					per_page: 20,
+					total_pages: 3
+				}
+			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>);
 
 		const node: Extract<SurfaceNode, { kind: 'table' }> = {
 			kind: 'table',

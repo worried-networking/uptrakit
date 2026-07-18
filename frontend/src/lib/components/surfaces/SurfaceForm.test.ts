@@ -36,8 +36,10 @@ describe('SurfaceForm', () => {
 
 	it('renders schema fields and preloads values for form-backed surface interactions', async () => {
 		vi.mocked(invokeSurfaceInteraction)
-			.mockResolvedValueOnce({ new_image_ref: 'ghcr.io/example/app:1.2.3' })
-			.mockResolvedValueOnce({});
+			.mockResolvedValueOnce({ data: { new_image_ref: 'ghcr.io/example/app:1.2.3' } } as unknown as Awaited<
+				ReturnType<typeof invokeSurfaceInteraction>
+			>)
+			.mockResolvedValueOnce({ data: {} } as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>);
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'switch-tag',
 			kind: 'form_submit',
@@ -87,38 +89,36 @@ describe('SurfaceForm', () => {
 		await fireEvent.submit(input.closest('form')!);
 
 		await waitFor(() => {
-			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenNthCalledWith(
-				1,
-				'docker.item-host-actions',
-				'get-current-tag',
-				expect.objectContaining({
+			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenNthCalledWith(1, {
+				path: { surface_id: 'docker.item-host-actions', interaction_id: 'get-current-tag' },
+				body: expect.objectContaining({
 					params: {
 						software_item_id: 'software-1',
 						host_id: 'host-1'
 					}
 				})
-			);
-			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenNthCalledWith(
-				2,
-				'docker.item-host-actions',
-				'switch-tag',
-				expect.objectContaining({
+			});
+			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenNthCalledWith(2, {
+				path: { surface_id: 'docker.item-host-actions', interaction_id: 'switch-tag' },
+				body: expect.objectContaining({
 					params: {
 						software_item_id: 'software-1',
 						host_id: 'host-1',
 						new_image_ref: 'ghcr.io/example/app:2.0.0'
 					}
 				})
-			);
+			});
 		});
 	});
 
 	it('loads action-backed select options via surface interactions', async () => {
 		vi.mocked(invokeSurfaceInteraction)
 			.mockResolvedValueOnce({
-				options: [{ value: 'eu-west-1', label: 'EU West 1' }]
-			})
-			.mockResolvedValueOnce({});
+				data: {
+					options: [{ value: 'eu-west-1', label: 'EU West 1' }]
+				}
+			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>)
+			.mockResolvedValueOnce({ data: {} } as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>);
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'switch-region',
 			kind: 'form_submit',
@@ -165,17 +165,15 @@ describe('SurfaceForm', () => {
 		});
 
 		await waitFor(() => {
-			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenNthCalledWith(
-				1,
-				'docker.item-host-actions',
-				'list-regions',
-				expect.objectContaining({
+			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenNthCalledWith(1, {
+				path: { surface_id: 'docker.item-host-actions', interaction_id: 'list-regions' },
+				body: expect.objectContaining({
 					params: {
 						software_item_id: 'software-1',
 						host_id: 'host-1'
 					}
 				})
-			);
+			});
 		});
 		expect(await screen.findByRole('option', { name: 'EU West 1' })).toBeInTheDocument();
 
@@ -186,23 +184,23 @@ describe('SurfaceForm', () => {
 		await fireEvent.submit(select.closest('form')!);
 
 		await waitFor(() => {
-			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenNthCalledWith(
-				2,
-				'docker.item-host-actions',
-				'switch-region',
-				expect.objectContaining({
+			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenNthCalledWith(2, {
+				path: { surface_id: 'docker.item-host-actions', interaction_id: 'switch-region' },
+				body: expect.objectContaining({
 					params: {
 						software_item_id: 'software-1',
 						host_id: 'host-1',
 						region: 'eu-west-1'
 					}
 				})
-			);
+			});
 		});
 	});
 
 	it('coerces schema number fields to JSON numbers before submit', async () => {
-		vi.mocked(invokeSurfaceInteraction).mockResolvedValueOnce({});
+		vi.mocked(invokeSurfaceInteraction).mockResolvedValueOnce({ data: {} } as unknown as Awaited<
+			ReturnType<typeof invokeSurfaceInteraction>
+		>);
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'save-client',
 			kind: 'form_submit',
@@ -232,20 +230,21 @@ describe('SurfaceForm', () => {
 		await fireEvent.submit(input.closest('form')!);
 
 		await waitFor(() => {
-			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledWith(
-				'mqtt.clients',
-				'save-client',
-				expect.objectContaining({
+			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledWith({
+				path: { surface_id: 'mqtt.clients', interaction_id: 'save-client' },
+				body: expect.objectContaining({
 					params: {
 						port: 1883
 					}
 				})
-			);
+			});
 		});
 	});
 
 	it('does not send synthetic _row helper in preload requests', async () => {
-		vi.mocked(invokeSurfaceInteraction).mockResolvedValueOnce({ value: 'preloaded' });
+		vi.mocked(invokeSurfaceInteraction).mockResolvedValueOnce({ data: { value: 'preloaded' } } as unknown as Awaited<
+			ReturnType<typeof invokeSurfaceInteraction>
+		>);
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'save',
 			kind: 'form_submit',
@@ -274,21 +273,21 @@ describe('SurfaceForm', () => {
 		});
 
 		await waitFor(() => {
-			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenNthCalledWith(
-				1,
-				'example.surface',
-				'load',
-				expect.objectContaining({
+			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenNthCalledWith(1, {
+				path: { surface_id: 'example.surface', interaction_id: 'load' },
+				body: expect.objectContaining({
 					params: {
 						host_id: 'host-1'
 					}
 				})
-			);
+			});
 		});
 	});
 
 	it('shows inline required errors and blocks schema submit until fixed', async () => {
-		vi.mocked(invokeSurfaceInteraction).mockResolvedValueOnce({});
+		vi.mocked(invokeSurfaceInteraction).mockResolvedValueOnce({ data: {} } as unknown as Awaited<
+			ReturnType<typeof invokeSurfaceInteraction>
+		>);
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'save',
 			kind: 'form_submit',
@@ -319,15 +318,14 @@ describe('SurfaceForm', () => {
 		await fireEvent.submit(submitButton.closest('form')!);
 
 		await waitFor(() => {
-			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledWith(
-				'example.surface',
-				'save',
-				expect.objectContaining({
+			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledWith({
+				path: { surface_id: 'example.surface', interaction_id: 'save' },
+				body: expect.objectContaining({
 					params: {
 						name: 'Configured Name'
 					}
 				})
-			);
+			});
 		});
 	});
 
@@ -394,7 +392,9 @@ describe('SurfaceForm', () => {
 	});
 
 	it('renders Save as default submit label when interaction has no submit_label', async () => {
-		vi.mocked(invokeSurfaceInteraction).mockResolvedValue({});
+		vi.mocked(invokeSurfaceInteraction).mockResolvedValue({ data: {} } as unknown as Awaited<
+			ReturnType<typeof invokeSurfaceInteraction>
+		>);
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'save-form',
 			kind: 'form_submit',
@@ -413,7 +413,9 @@ describe('SurfaceForm', () => {
 	});
 
 	it('uses interaction.submit_label when present', async () => {
-		vi.mocked(invokeSurfaceInteraction).mockResolvedValue({});
+		vi.mocked(invokeSurfaceInteraction).mockResolvedValue({ data: {} } as unknown as Awaited<
+			ReturnType<typeof invokeSurfaceInteraction>
+		>);
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'rotate',
 			kind: 'form_submit',
@@ -440,7 +442,9 @@ describe('SurfaceForm', () => {
 	});
 
 	it('fallback submit preserves effectiveSubmitLabel during loading (no text-swap)', async () => {
-		vi.mocked(invokeSurfaceInteraction).mockImplementation(() => new Promise(() => {}));
+		vi.mocked(invokeSurfaceInteraction).mockImplementation(
+			() => new Promise(() => {}) as unknown as ReturnType<typeof invokeSurfaceInteraction>
+		);
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'raw-submit',
 			kind: 'form_submit',

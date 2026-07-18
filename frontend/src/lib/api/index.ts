@@ -30,4 +30,3 @@ export { apiGet, authenticatedFetch, loginRaw } from './raw';
 // Cross-cutting domain helpers.
 export { executeBatchChunked } from './batch';
 export { sealedBoxEncrypt } from './crypto';
-export { listSurfaces, listSurfaceProviders, getSurfaceRead, invokeSurfaceInteraction } from './surfaces';
