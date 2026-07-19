@@ -15,6 +15,9 @@ pub(crate) fn allowlisted_notification_settings_controller_local_action(
     surface_id: &str,
     interaction_id: &str,
 ) -> Option<NotificationSettingsAction> {
+    if super::table_tier(surface_id, interaction_id) != Some(super::ExecutorTier::PluginWithAudit) {
+        return None;
+    }
     let channel_type = surface_id
         .strip_prefix("notifications.")
         .and_then(|rest| rest.split('.').next())?;

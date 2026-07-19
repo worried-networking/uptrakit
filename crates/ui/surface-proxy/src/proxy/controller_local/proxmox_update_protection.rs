@@ -20,6 +20,9 @@ pub(crate) fn allowlisted_proxmox_update_protection_controller_local_action(
     surface_id: &str,
     interaction_id: &str,
 ) -> Option<ProxmoxUpdateProtectionAction> {
+    if super::table_tier(surface_id, interaction_id) != Some(super::ExecutorTier::PluginWithAudit) {
+        return None;
+    }
     match (surface_id, interaction_id) {
         ("proxmox.settings.update-hooks", "save-global-defaults") => {
             Some(ProxmoxUpdateProtectionAction::SaveGlobalDefaults)

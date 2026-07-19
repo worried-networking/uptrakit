@@ -3,9 +3,10 @@ mod registry;
 
 pub use proxy::entity_enrichment;
 pub use proxy::{
-    AppStateSurfaceActionController, PluginSurfaceActionInvoker, PluginSurfaceLocalExecutor,
-    SurfaceCallerOrigin, SurfaceInvokeRequest, SurfaceLocalActionExecutor, SurfaceProxy,
-    SurfaceProxyError, map_surface_action_error,
+    AppStateSurfaceActionController, CONTROLLER_LOCAL_EXECUTOR_TABLE, ExecutorTier,
+    PluginSurfaceActionInvoker, PluginSurfaceLocalExecutor, SurfaceCallerOrigin,
+    SurfaceInvokeRequest, SurfaceLocalActionExecutor, SurfaceProxy, SurfaceProxyError,
+    map_surface_action_error,
 };
 pub use registry::{
     ResolvedSurfaceAction, ResolvedSurfaceRead, SurfaceCatalogItem, SurfaceProviderRejection,

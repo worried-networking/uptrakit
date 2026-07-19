@@ -17,6 +17,7 @@ use parking_lot::Mutex;
 mod controller_local;
 mod local_executor;
 pub use controller_local::map_surface_action_error;
+pub use controller_local::{CONTROLLER_LOCAL_EXECUTOR_TABLE, ExecutorTier};
 pub use local_executor::{
     PluginSurfaceActionInvoker, PluginSurfaceLocalExecutor, SurfaceLocalActionExecutor,
 };

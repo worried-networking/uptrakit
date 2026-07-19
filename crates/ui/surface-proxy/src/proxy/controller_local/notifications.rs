@@ -28,7 +28,9 @@ pub(crate) fn allowlisted_notification_channel_controller_local_action<'a>(
     surface_id: &'a str,
     interaction_id: &str,
 ) -> Option<&'a str> {
-    if !matches!(interaction_id, "create" | "edit" | "test" | "delete") {
+    if super::table_tier(surface_id, interaction_id)
+        != Some(super::ExecutorTier::ControllerExecutes)
+    {
         return None;
     }
     let channel_type = notification_channel_type_for_surface_id(surface_id)?;

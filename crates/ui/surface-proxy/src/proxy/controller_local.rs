@@ -34,6 +34,139 @@ pub(crate) use proxmox_update_protection::{
     emit_proxmox_update_protection_audit_event,
 };
 
+/// Which executor tier owns a `(surface_id, interaction_id)` pair
+/// (`local_executor.rs` tier ladder). `ControllerExecutes` = Tier 1
+/// (controller-side code + audit, no plugin call, delivery
+/// `ControllerExecutor`); `PluginWithAudit` = Tier 2 (plugin invoke + audit,
+/// delivery `PluginHandled`). Tier 3 (plugin invoke, no audit) is the
+/// fallthrough and has no rows. Guarded bidirectionally by
+/// `interaction_executor_guard` in web-api (spec D5).
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExecutorTier {
+    /// Tier 1: executed by controller-side code in `controller_local/`.
+    ControllerExecutes,
+    /// Tier 2: dispatched to the plugin, audited by the executor.
+    PluginWithAudit,
+}
+
+/// Single source for every allowlisted controller-local executor pair.
+pub const CONTROLLER_LOCAL_EXECUTOR_TABLE: &[(&str, &str, ExecutorTier)] = &[
+    // Tier 1a — notification channel CRUD
+    (
+        "notifications.webhook",
+        "create",
+        ExecutorTier::ControllerExecutes,
+    ),
+    (
+        "notifications.webhook",
+        "edit",
+        ExecutorTier::ControllerExecutes,
+    ),
+    (
+        "notifications.webhook",
+        "test",
+        ExecutorTier::ControllerExecutes,
+    ),
+    (
+        "notifications.webhook",
+        "delete",
+        ExecutorTier::ControllerExecutes,
+    ),
+    (
+        "notifications.telegram",
+        "create",
+        ExecutorTier::ControllerExecutes,
+    ),
+    (
+        "notifications.telegram",
+        "edit",
+        ExecutorTier::ControllerExecutes,
+    ),
+    (
+        "notifications.telegram",
+        "test",
+        ExecutorTier::ControllerExecutes,
+    ),
+    (
+        "notifications.telegram",
+        "delete",
+        ExecutorTier::ControllerExecutes,
+    ),
+    (
+        "notifications.email",
+        "create",
+        ExecutorTier::ControllerExecutes,
+    ),
+    (
+        "notifications.email",
+        "edit",
+        ExecutorTier::ControllerExecutes,
+    ),
+    (
+        "notifications.email",
+        "test",
+        ExecutorTier::ControllerExecutes,
+    ),
+    (
+        "notifications.email",
+        "delete",
+        ExecutorTier::ControllerExecutes,
+    ),
+    // Tier 2a — notification settings saves
+    (
+        "notifications.email",
+        "configure_smtp",
+        ExecutorTier::PluginWithAudit,
+    ),
+    (
+        "notifications.email.global_smtp",
+        "save_global_smtp",
+        ExecutorTier::PluginWithAudit,
+    ),
+    (
+        "notifications.telegram.global_settings",
+        "save_global_telegram",
+        ExecutorTier::PluginWithAudit,
+    ),
+    // Tier 2b — docker switch-tag
+    (
+        "docker.item-host-actions",
+        "switch-tag",
+        ExecutorTier::PluginWithAudit,
+    ),
+    // Tier 2c — proxmox update-protection / scaling saves
+    (
+        "proxmox.settings.update-hooks",
+        "save-global-defaults",
+        ExecutorTier::PluginWithAudit,
+    ),
+    (
+        "proxmox.software-item.update-hooks",
+        "save-item-overrides",
+        ExecutorTier::PluginWithAudit,
+    ),
+    (
+        "proxmox.settings.resource-scaling",
+        "save-scaling-global-defaults",
+        ExecutorTier::PluginWithAudit,
+    ),
+    (
+        "proxmox.software-item.resource-scaling",
+        "save-scaling-item-overrides",
+        ExecutorTier::PluginWithAudit,
+    ),
+];
+
+/// Looks up the tier for a pair. Linear scan over a 20-row const — a map
+/// would be complexity without a consumer.
+pub(crate) fn table_tier(surface_id: &str, interaction_id: &str) -> Option<ExecutorTier> {
+    CONTROLLER_LOCAL_EXECUTOR_TABLE
+        .iter()
+        .find(|(surface, interaction, _)| *surface == surface_id && *interaction == interaction_id)
+        .map(|(_, _, tier)| *tier)
+}
+
 // TODO(adr-0018): The collapse of ControllerIntegration/PluginInternal → SendFailed is only
 // acceptable because the tracing::error! call below preserves controller-side failure detail in
 // logs. A subscriber-capture test asserting that error event would lock in this guarantee, but no
@@ -90,5 +223,22 @@ impl SurfaceActionController for AppStateSurfaceActionController {
 
     fn tenant_db(&self) -> &uptrakit_shared_db::TenantDb {
         &self.tenant_db
+    }
+}
+
+#[cfg(test)]
+mod table_tests {
+    use super::*;
+
+    #[test]
+    fn executor_table_has_no_duplicate_pairs() {
+        let mut seen = std::collections::BTreeSet::new();
+        for (surface, interaction, _) in CONTROLLER_LOCAL_EXECUTOR_TABLE {
+            assert!(
+                seen.insert((*surface, *interaction)),
+                "duplicate row ({surface}, {interaction})"
+            );
+        }
+        assert_eq!(seen.len(), CONTROLLER_LOCAL_EXECUTOR_TABLE.len());
     }
 }

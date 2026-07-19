@@ -10,8 +10,9 @@ pub(crate) fn allowlisted_docker_switch_tag_controller_local_action(
     interaction_id: &str,
 ) -> bool {
     matches!(provider_id, "plugin.releases_docker" | "releases_docker")
+        && super::table_tier(surface_id, interaction_id)
+            == Some(super::ExecutorTier::PluginWithAudit)
         && surface_id == "docker.item-host-actions"
-        && interaction_id == "switch-tag"
 }
 
 fn classify_docker_switch_tag_error(
