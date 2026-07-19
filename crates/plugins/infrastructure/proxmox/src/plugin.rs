@@ -2,12 +2,12 @@
     clippy::expect_used,
     reason = "infallible literal surface ID and value constructions; panic would indicate a programming error in the surface manifest"
 )]
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use uptrakit_plugin_infrastructure_core::{
-    AgentInteraction, ConfigModel, HostRequirements, HostRuntime, PluginFamily,
-    SurfaceActionDescriptor, declare_plugin, surfaces,
+    AgentInteraction, ConfigModel, HostRequirements, HostRuntime, InteractionDelivery,
+    PluginFamily, PluginSurface, PluginSurfaceRegistration, RegisteredInteraction, declare_plugin,
+    surfaces,
 };
 use uptrakit_shared_types::Permission;
 
@@ -54,27 +54,6 @@ impl ProxmoxPlugin {
         Self { config: None }
     }
 
-    /// Return surface action definitions for the Proxmox VE plugin.
-    ///
-    /// Separate function used as a function pointer in `declare_plugin!`.
-    pub fn surface_actions_static() -> Vec<SurfaceActionDescriptor> {
-        let mut actions = Vec::new();
-        // Controller-side actions (included when not in agent mode).
-        if !cfg!(feature = "agent-infra") {
-            actions.extend(crate::surfaces::surface_actions());
-        }
-        actions
-    }
-
-    /// Return plugin-backed shared-surface registrations authored natively.
-    pub fn surface_registrations_static()
-    -> Vec<uptrakit_plugin_infrastructure_core::surfaces::SurfaceRegistration> {
-        if cfg!(feature = "agent-infra") {
-            return vec![];
-        }
-        proxmox_surface_registrations()
-    }
-
     /// Return controller-side migrations for the Proxmox VE plugin.
     #[cfg(feature = "migrations")]
     pub fn controller_migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
@@ -82,22 +61,14 @@ impl ProxmoxPlugin {
     }
 }
 
-fn descriptor_surface_registrations()
--> Vec<uptrakit_plugin_infrastructure_core::surfaces::SurfaceRegistration> {
-    proxmox_surface_registrations()
-}
-
-fn collect_registration_capabilities(
-    surfaces: &[surfaces::RegisteredSurface],
-) -> surfaces::CapabilitySet {
-    let mut caps = BTreeSet::new();
-    for surface in surfaces {
-        caps.extend(surface.descriptor.required_capabilities.0.iter().cloned());
+fn descriptor_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
+    if cfg!(feature = "agent-infra") {
+        return vec![];
     }
-    surfaces::CapabilitySet(caps)
+    proxmox_plugin_surfaces()
 }
 
-pub(crate) fn proxmox_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
+pub(crate) fn proxmox_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
     let surfaces = vec![
         proxmox_hosts_surface(),
         proxmox_host_info_surface(),
@@ -106,28 +77,14 @@ pub(crate) fn proxmox_surface_registrations() -> Vec<surfaces::SurfaceRegistrati
         proxmox_software_item_update_protection_surface(),
         proxmox_software_item_resource_scaling_surface(),
     ];
-    vec![surfaces::SurfaceRegistration {
-        provider: surfaces::ProviderIdentity {
-            provider_id: "plugin.infrastructure_proxmox".to_string(),
-            provider_kind: surfaces::ProviderKind::Plugin,
-            provider_namespace: "plugin".to_string(),
-        },
-        framework_generation: surfaces::FrameworkGeneration::new(1, 0),
-        capabilities: collect_registration_capabilities(&surfaces),
-        effective_tenant_binding: surfaces::EffectiveTenantBinding {
-            scope: surfaces::Scope::Global,
-            tenant_id: None,
-        },
-        surfaces,
-        encryption_metadata: None,
-    }]
+    vec![PluginSurfaceRegistration { surfaces }]
 }
 
-fn proxmox_hosts_surface() -> surfaces::RegisteredSurface {
+fn proxmox_hosts_surface() -> PluginSurface {
     let data_source_id = surfaces::DataSourceId::new("proxmox.hosts.mappings")
         .expect("literal data source id is valid");
 
-    surfaces::RegisteredSurface {
+    PluginSurface {
         descriptor: surfaces::SurfaceDescriptor::builder()
             .surface_id(
                 surfaces::SurfaceId::new("proxmox.hosts").expect("literal surface id is valid"),
@@ -223,141 +180,162 @@ fn proxmox_hosts_surface() -> surfaces::RegisteredSurface {
             ))
             .build(),
         interactions: vec![
-            {
-                let mut i = surfaces::InteractionDescriptor::new(
-                    surfaces::InteractionId::new("list").expect("literal"),
-                    surfaces::InteractionKind::DataLoad,
-                    "List Hosts",
-                    surfaces::InteractionTransport::ControllerLocal,
-                );
-                i.required_permission = Some(Permission::UpdateHosts.to_string());
-                i.result_schema = Some(surfaces::SchemaContract::Any);
-                i
-            },
-            {
-                let mut i = surfaces::InteractionDescriptor::new(
-                    surfaces::InteractionId::new("discover").expect("literal"),
-                    surfaces::InteractionKind::MutationAction,
-                    "Discover",
-                    surfaces::InteractionTransport::ControllerLocal,
-                );
-                i.required_permission = Some(Permission::UpdateHosts.to_string());
-                i.input_schema = Some(surfaces::SchemaContract::Object);
-                i.result_schema = Some(surfaces::SchemaContract::Any);
-                i.timeout_seconds = Some(120);
-                i.icon = Some("radar".to_string());
-                i
-            },
-            {
-                let mut i = surfaces::InteractionDescriptor::new(
-                    surfaces::InteractionId::new("test-connection").expect("literal"),
-                    surfaces::InteractionKind::MutationAction,
-                    "Test Connection",
-                    surfaces::InteractionTransport::ControllerLocal,
-                );
-                i.required_permission = Some(Permission::UpdateHosts.to_string());
-                i.input_schema = Some(surfaces::SchemaContract::Object);
-                i.result_schema = Some(surfaces::SchemaContract::Any);
-                i.timeout_seconds = Some(30);
-                i.icon = Some("plug-zap".to_string());
-                i
-            },
-            {
-                let mut i = surfaces::InteractionDescriptor::new(
-                    surfaces::InteractionId::new("approve-match").expect("literal"),
-                    surfaces::InteractionKind::MutationAction,
-                    "Approve Match",
-                    surfaces::InteractionTransport::ControllerLocal,
-                );
-                i.required_permission = Some(Permission::UpdateHosts.to_string());
-                i.input_schema = Some(surfaces::SchemaContract::Object);
-                i.result_schema = Some(surfaces::SchemaContract::Any);
-                i.icon = Some("check".to_string());
-                i
-            },
-            {
-                let mut i = surfaces::InteractionDescriptor::new(
-                    surfaces::InteractionId::new("match").expect("literal"),
-                    surfaces::InteractionKind::FormSubmit,
-                    "Manual Match",
-                    surfaces::InteractionTransport::ControllerLocal,
-                );
-                i.required_permission = Some(Permission::UpdateHosts.to_string());
-                i.provider_invocable = true;
-                i.input_schema = Some(surfaces::SchemaContract::Object);
-                i.result_schema = Some(surfaces::SchemaContract::Any);
-                i.form_ui = Some(surfaces::FormUiDescriptor {
-                    fields: vec![
-                        surfaces::FormFieldDescriptor {
-                            key: "mapping_id".to_string(),
-                            label: "Mapping ID".to_string(),
-                            field_type: "hidden".to_string(),
-                            required: true,
-                            placeholder: None,
-                            help_text: None,
-                            default_value: None,
-                            options: vec![],
-                            select_source: None,
-                            sensitive: false,
-                            list: false,
-                            visible_when: None,
-                        },
-                        surfaces::FormFieldDescriptor {
-                            key: "host_id".to_string(),
-                            label: "Host".to_string(),
-                            field_type: "select".to_string(),
-                            required: true,
-                            placeholder: Some("Select a host".to_string()),
-                            help_text: None,
-                            default_value: None,
-                            options: vec![],
-                            select_source: Some(surfaces::FormSelectSource::RestApi {
-                                path: "/api/v1/hosts".to_string(),
-                                value_field: "id".to_string(),
-                                label_field: "friendly_name".to_string(),
-                            }),
-                            sensitive: false,
-                            list: false,
-                            visible_when: None,
-                        },
-                    ],
-                    pre_load_interaction_id: None,
-                });
-                i.icon = Some("link".to_string());
-                i
-            },
-            {
-                let mut i = surfaces::InteractionDescriptor::new(
-                    surfaces::InteractionId::new("unmatch").expect("literal"),
-                    surfaces::InteractionKind::MutationAction,
-                    "Remove Match",
-                    surfaces::InteractionTransport::ControllerLocal,
-                );
-                i.required_permission = Some(Permission::UpdateHosts.to_string());
-                i.input_schema = Some(surfaces::SchemaContract::Object);
-                i.result_schema = Some(surfaces::SchemaContract::Any);
-                i.confirmation = Some(surfaces::InteractionConfirmation {
-                    title: "Remove Match".to_string(),
-                    message: "Remove the host mapping for".to_string(),
-                    confirm_label: Some("Remove".to_string()),
-                    cancel_label: None,
-                    severity: surfaces::ConfirmationSeverity::Danger,
-                });
-                i.icon = Some("unlink".to_string());
-                i
-            },
-            {
-                let mut i = surfaces::InteractionDescriptor::new(
-                    surfaces::InteractionId::new("unmatched-guests").expect("literal"),
-                    surfaces::InteractionKind::DataLoad,
-                    "Unmatched Guests",
-                    surfaces::InteractionTransport::ControllerLocal,
-                );
-                i.required_permission = Some(Permission::UpdateHosts.to_string());
-                i.result_schema = Some(surfaces::SchemaContract::Any);
-                i.provider_invocable = true;
-                i
-            },
+            RegisteredInteraction::new(
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("list").expect("literal"),
+                        surfaces::InteractionKind::DataLoad,
+                        "List Hosts",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.required_permission = Some(Permission::UpdateHosts.to_string());
+                    i.result_schema = Some(surfaces::SchemaContract::Any);
+                    i
+                },
+                InteractionDelivery::PluginHandled(crate::surfaces::dispatch_list_host_mappings),
+            ),
+            RegisteredInteraction::new(
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("discover").expect("literal"),
+                        surfaces::InteractionKind::MutationAction,
+                        "Discover",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.required_permission = Some(Permission::UpdateHosts.to_string());
+                    i.input_schema = Some(surfaces::SchemaContract::Object);
+                    i.result_schema = Some(surfaces::SchemaContract::Any);
+                    i.timeout_seconds = Some(120);
+                    i.icon = Some("radar".to_string());
+                    i
+                },
+                InteractionDelivery::PluginHandled(crate::surfaces::dispatch_discover_hosts),
+            ),
+            RegisteredInteraction::new(
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("test-connection").expect("literal"),
+                        surfaces::InteractionKind::MutationAction,
+                        "Test Connection",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.required_permission = Some(Permission::UpdateHosts.to_string());
+                    i.input_schema = Some(surfaces::SchemaContract::Object);
+                    i.result_schema = Some(surfaces::SchemaContract::Any);
+                    i.timeout_seconds = Some(30);
+                    i.icon = Some("plug-zap".to_string());
+                    i
+                },
+                InteractionDelivery::PluginHandled(crate::surfaces::dispatch_test_connection),
+            ),
+            RegisteredInteraction::new(
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("approve-match").expect("literal"),
+                        surfaces::InteractionKind::MutationAction,
+                        "Approve Match",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.required_permission = Some(Permission::UpdateHosts.to_string());
+                    i.input_schema = Some(surfaces::SchemaContract::Object);
+                    i.result_schema = Some(surfaces::SchemaContract::Any);
+                    i.icon = Some("check".to_string());
+                    i
+                },
+                InteractionDelivery::PluginHandled(crate::surfaces::dispatch_approve_match),
+            ),
+            RegisteredInteraction::new(
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("match").expect("literal"),
+                        surfaces::InteractionKind::FormSubmit,
+                        "Manual Match",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.required_permission = Some(Permission::UpdateHosts.to_string());
+                    i.provider_invocable = true;
+                    i.input_schema = Some(surfaces::SchemaContract::Object);
+                    i.result_schema = Some(surfaces::SchemaContract::Any);
+                    i.form_ui = Some(surfaces::FormUiDescriptor {
+                        fields: vec![
+                            surfaces::FormFieldDescriptor {
+                                key: "mapping_id".to_string(),
+                                label: "Mapping ID".to_string(),
+                                field_type: "hidden".to_string(),
+                                required: true,
+                                placeholder: None,
+                                help_text: None,
+                                default_value: None,
+                                options: vec![],
+                                select_source: None,
+                                sensitive: false,
+                                list: false,
+                                visible_when: None,
+                            },
+                            surfaces::FormFieldDescriptor {
+                                key: "host_id".to_string(),
+                                label: "Host".to_string(),
+                                field_type: "select".to_string(),
+                                required: true,
+                                placeholder: Some("Select a host".to_string()),
+                                help_text: None,
+                                default_value: None,
+                                options: vec![],
+                                select_source: Some(surfaces::FormSelectSource::RestApi {
+                                    path: "/api/v1/hosts".to_string(),
+                                    value_field: "id".to_string(),
+                                    label_field: "friendly_name".to_string(),
+                                }),
+                                sensitive: false,
+                                list: false,
+                                visible_when: None,
+                            },
+                        ],
+                        pre_load_interaction_id: None,
+                    });
+                    i.icon = Some("link".to_string());
+                    i
+                },
+                InteractionDelivery::PluginHandled(crate::surfaces::dispatch_match_host),
+            ),
+            RegisteredInteraction::new(
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("unmatch").expect("literal"),
+                        surfaces::InteractionKind::MutationAction,
+                        "Remove Match",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.required_permission = Some(Permission::UpdateHosts.to_string());
+                    i.input_schema = Some(surfaces::SchemaContract::Object);
+                    i.result_schema = Some(surfaces::SchemaContract::Any);
+                    i.confirmation = Some(surfaces::InteractionConfirmation {
+                        title: "Remove Match".to_string(),
+                        message: "Remove the host mapping for".to_string(),
+                        confirm_label: Some("Remove".to_string()),
+                        cancel_label: None,
+                        severity: surfaces::ConfirmationSeverity::Danger,
+                    });
+                    i.icon = Some("unlink".to_string());
+                    i
+                },
+                InteractionDelivery::PluginHandled(crate::surfaces::dispatch_unmatch_host),
+            ),
+            RegisteredInteraction::new(
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("unmatched-guests").expect("literal"),
+                        surfaces::InteractionKind::DataLoad,
+                        "Unmatched Guests",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.required_permission = Some(Permission::UpdateHosts.to_string());
+                    i.result_schema = Some(surfaces::SchemaContract::Any);
+                    i.provider_invocable = true;
+                    i
+                },
+                InteractionDelivery::PluginHandled(crate::surfaces::dispatch_unmatched_guests),
+            ),
         ],
         data_sources: vec![surfaces::DataSourceDescriptor {
             data_source_id,
@@ -382,10 +360,10 @@ fn proxmox_hosts_surface() -> surfaces::RegisteredSurface {
     }
 }
 
-fn proxmox_host_info_surface() -> surfaces::RegisteredSurface {
+fn proxmox_host_info_surface() -> PluginSurface {
     let data_source_id = surfaces::DataSourceId::new("proxmox.host-info.primary")
         .expect("literal data source id is valid");
-    surfaces::RegisteredSurface {
+    PluginSurface {
         descriptor: surfaces::SurfaceDescriptor::builder()
             .surface_id(
                 surfaces::SurfaceId::new("proxmox.host-info").expect("literal surface id is valid"),
@@ -407,18 +385,22 @@ fn proxmox_host_info_surface() -> surfaces::RegisteredSurface {
                 data_source_id: data_source_id.clone(),
             })
             .build(),
-        interactions: vec![{
-            let mut i = surfaces::InteractionDescriptor::new(
-                surfaces::InteractionId::new("get-info").expect("literal interaction id is valid"),
-                surfaces::InteractionKind::DataLoad,
-                "Get Info",
-                surfaces::InteractionTransport::ControllerLocal,
-            );
-            i.required_permission = Some(Permission::UpdateHosts.to_string());
-            i.result_schema = Some(surfaces::SchemaContract::Object);
-            i.timeout_seconds = Some(10);
-            i
-        }],
+        interactions: vec![RegisteredInteraction::new(
+            {
+                let mut i = surfaces::InteractionDescriptor::new(
+                    surfaces::InteractionId::new("get-info")
+                        .expect("literal interaction id is valid"),
+                    surfaces::InteractionKind::DataLoad,
+                    "Get Info",
+                    surfaces::InteractionTransport::ControllerLocal,
+                );
+                i.required_permission = Some(Permission::UpdateHosts.to_string());
+                i.result_schema = Some(surfaces::SchemaContract::Object);
+                i.timeout_seconds = Some(10);
+                i
+            },
+            InteractionDelivery::PluginHandled(crate::surfaces::dispatch_get_host_info),
+        )],
         data_sources: vec![surfaces::DataSourceDescriptor {
             data_source_id,
             kind: surfaces::DataSourceKind::ProviderQuery {
@@ -434,12 +416,12 @@ fn proxmox_host_info_surface() -> surfaces::RegisteredSurface {
     }
 }
 
-fn proxmox_settings_update_protection_surface() -> surfaces::RegisteredSurface {
+fn proxmox_settings_update_protection_surface() -> PluginSurface {
     let callout = "Backup targets in this form come from Proxmox discovery cache. \
         If the dropdown is empty, run Discover on the Proxmox VE Hosts page first."
         .to_string();
 
-    surfaces::RegisteredSurface {
+    PluginSurface {
         descriptor: surfaces::SurfaceDescriptor::builder()
             .surface_id(
                 surfaces::SurfaceId::new("proxmox.settings.update-hooks")
@@ -476,44 +458,55 @@ fn proxmox_settings_update_protection_surface() -> surfaces::RegisteredSurface {
             ))
             .build(),
         interactions: vec![
-            {
-                let mut i = surfaces::InteractionDescriptor::new(
-                    surfaces::InteractionId::new("preload-global-defaults")
-                        .expect("literal interaction id is valid"),
-                    surfaces::InteractionKind::DataLoad,
-                    "Preload Global Defaults",
-                    surfaces::InteractionTransport::ControllerLocal,
-                );
-                i.required_permission = Some(Permission::ManageGlobalSettings.to_string());
-                i.input_schema = Some(surfaces::SchemaContract::Object);
-                i.result_schema = Some(surfaces::SchemaContract::Object);
-                i
-            },
-            {
-                let mut i = surfaces::InteractionDescriptor::new(
-                    surfaces::InteractionId::new("load-backup-target-options")
-                        .expect("literal interaction id is valid"),
-                    surfaces::InteractionKind::DataLoad,
-                    "Load Backup Target Options",
-                    surfaces::InteractionTransport::ControllerLocal,
-                );
-                i.required_permission = Some(Permission::ManageGlobalSettings.to_string());
-                i.input_schema = Some(surfaces::SchemaContract::Object);
-                i.result_schema = Some(surfaces::SchemaContract::Object);
-                i
-            },
-            {
-                let mut i = surfaces::InteractionDescriptor::new(
-                    surfaces::InteractionId::new("save-global-defaults")
-                        .expect("literal interaction id is valid"),
-                    surfaces::InteractionKind::MutationAction,
-                    "Save Global Defaults",
-                    surfaces::InteractionTransport::ControllerLocal,
-                );
-                i.required_permission = Some(Permission::ManageGlobalSettings.to_string());
-                i.input_schema = Some(surfaces::SchemaContract::Object);
-                i.result_schema = Some(surfaces::SchemaContract::Any);
-                i.form_ui = Some(surfaces::FormUiDescriptor {
+            RegisteredInteraction::new(
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("preload-global-defaults")
+                            .expect("literal interaction id is valid"),
+                        surfaces::InteractionKind::DataLoad,
+                        "Preload Global Defaults",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.required_permission = Some(Permission::ManageGlobalSettings.to_string());
+                    i.input_schema = Some(surfaces::SchemaContract::Object);
+                    i.result_schema = Some(surfaces::SchemaContract::Object);
+                    i
+                },
+                InteractionDelivery::PluginHandled(
+                    crate::surfaces::dispatch_preload_global_defaults,
+                ),
+            ),
+            RegisteredInteraction::new(
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("load-backup-target-options")
+                            .expect("literal interaction id is valid"),
+                        surfaces::InteractionKind::DataLoad,
+                        "Load Backup Target Options",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.required_permission = Some(Permission::ManageGlobalSettings.to_string());
+                    i.input_schema = Some(surfaces::SchemaContract::Object);
+                    i.result_schema = Some(surfaces::SchemaContract::Object);
+                    i
+                },
+                InteractionDelivery::PluginHandled(
+                    crate::surfaces::dispatch_load_backup_target_options,
+                ),
+            ),
+            RegisteredInteraction::new(
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("save-global-defaults")
+                            .expect("literal interaction id is valid"),
+                        surfaces::InteractionKind::MutationAction,
+                        "Save Global Defaults",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.required_permission = Some(Permission::ManageGlobalSettings.to_string());
+                    i.input_schema = Some(surfaces::SchemaContract::Object);
+                    i.result_schema = Some(surfaces::SchemaContract::Any);
+                    i.form_ui = Some(surfaces::FormUiDescriptor {
                     fields: vec![
                         surfaces::FormFieldDescriptor {
                             key: "plugin_config_id".to_string(),
@@ -630,15 +623,17 @@ fn proxmox_settings_update_protection_surface() -> surfaces::RegisteredSurface {
                             .expect("literal interaction id is valid"),
                     ),
                 });
-                i
-            },
+                    i
+                },
+                InteractionDelivery::PluginHandled(crate::surfaces::dispatch_save_global_defaults),
+            ),
         ],
         data_sources: vec![],
     }
 }
 
-fn proxmox_settings_resource_scaling_surface() -> surfaces::RegisteredSurface {
-    surfaces::RegisteredSurface {
+fn proxmox_settings_resource_scaling_surface() -> PluginSurface {
+    PluginSurface {
         descriptor: surfaces::SurfaceDescriptor::builder()
             .surface_id(
                 surfaces::SurfaceId::new("proxmox.settings.resource-scaling")
@@ -668,32 +663,38 @@ fn proxmox_settings_resource_scaling_surface() -> surfaces::RegisteredSurface {
             ))
             .build(),
         interactions: vec![
-            {
-                let mut i = surfaces::InteractionDescriptor::new(
-                    surfaces::InteractionId::new("preload-scaling-global-defaults")
-                        .expect("literal interaction id is valid"),
-                    surfaces::InteractionKind::DataLoad,
-                    "Preload Scaling Global Defaults",
-                    surfaces::InteractionTransport::ControllerLocal,
-                );
-                i.required_permission = Some(Permission::ManageGlobalSettings.to_string());
-                i.input_schema = Some(surfaces::SchemaContract::Object);
-                i.result_schema = Some(surfaces::SchemaContract::Object);
-                i
-            },
-            {
-                let mut i = surfaces::InteractionDescriptor::new(
-                    surfaces::InteractionId::new("save-scaling-global-defaults")
-                        .expect("literal interaction id is valid"),
-                    surfaces::InteractionKind::MutationAction,
-                    "Save Scaling Global Defaults",
-                    surfaces::InteractionTransport::ControllerLocal,
-                );
-                i.required_permission = Some(Permission::ManageGlobalSettings.to_string());
-                i.input_schema = Some(surfaces::SchemaContract::Object);
-                i.result_schema = Some(surfaces::SchemaContract::Any);
-                i.form_ui = Some(surfaces::FormUiDescriptor {
-                    fields: vec![
+            RegisteredInteraction::new(
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("preload-scaling-global-defaults")
+                            .expect("literal interaction id is valid"),
+                        surfaces::InteractionKind::DataLoad,
+                        "Preload Scaling Global Defaults",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.required_permission = Some(Permission::ManageGlobalSettings.to_string());
+                    i.input_schema = Some(surfaces::SchemaContract::Object);
+                    i.result_schema = Some(surfaces::SchemaContract::Object);
+                    i
+                },
+                InteractionDelivery::PluginHandled(
+                    crate::surfaces::dispatch_preload_scaling_global_defaults,
+                ),
+            ),
+            RegisteredInteraction::new(
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("save-scaling-global-defaults")
+                            .expect("literal interaction id is valid"),
+                        surfaces::InteractionKind::MutationAction,
+                        "Save Scaling Global Defaults",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.required_permission = Some(Permission::ManageGlobalSettings.to_string());
+                    i.input_schema = Some(surfaces::SchemaContract::Object);
+                    i.result_schema = Some(surfaces::SchemaContract::Any);
+                    i.form_ui = Some(surfaces::FormUiDescriptor {
+                        fields: vec![
                         surfaces::FormFieldDescriptor {
                             key: "plugin_config_id".to_string(),
                             label: "Proxmox Configuration".to_string(),
@@ -820,24 +821,28 @@ fn proxmox_settings_resource_scaling_surface() -> surfaces::RegisteredSurface {
                             }),
                         },
                     ],
-                    pre_load_interaction_id: Some(
-                        surfaces::InteractionId::new("preload-scaling-global-defaults")
-                            .expect("literal interaction id is valid"),
-                    ),
-                });
-                i
-            },
+                        pre_load_interaction_id: Some(
+                            surfaces::InteractionId::new("preload-scaling-global-defaults")
+                                .expect("literal interaction id is valid"),
+                        ),
+                    });
+                    i
+                },
+                InteractionDelivery::PluginHandled(
+                    crate::surfaces::dispatch_save_scaling_global_defaults,
+                ),
+            ),
         ],
         data_sources: vec![],
     }
 }
 
-fn proxmox_software_item_update_protection_surface() -> surfaces::RegisteredSurface {
+fn proxmox_software_item_update_protection_surface() -> PluginSurface {
     let callout = "Per-item override values are stored in Proxmox policy tables. \
         Backup target options come from sync cache and stay empty until discover/sync populates them."
         .to_string();
 
-    surfaces::RegisteredSurface {
+    PluginSurface {
         descriptor: surfaces::SurfaceDescriptor::builder()
             .surface_id(
                 surfaces::SurfaceId::new("proxmox.software-item.update-hooks")
@@ -874,44 +879,55 @@ fn proxmox_software_item_update_protection_surface() -> surfaces::RegisteredSurf
             ))
             .build(),
         interactions: vec![
-            {
-                let mut i = surfaces::InteractionDescriptor::new(
-                    surfaces::InteractionId::new("preload-item-overrides")
-                        .expect("literal interaction id is valid"),
-                    surfaces::InteractionKind::DataLoad,
-                    "Preload Per-item Overrides",
-                    surfaces::InteractionTransport::ControllerLocal,
-                );
-                i.required_permission = Some(Permission::ViewSoftware.to_string());
-                i.input_schema = Some(surfaces::SchemaContract::Object);
-                i.result_schema = Some(surfaces::SchemaContract::Object);
-                i
-            },
-            {
-                let mut i = surfaces::InteractionDescriptor::new(
-                    surfaces::InteractionId::new("load-backup-target-options")
-                        .expect("literal interaction id is valid"),
-                    surfaces::InteractionKind::DataLoad,
-                    "Load Backup Target Options",
-                    surfaces::InteractionTransport::ControllerLocal,
-                );
-                i.required_permission = Some(Permission::ViewSoftware.to_string());
-                i.input_schema = Some(surfaces::SchemaContract::Object);
-                i.result_schema = Some(surfaces::SchemaContract::Object);
-                i
-            },
-            {
-                let mut i = surfaces::InteractionDescriptor::new(
-                    surfaces::InteractionId::new("save-item-overrides")
-                        .expect("literal interaction id is valid"),
-                    surfaces::InteractionKind::MutationAction,
-                    "Save Per-item Overrides",
-                    surfaces::InteractionTransport::ControllerLocal,
-                );
-                i.required_permission = Some(Permission::UpdateSoftware.to_string());
-                i.input_schema = Some(surfaces::SchemaContract::Object);
-                i.result_schema = Some(surfaces::SchemaContract::Any);
-                i.form_ui = Some(surfaces::FormUiDescriptor {
+            RegisteredInteraction::new(
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("preload-item-overrides")
+                            .expect("literal interaction id is valid"),
+                        surfaces::InteractionKind::DataLoad,
+                        "Preload Per-item Overrides",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.required_permission = Some(Permission::ViewSoftware.to_string());
+                    i.input_schema = Some(surfaces::SchemaContract::Object);
+                    i.result_schema = Some(surfaces::SchemaContract::Object);
+                    i
+                },
+                InteractionDelivery::PluginHandled(
+                    crate::surfaces::dispatch_preload_item_overrides,
+                ),
+            ),
+            RegisteredInteraction::new(
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("load-backup-target-options")
+                            .expect("literal interaction id is valid"),
+                        surfaces::InteractionKind::DataLoad,
+                        "Load Backup Target Options",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.required_permission = Some(Permission::ViewSoftware.to_string());
+                    i.input_schema = Some(surfaces::SchemaContract::Object);
+                    i.result_schema = Some(surfaces::SchemaContract::Object);
+                    i
+                },
+                InteractionDelivery::PluginHandled(
+                    crate::surfaces::dispatch_load_backup_target_options,
+                ),
+            ),
+            RegisteredInteraction::new(
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("save-item-overrides")
+                            .expect("literal interaction id is valid"),
+                        surfaces::InteractionKind::MutationAction,
+                        "Save Per-item Overrides",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.required_permission = Some(Permission::UpdateSoftware.to_string());
+                    i.input_schema = Some(surfaces::SchemaContract::Object);
+                    i.result_schema = Some(surfaces::SchemaContract::Any);
+                    i.form_ui = Some(surfaces::FormUiDescriptor {
                     fields: vec![
                         surfaces::FormFieldDescriptor {
                             key: "plugin_config_id".to_string(),
@@ -1036,15 +1052,17 @@ fn proxmox_software_item_update_protection_surface() -> surfaces::RegisteredSurf
                             .expect("literal interaction id is valid"),
                     ),
                 });
-                i
-            },
+                    i
+                },
+                InteractionDelivery::PluginHandled(crate::surfaces::dispatch_save_item_overrides),
+            ),
         ],
         data_sources: vec![],
     }
 }
 
-fn proxmox_software_item_resource_scaling_surface() -> surfaces::RegisteredSurface {
-    surfaces::RegisteredSurface {
+fn proxmox_software_item_resource_scaling_surface() -> PluginSurface {
+    PluginSurface {
         descriptor: surfaces::SurfaceDescriptor::builder()
             .surface_id(
                 surfaces::SurfaceId::new("proxmox.software-item.resource-scaling")
@@ -1074,32 +1092,38 @@ fn proxmox_software_item_resource_scaling_surface() -> surfaces::RegisteredSurfa
             ))
             .build(),
         interactions: vec![
-            {
-                let mut i = surfaces::InteractionDescriptor::new(
-                    surfaces::InteractionId::new("preload-scaling-item-overrides")
-                        .expect("literal interaction id is valid"),
-                    surfaces::InteractionKind::DataLoad,
-                    "Preload Per-item Scaling Overrides",
-                    surfaces::InteractionTransport::ControllerLocal,
-                );
-                i.required_permission = Some(Permission::ViewSoftware.to_string());
-                i.input_schema = Some(surfaces::SchemaContract::Object);
-                i.result_schema = Some(surfaces::SchemaContract::Object);
-                i
-            },
-            {
-                let mut i = surfaces::InteractionDescriptor::new(
-                    surfaces::InteractionId::new("save-scaling-item-overrides")
-                        .expect("literal interaction id is valid"),
-                    surfaces::InteractionKind::MutationAction,
-                    "Save Per-item Scaling Overrides",
-                    surfaces::InteractionTransport::ControllerLocal,
-                );
-                i.required_permission = Some(Permission::UpdateSoftware.to_string());
-                i.input_schema = Some(surfaces::SchemaContract::Object);
-                i.result_schema = Some(surfaces::SchemaContract::Any);
-                i.form_ui = Some(surfaces::FormUiDescriptor {
-                    fields: vec![
+            RegisteredInteraction::new(
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("preload-scaling-item-overrides")
+                            .expect("literal interaction id is valid"),
+                        surfaces::InteractionKind::DataLoad,
+                        "Preload Per-item Scaling Overrides",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.required_permission = Some(Permission::ViewSoftware.to_string());
+                    i.input_schema = Some(surfaces::SchemaContract::Object);
+                    i.result_schema = Some(surfaces::SchemaContract::Object);
+                    i
+                },
+                InteractionDelivery::PluginHandled(
+                    crate::surfaces::dispatch_preload_scaling_item_overrides,
+                ),
+            ),
+            RegisteredInteraction::new(
+                {
+                    let mut i = surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new("save-scaling-item-overrides")
+                            .expect("literal interaction id is valid"),
+                        surfaces::InteractionKind::MutationAction,
+                        "Save Per-item Scaling Overrides",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    );
+                    i.required_permission = Some(Permission::UpdateSoftware.to_string());
+                    i.input_schema = Some(surfaces::SchemaContract::Object);
+                    i.result_schema = Some(surfaces::SchemaContract::Any);
+                    i.form_ui = Some(surfaces::FormUiDescriptor {
+                        fields: vec![
                         surfaces::FormFieldDescriptor {
                             key: "software_item_id".to_string(),
                             label: "Software Item".to_string(),
@@ -1244,13 +1268,17 @@ fn proxmox_software_item_resource_scaling_surface() -> surfaces::RegisteredSurfa
                             }),
                         },
                     ],
-                    pre_load_interaction_id: Some(
-                        surfaces::InteractionId::new("preload-scaling-item-overrides")
-                            .expect("literal interaction id is valid"),
-                    ),
-                });
-                i
-            },
+                        pre_load_interaction_id: Some(
+                            surfaces::InteractionId::new("preload-scaling-item-overrides")
+                                .expect("literal interaction id is valid"),
+                        ),
+                    });
+                    i
+                },
+                InteractionDelivery::PluginHandled(
+                    crate::surfaces::dispatch_save_scaling_item_overrides,
+                ),
+            ),
         ],
         data_sources: vec![],
     }
@@ -1357,13 +1385,9 @@ declare_plugin!(ProxmoxPlugin, ProxmoxConfig, "infrastructure_proxmox", {
             uptrakit_shared_types::PluginCapability::GuestExec,
         ],
     },
-    owned_surface_ids: &["proxmox."],
-    surface_actions: {
-        actions: ProxmoxPlugin::surface_actions_static,
-        handle_action: crate::surfaces::handle_surface_action,
-    },
-    surfaces: {
-        registrations: descriptor_surface_registrations,
+    unified_surfaces: {
+        provider_id: "plugin.infrastructure_proxmox",
+        registrations: descriptor_plugin_surfaces,
     },
     migrations: __proxmox_migrations,
     agent_migrations: __proxmox_agent_migrations,
@@ -1473,19 +1497,20 @@ mod tests {
     // ── descriptor surfaces ─────────────────────────────────────────────
 
     #[test]
-    fn descriptor_has_surfaces() {
-        assert!(DESCRIPTOR.surface_actions.is_some());
-        let surface_actions = DESCRIPTOR.surface_actions.unwrap();
-        assert!(!surface_actions.owned_surface_ids().is_empty());
-        assert_eq!(surface_actions.owned_surface_ids()[0], "proxmox.");
-    }
-
-    #[test]
     fn descriptor_has_plugin_surface_registrations() {
-        let registrations = (DESCRIPTOR
-            .surfaces
-            .expect("surfaces are registered")
-            .registrations)();
+        assert!(
+            DESCRIPTOR.unified_surfaces.is_some(),
+            "proxmox should declare unified surface registrations on the descriptor"
+        );
+        // Content assertions below exercise the unguarded builder directly
+        // (not `DESCRIPTOR.unified_surfaces.registrations`, which is gated
+        // empty under `agent-infra` — see
+        // `unified_registrations_pair_every_interaction_with_plugin_handled_delivery`
+        // for that behavior).
+        let registrations: Vec<_> = proxmox_plugin_surfaces()
+            .iter()
+            .map(|r| r.to_wire("plugin.infrastructure_proxmox"))
+            .collect();
         assert!(
             !registrations.is_empty(),
             "proxmox should contribute at least one shared-surface registration"
@@ -1576,27 +1601,11 @@ mod tests {
     }
 
     #[test]
-    fn controller_surfaces_are_gated_out_in_agent_builds() {
-        let registrations = ProxmoxPlugin::surface_registrations_static();
-        if cfg!(feature = "agent-infra") {
-            assert!(
-                registrations.is_empty(),
-                "agent-infra builds must not expose controller-local shared surfaces"
-            );
-        } else {
-            assert!(
-                !registrations.is_empty(),
-                "controller builds should keep shared-surface registrations"
-            );
-        }
-    }
-
-    #[test]
     fn proxmox_host_info_surface_uses_explicit_data_source_contract() {
-        let registrations = (DESCRIPTOR
-            .surfaces
-            .expect("surfaces are registered")
-            .registrations)();
+        let registrations: Vec<_> = proxmox_plugin_surfaces()
+            .iter()
+            .map(|r| r.to_wire("plugin.infrastructure_proxmox"))
+            .collect();
         let host_info = registrations
             .iter()
             .flat_map(|registration| registration.surfaces.iter())
@@ -1625,7 +1634,10 @@ mod tests {
 
     #[test]
     fn proxmox_hosts_surface_has_full_table_layout() {
-        let registrations = proxmox_surface_registrations();
+        let registrations: Vec<_> = proxmox_plugin_surfaces()
+            .iter()
+            .map(|r| r.to_wire("plugin.infrastructure_proxmox"))
+            .collect();
         let reg = &registrations[0];
         let hosts = reg
             .surfaces
@@ -1716,7 +1728,10 @@ mod tests {
 
     #[test]
     fn proxmox_hosts_registers_unmatched_guests_and_provider_invocable_match() {
-        let registrations = proxmox_surface_registrations();
+        let registrations: Vec<_> = proxmox_plugin_surfaces()
+            .iter()
+            .map(|r| r.to_wire("plugin.infrastructure_proxmox"))
+            .collect();
         let reg = &registrations[0];
         let hosts = reg
             .surfaces
@@ -1751,10 +1766,10 @@ mod tests {
 
     #[test]
     fn policy_surfaces_keep_preload_and_backup_options_contract() {
-        let registrations = (DESCRIPTOR
-            .surfaces
-            .expect("surfaces are registered")
-            .registrations)();
+        let registrations: Vec<_> = proxmox_plugin_surfaces()
+            .iter()
+            .map(|r| r.to_wire("plugin.infrastructure_proxmox"))
+            .collect();
         let settings_policy = registrations
             .iter()
             .flat_map(|registration| registration.surfaces.iter())
@@ -1874,7 +1889,10 @@ mod tests {
 
     #[test]
     fn proxmox_hosts_surface_interactions_carry_icons() {
-        let registrations = proxmox_surface_registrations();
+        let registrations: Vec<_> = proxmox_plugin_surfaces()
+            .iter()
+            .map(|r| r.to_wire("plugin.infrastructure_proxmox"))
+            .collect();
         let proxmox = registrations
             .first()
             .expect("plugin returns at least one registration");
@@ -1897,6 +1915,158 @@ mod tests {
         assert_eq!(by_id["match"].icon.as_deref(), Some("link"));
         assert_eq!(by_id["unmatch"].icon.as_deref(), Some("unlink"));
         assert!(by_id["list"].icon.is_none());
+    }
+
+    #[test]
+    fn unified_registrations_pair_every_interaction_with_plugin_handled_delivery() {
+        use uptrakit_plugin_infrastructure_core::InteractionDeliveryKind;
+
+        if cfg!(feature = "agent-infra") {
+            // `descriptor_plugin_surfaces` is the gated wrapper actually
+            // wired into `declare_plugin!`; `proxmox_plugin_surfaces` itself
+            // is the unguarded raw builder used by the content assertions
+            // below and by other structural tests that must see real data
+            // regardless of feature flags.
+            assert!(descriptor_plugin_surfaces().is_empty());
+            return;
+        }
+
+        let registrations = proxmox_plugin_surfaces();
+        let mut seen: Vec<(String, String, InteractionDeliveryKind)> = Vec::new();
+        for registration in &registrations {
+            for surface in &registration.surfaces {
+                for interaction in &surface.interactions {
+                    assert_eq!(
+                        interaction.descriptor().transport,
+                        surfaces::InteractionTransport::ControllerLocal
+                    );
+                    seen.push((
+                        surface.descriptor.surface_id.as_str().to_string(),
+                        interaction.descriptor().interaction_id.as_str().to_string(),
+                        interaction.delivery().kind(),
+                    ));
+                }
+            }
+        }
+
+        // Expected (surface, interaction, delivery) table (plan
+        // 2026-07-16-interaction-unification-c-cutover-guard-docs.md, C3); the
+        // table's own length is the count source of truth below — no bare
+        // literal count is asserted separately.
+        let expected: Vec<(&str, &str, InteractionDeliveryKind)> = vec![
+            (
+                "proxmox.hosts",
+                "list",
+                InteractionDeliveryKind::PluginHandled,
+            ),
+            (
+                "proxmox.hosts",
+                "discover",
+                InteractionDeliveryKind::PluginHandled,
+            ),
+            (
+                "proxmox.hosts",
+                "test-connection",
+                InteractionDeliveryKind::PluginHandled,
+            ),
+            (
+                "proxmox.hosts",
+                "match",
+                InteractionDeliveryKind::PluginHandled,
+            ),
+            (
+                "proxmox.hosts",
+                "approve-match",
+                InteractionDeliveryKind::PluginHandled,
+            ),
+            (
+                "proxmox.hosts",
+                "unmatch",
+                InteractionDeliveryKind::PluginHandled,
+            ),
+            (
+                "proxmox.hosts",
+                "unmatched-guests",
+                InteractionDeliveryKind::PluginHandled,
+            ),
+            (
+                "proxmox.host-info",
+                "get-info",
+                InteractionDeliveryKind::PluginHandled,
+            ),
+            (
+                "proxmox.settings.update-hooks",
+                "preload-global-defaults",
+                InteractionDeliveryKind::PluginHandled,
+            ),
+            (
+                "proxmox.settings.update-hooks",
+                "save-global-defaults",
+                InteractionDeliveryKind::PluginHandled,
+            ),
+            (
+                "proxmox.settings.update-hooks",
+                "load-backup-target-options",
+                InteractionDeliveryKind::PluginHandled,
+            ),
+            (
+                "proxmox.software-item.update-hooks",
+                "load-backup-target-options",
+                InteractionDeliveryKind::PluginHandled,
+            ),
+            (
+                "proxmox.software-item.update-hooks",
+                "preload-item-overrides",
+                InteractionDeliveryKind::PluginHandled,
+            ),
+            (
+                "proxmox.software-item.update-hooks",
+                "save-item-overrides",
+                InteractionDeliveryKind::PluginHandled,
+            ),
+            (
+                "proxmox.settings.resource-scaling",
+                "preload-scaling-global-defaults",
+                InteractionDeliveryKind::PluginHandled,
+            ),
+            (
+                "proxmox.settings.resource-scaling",
+                "save-scaling-global-defaults",
+                InteractionDeliveryKind::PluginHandled,
+            ),
+            (
+                "proxmox.software-item.resource-scaling",
+                "preload-scaling-item-overrides",
+                InteractionDeliveryKind::PluginHandled,
+            ),
+            (
+                "proxmox.software-item.resource-scaling",
+                "save-scaling-item-overrides",
+                InteractionDeliveryKind::PluginHandled,
+            ),
+        ];
+
+        for (surface, id, kind) in &expected {
+            assert!(
+                seen.iter()
+                    .any(|(s, i, k)| s == surface && i == id && k == kind),
+                "missing ({surface}, {id}, {kind:?})"
+            );
+        }
+        assert_eq!(
+            seen.len(),
+            expected.len(),
+            "unexpected total interaction count across proxmox_plugin_surfaces()"
+        );
+        assert!(
+            !seen.iter().any(|(_, id, _)| id == "add-config"),
+            "add-config never had a registered interaction and must not reappear"
+        );
+
+        // Migration left no legacy arm behind — a leftover `surfaces:` or
+        // `surface_actions:` block would double-register on the wire.
+        assert!(DESCRIPTOR.surface_actions.is_none());
+        assert!(DESCRIPTOR.surfaces.is_none());
     }
 
     /// Helper to create a test runtime.

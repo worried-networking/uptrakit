@@ -15,12 +15,7 @@ use serde::de::DeserializeOwned;
 use serde_json::json;
 use uuid::Uuid;
 
-use uptrakit_plugin_infrastructure_core::{
-    ApiSubmitDescriptor, FormFieldDescriptor, FormFieldType, FormSelectSourceDescriptor,
-    SurfaceActionContext, SurfaceActionDescriptor, SurfaceActionError, SurfaceActionUi,
-    SurfaceFormDescriptor, SurfaceRowCondition,
-};
-use uptrakit_shared_types::Permission;
+use uptrakit_plugin_infrastructure_core::{SurfaceActionContext, SurfaceActionError};
 use uptrakit_tenant_db::TenantDb;
 
 use crate::client::ProxmoxClient;
@@ -125,443 +120,306 @@ pub(crate) struct ProxmoxScalingItemOverridesSaveRequest {
     pub delta_memory_mb: Option<i32>,
 }
 
-const SURFACE_SETTINGS_UPDATE_HOOKS: &str = "proxmox.settings.update-hooks";
-const SURFACE_SETTINGS_RESOURCE_SCALING: &str = "proxmox.settings.resource-scaling";
-const SURFACE_SOFTWARE_ITEM_UPDATE_HOOKS: &str = "proxmox.software-item.update-hooks";
-const SURFACE_SOFTWARE_ITEM_RESOURCE_SCALING: &str = "proxmox.software-item.resource-scaling";
+// ── Unified-surface interaction dispatch shims ────────────────────────────
+//
+// Each shim is the `PluginHandled` delivery target for exactly one
+// `(surface_id, interaction_id)` pair registered in `plugin.rs`. Bodies are
+// the former `execute_controller_surface_action_typed` match arms, moved
+// verbatim, with `tenant_db` obtained via `ctx.tenant_db()`.
 
-const ACTION_PRELOAD_SCALING_GLOBAL_DEFAULTS: &str = "preload-scaling-global-defaults";
-const ACTION_SAVE_SCALING_GLOBAL_DEFAULTS: &str = "save-scaling-global-defaults";
-const ACTION_PRELOAD_SCALING_ITEM_OVERRIDES: &str = "preload-scaling-item-overrides";
-const ACTION_SAVE_SCALING_ITEM_OVERRIDES: &str = "save-scaling-item-overrides";
-
-const ACTION_PRELOAD_GLOBAL_DEFAULTS: &str = "preload-global-defaults";
-const ACTION_SAVE_GLOBAL_DEFAULTS: &str = "save-global-defaults";
-const ACTION_PRELOAD_ITEM_OVERRIDES: &str = "preload-item-overrides";
-const ACTION_SAVE_ITEM_OVERRIDES: &str = "save-item-overrides";
-const ACTION_LOAD_BACKUP_TARGET_OPTIONS: &str = "load-backup-target-options";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ControllerSurfaceAction {
-    ListHostMappings,
-    DiscoverHosts,
-    TestConnection,
-    MatchHost,
-    ApproveMatch,
-    UnmatchHost,
-    ListAllUnmatched,
-    GetHostInfo,
-    PreloadGlobalDefaults,
-    SaveGlobalDefaults,
-    PreloadItemOverrides,
-    SaveItemOverrides,
-    LoadBackupTargetOptions,
-    PreloadScalingGlobalDefaults,
-    SaveScalingGlobalDefaults,
-    PreloadScalingItemOverrides,
-    SaveScalingItemOverrides,
-}
-
-fn resolve_controller_surface_action(
-    surface_id: &str,
-    action_id: &str,
-) -> Option<ControllerSurfaceAction> {
-    match (surface_id, action_id) {
-        ("proxmox.hosts", "list") => Some(ControllerSurfaceAction::ListHostMappings),
-        ("proxmox.hosts", "discover") => Some(ControllerSurfaceAction::DiscoverHosts),
-        ("proxmox.hosts", "test-connection") => Some(ControllerSurfaceAction::TestConnection),
-        ("proxmox.hosts", "match") => Some(ControllerSurfaceAction::MatchHost),
-        ("proxmox.hosts", "approve-match") => Some(ControllerSurfaceAction::ApproveMatch),
-        ("proxmox.hosts", "unmatch") => Some(ControllerSurfaceAction::UnmatchHost),
-        ("proxmox.hosts", "unmatched-guests") => Some(ControllerSurfaceAction::ListAllUnmatched),
-        ("proxmox.host-info", "get-info") => Some(ControllerSurfaceAction::GetHostInfo),
-        (SURFACE_SETTINGS_UPDATE_HOOKS, ACTION_PRELOAD_GLOBAL_DEFAULTS) => {
-            Some(ControllerSurfaceAction::PreloadGlobalDefaults)
-        }
-        (SURFACE_SETTINGS_UPDATE_HOOKS, ACTION_SAVE_GLOBAL_DEFAULTS) => {
-            Some(ControllerSurfaceAction::SaveGlobalDefaults)
-        }
-        (SURFACE_SETTINGS_UPDATE_HOOKS, ACTION_LOAD_BACKUP_TARGET_OPTIONS)
-        | (SURFACE_SOFTWARE_ITEM_UPDATE_HOOKS, ACTION_LOAD_BACKUP_TARGET_OPTIONS) => {
-            Some(ControllerSurfaceAction::LoadBackupTargetOptions)
-        }
-        (SURFACE_SOFTWARE_ITEM_UPDATE_HOOKS, ACTION_PRELOAD_ITEM_OVERRIDES) => {
-            Some(ControllerSurfaceAction::PreloadItemOverrides)
-        }
-        (SURFACE_SOFTWARE_ITEM_UPDATE_HOOKS, ACTION_SAVE_ITEM_OVERRIDES) => {
-            Some(ControllerSurfaceAction::SaveItemOverrides)
-        }
-        (SURFACE_SETTINGS_RESOURCE_SCALING, ACTION_PRELOAD_SCALING_GLOBAL_DEFAULTS) => {
-            Some(ControllerSurfaceAction::PreloadScalingGlobalDefaults)
-        }
-        (SURFACE_SETTINGS_RESOURCE_SCALING, ACTION_SAVE_SCALING_GLOBAL_DEFAULTS) => {
-            Some(ControllerSurfaceAction::SaveScalingGlobalDefaults)
-        }
-        (SURFACE_SOFTWARE_ITEM_RESOURCE_SCALING, ACTION_PRELOAD_SCALING_ITEM_OVERRIDES) => {
-            Some(ControllerSurfaceAction::PreloadScalingItemOverrides)
-        }
-        (SURFACE_SOFTWARE_ITEM_RESOURCE_SCALING, ACTION_SAVE_SCALING_ITEM_OVERRIDES) => {
-            Some(ControllerSurfaceAction::SaveScalingItemOverrides)
-        }
-        _ => None,
-    }
-}
-
-/// Returns the surface action library for the Proxmox VE plugin.
-///
-/// All actions referenced by shared-surface interaction IDs must be defined
-/// here.
-pub fn surface_actions() -> Vec<SurfaceActionDescriptor> {
-    vec![
-        add_config_action(),
-        match_action(),
-        approve_match_action(),
-        unmatch_action(),
-        discover_action(),
-        test_connection_action(),
-        list_all_unmatched_action(),
-        get_info_action(),
-        preload_global_defaults_action(),
-        save_global_defaults_action(),
-        preload_item_overrides_action(),
-        save_item_overrides_action(),
-        load_backup_target_options_action(),
-        preload_scaling_global_defaults_action(),
-        save_scaling_global_defaults_action(),
-        preload_scaling_item_overrides_action(),
-        save_scaling_item_overrides_action(),
-    ]
-}
-
-// ── Action definitions ──────────────────────────────────────────────────────
-
-fn add_config_action() -> SurfaceActionDescriptor {
-    SurfaceActionDescriptor::new("add-config", "Add Configuration")
-        .with_permission(Permission::UpdateHosts)
-        .with_ui(SurfaceActionUi::Form(SurfaceFormDescriptor::new(vec![
-            FormFieldDescriptor::new("name", "Configuration Name")
-                .required()
-                .with_placeholder("My Proxmox Cluster"),
-            FormFieldDescriptor::new("api_url", "Proxmox VE URL")
-                .required()
-                .with_placeholder("https://pve.example.com:8006")
-                .with_help_text("HTTPS URL to your Proxmox VE API (port 8006 by default)."),
-            FormFieldDescriptor::new("api_token", "API Token")
-                .with_type(FormFieldType::Password)
-                .required()
-                .with_placeholder("user@realm!tokenid=secret")
-                .with_help_text(
-                    "PVE API token in USER@REALM!TOKENID=SECRET format. \
-                     Least-privilege setup (run as root on PVE): \
-                     pveum role add UptrakitAudit \
-                       -privs 'Sys.Audit VM.Audit VM.GuestAgent.Audit VM.GuestAgent.FileRead'; \
-                     pveum role add UptrakitProtection -privs 'VM.Snapshot VM.Backup'; \
-                     pveum acl modify / --users USER@REALM --roles UptrakitAudit; \
-                     pveum acl modify /vms --users USER@REALM --roles UptrakitProtection. \
-                     VM.GuestAgent.* privileges require PVE 9+. \
-                     UptrakitProtection on /vms is only required for snapshot/backup \
-                     update-protection mode. These roles are provisioned automatically \
-                     on host sync when the token was created by Uptrakit.",
-                ),
-            FormFieldDescriptor::new("verify_tls", "Verify TLS Certificate")
-                .with_type(FormFieldType::Toggle)
-                .with_help_text("Disable if your Proxmox VE uses a self-signed certificate."),
-            FormFieldDescriptor::new("node_filter", "Node Filter")
-                .with_placeholder("pve1,pve2")
-                .with_help_text(
-                    "Comma-separated list of node names to include. Leave blank for all nodes.",
-                ),
-        ])))
-        .with_api_submit(
-            ApiSubmitDescriptor::new(
-                "POST",
-                "/api/v1/plugin-configs",
-                serde_json::json!({
-                    "name": "{{name}}",
-                    "plugin_type": "infrastructure_proxmox",
-                    "enabled": true,
-                    "config": {
-                        "api_url": "{{api_url}}",
-                        "api_token": "{{api_token}}",
-                        "verify_tls": "{{verify_tls:bool}}",
-                        "node_filter": "{{node_filter:csv_array}}"
-                    }
-                }),
-            )
-            .with_response_id_field("id")
-            .with_response_label_field("name"),
-        )
-}
-
-fn match_action() -> SurfaceActionDescriptor {
-    SurfaceActionDescriptor::new("match", "Manual Match")
-        .with_ui(SurfaceActionUi::Form(SurfaceFormDescriptor::new(vec![
-            FormFieldDescriptor::new("mapping_id", "Mapping ID")
-                .with_type(FormFieldType::Hidden)
-                .required(),
-            FormFieldDescriptor::new("host_id", "Host")
-                .with_type(FormFieldType::Select)
-                .required()
-                .with_placeholder("Select a host")
-                .with_select_source(FormSelectSourceDescriptor::RestApi {
-                    path: "/api/v1/hosts".to_string(),
-                    value_field: "id".to_string(),
-                    label_field: "friendly_name".to_string(),
-                }),
-        ])))
-        .with_permission(Permission::UpdateHosts)
-}
-
-fn approve_match_action() -> SurfaceActionDescriptor {
-    SurfaceActionDescriptor::new("approve-match", "Approve Match")
-        .with_permission(Permission::UpdateHosts)
-        .with_row_visible_when("suggested_host_id", SurfaceRowCondition::Present)
-}
-
-fn unmatch_action() -> SurfaceActionDescriptor {
-    SurfaceActionDescriptor::new("unmatch", "Remove Match")
-        .with_permission(Permission::UpdateHosts)
-        .destructive()
-        .with_confirm_entity_field("proxmox_name")
-        .with_row_visible_when("matched_host", SurfaceRowCondition::Present)
-}
-
-fn discover_action() -> SurfaceActionDescriptor {
-    SurfaceActionDescriptor::new("discover", "Discover")
-        .with_permission(Permission::UpdateHosts)
-        .with_timeout(120)
-}
-
-fn test_connection_action() -> SurfaceActionDescriptor {
-    SurfaceActionDescriptor::new("test-connection", "Test Connection")
-        .with_permission(Permission::UpdateHosts)
-        .with_timeout(30)
-}
-
-fn list_all_unmatched_action() -> SurfaceActionDescriptor {
-    SurfaceActionDescriptor::new("unmatched-guests", "Unmatched Guests")
-        .with_permission(Permission::UpdateHosts)
-        .with_timeout(10)
-}
-
-fn get_info_action() -> SurfaceActionDescriptor {
-    SurfaceActionDescriptor::new("get-info", "Get Info")
-        .with_permission(Permission::UpdateHosts)
-        .with_timeout(10)
-}
-
-fn preload_global_defaults_action() -> SurfaceActionDescriptor {
-    SurfaceActionDescriptor::new(ACTION_PRELOAD_GLOBAL_DEFAULTS, "Preload Global Defaults")
-        .with_permission(Permission::ManageGlobalSettings)
-}
-
-fn save_global_defaults_action() -> SurfaceActionDescriptor {
-    SurfaceActionDescriptor::new(ACTION_SAVE_GLOBAL_DEFAULTS, "Save Global Defaults")
-        .with_permission(Permission::ManageGlobalSettings)
-}
-
-fn preload_item_overrides_action() -> SurfaceActionDescriptor {
-    SurfaceActionDescriptor::new(ACTION_PRELOAD_ITEM_OVERRIDES, "Preload Per-item Overrides")
-        .with_permission(Permission::ViewSoftware)
-}
-
-fn save_item_overrides_action() -> SurfaceActionDescriptor {
-    SurfaceActionDescriptor::new(ACTION_SAVE_ITEM_OVERRIDES, "Save Per-item Overrides")
-        .with_permission(Permission::UpdateSoftware)
-}
-
-fn load_backup_target_options_action() -> SurfaceActionDescriptor {
-    SurfaceActionDescriptor::new(
-        ACTION_LOAD_BACKUP_TARGET_OPTIONS,
-        "Load Backup Target Dropdown Options",
-    )
-    .with_permission(Permission::ViewSoftware)
-}
-
-fn preload_scaling_global_defaults_action() -> SurfaceActionDescriptor {
-    SurfaceActionDescriptor::new(
-        ACTION_PRELOAD_SCALING_GLOBAL_DEFAULTS,
-        "Preload Scaling Global Defaults",
-    )
-    .with_permission(Permission::ManageGlobalSettings)
-}
-
-fn save_scaling_global_defaults_action() -> SurfaceActionDescriptor {
-    SurfaceActionDescriptor::new(
-        ACTION_SAVE_SCALING_GLOBAL_DEFAULTS,
-        "Save Scaling Global Defaults",
-    )
-    .with_permission(Permission::ManageGlobalSettings)
-}
-
-fn preload_scaling_item_overrides_action() -> SurfaceActionDescriptor {
-    SurfaceActionDescriptor::new(
-        ACTION_PRELOAD_SCALING_ITEM_OVERRIDES,
-        "Preload Per-item Scaling Overrides",
-    )
-    .with_permission(Permission::ViewSoftware)
-}
-
-fn save_scaling_item_overrides_action() -> SurfaceActionDescriptor {
-    SurfaceActionDescriptor::new(
-        ACTION_SAVE_SCALING_ITEM_OVERRIDES,
-        "Save Per-item Scaling Overrides",
-    )
-    .with_permission(Permission::UpdateSoftware)
-}
-
-/// Handle a surface action for the Proxmox plugin.
-///
-/// Dispatches based on `(surface_id, action_id)` to the appropriate handler.
-///
-/// The function item matches `SurfaceActionHandler` so it can be used directly
-/// as a function pointer in `declare_plugin!`.
-pub fn handle_surface_action<'a>(
+pub(crate) fn dispatch_list_host_mappings<'a>(
     ctx: &'a SurfaceActionContext<'a>,
-    surface_id: &'a str,
-    action_id: &'a str,
     params: serde_json::Value,
 ) -> Pin<
     Box<
         dyn Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>> + Send + 'a,
     >,
 > {
-    Box::pin(handle_action_inner(ctx, surface_id, action_id, params))
+    Box::pin(async move {
+        execute_controller_list_host_mappings(ctx.tenant_db(), params)
+            .await
+            .map_err(map_controller_action_error)
+    })
 }
 
-#[tracing::instrument(skip_all, fields(surface_id, action_id))]
-async fn handle_action_inner(
-    ctx: &SurfaceActionContext<'_>,
-    surface_id: &str,
-    action_id: &str,
+pub(crate) fn dispatch_discover_hosts<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
     params: serde_json::Value,
-) -> std::result::Result<serde_json::Value, SurfaceActionError> {
-    tracing::debug!("dispatching Proxmox surface action");
-    execute_controller_surface_action_typed(ctx.tenant_db(), surface_id, action_id, params).await
+) -> Pin<
+    Box<
+        dyn Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>> + Send + 'a,
+    >,
+> {
+    Box::pin(async move {
+        let request = parse_action_params::<ProxmoxPluginConfigRequest>(params, "discover")?;
+        execute_controller_discover_hosts(ctx.tenant_db(), request)
+            .await
+            .map_err(map_controller_action_error)
+    })
 }
 
-async fn execute_controller_surface_action_typed(
-    tenant_db: &TenantDb,
-    surface_id: &str,
-    action_id: &str,
+pub(crate) fn dispatch_test_connection<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
     params: serde_json::Value,
-) -> std::result::Result<serde_json::Value, SurfaceActionError> {
-    let Some(route) = resolve_controller_surface_action(surface_id, action_id) else {
-        return Err(SurfaceActionError::InvalidInput(format!(
-            "unknown action '{action_id}' for surface '{surface_id}'"
-        )));
-    };
+) -> Pin<
+    Box<
+        dyn Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>> + Send + 'a,
+    >,
+> {
+    Box::pin(async move {
+        let request = parse_action_params::<ProxmoxPluginConfigRequest>(params, "test-connection")?;
+        execute_controller_test_connection(ctx.tenant_db(), request)
+            .await
+            .map_err(map_controller_action_error)
+    })
+}
 
-    match route {
-        ControllerSurfaceAction::ListHostMappings => {
-            execute_controller_list_host_mappings(tenant_db, params)
-                .await
-                .map_err(map_controller_action_error)
-        }
-        ControllerSurfaceAction::DiscoverHosts => execute_controller_discover_hosts(
-            tenant_db,
-            parse_action_params::<ProxmoxPluginConfigRequest>(params, action_id)?,
-        )
-        .await
-        .map_err(map_controller_action_error),
-        ControllerSurfaceAction::TestConnection => execute_controller_test_connection(
-            tenant_db,
-            parse_action_params::<ProxmoxPluginConfigRequest>(params, action_id)?,
-        )
-        .await
-        .map_err(map_controller_action_error),
-        ControllerSurfaceAction::MatchHost => execute_controller_manual_match(
-            tenant_db,
-            parse_action_params::<ProxmoxManualMatchRequest>(params, action_id)?,
-        )
-        .await
-        .map_err(map_controller_action_error),
-        ControllerSurfaceAction::ApproveMatch => {
-            execute_controller_approve_match(tenant_db, parse_approve_match_request(params)?)
-                .await
-                .map_err(map_controller_action_error)
-        }
-        ControllerSurfaceAction::UnmatchHost => execute_controller_unmatch_host(
-            tenant_db,
-            parse_action_params::<ProxmoxMappingRequest>(params, action_id)?,
-        )
-        .await
-        .map_err(map_controller_action_error),
-        ControllerSurfaceAction::ListAllUnmatched => execute_controller_list_all_unmatched(
-            tenant_db,
-            parse_action_params::<ProxmoxUnmatchedGuestsRequest>(params, action_id)?,
-        )
-        .await
-        .map_err(map_controller_action_error),
-        ControllerSurfaceAction::GetHostInfo => execute_controller_get_host_info(
-            tenant_db,
-            parse_action_params::<ProxmoxHostInfoRequest>(params, action_id)?,
-        )
-        .await
-        .map_err(map_controller_action_error),
-        ControllerSurfaceAction::PreloadGlobalDefaults => {
-            execute_controller_preload_global_defaults(
-                tenant_db,
-                parse_action_params::<ProxmoxScopeSelectionRequest>(params, action_id)?,
-            )
+pub(crate) fn dispatch_match_host<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
+    params: serde_json::Value,
+) -> Pin<
+    Box<
+        dyn Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>> + Send + 'a,
+    >,
+> {
+    Box::pin(async move {
+        let request = parse_action_params::<ProxmoxManualMatchRequest>(params, "match")?;
+        execute_controller_manual_match(ctx.tenant_db(), request)
             .await
             .map_err(map_controller_action_error)
-        }
-        ControllerSurfaceAction::SaveGlobalDefaults => execute_controller_save_global_defaults(
-            tenant_db,
-            parse_action_params::<ProxmoxGlobalDefaultsSaveRequest>(params, action_id)?,
-        )
-        .await
-        .map_err(map_controller_action_error),
-        ControllerSurfaceAction::PreloadItemOverrides => execute_controller_preload_item_overrides(
-            tenant_db,
-            parse_action_params::<ProxmoxItemOverridePreloadRequest>(params, action_id)?,
-        )
-        .await
-        .map_err(map_controller_action_error),
-        ControllerSurfaceAction::SaveItemOverrides => execute_controller_save_item_overrides(
-            tenant_db,
-            parse_action_params::<ProxmoxItemOverrideSaveRequest>(params, action_id)?,
-        )
-        .await
-        .map_err(map_controller_action_error),
-        ControllerSurfaceAction::LoadBackupTargetOptions => {
-            execute_controller_load_backup_target_options(
-                tenant_db,
-                parse_action_params::<ProxmoxScopeSelectionRequest>(params, action_id)?,
-            )
+    })
+}
+
+pub(crate) fn dispatch_approve_match<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
+    params: serde_json::Value,
+) -> Pin<
+    Box<
+        dyn Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>> + Send + 'a,
+    >,
+> {
+    Box::pin(async move {
+        let request = parse_approve_match_request(params)?;
+        execute_controller_approve_match(ctx.tenant_db(), request)
             .await
             .map_err(map_controller_action_error)
-        }
-        ControllerSurfaceAction::PreloadScalingGlobalDefaults => {
-            handle_preload_scaling_global_defaults(
-                tenant_db,
-                parse_action_params::<ProxmoxScopeSelectionRequest>(params, action_id)?,
-            )
+    })
+}
+
+pub(crate) fn dispatch_unmatch_host<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
+    params: serde_json::Value,
+) -> Pin<
+    Box<
+        dyn Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>> + Send + 'a,
+    >,
+> {
+    Box::pin(async move {
+        let request = parse_action_params::<ProxmoxMappingRequest>(params, "unmatch")?;
+        execute_controller_unmatch_host(ctx.tenant_db(), request)
             .await
             .map_err(map_controller_action_error)
-        }
-        ControllerSurfaceAction::SaveScalingGlobalDefaults => handle_save_scaling_global_defaults(
-            tenant_db,
-            parse_action_params::<ProxmoxScalingGlobalDefaultsSaveRequest>(params, action_id)?,
-        )
-        .await
-        .map_err(map_controller_action_error),
-        ControllerSurfaceAction::PreloadScalingItemOverrides => {
-            handle_preload_scaling_item_overrides(
-                tenant_db,
-                parse_action_params::<ProxmoxItemOverridePreloadRequest>(params, action_id)?,
-            )
+    })
+}
+
+pub(crate) fn dispatch_unmatched_guests<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
+    params: serde_json::Value,
+) -> Pin<
+    Box<
+        dyn Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>> + Send + 'a,
+    >,
+> {
+    Box::pin(async move {
+        let request =
+            parse_action_params::<ProxmoxUnmatchedGuestsRequest>(params, "unmatched-guests")?;
+        execute_controller_list_all_unmatched(ctx.tenant_db(), request)
             .await
             .map_err(map_controller_action_error)
-        }
-        ControllerSurfaceAction::SaveScalingItemOverrides => handle_save_scaling_item_overrides(
-            tenant_db,
-            parse_action_params::<ProxmoxScalingItemOverridesSaveRequest>(params, action_id)?,
-        )
-        .await
-        .map_err(map_controller_action_error),
-    }
+    })
+}
+
+pub(crate) fn dispatch_get_host_info<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
+    params: serde_json::Value,
+) -> Pin<
+    Box<
+        dyn Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>> + Send + 'a,
+    >,
+> {
+    Box::pin(async move {
+        let request = parse_action_params::<ProxmoxHostInfoRequest>(params, "get-info")?;
+        execute_controller_get_host_info(ctx.tenant_db(), request)
+            .await
+            .map_err(map_controller_action_error)
+    })
+}
+
+pub(crate) fn dispatch_preload_global_defaults<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
+    params: serde_json::Value,
+) -> Pin<
+    Box<
+        dyn Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>> + Send + 'a,
+    >,
+> {
+    Box::pin(async move {
+        let request =
+            parse_action_params::<ProxmoxScopeSelectionRequest>(params, "preload-global-defaults")?;
+        execute_controller_preload_global_defaults(ctx.tenant_db(), request)
+            .await
+            .map_err(map_controller_action_error)
+    })
+}
+
+pub(crate) fn dispatch_save_global_defaults<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
+    params: serde_json::Value,
+) -> Pin<
+    Box<
+        dyn Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>> + Send + 'a,
+    >,
+> {
+    Box::pin(async move {
+        let request = parse_action_params::<ProxmoxGlobalDefaultsSaveRequest>(
+            params,
+            "save-global-defaults",
+        )?;
+        execute_controller_save_global_defaults(ctx.tenant_db(), request)
+            .await
+            .map_err(map_controller_action_error)
+    })
+}
+
+pub(crate) fn dispatch_load_backup_target_options<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
+    params: serde_json::Value,
+) -> Pin<
+    Box<
+        dyn Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>> + Send + 'a,
+    >,
+> {
+    Box::pin(async move {
+        let request = parse_action_params::<ProxmoxScopeSelectionRequest>(
+            params,
+            "load-backup-target-options",
+        )?;
+        execute_controller_load_backup_target_options(ctx.tenant_db(), request)
+            .await
+            .map_err(map_controller_action_error)
+    })
+}
+
+pub(crate) fn dispatch_preload_item_overrides<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
+    params: serde_json::Value,
+) -> Pin<
+    Box<
+        dyn Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>> + Send + 'a,
+    >,
+> {
+    Box::pin(async move {
+        let request = parse_action_params::<ProxmoxItemOverridePreloadRequest>(
+            params,
+            "preload-item-overrides",
+        )?;
+        execute_controller_preload_item_overrides(ctx.tenant_db(), request)
+            .await
+            .map_err(map_controller_action_error)
+    })
+}
+
+pub(crate) fn dispatch_save_item_overrides<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
+    params: serde_json::Value,
+) -> Pin<
+    Box<
+        dyn Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>> + Send + 'a,
+    >,
+> {
+    Box::pin(async move {
+        let request =
+            parse_action_params::<ProxmoxItemOverrideSaveRequest>(params, "save-item-overrides")?;
+        execute_controller_save_item_overrides(ctx.tenant_db(), request)
+            .await
+            .map_err(map_controller_action_error)
+    })
+}
+
+pub(crate) fn dispatch_preload_scaling_global_defaults<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
+    params: serde_json::Value,
+) -> Pin<
+    Box<
+        dyn Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>> + Send + 'a,
+    >,
+> {
+    Box::pin(async move {
+        let request = parse_action_params::<ProxmoxScopeSelectionRequest>(
+            params,
+            "preload-scaling-global-defaults",
+        )?;
+        handle_preload_scaling_global_defaults(ctx.tenant_db(), request)
+            .await
+            .map_err(map_controller_action_error)
+    })
+}
+
+pub(crate) fn dispatch_save_scaling_global_defaults<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
+    params: serde_json::Value,
+) -> Pin<
+    Box<
+        dyn Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>> + Send + 'a,
+    >,
+> {
+    Box::pin(async move {
+        let request = parse_action_params::<ProxmoxScalingGlobalDefaultsSaveRequest>(
+            params,
+            "save-scaling-global-defaults",
+        )?;
+        handle_save_scaling_global_defaults(ctx.tenant_db(), request)
+            .await
+            .map_err(map_controller_action_error)
+    })
+}
+
+pub(crate) fn dispatch_preload_scaling_item_overrides<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
+    params: serde_json::Value,
+) -> Pin<
+    Box<
+        dyn Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>> + Send + 'a,
+    >,
+> {
+    Box::pin(async move {
+        let request = parse_action_params::<ProxmoxItemOverridePreloadRequest>(
+            params,
+            "preload-scaling-item-overrides",
+        )?;
+        handle_preload_scaling_item_overrides(ctx.tenant_db(), request)
+            .await
+            .map_err(map_controller_action_error)
+    })
+}
+
+pub(crate) fn dispatch_save_scaling_item_overrides<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
+    params: serde_json::Value,
+) -> Pin<
+    Box<
+        dyn Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>> + Send + 'a,
+    >,
+> {
+    Box::pin(async move {
+        let request = parse_action_params::<ProxmoxScalingItemOverridesSaveRequest>(
+            params,
+            "save-scaling-item-overrides",
+        )?;
+        handle_save_scaling_item_overrides(ctx.tenant_db(), request)
+            .await
+            .map_err(map_controller_action_error)
+    })
 }
 
 async fn execute_controller_list_host_mappings(
@@ -1992,77 +1850,6 @@ mod tests {
     use crate::entity::proxmox_host_mapping;
 
     #[test]
-    fn surface_actions_include_scaling_actions_with_correct_permissions() {
-        let actions = surface_actions();
-        // Now 17: 13 original + 4 scaling
-        assert_eq!(actions.len(), 17);
-        let ids: Vec<&str> = actions.iter().map(|a| a.action_id.as_str()).collect();
-        assert!(ids.contains(&ACTION_PRELOAD_SCALING_GLOBAL_DEFAULTS));
-        assert!(ids.contains(&ACTION_SAVE_SCALING_GLOBAL_DEFAULTS));
-        assert!(ids.contains(&ACTION_PRELOAD_SCALING_ITEM_OVERRIDES));
-        assert!(ids.contains(&ACTION_SAVE_SCALING_ITEM_OVERRIDES));
-
-        let save_global_scaling = actions
-            .iter()
-            .find(|a| a.action_id == ACTION_SAVE_SCALING_GLOBAL_DEFAULTS)
-            .expect("save-scaling-global-defaults must be exported");
-        assert_eq!(
-            save_global_scaling.permission,
-            Permission::ManageGlobalSettings.as_str()
-        );
-
-        let save_item_scaling = actions
-            .iter()
-            .find(|a| a.action_id == ACTION_SAVE_SCALING_ITEM_OVERRIDES)
-            .expect("save-scaling-item-overrides must be exported");
-        assert_eq!(
-            save_item_scaling.permission,
-            Permission::UpdateSoftware.as_str()
-        );
-    }
-
-    #[test]
-    fn surface_actions_include_host_and_policy_actions_with_permissions() {
-        let actions = surface_actions();
-        assert_eq!(actions.len(), 17);
-        let ids: Vec<&str> = actions.iter().map(|a| a.action_id.as_str()).collect();
-        assert!(ids.contains(&"add-config"));
-        assert!(ids.contains(&"match"));
-        assert!(ids.contains(&"approve-match"));
-        assert!(ids.contains(&"unmatch"));
-        assert!(ids.contains(&"discover"));
-        assert!(ids.contains(&"test-connection"));
-        assert!(ids.contains(&"unmatched-guests"));
-        assert!(ids.contains(&"get-info"));
-        assert!(ids.contains(&ACTION_PRELOAD_GLOBAL_DEFAULTS));
-        assert!(ids.contains(&ACTION_SAVE_GLOBAL_DEFAULTS));
-        assert!(ids.contains(&ACTION_PRELOAD_ITEM_OVERRIDES));
-        assert!(ids.contains(&ACTION_SAVE_ITEM_OVERRIDES));
-        assert!(ids.contains(&ACTION_LOAD_BACKUP_TARGET_OPTIONS));
-
-        let get_info = actions
-            .iter()
-            .find(|action| action.action_id == "get-info")
-            .expect("get-info action must be exported");
-        assert_eq!(get_info.permission, "update_hosts");
-
-        let save_global = actions
-            .iter()
-            .find(|action| action.action_id == ACTION_SAVE_GLOBAL_DEFAULTS)
-            .expect("save-global-defaults action must be exported");
-        assert_eq!(
-            save_global.permission,
-            Permission::ManageGlobalSettings.as_str()
-        );
-
-        let save_item = actions
-            .iter()
-            .find(|action| action.action_id == ACTION_SAVE_ITEM_OVERRIDES)
-            .expect("save-item-overrides action must be exported");
-        assert_eq!(save_item.permission, Permission::UpdateSoftware.as_str());
-    }
-
-    #[test]
     fn parse_uuid_param_valid() {
         let params = serde_json::json!({"id": "01944c3c-6a3a-7000-8000-000000000001"});
         assert!(parse_uuid_param(&params, "id").is_ok());
@@ -2098,26 +1885,6 @@ mod tests {
     fn parse_uuid_param_with_fallback_both_missing() {
         let params = serde_json::json!({});
         assert!(parse_uuid_param_with_fallback(&params, "host_id", "suggested_host_id").is_err());
-    }
-
-    #[test]
-    fn approve_match_action_has_row_visibility() {
-        let action = approve_match_action();
-        let rvw = action
-            .row_visible_when
-            .expect("approve-match should have row_visible_when");
-        assert_eq!(rvw.field, "suggested_host_id");
-        assert_eq!(rvw.condition, SurfaceRowCondition::Present);
-    }
-
-    #[test]
-    fn unmatch_action_has_row_visibility() {
-        let action = unmatch_action();
-        let rvw = action
-            .row_visible_when
-            .expect("unmatch should have row_visible_when");
-        assert_eq!(rvw.field, "matched_host");
-        assert_eq!(rvw.condition, SurfaceRowCondition::Present);
     }
 
     #[test]
@@ -2838,49 +2605,5 @@ mod tests {
         let items = result["items"].as_array().expect("items array");
         assert_eq!(items.len(), 250);
         assert_eq!(result["total"], 250);
-    }
-
-    #[test]
-    fn every_legacy_dispatchable_action_is_a_registered_interaction() {
-        let registrations = crate::plugin::proxmox_surface_registrations();
-        // `api_submit` actions (currently only `add-config`) are delivered by the
-        // frontend POSTing straight to a generic REST endpoint; they never flow
-        // through `handle_surface_action`/`resolve_controller_surface_action`, so
-        // they fall outside the controller-dispatch drift class this guard checks.
-        let legacy_ids: Vec<String> = surface_actions()
-            .iter()
-            .filter(|a| a.api_submit.is_none())
-            .map(|a| a.action_id.clone())
-            .collect();
-
-        // Green-on-empty protection: the sets must be non-empty and contain
-        // the two interactions this guard exists for.
-        assert!(!legacy_ids.is_empty());
-        assert!(legacy_ids.iter().any(|id| id == "unmatched-guests"));
-        assert!(legacy_ids.iter().any(|id| id == "match"));
-
-        for action_id in &legacy_ids {
-            let carriers: Vec<&str> = registrations
-                .iter()
-                .flat_map(|r| r.surfaces.iter())
-                .filter(|s| {
-                    s.interactions
-                        .iter()
-                        .any(|i| i.interaction_id.as_str() == action_id)
-                })
-                .map(|s| s.descriptor.surface_id.as_str())
-                .collect();
-            assert!(
-                !carriers.is_empty(),
-                "legacy action `{action_id}` is not registered on any surface — \
-                 the unmatched-guests drift class"
-            );
-            for surface_id in &carriers {
-                assert!(
-                    resolve_controller_surface_action(surface_id, action_id).is_some(),
-                    "registered pair ({surface_id}, {action_id}) must be dispatchable"
-                );
-            }
-        }
     }
 }

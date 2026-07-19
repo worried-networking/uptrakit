@@ -52,6 +52,12 @@ pub use uptrakit_plugin_infrastructure_core::TransactionalEmailError;
 // Re-export descriptor surface-action context (typed controller boundary).
 pub use uptrakit_plugin_infrastructure_core::SurfaceActionContext;
 
+// Re-export the fieldless interaction-delivery mirror (ADR-0028) so
+// downstream consumers (e.g. the D5 executor-allowlist guard) can inspect
+// how a registered interaction is delivered without depending on
+// `uptrakit-plugin-infrastructure-core` directly.
+pub use uptrakit_plugin_infrastructure_core::InteractionDeliveryKind;
+
 // Re-export executor types for downstream convenience
 pub use uptrakit_command::{CommandExecutor, LocalCommandExecutor};
 
