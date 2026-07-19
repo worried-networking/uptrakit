@@ -128,6 +128,50 @@ needed to service those surfaces.
 `PluginSurfaceOps::surface_registrations()` is aggregated by `PluginCatalog`, and the controller
 bootstraps these registrations into `SurfaceRegistry`.
 
+## Unified plugin registration model
+
+Plugin-side surfaces and interactions have a single source of truth (ADR-0028;
+`crates/plugins/infrastructure/core/src/registration.rs`): the `declare_plugin!` macro's
+`surfaces: { provider_id, registrations }` arm, where `registrations` is a `fn() -> Vec<PluginSurfaceRegistration>`.
+Each interaction is a `RegisteredInteraction::new(descriptor, delivery)`, pairing a wire
+`surfaces::InteractionDescriptor` with an `InteractionDelivery`. `RegisteredInteraction::new` derives
+`descriptor.transport` from the delivery and overwrites whatever the caller set — transport is never
+authored independently, closing the drift class that let a legacy dispatch table and a registered
+interaction list disagree for over a year.
+
+### Delivery kinds
+
+- `InteractionDelivery::PluginHandled(handler)` — dispatched to a plugin `InteractionHandler` fn pointer.
+- `InteractionDelivery::ControllerExecutor` — executed entirely by controller-side code; the plugin
+  declares the interaction but has no handler for it.
+
+### Exact-id routing and duplicate-surface-id admission
+
+`PluginCatalog::build` derives an exact-id `BTreeMap<(String, String), InteractionHandler>` dispatch map
+from every plugin's `registrations()` call at build time (only `PluginHandled` entries), replacing the
+longest-prefix `starts_with` routing an earlier revision of this runtime used. `PluginSurfaceActionOps::handle_surface_action`
+does an exact-pair lookup; a miss returns the same error shape the prefix router produced for an
+unroutable action. On surface-id admission, the **same plugin** re-registering the **same** `surface_id`
+across calls is fine; a **different** plugin claiming an already-seen `surface_id` is a hard
+catalog-construction error. Exact-id routing is safe here because every dispatched `surface_id` is
+post-registry-resolution (from a `ResolvedSurfaceAction`) — no dynamic or parameterized surface ids
+exist.
+
+### Controller-local executor table + bidirectional guard
+
+`ControllerExecutor` interactions must have a matching row in `CONTROLLER_LOCAL_EXECUTOR_TABLE`
+(`crates/ui/surface-proxy/src/proxy/controller_local.rs`), a single `(surface_id, interaction_id, ExecutorTier)`
+const table. `ExecutorTier::ControllerExecutes` is Tier 1 (controller-side code + audit, no plugin call);
+`ExecutorTier::PluginWithAudit` is Tier 2 (plugin invoke + controller-side audit wrap); Tier 3 (plugin
+invoke, no audit) is the fallthrough and has no table rows. A bidirectional integration test,
+`crates/ui/web-api/tests/interaction_executor_guard.rs`, proves the table and the catalog's derived
+interaction deliveries agree in both directions: every table row has a matching registration with the
+expected delivery kind, and every `ControllerExecutor`-delivery registration has a Tier-1 table row — a
+registered-but-tableless `ControllerExecutor` interaction is registered but unexecutable, and fails the
+guard instead of failing silently at request time. The guard proves existence and delivery kind, not
+audit-tier correctness: Tiers 2 and 3 both map to `PluginHandled`, so a row moved between an audited and
+an unaudited tier stays a hand-authored correctness class, unguarded by this test.
+
 ## Frontend integration pattern
 
 The frontend loads and renders surfaces through shared runtime modules:

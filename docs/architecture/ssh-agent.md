@@ -888,6 +888,15 @@ handler's `on_surface_action_response` method calls `proxy.complete()` to delive
 | `discovered-guests`       | select_source (action)   | 15s     | List unmatched Proxmox guests (via ServiceSurfaceProxy)                                                              |
 | `bootstrap-proxmox-guest` | primary_action (form)    | 120s    | Bootstrap a discovered Proxmox guest with auto-matching                                                              |
 
+All six of the runtime's own actions, plus the two Proxmox agent-module actions it merges in under
+`agent-infra`, are authored through the `AgentInteraction` builder (ADR-0028;
+`crates/plugins/infrastructure/core/src/agent_interaction.rs`). Placement (primary action bar vs. row
+action vs. internal/data-only) comes from each interaction's `AgentInteractionPlacement`
+(`Primary`/`Row`/`Internal`) rather than the hardcoded id-literal filters an earlier revision of this
+surface used. Because the wire `InteractionDescriptor` cannot carry placement, a golden-fixture test
+pins the `ssh-agent.hosts` surface's wire `SurfaceRegistration` JSON and asserts the authoring path
+reproduces it exactly, catching silent metadata loss the wire type itself cannot express.
+
 ### E2E encryption for sensitive parameters
 
 The bootstrap and sync-host actions accept sensitive credentials (SSH password, private key) that

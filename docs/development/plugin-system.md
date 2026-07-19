@@ -567,10 +567,21 @@ declare_plugin!(WebhookPlugin, WebhookConfig, "webhook", {
     config_model: ConfigModel::NotificationChannel,
     roles: [NotificationTransport],
     notification_transport: create_webhook_transport,
-    surface_actions: { actions: ..., handle_action: ... },
-    surfaces: { registrations: ... },
+    surfaces: {
+        provider_id: "plugin.webhook",
+        registrations: webhook_plugin_surfaces,
+    },
 });
 ```
+
+`surfaces:` is the single source for a plugin's surface and interaction registrations (ADR-0028): the
+`registrations` fn returns `Vec<PluginSurfaceRegistration>`, where each interaction is a
+`RegisteredInteraction::new(descriptor, delivery)` pairing a wire `InteractionDescriptor` with an
+`InteractionDelivery` (`PluginHandled(handler)` dispatches to a plugin fn; `ControllerExecutor` marks an
+interaction executed entirely by controller-side code, and requires a matching row in
+`CONTROLLER_LOCAL_EXECUTOR_TABLE` — see [Unified plugin registration
+model](surfaces.md#unified-plugin-registration-model)). `descriptor.transport` is always derived from the
+delivery by `RegisteredInteraction::new` — never authored directly.
 
 Notification transports are **singletons** created at catalog construction time. The `PluginCatalog`
 stores them as `Arc<dyn NotificationTransport>` and exposes them via the `NotificationOps` trait.

@@ -45,22 +45,22 @@ Controller
 
 ## Module Structure
 
-| Module                     | Purpose                                                                             |
-| -------------------------- | ----------------------------------------------------------------------------------- |
-| `config.rs`                | `ProxmoxConfig` — API URL, token, TLS, node filter                                  |
-| `error.rs`                 | `ProxmoxError` enum with `impl_report_conversion!`                                  |
-| `client.rs`                | `ProxmoxClient` — HTTP client for Proxmox REST API                                  |
-| `api_types.rs`             | Serde structs for PVE API JSON responses                                            |
-| `plugin.rs`                | `ProxmoxPlugin` — unified `PluginMeta` + role trait impls (controller + agent)      |
-| `agent/plugin.rs`          | Role trait impls (`HostLifecycle`, `HostReport`, `GuestExec`) on `ProxmoxPlugin`    |
-| `agent/surface_actions.rs` | Agent surface action handlers (`discovered-guests`, `bootstrap-proxmox-guest`)      |
-| `agent/db_ops.rs`          | Agent-local DB operations (PVE host state, pending matches)                         |
-| `agent/migration.rs`       | Agent-local DB migrations (`proxmox_host_state`, `proxmox_pending_matches`)         |
-| `discovery.rs`             | `discover_guests()` — queries nodes for VMs/CTs                                     |
-| `matching.rs`              | `manual_match()` / `unmatch()` — manual-only host matching                          |
-| `surfaces.rs`              | Surface action definitions + handler dispatch                                       |
-| `pve_setup.rs`             | PVE node detection and API credential creation (agent-side)                         |
-| `guest_exec.rs`            | Guest command execution via `pct exec` / `qm guest exec` (agent-side)               |
+| Module                     | Purpose                                                                                                                                                 |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `config.rs`                | `ProxmoxConfig` — API URL, token, TLS, node filter                                                                                                      |
+| `error.rs`                 | `ProxmoxError` enum with `impl_report_conversion!`                                                                                                      |
+| `client.rs`                | `ProxmoxClient` — HTTP client for Proxmox REST API                                                                                                      |
+| `api_types.rs`             | Serde structs for PVE API JSON responses                                                                                                                |
+| `plugin.rs`                | `ProxmoxPlugin` — unified `PluginMeta` + role trait impls (controller + agent)                                                                          |
+| `agent/plugin.rs`          | Role trait impls (`HostLifecycle`, `HostReport`, `GuestExec`) on `ProxmoxPlugin`                                                                        |
+| `agent/surface_actions.rs` | Dispatch shim over the plugin's `agent_interactions()` table (`discovered-guests`, `bootstrap-proxmox-guest`); implementation fns for both interactions |
+| `agent/db_ops.rs`          | Agent-local DB operations (PVE host state, pending matches)                                                                                             |
+| `agent/migration.rs`       | Agent-local DB migrations (`proxmox_host_state`, `proxmox_pending_matches`)                                                                             |
+| `discovery.rs`             | `discover_guests()` — queries nodes for VMs/CTs                                                                                                         |
+| `matching.rs`              | `manual_match()` / `unmatch()` — manual-only host matching                                                                                              |
+| `surfaces.rs`              | Surface action definitions + handler dispatch                                                                                                           |
+| `pve_setup.rs`             | PVE node detection and API credential creation (agent-side)                                                                                             |
+| `guest_exec.rs`            | Guest command execution via `pct exec` / `qm guest exec` (agent-side)                                                                                   |
 
 ## Proxmox API Client
 
@@ -130,16 +130,16 @@ Users manually link discovered Proxmox guests to Uptrakit hosts via the
 All actions are dispatched through the shared-surface runtime. No dedicated CLI
 commands or REST routes exist.
 
-| Surface             | Action               | Parameters                                  | Description                                                          |
-| ------------------- | -------------------- | ------------------------------------------- | -------------------------------------------------------------------- |
-| `proxmox.hosts`     | `list`               | `plugin_config_id`                          | List discovered guests with inline match suggestions                 |
-| `proxmox.hosts`     | `discover`           | `plugin_config_id`                          | Trigger discovery                                                    |
-| `proxmox.hosts`     | `test-connection`    | `plugin_config_id`                          | Test API connectivity                                                |
-| `proxmox.hosts`     | `match`              | `mapping_id`, `host_id`                     | Manual match                                                         |
-| `proxmox.hosts`     | `approve-match`      | `mapping_id`, `host_id`/`suggested_host_id` | Approve a suggested match (accepts `suggested_host_id` as fallback)  |
-| `proxmox.hosts`     | `unmatch`            | `mapping_id`                                | Remove match (destructive, confirmation dialog shows `proxmox_name`) |
-| `proxmox.hosts`     | `unmatched-guests`   | (none)                                      | List unmatched guests sorted by name across all configs              |
-| `proxmox.host-info` | `get-info`           | `host_id`                                   | Get Proxmox info for host                                            |
+| Surface             | Action             | Parameters                                  | Description                                                          |
+| ------------------- | ------------------ | ------------------------------------------- | -------------------------------------------------------------------- |
+| `proxmox.hosts`     | `list`             | `plugin_config_id`                          | List discovered guests with inline match suggestions                 |
+| `proxmox.hosts`     | `discover`         | `plugin_config_id`                          | Trigger discovery                                                    |
+| `proxmox.hosts`     | `test-connection`  | `plugin_config_id`                          | Test API connectivity                                                |
+| `proxmox.hosts`     | `match`            | `mapping_id`, `host_id`                     | Manual match                                                         |
+| `proxmox.hosts`     | `approve-match`    | `mapping_id`, `host_id`/`suggested_host_id` | Approve a suggested match (accepts `suggested_host_id` as fallback)  |
+| `proxmox.hosts`     | `unmatch`          | `mapping_id`                                | Remove match (destructive, confirmation dialog shows `proxmox_name`) |
+| `proxmox.hosts`     | `unmatched-guests` | (none)                                      | List unmatched guests sorted by name across all configs              |
+| `proxmox.host-info` | `get-info`         | `host_id`                                   | Get Proxmox info for host                                            |
 
 In the current shared-surface slice, `proxmox.hosts` is intentionally **not**
 rendered as the old selector-driven data table. The page currently exposes only

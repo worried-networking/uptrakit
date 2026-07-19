@@ -1484,8 +1484,14 @@ The controller-side `run_controller_side_fetch_releases` groups rows by effectiv
 Notification plugins extend the UI via shared surfaces. Each notification plugin owns its own `surfaces.rs` module with:
 
 - `surface_registrations()` -- returns UI manifests for channel management
-- `surface_actions()` -- returns the action catalogue
-- `handle_surface_action(ctx, surface_id, action_id, params)` -- dispatches actions
+- a `*_plugin_surfaces()` fn (wired via the `surfaces:` `declare_plugin!` arm) authoring the interaction
+  catalogue: each interaction is a `RegisteredInteraction::new(descriptor, delivery)` pairing a
+  `surfaces::InteractionDescriptor::new(...)` with an `InteractionDelivery::PluginHandled(shim)` (dispatched
+  to a plugin fn) or `InteractionDelivery::ControllerExecutor` (executed by controller-side code; requires a
+  `CONTROLLER_LOCAL_EXECUTOR_TABLE` row). `descriptor.transport` is derived by `RegisteredInteraction::new`
+  from the delivery and is never authored directly (ADR-0028).
+- `handle_surface_action(ctx, surface_id, action_id, params)` -- exact-id `(surface_id, interaction_id)`
+  dispatch, not the previous longest-prefix routing
 
 ### `handle_action` signature
 
@@ -1803,8 +1809,10 @@ Cross-reference: inline module documentation in `crates/plugins/infrastructure/c
 
 ## Action icons
 
-Plugin authors may declare a `lucide-svelte` icon alongside any `SurfaceActionDescriptor` label. Icons render through the shared `SurfaceActionButton`
-component and adapt to the surface they appear in (`'auto'` collapse in action bars; `'icon-only'` default in DataTable row actions).
+Plugin authors may declare a `lucide-svelte` icon alongside any interaction label — controller-side via
+`surfaces::InteractionDescriptor`, agent-side via `AgentInteraction::with_icon`. Icons render through the shared
+`SurfaceActionButton` component and adapt to the surface they appear in (`'auto'` collapse in action bars;
+`'icon-only'` default in DataTable row actions).
 
 ### Identifier scheme
 
@@ -1824,9 +1832,10 @@ required — the field is `Option<String>`.
 ### Authoring example
 
 ```rust
-SurfaceActionDescriptor::new("sync-host", "Sync")
+AgentInteraction::new("sync-host", "Sync")
     .with_icon("refresh-cw")
     .with_permission(Permission::UpdateHosts.to_string())
+    .placement(AgentInteractionPlacement::Row)
 ```
 
 ### Where icons render
@@ -1834,3 +1843,23 @@ SurfaceActionDescriptor::new("sync-host", "Sync")
 - **Action-bar buttons** use `labelDisplay='auto'` (the label collapses to icon-only on narrow containers, ≤ 28em).
 - **DataTable row-action buttons** use `labelDisplay='icon-only'` (default-hide when an icon is set).
 - **Workflow triggers** inherit `labelDisplay` from their parent context (action bar or row action).
+
+### Agent-side interaction authoring
+
+Agent-collected interactions (agent-ssh runtime built-ins, and infrastructure plugins' agent modules under
+`#[cfg(feature = "agent-infra")]`) are authored through one builder,
+`AgentInteraction` (`crates/plugins/infrastructure/core/src/agent_interaction.rs`), instead of hand-written
+`SurfaceActionDescriptor`s (ADR-0028). `AgentInteraction::new(action_id, label)` accepts the same
+`with_icon`/`with_permission`/`with_timeout`/`destructive`/`with_confirm_entity_field`/`with_row_visible_when`
+builder calls as the controller-side descriptor, plus `.placement(AgentInteractionPlacement)`, which the wire
+`InteractionDescriptor` cannot express: `Internal` (wizard steps, data loads, select-source feeders — not
+placed in the action bar or rows), `Primary` (surface action bar), or `Row` (per-row table action). Behind
+`agent-infra`, `.with_agent_handler(handler)` attaches the async handler an infrastructure plugin's
+`GuestExec::handle_service_extension_action` impl dispatches to via a table lookup keyed by `action_id`. A
+plugin declares its full list via the `agent_surfaces:` `declare_plugin!` arm (`fn() -> Vec<AgentInteraction>`).
+
+Because placement and other agent-only metadata cannot round-trip through the wire `InteractionDescriptor`,
+regressions in this path are caught by a golden-fixture wire-equivalence test that pins the `ssh-agent.hosts`
+surface's wire `SurfaceRegistration` JSON output and asserts the authoring path reproduces it exactly
+(interaction set, kinds, workflow steps, timeouts, permissions, `visible_when`, batch flags) — see
+`crates/core/agent-ssh-runtime/src/surface_runtime.rs`.

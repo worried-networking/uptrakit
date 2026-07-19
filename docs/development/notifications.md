@@ -142,22 +142,23 @@ declare_plugin!(WebhookPlugin, WebhookChannelConfig, "webhook", {
     config_model: ConfigModel::NotificationChannel,
     roles: [NotificationTransport],
     notification_transport: create_webhook_transport,
-    owned_surface_ids: &["notifications.webhook"],
     raw_settings_keys: &[],
-    surface_actions: {
-        actions: webhook_surface_actions,
-        handle_action: webhook_handle_surface_action,
-    },
     surfaces: {
-        registrations: webhook_surface_registrations,
+        provider_id: "plugin.webhook",
+        registrations: webhook_plugin_surfaces,
     },
 });
 ```
 
+`surfaces:` is the single source for both the surface/interaction registrations served to
+`SurfaceRegistry` and the exact-id dispatch map `PluginCatalog` derives for `PluginHandled`
+interactions (ADR-0028); there is no separate `surface_actions:`/`owned_surface_ids:` arm to keep in
+sync.
+
 The macro generates:
 
 - A `pub static DESCRIPTOR: PluginDescriptor` with all metadata, config ops, role creators,
-  surface action ops, and surface registrations.
+  and surface registrations.
 - An `impl PluginMeta for WebhookPlugin` that returns `PluginTypeId::from_static("webhook")`.
 - Compile-time assertions that the plugin struct implements all declared role traits.
 
@@ -340,7 +341,7 @@ fn create_slack_transport(
     ))
 }
 
-// Surface action and registration functions omitted for brevity -- see Step 5.
+// Interaction registration functions omitted for brevity -- see Step 5.
 
 declare_plugin!(SlackPlugin, SlackChannelConfig, "slack", {
     display_name: "Slack",
@@ -348,14 +349,10 @@ declare_plugin!(SlackPlugin, SlackChannelConfig, "slack", {
     config_model: ConfigModel::NotificationChannel,
     roles: [NotificationTransport],
     notification_transport: create_slack_transport,
-    owned_surface_ids: &["notifications.slack"],
     raw_settings_keys: &[],
-    surface_actions: {
-        actions: slack_surface_actions,
-        handle_action: slack_handle_surface_action,
-    },
     surfaces: {
-        registrations: slack_surface_registrations,
+        provider_id: "plugin.slack",
+        registrations: slack_plugin_surfaces,
     },
 });
 ```
@@ -394,36 +391,50 @@ descriptors.push(&uptrakit_notification_plugin_slack::DESCRIPTOR);
 The `PluginCatalog` reads each descriptor's `family`, `config_model`, and `roles` to
 automatically register the transport singleton, config ops, and surface action handlers.
 
-### 5. Add surface action handlers
+### 5. Add interaction handlers and register them
 
-Each notification plugin owns its own `surfaces.rs` module with a `handle_surface_action()` function
-that handles settings CRUD, channel listing, and callback handling. Create
+Each notification plugin owns its own `surfaces.rs` module with one `InteractionHandler` fn per
+`PluginHandled` interaction (ADR-0028), plus a `*_plugin_surfaces()` fn in `plugin.rs` that builds the
+`Vec<PluginSurfaceRegistration>` pairing each `surfaces::InteractionDescriptor` with its handler via
+`RegisteredInteraction::new(descriptor, InteractionDelivery::PluginHandled(handler))`. Create
 `crates/plugins/notifications/slack/src/surfaces.rs`:
 
 ```rust
-pub async fn handle_surface_action(
-    ctx: &SurfaceActionContext<'_>,
-    surface_id: &str,
-    action_id: &str,
+pub(crate) fn slack_list_handler<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
     params: serde_json::Value,
-) -> Result<serde_json::Value, String> {
-    match (surface_id, action_id) {
-        ("notifications.slack", "list") => {
-            // Use the shared list_channels helper from notification-plugin-core
-            list_channels(ctx, "slack", params).await
-        }
-        _ => Err(format!("unknown action '{action_id}' for surface '{surface_id}'")),
-    }
+) -> std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<serde_json::Value, SurfaceActionError>> + Send + 'a>,
+> {
+    // Use the shared list_channels helper from notification-plugin-core
+    Box::pin(async move { list_channels(ctx, "slack", &params).await })
 }
 ```
 
-The shared `list_channels` helper (in `uptrakit-notification-plugin-core`, behind the `extensions`
-feature) provides pagination and config flattening that all notification plugins share. See
-[Shared list_channels helper](#shared-list_channels-helper) for details.
+Then, in `plugin.rs`, wire it into the registration:
 
-The `declare_plugin!` macro's `surface_actions` section wires the handler into the descriptor. The
-handler receives a `descriptor::SurfaceActionContext` (with `db: &dyn Any`) and must downcast
-to `sea_orm::DatabaseConnection` before delegating to `surfaces::handle_surface_action`.
+```rust
+RegisteredInteraction::new(
+    surfaces::InteractionDescriptor::new(
+        surfaces::InteractionId::new("list").expect("literal interaction id is valid"),
+        surfaces::InteractionKind::DataLoad,
+        "List",
+        surfaces::InteractionTransport::ControllerLocal,
+    ),
+    InteractionDelivery::PluginHandled(crate::surfaces::slack_list_handler),
+)
+```
+
+`RegisteredInteraction::new` derives `descriptor.transport` from the delivery -- never author the
+transport field directly. The shared `list_channels` helper (in `uptrakit-notification-plugin-core`,
+behind the `extensions` feature) provides pagination and config flattening that all notification
+plugins share. See [Shared list_channels helper](#shared-list_channels-helper) for details.
+
+The `declare_plugin!` macro's `surfaces: { provider_id, registrations }` arm wires the `*_plugin_surfaces`
+fn into the descriptor; `PluginCatalog` derives the exact-id `(surface_id, interaction_id)` dispatch map
+from it at build time. `PluginSurfaceActionOps::handle_surface_action` receives a
+`descriptor::SurfaceActionContext` (with `db: &dyn Any`); handlers must downcast to
+`sea_orm::DatabaseConnection`.
 
 ### 6. Propagate the feature flag
 
@@ -633,10 +644,13 @@ permissions, see [Authentication and Authorization](../security/auth-and-authori
 | `GET`  | `/api/v1/notifications/log`                                  | `view_notifications`     | List delivery log (paginated) |
 | `POST` | `/api/v1/notifications/callback/{channel_type}/{channel_id}` | Public (plugin-verified) | Generic notification callback |
 
-The callback endpoint is not authenticated via JWT. It dispatches to the plugin's
-`handle_callback` surface action, which performs channel-type-specific verification
-(e.g. the Telegram plugin verifies the `X-Telegram-Bot-Api-Secret-Token` header against
-the channel's `webhook_secret` config field).
+The callback endpoint is not authenticated via JWT. It is not a surface interaction either: it resolves
+the transport for `channel_type` via `plugin_ops.transport(&channel_type_id)` and calls
+`NotificationTransport::handle_callback` directly (ADR-0028 / spec D2a), off the surface dispatch path.
+The default trait implementation returns a "callback not supported for channel type '...'" error;
+channel types that need a callback override it and perform channel-type-specific verification (e.g. the
+Telegram plugin verifies the `X-Telegram-Bot-Api-Secret-Token` header against the channel's
+`webhook_secret` config field).
 
 ## Webhook plugin details
 
@@ -858,26 +872,31 @@ without transport-specific branching in frontend route code.
 
 ### Architecture
 
-Each notification plugin owns its surface action definitions and handlers in a `surfaces.rs`
-module within the plugin crate. This keeps all transport-specific knowledge co-located with
-the plugin implementation. The `PluginCatalog` delegates to each registered plugin and
-aggregates the results through its surface-action dispatch methods. Surface actions are
-declared in the `declare_plugin!` macro's `surface_actions` section.
+Each notification plugin owns its interaction registrations and handlers in a `surfaces.rs` module
+within the plugin crate. This keeps all transport-specific knowledge co-located with the plugin
+implementation. `declare_plugin!`'s single `surfaces: { provider_id, registrations }` arm
+(ADR-0028) is the source for both: `registrations` is a `fn() -> Vec<PluginSurfaceRegistration>`
+where each interaction is a `RegisteredInteraction::new(descriptor, delivery)` pairing a
+`surfaces::InteractionDescriptor` with an `InteractionDelivery` -- `PluginHandled(shim)` for
+interactions the plugin executes (settings CRUD, channel listing), or `ControllerExecutor` for
+interactions executed entirely by controller-side code (channel `create`/`edit`/`test`/`delete`,
+allowlisted via `CONTROLLER_LOCAL_EXECUTOR_TABLE`). `PluginCatalog` derives an exact-id
+`(surface_id, interaction_id)` dispatch map from every plugin's `registrations()` call at build
+time -- not the longest-prefix routing an earlier revision of this doc described.
 
 Each plugin's `surfaces.rs` module exports:
 
-- `handle_surface_action(ctx, surface_id, action_id, params) -> Result<Value, String>` -- action
-  dispatch including settings CRUD, channel listing, and callback handling
+- `handle_surface_action(ctx, surface_id, action_id, params) -> Result<Value, String>` -- exact-id
+  action dispatch for `PluginHandled` interactions (settings CRUD, channel listing)
 
-The `declare_plugin!` macro uses:
+Callback handling (e.g. telegram's Bot API webhook) is not part of this dispatch path -- it is a
+`NotificationTransport::handle_callback` trait method invoked directly by the public notification
+callback route (see "Plugin surface action handlers" below).
 
-- `surface_actions.actions` -- returns action descriptors
-- `surface_actions.handle_action` -- async action handler
-- `surfaces.registrations` -- returns shared-surface registrations
-
-In the shared runtime, notification plugins additionally expose surface registrations via the
-`surfaces` section in `declare_plugin!` (`registrations: ...`). Those registrations are loaded into
-controller `SurfaceRegistry` at startup and rendered through `frontend/src/lib/components/surfaces/`.
+The registrations returned by `surfaces.registrations` are also what the shared runtime loads into
+controller `SurfaceRegistry` at startup and renders through `frontend/src/lib/components/surfaces/`
+-- registration and dispatch are now the same source, so they cannot drift apart (the historical
+`list-all-unmatched` incident ADR-0028 documents).
 
 ### Shared `list_channels` helper
 
@@ -922,9 +941,12 @@ via surface actions rather than dedicated REST endpoints:
 - `save_global_smtp` -- saves global SMTP defaults to the `global_settings` table using
   `upsert_global_setting_raw`
 
-**Callback handling** (telegram plugin): the `handle_callback` action verifies the
-`X-Telegram-Bot-Api-Secret-Token` header, parses `callback_query.data` as a UUID action
-token, and updates the notification log entry.
+**Callback handling** (telegram plugin): `handle_callback` is a `NotificationTransport` trait method
+(ADR-0028 / spec D2a), not a surface interaction — it is invoked off the surface dispatch path by the
+public, unauthenticated `/api/v1/notifications/callback/{channel_type}/{channel_id}` route, which resolves
+the transport by `channel_type` and calls the trait method directly. Telegram's override verifies the
+`X-Telegram-Bot-Api-Secret-Token` header, parses `callback_query.data` as a UUID action token, and updates
+the notification log entry.
 
 ### Raw-key settings store functions
 

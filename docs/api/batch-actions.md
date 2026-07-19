@@ -113,14 +113,12 @@ contracts used for single-item actions. Keep batch-style UX aligned with the sha
 patterns and explicit permission gates below rather than building bespoke selection UI per
 provider.
 
-Surface actions can be marked as batch-capable by calling `.batch()` on
-`SurfaceActionDescriptor` (which sets `batch_action: true` in the serialized definition).
-When multiple rows are selected in a DataTable, batch-capable actions appear in the batch
-action bar.
-
-The `ids` of all selected rows are passed in the action params. The surface action handler
-receives the full list and is responsible for processing each item. See
-[Extensions API](extensions.md) for the full surface action model.
+There is no `batch_action: true` flag on interaction descriptors -- it existed only on the
+deleted legacy `SurfaceActionDescriptor` type and was dead data on the controller (no consumer
+ever mapped it onto the wire contract). Selection-driven, multi-row invocation for
+provider-backed interactions is not currently modeled; today's batch selection UX is limited to
+the built-in surface tables described below. A future interaction-level batch contract is
+tracked separately, not part of the single-source registration model in ADR-0028.
 
 ## Frontend Integration
 
@@ -135,25 +133,26 @@ component props and the page integration pattern, and
 
 ### Shared surface tables
 
-When surface-backed actions declare `batch_action: true`, `SurfaceTable.svelte` automatically
-adds a checkbox column and renders `BatchActionBar` with the batch-capable actions. The
-action is invoked with an `ids` array in the params.
+Surface-backed batch selection is currently expressed only by the built-in surface tables listed
+above (services, hosts, etc.) -- `SurfaceTable.svelte` does not add a checkbox column or
+`BatchActionBar` on its own. Neither `RegisteredInteraction`/`InteractionDescriptor` (controller-side)
+nor `AgentInteraction` (agent-side authoring) carries a batch flag; it was dropped as dead data --
+no consumer ever mapped it onto the wire contract (ADR-0028).
 
 ## Key Files
 
-| File                                                         | Purpose                                                       |
-| ------------------------------------------------------------ | ------------------------------------------------------------- |
-| `crates/shared/web-api-types/src/batch_actions.rs`           | `BatchActionRequest`, `BatchActionResponse`, and validation   |
-| `crates/ui/web-api/src/routes/services.rs`                   | `batch_services` handler                                      |
-| `crates/ui/web-api/src/routes/system_services.rs`            | `batch_system_services` handler                               |
-| `crates/ui/web-api/src/routes/software_items/mod.rs`         | `batch_software_items` handler                                |
-| `crates/ui/web-api/src/routes/hosts.rs`                      | `batch_hosts` handler                                         |
-| `crates/ui/web-api/src/routes/autodiscovery.rs`              | `batch_autodiscovery_ignores` handler                         |
-| `crates/ui/web-api/src/routes/plugin_configs.rs`             | `batch_plugin_configs` handler                                |
-| `crates/ui/web-api/src/routes/host_tags.rs`                  | `batch_host_tags` handler                                     |
-| `crates/plugins/infrastructure/core/src/legacy_extension.rs` | Legacy compatibility schema carrying the `batch_action` field |
-| `frontend/src/lib/types.ts`                                  | `BatchActionRequest`, `BatchActionResponse` TypeScript types  |
-| `frontend/src/lib/api.ts`                                    | `batchServices`, `batchHosts`, etc. API client functions      |
-| `frontend/src/lib/components/BatchActionBar.svelte`          | Shared batch action toolbar                                   |
-| `frontend/src/lib/components/BatchResultDialog.svelte`       | Shared partial-success results dialog                         |
-| `frontend/src/lib/components/surfaces/SurfaceTable.svelte`   | Shared surface table with batch support                       |
+| File                                                       | Purpose                                                      |
+| ---------------------------------------------------------- | ------------------------------------------------------------ |
+| `crates/shared/web-api-types/src/batch_actions.rs`         | `BatchActionRequest`, `BatchActionResponse`, and validation  |
+| `crates/ui/web-api/src/routes/services.rs`                 | `batch_services` handler                                     |
+| `crates/ui/web-api/src/routes/system_services.rs`          | `batch_system_services` handler                              |
+| `crates/ui/web-api/src/routes/software_items/mod.rs`       | `batch_software_items` handler                               |
+| `crates/ui/web-api/src/routes/hosts.rs`                    | `batch_hosts` handler                                        |
+| `crates/ui/web-api/src/routes/autodiscovery.rs`            | `batch_autodiscovery_ignores` handler                        |
+| `crates/ui/web-api/src/routes/plugin_configs.rs`           | `batch_plugin_configs` handler                               |
+| `crates/ui/web-api/src/routes/host_tags.rs`                | `batch_host_tags` handler                                    |
+| `frontend/src/lib/types.ts`                                | `BatchActionRequest`, `BatchActionResponse` TypeScript types |
+| `frontend/src/lib/api.ts`                                  | `batchServices`, `batchHosts`, etc. API client functions     |
+| `frontend/src/lib/components/BatchActionBar.svelte`        | Shared batch action toolbar                                  |
+| `frontend/src/lib/components/BatchResultDialog.svelte`     | Shared partial-success results dialog                        |
+| `frontend/src/lib/components/surfaces/SurfaceTable.svelte` | Shared surface table with batch support                      |

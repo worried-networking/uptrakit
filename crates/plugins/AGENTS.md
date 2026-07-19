@@ -12,7 +12,7 @@ to it rather than re-deriving its content here. Related docs: [plugin-system.md]
 
 Every plugin crate exports a `DESCRIPTOR: PluginDescriptor` static via the `declare_plugin!` macro
 (`crates/plugins/infrastructure/core/src/macros.rs`). The descriptor carries identity (`type_id`, `display_name`,
-`family`, `scope`), config operations, role creators, capabilities, and optional sections (surface actions,
+`family`, `scope`), config operations, role creators, capabilities, and optional sections (surfaces,
 type settings, config test, sudo commands, migrations). Every compiled-in plugin must be listed in
 `all_descriptors()` in `uptrakit-plugin-infrastructure-registry` (`crates/plugins/infrastructure/registry/src/registry.rs`)
 -- this is the single authoritative list the `PluginCatalog` dispatches against.
@@ -24,6 +24,35 @@ Plugins implement narrow role traits rather than one monolithic `Plugin` trait. 
 implements all of them; check the descriptor's declared roles. Most software plugins implement
 `VersionDetector` + `ReleaseFetcher` + `UpdateExecutor` together; discovery-only, fetch-only, and
 enhancement-only plugins are valid partial-role configurations.
+
+## Interaction registration (ADR-0028)
+
+A plugin's `surfaces:` `declare_plugin!` arm (`fn() -> Vec<PluginSurfaceRegistration>`) is the **single**
+source for both what `SurfaceRegistry` serves and how the catalog dispatches requests -- there is no
+separate action-catalogue or routing-table arm to keep in sync. Rules:
+
+- Author each interaction as `RegisteredInteraction::new(descriptor, delivery)`
+  (`crates/plugins/infrastructure/core/src/registration.rs`). Never set `descriptor.transport` yourself --
+  `RegisteredInteraction::new` derives and overwrites it from `delivery`.
+- `InteractionDelivery::PluginHandled(handler)` dispatches to a plugin `InteractionHandler` fn pointer;
+  `InteractionDelivery::ControllerExecutor` declares an interaction executed entirely by controller-side
+  code, with no plugin handler.
+- A `ControllerExecutor` interaction **requires** a matching `(surface_id, interaction_id)` row in
+  `CONTROLLER_LOCAL_EXECUTOR_TABLE` (`crates/ui/surface-proxy/src/proxy/controller_local.rs`) --
+  `crates/ui/web-api/tests/interaction_executor_guard.rs` enforces this bidirectionally and fails the build
+  if the table and the catalog's registrations disagree in either direction.
+- Dispatch is exact-id `(surface_id, interaction_id)`, not prefix-matched. The same plugin may
+  re-register the same `surface_id` across calls; a different plugin claiming an already-used `surface_id`
+  is a catalog-construction error.
+- Agent-side interactions (agent-ssh runtime, infrastructure plugins' `#[cfg(feature = "agent-infra")]`
+  modules) use the separate `AgentInteraction` builder
+  (`crates/plugins/infrastructure/core/src/agent_interaction.rs`) via the `agent_surfaces:`
+  `declare_plugin!` arm (`fn() -> Vec<AgentInteraction>`) -- placement (`AgentInteractionPlacement`) and
+  the agent handler live there, not on `RegisteredInteraction`.
+
+See [Unified plugin registration model](../../docs/development/surfaces.md#unified-plugin-registration-model)
+for the full model and [ADR-0028](../../docs/adr/0028-single-source-plugin-interaction-registration.md)
+for the rationale.
 
 ## Mandatory shared helpers (`infrastructure-core`)
 
