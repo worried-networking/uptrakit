@@ -19,10 +19,6 @@ skip = "integration-test OCSP responder stub; infrastructure only, no security e
 # ---------------------------------------------------------------------------
 
 [[entries]]
-site = "uptrakit_web_api::router::invoke_surface_interaction"
-action = "surface_action.invoke"
-
-[[entries]]
 site = "uptrakit_web_api::router::manual_register_client"
 skip = "router:: alias for routes::oauth::clients_api::manual_register_client; audit emitted by handler"
 
@@ -618,6 +614,14 @@ action = "software_item.update_host_assignment"
 [[entries]]
 site = "uptrakit_web_api::routes::software_items::crud::update_software_item"
 action = "software_item.update"
+
+# ---------------------------------------------------------------------------
+# Surfaces
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::surfaces::invoke_surface_interaction"
+action = "surface_action.invoke"
 
 # ---------------------------------------------------------------------------
 # System enrollment tokens
