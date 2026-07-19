@@ -1,6 +1,4 @@
-// All helpers in this module are consumed only by sibling modules (`notifications.rs`,
-// `proxmox_add_config.rs`) which are themselves pending wiring via `local_executor.rs`.
-// Remove this comment once `local_executor.rs` is wired in.
+// Parameter-extraction helpers consumed by the `notifications.rs` controller-local gate.
 
 use uuid::Uuid;
 
@@ -75,48 +73,11 @@ pub(super) fn strict_optional_bool_param(
     Ok(Some(value))
 }
 
-pub(super) fn parse_csv_array_or_string_array_param(
-    params: &serde_json::Map<String, serde_json::Value>,
-    key: &str,
-) -> Result<Vec<String>, String> {
-    let Some(value) = params.get(key) else {
-        return Ok(Vec::new());
-    };
-    if value.is_null() {
-        return Ok(Vec::new());
-    }
-
-    match value {
-        serde_json::Value::String(text) => Ok(text
-            .split(',')
-            .map(str::trim)
-            .filter(|entry| !entry.is_empty())
-            .map(str::to_string)
-            .collect()),
-        serde_json::Value::Array(values) => {
-            let mut parsed = Vec::new();
-            for value in values {
-                let Some(value) = value.as_str() else {
-                    return Err(format!("field `{key}` array entries must be strings"));
-                };
-                let value = value.trim();
-                if !value.is_empty() {
-                    parsed.push(value.to_string());
-                }
-            }
-            Ok(parsed)
-        }
-        _ => Err(format!(
-            "field `{key}` must be either a csv string or an array of strings"
-        )),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        optional_string_param, parse_csv_array_or_string_array_param, required_string_param,
-        required_uuid_param, strict_bool_param_with_default, strict_optional_bool_param,
+        optional_string_param, required_string_param, required_uuid_param,
+        strict_bool_param_with_default, strict_optional_bool_param,
     };
 
     #[test]
@@ -179,24 +140,6 @@ mod tests {
         assert_eq!(
             strict_optional_bool_param(optional, "enabled").expect_err("string should fail"),
             "field `enabled` must be a boolean"
-        );
-    }
-
-    #[test]
-    fn parse_csv_array_or_string_array_param_normalizes_csv_and_arrays() {
-        let csv = serde_json::json!({ "node_filter": " node-a,, node-b " });
-        let csv = csv.as_object().expect("object");
-        assert_eq!(
-            parse_csv_array_or_string_array_param(csv, "node_filter").expect("csv should parse"),
-            vec!["node-a".to_string(), "node-b".to_string()]
-        );
-
-        let array = serde_json::json!({ "node_filter": [" node-a ", "", "node-b"] });
-        let array = array.as_object().expect("object");
-        assert_eq!(
-            parse_csv_array_or_string_array_param(array, "node_filter")
-                .expect("array should parse"),
-            vec!["node-a".to_string(), "node-b".to_string()]
         );
     }
 }

@@ -12,12 +12,10 @@ use super::controller_local::{
     allowlisted_docker_switch_tag_controller_local_action,
     allowlisted_notification_channel_controller_local_action,
     allowlisted_notification_settings_controller_local_action,
-    allowlisted_proxmox_add_config_controller_local_action, allowlisted_proxmox_provider,
     allowlisted_proxmox_update_protection_controller_local_action,
     emit_docker_switch_tag_audit_event, emit_notification_channel_audit_event,
-    emit_notification_settings_audit_event, emit_proxmox_add_config_audit_event,
-    emit_proxmox_update_protection_audit_event, execute_allowlisted_notification_channel_action,
-    execute_allowlisted_proxmox_add_config_action, map_surface_action_error,
+    emit_notification_settings_audit_event, emit_proxmox_update_protection_audit_event,
+    execute_allowlisted_notification_channel_action, map_surface_action_error,
     notification_channel_type_for_surface_id,
 };
 use super::{AppStateSurfaceActionController, SurfaceProxyError};
@@ -200,40 +198,6 @@ impl SurfaceLocalActionExecutor for PluginSurfaceLocalExecutor {
                 tenant_id,
                 resolved.interaction.interaction_id.as_str(),
                 channel_type,
-                &request.params,
-                result.as_ref(),
-            );
-            return result;
-        }
-
-        // --- Tier 1: Proxmox add-config (db + plugin_ops required) ---
-        if allowlisted_proxmox_provider(resolved.provider_id.as_str())
-            && allowlisted_proxmox_add_config_controller_local_action(
-                resolved.descriptor.surface_id.as_str(),
-                resolved.interaction.interaction_id.as_str(),
-            )
-        {
-            let db = self.action_context_db.as_deref().ok_or_else(|| {
-                SurfaceProxyError::SchemaValidationFailed(
-                    "internal error: expected DatabaseConnection".to_string(),
-                )
-            })?;
-            let plugin_ops = self.plugin_ops.as_deref().ok_or_else(|| {
-                SurfaceProxyError::SchemaValidationFailed(
-                    "internal error: expected PluginOps".to_string(),
-                )
-            })?;
-            let tenant_db = uptrakit_web_api_queries::TenantDb::new(db.clone(), tenant_id);
-            let result = execute_allowlisted_proxmox_add_config_action(
-                &tenant_db,
-                plugin_ops,
-                &request.params,
-            )
-            .await;
-            emit_proxmox_add_config_audit_event(
-                self.audit_emitter.as_ref(),
-                caller_user_id,
-                tenant_id,
                 &request.params,
                 result.as_ref(),
             );

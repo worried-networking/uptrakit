@@ -6,7 +6,6 @@ mod docker;
 mod notification_settings;
 mod notifications;
 mod params;
-mod proxmox_add_config;
 mod proxmox_update_protection;
 
 pub(crate) use docker::{
@@ -24,10 +23,6 @@ pub(crate) use notifications::{
 #[cfg(test)]
 pub(crate) use notifications::{
     build_notification_channel_create_request, build_notification_channel_update_request,
-};
-pub(crate) use proxmox_add_config::{
-    allowlisted_proxmox_add_config_controller_local_action, allowlisted_proxmox_provider,
-    emit_proxmox_add_config_audit_event, execute_allowlisted_proxmox_add_config_action,
 };
 pub(crate) use proxmox_update_protection::{
     allowlisted_proxmox_update_protection_controller_local_action,

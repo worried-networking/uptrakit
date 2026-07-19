@@ -10,7 +10,6 @@ use super::tenant_id;
 use uptrakit_shared_db::entity::audit_log;
 
 mod notifications;
-mod proxmox;
 
 mod docker;
 #[cfg(any(feature = "notifications-email", feature = "notifications-telegram"))]
