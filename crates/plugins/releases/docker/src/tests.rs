@@ -129,10 +129,10 @@ fn descriptor_capabilities_includes_detect_host_compatibility() {
 
 #[test]
 fn descriptor_has_plugin_surface_registrations() {
-    let registrations = (crate::plugin::DESCRIPTOR
-        .surfaces
-        .expect("surfaces are registered")
-        .registrations)();
+    let registrations = crate::plugin::docker_plugin_surfaces()
+        .iter()
+        .map(|r| r.to_wire("plugin.releases_docker"))
+        .collect::<Vec<_>>();
     assert!(!registrations.is_empty());
     assert!(registrations.iter().all(|registration| {
         registration.provider.provider_kind
@@ -152,10 +152,10 @@ fn descriptor_has_plugin_surface_registrations() {
 
 #[test]
 fn docker_item_host_actions_surface_keeps_form_preload_contract() {
-    let registrations = (crate::plugin::DESCRIPTOR
-        .surfaces
-        .expect("surfaces are registered")
-        .registrations)();
+    let registrations = crate::plugin::docker_plugin_surfaces()
+        .iter()
+        .map(|r| r.to_wire("plugin.releases_docker"))
+        .collect::<Vec<_>>();
     let docker_surface = registrations
         .iter()
         .flat_map(|registration| registration.surfaces.iter())
@@ -240,10 +240,10 @@ fn docker_item_host_actions_surface_keeps_form_preload_contract() {
 
 #[test]
 fn docker_surface_registration_capabilities_cover_contract() {
-    let registrations = (crate::plugin::DESCRIPTOR
-        .surfaces
-        .expect("surfaces are registered")
-        .registrations)();
+    let registrations = crate::plugin::docker_plugin_surfaces()
+        .iter()
+        .map(|r| r.to_wire("plugin.releases_docker"))
+        .collect::<Vec<_>>();
     let registration = registrations
         .iter()
         .find(|registration| {
@@ -1798,5 +1798,26 @@ async fn discover_software_falls_back_to_index_digest_when_platform_registry_fai
     assert_eq!(
         target.config_override,
         Some(serde_json::json!({"platform": "linux/amd64"}))
+    );
+}
+
+#[test]
+fn docker_interactions_are_all_plugin_handled() {
+    use uptrakit_plugin_infrastructure_core::InteractionDeliveryKind;
+
+    let kinds: Vec<InteractionDeliveryKind> = crate::plugin::docker_plugin_surfaces()
+        .iter()
+        .flat_map(|registration| registration.surfaces.iter())
+        .flat_map(|surface| surface.interactions.iter())
+        .map(|interaction| interaction.delivery().kind())
+        .collect();
+
+    assert_eq!(
+        kinds,
+        vec![
+            InteractionDeliveryKind::PluginHandled,
+            InteractionDeliveryKind::PluginHandled,
+        ],
+        "both docker interactions must be plugin-handled (Tier 2/3), never controller-executor"
     );
 }

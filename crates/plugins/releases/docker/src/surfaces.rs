@@ -18,11 +18,7 @@ use std::pin::Pin;
 
 use serde::de::DeserializeOwned;
 
-use uptrakit_plugin_infrastructure_core::{
-    FormFieldDescriptor, FormFieldType, SurfaceActionContext, SurfaceActionDescriptor,
-    SurfaceActionError, SurfaceActionUi, SurfaceFormDescriptor,
-};
-use uptrakit_shared_types::Permission;
+use uptrakit_plugin_infrastructure_core::{SurfaceActionContext, SurfaceActionError};
 
 use crate::image_ref::{ImageRef, validate_identifier};
 
@@ -63,100 +59,34 @@ fn extract_container_suffix(id: &str) -> Option<&str> {
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
-/// Returns the surface action library for the Docker plugin.
-///
-/// All action IDs referenced by shared-surface interaction definitions must be
-/// defined here.
-pub fn surface_actions() -> Vec<SurfaceActionDescriptor> {
-    vec![switch_tag_action(), get_current_tag_action()]
-}
-
-// ── Action definitions ───────────────────────────────────────────────────────
-
-/// Form action: switch the Docker image tag for a specific host assignment.
-fn switch_tag_action() -> SurfaceActionDescriptor {
-    SurfaceActionDescriptor::new("switch-tag", "Switch Tag")
-        .with_permission(Permission::UpdateSoftware)
-        .with_ui(SurfaceActionUi::Form(
-            SurfaceFormDescriptor::new(vec![
-                FormFieldDescriptor::new("software_item_id", "")
-                    .with_type(FormFieldType::Hidden)
-                    .required(),
-                FormFieldDescriptor::new("host_id", "")
-                    .with_type(FormFieldType::Hidden)
-                    .required(),
-                FormFieldDescriptor::new("new_image_ref", "New Image Reference")
-                    .required()
-                    .with_placeholder("ghcr.io/example/app:26.2.6")
-                    .with_help_text(
-                        "Enter the full image reference with the new tag. \
-                         The container name is preserved automatically.",
-                    ),
-            ])
-            .with_pre_load_action("get-current-tag"),
-        ))
-}
-
-/// Pre-load helper: returns the current image reference for form pre-population.
-///
-/// Not shown as a button in the UI — invoked automatically when the Switch Tag
-/// form opens to populate the `new_image_ref` field with the current value.
-fn get_current_tag_action() -> SurfaceActionDescriptor {
-    SurfaceActionDescriptor::new("get-current-tag", "").with_permission(Permission::UpdateSoftware)
-}
-
-// ── Surface action handler ───────────────────────────────────────────────────
-
-/// Dispatch a surface action for the Docker plugin.
-///
-/// Routes based on `(surface_id, action_id)` to the appropriate handler.
-///
-/// Surface handlers receive a typed `SurfaceActionContext` and must return
-/// typed `SurfaceActionError` values at the boundary.
-pub fn handle_surface_action<'a>(
+/// Dispatch shim for the `switch-tag` interaction (exact-id dispatch map entry).
+pub(crate) fn docker_switch_tag_handler<'a>(
     ctx: &'a SurfaceActionContext<'a>,
-    surface_id: &'a str,
-    action_id: &'a str,
     params: serde_json::Value,
 ) -> Pin<
     Box<
         dyn Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>> + Send + 'a,
     >,
 > {
-    Box::pin(handle_surface_action_inner(
-        ctx, surface_id, action_id, params,
-    ))
+    Box::pin(async move {
+        let request = parse_action_params::<DockerSwitchTagRequest>(params, "switch-tag")?;
+        handle_switch_tag(ctx, request).await
+    })
 }
 
-#[tracing::instrument(skip_all, fields(surface_id, action_id))]
-async fn handle_surface_action_inner(
-    ctx: &SurfaceActionContext<'_>,
-    surface_id: &str,
-    action_id: &str,
+/// Dispatch shim for the `get-current-tag` interaction (exact-id dispatch map entry).
+pub(crate) fn docker_get_current_tag_handler<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
     params: serde_json::Value,
-) -> std::result::Result<serde_json::Value, SurfaceActionError> {
-    tracing::debug!("dispatching Docker surface action");
-
-    let result = match (surface_id, action_id) {
-        ("docker.item-host-actions", "switch-tag") => {
-            let request = parse_action_params::<DockerSwitchTagRequest>(params, action_id)?;
-            handle_switch_tag(ctx, request).await
-        }
-        ("docker.item-host-actions", "get-current-tag") => {
-            let request = parse_action_params::<DockerItemHostRequest>(params, action_id)?;
-            handle_get_current_tag(ctx, request).await
-        }
-        _ => Err(SurfaceActionError::InvalidInput(format!(
-            "unknown action '{action_id}' for surface '{surface_id}'"
-        ))),
-    };
-
-    match &result {
-        Ok(_) => tracing::debug!("Docker surface action succeeded"),
-        Err(e) => tracing::warn!(error = %e, "Docker surface action failed"),
-    }
-
-    result
+) -> Pin<
+    Box<
+        dyn Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>> + Send + 'a,
+    >,
+> {
+    Box::pin(async move {
+        let request = parse_action_params::<DockerItemHostRequest>(params, "get-current-tag")?;
+        handle_get_current_tag(ctx, request).await
+    })
 }
 
 // ── Action handlers ──────────────────────────────────────────────────────────
@@ -338,36 +268,53 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uptrakit_plugin_infrastructure_core::InteractionDeliveryKind;
+
+    use crate::plugin::docker_plugin_surfaces;
 
     #[test]
-    fn surface_actions_returns_two() {
-        let actions = surface_actions();
-        assert_eq!(actions.len(), 2);
-        let ids: Vec<&str> = actions.iter().map(|a| a.action_id.as_str()).collect();
-        assert!(ids.contains(&"switch-tag"));
-        assert!(ids.contains(&"get-current-tag"));
-    }
-
-    #[test]
-    fn switch_tag_action_has_form_with_pre_load() {
-        let action = switch_tag_action();
-        assert!(action.ui.is_some());
-        if let Some(SurfaceActionUi::Form(form)) = &action.ui {
-            assert_eq!(form.pre_load_action.as_deref(), Some("get-current-tag"));
-            // Hidden fields present
-            let keys: Vec<&str> = form.fields.iter().map(|f| f.key.as_str()).collect();
-            assert!(keys.contains(&"software_item_id"));
-            assert!(keys.contains(&"host_id"));
-            assert!(keys.contains(&"new_image_ref"));
-        } else {
-            panic!("expected Form UI");
+    fn docker_plugin_surfaces_pair_every_interaction_with_plugin_handled_delivery() {
+        let registrations = docker_plugin_surfaces();
+        let mut seen: Vec<(String, String, InteractionDeliveryKind)> = Vec::new();
+        for registration in &registrations {
+            for surface in &registration.surfaces {
+                for interaction in &surface.interactions {
+                    assert_eq!(
+                        interaction.descriptor().transport,
+                        uptrakit_plugin_infrastructure_core::surfaces::InteractionTransport::ControllerLocal
+                    );
+                    seen.push((
+                        surface.descriptor.surface_id.as_str().to_string(),
+                        interaction.descriptor().interaction_id.as_str().to_string(),
+                        interaction.delivery().kind(),
+                    ));
+                }
+            }
         }
-    }
-
-    #[test]
-    fn get_current_tag_action_has_no_ui() {
-        let action = get_current_tag_action();
-        assert!(action.ui.is_none(), "pre-load helper must have no UI");
+        let expected: Vec<(&str, &str, InteractionDeliveryKind)> = vec![
+            (
+                "docker.item-host-actions",
+                "switch-tag",
+                InteractionDeliveryKind::PluginHandled,
+            ),
+            (
+                "docker.item-host-actions",
+                "get-current-tag",
+                InteractionDeliveryKind::PluginHandled,
+            ),
+        ];
+        for (surface, id, kind) in &expected {
+            assert!(
+                seen.iter()
+                    .any(|(s, i, k)| s == surface && i == id && k == kind),
+                "missing ({surface}, {id}, {kind:?})"
+            );
+        }
+        assert_eq!(
+            seen.len(),
+            expected.len(),
+            "unexpected total interaction count across docker_plugin_surfaces()"
+        );
     }
 
     #[test]
