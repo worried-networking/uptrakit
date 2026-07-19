@@ -57,20 +57,12 @@ macro_rules! declare_plugin {
                 create: $ive_create_fn:expr,
                 host_requirements: $ive_hr:expr $(,)?
             } )?
-            $(, owned_surface_ids: $surface_action_ids:expr )?
             $(, raw_settings_keys: $raw_keys:expr )?
             $(, global_provider_consumers: [ $( $global_provider_consumer:expr ),+ $(,)? ] )?
             $(, sudo: $sudo_fn:expr )?
-            $(, surface_actions: {
-                actions: $surface_actions_fn:expr,
-                handle_action: $surface_handler_fn:expr $(,)?
-            } )?
             $(, surfaces: {
-                registrations: $surface_registrations_fn:expr $(,)?
-            } )?
-            $(, unified_surfaces: {
-                provider_id: $unified_provider_id:expr,
-                registrations: $unified_registrations_fn:expr $(,)?
+                provider_id: $provider_id:expr,
+                registrations: $registrations_fn:expr $(,)?
             } )?
             $(, migrations: $migrations_fn:expr )?
             $(, agent_migrations: $agent_migrations_fn:expr )?
@@ -183,22 +175,10 @@ macro_rules! declare_plugin {
             $crate::__declare_type_settings_static!($config, $ts_marker);
         )?
 
-        // Surface action library static — $surface_action_ids drives this repetition
-        $(
-            $crate::__declare_surface_action_library_static!(
-                $surface_action_ids, $surface_actions_fn, $surface_handler_fn
-            );
-        )?
-
-        // Surface ops static — $surface_registrations_fn drives this repetition
-        $(
-            $crate::__declare_surface_ops_static!($surface_registrations_fn);
-        )?
-
-        // Unified surface ops static — $unified_registrations_fn drives this repetition
+        // Surface ops static — $registrations_fn drives this repetition
         $(
             $crate::__declare_unified_surface_ops_static!(
-                $unified_provider_id, $unified_registrations_fn
+                $provider_id, $registrations_fn
             );
         )?
 
@@ -304,14 +284,8 @@ macro_rules! declare_plugin {
                 )?
                 rc
             },
-            surface_actions: $crate::__optional_static_ref!(surface_actions
-                $(, surface_actions: { owned_surface_ids: $surface_action_ids } )?
-            ),
             surfaces: $crate::__optional_static_ref!(surfaces
-                $(, surfaces: { registrations: $surface_registrations_fn } )?
-            ),
-            unified_surfaces: $crate::__optional_static_ref!(unified_surfaces
-                $(, unified_surfaces: { provider_id: $unified_provider_id } )?
+                $(, surfaces: { provider_id: $provider_id } )?
             ),
             type_settings: $crate::__optional_static_ref!(type_settings
                 $(, type_settings: $ts_marker )?
@@ -816,31 +790,6 @@ macro_rules! __declare_type_settings_static {
 
 #[macro_export]
 #[doc(hidden)]
-macro_rules! __declare_surface_action_library_static {
-    ($surface_action_ids:expr, $actions_fn:expr, $handler_fn:expr) => {
-        #[doc(hidden)]
-        static __PLUGIN_SURFACE_ACTIONS: $crate::SurfaceActionLibrary =
-            $crate::SurfaceActionLibrary {
-                actions: $actions_fn,
-                owned_surface_ids: $surface_action_ids,
-                handle_action: $handler_fn,
-            };
-    };
-}
-
-#[macro_export]
-#[doc(hidden)]
-macro_rules! __declare_surface_ops_static {
-    ($registrations_fn:expr) => {
-        #[doc(hidden)]
-        static __PLUGIN_SURFACES: $crate::SurfaceRegistrationOps = $crate::SurfaceRegistrationOps {
-            registrations: $registrations_fn,
-        };
-    };
-}
-
-#[macro_export]
-#[doc(hidden)]
 macro_rules! __declare_unified_surface_ops_static {
     ($provider_id:expr, $registrations_fn:expr) => {
         #[doc(hidden)]
@@ -868,22 +817,10 @@ macro_rules! __optional_static_ref {
     (type_settings) => {
         None
     };
-    (surface_actions, surface_actions: { owned_surface_ids: $surface_action_ids:expr }) => {
-        Some(&__PLUGIN_SURFACE_ACTIONS)
-    };
-    (surface_actions) => {
-        None
-    };
-    (surfaces, surfaces: { registrations: $surface_registrations_fn:expr }) => {
-        Some(&__PLUGIN_SURFACES)
-    };
-    (surfaces) => {
-        None
-    };
-    (unified_surfaces, unified_surfaces: { provider_id: $unified_provider_id:expr }) => {
+    (surfaces, surfaces: { provider_id: $provider_id:expr }) => {
         Some(&__PLUGIN_UNIFIED_SURFACES)
     };
-    (unified_surfaces) => {
+    (surfaces) => {
         None
     };
 }

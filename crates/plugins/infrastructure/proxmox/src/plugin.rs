@@ -1385,7 +1385,7 @@ declare_plugin!(ProxmoxPlugin, ProxmoxConfig, "infrastructure_proxmox", {
             uptrakit_shared_types::PluginCapability::GuestExec,
         ],
     },
-    unified_surfaces: {
+    surfaces: {
         provider_id: "plugin.infrastructure_proxmox",
         registrations: descriptor_plugin_surfaces,
     },
@@ -1499,11 +1499,11 @@ mod tests {
     #[test]
     fn descriptor_has_plugin_surface_registrations() {
         assert!(
-            DESCRIPTOR.unified_surfaces.is_some(),
+            DESCRIPTOR.surfaces.is_some(),
             "proxmox should declare unified surface registrations on the descriptor"
         );
         // Content assertions below exercise the unguarded builder directly
-        // (not `DESCRIPTOR.unified_surfaces.registrations`, which is gated
+        // (not `DESCRIPTOR.surfaces.registrations`, which is gated
         // empty under `agent-infra` — see
         // `unified_registrations_pair_every_interaction_with_plugin_handled_delivery`
         // for that behavior).
@@ -2062,11 +2062,6 @@ mod tests {
             !seen.iter().any(|(_, id, _)| id == "add-config"),
             "add-config never had a registered interaction and must not reappear"
         );
-
-        // Migration left no legacy arm behind — a leftover `surfaces:` or
-        // `surface_actions:` block would double-register on the wire.
-        assert!(DESCRIPTOR.surface_actions.is_none());
-        assert!(DESCRIPTOR.surfaces.is_none());
     }
 
     /// Helper to create a test runtime.

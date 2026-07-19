@@ -605,7 +605,7 @@ declare_plugin!(TelegramPlugin, TelegramChannelConfig, "telegram", {
     roles: [NotificationTransport],
     notification_transport: create_telegram_transport,
     raw_settings_keys: &["global_telegram.bot_token"],
-    unified_surfaces: {
+    surfaces: {
         provider_id: "plugin.telegram",
         registrations: telegram_plugin_surfaces,
     },
@@ -718,10 +718,6 @@ mod tests {
             expected.len(),
             "unexpected total interaction count across telegram_plugin_surfaces()"
         );
-        // Migration left no legacy arm behind — a leftover `surfaces:` or
-        // `surface_actions:` block would double-register on the wire.
-        assert!(DESCRIPTOR.surface_actions.is_none());
-        assert!(DESCRIPTOR.surfaces.is_none());
     }
 
     #[test]

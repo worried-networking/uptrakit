@@ -111,16 +111,14 @@ pub use descriptor::ControllerRuntime;
 #[cfg(feature = "migrations")]
 pub use descriptor::PluginTableDescriptor;
 pub use descriptor::{
-    ApiSubmitDescriptor, CatalogConfig, ConfigModel, ConfigOps, ConfigTestOps,
-    CreateControllerProtectionFn, CreateEnhancementFn, CreateInstalledVersionEnricherFn,
-    CreateReleaseFetcherFn, CreateRoleFn, CreateTransportFn, GlobalProviderConsumerDecl,
-    GlobalProviderLookup, InstalledVersionEnricherSlot, InstanceConfigOps, PluginDescriptor,
-    PluginFamily, PluginScope, PluginSurfaceRegistrationOps, ReleaseFetcherSlot, RoleCreators,
-    RoleSlot, SurfaceActionContext, SurfaceActionDescriptor, SurfaceActionError,
-    SurfaceActionHandler, SurfaceActionLibrary, SurfaceActionUi, SurfaceFormDescriptor,
-    SurfaceManifest, SurfacePlacement, SurfaceRegistrationOps, SurfaceRowCondition,
-    SurfaceRowVisibleWhen, SurfaceTableColumn, SurfaceTargeting, SurfaceUiDefinition,
-    SurfaceWorkflowStep, TypeSettingsOps,
+    CatalogConfig, ConfigModel, ConfigOps, ConfigTestOps, CreateControllerProtectionFn,
+    CreateEnhancementFn, CreateInstalledVersionEnricherFn, CreateReleaseFetcherFn, CreateRoleFn,
+    CreateTransportFn, GlobalProviderConsumerDecl, GlobalProviderLookup,
+    InstalledVersionEnricherSlot, InstanceConfigOps, PluginDescriptor, PluginFamily, PluginScope,
+    PluginSurfaceRegistrationOps, ReleaseFetcherSlot, RoleCreators, RoleSlot, SurfaceActionContext,
+    SurfaceActionError, SurfaceActionUi, SurfaceFormDescriptor, SurfaceManifest, SurfacePlacement,
+    SurfaceRowCondition, SurfaceRowVisibleWhen, SurfaceTableColumn, SurfaceTargeting,
+    SurfaceUiDefinition, SurfaceWorkflowStep, TypeSettingsOps,
 };
 pub use descriptor::{DbMigrateTablesFn, InfraBundle, InfraSlot, MigrationsFn};
 pub use form_schema::{

@@ -17,10 +17,9 @@ use crate::descriptor::{SurfaceActionContext, SurfaceActionError};
 
 /// Per-interaction async handler.
 ///
-/// Mirrors [`crate::descriptor::SurfaceActionHandler`] minus the
-/// `surface_id`/`action_id` parameters — the exact-id dispatch map built by
-/// [`crate::catalog::PluginCatalog`] has already resolved those before
-/// invoking the handler.
+/// Receives only `(ctx, params)`: the exact-id dispatch map built by
+/// [`crate::catalog::PluginCatalog`] has already resolved the
+/// `surface_id`/`action_id` before invoking the handler.
 pub type InteractionHandler = for<'a> fn(
     &'a SurfaceActionContext<'a>,
     serde_json::Value,

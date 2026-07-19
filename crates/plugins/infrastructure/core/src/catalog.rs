@@ -4,7 +4,6 @@
 //! by type ID, constructs singleton transports and lifecycle plugins at startup,
 //! and provides surface action routing.
 
-use std::cmp::Reverse;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -43,15 +42,13 @@ impl InstancePluginStates {
 
 use crate::descriptor::{
     CatalogConfig, PluginDescriptor, PluginScope, SurfaceActionContext, SurfaceActionError,
-    SurfaceActionHandler,
 };
 use crate::error::PluginError;
 use crate::plugin_ops::{
     ControllerUpdateHookOps, ControllerUpdateProtectionOps, NotificationOps, PluginConfigOps,
     PluginMetadataOps, PluginSurfaceActionOps, PluginSurfaceOps, SoftwareItemLifecycleOps,
 };
-use crate::registration::InteractionHandler as UnifiedInteractionHandler;
-use crate::registration::{InteractionDelivery, InteractionDeliveryKind};
+use crate::registration::{InteractionDelivery, InteractionDeliveryKind, InteractionHandler};
 use crate::roles::{
     ControllerUpdateProtection, NotificationTransport, SoftwareItemCreatedEvent,
     SoftwareItemLifecycle, SoftwareItemLifecycleContext, SoftwareItemPatch,
@@ -75,20 +72,6 @@ pub enum CatalogError {
     #[error("duplicate notification transport: {0}")]
     DuplicateTransport(&'static str),
 
-    #[error("duplicate surface action prefix: {0}")]
-    DuplicateSurfaceActionPrefix(&'static str),
-
-    #[error(
-        "overlapping surface action prefix: '{new_prefix}' (from {new_owner}) \
-         overlaps with '{existing_prefix}' (from {existing_owner})"
-    )]
-    OverlappingSurfaceActionPrefix {
-        new_prefix: &'static str,
-        existing_prefix: &'static str,
-        new_owner: &'static str,
-        existing_owner: &'static str,
-    },
-
     #[error("failed to create singleton: {0}")]
     SingletonCreation(String),
 }
@@ -106,8 +89,7 @@ pub struct PluginCatalog {
         expect(dead_code, reason = "field is read only in the plugin-ops impl block")
     )]
     controller_update_hook: ControllerUpdateHookValue,
-    surface_action_routes: Vec<(&'static str, SurfaceActionHandler)>,
-    unified_surface_dispatch: BTreeMap<String, BTreeMap<String, UnifiedInteractionHandler>>,
+    surface_dispatch: BTreeMap<(String, String), InteractionHandler>,
     instance_states: InstancePluginStates,
 }
 
@@ -140,15 +122,9 @@ impl PluginCatalog {
         > = None;
         #[cfg(not(feature = "plugin-ops"))]
         let controller_update_hook = ();
-        let mut surface_action_routes = Vec::new();
-        // (prefix, owner_type_id) pairs for overlap detection
-        let mut seen_surface_prefixes: Vec<(&'static str, &'static str)> = Vec::new();
-        let mut unified_surface_dispatch: BTreeMap<
-            String,
-            BTreeMap<String, UnifiedInteractionHandler>,
-        > = BTreeMap::new();
+        let mut surface_dispatch: BTreeMap<(String, String), InteractionHandler> = BTreeMap::new();
         // surface_id -> owner_type_id, for exact-id duplicate detection
-        let mut seen_unified_surface_ids: BTreeMap<String, &'static str> = BTreeMap::new();
+        let mut seen_surface_ids: BTreeMap<String, &'static str> = BTreeMap::new();
 
         // Validate scope/instance_config invariant: tenant-scoped plugins must
         // not declare instance_config (only meaningful for scope=Instance).
@@ -278,38 +254,13 @@ impl PluginCatalog {
                 controller_update_hook = Some(plugin);
             }
 
-            // ── Uniqueness + overlap: surface action prefixes ──
-            if let Some(ext) = desc.surface_actions {
-                for prefix in ext.owned_surface_ids() {
-                    // Reject overlapping prefixes from DIFFERENT descriptors
-                    for &(existing_prefix, owner) in &seen_surface_prefixes {
-                        if owner == desc.type_id {
-                            continue;
-                        }
-                        if prefix.starts_with(existing_prefix)
-                            || existing_prefix.starts_with(prefix)
-                        {
-                            return Err(rootcause::report!(PluginError::UnsupportedOperation(
-                                format!(
-                                    "overlapping surface action prefix: '{prefix}' (from {}) \
-                                     overlaps with '{existing_prefix}' (from {owner})",
-                                    desc.type_id
-                                )
-                            )));
-                        }
-                    }
-                    seen_surface_prefixes.push((prefix, desc.type_id));
-                    surface_action_routes.push((*prefix, ext.handle_action));
-                }
-            }
-
-            // ── Uniqueness: unified surface ids + exact-id interaction dispatch ──
-            if let Some(ops) = desc.unified_surfaces {
+            // ── Uniqueness: surface ids + exact-id interaction dispatch ──
+            if let Some(ops) = desc.surfaces {
                 for registration in (ops.registrations)() {
                     for surface in &registration.surfaces {
                         let surface_id = surface.descriptor.surface_id.as_str().to_string();
 
-                        if let Some(&owner) = seen_unified_surface_ids.get(&surface_id) {
+                        if let Some(&owner) = seen_surface_ids.get(&surface_id) {
                             if owner != desc.type_id {
                                 return Err(rootcause::report!(PluginError::UnsupportedOperation(
                                     format!(
@@ -320,19 +271,17 @@ impl PluginCatalog {
                                 )));
                             }
                         } else {
-                            seen_unified_surface_ids.insert(surface_id.clone(), desc.type_id);
+                            seen_surface_ids.insert(surface_id.clone(), desc.type_id);
                         }
 
-                        let actions = unified_surface_dispatch
-                            .entry(surface_id.clone())
-                            .or_default();
                         for interaction in &surface.interactions {
                             if let InteractionDelivery::PluginHandled(handler) =
                                 interaction.delivery()
                             {
                                 let interaction_id =
                                     interaction.descriptor().interaction_id.as_str();
-                                if actions.contains_key(interaction_id) {
+                                let key = (surface_id.clone(), interaction_id.to_string());
+                                if surface_dispatch.contains_key(&key) {
                                     return Err(rootcause::report!(
                                         PluginError::UnsupportedOperation(format!(
                                             "duplicate interaction '{interaction_id}' on surface \
@@ -340,7 +289,7 @@ impl PluginCatalog {
                                         ))
                                     ));
                                 }
-                                actions.insert(interaction_id.to_string(), *handler);
+                                surface_dispatch.insert(key, *handler);
                             }
                         }
                     }
@@ -348,30 +297,18 @@ impl PluginCatalog {
             }
         }
 
-        // Longest prefix first for greedy matching
-        surface_action_routes.sort_by_key(|a| Reverse(a.0.len()));
-
         Ok(Self {
             descriptors: map,
             transports,
             lifecycle_plugins,
             controller_update_protection,
             controller_update_hook,
-            surface_action_routes,
-            unified_surface_dispatch,
+            surface_dispatch,
             instance_states,
         })
     }
 
-    /// Route a surface action to the correct handler by prefix match.
-    pub fn route_surface_action(&self, surface_id: &str) -> Option<SurfaceActionHandler> {
-        self.surface_action_routes
-            .iter()
-            .find(|(prefix, _)| surface_id.starts_with(prefix))
-            .map(|(_, handler)| *handler)
-    }
-
-    /// Every unified-surfaces interaction, as `(surface_id, interaction_id, kind)`
+    /// Every surface interaction, as `(surface_id, interaction_id, kind)`
     /// triples. Used by consumers (e.g. the D5 executor-allowlist guard) that need
     /// to enumerate how each registered interaction is delivered without exposing
     /// the underlying handler function pointer.
@@ -379,7 +316,7 @@ impl PluginCatalog {
     pub fn interaction_deliveries(&self) -> Vec<(String, String, InteractionDeliveryKind)> {
         self.descriptors
             .values()
-            .filter_map(|descriptor| descriptor.unified_surfaces)
+            .filter_map(|descriptor| descriptor.surfaces)
             .flat_map(|ops| (ops.registrations)())
             .flat_map(|registration| registration.surfaces)
             .flat_map(|surface| {
@@ -455,45 +392,28 @@ impl PluginSurfaceActionOps for PluginCatalog {
         action_id: &str,
         params: serde_json::Value,
     ) -> std::result::Result<serde_json::Value, SurfaceActionError> {
-        if let Some(handler) = self
-            .unified_surface_dispatch
-            .get(surface_id)
-            .and_then(|actions| actions.get(action_id))
-        {
-            return handler(ctx, params).await;
-        }
-
-        let handler = self.route_surface_action(surface_id).ok_or_else(|| {
+        let key = (surface_id.to_string(), action_id.to_string());
+        let handler = self.surface_dispatch.get(&key).ok_or_else(|| {
             SurfaceActionError::InvalidInput(format!(
                 "no registered interaction '{action_id}' on surface '{surface_id}'"
             ))
         })?;
-        handler(ctx, surface_id, action_id, params).await
+        handler(ctx, params).await
     }
 }
 
 impl PluginSurfaceOps for PluginCatalog {
     fn surface_registrations(&self) -> Vec<uptrakit_surfaces::SurfaceRegistration> {
-        let legacy = self
-            .descriptors
+        self.descriptors
             .values()
-            .filter_map(|descriptor| descriptor.surfaces)
-            .flat_map(|surface_ops| (surface_ops.registrations)());
-        let unified = self
-            .descriptors
-            .values()
-            .filter_map(|descriptor| {
-                descriptor
-                    .unified_surfaces
-                    .map(|ops| (ops, (ops.registrations)()))
-            })
+            .filter_map(|descriptor| descriptor.surfaces.map(|ops| (ops, (ops.registrations)())))
             .flat_map(|(ops, registrations)| {
                 registrations
                     .into_iter()
                     .map(|registration| registration.to_wire(ops.provider_id))
                     .collect::<Vec<_>>()
-            });
-        legacy.chain(unified).collect()
+            })
+            .collect()
     }
 }
 
@@ -926,7 +846,7 @@ mod tests {
                 family: PluginFamily::Enhancement,
                 config_model: ConfigModel::None,
                 roles: [],
-                unified_surfaces: {
+                surfaces: {
                     provider_id: "plugin.test_unified_demo_surface",
                     registrations: registrations,
                 },
@@ -989,7 +909,7 @@ mod tests {
                 family: PluginFamily::Enhancement,
                 config_model: ConfigModel::None,
                 roles: [],
-                unified_surfaces: {
+                surfaces: {
                     provider_id: "plugin.test_unified_dup_surface_a",
                     registrations: registrations,
                 },
@@ -1052,7 +972,7 @@ mod tests {
                 family: PluginFamily::Enhancement,
                 config_model: ConfigModel::None,
                 roles: [],
-                unified_surfaces: {
+                surfaces: {
                     provider_id: "plugin.test_unified_dup_surface_b",
                     registrations: registrations,
                 },
@@ -1258,23 +1178,9 @@ mod tests {
         }))
     }
 
-    fn test_plugin_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
-        vec![surfaces::SurfaceRegistration {
-            provider: surfaces::ProviderIdentity {
-                provider_id: "plugin.test_provider".to_string(),
-                provider_kind: surfaces::ProviderKind::Plugin,
-                provider_namespace: "plugin".to_string(),
-            },
-            framework_generation: surfaces::FrameworkGeneration::new(1, 0),
-            capabilities: surfaces::CapabilitySet::from_capabilities([
-                surfaces::Capability::TextBlockNode,
-                surfaces::Capability::UniversalTargeting,
-            ]),
-            effective_tenant_binding: surfaces::EffectiveTenantBinding {
-                scope: surfaces::Scope::Global,
-                tenant_id: None,
-            },
-            surfaces: vec![surfaces::RegisteredSurface {
+    fn test_plugin_surface_registration() -> Vec<PluginSurfaceRegistration> {
+        vec![PluginSurfaceRegistration {
+            surfaces: vec![PluginSurface {
                 descriptor: surfaces::SurfaceDescriptor::builder()
                     .surface_id(surfaces::SurfaceId::new("plugin.test.surface").unwrap())
                     .label("Test surface")
@@ -1294,12 +1200,12 @@ mod tests {
                 interactions: vec![],
                 data_sources: vec![],
             }],
-            encryption_metadata: None,
         }]
     }
 
-    static TEST_SURFACE_OPS: SurfaceRegistrationOps = SurfaceRegistrationOps {
-        registrations: test_plugin_surface_registrations,
+    static TEST_SURFACE_OPS: PluginSurfaceRegistrationOps = PluginSurfaceRegistrationOps {
+        provider_id: "plugin.test_provider",
+        registrations: test_plugin_surface_registration,
     };
 
     static TEST_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
@@ -1332,9 +1238,7 @@ mod tests {
             infra: None,
             installed_version_enricher: None,
         },
-        surface_actions: None,
         surfaces: Some(&TEST_SURFACE_OPS),
-        unified_surfaces: None,
         type_settings: None,
         config_test: None,
         sudo: None,
@@ -1378,9 +1282,7 @@ mod tests {
             infra: None,
             installed_version_enricher: None,
         },
-        surface_actions: None,
         surfaces: None,
-        unified_surfaces: None,
         type_settings: None,
         config_test: None,
         sudo: None,
@@ -1424,9 +1326,7 @@ mod tests {
             infra: None,
             installed_version_enricher: None,
         },
-        surface_actions: None,
         surfaces: None,
-        unified_surfaces: None,
         type_settings: None,
         config_test: None,
         sudo: None,
@@ -1470,9 +1370,7 @@ mod tests {
             infra: None,
             installed_version_enricher: None,
         },
-        surface_actions: None,
         surfaces: None,
-        unified_surfaces: None,
         type_settings: None,
         config_test: None,
         sudo: None,
@@ -1515,9 +1413,7 @@ mod tests {
             infra: None,
             installed_version_enricher: None,
         },
-        surface_actions: None,
         surfaces: None,
-        unified_surfaces: None,
         type_settings: None,
         config_test: None,
         sudo: None,
@@ -1756,9 +1652,7 @@ mod tests {
             infra: None,
             installed_version_enricher: None,
         },
-        surface_actions: None,
         surfaces: None,
-        unified_surfaces: None,
         type_settings: None,
         config_test: None,
         sudo: None,
@@ -1823,9 +1717,7 @@ mod tests {
             infra: None,
             installed_version_enricher: None,
         },
-        surface_actions: None,
         surfaces: None,
-        unified_surfaces: None,
         type_settings: None,
         config_test: None,
         sudo: None,

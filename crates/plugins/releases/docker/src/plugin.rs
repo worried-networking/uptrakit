@@ -412,7 +412,7 @@ declare_plugin!(DockerPlugin, DockerConfig, "releases_docker", {
         uptrakit_plugin_infrastructure_core::PluginCapability::ControllerSideFetchReleases,
         uptrakit_plugin_infrastructure_core::PluginCapability::DetectHostCompatibility,
     ]
-    , unified_surfaces: {
+    , surfaces: {
         provider_id: "plugin.releases_docker",
         registrations: DockerPlugin::docker_plugin_surfaces_static,
     }

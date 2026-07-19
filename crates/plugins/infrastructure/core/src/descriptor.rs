@@ -3,12 +3,9 @@
 //! [`PluginDescriptor`] is the static metadata struct that every plugin exports.
 //! [`CatalogConfig`] provides shared resources for singleton construction.
 
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use uptrakit_shared_types::{ConfigTestKind, PluginCapability};
-use uptrakit_surfaces as surfaces;
 
 use crate::form_schema::FormFieldDescriptor;
 use crate::host_requirements::HostRequirements;
@@ -167,7 +164,7 @@ impl std::fmt::Display for GlobalProviderConsumerDecl {
 /// HTTP request.
 ///
 /// This struct is always compiled (not feature-gated) so that the
-/// `SurfaceActionHandler` type alias is available in all plugin crates.
+/// [`crate::InteractionHandler`] type alias is available in all plugin crates.
 /// The `controller` field exposes typed controller-side capabilities instead
 /// of a raw `dyn Any` database escape hatch.
 pub struct SurfaceActionContext<'a> {
@@ -209,35 +206,12 @@ pub enum SurfaceActionError {
 }
 
 pub use crate::surface_form_authoring::{
-    ApiSubmitDescriptor, SurfaceActionDescriptor, SurfaceActionUi, SurfaceFormDescriptor,
-    SurfaceManifest, SurfacePlacement, SurfaceRowCondition, SurfaceRowVisibleWhen,
-    SurfaceTableColumn, SurfaceTargeting, SurfaceUiDefinition, SurfaceWorkflowStep,
+    SurfaceActionUi, SurfaceFormDescriptor, SurfaceManifest, SurfacePlacement, SurfaceRowCondition,
+    SurfaceRowVisibleWhen, SurfaceTableColumn, SurfaceTargeting, SurfaceUiDefinition,
+    SurfaceWorkflowStep,
 };
 
-// ── Surface action library ──────────────────────────────────────────────────
-
-/// Surface action library exported by plugins that expose controller-side surface actions.
-pub struct SurfaceActionLibrary {
-    pub actions: fn() -> Vec<SurfaceActionDescriptor>,
-    pub owned_surface_ids: &'static [&'static str],
-    pub handle_action: SurfaceActionHandler,
-}
-
-impl SurfaceActionLibrary {
-    /// Surface-oriented accessor for owned route prefixes.
-    pub fn owned_surface_ids(&self) -> &'static [&'static str] {
-        self.owned_surface_ids
-    }
-}
-
-/// Surface registration handling for plugin-backed compiled-in providers.
-pub struct SurfaceRegistrationOps {
-    pub registrations: fn() -> Vec<surfaces::SurfaceRegistration>,
-}
-
-/// Unified single-source surface registration ops (ADR-0028). Replaces both
-/// `SurfaceActionLibrary` and `SurfaceRegistrationOps` once every plugin is
-/// migrated (transitional coexistence until then).
+/// Single-source surface registration ops (ADR-0028).
 pub struct PluginSurfaceRegistrationOps {
     /// Wire provider id, e.g. `"plugin.webhook"`.
     pub provider_id: &'static str,
@@ -341,16 +315,6 @@ pub type CreateControllerUpdateHookFn =
 /// Placeholder when `plugin-ops` is not enabled.
 #[cfg(not(feature = "plugin-ops"))]
 pub type CreateControllerUpdateHookFn = fn(&CatalogConfig) -> crate::error::Result<()>;
-
-/// Async surface action handler.
-pub type SurfaceActionHandler = for<'a> fn(
-    &'a SurfaceActionContext<'a>,
-    &'a str,           // surface_id
-    &'a str,           // action_id
-    serde_json::Value, // params
-) -> Pin<
-    Box<dyn Future<Output = Result<serde_json::Value, SurfaceActionError>> + Send + 'a>,
->;
 
 /// Migrations function pointer type.
 ///
@@ -595,11 +559,8 @@ pub struct PluginDescriptor {
     pub roles: RoleCreators,
 
     // ── Optional sections ──
-    pub surface_actions: Option<&'static SurfaceActionLibrary>,
-    pub surfaces: Option<&'static SurfaceRegistrationOps>,
-    /// Unified surface registrations (single-source; supersedes
-    /// `surface_actions` + `surfaces` — transitional coexistence).
-    pub unified_surfaces: Option<&'static PluginSurfaceRegistrationOps>,
+    /// Single-source surface registrations (ADR-0028).
+    pub surfaces: Option<&'static PluginSurfaceRegistrationOps>,
     pub type_settings: Option<&'static TypeSettingsOps>,
     pub config_test: Option<&'static ConfigTestOps>,
     /// Sudo commands required by this plugin.

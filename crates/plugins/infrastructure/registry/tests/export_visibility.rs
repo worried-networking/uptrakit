@@ -82,8 +82,6 @@ fn existing_reexports_still_visible() {
     let _: Option<&dyn uptrakit_plugin_infrastructure_registry::PluginOps> = None;
     let _: Option<&dyn uptrakit_plugin_infrastructure_registry::PluginSurfaceActionOps> = None;
     let _: Option<uptrakit_plugin_infrastructure_registry::SurfaceActionContext<'_>> = None;
-    let _: Option<uptrakit_plugin_infrastructure_registry::SurfaceActionLibrary> = None;
-    let _: Option<uptrakit_plugin_infrastructure_registry::SurfaceActionDescriptor> = None;
     let _: Option<uptrakit_plugin_infrastructure_registry::SurfaceActionUi> = None;
     let _: Option<uptrakit_plugin_infrastructure_registry::SurfaceFormDescriptor> = None;
     let _: Option<uptrakit_plugin_infrastructure_registry::SurfaceRowCondition> = None;
@@ -105,8 +103,6 @@ fn current_surface_contract_symbols_remain_publicly_visible() {
 
     for symbol in [
         "SurfaceActionContext",
-        "SurfaceActionDescriptor",
-        "SurfaceActionLibrary",
         "SurfaceActionUi",
         "SurfaceFormDescriptor",
         "FormFieldDescriptor",

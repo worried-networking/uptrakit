@@ -1109,6 +1109,27 @@ async fn insert_test_proxmox_plugin_config(
     id
 }
 
+/// Proxmox controller registrations are empty whenever the linked registry was
+/// built with agent-infra (any workspace-wide build unifies it ON via
+/// agent-ssh-runtime, emptying `descriptor_plugin_surfaces`). These
+/// provider-origin e2e tests exercise real proxmox controller interactions, so
+/// they only apply when those registrations are present; whole-plugin existence
+/// is covered by the proxmox crate's own smoke test and the D5 executor guard.
+#[cfg(feature = "db-sqlite")]
+fn proxmox_controller_surfaces_present() -> bool {
+    uptrakit_plugin_infrastructure_registry::build_catalog(
+        &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+        uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
+    )
+    .map(|catalog| {
+        catalog
+            .interaction_deliveries()
+            .iter()
+            .any(|(surface, _, _)| surface.starts_with("proxmox."))
+    })
+    .unwrap_or(false)
+}
+
 /// Register the calling service as a surface provider so
 /// `caller_origin_for_request` can resolve `SurfaceCallerOrigin::Provider {
 /// service_id }` — required unconditionally for every `CallerOrigin::Provider`
@@ -1135,6 +1156,9 @@ fn register_calling_service_as_provider(
 #[cfg(feature = "db-sqlite")]
 #[tokio::test]
 async fn provider_origin_denied_for_unflagged_permissioned_interaction() {
+    if !proxmox_controller_surfaces_present() {
+        return;
+    }
     let db = crate::test_harness::setup_migrated_db_with_plugins().await;
     let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
     let (state, _jwt) =
@@ -1218,6 +1242,9 @@ async fn provider_origin_denied_for_unflagged_permissioned_interaction() {
 #[cfg(feature = "db-sqlite")]
 #[tokio::test]
 async fn provider_origin_unmatched_guests_executes_and_audits_service_actor() {
+    if !proxmox_controller_surfaces_present() {
+        return;
+    }
     let db = crate::test_harness::setup_migrated_db_with_plugins().await;
     let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
     let plugin_config_id = insert_test_proxmox_plugin_config(&db, tenant_id).await;
@@ -1323,6 +1350,9 @@ async fn provider_origin_unmatched_guests_executes_and_audits_service_actor() {
 #[cfg(feature = "db-sqlite")]
 #[tokio::test]
 async fn provider_origin_unmatched_guests_resolves_target_from_surface() {
+    if !proxmox_controller_surfaces_present() {
+        return;
+    }
     let db = crate::test_harness::setup_migrated_db_with_plugins().await;
     let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
     let plugin_config_id = insert_test_proxmox_plugin_config(&db, tenant_id).await;
@@ -1422,6 +1452,9 @@ async fn provider_origin_unmatched_guests_resolves_target_from_surface() {
 #[cfg(feature = "db-sqlite")]
 #[tokio::test]
 async fn provider_origin_match_completes_handler() {
+    if !proxmox_controller_surfaces_present() {
+        return;
+    }
     let db = crate::test_harness::setup_migrated_db_with_plugins().await;
     let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
     let plugin_config_id = insert_test_proxmox_plugin_config(&db, tenant_id).await;

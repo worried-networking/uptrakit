@@ -521,7 +521,7 @@ declare_plugin!(WebhookPlugin, WebhookChannelConfig, "webhook", {
     roles: [NotificationTransport],
     notification_transport: create_webhook_transport,
     raw_settings_keys: &[],
-    unified_surfaces: {
+    surfaces: {
         provider_id: "plugin.webhook",
         registrations: webhook_plugin_surfaces,
     },
@@ -662,10 +662,6 @@ mod tests {
             expected.len(),
             "unexpected total interaction count across webhook_plugin_surfaces()"
         );
-        // Migration left no legacy arm behind — a leftover `surfaces:` or
-        // `surface_actions:` block would double-register on the wire.
-        assert!(DESCRIPTOR.surface_actions.is_none());
-        assert!(DESCRIPTOR.surfaces.is_none());
     }
 
     #[test]

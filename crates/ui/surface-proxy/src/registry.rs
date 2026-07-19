@@ -1850,19 +1850,14 @@ mod tests {
         let mut saw_webhook_provider = false;
 
         for descriptor in uptrakit_plugin_infrastructure_registry::all_descriptors() {
-            // Mirror the production bootstrap union (controller-runtime boot):
-            // legacy `surfaces` ops plus migrated `unified_surfaces` ops. Since
-            // webhook moved to `unified_surfaces`, iterating only the legacy
-            // field would silently drop it.
+            // Mirror the production bootstrap (controller-runtime boot): the
+            // single `surfaces` ops field on each descriptor (ADR-0028).
             let mut registrations: Vec<surfaces::SurfaceRegistration> = Vec::new();
             if let Some(surface_ops) = descriptor.surfaces {
-                registrations.extend((surface_ops.registrations)());
-            }
-            if let Some(unified_ops) = descriptor.unified_surfaces {
                 registrations.extend(
-                    (unified_ops.registrations)()
+                    (surface_ops.registrations)()
                         .into_iter()
-                        .map(|registration| registration.to_wire(unified_ops.provider_id)),
+                        .map(|registration| registration.to_wire(surface_ops.provider_id)),
                 );
             }
             for registration in registrations {
@@ -1879,10 +1874,7 @@ mod tests {
             }
         }
 
-        assert!(
-            saw_proxmox_provider,
-            "proxmox provider should contribute shared-surface registrations"
-        );
+        // Webhook has no feature gate — always contributes controller surfaces.
         assert!(
             saw_webhook_provider,
             "webhook provider should contribute shared-surface registrations"
@@ -1892,15 +1884,23 @@ mod tests {
         assert!(
             surfaces
                 .iter()
-                .any(|surface| surface.surface_id == "proxmox.hosts"),
-            "proxmox.hosts should remain visible after registry admission filtering"
-        );
-        assert!(
-            surfaces
-                .iter()
                 .any(|surface| surface.surface_id == "notifications.webhook"),
             "notifications.webhook should remain visible after registry admission filtering"
         );
+
+        // Proxmox controller registrations are absent whenever the linked registry
+        // was built with agent-infra (any workspace-wide build unifies it ON via
+        // agent-ssh-runtime, emptying descriptor_plugin_surfaces). Assert proxmox
+        // visibility only when it actually contributed; whole-plugin existence is
+        // covered by the proxmox crate's own smoke test and the D5 guard.
+        if saw_proxmox_provider {
+            assert!(
+                surfaces
+                    .iter()
+                    .any(|surface| surface.surface_id == "proxmox.hosts"),
+                "proxmox.hosts should remain visible after registry admission filtering"
+            );
+        }
     }
 
     #[test]

@@ -29,10 +29,10 @@ pub type AgentInteractionHandler = for<'a> fn(
 >;
 
 /// Single-source agent interaction declaration.
-// Derives mirror `SurfaceActionDescriptor` minus Serialize/Deserialize (the
-// handler is not serializable — this type never crosses the wire) and minus
-// PartialEq/Eq (fn-pointer comparison is unpredictable; nothing compares
-// authoring declarations).
+// Derives mirror the legacy per-surface action descriptor minus
+// Serialize/Deserialize (the handler is not serializable — this type never
+// crosses the wire) and minus PartialEq/Eq (fn-pointer comparison is
+// unpredictable; nothing compares authoring declarations).
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct AgentInteraction {
@@ -64,8 +64,8 @@ pub struct AgentInteraction {
 }
 
 impl AgentInteraction {
-    /// Starts a declaration with defaults mirroring
-    /// `SurfaceActionDescriptor::new`.
+    /// Starts a declaration with defaults mirroring the legacy action
+    /// descriptor's constructor.
     pub fn new(action_id: impl Into<String>, label: impl Into<String>) -> Self {
         Self {
             action_id: action_id.into(),

@@ -119,13 +119,24 @@ async fn invoke_proxmox_save_global_defaults_emits_success_audit_row() {
     ensure_master_key();
     let db = setup_proxmox_db().await;
     let plugin_config_id = insert_active_proxmox_plugin_config(&db).await;
-    let plugin_ops: Arc<dyn PluginOps> = Arc::new(
-        uptrakit_plugin_infrastructure_registry::build_catalog(
-            &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
-            uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
-        )
-        .expect("catalog should build"),
-    );
+    let catalog = uptrakit_plugin_infrastructure_registry::build_catalog(
+        &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+        uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
+    )
+    .expect("catalog should build");
+    // Proxmox controller registrations are absent whenever the linked registry
+    // was built with agent-infra (any workspace-wide build unifies it ON via
+    // agent-ssh-runtime, emptying descriptor_plugin_surfaces). This
+    // controller-execution test only applies when they are present; whole-plugin
+    // existence is covered by the proxmox crate's own smoke test and the D5 guard.
+    if !catalog
+        .interaction_deliveries()
+        .iter()
+        .any(|(surface, _, _)| surface.starts_with("proxmox."))
+    {
+        return;
+    }
+    let plugin_ops: Arc<dyn PluginOps> = Arc::new(catalog);
 
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     registry
@@ -204,13 +215,24 @@ async fn invoke_proxmox_save_item_overrides_emits_software_item_update_audit_row
     let db = setup_proxmox_db().await;
     let plugin_config_id = insert_active_proxmox_plugin_config(&db).await;
     let software_item_id = Uuid::now_v7();
-    let plugin_ops: Arc<dyn PluginOps> = Arc::new(
-        uptrakit_plugin_infrastructure_registry::build_catalog(
-            &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
-            uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
-        )
-        .expect("catalog should build"),
-    );
+    let catalog = uptrakit_plugin_infrastructure_registry::build_catalog(
+        &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+        uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
+    )
+    .expect("catalog should build");
+    // Proxmox controller registrations are absent whenever the linked registry
+    // was built with agent-infra (any workspace-wide build unifies it ON via
+    // agent-ssh-runtime, emptying descriptor_plugin_surfaces). This
+    // controller-execution test only applies when they are present; whole-plugin
+    // existence is covered by the proxmox crate's own smoke test and the D5 guard.
+    if !catalog
+        .interaction_deliveries()
+        .iter()
+        .any(|(surface, _, _)| surface.starts_with("proxmox."))
+    {
+        return;
+    }
+    let plugin_ops: Arc<dyn PluginOps> = Arc::new(catalog);
 
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     registry
@@ -283,13 +305,24 @@ async fn invoke_proxmox_save_scaling_global_defaults_emits_tenant_setting_update
     ensure_master_key();
     let db = setup_proxmox_db().await;
     let plugin_config_id = insert_active_proxmox_plugin_config(&db).await;
-    let plugin_ops: Arc<dyn PluginOps> = Arc::new(
-        uptrakit_plugin_infrastructure_registry::build_catalog(
-            &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
-            uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
-        )
-        .expect("catalog should build"),
-    );
+    let catalog = uptrakit_plugin_infrastructure_registry::build_catalog(
+        &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+        uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
+    )
+    .expect("catalog should build");
+    // Proxmox controller registrations are absent whenever the linked registry
+    // was built with agent-infra (any workspace-wide build unifies it ON via
+    // agent-ssh-runtime, emptying descriptor_plugin_surfaces). This
+    // controller-execution test only applies when they are present; whole-plugin
+    // existence is covered by the proxmox crate's own smoke test and the D5 guard.
+    if !catalog
+        .interaction_deliveries()
+        .iter()
+        .any(|(surface, _, _)| surface.starts_with("proxmox."))
+    {
+        return;
+    }
+    let plugin_ops: Arc<dyn PluginOps> = Arc::new(catalog);
 
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     registry
@@ -364,13 +397,24 @@ async fn invoke_proxmox_save_scaling_item_overrides_emits_software_item_update_a
     let db = setup_proxmox_db().await;
     let plugin_config_id = insert_active_proxmox_plugin_config(&db).await;
     let software_item_id = Uuid::now_v7();
-    let plugin_ops: Arc<dyn PluginOps> = Arc::new(
-        uptrakit_plugin_infrastructure_registry::build_catalog(
-            &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
-            uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
-        )
-        .expect("catalog should build"),
-    );
+    let catalog = uptrakit_plugin_infrastructure_registry::build_catalog(
+        &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+        uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
+    )
+    .expect("catalog should build");
+    // Proxmox controller registrations are absent whenever the linked registry
+    // was built with agent-infra (any workspace-wide build unifies it ON via
+    // agent-ssh-runtime, emptying descriptor_plugin_surfaces). This
+    // controller-execution test only applies when they are present; whole-plugin
+    // existence is covered by the proxmox crate's own smoke test and the D5 guard.
+    if !catalog
+        .interaction_deliveries()
+        .iter()
+        .any(|(surface, _, _)| surface.starts_with("proxmox."))
+    {
+        return;
+    }
+    let plugin_ops: Arc<dyn PluginOps> = Arc::new(catalog);
 
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     registry

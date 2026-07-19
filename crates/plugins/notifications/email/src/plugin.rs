@@ -1132,7 +1132,7 @@ declare_plugin!(EmailPlugin, EmailChannelConfig, "email", {
         "global_smtp.from_address", "global_smtp.from_name", "global_smtp.tls_mode",
         "global_smtp.helo_host",
     ],
-    unified_surfaces: {
+    surfaces: {
         provider_id: "plugin.email",
         registrations: email_plugin_surfaces,
     },
@@ -1283,10 +1283,6 @@ mod tests {
             expected.len(),
             "unexpected total interaction count across email_plugin_surfaces()"
         );
-        // Migration left no legacy arm behind — a leftover `surfaces:` or
-        // `surface_actions:` block would double-register on the wire.
-        assert!(DESCRIPTOR.surface_actions.is_none());
-        assert!(DESCRIPTOR.surfaces.is_none());
     }
 
     #[test]

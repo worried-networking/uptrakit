@@ -4,8 +4,8 @@ use std::str::FromStr;
 
 /// An authorization permission.
 ///
-/// Used in shared surface action descriptors (`SurfaceActionDescriptor.permission`) and
-/// web API auth middleware to gate access to actions and endpoints.
+/// Used in shared surface interaction descriptors (`InteractionDescriptor.required_permission`)
+/// and web API auth middleware to gate access to actions and endpoints.
 ///
 /// All variants serialize to / deserialize from `snake_case` strings.
 /// Unknown strings received on the wire are preserved as [`Permission::Other`] so that
