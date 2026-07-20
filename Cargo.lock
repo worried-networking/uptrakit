@@ -7964,6 +7964,7 @@ dependencies = [
  "tracing",
  "uptrakit-command",
  "uptrakit-plugin-infrastructure-core",
+ "uptrakit-plugin-infrastructure-proxmox",
  "uptrakit-shared-db",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",

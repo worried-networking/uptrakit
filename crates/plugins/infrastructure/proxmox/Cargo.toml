@@ -45,6 +45,19 @@ tokio = { workspace = true, features = ["sync", "time"] }
 sea-orm-migration = { workspace = true, optional = true }
 
 [dev-dependencies]
+# Self dev-dependency (cargo explicitly permits dev-dep cycles onto the package
+# itself): enables this crate's own features for its test/bench targets only.
+# Required because the dev-dep on infrastructure-core below enables core's
+# `agent-infra` -> `migrations`, which switches core's descriptor fn-pointer
+# aliases to their real signatures; without the matching proxmox features the
+# `#[cfg(not(feature = "migrations"))]` stubs in reset.rs/db_migrate.rs/plugin.rs
+# fail to type-check (E0308). Deleting this line re-breaks every bare
+# `cargo test|clippy -p uptrakit-plugin-infrastructure-proxmox` invocation.
+# Lib-only builds (production consumers, agent binaries, `cargo check -p`) are
+# unaffected: resolver v3 does not unify dev-dep features for them.
+# Interim mitigation — retire together with the dependency-policy rule when the
+# infra-core feature-switched aliases become additive (deferred restructure spec).
+uptrakit-plugin-infrastructure-proxmox = { workspace = true, features = ["agent-infra", "plugin-ops", "db-sqlite", "testing"] }
 tokio = { workspace = true, features = ["macros", "rt"] }
 httpmock = { workspace = true }
 uptrakit-shared-db = { workspace = true, features = ["migration", "db-sqlite"] }
