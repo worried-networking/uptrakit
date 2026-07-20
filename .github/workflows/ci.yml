@@ -93,6 +93,21 @@ jobs:
       # the shutdown-token cfg gating in controller-runtime/src/embedded/mod.rs against
       # dead-code / unfulfilled-lint drift on the zero-embedded path.
       - run: cargo check -p uptrakit-controller-runtime --no-default-features --features db-sqlite
+      # Bare per-crate clippy sweep over every plugin crate. Workspace-level
+      # gates unify features across all members (including dev-dep feature
+      # unification), so they never compile a plugin crate's own bare feature
+      # world; a desync between a crate's cfg(not(feature)) fallbacks and a
+      # dependency's feature-switched types is visible ONLY in isolated -p
+      # builds (proxmox E0308 incident, 2026-07-20 spec). Crate list is derived
+      # from the two-level plugin layout glob — never hand-maintained.
+      - name: Bare-crate clippy sweep (plugin crates)
+        run: |
+          for manifest in crates/plugins/*/*/Cargo.toml; do
+            crate=$(grep -m1 '^name' "$manifest" | sed 's/.*"\(.*\)"/\1/')
+            echo "::group::${crate}"
+            cargo clippy --all-targets -p "$crate" -- -D warnings
+            echo "::endgroup::"
+          done
       - name: Check legacy error-match patterns
         run: ./scripts/check_legacy_error_matches.sh
       - name: Audit coverage check
