@@ -14,66 +14,142 @@ cd "$ROOT"
 
 ALLOWLIST_FILE="ci/verify_no_new_cfg_not_feature_allowlist.txt"
 RULE="negated_feature_cfg"
-fail=0
 
-# Slurp-mode (perl -0777, precedent: ci/verify_handler_state_contract.sh)
-# handles attributes rustfmt wraps across lines. The ^\s* anchor under /m is
-# load-bearing: without it the pattern false-positives on prose mentions of
-# the attribute inside // and /// comments.
-# Validate every allowlist row up front (mirror verify_no_security_audit.sh's
-# strictness: a malformed or unknown-rule row is an error, never silently skipped).
-while IFS='|' read -r a_rule a_path a_regex; do
-  if [ -z "${a_rule:-}" ] || [ -z "${a_path:-}" ] || [ -z "${a_regex:-}" ]; then
-    echo "ERROR: malformed allowlist row (need rule|path|text-regex): $a_rule|$a_path|$a_regex" >&2
-    exit 1
-  fi
-  if [ "$a_rule" != "$RULE" ]; then
-    echo "ERROR: unknown rule '$a_rule' in $ALLOWLIST_FILE" >&2
-    exit 1
-  fi
-  case "$a_path" in crates/*) ;; *)
-    echo "ERROR: allowlist path must start with crates/: $a_path" >&2
-    exit 1
-  ;; esac
-  # ERE validity: grep exits 1 on valid-but-unmatched, 2 on invalid regex.
-  rc=0
-  printf '' | grep -Eq "$a_regex" 2>/dev/null || rc=$?
-  if [ "$rc" -eq 2 ]; then
-    echo "ERROR: invalid ERE in allowlist row for $a_path: $a_regex" >&2
-    exit 1
-  fi
-done < <(grep -v '^#' "$ALLOWLIST_FILE")
+if [[ ! -f "$ALLOWLIST_FILE" ]]; then
+  echo "verify_no_new_cfg_not_feature: allowlist file is missing: $ALLOWLIST_FILE"
+  exit 1
+fi
 
-while IFS=: read -r file line text; do
-  [ -z "${file:-}" ] && continue
-  allowed=0
-  while IFS='|' read -r a_rule a_path a_regex; do
-    [ "$a_path" = "$file" ] || continue
-    if printf '%s' "$text" | grep -Eq "$a_regex"; then
-      allowed=1
-      break
+trim() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+# ERE validity: grep exits 1 on valid-but-unmatched, 2 on invalid regex.
+is_valid_ere() {
+  local pattern="$1"
+  printf '' | grep -E "$pattern" >/dev/null 2>&1 || [[ $? -eq 1 ]]
+}
+
+declare -a ALLOW_PATHS=()
+declare -a ALLOW_TEXT_PATTERNS=()
+
+# Validate + load every allowlist row up front (mirror verify_no_security_audit.sh:
+# blank and comment lines are skipped for editability; a malformed, unknown-rule,
+# bad-path, or invalid-regex row is a fatal error reported with its line number,
+# never silently skipped).
+load_allowlist() {
+  local line line_no=0 raw rule path text_pattern rest
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line_no=$((line_no + 1))
+    raw="${line%$'\r'}"
+
+    if [[ -z "$(trim "$raw")" ]]; then
+      continue
     fi
-  done < <(grep -v '^#' "$ALLOWLIST_FILE")
-  if [ "$allowed" -eq 0 ]; then
+    if [[ "$(trim "$raw")" == \#* ]]; then
+      continue
+    fi
+
+    if [[ "$raw" != *"|"* ]]; then
+      echo "verify_no_new_cfg_not_feature: invalid allowlist row ${line_no}: expected 'rule|path|text-regex'"
+      exit 1
+    fi
+    rule="${raw%%|*}"
+    rest="${raw#*|}"
+
+    if [[ "$rest" != *"|"* ]]; then
+      echo "verify_no_new_cfg_not_feature: invalid allowlist row ${line_no}: expected 'rule|path|text-regex'"
+      exit 1
+    fi
+    path="${rest%%|*}"
+    text_pattern="${rest#*|}"
+
+    rule="$(trim "$rule")"
+    path="$(trim "$path")"
+    text_pattern="$(trim "$text_pattern")"
+
+    if [[ -z "$rule" || -z "$path" || -z "$text_pattern" ]]; then
+      echo "verify_no_new_cfg_not_feature: invalid allowlist row ${line_no}: expected 'rule|path|text-regex'"
+      exit 1
+    fi
+
+    if [[ "$rule" != "$RULE" ]]; then
+      echo "verify_no_new_cfg_not_feature: invalid allowlist rule '${rule}' at row ${line_no}"
+      exit 1
+    fi
+
+    if [[ "$path" != crates/* ]]; then
+      echo "verify_no_new_cfg_not_feature: allowlist path must start with 'crates/' at row ${line_no}"
+      exit 1
+    fi
+
+    if ! is_valid_ere "$text_pattern"; then
+      echo "verify_no_new_cfg_not_feature: invalid regex in allowlist row ${line_no}: ${text_pattern}"
+      exit 1
+    fi
+
+    ALLOW_PATHS+=("$path")
+    ALLOW_TEXT_PATTERNS+=("$text_pattern")
+  done <"$ALLOWLIST_FILE"
+}
+
+# A finding is allowlisted when a row's path matches exactly AND its text-regex
+# pins the specific feature name in the flagged attribute.
+is_allowlisted() {
+  local path="$1"
+  local text="$2"
+  local idx pattern
+
+  for idx in "${!ALLOW_PATHS[@]}"; do
+    [[ "${ALLOW_PATHS[$idx]}" == "$path" ]] || continue
+    pattern="${ALLOW_TEXT_PATTERNS[$idx]}"
+    if printf '%s\n' "$text" | grep -Eq "$pattern"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+load_allowlist
+
+# Collect the tracked .rs file list once, then hand it to a SINGLE perl process
+# (precedent: ci/verify_handler_state_contract.sh batches files into one
+# `perl -0777` invocation rather than forking per file).
+rs_files=()
+while IFS= read -r f; do
+  rs_files+=("$f")
+done < <(git ls-files 'crates/*' | grep '\.rs$')
+
+# Slurp-mode (perl -0777) handles attributes rustfmt wraps across lines. The
+# ^\s* anchor is load-bearing: without it the pattern false-positives on prose
+# mentions of the attribute inside // and /// comments.
+fail=0
+if [ "${#rs_files[@]}" -gt 0 ]; then
+  while IFS=: read -r file line text; do
+    [ -z "${file:-}" ] && continue
+    if is_allowlisted "$file" "$text"; then
+      continue
+    fi
     echo "ERROR: negated-feature cfg attribute not in allowlist: $file:$line: $text" >&2
     echo "  Additive-only feature flags are required; if this site is genuinely" >&2
     echo "  necessary, add a justified allowlist entry (maintainer sign-off)." >&2
     fail=1
-  fi
-done < <(git ls-files 'crates/*' | grep '\.rs$' | while IFS= read -r f; do
-  perl -0777 -ne '
-    while (/^([^\S\n]*#!?\[cfg\([^\]]*not\s*\(\s*(?:any\s*\(\s*)?feature[^\n]*)/gsm) {
-      my $off  = $-[1];
-      my $line = 1 + substr($_, 0, $off) =~ tr/\n//;
-      my $text = $1;
-      $text =~ s/^\s+//;
-      # Join wrapped attributes into ONE record: an embedded newline would
-      # split the file:line:text stream at the IFS=: read consumer, making
-      # wrapped sites unallowlistable (verified failure mode).
-      $text =~ s/\s*\n\s*/ /g;
-      print "$ARGV:$line:$text\n";
-    }' "$f"
-done)
+  done < <(perl -0777 -ne '
+      while (/^([^\S\n]*#!?\[cfg\([^\]]*not\s*\(\s*(?:any\s*\(\s*)?feature[^\n]*)/gsm) {
+        my $off  = $-[1];
+        my $line = 1 + substr($_, 0, $off) =~ tr/\n//;
+        my $text = $1;
+        $text =~ s/^\s+//;
+        # Join wrapped attributes into ONE record: an embedded newline would
+        # split the file:line:text stream at the IFS=: read consumer, making
+        # wrapped sites unallowlistable (verified failure mode).
+        $text =~ s/\s*\n\s*/ /g;
+        print "$ARGV:$line:$text\n";
+      }' "${rs_files[@]}")
+fi
 
 if [ "$fail" -ne 0 ]; then
   exit 1
