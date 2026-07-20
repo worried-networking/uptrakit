@@ -114,9 +114,9 @@ compatibility remains untested, exactly as before this spec.
 
 ### 2. Document assembly (hand-assembled via serde_yaml_ng)
 
-- The `#[cfg(feature = "schema")]` module `spec_gen` in `uptrakit-wire` assembles the complete AsyncAPI 3.0.0 document
-  in Rust and serializes it with `serde_yaml_ng` (already a wire-crate dev-dependency; becomes an optional dependency
-  of the `schema` feature). **No net-new external dependency.** Document content: `info` (short description pointing
+- The `#[cfg(all(test, feature = "schema"))]` module `spec_gen` in `uptrakit-wire` assembles the complete AsyncAPI
+  3.0.0 document in Rust and serializes it with `serde_yaml_ng` (already a wire-crate dev-dependency, which covers
+  test-only code — no manifest change for it). **No net-new external dependency.** Document content: `info` (short description pointing
   at `docs/api/wire-protocol.md` for narrative), the `/api/v1/ws/service` channel, send/receive operations for the two
   message directions, `components/messages` (one entry per real enum variant, `const`-discriminated, snake_case keys
   matching the serde wire strings) and `components/schemas` (schemars output, shared `$defs` hoisted). The **entire**
@@ -213,8 +213,8 @@ untouched. No frontend, controller, or service code changes beyond the wire crat
 ## Deliverables
 
 1. **Zero net-new workspace dependencies**: schemars reused from the existing `schemars = { version = "1" }` root
-   entry; `serde_yaml_ng` promoted from wire dev-dependency to optional dependency of the `schema` feature (root
-   entry already exists). Crate manifests use `workspace = true`. `cargo deny check` must pass.
+   entry; `serde_yaml_ng` stays a plain dev-dependency (test-only generator code needs no optional prod entry).
+   Crate manifests use `workspace = true`. `cargo deny check` must pass.
 2. `uptrakit-wire`: `schema` feature, `JsonSchema` derives + overrides, `spec_gen` module, golden test, alias removal,
    conformance-test retirement. `uptrakit-shared-macros`: `wire_safe_enum!` extended with the manual `JsonSchema`
    emission (§1).
