@@ -34,20 +34,42 @@ Make the Rust wire types the single source of truth and generate `asyncapi.yaml`
 established drift-guard idiom (ADR-0025/ADR-0026 + `scripts/regen-api.sh` + golden staleness test). The first generation
 replaces the drifted document and thereby fixes every gap above in one step. This decision gets its own ADR (0029).
 
-Spec-first generation (AsyncAPI Generator templates → Rust) was rejected: no production-grade Rust template exists, it
-drags the Node toolchain into Rust CI, generated code would violate the workspace lint policy, and it inverts the repo's
-code-is-truth idiom (same grounds on which ADR-0026 rejected client codegen). Validation-only hardening was rejected:
-sample-based validation cannot reach zero drift, and a faithful schema comparator requires deriving the schemas anyway —
-at which point generation is the fix (ADR-0025's own reasoning). A manual yaml fix followed by later codegen was
-rejected as throwaway work.
+Rejected alternatives (all recorded in ADR-0029):
+
+- **Spec-first generation** (AsyncAPI Generator templates → Rust): no production-grade Rust template exists, it drags
+  the Node toolchain into Rust CI, generated code would violate the workspace lint policy, and it inverts the repo's
+  code-is-truth idiom (same grounds on which ADR-0026 rejected client codegen).
+- **Validation-only hardening**: sample-based validation cannot reach zero drift, and a faithful schema comparator
+  requires deriving the schemas anyway — at which point generation is the fix (ADR-0025's own reasoning).
+- **Manual yaml fix followed by later codegen**: throwaway work.
+- **Deleting `asyncapi.yaml` outright** (cheapest fix for a consumer-less doc): rejected by explicit product decision —
+  the document is kept as an interchange-format reference for future WS integrators (loadable into AsyncAPI tooling,
+  usable for third-party client generation), value rustdoc cannot provide.
+- **asyncapi-rust 0.4.0 as the document assembler**: initially selected for consistency with the web-api code-first
+  approach, then rejected on verified evidence — see §2.
+
+Honest statement of what the golden gate does and does not guard (also §6): it detects **staleness** (committed yaml vs
+code) and turns every wire-shape change into a reviewable `asyncapi.yaml` diff in the PR — the same diff-review trust
+model the repo already uses for `openapi.json`. It does **not** hard-fail on an accidental serde change the way a
+pinned-expectation test would: a self-derived spec cannot disagree with the code it derives from. Cross-version wire
+compatibility remains untested, exactly as before this spec.
 
 ## Design
 
 ### 1. Schema derivation (schemars)
 
-- Add `schemars = "1.2.1"` to root `[workspace.dependencies]`; `uptrakit-wire` references it `workspace = true` behind a
-  new **additive** cargo feature `schema` (off by default; complies with the additive-only feature rule). Enable
-  schemars features `uuid1` and `preserve_order` (deterministic key order for the golden gate).
+- schemars is **already registered** in root `[workspace.dependencies]` as `schemars = { version = "1" }` (consumed by
+  `uptrakit-mcp`; resolves to 1.2.1 in the current lockfile). Reuse that entry — do not re-pin to an exact patch
+  version (the workspace convention is loose major-version pins). `uptrakit-wire` references it `workspace = true`
+  behind a new **additive** cargo feature `schema` (off by default; complies with the additive-only feature rule).
+  Per the dependency-policy convention (root entry = version only; consuming crates declare the additional features
+  they need), the schemars features `uuid1` and `preserve_order` go in `uptrakit-wire`'s own manifest —
+  `schemars = { workspace = true, features = ["uuid1", "preserve_order"], optional = true }` — not on the root entry.
+  Note on `preserve_order`: schemars output is deterministic either way (default is alphabetical via `BTreeMap`); the
+  feature switches to declaration order for readability. Determinism does not depend on it.
+  Resolution heads-up for implementation: schemars 1.2.1's `ref-cast` chain can pull `syn 3.x` in an unconstrained
+  resolve while today's lockfile holds `syn 2.x` — `cargo deny check` (multiple-versions = deny) is the gate that
+  catches this during lockfile regen; not a design change, just expect it.
 - `#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]` on `ServiceMessage`, `ControllerMessage`, both
   envelope structs, and every payload/shared type they reach. schemars 1.x natively supports the internally-tagged
   layout (`#[serde(tag = "type", rename_all = "snake_case")]`) both enums use, plus `rename`/`default`/`flatten`.
@@ -70,33 +92,57 @@ rejected as throwaway work.
   - `#[serde(other)]` catch-all variants (`Unknown`) are excluded from the generated message list via
     `#[cfg_attr(feature = "schema", schemars(skip))]` — they are a deserialize-only forward-compat mechanism, not a wire
     message.
-  - Wire-safe enums with `Other(String)` catch-alls (e.g. `UpdateCategory`, `Capability`) are represented honestly as
-    open `string` schemas with the known values listed in the schema `description`, never as closed `enum:` lists.
+  - Wire-safe enums with `Other(String)` catch-alls (e.g. `UpdateCategory`, `Capability`, `EnrollmentStatus`) are
+    represented honestly as open `string` schemas with the known values listed in the schema `description`, never as
+    closed `enum:` lists. **These types cannot use the `JsonSchema` derive**: they implement `Serialize`/`Deserialize`
+    by hand (or via `wire_safe_enum!`), so a derive would silently document the Rust enum shape instead of the wire
+    string — a semantic bug the compiler cannot catch. The repo already solves this exact problem for OpenAPI:
+    `wire_safe_enum!` (`crates/shared/macros/src/lib.rs`) emits a manual `utoipa::PartialSchema`/`ToSchema` impl
+    describing the serde wire format. Mirror it: extend `wire_safe_enum!` with a feature-gated manual
+    `schemars::JsonSchema` impl (open string schema + known values in the description), and write equivalent manual
+    impls for the hand-rolled (non-macro) types. Implementation must inventory the affected population by grepping
+    `impl Serialize for` / `impl<'de> Deserialize` across every crate the payloads reach — known members today:
+    `Capability`, `EnrollmentStatus` (`capabilities.rs`), `UpdateCategory` (`shared/types`); the grep is the
+    authoritative list (the named types are examples, not an exhaustive or mutually-exclusive enumeration).
+    Implementation constraint: each manual impl's known-value list must be derived programmatically from the same
+    source the `Serialize` impl uses (variant iteration / shared const table), never a hardcoded string list — a
+    hardcoded list drifts silently because the golden gate cannot see self-derived output disagreeing with itself.
+    `uptrakit-shared-macros` is therefore a touched crate.
   - Deserialize-only `#[serde(alias)]` attributes are not represented — moot, because this spec removes them (§4).
 - Rustdoc comments (`///`) on payload structs and fields flow into schema `description` fields automatically via
   schemars, so per-field documentation lives in code and regenerates with it.
 
-### 2. Document assembly (asyncapi-rust)
+### 2. Document assembly (hand-assembled via serde_yaml_ng)
 
-- Add `asyncapi-rust = "0.4.0"` to root `[workspace.dependencies]`; wire crate dev/feature-gated use only. Chosen for
-  consistency with the web-api code-first approach: it targets AsyncAPI 3.0, is built directly on schemars 1.x, its
-  headline use case is an internally-tagged WS message enum, and its output is IndexMap-backed (byte-stable). Risk
-  accepted knowingly: 0.x with two breaking releases in eight months, single maintainer — pinned version; breaking bumps
-  are scheduled chores.
-- A `#[cfg(feature = "schema")]` module `spec_gen` in `uptrakit-wire` builds the complete AsyncAPI 3.0.0 document in
-  Rust: `info` (short description pointing at `docs/api/wire-protocol.md` for narrative), the `/api/v1/ws/service`
-  channel, send/receive operations for the two message directions, `components/messages` (one entry per real enum
-  variant, `const`-discriminated) and `components/schemas` (schemars output, shared `$defs` hoisted). The **entire**
+- The `#[cfg(feature = "schema")]` module `spec_gen` in `uptrakit-wire` assembles the complete AsyncAPI 3.0.0 document
+  in Rust and serializes it with `serde_yaml_ng` (already a wire-crate dev-dependency; becomes an optional dependency
+  of the `schema` feature). **No net-new external dependency.** Document content: `info` (short description pointing
+  at `docs/api/wire-protocol.md` for narrative), the `/api/v1/ws/service` channel, send/receive operations for the two
+  message directions, `components/messages` (one entry per real enum variant, `const`-discriminated, snake_case keys
+  matching the serde wire strings) and `components/schemas` (schemars output, shared `$defs` hoisted). The **entire**
   `asyncapi.yaml` becomes generated output; there is no hand-edited region left in the file. A generated-file header
-  comment names the regen command.
+  comment names the regen command. Output must be deterministic (byte-identical across reruns) — verified in §Verification.
+- **Named implementation risk — `$ref` namespace translation.** schemars emits definitions under `$defs` with
+  `$ref: "#/$defs/Foo"` (JSON Schema 2020-12 dialect); AsyncAPI `components/schemas` requires
+  `$ref: "#/components/schemas/Foo"`. The hoisting step is a translation, not a move — and broken refs are still
+  deterministic, so the golden gate cannot see them. Guard with a first-party test: the generated document contains no
+  `#/$defs/` occurrence and every `$ref` string resolves to an existing key within the document. Verify schemars
+  1.2.1's actual ref path and emitted dialect keywords (`$schema`, 2020-12-isms) during implementation rather than
+  assuming.
 - The envelope-flatten layout must be preserved as documented today: each message payload schema presents one flat
   object carrying `protocol_version`, `seq`, `trace_context`, optional `pagination` (service direction), `type`
   discriminator, and the payload fields — matching what `#[serde(flatten)]` actually puts on the wire.
-- **Feasibility spike is the first implementation task**: prove asyncapi-rust 0.4.0 can express (a) the flattened
-  envelope schema shape, (b) AsyncAPI 3.0 channels/operations as currently structured, (c) deterministic byte-stable
-  YAML output. **Named fallback** if any of these fail: keep schemars for all schemas and assemble the document
-  sections by hand with `serde_yaml_ng` (already a dev-dependency) inside the same module — the assembly surface is
-  small since all prose leaves the file (§5). The fallback changes no other part of this design.
+- **asyncapi-rust 0.4.0 was evaluated as the assembler and rejected on verified evidence** (initially preferred for
+  consistency with the web-api code-first approach). Two blockers, both confirmed by reading its published source:
+  (a) `ToAsyncApiMessage` operates on the tagged enum alone, while the envelope fields live on the wrapping
+  `ServiceEnvelope`/`ControllerEnvelope` structs — the flattened envelope layout cannot be expressed; (b) its codegen
+  reads only per-variant `#[serde(rename = ...)]` and has no `rename_all` handling at all, so both enums'
+  `rename_all = "snake_case"` discriminants and message-map keys would emit as bare PascalCase variant identifiers
+  (`"Ping"`, not `"ping"`). Adding 63 per-variant `rename` attributes to work around (b) is rejected — reshaping wire
+  code to fit a 0.x doc tool. Supporting signals: single maintainer; ~7 months of dormancy followed by two breaking
+  releases within hours on one day (2026-06-19); 0.4.0 roughly a month old at spec time. **Reversal condition** (ADR
+  records it): if a future asyncapi-rust release gains `rename_all` support and an envelope/flatten mechanism,
+  re-evaluate replacing the hand assembly; until then it is not registered in the workspace at all.
 
 ### 3. Golden staleness gate (web-api idiom)
 
@@ -104,11 +150,14 @@ rejected as throwaway work.
   committed `asyncapi.yaml` is byte-identical to the generated document; with `UPDATE_ASYNCAPI=1` set it rewrites the
   file instead — exactly the `UPDATE_OPENAPI=1` pattern in `crates/ui/web-api`.
 - New `scripts/regen-asyncapi.sh` mirroring `scripts/regen-api.sh`:
-  `UPDATE_ASYNCAPI=1 cargo test -p uptrakit-wire --features schema asyncapi_`.
-- Enforcement scope (stated per the feature-gate lesson): the CI quality gate `cargo test --all-features` runs the
-  golden test; the pre-push hook's `cargo nextest run --no-default-features --features db-sqlite` does **not** compile
-  the `schema` feature, so pre-push will not catch staleness — CI is the enforcing gate. The command that exercises the
-  gate locally is `cargo test -p uptrakit-wire --features schema asyncapi_`.
+  `UPDATE_ASYNCAPI=1 cargo test -p uptrakit-wire --all-features asyncapi_` — `--all-features` (not `--features schema`)
+  deliberately mirrors `regen-api.sh` and future-proofs against the "legitimate feature subset" false-failure trap the
+  web-api golden test documents, should `uptrakit-wire` ever grow another spec-affecting feature.
+- Enforcement scope (stated per the feature-gate lesson): CI exercises the golden test through the coverage job's
+  `cargo llvm-cov --workspace --all-features` run (the documented equivalent of the canonical `cargo test
+--all-features` gate); the pre-push hook's `cargo nextest run --no-default-features --features db-sqlite` does
+  **not** compile the `schema` feature, so pre-push will not catch staleness — CI is the enforcing gate. The command
+  that exercises the gate locally is `cargo test -p uptrakit-wire --all-features asyncapi_`.
 
 ### 4. Serde alias removal
 
@@ -139,12 +188,21 @@ a rewrite (regeneration is how unlisted content dies):
 
 ### 6. Test cleanup
 
-Retire the `AsyncApiSpec` validator and all `spec_conformance_*` tests in `src/tests.rs`: once the schemas derive from
-the same Rust types via serde/schemars, asserting serialization against them is testing upstream crate behavior. The
-envelope wire-shape serialization tests (flat JSON layout, seq/protocol_version presence) stay — they pin the on-wire
-contract independent of schemars. `docs/development/testing.md` currently describes the sample-based mechanism and
-overstates its coverage; that section is rewritten to describe the golden gate (correct-in-place, not a rewrite of the
-whole doc).
+Retire the `AsyncApiSpec` validator and all `spec_conformance_*` tests in `src/tests.rs` — scoped precisely: the
+retirement rationale ("testing upstream crate behavior") applies to **derived** schemas only. The envelope wire-shape
+serialization tests (flat JSON layout, seq/protocol_version presence) stay — they pin the on-wire contract independent
+of schemars. **New first-party tests this spec adds** (the manual impls are new logic, per the cover-new-logic rule):
+
+- per wire-safe/hand-rolled enum with a manual `JsonSchema` impl (`Capability`, `EnrollmentStatus`, `UpdateCategory`,
+  plus the `wire_safe_enum!`-generated impls): assert the generated schema is an open `string` with **no** `enum:`
+  array — the exact regression (closed enum where open string is required) the manual impls exist to prevent;
+- the `$ref`-resolution test from §2 (no `#/$defs/`, all refs resolve).
+
+Trust-model change stated honestly (see §Decision): the retired tests' residual change-detection value (a hard-red on
+an accidental serde change for sampled messages) is replaced by the golden gate's diff-review model, not by an
+equivalent hard-red; this matches the repo's accepted `openapi.json` regime. `docs/development/testing.md` currently
+describes the sample-based mechanism and overstates its coverage; that section is rewritten to describe the golden
+gate and this trust model (correct-in-place, not a rewrite of the whole doc).
 
 ### 7. Out-of-scope guard
 
@@ -154,32 +212,48 @@ untouched. No frontend, controller, or service code changes beyond the wire crat
 
 ## Deliverables
 
-1. Workspace-root `[workspace.dependencies]`: `schemars` 1.2.1, `asyncapi-rust` 0.4.0 (registered there first; crate
-   manifests use `workspace = true`). `cargo deny check` must pass with both.
+1. **Zero net-new workspace dependencies**: schemars reused from the existing `schemars = { version = "1" }` root
+   entry; `serde_yaml_ng` promoted from wire dev-dependency to optional dependency of the `schema` feature (root
+   entry already exists). Crate manifests use `workspace = true`. `cargo deny check` must pass.
 2. `uptrakit-wire`: `schema` feature, `JsonSchema` derives + overrides, `spec_gen` module, golden test, alias removal,
-   conformance-test retirement.
+   conformance-test retirement. `uptrakit-shared-macros`: `wire_safe_enum!` extended with the manual `JsonSchema`
+   emission (§1).
 3. Regenerated `crates/shared/wire/asyncapi.yaml` (fully generated; reviewed diff against the old file checked against
    the §Problem inventory: 12 previously missing messages present, stale fields gone, capability representation open).
 4. `scripts/regen-asyncapi.sh`.
 5. Docs:
-   - `docs/adr/0029-asyncapi-codegen.md` — new ADR recording this decision, the rejected alternatives, the accepted
-     schemars representation limits, and the asyncapi-rust 0.x risk.
+   - `docs/adr/0029-asyncapi-codegen.md` — new ADR recording this decision, the rejected alternatives (including
+     yaml deletion and asyncapi-rust with its reversal condition), the accepted schemars representation limits, the
+     golden-gate trust model (staleness detection + diff review, not hard-red change detection), the `--all-features`
+     compile-time cost of feature unification pulling schemars into `uptrakit-shared-types`/`uptrakit-surfaces`, and
+     the standing obligation that any future custom `Serialize` impl in a schema-reached crate needs a matching manual
+     `JsonSchema` impl, the one-time AsyncAPI-validator authoring gate and its residual tension (validity not
+     re-checked per commit), and a note that a schemars minor bump changing output flips the golden test red into a
+     reviewable regen diff (caught, not silent). Implementation verifies schemars 1.2.1's MSRV against the workspace
+     `rust-version`.
    - `docs/api/wire-protocol.md` — absorbs migrated narrative prose (§5).
    - `docs/development/testing.md` — sample-validator section replaced by golden-gate description (§6).
    - `docs/development/quality-gates.md` **and** the AGENTS.md quick-start block — add the regen command, same commit
      (AGENTS.md maintenance rule).
    - `AGENTS.md` — wire invariant wording still holds ("documented in asyncapi.yaml"); fix the stale crate name in the
-     layout tree (`uptrakit-internal-wire` → `uptrakit-wire`).
-   - `docs/README.md` — index entry for the new ADR.
+     layout tree (`uptrakit-internal-wire` → `uptrakit-wire`). No `docs/README.md` change: it carries no ADR index
+     (verified — zero ADR mentions), and this spec does not introduce one.
 6. Pending-specs tracker entry (working artifact, not committed).
 
 ## Verification
 
-- `cargo test -p uptrakit-wire --features schema asyncapi_` green; rerunning `scripts/regen-asyncapi.sh` twice yields a
+- `cargo test -p uptrakit-wire --all-features asyncapi_` green; rerunning `scripts/regen-asyncapi.sh` twice yields a
   byte-identical file (determinism).
-- Full gates: `cargo fmt`, `cargo check`/`clippy` on both canonical feature sets, `cargo test --all-features`,
+- Full gates: `cargo fmt`, `cargo check`/`clippy` on both canonical feature sets, `cargo test --all-features`
+  (workspace-wide `--all-features` includes `embed-frontend` — build `frontend/` first per the AGENTS.md note),
   `cargo deny check`, `markdownlint`.
 - Generated-vs-old yaml diff reviewed against the §Problem inventory (the gap-fix proof).
+- **AsyncAPI validity**: the first generated document is loaded through an AsyncAPI validator (AsyncAPI Studio or
+  `@asyncapi/parser`) and passes — a one-time authoring gate, deliberately not CI (keeps Node out of Rust CI). The
+  ADR states the residual tension honestly: the doc's fitness for AsyncAPI tooling is verified at authoring and on
+  manual regen review, not per-commit. `scripts/regen-asyncapi.sh` prints a one-line reminder to re-run the validator
+  whenever the message/schema set changes, so future regens have a prompt the diff review alone would not provide.
+- The §2 `$ref`-resolution test and the §6 open-string manual-impl tests are green.
 - Prose migration greps (§5), both directions.
 - Workspace-wide grep for the removed alias strings returns hits only in this spec/ADR/history documents.
 
