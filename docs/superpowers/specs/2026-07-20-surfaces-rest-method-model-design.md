@@ -88,10 +88,14 @@ GET|PUT|DELETE      /api/v1/surfaces/{surface_id}/interactions/{interaction_id}/
   then interaction) → 403; then method mismatch → 405 with an `Allow` header listing every method registered for
   that interaction ID. Permission before 405 so an unauthorized caller cannot probe an interaction's kind or
   method set. 405 uses `StatusCode::METHOD_NOT_ALLOWED` with the platform `ErrorResponse` envelope.
-- **Item segment (B5):** when `{item_id}` is present it is injected into the provider-bound `params` map as
-  reserved key `id` (JSON string; the provider parses, exactly as row-context params work today). `POST` does not
-  accept an item segment (create targets the collection). Whether an interaction _requires_ the item segment is
-  the provider's contract with itself — the framework injects when present and does not model item-scoped-ness.
+- **Item segment (B5) and the `id` reserved-key contract:** `id` is a framework-reserved **string** params key.
+  The framework populates it from the `{item_id}` path segment when present; it may equally arrive as a GET
+  query key (string passthrough — e.g. form preloads whose row context spreads `id` into request params today)
+  or a POST body field (item-targeted domain operations like notifications `test`). **Providers read
+  `params["id"]` uniformly and never care which route it took.** `POST` accepts no item segment (create targets
+  the collection). Whether an interaction _requires_ `id` is the provider's contract with itself — the framework
+  injects/forwards and does not model item-scoped-ness. `id` joins the reserved-key collision list for declared
+  `params` (§4).
 - **HEAD:** must not invoke the provider. Axum's auto-derived HEAD runs the full GET handler and only strips the
   response body — it skips nothing by itself. The GET handler therefore branches on the extracted `Method`
   explicitly and short-circuits HEAD after the permission check (headers only, no provider dispatch).
@@ -153,7 +157,11 @@ GET|PUT|DELETE      /api/v1/surfaces/{surface_id}/interactions/{interaction_id}/
   enforced at the single admission choke point `validate_registration_admission_locked` (shared by
   `register_service` and `bootstrap_plugin`/`bootstrap_builtin` — the plan must verify this call linkage by
   grep). A `DataLoad` declaring a non-GET method (or any interaction declaring `Other`) is rejected; a `DataLoad`
-  omitting the field is normalized to `Get`.
+  omitting the field is normalized to `Get`. The `(id, method)` key propagates to
+  `CONTROLLER_LOCAL_EXECUTOR_TABLE` (`crates/ui/surface-proxy/src/proxy/controller_local.rs`): its
+  `(surface_id, interaction_id)` row key gains the method (a collapsed GET+PUT pair on one ID would otherwise
+  collide), and its `executor_table_has_no_duplicate_pairs` guard test plus the ADR-0028 bidirectional guard
+  (`interaction_executor_guard.rs`) re-key with it.
 - **Compatibility, old service → new controller:** an old service binary registers descriptors without
   `http_method`. Non-DataLoad kinds default to POST (today's behavior); DataLoad kinds normalize to GET, and the
   frontend — which is data-driven and ships with the controller — dispatches GET. The wire request the old
@@ -275,9 +283,13 @@ before deletion (deletions break tests at compile, not runtime).
 - **CLI:** `dynamic` dispatch (`crates/ui/cli/src/commands/surfaces.rs`) selects the method from the descriptor.
 - **e2e:** Playwright mock route-matcher regexes in `frontend/tests/e2e/` swept for the interactions path (they
   key on paths, not the SDK — a method/path change silently falls through to catch-all mocks otherwise).
-- **Audit:** invoke-path audit emissions gain the method as a field; if handler registration moves between
-  `router.rs` and `routes!` forms, re-key `audit-catalog.toml` accordingly and run
-  `cargo xtask audit-coverage-check` as a task gate (not only at pre-push).
+- **Audit (policy pinned):** GET DataLoad invocations **stay audited** (status quo — the invoke path audits
+  unconditionally today, and reads of permission-gated data are worth a row). The method joins both the audit
+  target/display form and `details_json`, so a collapsed GET+PUT noun (companion rename spec) stays
+  read-vs-write distinguishable in the audit log — the bare `{surface_id}/{interaction_id}` target alone no
+  longer would be. If handler registration moves between `router.rs` and `routes!` forms, re-key
+  `audit-catalog.toml` accordingly and run `cargo xtask audit-coverage-check` as a task gate (not only at
+  pre-push).
 - `crates/ui/web-api/db_access_policy.toml`: entries for new/renamed handlers.
 
 ## Error semantics (delta)
