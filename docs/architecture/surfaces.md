@@ -82,7 +82,7 @@ Core gates:
 - invalid slot/contract
 - invalid transport usage
 - tenant-binding mismatch
-- allowlist violations (`controller_query`, SSE topic, direct built-in operation)
+- allowlist violations (`controller_query`, SSE topic)
 - payload and contract-size/depth limits
 
 Rejections are returned as structured reasons with machine-readable codes

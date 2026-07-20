@@ -66,7 +66,7 @@ Service and plugin providers are admitted through `SurfaceRegistry` with strict 
 - slot ID validation against central slot registry
 - provider-kind/transport compatibility
 - tenant-binding correctness for authenticated service context
-- allowlist checks for controller queries, SSE topics, and direct built-in operations
+- allowlist checks for controller queries and SSE topics
 - contract shape and depth limits
 - payload and interaction count limits
 

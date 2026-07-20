@@ -64,7 +64,7 @@ Controller admission rejects incompatible registrations. Main gates:
 - invalid slot or invalid contract shape
 - transport misuse for provider kind
 - tenant-binding mismatch against authenticated service context
-- allowlist failures (`controller_query`, SSE topic, direct built-in operation IDs)
+- allowlist failures (`controller_query`, SSE topic)
 - payload and depth limits
 
 The built-in UI and surface-backed UI must stay visually aligned; the runtime is a parity path,
