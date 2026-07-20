@@ -533,6 +533,10 @@ feature.
 **Never** use `#[cfg(not(feature = "X"))]` attribute-style conditionals. This syntax makes feature `X` subtract from the binary, which violates the
 additive model and can cause incorrect builds when features are combined.
 
+This rule is CI-enforced by `ci/verify_no_new_cfg_not_feature.sh` (all negated-feature `cfg` spellings, including
+`all(…, not(…))` compositions and inner attributes); pre-existing sites are grandfathered in a shrink-only allowlist —
+see the gate script's header for the exception process.
+
 Instead, use the `cfg!()` macro in expression position:
 
 ```rust

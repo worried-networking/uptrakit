@@ -45,6 +45,7 @@ bash ci/verify_typed_audit_actions.sh                                # Audit act
 bash ci/verify_handler_state_contract.sh                             # No handler mixes State<Arc<AppState>> with sub-state
 python3 ci/verify_db_access_policy.py                                # db_access_policy.toml consistent with routes/
 bash ci/verify_agents_md_budget.sh                                   # AGENTS.md size budget gate
+bash ci/verify_no_new_cfg_not_feature.sh                             # Additive-only feature flags: no new negated-feature cfg outside allowlist
 ```
 
 > **Note:** `--all-features` includes `embed-frontend`, which requires `frontend/build/`. Build the frontend first

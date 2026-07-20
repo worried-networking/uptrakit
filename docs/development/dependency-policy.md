@@ -58,6 +58,31 @@ Rules:
 4. Optional heavy deps must use `workspace = true, optional = true` and be gated with `dep:crate`
    in the feature definition.
 
+### Self dev-dependencies (required interim mitigation)
+
+A crate MUST declare a dev-dependency on itself (via `workspace = true`, enabling its own features) when both hold:
+
+1. it carries `#[cfg(not(feature = "X"))]` fallback code whose shape depends on a shared dependency's feature state, and
+2. any of its dev-dependencies can transitively force that foreign feature on.
+
+Without it, dev-dep feature unification compiles the dependency's real signatures against the crate's fallback stubs,
+and every bare `cargo test|clippy -p <crate>` fails (the 2026-07-20 proxmox incident). Worked example:
+`crates/plugins/infrastructure/proxmox/Cargo.toml` `[dev-dependencies]` — see its inline comment.
+
+Caveats:
+
+- `cargo test --no-default-features -p <crate>` no longer means what it says: dev-dep features are additive and
+  unsuppressable, so the crate's test targets always run in the enabled feature world. Feature-subset verification for
+  such a crate is compile-only (lib `cargo check -p`, consumer binary builds).
+- This rule is an **interim mitigation with an expiry**: retire it (and the proxmox self-dev-dep) when the infra-core
+  feature-switched aliases become additive — the compliant long-term answer to feature desync is additive features, not
+  more self-dev-deps.
+- This rule covers only the type-switching/fallback shape. Feature-gated _test code_ with no fallback involved (the
+  E0599 shape) is covered by the CI bare-crate clippy sweep over `crates/plugins/**` instead.
+- Thin-binary constraint, stated precisely: `uptrakit-agent` is the binary that must stay free of `sea-orm-migration`
+  (it has no registry/migration dependency at all). `uptrakit-agent-ssh` already carries `sea-orm-migration`
+  unconditionally via `agent-ssh-runtime` — do not read this rule as implying otherwise.
+
 ## Feature-gated optional dependencies
 
 Heavy dependencies that are only needed for specific functionality are gated behind Cargo
