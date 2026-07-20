@@ -3,8 +3,9 @@
 **Date:** 2026-07-20
 **Status:** Approved (user-approved after a 3-round adversarial generator–critic review + independent verification pass)
 **Scope:** `crates/plugins/infrastructure/proxmox/Cargo.toml`, `.github/workflows/ci.yml`,
-`ci/verify_no_new_cfg_not_feature.sh` (new) + allowlist, `docs/development/dependency-policy.md`,
-`docs/development/quality-gates.md`, `AGENTS.md` (quick-start gate list)
+`ci/verify_no_new_cfg_not_feature.sh` (new) + allowlist, `.husky/pre-push`,
+`docs/development/dependency-policy.md`, `docs/development/quality-gates.md`,
+`docs/development/coding-standards.md`, `AGENTS.md` (quick-start gate list)
 
 ## Problem
 
@@ -99,54 +100,112 @@ can no longer exercise a "no-features test world" — dev-dep features are addit
 by `--no-default-features`. This is not a regression (that world never compiled; that is the bug), but
 the manifest comment and the dependency-policy note must state it: stub-world verification lives in the
 agent binary build (`cargo check -p uptrakit-plugin-infrastructure-proxmox` / `cargo build -p uptrakit-agent`),
-not in any test target.
+not in any test target. Stated plainly as a coverage trade (contrarian-surfaced): proxmox's test
+targets can now ONLY run in the maximal feature world — per-feature-subset test execution
+(cargo-hack-style) is structurally impossible for this crate until the deferred infra-core
+restructure makes its features additive; until then, feature-subset verification is compile-only
+(lib checks + agent binary build).
 
 ## Long-term prevention (in scope; approved via adversarial review)
 
-The self-dev-dep alone fixes the instance. Two CI gates prevent the class. Both live in the existing
-`backend-lint` job / `ci/` script family — no new CI job (avoids a `rust-cache` shared-key save race;
-`backend-lint` is the sole writer of the `rust-all-features` key, `backend-test` already sets
-`save-if: "false"` for exactly this reason).
+The self-dev-dep alone fixes the instance. Two CI gates prevent the class, each in the job that
+matches its shape: Gate A (cargo-compiling) joins `backend-lint` (no new job — avoids a `rust-cache`
+shared-key save race; `backend-lint` is the sole writer of the `rust-all-features` key, `backend-test`
+already sets `save-if: "false"` for exactly this reason). Gate B (pure grep script) joins the
+`semantic-boundary` job, which already installs ripgrep and runs the sibling `verify_*.sh` scripts —
+NOT `backend-lint`, which has no ripgrep step and never runs script gates.
 
 ### Gate A — bare-crate clippy sweep over `crates/plugins/**`
 
 One `cargo clippy --all-targets -p <crate>` per plugin crate, added to `backend-lint` (precedent: the
 package-isolation `cargo check -p uptrakit-controller-runtime …` step there, which carries its own
-justifying comment). The crate list MUST be derived dynamically (a `find crates/plugins -name
-Cargo.toml` loop or an xtask subcommand mirroring `ci/check_plugin_semantic_boundary.py`'s discovery) —
-never a hand-maintained enumeration, so a future plugin crate is covered the day it lands. Single
+justifying comment). The crate list MUST be derived dynamically — a shell loop over the two-level
+plugin layout (`crates/plugins/*/*/Cargo.toml` glob, reading each `name` field) — never a
+hand-maintained enumeration, so a future plugin crate is covered the day it lands. Single
 command per crate: clippy `--all-targets` type-checks lib+tests+benches, so it surfaces both the E0308
 alias-desync shape and the E0599 shape (test code calling own-feature-gated items — a shape no
 `cfg(not)` grep can predict). Verified: no other plugin crate currently fails this gate (structural
 check of all plugin crates + empirical bare-clippy spot-check of registry and skills, both clean).
+Contingency if the pre-wiring end-to-end sweep (verification step 8) reddens a crate the spot-checks
+missed: fix that crate in-scope (same self-dev-dep pattern if it has the desync shape, or the direct
+compile fix) — Gate A deliberately has NO per-crate skip/allowlist; an all-green sweep is the
+precondition for wiring it, not something to except around.
 Cost note for the implementing PR: the sweep shares `backend-lint`'s target dir but bare-default
 resolution differs from `--all-features`, so it reduces — not eliminates — recompilation; measure CI
-minutes in the PR rather than trusting estimates.
+minutes in the PR rather than trusting estimates. Explicit cost decision rule (not a silent
+every-PR default): if the measured sweep adds more than ~2 minutes to `backend-lint`, demote it —
+path-filter to PRs touching `crates/**`, or move the full sweep to a nightly/merge-gate job keeping
+only touched-crate checks per PR. The sweep also grows linearly with plugin count by design; revisit
+placement when it does.
 
 Rejected for this role: `cargo hack --each-feature` — dev-dependency features activate in every
 test-mode leg, so post-fix all legs resolve identically (moot), and in `check` mode dev-deps never
 activate (structurally cannot catch the class). A full feature powerset across the workspace is pure
 cost.
 
-### Gate B — attribute-grep gate on new `#[cfg(not(feature))]`
+### Gate B — attribute-grep gate on negated feature cfgs
 
 New `ci/verify_no_new_cfg_not_feature.sh` + checked-in allowlist, mirroring the
-`ci/verify_no_security_audit.sh` + `_allowlist.txt` pattern (`rule|path|regex` format). The regex must
-anchor on the attribute shape (`^\s*#\[cfg\(not\(` with a `feature` match), not the substring — two
-prose mentions (`crates/shared/audit-log/src/emitter.rs` doc-comment,
-`crates/core/agent-ssh-runtime/src/client.rs` inline comment) are not sites and must not be
-allowlisted as such. Seed the allowlist from a fresh grep at implementation time (24 real attributes
-across 13 files / 8 crates at time of writing — treat as evidence, not a gate; the checked-in
-allowlist file is the source of truth and prose must never restate its counts). Carve out
-`crates/core/controller-runtime/src/db/mod.rs` as a distinct permanently-allowed category: its
-`cfg(not(any(feature…)))` guards a `compile_error!` ("pick a DB backend"), a benign different class
-from feature-switched signatures. New sites require an allowlist entry, giving PR review a visible
-decision point.
+`ci/verify_no_security_audit.sh` + `_allowlist.txt` pattern (`rule|path|regex` format), wired into
+both the `semantic-boundary` CI job and `.husky/pre-push` alongside its three `verify_*.sh` siblings
+(all three run in both places; a gate that only fires in CI breaks the local-first pattern).
+
+Match shape — the gate must catch a _negated feature test anywhere inside a `cfg` attribute_, not
+just the leading `cfg(not(` spelling. Three real shapes exist in-tree today:
+`#[cfg(not(feature = "x"))]`, `#[cfg(not(any(feature = "a", feature = "b")))]`
+(`controller-runtime/src/db/mod.rs`), and `#[cfg(all(feature = "a", not(feature = "b")))]`
+(`proxmox/src/plugin.rs` middle branch — the same paired-stub risk class this gate exists for; a
+bare `cfg(not(`-only anchor is blind to it). Prescribed detection: slurp-mode matching per the
+in-repo precedent `ci/verify_handler_state_contract.sh` (`perl -0777` handles attributes rustfmt
+wraps across lines — long `any(...)` lists), with the pattern
+`^\s*#!?\[cfg\([^\]]*not\s*\(\s*(any\s*\(\s*)?feature` under the `/gsm` flags. Load-bearing pieces,
+each empirically verified this review: the `^\s*` line-start anchor with `/m` is what excludes the
+two prose mentions (`crates/shared/audit-log/src/emitter.rs` doc-comment,
+`crates/core/agent-ssh-runtime/src/client.rs` inline comment — the unanchored form of this same
+pattern false-positives on BOTH, so the anchor is not optional); the `#!?` alternation also covers
+the inner-attribute form `#![cfg(...)]` (an established module-gating idiom here; no negated inner
+attribute exists today, but the gate must not be blind to one). Verified behavior of the anchored
+pattern: 0 matches in `emitter.rs`, exactly the two real attributes in `client.rs`, and all three
+in-tree shapes matched. Still prove both directions at implementation time: RED on a temporary
+unlisted addition of each of the three shapes, silent on the prose mentions.
+
+Allowlist keying: follow `verify_no_security_audit.sh`'s `is_allowlisted()` semantics — entries match
+on (rule, path, text-regex); line numbers are display-only, so slurp-mode matching (which has byte
+offsets, not line numbers) composes with the allowlist format; derive display line numbers by
+counting newlines up to the match offset, or omit them.
+
+Seed the allowlist from a fresh run of the final pattern at implementation time — the widened shape
+finds MORE than the 24 top-level `cfg(not(` attributes counted earlier (the `cfg(all(…, not(…)))`
+sites were invisible to that count); the checked-in allowlist file is the source of truth and prose
+must never restate its counts. Carve out `crates/core/controller-runtime/src/db/mod.rs` as a distinct
+permanently-allowed category: its `cfg(not(any(feature…)))` guards a `compile_error!` ("pick a DB
+backend"), a benign different class from feature-switched signatures.
+
+Allowlist semantics — a ratchet, not an exception pathway: it grandfathers the existing sites so the
+prohibition (until now unenforced prose in coding-standards) becomes CI-enforced for all new code;
+entries are expected only to be removed (each deletion via the deferred restructure below), and adding
+one requires explicit maintainer sign-off in review with an in-file justification comment. The gate
+freezes the violation count; full conformance is owned by the deferred restructure, not by this spec.
+
+Why Gate B is not redundant with Gate A (contrarian-tested): Gate A compiles only `crates/plugins/**`
+— the five crates with negated-feature cfgs outside it (agent-runtime, agent-ssh-runtime,
+service-sdk, web-api, controller-runtime) are Gate B's only coverage; Gate B also catches a new
+type-switching site that happens to compile green in every CI feature world (this bug was exactly
+that for months); and its cost is a sub-second grep. Rare benign uses exist (the `compile_error!`
+backend guard is one — hence its permanent carve-out), so friction lands on a population that is
+almost entirely prohibited code plus the occasional carve-out-worthy guard, each a deliberate
+review decision. Retirement coupling: Gate B and the allowlist exist because the restructure is
+deferred — the restructure spec, when picked up, must shrink the allowlist toward the carve-out-only
+state and then decide whether Gate B survives as a cheap tripwire or retires.
 
 ### Policy rule (with the CI gates, completes prevention)
 
-`docs/development/dependency-policy.md` gains a requirement, not just a worked example: a self
-dev-dependency is REQUIRED whenever a crate (a) carries `#[cfg(not(feature))]` fallback code whose
+`docs/development/dependency-policy.md` gains a requirement — framed as a REQUIRED INTERIM
+MITIGATION with an explicit expiry condition ("retire this rule and the proxmox self-dev-dep when
+the infra-core feature-switched aliases become additive; see the deferred restructure spec"), never
+as a standing pattern to reach for by default — the compliant long-term answer to feature desync is
+additive features, not more self-dev-deps. The rule: a self dev-dependency is REQUIRED whenever a
+crate (a) carries `#[cfg(not(feature))]` fallback code whose
 shape depends on a shared dependency's feature state, and (b) any dev-dependency can transitively
 force that foreign feature on. State explicitly that this rule targets the type-switching/fallback
 shape only; Gate A's bare-crate sweep is the catch-all for the E0599-only shape (feature-gated test
@@ -159,7 +218,10 @@ imply otherwise.
 
 - **Document-the-command only (no code change):** zero blast radius, but leaves the bare command a
   15-error trap and leaves the ledger-recorded mis-gate class open for every future plan touching this
-  crate. Rejected in favor of making the obvious command correct.
+  crate. Rejected in favor of making the obvious command correct — BUT retained as the named fallback:
+  if verification step 6 (release-plz probe) comes back red against the self-dev-dep, ship the doc-only
+  stance plus Gates A/B (which are independent of the manifest change) instead of forcing the novel
+  mechanism through.
 - **Trim dev-dep features + `#![cfg(feature = "migrations")]`-gate the test modules:** bare
   `cargo test` would compile but run ~0 tests — exactly the green-on-empty anti-pattern the ledger
   bans. Rejected.
@@ -191,13 +253,19 @@ All commands from repo root; every gate names its feature world explicitly:
    release pipeline cannot be validated read-only. With the change applied, run the release-plz cargo
    wrapper's package step (`ci/release-plz/cargo-wrapper.sh` invocation of
    `cargo package --allow-dirty --workspace --no-verify`) and a `release-plz update` dry run; confirm
-   both succeed and proxmox's next-version computation is unaffected.
+   both succeed and proxmox's next-version computation is unaffected. Honest scope of this probe: it
+   validates release-plz's dependency-graph walk and tarball _emission_; `--no-verify` deliberately
+   skips the extract-and-rebuild step — the one path that would resolve the self-dev-dep from a
+   packaged tarball. Acceptable residual: the pipeline is `git_only` (crates never published or
+   rebuilt from tarballs), so that unexercised path has no consumer.
 7. Commit `Cargo.lock` if it changes (the lock records per-package dependency edges).
 8. For the CI additions: `actionlint` on `.github/workflows/ci.yml` (already in pre-commit for staged
    workflow files); run `ci/verify_no_new_cfg_not_feature.sh` locally — expected: exit 0 on main with
-   the seeded allowlist, non-zero when a test `#[cfg(not(feature = "x"))]` line is temporarily added
-   to an unlisted file (prove the RED case, not just the green); run the Gate-A sweep loop locally
-   once end-to-end to confirm every plugin crate is clean before wiring it into CI.
+   the seeded allowlist, non-zero for a temporary unlisted addition of EACH of the three in-tree
+   shapes (`cfg(not(feature))`, `cfg(not(any(feature…)))`, `cfg(all(…, not(feature…)))`) — prove the
+   RED cases, not just the green; run the full `.husky/pre-push` once (the script joins its siblings
+   there); run the Gate-A sweep loop locally once end-to-end to confirm every plugin crate is clean
+   before wiring it into CI.
 
 Commit type: `build(proxmox): …` — this is a build-system/dev-gate fix with zero runtime change;
 `fix:` would trigger an unwarranted release-plz version bump (the pipeline releases on `feat`/`fix`).
@@ -214,9 +282,11 @@ Commit type: `build(proxmox): …` — this is a build-system/dev-gate fix with 
 - **`docs/development/quality-gates.md` + AGENTS.md quick-start block** — add
   `bash ci/verify_no_new_cfg_not_feature.sh` to the canonical gate list (quality-gates.md is the
   canonical source; AGENTS.md quick-start updates in the same commit per its own maintenance rule).
-- **`docs/development/feature-flags.md` (or coding-standards.md#feature-flags)** — one line noting the
-  additive-only rule is now CI-enforced by the new script, with the allowlist as the exception
-  mechanism.
+- **`docs/development/coding-standards.md#feature-flags`** — the substantive home of the additive-only
+  rule: one line noting it is now CI-enforced by the new script, with the allowlist as the
+  grandfathered ratchet (`feature-flags.md` only cross-references this section; do not put the note
+  there).
+- **`.husky/pre-push`** — add the new script invocation alongside its three `verify_*.sh` siblings.
 - **No ADR for this spec:** the self-dev-dep + CI gates are dependency-policy/CI mechanics. The
   deferred core alias restructure (below) IS ADR-worthy and gets its own spec + ADR when picked up.
 
@@ -239,8 +309,8 @@ Send` with a `#[cfg(feature = "migrations")]` `into_sea_orm()` method,
     the Phase-0 self-dev-dep already shields the InfraSlot family from this exact desync.
   - The proxmox `#[cfg(not(feature = "migrations"))]` stub sites remain load-bearing for thin
     `uptrakit-agent` builds and are only removable via this restructure.
-- Repo-wide audit of non-plugin crates' bare `-p` gates (Gate A covers `crates/plugins/**`; the 8
-  crates with `cfg(not(feature))` sites outside it — agent-runtime, agent-ssh-runtime, service-sdk,
+- Repo-wide audit of non-plugin crates' bare `-p` gates (Gate A covers `crates/plugins/**`; the 5
+  crates with negated-feature cfg sites outside it — agent-runtime, agent-ssh-runtime, service-sdk,
   web-api, controller-runtime — are not swept and only proxmox was confirmed broken).
 - The standards-snapshot staleness-script false positive (collapsed source-path notation) — session
   tooling housekeeping, not project code; handled outside this spec.
