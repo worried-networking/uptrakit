@@ -123,6 +123,11 @@ No transitional aliases. Analysis of actual cross-binary references:
 - Policy if the plan-time grep finds a missed cross-binary reference: rename anyway; accepted breakage (user
   decision). Do **not** justify with a lockstep-release claim — agent binaries ship separately and skew is the
   steady state; state the breakage and the affected version combinations explicitly in the plan.
+- **New service → OLD controller (from the companion spec, restated):** the collapsed multi-method registrations
+  this spec introduces for mqtt/agent-ssh hard-fail registration on a pre-method-model controller (old id-only
+  uniqueness check rejects the duplicate ID; `ActionRef` object form fails deserialization). Loud failure, not
+  silent. Controller upgrades first; the release notes for the mqtt/agent-ssh binaries carrying these renames
+  must state the minimum controller version.
 
 Interaction IDs are not persisted (no DB columns, no MQTT topics — verified 2026-07-16 in the absorbed spec;
 re-verify by grep at plan time). Audit rows contain historical IDs as data — fine.
@@ -174,8 +179,8 @@ enum (C5); CLI help-text example; e2e mock matchers; guard tests (catalog + two 
 - New ADR `docs/adr/0031-surface-identifier-naming.md` (verify next-free number at implementation time; 0030 is
   the companion spec's) — convention, C1–C5, no-alias skew rationale.
 - `docs/api/surfaces.md` — example IDs updated to the new convention.
-- `frontend/AGENTS.md` — fix the stale claim that `frontend/src/lib/api/surfaces.ts` carries non-spec surface
-  endpoints (file retired; all four REST endpoints are utoipa-registered) — reconcile while renaming anyway.
+- `frontend/AGENTS.md` — owned by the companion method-model spec (stale `surfaces.ts` carve-out replaced there
+  with the DataLoad query-wrapper escape hatch); this spec only verifies no renamed ID appears in it.
 - Any doc page naming a renamed ID (found by the repo-wide grep above).
 - `CONTEXT.md`: no change — no new domain vocabulary.
 
