@@ -432,9 +432,9 @@ plugins share. See [Shared list_channels helper](#shared-list_channels-helper) f
 
 The `declare_plugin!` macro's `surfaces: { provider_id, registrations }` arm wires the `*_plugin_surfaces`
 fn into the descriptor; `PluginCatalog` derives the exact-id `(surface_id, interaction_id)` dispatch map
-from it at build time. `PluginSurfaceActionOps::handle_surface_action` receives a
-`descriptor::SurfaceActionContext` (with `db: &dyn Any`); handlers must downcast to
-`sea_orm::DatabaseConnection`.
+from it at build time. Each handler receives a `descriptor::SurfaceActionContext` exposing the typed
+controller boundary via its `controller` field -- use its accessors (`ctx.tenant_id()`,
+`ctx.caller_user_id()`, `ctx.tenant_db()`); there is no `dyn Any` database escape hatch to downcast.
 
 ### 6. Propagate the feature flag
 
