@@ -1,8 +1,10 @@
 # Proxmox Plugin: Fix Bare Per-Crate Test/Clippy Gates — Design
 
 **Date:** 2026-07-20
-**Status:** Approved for planning
-**Scope:** `crates/plugins/infrastructure/proxmox/Cargo.toml`, `docs/development/dependency-policy.md`
+**Status:** Approved (user-approved after a 3-round adversarial generator–critic review + independent verification pass)
+**Scope:** `crates/plugins/infrastructure/proxmox/Cargo.toml`, `.github/workflows/ci.yml`,
+`ci/verify_no_new_cfg_not_feature.sh` (new) + allowlist, `docs/development/dependency-policy.md`,
+`docs/development/quality-gates.md`, `AGENTS.md` (quick-start gate list)
 
 ## Problem
 
@@ -99,6 +101,60 @@ the manifest comment and the dependency-policy note must state it: stub-world ve
 agent binary build (`cargo check -p uptrakit-plugin-infrastructure-proxmox` / `cargo build -p uptrakit-agent`),
 not in any test target.
 
+## Long-term prevention (in scope; approved via adversarial review)
+
+The self-dev-dep alone fixes the instance. Two CI gates prevent the class. Both live in the existing
+`backend-lint` job / `ci/` script family — no new CI job (avoids a `rust-cache` shared-key save race;
+`backend-lint` is the sole writer of the `rust-all-features` key, `backend-test` already sets
+`save-if: "false"` for exactly this reason).
+
+### Gate A — bare-crate clippy sweep over `crates/plugins/**`
+
+One `cargo clippy --all-targets -p <crate>` per plugin crate, added to `backend-lint` (precedent: the
+package-isolation `cargo check -p uptrakit-controller-runtime …` step there, which carries its own
+justifying comment). The crate list MUST be derived dynamically (a `find crates/plugins -name
+Cargo.toml` loop or an xtask subcommand mirroring `ci/check_plugin_semantic_boundary.py`'s discovery) —
+never a hand-maintained enumeration, so a future plugin crate is covered the day it lands. Single
+command per crate: clippy `--all-targets` type-checks lib+tests+benches, so it surfaces both the E0308
+alias-desync shape and the E0599 shape (test code calling own-feature-gated items — a shape no
+`cfg(not)` grep can predict). Verified: no other plugin crate currently fails this gate (structural
+check of all plugin crates + empirical bare-clippy spot-check of registry and skills, both clean).
+Cost note for the implementing PR: the sweep shares `backend-lint`'s target dir but bare-default
+resolution differs from `--all-features`, so it reduces — not eliminates — recompilation; measure CI
+minutes in the PR rather than trusting estimates.
+
+Rejected for this role: `cargo hack --each-feature` — dev-dependency features activate in every
+test-mode leg, so post-fix all legs resolve identically (moot), and in `check` mode dev-deps never
+activate (structurally cannot catch the class). A full feature powerset across the workspace is pure
+cost.
+
+### Gate B — attribute-grep gate on new `#[cfg(not(feature))]`
+
+New `ci/verify_no_new_cfg_not_feature.sh` + checked-in allowlist, mirroring the
+`ci/verify_no_security_audit.sh` + `_allowlist.txt` pattern (`rule|path|regex` format). The regex must
+anchor on the attribute shape (`^\s*#\[cfg\(not\(` with a `feature` match), not the substring — two
+prose mentions (`crates/shared/audit-log/src/emitter.rs` doc-comment,
+`crates/core/agent-ssh-runtime/src/client.rs` inline comment) are not sites and must not be
+allowlisted as such. Seed the allowlist from a fresh grep at implementation time (24 real attributes
+across 13 files / 8 crates at time of writing — treat as evidence, not a gate; the checked-in
+allowlist file is the source of truth and prose must never restate its counts). Carve out
+`crates/core/controller-runtime/src/db/mod.rs` as a distinct permanently-allowed category: its
+`cfg(not(any(feature…)))` guards a `compile_error!` ("pick a DB backend"), a benign different class
+from feature-switched signatures. New sites require an allowlist entry, giving PR review a visible
+decision point.
+
+### Policy rule (with the CI gates, completes prevention)
+
+`docs/development/dependency-policy.md` gains a requirement, not just a worked example: a self
+dev-dependency is REQUIRED whenever a crate (a) carries `#[cfg(not(feature))]` fallback code whose
+shape depends on a shared dependency's feature state, and (b) any dev-dependency can transitively
+force that foreign feature on. State explicitly that this rule targets the type-switching/fallback
+shape only; Gate A's bare-crate sweep is the catch-all for the E0599-only shape (feature-gated test
+code with no fallback involved). Thin-binary constraint, stated precisely: `uptrakit-agent` is the
+binary that must stay free of `sea-orm-migration` (no registry/migration dependency at all);
+`uptrakit-agent-ssh` already carries it unconditionally via `agent-ssh-runtime` — policy text must not
+imply otherwise.
+
 ## Alternatives considered and rejected
 
 - **Document-the-command only (no code change):** zero blast radius, but leaves the bare command a
@@ -137,6 +193,11 @@ All commands from repo root; every gate names its feature world explicitly:
    `cargo package --allow-dirty --workspace --no-verify`) and a `release-plz update` dry run; confirm
    both succeed and proxmox's next-version computation is unaffected.
 7. Commit `Cargo.lock` if it changes (the lock records per-package dependency edges).
+8. For the CI additions: `actionlint` on `.github/workflows/ci.yml` (already in pre-commit for staged
+   workflow files); run `ci/verify_no_new_cfg_not_feature.sh` locally — expected: exit 0 on main with
+   the seeded allowlist, non-zero when a test `#[cfg(not(feature = "x"))]` line is temporarily added
+   to an unlisted file (prove the RED case, not just the green); run the Gate-A sweep loop locally
+   once end-to-end to confirm every plugin crate is clean before wiring it into CI.
 
 Commit type: `build(proxmox): …` — this is a build-system/dev-gate fix with zero runtime change;
 `fix:` would trigger an unwarranted release-plz version bump (the pipeline releases on `feat`/`fix`).
@@ -145,26 +206,41 @@ Commit type: `build(proxmox): …` — this is a build-system/dev-gate fix with 
 
 - **Inline manifest comment** in `crates/plugins/infrastructure/proxmox/Cargo.toml` (shown above) —
   co-located rationale so the precedent-free pattern survives future cleanup.
-- **`docs/development/dependency-policy.md`** — add a short subsection under the existing
-  dev-dependencies guidance ("If a dep is used only in tests…"): when a crate's _test targets_ require
-  the crate's own features (typically because dev-deps force a dependency's features that must stay in
-  lockstep), the sanctioned pattern is a self dev-dependency via `workspace = true` with the needed
-  features; cite the proxmox manifest as the worked example, and state the `--no-default-features`
-  test-target caveat.
-- **No ADR:** this is a dependency-policy mechanic, not an architecture decision; the deferred core
-  alias restructure would be ADR-worthy if picked up.
-- **No AGENTS.md / quality-gates change:** those documents define workspace-level gates, which are
-  unchanged; per-crate command behavior is corrected, not redefined.
+- **`docs/development/dependency-policy.md`** — add a subsection under the existing dev-dependencies
+  guidance ("If a dep is used only in tests…") carrying the REQUIRED self-dev-dep rule from
+  "Long-term prevention" above: trigger conditions (a)+(b), the proxmox manifest as worked example,
+  the `--no-default-features` test-target caveat, and the cross-reference that Gate A covers the
+  E0599-only shape the rule does not.
+- **`docs/development/quality-gates.md` + AGENTS.md quick-start block** — add
+  `bash ci/verify_no_new_cfg_not_feature.sh` to the canonical gate list (quality-gates.md is the
+  canonical source; AGENTS.md quick-start updates in the same commit per its own maintenance rule).
+- **`docs/development/feature-flags.md` (or coding-standards.md#feature-flags)** — one line noting the
+  additive-only rule is now CI-enforced by the new script, with the allowlist as the exception
+  mechanism.
+- **No ADR for this spec:** the self-dev-dep + CI gates are dependency-policy/CI mechanics. The
+  deferred core alias restructure (below) IS ADR-worthy and gets its own spec + ADR when picked up.
 
 ## Out of scope / deferred
 
-- Root-cause restructure of infra-core's feature-switched type aliases (`MigrationsFn`,
-  `ResetTenantDataFn`, `DbMigrateTablesFn`, and the `agent-infra`/`plugin-ops` siblings in
-  `descriptor.rs`) into additive optional fields — deferred debt; would also allow deleting the
-  `#[cfg(not(feature = "migrations"))]` stub sites in proxmox.
-- The pre-existing `#[cfg(not(feature))]` sites themselves: they remain load-bearing for thin agent
-  builds and are only removable via the deferred restructure.
-- Repo-wide audit of other crates whose bare `-p` gates may be similarly broken by dev-dep feature
-  unification (only proxmox is confirmed).
+- **Root-cause restructure of infra-core's feature-switched signatures — deferred to its own
+  spec + ADR**, with these adversarially-reviewed design constraints as the starting point:
+  - `MigrationsFn` is fully solvable via an always-defined erasure trait: `trait PluginMigration:
+Send` with a `#[cfg(feature = "migrations")]` `into_sea_orm()` method,
+    `type MigrationsFn = fn() -> Vec<Box<dyn PluginMigration>>` (never switches), adapter
+    `impl PluginMigration for Box<dyn sea_orm_migration::MigrationTrait>` matching the
+    already-erased vec proxmox returns. The `Send` bound is CONFIRMED against the pinned dep:
+    `sea-orm-migration 2.0.0-rc.41` declares `trait MigrationTrait: MigrationName + Send + Sync`.
+  - `ResetTenantDataFn`/`DbMigrateTablesFn` and the LIVE `InfraSlot`/`InfraBundle` family are NOT
+    erasure-compatible — their signatures embed concrete `sea_orm::DatabaseTransaction`/
+    `DatabaseConnection` types (`descriptor.rs`, `roles.rs` `on_plugin_config_reported`/
+    `has_infra_state`). Erasing those means "no direct sea_orm types in any shared descriptor
+    signature" — a materially larger project the ADR must scope honestly. Mitigation until then:
+    Gate B, plus the fact that `agent-infra` co-activates `migrations` in both core and proxmox, so
+    the Phase-0 self-dev-dep already shields the InfraSlot family from this exact desync.
+  - The proxmox `#[cfg(not(feature = "migrations"))]` stub sites remain load-bearing for thin
+    `uptrakit-agent` builds and are only removable via this restructure.
+- Repo-wide audit of non-plugin crates' bare `-p` gates (Gate A covers `crates/plugins/**`; the 8
+  crates with `cfg(not(feature))` sites outside it — agent-runtime, agent-ssh-runtime, service-sdk,
+  web-api, controller-runtime — are not swept and only proxmox was confirmed broken).
 - The standards-snapshot staleness-script false positive (collapsed source-path notation) — session
   tooling housekeeping, not project code; handled outside this spec.
