@@ -1,0 +1,22 @@
+# rule|path|text-regex
+# Shrink-only ratchet: entries are grandfathered pre-existing sites; each is
+# expected to be REMOVED by the deferred infra-core alias restructure. Adding
+# an entry requires maintainer sign-off + an in-file justification comment.
+# Permanent carve-out category: compile_error! backend guards (benign class,
+# not a feature-switched signature) — currently controller-runtime/src/db/mod.rs.
+negated_feature_cfg|crates/core/agent-runtime/src/lib.rs|not\(feature = "interactive"\)
+negated_feature_cfg|crates/core/agent-ssh-runtime/src/client.rs|not\(feature = "interactive"\)
+negated_feature_cfg|crates/core/agent-ssh-runtime/src/lib.rs|not\(feature = "interactive"\)
+negated_feature_cfg|crates/core/controller-runtime/src/db/mod.rs|not\(any\(feature = "db-sqlite", feature = "db-postgres"\)\)
+negated_feature_cfg|crates/plugins/infrastructure/core/src/catalog.rs|not\(feature = "plugin-ops"\)
+negated_feature_cfg|crates/plugins/infrastructure/core/src/descriptor.rs|not\(feature = "plugin-ops"\)
+negated_feature_cfg|crates/plugins/infrastructure/core/src/descriptor.rs|not\(feature = "migrations"\)
+negated_feature_cfg|crates/plugins/infrastructure/core/src/descriptor.rs|not\(feature = "agent-infra"\)
+negated_feature_cfg|crates/plugins/infrastructure/core/src/macros.rs|not\(feature = "agent-infra"\)
+negated_feature_cfg|crates/plugins/infrastructure/proxmox/src/db_migrate.rs|not\(feature = "migrations"\)
+negated_feature_cfg|crates/plugins/infrastructure/proxmox/src/plugin.rs|not\(feature = "migrations"\)
+negated_feature_cfg|crates/plugins/infrastructure/proxmox/src/plugin.rs|all\(feature = "migrations", not\(feature = "agent-infra"\)
+negated_feature_cfg|crates/plugins/infrastructure/proxmox/src/reset.rs|not\(feature = "migrations"\)
+negated_feature_cfg|crates/plugins/package-managers/skills/src/plugin.rs|not\(feature = "catalog"\)
+negated_feature_cfg|crates/shared/service-sdk/src/lifecycle.rs|not\(feature = "zeroconf"\)
+negated_feature_cfg|crates/ui/web-api/src/integration_tests/plugin_configs.rs|not\(feature = "dashboard-icons"\)
