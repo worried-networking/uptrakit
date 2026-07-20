@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use uptrakit_shared_macros::wire_safe_enum;
 
 use crate::{FormUiDescriptor, InteractionId, ProviderKind, SchemaContract};
 
@@ -26,6 +27,31 @@ pub enum InteractionTransport {
     ProviderProxied,
 }
 
+wire_safe_enum! {
+    /// HTTP method a surface interaction is dispatched with (REST method model, B1).
+    #[derive(Debug, Clone, PartialEq, Eq, Default)]
+    pub enum InteractionHttpMethod {
+        Get => "get",
+        // `#[serde(default)]` on `InteractionDescriptor::http_method` requires
+        // `InteractionHttpMethod: Default`; `#[default]` marks the variant the
+        // derive picks (the macro forwards per-variant attributes verbatim).
+        #[default]
+        Post => "post",
+        Put => "put",
+        Delete => "delete",
+    }
+    parse_error = ParseInteractionHttpMethodError("invalid interaction http method");
+}
+
+/// Known variants for exhaustive test iteration (mirrors the
+/// `ProviderEncryptionAlgorithm` precedent in `protocol.rs`).
+pub const KNOWN_INTERACTION_HTTP_METHODS: &[InteractionHttpMethod] = &[
+    InteractionHttpMethod::Get,
+    InteractionHttpMethod::Post,
+    InteractionHttpMethod::Put,
+    InteractionHttpMethod::Delete,
+];
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowStepDescriptor {
     pub step_id: String,
@@ -45,6 +71,11 @@ pub struct WorkflowStepDescriptor {
 pub struct InteractionDescriptor {
     pub interaction_id: InteractionId,
     pub kind: InteractionKind,
+    /// HTTP method this interaction is dispatched with. Wire default is POST
+    /// (providers that predate the method model omit the field); DataLoads
+    /// normalize to GET at admission regardless of the declared value.
+    #[serde(default)]
+    pub http_method: InteractionHttpMethod,
     pub label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub required_permission: Option<String>,
@@ -142,6 +173,7 @@ impl InteractionDescriptor {
         Self {
             interaction_id,
             kind,
+            http_method: InteractionHttpMethod::default(),
             label: label.into(),
             transport,
             required_permission: None,
@@ -155,6 +187,23 @@ impl InteractionDescriptor {
             icon: None,
             submit_label: None,
             provider_invocable: false,
+        }
+    }
+
+    /// Declare a non-default dispatch method (PUT/DELETE mutations).
+    #[must_use]
+    pub fn with_http_method(mut self, http_method: InteractionHttpMethod) -> Self {
+        self.http_method = http_method;
+        self
+    }
+
+    /// The method the framework dispatches with: DataLoads are GET-only (B1);
+    /// any other kind uses the declared method.
+    pub fn effective_http_method(&self) -> InteractionHttpMethod {
+        if self.kind == InteractionKind::DataLoad {
+            InteractionHttpMethod::Get
+        } else {
+            self.http_method.clone()
         }
     }
 
@@ -409,6 +458,49 @@ mod tests {
             result,
             Err(InteractionValidationError::ProviderInvocableForbiddenForServiceProviders { .. })
         ));
+    }
+
+    #[test]
+    fn http_method_defaults_to_post_when_absent_on_wire() {
+        // Old-peer shape: descriptor JSON without http_method.
+        let json = serde_json::json!({
+            "interaction_id": "save",
+            "kind": "mutation_action",
+            "label": "Save",
+            "transport": { "mode": "controller_local" }
+        });
+        let descriptor: InteractionDescriptor = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(descriptor.http_method, InteractionHttpMethod::Post);
+    }
+
+    #[test]
+    fn effective_http_method_normalizes_dataload_to_get() {
+        let json = serde_json::json!({
+            "interaction_id": "list",
+            "kind": "data_load",
+            "label": "List",
+            "transport": { "mode": "provider_proxied" }
+        });
+        let descriptor: InteractionDescriptor = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(descriptor.http_method, InteractionHttpMethod::Post); // raw wire default
+        assert_eq!(
+            descriptor.effective_http_method(),
+            InteractionHttpMethod::Get
+        );
+    }
+
+    #[test]
+    fn http_method_round_trips_wire_string() {
+        assert_eq!(
+            InteractionHttpMethod::from("put".to_string()),
+            InteractionHttpMethod::Put
+        );
+        assert_eq!(InteractionHttpMethod::Put.as_str(), "put");
+        assert!(matches!(
+            InteractionHttpMethod::from("patch".to_string()),
+            InteractionHttpMethod::Other(_)
+        ));
+        "patch".parse::<InteractionHttpMethod>().unwrap_err(); // strict FromStr
     }
 
     #[test]

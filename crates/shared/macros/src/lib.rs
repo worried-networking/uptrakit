@@ -200,19 +200,22 @@ macro_rules! impl_report_conversion {
 /// - The `Other(String)` catch-all is always appended by the macro — never include it
 ///   in the input body.
 /// - `Copy` is not possible because `Other(String)` contains a `String`.
+/// - Individual variants may carry their own attributes (e.g. `#[default]` paired
+///   with `Default` in the enum-level `#[derive(...)]`) by placing them before the
+///   variant name: `#[default]\nPost => "post",`.
 #[macro_export]
 macro_rules! wire_safe_enum {
     (
         $(#[$meta:meta])*
         $vis:vis enum $name:ident {
-            $($variant:ident => $wire:literal),+ $(,)?
+            $($(#[$vmeta:meta])* $variant:ident => $wire:literal),+ $(,)?
         }
         parse_error = $err_name:ident($err_msg:literal);
     ) => {
         $(#[$meta])*
         #[non_exhaustive]
         $vis enum $name {
-            $($variant,)+
+            $($(#[$vmeta])* $variant,)+
             /// An unknown value received from a newer peer.
             ///
             /// The inner string is the raw value as it appeared on the wire.
