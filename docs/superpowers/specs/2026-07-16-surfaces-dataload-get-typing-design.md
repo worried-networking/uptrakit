@@ -1,8 +1,13 @@
 # Surfaces API: DataLoad Interactions via GET + Typed Query Params
 
 **Date:** 2026-07-16
-**Status:** Approved (user interview + contrarian pass + 3-round adversarial generator/critic loop; split out of the
-combined surfaces-REST spec on user request)
+**Status:** Superseded (2026-07-20) by
+[`2026-07-20-surfaces-rest-method-model-design.md`](2026-07-20-surfaces-rest-method-model-design.md) (absorbs the
+DataLoad-GET + query-typing design) and
+[`2026-07-20-surfaces-id-naming-convention-design.md`](2026-07-20-surfaces-id-naming-convention-design.md)
+(replaces the Deferred §5 rename table — the method model obsoletes CRUD-verb IDs and the dual-dispatch aliases).
+Original status: Approved (user interview + contrarian pass + 3-round adversarial generator/critic loop; split out
+of the combined surfaces-REST spec on user request)
 **Scope:** `crates/ui/web-api` (routes, OpenAPI), `crates/shared/surfaces`, `crates/shared/web-api-types`,
 `crates/ui/surface-proxy`, `crates/shared/wire`, `crates/shared/openapi-client`, `crates/ui/cli`, `frontend/`, `ci/`,
 docs.
