@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{BuiltInApiOperationId, FormUiDescriptor, InteractionId, ProviderKind, SchemaContract};
+use crate::{FormUiDescriptor, InteractionId, ProviderKind, SchemaContract};
 
 pub const MIN_INTERACTION_TIMEOUT_SECONDS: u16 = 1;
 pub const MAX_INTERACTION_TIMEOUT_SECONDS: u16 = 300;
@@ -24,7 +24,6 @@ pub enum InteractionKind {
 pub enum InteractionTransport {
     ControllerLocal,
     ProviderProxied,
-    DirectBuiltInApi { operation_id: BuiltInApiOperationId },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,10 +99,6 @@ pub enum ConfirmationSeverity {
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum InteractionValidationError {
     #[error(
-        "provider-authored interactions cannot use direct built-in API transport (interaction `{interaction_id}`)"
-    )]
-    DirectBuiltInApiForbiddenForProvider { interaction_id: InteractionId },
-    #[error(
         "interaction `{interaction_id}` timeout must be between {MIN_INTERACTION_TIMEOUT_SECONDS} and {MAX_INTERACTION_TIMEOUT_SECONDS} seconds"
     )]
     TimeoutOutOfRange { interaction_id: InteractionId },
@@ -166,9 +161,6 @@ impl InteractionDescriptor {
     /// Validates provider-specific interaction contract rules.
     ///
     /// # Errors
-    /// Returns
-    /// [`InteractionValidationError::DirectBuiltInApiForbiddenForProvider`]
-    /// when a non-built-in provider uses `direct_built_in_api` transport.
     /// Returns [`InteractionValidationError::TimeoutOutOfRange`] when
     /// `timeout_seconds` falls outside
     /// [`MIN_INTERACTION_TIMEOUT_SECONDS`]..=[`MAX_INTERACTION_TIMEOUT_SECONDS`].
@@ -191,19 +183,6 @@ impl InteractionDescriptor {
         &self,
         provider_kind: ProviderKind,
     ) -> Result<(), InteractionValidationError> {
-        if provider_kind != ProviderKind::BuiltIn
-            && matches!(
-                self.transport,
-                InteractionTransport::DirectBuiltInApi { .. }
-            )
-        {
-            return Err(
-                InteractionValidationError::DirectBuiltInApiForbiddenForProvider {
-                    interaction_id: self.interaction_id.clone(),
-                },
-            );
-        }
-
         if self.provider_invocable
             && self.required_permission.is_some()
             && provider_kind == ProviderKind::Service

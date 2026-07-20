@@ -146,7 +146,6 @@ fn registry() -> SurfaceRegistry {
     SurfaceRegistry::new(SurfaceRegistryConfig {
         allowed_controller_queries: HashSet::new(),
         allowed_sse_topics: HashSet::new(),
-        allowed_direct_builtin_operations: HashSet::new(),
         ..SurfaceRegistryConfig::default()
     })
 }

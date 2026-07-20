@@ -97,7 +97,6 @@ pub struct SurfaceRegistryConfig {
     pub required_capabilities: surfaces::CapabilitySet,
     pub allowed_controller_queries: HashSet<String>,
     pub allowed_sse_topics: HashSet<String>,
-    pub allowed_direct_builtin_operations: HashSet<String>,
     pub max_data_source_page_size: u16,
     pub max_surfaces_per_batch: usize,
     pub max_interactions_per_batch: usize,
@@ -115,7 +114,6 @@ impl Default for SurfaceRegistryConfig {
             required_capabilities: surfaces::CapabilitySet::default(),
             allowed_controller_queries: HashSet::new(),
             allowed_sse_topics: HashSet::new(),
-            allowed_direct_builtin_operations: HashSet::new(),
             max_data_source_page_size: 1000,
             max_surfaces_per_batch: 64,
             max_interactions_per_batch: 256,
@@ -719,46 +717,9 @@ impl SurfaceRegistry {
                                 });
                             }
                         }
-                        surfaces::InteractionTransport::DirectBuiltInApi { .. } => {
-                            reasons.push(SurfaceProviderRejectionReason {
-                                code: SurfaceProviderRejectionCode::InvalidTransport,
-                                message:
-                                    "sensitive fields are not supported on direct built-in API transport"
-                                        .to_string(),
-                                surface_id: surface_id.clone(),
-                            });
-                        }
                         &_ => {
                             tracing::warn!("unknown interaction transport — update match arm");
                         }
-                    }
-                }
-
-                if let surfaces::InteractionTransport::DirectBuiltInApi { operation_id } =
-                    &interaction.transport
-                {
-                    if source_kind != surfaces::ProviderKind::BuiltIn {
-                        reasons.push(SurfaceProviderRejectionReason {
-                            code: SurfaceProviderRejectionCode::InvalidTransport,
-                            message:
-                                "non-built-in providers cannot use direct built-in API transport"
-                                    .to_string(),
-                            surface_id: surface_id.clone(),
-                        });
-                    }
-                    if !self
-                        .config
-                        .allowed_direct_builtin_operations
-                        .contains(operation_id.as_str())
-                    {
-                        reasons.push(SurfaceProviderRejectionReason {
-                            code: SurfaceProviderRejectionCode::InvalidTransport,
-                            message: format!(
-                                "direct built-in operation `{}` is not allowlisted",
-                                operation_id
-                            ),
-                            surface_id: surface_id.clone(),
-                        });
                     }
                 }
             }

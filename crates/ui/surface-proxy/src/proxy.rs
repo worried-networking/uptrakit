@@ -288,8 +288,7 @@ impl SurfaceProxy {
         }
 
         match &resolved.interaction.transport {
-            surfaces::InteractionTransport::ControllerLocal
-            | surfaces::InteractionTransport::DirectBuiltInApi { .. } => {
+            surfaces::InteractionTransport::ControllerLocal => {
                 if matches!(
                     resolved.interaction.transport,
                     surfaces::InteractionTransport::ControllerLocal

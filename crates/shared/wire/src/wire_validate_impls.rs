@@ -553,16 +553,6 @@ fn validate_surface_interaction(
         )?;
     }
 
-    if let surfaces::InteractionTransport::DirectBuiltInApi { operation_id } =
-        &interaction.transport
-    {
-        check_string_len(
-            operation_id.as_str(),
-            MAX_SHORT_STRING_LEN,
-            "surfaces[].interactions[].transport.operation_id",
-        )?;
-    }
-
     if let Some(icon) = &interaction.icon {
         surfaces::validate_icon_name(icon).map_err(|err| WireValidationError {
             field: "surfaces[].interactions[].icon",

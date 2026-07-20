@@ -7,16 +7,16 @@ use serde_json::{Map, Value, json};
 use uuid::Uuid;
 
 use uptrakit_surfaces::{
-    BuiltInApiOperationId, CallerOrigin, Capability, CapabilitySet, ControllerQueryId,
-    DataSourceDescriptor, DataSourceEmptyState, DataSourceFiltering, DataSourceId, DataSourceKind,
-    DataSourcePagination, DataSourceSorting, EffectiveTenantBinding, EncryptedSensitiveParams,
-    FormFieldDescriptor, FormUiDescriptor, FrameworkGeneration, FrameworkGenerationRange,
-    InteractionConfirmation, InteractionDescriptor, InteractionId, InteractionKind,
-    InteractionTransport, MIN_PROVIDER_REFRESH_INTERVAL_SECONDS, ProviderEncryptionAlgorithm,
-    ProviderIdentity, ProviderKind, RefreshPolicy, RegisteredSurface, SLOT_SETTINGS_TABS,
-    SLOT_SURFACE_PAGE, SchemaContract, Scope, SurfaceActionRequest, SurfaceDescriptor, SurfaceId,
-    SurfaceNode, SurfaceRegistration, SurfaceRegistrationErrorCode, SurfaceRegistrationPolicy,
-    SurfaceTab, SurfaceTabId, Targeting, WorkflowStepDescriptor,
+    CallerOrigin, Capability, CapabilitySet, ControllerQueryId, DataSourceDescriptor,
+    DataSourceEmptyState, DataSourceFiltering, DataSourceId, DataSourceKind, DataSourcePagination,
+    DataSourceSorting, EffectiveTenantBinding, EncryptedSensitiveParams, FormFieldDescriptor,
+    FormUiDescriptor, FrameworkGeneration, FrameworkGenerationRange, InteractionConfirmation,
+    InteractionDescriptor, InteractionId, InteractionKind, InteractionTransport,
+    MIN_PROVIDER_REFRESH_INTERVAL_SECONDS, ProviderEncryptionAlgorithm, ProviderIdentity,
+    ProviderKind, RefreshPolicy, RegisteredSurface, SLOT_SETTINGS_TABS, SLOT_SURFACE_PAGE,
+    SchemaContract, Scope, SurfaceActionRequest, SurfaceDescriptor, SurfaceId, SurfaceNode,
+    SurfaceRegistration, SurfaceRegistrationErrorCode, SurfaceRegistrationPolicy, SurfaceTab,
+    SurfaceTabId, Targeting, WorkflowStepDescriptor,
 };
 
 fn registration_policy(required_capabilities: CapabilitySet) -> SurfaceRegistrationPolicy {
@@ -284,19 +284,6 @@ fn protocol_registration_rejects_provider_interval_below_minimum() {
     let err = registration
         .validate_against(&registration_policy(CapabilitySet::default()))
         .expect_err("provider query interval below minimum should be rejected");
-    assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
-}
-
-#[test]
-fn protocol_registration_rejects_provider_direct_builtin_api_transport() {
-    let mut registration = minimal_registration(ProviderKind::Plugin);
-    registration.surfaces[0].interactions[0].transport = InteractionTransport::DirectBuiltInApi {
-        operation_id: BuiltInApiOperationId::new("settings.save").expect("valid operation id"),
-    };
-
-    let err = registration
-        .validate_against(&registration_policy(CapabilitySet::default()))
-        .expect_err("provider direct built-in API transport should be rejected");
     assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
 }
 

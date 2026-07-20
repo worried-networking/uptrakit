@@ -4,11 +4,11 @@
 )]
 
 use uptrakit_surfaces::{
-    BuiltInApiOperationId, CalloutLevel, Capability, ControllerQueryId, ControllerSseTopicId,
-    DataSourceId, DataSourceValidationError, FrameworkGeneration, FrameworkGenerationRange,
-    InteractionId, SLOT_HOST_DETAIL_TABS, SLOT_SETTINGS_TABS, SLOT_SOFTWARE_ITEM_TABS,
-    SLOT_SURFACE_PAGE, SchemaContract, SurfaceId, SurfaceRowCondition, Targeting,
-    all_surface_slots, is_valid_surface_identifier, slot_def, validate_surface_identifier,
+    CalloutLevel, Capability, ControllerQueryId, ControllerSseTopicId, DataSourceId,
+    DataSourceValidationError, FrameworkGeneration, FrameworkGenerationRange, InteractionId,
+    SLOT_HOST_DETAIL_TABS, SLOT_SETTINGS_TABS, SLOT_SOFTWARE_ITEM_TABS, SLOT_SURFACE_PAGE,
+    SchemaContract, SurfaceId, SurfaceRowCondition, Targeting, all_surface_slots,
+    is_valid_surface_identifier, slot_def, validate_surface_identifier,
 };
 
 #[test]
@@ -52,12 +52,12 @@ fn slots_registry_exposes_known_slots() {
 }
 
 #[test]
-fn ids_controller_and_builtin_operation_identifiers_follow_lexical_rules() {
+fn ids_controller_and_interaction_identifiers_follow_lexical_rules() {
     assert!(ControllerQueryId::new("controller.hosts.list").is_ok());
-    assert!(BuiltInApiOperationId::new("settings.users.create").is_ok());
+    assert!(InteractionId::new("settings.users.create").is_ok());
 
     assert!(ControllerQueryId::new("Controller.hosts.list").is_err());
-    assert!(BuiltInApiOperationId::new("settings/users/create").is_err());
+    assert!(InteractionId::new("settings/users/create").is_err());
 }
 
 #[test]
