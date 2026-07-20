@@ -151,7 +151,6 @@ export interface FormField {
 // ── Surface contract (frontend-only extension-point descriptors) ──────────────────
 
 export type {
-	BuiltInApiOperationId,
 	ControllerQueryId,
 	DataSourceDescriptor,
 	DataSourceId,

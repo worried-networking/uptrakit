@@ -5,7 +5,6 @@ export type SurfaceId = string;
 export type InteractionId = string;
 export type DataSourceId = string;
 export type ControllerQueryId = string;
-export type BuiltInApiOperationId = string;
 export type SurfaceTabId = string;
 
 export type SurfaceTargeting = 'universal' | 'targeted';
@@ -198,10 +197,7 @@ export type InteractionKind =
 	| 'data_load'
 	| 'confirmable_action';
 
-export type InteractionTransport =
-	| { mode: 'controller_local' }
-	| { mode: 'provider_proxied' }
-	| { mode: 'direct_built_in_api'; operation_id: BuiltInApiOperationId };
+export type InteractionTransport = { mode: 'controller_local' } | { mode: 'provider_proxied' };
 
 export interface InteractionConfirmation {
 	title: string;

@@ -100,7 +100,6 @@ Routing then follows declared transport:
 
 - `ProviderProxied` — proxied to connected service provider
 - `ControllerLocal` — executed in controller (currently plugin providers)
-- `DirectBuiltInApi` — built-in operation IDs only, controller allowlisted
 
 `SurfaceProxy` enforces idempotency and timeout behavior and maps failures to typed surface error
 codes.
