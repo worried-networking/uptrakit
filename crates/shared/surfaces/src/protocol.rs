@@ -828,6 +828,14 @@ impl<'a> RootNodeReferenceValidator<'a> {
         interaction_id: &str,
         declared_method: Option<&InteractionHttpMethod>,
     ) -> Result<(), SurfaceRegistrationError> {
+        // `declared_method: None` matches the first interaction with this id
+        // regardless of method, i.e. first-match-wins. That's only safe
+        // because `require_root_interaction_reference` runs first (in the
+        // caller chain) and already rejects an ambiguous reference — an id
+        // with `declared_method: None` that resolves to more than one
+        // registered method. Do not reorder validation so this lookup runs
+        // before that check: it would silently pick an arbitrary method's
+        // `form_ui` instead of erroring on the ambiguity.
         let Some(target) = self.interactions.iter().find(|interaction| {
             interaction.interaction_id.as_str() == interaction_id
                 && declared_method

@@ -423,7 +423,15 @@ fn validate_surface_node(
             )?;
         }
         surfaces::SurfaceNode::KeyValue { .. } | surfaces::SurfaceNode::Table { .. } => {}
-        surfaces::SurfaceNode::Form { .. } => {}
+        surfaces::SurfaceNode::Form { http_method, .. } => {
+            if let Some(method) = http_method {
+                check_string_len(
+                    method.as_str(),
+                    MAX_SHORT_STRING_LEN,
+                    "surfaces[].descriptor.root_node.http_method",
+                )?;
+            }
+        }
         surfaces::SurfaceNode::ActionBar { action_ids } => {
             check_vec_len(
                 action_ids,
@@ -436,6 +444,13 @@ fn validate_surface_node(
                     MAX_SHORT_STRING_LEN,
                     "surfaces[].descriptor.root_node.action_ids[]",
                 )?;
+                if let Some(method) = action_ref.http_method() {
+                    check_string_len(
+                        method.as_str(),
+                        MAX_SHORT_STRING_LEN,
+                        "surfaces[].descriptor.root_node.action_ids[].http_method",
+                    )?;
+                }
             }
         }
         surfaces::SurfaceNode::Tabs { tabs } => {
@@ -472,7 +487,18 @@ fn validate_surface_node(
                 "surfaces[].descriptor.root_node.empty_state.description",
             )?;
         }
-        surfaces::SurfaceNode::ModalTrigger { modal_nodes, .. } => {
+        surfaces::SurfaceNode::ModalTrigger {
+            http_method,
+            modal_nodes,
+            ..
+        } => {
+            if let Some(method) = http_method {
+                check_string_len(
+                    method.as_str(),
+                    MAX_SHORT_STRING_LEN,
+                    "surfaces[].descriptor.root_node.http_method",
+                )?;
+            }
             check_vec_len(
                 modal_nodes,
                 MAX_SURFACE_FIELDS,
@@ -1870,6 +1896,25 @@ mod tests {
 
         let err = payload.wire_validate().unwrap_err();
         assert_eq!(err.field, "surfaces[].descriptor.root_node.text");
+    }
+
+    #[test]
+    fn surface_registration_rejects_oversized_action_ref_http_method() {
+        let mut payload = test_surface_registration();
+        payload.surfaces[0].descriptor.root_node = surfaces::SurfaceNode::ActionBar {
+            action_ids: vec![surfaces::ActionRef::WithMethod {
+                interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
+                http_method: Some(surfaces::InteractionHttpMethod::Other(
+                    "x".repeat(MAX_SHORT_STRING_LEN + 1),
+                )),
+            }],
+        };
+
+        let err = payload.wire_validate().unwrap_err();
+        assert_eq!(
+            err.field,
+            "surfaces[].descriptor.root_node.action_ids[].http_method"
+        );
     }
 
     #[test]
