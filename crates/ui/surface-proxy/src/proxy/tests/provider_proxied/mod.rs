@@ -152,6 +152,7 @@ fn registry() -> SurfaceRegistry {
 
 fn request_with_idem(idempotency_key: &str) -> SurfaceInvokeRequest {
     SurfaceInvokeRequest {
+        method: None,
         tenant_id: tenant_id(),
         surface_id: "ssh.guest.panel".to_string(),
         interaction_id: "refresh".to_string(),
@@ -313,6 +314,7 @@ async fn invoke_allows_provider_proxied_requests_without_sensitive_payload() {
 
     let invoke_task = tokio::spawn({
         let request = SurfaceInvokeRequest {
+            method: None,
             tenant_id: tenant_id(),
             surface_id: "ssh.guest.panel".to_string(),
             interaction_id: "refresh".to_string(),
@@ -656,6 +658,7 @@ async fn invoke_provider_origin_denied_for_permission_gated_interaction() {
         .expect("provider-b registration should succeed");
 
     let request = SurfaceInvokeRequest {
+        method: None,
         tenant_id: tenant_id(),
         surface_id: "proxmox.guest.invocable_panel".to_string(),
         interaction_id: "refresh".to_string(),
@@ -712,6 +715,7 @@ async fn invoke_provider_origin_allowed_when_provider_invocable() {
         .expect("provider-b registration should succeed");
 
     let request = SurfaceInvokeRequest {
+        method: None,
         tenant_id: tenant_id(),
         surface_id: "proxmox.guest.invocable_panel".to_string(),
         interaction_id: "refresh".to_string(),
@@ -769,6 +773,7 @@ async fn invoke_provider_origin_resolves_target_from_surface_when_target_none() 
         .expect("provider-b registration should succeed");
 
     let request = SurfaceInvokeRequest {
+        method: None,
         tenant_id: tenant_id(),
         surface_id: "proxmox.guest.invocable_panel".to_string(),
         interaction_id: "refresh".to_string(),
@@ -865,6 +870,7 @@ async fn invoke_explicit_bogus_target_errors_with_named_provider() {
         .expect("provider-b registration should succeed");
 
     let request = SurfaceInvokeRequest {
+        method: None,
         tenant_id: tenant_id(),
         surface_id: "proxmox.guest.invocable_panel".to_string(),
         interaction_id: "refresh".to_string(),

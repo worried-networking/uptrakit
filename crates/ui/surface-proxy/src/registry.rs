@@ -432,11 +432,45 @@ impl SurfaceRegistry {
         tenant_visible
     }
 
+    /// Id-only resolution, preserved for callers that have no concrete HTTP
+    /// method to hand (e.g. the legacy POST-only invoke route). Delegates to
+    /// [`Self::resolve_surface_action_for_method`] with `method: None`, which
+    /// resolves only when the interaction id registers exactly one method;
+    /// an ambiguous multi-method id now surfaces as
+    /// [`SurfaceRegistryLookupError::MethodNotAllowed`] rather than silently
+    /// picking a sibling or failing closed as not-found.
     pub fn resolve_surface_action(
         &self,
         tenant_id: Uuid,
         surface_id: &str,
         interaction_id: &str,
+        target_provider_id: Option<&str>,
+    ) -> Result<ResolvedSurfaceAction, SurfaceRegistryLookupError> {
+        self.resolve_surface_action_for_method(
+            tenant_id,
+            surface_id,
+            interaction_id,
+            None,
+            target_provider_id,
+        )
+    }
+
+    /// Method-aware surface action resolution (REST method model, B1-B8).
+    ///
+    /// - `method: Some(m)` resolves the exact `(interaction_id, m)` pair;
+    ///   if the interaction id exists but no registration matches `m`,
+    ///   returns [`SurfaceRegistryLookupError::MethodNotAllowed`] listing
+    ///   every method actually registered for that id.
+    /// - `method: None` resolves iff the interaction id registers exactly
+    ///   one method (it does **not** prefer POST); zero registrations is
+    ///   [`SurfaceRegistryLookupError::InteractionNotFound`], more than one
+    ///   is `MethodNotAllowed` listing all of them.
+    pub fn resolve_surface_action_for_method(
+        &self,
+        tenant_id: Uuid,
+        surface_id: &str,
+        interaction_id: &str,
+        method: Option<surfaces::InteractionHttpMethod>,
         target_provider_id: Option<&str>,
     ) -> Result<ResolvedSurfaceAction, SurfaceRegistryLookupError> {
         let providers = self.list_targeted_providers_for_surface(surface_id, tenant_id);
@@ -481,19 +515,36 @@ impl SurfaceRegistry {
             .iter()
             .find(|surface| surface.descriptor.surface_id.as_str() == surface_id)
             .ok_or(SurfaceRegistryLookupError::SurfaceNotFound)?;
-        // Plan-2-window guard: this lookup stays id-only (Plan 3 adds a
-        // method-aware resolve). Task 4 admission accepts `(id, GET)` +
-        // `(id, POST)` pairs under the same surface, so an id-only match here
-        // could silently pick either sibling. Fail closed instead of guessing
-        // — reuse the existing not-found variant rather than adding a new one.
-        let mut matching_interactions = surface
+
+        let matching_interactions: Vec<&surfaces::InteractionDescriptor> = surface
             .interactions
             .iter()
-            .filter(|interaction| interaction.interaction_id.as_str() == interaction_id);
-        let interaction = match (matching_interactions.next(), matching_interactions.next()) {
-            (None, _) => return Err(SurfaceRegistryLookupError::InteractionNotFound),
-            (Some(_), Some(_)) => return Err(SurfaceRegistryLookupError::InteractionNotFound),
-            (Some(interaction), None) => interaction.clone(),
+            .filter(|interaction| interaction.interaction_id.as_str() == interaction_id)
+            .collect();
+
+        let interaction = match method {
+            Some(requested_method) => matching_interactions
+                .iter()
+                .find(|interaction| interaction.http_method == requested_method)
+                .map(|interaction| (*interaction).clone())
+                .ok_or_else(|| {
+                    if matching_interactions.is_empty() {
+                        SurfaceRegistryLookupError::InteractionNotFound
+                    } else {
+                        SurfaceRegistryLookupError::MethodNotAllowed(registered_methods(
+                            &matching_interactions,
+                        ))
+                    }
+                })?,
+            None => match matching_interactions.as_slice() {
+                [] => return Err(SurfaceRegistryLookupError::InteractionNotFound),
+                [single] => (*single).clone(),
+                _ => {
+                    return Err(SurfaceRegistryLookupError::MethodNotAllowed(
+                        registered_methods(&matching_interactions),
+                    ));
+                }
+            },
         };
 
         Ok(ResolvedSurfaceAction {
@@ -957,6 +1008,22 @@ pub enum SurfaceRegistryLookupError {
     TargetProviderRequired,
     InvalidProvider(String),
     NoTenantCompatibleProvider,
+    /// The interaction id exists but none of its registered `(id, method)`
+    /// registrations match the requested method. Carries every HTTP method
+    /// currently registered for that interaction id, for building an `Allow`
+    /// header or a descriptive 405 message.
+    MethodNotAllowed(Vec<surfaces::InteractionHttpMethod>),
+}
+
+/// Collects the HTTP methods registered for a set of same-id interaction
+/// candidates, in registration order, for `MethodNotAllowed` error payloads.
+fn registered_methods(
+    interactions: &[&surfaces::InteractionDescriptor],
+) -> Vec<surfaces::InteractionHttpMethod> {
+    interactions
+        .iter()
+        .map(|interaction| interaction.http_method.clone())
+        .collect()
 }
 
 /// DataLoads are GET-only (B1): rewrite the stored method so every consumer
@@ -1603,8 +1670,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn id_only_resolve_errors_on_multi_method_id() {
+    /// Builds a `dup-action` registration with a DataLoad (normalized to GET)
+    /// and a MutationAction (default POST) sharing the same interaction id,
+    /// bootstraps it, and returns the registry for method-aware resolve tests.
+    fn registry_with_multi_method_dup_action() -> SurfaceRegistry {
         let registry = registry();
         let id = surfaces::InteractionId::new("dup-action").unwrap();
         let data_load = surfaces::InteractionDescriptor::new(
@@ -1631,6 +1700,12 @@ mod tests {
         registry
             .bootstrap_plugin(registration)
             .expect("multi-method same-id registration is accepted at admission (Task 4)");
+        registry
+    }
+
+    #[test]
+    fn id_only_resolve_errors_on_multi_method_id() {
+        let registry = registry_with_multi_method_dup_action();
 
         let result = registry.resolve_surface_action(
             tenant_a(),
@@ -1639,8 +1714,156 @@ mod tests {
             Some("plugin.dataload_test_provider"),
         );
         assert!(
-            matches!(result, Err(SurfaceRegistryLookupError::InteractionNotFound)),
-            "id-only resolve must fail closed on an ambiguous multi-method id, got {result:?}"
+            matches!(
+                result,
+                Err(SurfaceRegistryLookupError::MethodNotAllowed(ref methods))
+                    if methods.len() == 2
+            ),
+            "id-only (method: None) resolve on an ambiguous multi-method id must \
+             return MethodNotAllowed listing every registered method, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn resolve_surface_action_for_method_matches_exact_method_among_siblings() {
+        let registry = registry_with_multi_method_dup_action();
+
+        let get_resolved = registry
+            .resolve_surface_action_for_method(
+                tenant_a(),
+                "test.dataload.surface",
+                "dup-action",
+                Some(surfaces::InteractionHttpMethod::Get),
+                Some("plugin.dataload_test_provider"),
+            )
+            .expect("GET should resolve the DataLoad sibling");
+        assert_eq!(
+            get_resolved.interaction.kind,
+            surfaces::InteractionKind::DataLoad
+        );
+
+        let post_resolved = registry
+            .resolve_surface_action_for_method(
+                tenant_a(),
+                "test.dataload.surface",
+                "dup-action",
+                Some(surfaces::InteractionHttpMethod::Post),
+                Some("plugin.dataload_test_provider"),
+            )
+            .expect("POST should resolve the MutationAction sibling");
+        assert_eq!(
+            post_resolved.interaction.kind,
+            surfaces::InteractionKind::MutationAction
+        );
+    }
+
+    #[test]
+    fn resolve_surface_action_for_method_rejects_unregistered_method_among_siblings() {
+        let registry = registry_with_multi_method_dup_action();
+
+        let result = registry.resolve_surface_action_for_method(
+            tenant_a(),
+            "test.dataload.surface",
+            "dup-action",
+            Some(surfaces::InteractionHttpMethod::Delete),
+            Some("plugin.dataload_test_provider"),
+        );
+        match result {
+            Err(SurfaceRegistryLookupError::MethodNotAllowed(methods)) => {
+                assert!(methods.contains(&surfaces::InteractionHttpMethod::Get));
+                assert!(methods.contains(&surfaces::InteractionHttpMethod::Post));
+            }
+            other => panic!("expected MethodNotAllowed listing GET and POST, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolve_surface_action_for_method_none_resolves_single_method_interaction() {
+        let registry = registry();
+        registry.register_provider_for_test(
+            registration_for_service("provider-a", tenant_a()),
+            Some(Uuid::now_v7()),
+            Some("uptrakit-agent-ssh"),
+        );
+
+        let resolved = registry
+            .resolve_surface_action_for_method(
+                tenant_a(),
+                "ssh.guest.panel",
+                "refresh",
+                None,
+                Some("provider-a"),
+            )
+            .expect("single registered method must resolve when method is None");
+        assert_eq!(
+            resolved.interaction.http_method,
+            surfaces::InteractionHttpMethod::Post
+        );
+    }
+
+    #[test]
+    fn resolve_surface_action_for_method_rejects_mismatched_method_on_single_registration() {
+        let registry = registry();
+        registry.register_provider_for_test(
+            registration_for_service("provider-a", tenant_a()),
+            Some(Uuid::now_v7()),
+            Some("uptrakit-agent-ssh"),
+        );
+
+        let result = registry.resolve_surface_action_for_method(
+            tenant_a(),
+            "ssh.guest.panel",
+            "refresh",
+            Some(surfaces::InteractionHttpMethod::Get),
+            Some("provider-a"),
+        );
+        assert!(
+            matches!(
+                result,
+                Err(SurfaceRegistryLookupError::MethodNotAllowed(ref methods))
+                    if methods == &[surfaces::InteractionHttpMethod::Post]
+            ),
+            "GET against a POST-only registration must be MethodNotAllowed([Post]), got {result:?}"
+        );
+    }
+
+    #[test]
+    fn resolve_surface_action_for_method_unknown_id_is_interaction_not_found_regardless_of_method()
+    {
+        let registry = registry();
+        registry.register_provider_for_test(
+            registration_for_service("provider-a", tenant_a()),
+            Some(Uuid::now_v7()),
+            Some("uptrakit-agent-ssh"),
+        );
+
+        let none_result = registry.resolve_surface_action_for_method(
+            tenant_a(),
+            "ssh.guest.panel",
+            "does-not-exist",
+            None,
+            Some("provider-a"),
+        );
+        assert!(matches!(
+            none_result,
+            Err(SurfaceRegistryLookupError::InteractionNotFound)
+        ));
+
+        let some_result = registry.resolve_surface_action_for_method(
+            tenant_a(),
+            "ssh.guest.panel",
+            "does-not-exist",
+            Some(surfaces::InteractionHttpMethod::Post),
+            Some("provider-a"),
+        );
+        assert!(
+            matches!(
+                some_result,
+                Err(SurfaceRegistryLookupError::InteractionNotFound)
+            ),
+            "an unknown interaction id must stay 404-shaped (InteractionNotFound) even \
+             when a concrete method is requested — 405 only applies once the id is known, \
+             got {some_result:?}"
         );
     }
 

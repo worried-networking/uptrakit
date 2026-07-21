@@ -136,6 +136,17 @@ pub(super) fn surface_registry_lookup_error_to_wire(
             uptrakit_wire::surfaces::SurfaceActionErrorCode::ProviderUnavailable,
             "no provider available for requested surface interaction".to_string(),
         ),
+        crate::surface_registry::SurfaceRegistryLookupError::MethodNotAllowed(methods) => (
+            uptrakit_wire::surfaces::SurfaceActionErrorCode::InvalidRequest,
+            format!(
+                "method not allowed for this interaction; allowed methods: [{}]",
+                methods
+                    .iter()
+                    .map(uptrakit_wire::surfaces::InteractionHttpMethod::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        ),
         unknown => {
             tracing::warn!(
                 ?unknown,

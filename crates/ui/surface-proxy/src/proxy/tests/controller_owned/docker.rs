@@ -127,6 +127,7 @@ async fn invoke_docker_switch_tag_success_emits_software_item_update_audit_row()
             &service_connections,
             &registry,
             SurfaceInvokeRequest {
+                method: None,
                 tenant_id: tenant_id(),
                 surface_id: "docker.item-host-actions".to_string(),
                 interaction_id: "switch-tag".to_string(),
@@ -213,6 +214,7 @@ async fn invoke_docker_switch_tag_invalid_image_emits_validation_failed_audit_ro
             &service_connections,
             &registry,
             SurfaceInvokeRequest {
+                method: None,
                 tenant_id: tenant_id(),
                 surface_id: "docker.item-host-actions".to_string(),
                 interaction_id: "switch-tag".to_string(),

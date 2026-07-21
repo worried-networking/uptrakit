@@ -380,10 +380,16 @@ pub async fn invoke_surface_interaction(
         crate::auth::AuthMethod::Oidc { provider_id } => format!("oidc:{provider_id}"),
     };
 
+    // This legacy route stays POST-only and id-addressed (no `:method` in the
+    // path), so it keeps resolving without a concrete method — the pre-check
+    // above and this invocation both delegate to `resolve_surface_action`
+    // (method: None), so they resolve identically. The REST method-model
+    // route family (Task 3) is what threads a concrete method through.
     let request = SurfaceInvokeRequest::new(
         tenant_ctx.tenant_id,
         surface_id.clone(),
         interaction_id.clone(),
+        None,
         idempotency_key,
         body.target_provider_id.clone(),
         SurfaceCallerOrigin::UserSession {
@@ -492,6 +498,16 @@ fn map_lookup_error(error: SurfaceRegistryLookupError) -> Response {
             StatusCode::NOT_FOUND,
             "No tenant-compatible provider available",
             "no_provider",
+        ),
+        // This legacy id-only route never resolves with a concrete method
+        // (`SurfaceInvokeRequest::method` is always `None` here), so it can
+        // still surface `MethodNotAllowed` for a multi-method interaction id
+        // — no `Allow` header on this route; the method-model route family
+        // (Task 3) owns that.
+        SurfaceRegistryLookupError::MethodNotAllowed(_) => error_response_with_code(
+            StatusCode::METHOD_NOT_ALLOWED,
+            "Method not allowed for this interaction",
+            "method_not_allowed",
         ),
         unknown => {
             tracing::warn!(?unknown, "unhandled SurfaceRegistryLookupError variant");
@@ -727,6 +743,10 @@ fn classify_surface_lookup_error_for_audit(
         SurfaceRegistryLookupError::NoTenantCompatibleProvider => {
             (uptrakit_audit_log::AuditOutcome::Failed, "no_provider")
         }
+        SurfaceRegistryLookupError::MethodNotAllowed(_) => (
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "method_not_allowed",
+        ),
         _ => {
             tracing::warn!(
                 ?error,

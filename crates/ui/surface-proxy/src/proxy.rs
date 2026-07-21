@@ -115,6 +115,12 @@ pub struct SurfaceInvokeRequest {
     pub tenant_id: Uuid,
     pub surface_id: String,
     pub interaction_id: String,
+    /// HTTP method the caller resolved this invocation against, threaded
+    /// through to [`SurfaceRegistry::resolve_surface_action_for_method`].
+    /// `None` preserves id-only resolution (single registered method
+    /// required); callers with a concrete method (e.g. a REST route, or a
+    /// service-forwarded `SurfaceActionRequest.method`) should pass `Some`.
+    pub method: Option<surfaces::InteractionHttpMethod>,
     pub idempotency_key: String,
     pub target_provider_id: Option<String>,
     pub caller_origin: SurfaceCallerOrigin,
@@ -129,12 +135,13 @@ impl SurfaceInvokeRequest {
     /// because the type is `#[non_exhaustive]`.
     #[expect(
         clippy::too_many_arguments,
-        reason = "constructor mirrors the eight fields of #[non_exhaustive] SurfaceInvokeRequest"
+        reason = "constructor mirrors the nine fields of #[non_exhaustive] SurfaceInvokeRequest"
     )]
     pub fn new(
         tenant_id: Uuid,
         surface_id: String,
         interaction_id: String,
+        method: Option<surfaces::InteractionHttpMethod>,
         idempotency_key: String,
         target_provider_id: Option<String>,
         caller_origin: SurfaceCallerOrigin,
@@ -145,6 +152,7 @@ impl SurfaceInvokeRequest {
             tenant_id,
             surface_id,
             interaction_id,
+            method,
             idempotency_key,
             target_provider_id,
             caller_origin,
@@ -251,10 +259,11 @@ impl SurfaceProxy {
         let target_provider_id =
             implicit_target_provider_for_request(service_connections, registry, &request).await?;
         let resolved = registry
-            .resolve_surface_action(
+            .resolve_surface_action_for_method(
                 request.tenant_id,
                 &request.surface_id,
                 &request.interaction_id,
+                request.method.clone(),
                 target_provider_id.as_deref(),
             )
             .map_err(map_lookup_error)?;
@@ -823,6 +832,16 @@ fn map_lookup_error(error: SurfaceRegistryLookupError) -> SurfaceProxyError {
             ))
         }
         SurfaceRegistryLookupError::NoTenantCompatibleProvider => SurfaceProxyError::NoProvider,
+        SurfaceRegistryLookupError::MethodNotAllowed(methods) => {
+            let allowed = methods
+                .iter()
+                .map(surfaces::InteractionHttpMethod::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            SurfaceProxyError::SchemaValidationFailed(format!(
+                "method not allowed for this interaction; allowed methods: [{allowed}]"
+            ))
+        }
     }
 }
 

@@ -242,6 +242,7 @@ async fn invoke_executes_plugin_controller_local_interaction() {
             &service_connections,
             &registry,
             SurfaceInvokeRequest {
+                method: None,
                 tenant_id: tenant_id(),
                 surface_id: "notifications.email.global_smtp".to_string(),
                 interaction_id: "save_global_smtp".to_string(),
@@ -306,6 +307,7 @@ async fn invoke_controller_local_preserves_surface_action_error_categories() {
                 &service_connections,
                 &registry,
                 SurfaceInvokeRequest {
+                    method: None,
                     tenant_id: tenant_id(),
                     surface_id: "notifications.email.global_smtp".to_string(),
                     interaction_id: "save_global_smtp".to_string(),
@@ -354,6 +356,7 @@ async fn invoke_controller_local_rejects_concurrent_duplicate_idempotency() {
                 &service_connections_first,
                 &registry_first,
                 SurfaceInvokeRequest {
+                    method: None,
                     tenant_id: tenant_id(),
                     surface_id: "notifications.email.global_smtp".to_string(),
                     interaction_id: "save_global_smtp".to_string(),
@@ -378,6 +381,7 @@ async fn invoke_controller_local_rejects_concurrent_duplicate_idempotency() {
             &service_connections,
             &registry,
             SurfaceInvokeRequest {
+                method: None,
                 tenant_id: tenant_id(),
                 surface_id: "notifications.email.global_smtp".to_string(),
                 interaction_id: "save_global_smtp".to_string(),
@@ -446,6 +450,7 @@ async fn controller_local_client_disconnect_releases_idempotency() {
                 &service_connections,
                 &registry,
                 SurfaceInvokeRequest {
+                    method: None,
                     tenant_id: tenant_id(),
                     surface_id: "notifications.email.global_smtp".to_string(),
                     interaction_id: "save_global_smtp".to_string(),
@@ -506,6 +511,7 @@ async fn invoke_controller_local_allows_cleartext_sensitive_fields() {
             &service_connections,
             &registry,
             SurfaceInvokeRequest {
+                method: None,
                 tenant_id: tenant_id(),
                 surface_id: "notifications.email.global_smtp".to_string(),
                 interaction_id: "save_global_smtp".to_string(),
@@ -547,6 +553,7 @@ async fn invoke_stamps_effective_get_method_for_data_load_controller_local() {
             &service_connections,
             &registry,
             SurfaceInvokeRequest {
+                method: None,
                 tenant_id: tenant_id(),
                 surface_id: "notifications.email.global_smtp_load".to_string(),
                 interaction_id: "load_global_smtp".to_string(),
@@ -598,6 +605,7 @@ async fn invoke_rejects_body_missing_required_declared_param() {
             &service_connections,
             &registry,
             SurfaceInvokeRequest {
+                method: None,
                 tenant_id: tenant_id(),
                 surface_id: "notifications.email.global_smtp".to_string(),
                 interaction_id: "save_global_smtp".to_string(),
@@ -646,6 +654,7 @@ async fn invoke_allows_undeclared_body_key_to_pass_through() {
             &service_connections,
             &registry,
             SurfaceInvokeRequest {
+                method: None,
                 tenant_id: tenant_id(),
                 surface_id: "notifications.email.global_smtp".to_string(),
                 interaction_id: "save_global_smtp".to_string(),

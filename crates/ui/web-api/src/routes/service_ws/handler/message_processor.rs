@@ -623,10 +623,18 @@ impl MessageProcessor {
             ));
         }
 
+        // `SurfaceActionRequest.method` defaults to `Post` for pre-method-model
+        // peers that never set it (see 535cbe242), so it is not a reliable
+        // resolution key here: many registered interactions (e.g. DataLoad,
+        // normalized to GET) would spuriously 405 for such callers. This
+        // provider-origin path therefore keeps id-only resolution; the wire
+        // `method` field is stamped onto the resolved action for later
+        // consumers (Task 6), not used to select among method-siblings.
         let invoke_request = crate::surface_proxy::SurfaceInvokeRequest::new(
             request_tenant_id,
             payload.surface_id.to_string(),
             payload.interaction_id.to_string(),
+            None,
             payload.idempotency_key.clone(),
             payload.target_provider_id.clone(),
             crate::surface_proxy::SurfaceCallerOrigin::Provider {
@@ -639,10 +647,11 @@ impl MessageProcessor {
             .state
             .surface_proxy_deps
             .registry
-            .resolve_surface_action(
+            .resolve_surface_action_for_method(
                 request_tenant_id,
                 payload.surface_id.as_str(),
                 payload.interaction_id.as_str(),
+                None,
                 payload.target_provider_id.as_deref(),
             ) {
             Ok(resolved) => Some(resolved),

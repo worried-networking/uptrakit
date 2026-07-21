@@ -165,6 +165,7 @@ async fn invoke_proxmox_save_global_defaults_emits_success_audit_row() {
             &service_connections,
             &registry,
             SurfaceInvokeRequest {
+                method: None,
                 tenant_id: tenant_id(),
                 surface_id: "proxmox.settings.update-hooks".to_string(),
                 interaction_id: "save-global-defaults".to_string(),
@@ -266,6 +267,7 @@ async fn invoke_proxmox_save_item_overrides_emits_software_item_update_audit_row
             &service_connections,
             &registry,
             SurfaceInvokeRequest {
+                method: None,
                 tenant_id: tenant_id(),
                 surface_id: "proxmox.software-item.update-hooks".to_string(),
                 interaction_id: "save-item-overrides".to_string(),
@@ -351,6 +353,7 @@ async fn invoke_proxmox_save_scaling_global_defaults_emits_tenant_setting_update
             &service_connections,
             &registry,
             SurfaceInvokeRequest {
+                method: None,
                 tenant_id: tenant_id(),
                 surface_id: "proxmox.settings.resource-scaling".to_string(),
                 interaction_id: "save-scaling-global-defaults".to_string(),
@@ -448,6 +451,7 @@ async fn invoke_proxmox_save_scaling_item_overrides_emits_software_item_update_a
             &service_connections,
             &registry,
             SurfaceInvokeRequest {
+                method: None,
                 tenant_id: tenant_id(),
                 surface_id: "proxmox.software-item.resource-scaling".to_string(),
                 interaction_id: "save-scaling-item-overrides".to_string(),

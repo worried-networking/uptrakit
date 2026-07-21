@@ -118,6 +118,7 @@ async fn invoke_allowlisted_notification_create_executes_controller_owned_path()
             &service_connections,
             &registry,
             SurfaceInvokeRequest {
+                method: None,
                 tenant_id: tenant_id(),
                 surface_id: "notifications.webhook".to_string(),
                 interaction_id: "create".to_string(),
@@ -182,6 +183,7 @@ async fn invoke_notifications_email_configure_smtp_executes_controller_local_pat
             &service_connections,
             &registry,
             SurfaceInvokeRequest {
+                method: None,
                 tenant_id: tenant_id(),
                 surface_id: "notifications.email".to_string(),
                 interaction_id: "configure_smtp".to_string(),
@@ -328,6 +330,7 @@ async fn invoke_allowlisted_notification_row_actions_use_controller_owned_path()
                 &service_connections,
                 &registry,
                 SurfaceInvokeRequest {
+                    method: None,
                     tenant_id: tenant_id(),
                     surface_id: "notifications.webhook".to_string(),
                     interaction_id: interaction_id.to_string(),
@@ -396,6 +399,7 @@ async fn invoke_allowlisted_notification_create_emits_audit_row() {
             &service_connections,
             &registry,
             SurfaceInvokeRequest {
+                method: None,
                 tenant_id: tenant_id(),
                 surface_id: "notifications.webhook".to_string(),
                 interaction_id: "create".to_string(),

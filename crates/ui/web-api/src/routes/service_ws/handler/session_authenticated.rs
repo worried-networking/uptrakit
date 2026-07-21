@@ -1263,6 +1263,7 @@ mod tests {
                             tenant_id,
                             "ssh.guest.panel".to_string(),
                             "refresh".to_string(),
+                            None,
                             "replaced-session-test".to_string(),
                             Some("provider-a".to_string()),
                             crate::surface_proxy::SurfaceCallerOrigin::UserSession {
@@ -1585,6 +1586,7 @@ mod tests {
                             tenant_id,
                             "ssh.guest.panel".to_string(),
                             "refresh".to_string(),
+                            None,
                             "rotate-provider".to_string(),
                             Some("provider-a".to_string()),
                             crate::surface_proxy::SurfaceCallerOrigin::UserSession {

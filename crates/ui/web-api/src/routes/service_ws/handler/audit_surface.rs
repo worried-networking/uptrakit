@@ -412,6 +412,10 @@ pub(super) fn classify_surface_lookup_error_for_audit(
         crate::surface_registry::SurfaceRegistryLookupError::NoTenantCompatibleProvider => {
             (uptrakit_audit_log::AuditOutcome::Failed, "no_provider")
         }
+        crate::surface_registry::SurfaceRegistryLookupError::MethodNotAllowed(_) => (
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "method_not_allowed",
+        ),
         _ => {
             tracing::warn!(
                 ?error,

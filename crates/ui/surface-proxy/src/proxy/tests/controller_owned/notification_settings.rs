@@ -127,6 +127,7 @@ async fn invoke_notifications_email_save_global_smtp_emits_global_setting_update
             &service_connections,
             &registry,
             SurfaceInvokeRequest {
+                method: None,
                 tenant_id: tenant_id(),
                 surface_id: "notifications.email.global_smtp".to_string(),
                 interaction_id: "save_global_smtp".to_string(),
@@ -210,6 +211,7 @@ async fn invoke_notifications_telegram_save_global_telegram_failure_emits_failed
             &service_connections,
             &registry,
             SurfaceInvokeRequest {
+                method: None,
                 tenant_id: tenant_id(),
                 surface_id: "notifications.telegram.global_settings".to_string(),
                 interaction_id: "save_global_telegram".to_string(),
