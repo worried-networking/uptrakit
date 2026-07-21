@@ -29,10 +29,11 @@ pub(super) async fn prepare_invocation(
     let target_provider_id =
         implicit_target_provider_for_request(service_connections, registry, request).await?;
     let resolved = registry
-        .resolve_surface_action(
+        .resolve_surface_action_for_method(
             request.tenant_id,
             &request.surface_id,
             &request.interaction_id,
+            request.method.as_ref(),
             target_provider_id.as_deref(),
         )
         .map_err(map_lookup_error)?;

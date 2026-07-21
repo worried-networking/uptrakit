@@ -307,12 +307,16 @@ pub async fn invoke_surface_interaction(
         api_token_id,
     };
 
-    let resolved = match state.surface_proxy_deps.registry.resolve_surface_action(
-        tenant_ctx.tenant_id,
-        &surface_id,
-        &interaction_id,
-        body.target_provider_id.as_deref(),
-    ) {
+    let resolved = match state
+        .surface_proxy_deps
+        .registry
+        .resolve_surface_action_for_method(
+            tenant_ctx.tenant_id,
+            &surface_id,
+            &interaction_id,
+            None,
+            body.target_provider_id.as_deref(),
+        ) {
         Ok(resolved) => resolved,
         Err(error) => {
             let (outcome, reason_code) = classify_surface_lookup_error_for_audit(&error);
@@ -382,9 +386,10 @@ pub async fn invoke_surface_interaction(
 
     // This legacy route stays POST-only and id-addressed (no `:method` in the
     // path), so it keeps resolving without a concrete method — the pre-check
-    // above and this invocation both delegate to `resolve_surface_action`
-    // (method: None), so they resolve identically. The REST method-model
-    // route family (Task 3) is what threads a concrete method through.
+    // above and this invocation both delegate to
+    // `resolve_surface_action_for_method` with `method: None`, so they
+    // resolve identically. The REST method-model route family (Task 3) is
+    // what threads a concrete method through.
     let request = SurfaceInvokeRequest::new(
         tenant_ctx.tenant_id,
         surface_id.clone(),
@@ -504,7 +509,7 @@ fn map_lookup_error(error: SurfaceRegistryLookupError) -> Response {
         // still surface `MethodNotAllowed` for a multi-method interaction id
         // — no `Allow` header on this route; the method-model route family
         // (Task 3) owns that.
-        SurfaceRegistryLookupError::MethodNotAllowed(_) => error_response_with_code(
+        SurfaceRegistryLookupError::MethodNotAllowed { .. } => error_response_with_code(
             StatusCode::METHOD_NOT_ALLOWED,
             "Method not allowed for this interaction",
             "method_not_allowed",
@@ -743,7 +748,7 @@ fn classify_surface_lookup_error_for_audit(
         SurfaceRegistryLookupError::NoTenantCompatibleProvider => {
             (uptrakit_audit_log::AuditOutcome::Failed, "no_provider")
         }
-        SurfaceRegistryLookupError::MethodNotAllowed(_) => (
+        SurfaceRegistryLookupError::MethodNotAllowed { .. } => (
             uptrakit_audit_log::AuditOutcome::ValidationFailed,
             "method_not_allowed",
         ),

@@ -18,14 +18,10 @@ pub(super) fn map_lookup_error(error: SurfaceRegistryLookupError) -> SurfaceProx
             SurfaceProxyError::InvalidProvider(provider_id)
         }
         SurfaceRegistryLookupError::NoTenantCompatibleProvider => SurfaceProxyError::NoProvider,
-        SurfaceRegistryLookupError::MethodNotAllowed(methods) => {
-            let allowed = methods
-                .iter()
-                .map(surfaces::InteractionHttpMethod::to_string)
-                .collect::<Vec<_>>()
-                .join(", ");
+        SurfaceRegistryLookupError::MethodNotAllowed { allowed, .. } => {
             SurfaceProxyError::SchemaValidationFailed(format!(
-                "method not allowed for this interaction; allowed methods: [{allowed}]"
+                "method not allowed for this interaction; allowed methods: [{}]",
+                crate::registry::format_allowed_methods(&allowed)
             ))
         }
     }

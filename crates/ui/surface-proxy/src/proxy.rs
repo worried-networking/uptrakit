@@ -118,8 +118,13 @@ pub struct SurfaceInvokeRequest {
     /// HTTP method the caller resolved this invocation against, threaded
     /// through to [`SurfaceRegistry::resolve_surface_action_for_method`].
     /// `None` preserves id-only resolution (single registered method
-    /// required); callers with a concrete method (e.g. a REST route, or a
-    /// service-forwarded `SurfaceActionRequest.method`) should pass `Some`.
+    /// required); callers with a concrete method (e.g. a REST route) should
+    /// pass `Some`. The provider-origin wire path (a service-forwarded
+    /// `SurfaceActionRequest`) always resolves by id only and must keep
+    /// passing `None` here — its wire `method` field is not a trustworthy
+    /// resolution key (see `message_processor.rs`'s handling of
+    /// `SurfaceActionRequest.method`); method-aware resolution is
+    /// HTTP-route-origin only.
     pub method: Option<surfaces::InteractionHttpMethod>,
     pub idempotency_key: String,
     pub target_provider_id: Option<String>,
@@ -263,7 +268,7 @@ impl SurfaceProxy {
                 request.tenant_id,
                 &request.surface_id,
                 &request.interaction_id,
-                request.method.clone(),
+                request.method.as_ref(),
                 target_provider_id.as_deref(),
             )
             .map_err(map_lookup_error)?;
@@ -832,14 +837,10 @@ fn map_lookup_error(error: SurfaceRegistryLookupError) -> SurfaceProxyError {
             ))
         }
         SurfaceRegistryLookupError::NoTenantCompatibleProvider => SurfaceProxyError::NoProvider,
-        SurfaceRegistryLookupError::MethodNotAllowed(methods) => {
-            let allowed = methods
-                .iter()
-                .map(surfaces::InteractionHttpMethod::to_string)
-                .collect::<Vec<_>>()
-                .join(", ");
+        SurfaceRegistryLookupError::MethodNotAllowed { allowed, .. } => {
             SurfaceProxyError::SchemaValidationFailed(format!(
-                "method not allowed for this interaction; allowed methods: [{allowed}]"
+                "method not allowed for this interaction; allowed methods: [{}]",
+                crate::registry::format_allowed_methods(&allowed)
             ))
         }
     }
