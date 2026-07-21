@@ -13,11 +13,10 @@ use uptrakit_surfaces::{
     FormUiDescriptor, FrameworkGeneration, FrameworkGenerationRange, InteractionConfirmation,
     InteractionDescriptor, InteractionHttpMethod, InteractionId, InteractionKind,
     InteractionTransport, MIN_PROVIDER_REFRESH_INTERVAL_SECONDS, ParamFieldDescriptor,
-    ProviderEncryptionAlgorithm, ProviderIdentity, ProviderKind, RESERVED_PARAM_KEYS,
-    RefreshPolicy, RegisteredSurface, SLOT_SETTINGS_TABS, SLOT_SURFACE_PAGE, SchemaContract, Scope,
-    SurfaceActionRequest, SurfaceDescriptor, SurfaceId, SurfaceNode, SurfaceRegistration,
-    SurfaceRegistrationErrorCode, SurfaceRegistrationPolicy, SurfaceTab, SurfaceTabId, Targeting,
-    WorkflowStepDescriptor,
+    ProviderEncryptionAlgorithm, ProviderIdentity, ProviderKind, RefreshPolicy, RegisteredSurface,
+    SLOT_SETTINGS_TABS, SLOT_SURFACE_PAGE, SchemaContract, Scope, SurfaceActionRequest,
+    SurfaceDescriptor, SurfaceId, SurfaceNode, SurfaceRegistration, SurfaceRegistrationErrorCode,
+    SurfaceRegistrationPolicy, SurfaceTab, SurfaceTabId, Targeting, WorkflowStepDescriptor,
 };
 
 fn registration_policy(required_capabilities: CapabilitySet) -> SurfaceRegistrationPolicy {
@@ -732,6 +731,7 @@ fn duplicate_id_method_pair_rejected() {
         .validate_against(&registration_policy(CapabilitySet::default()))
         .expect_err("duplicate (id, method) pair should be rejected");
     assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
+    assert!(err.message.contains("duplicate interaction"));
 }
 
 #[test]
@@ -784,11 +784,22 @@ fn dataload_delete_rejected() {
 
 #[test]
 fn other_method_rejected() {
-    let mut registration = minimal_registration(ProviderKind::Plugin);
-    registration.surfaces[0].interactions[0].http_method =
-        InteractionHttpMethod::Other("patch".to_string());
+    // Built from raw JSON (not direct field assignment) to prove the
+    // end-to-end wire path: a peer sending `"http_method": "patch"`
+    // deserializes into `InteractionHttpMethod::Other(_)` (wire_safe_enum
+    // catch-all), and that value is rejected at admission.
+    let registration = minimal_registration(ProviderKind::Plugin);
+    let mut encoded = serde_json::to_value(&registration).expect("serialize registration");
+    encoded["surfaces"][0]["interactions"][0]["http_method"] = json!("patch");
 
-    let err = registration
+    let decoded: SurfaceRegistration =
+        serde_json::from_value(encoded).expect("deserialize registration with unknown http_method");
+    assert_eq!(
+        decoded.surfaces[0].interactions[0].http_method,
+        InteractionHttpMethod::Other("patch".to_string())
+    );
+
+    let err = decoded
         .validate_against(&registration_policy(CapabilitySet::default()))
         .expect_err("an unknown declared http_method should be rejected");
     assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
@@ -837,15 +848,21 @@ fn non_dataload_get_rejected() {
 #[test]
 fn reserved_param_key_rejected() {
     let mut registration = minimal_registration(ProviderKind::Plugin);
-    let reserved_key = RESERVED_PARAM_KEYS[0];
-    registration.surfaces[0].interactions[0].params = vec![ParamFieldDescriptor::new(
-        reserved_key,
-        SchemaContract::String,
-    )];
+    registration.surfaces[0].interactions[0].params =
+        vec![ParamFieldDescriptor::new("id", SchemaContract::String)];
 
     let err = registration
         .validate_against(&registration_policy(CapabilitySet::default()))
-        .expect_err("a param key colliding with a reserved key should be rejected");
+        .expect_err("a param key colliding with the reserved `id` key should be rejected");
+    assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
+
+    let mut registration = minimal_registration(ProviderKind::Plugin);
+    registration.surfaces[0].interactions[0].params =
+        vec![ParamFieldDescriptor::new("page", SchemaContract::String)];
+
+    let err = registration
+        .validate_against(&registration_policy(CapabilitySet::default()))
+        .expect_err("a param key colliding with the reserved `page` key should be rejected");
     assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
 }
 
@@ -914,6 +931,7 @@ fn bare_reference_to_multi_method_id_rejected() {
         .validate_against(&registration_policy(CapabilitySet::default()))
         .expect_err("a bare reference to an id registered under multiple methods must fail closed");
     assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
+    assert!(err.message.contains("ambiguous"));
 }
 
 #[test]
