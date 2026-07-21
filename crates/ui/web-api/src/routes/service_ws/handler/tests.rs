@@ -1131,7 +1131,7 @@ fn proxmox_controller_surfaces_present() -> bool {
         catalog
             .interaction_deliveries()
             .iter()
-            .any(|(surface, _, _)| surface.starts_with("proxmox."))
+            .any(|(surface, _, _, _)| surface.starts_with("proxmox."))
     })
     .unwrap_or(false)
 }

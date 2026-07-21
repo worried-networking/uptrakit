@@ -14,7 +14,12 @@ use uptrakit_surface_proxy::{CONTROLLER_LOCAL_EXECUTOR_TABLE, ExecutorTier};
 // plain helpers in integration tests (coding-standards.md test-mode
 // exemptions).
 fn catalog_deliveries() -> uptrakit_plugin_infrastructure_core::Result<
-    Vec<(String, String, registry::InteractionDeliveryKind)>,
+    Vec<(
+        String,
+        String,
+        registry::InteractionHttpMethod,
+        registry::InteractionDeliveryKind,
+    )>,
 > {
     let catalog = registry::build_catalog(
         &registry::CatalogConfig::default(),
@@ -36,8 +41,10 @@ fn every_executor_table_pair_is_registered_with_matching_delivery() {
     // observe that — so proxmox rows gate on catalog-observed presence, not
     // a feature flag. Whole-plugin existence is guarded by the proxmox
     // crate's own smoke test in the bare -p world.
-    let proxmox_present = deliveries.iter().any(|(s, _, _)| s.starts_with("proxmox."));
-    for (surface, interaction, tier) in CONTROLLER_LOCAL_EXECUTOR_TABLE {
+    let proxmox_present = deliveries
+        .iter()
+        .any(|(s, _, _, _)| s.starts_with("proxmox."));
+    for (surface, interaction, method, tier) in CONTROLLER_LOCAL_EXECUTOR_TABLE {
         // Feature-gated plugins: their rows only assert when compiled in.
         let compiled = match *surface {
             s if s.starts_with("notifications.telegram") => {
@@ -58,10 +65,12 @@ fn every_executor_table_pair_is_registered_with_matching_delivery() {
             _ => panic!("unmapped executor tier for ({surface}, {interaction})"),
         };
         assert!(
-            deliveries
-                .iter()
-                .any(|(s, i, k)| s == surface && i == interaction && *k == expected_kind),
-            "executor table row ({surface}, {interaction}, {tier:?}) has no matching registration"
+            deliveries.iter().any(|(s, i, m, k)| s == surface
+                && i == interaction
+                && m == method
+                && *k == expected_kind),
+            "executor table row ({surface}, {interaction}, {method}, {tier:?}) has no matching \
+             registration"
         );
     }
 }
@@ -71,14 +80,14 @@ fn every_controller_executor_registration_has_an_executor_table_row() {
     let deliveries = catalog_deliveries().expect("catalog builds");
     let controller_executed: Vec<_> = deliveries
         .iter()
-        .filter(|(_, _, kind)| *kind == registry::InteractionDeliveryKind::ControllerExecutor)
+        .filter(|(_, _, _, kind)| *kind == registry::InteractionDeliveryKind::ControllerExecutor)
         .collect();
     // Green-on-empty protection: webhook is unconditionally in web-api's
     // catalog and registers four ControllerExecutor interactions.
     assert!(
         controller_executed
             .iter()
-            .any(|(s, i, _)| s == "notifications.webhook" && i == "create"),
+            .any(|(s, i, _, _)| s == "notifications.webhook" && i == "create"),
         "known member (notifications.webhook, create) missing — catalog wiring broken"
     );
     // Expression-position cfg!() per coding-standards.md "Additive patterns
@@ -87,7 +96,7 @@ fn every_controller_executor_registration_has_an_executor_table_row() {
         assert!(
             controller_executed
                 .iter()
-                .any(|(s, i, _)| s == "notifications.telegram" && i == "create"),
+                .any(|(s, i, _, _)| s == "notifications.telegram" && i == "create"),
             "known member (notifications.telegram, create) missing"
         );
     }
@@ -95,19 +104,20 @@ fn every_controller_executor_registration_has_an_executor_table_row() {
         assert!(
             controller_executed
                 .iter()
-                .any(|(s, i, _)| s == "notifications.email" && i == "create"),
+                .any(|(s, i, _, _)| s == "notifications.email" && i == "create"),
             "known member (notifications.email, create) missing"
         );
     }
-    for (surface, interaction, _) in &controller_executed {
+    for (surface, interaction, method, _) in &controller_executed {
         assert!(
             CONTROLLER_LOCAL_EXECUTOR_TABLE
                 .iter()
-                .any(|(s, i, tier)| s == surface
+                .any(|(s, i, m, tier)| s == surface
                     && i == interaction
+                    && m == method
                     && *tier == ExecutorTier::ControllerExecutes),
-            "registered ControllerExecutor interaction ({surface}, {interaction}) has no \
-             Tier-1 executor table row — it is registered but unexecutable"
+            "registered ControllerExecutor interaction ({surface}, {interaction}, {method}) has \
+             no Tier-1 executor table row — it is registered but unexecutable"
         );
     }
 }
@@ -118,12 +128,15 @@ fn known_plugin_handled_members_are_registered() {
     let mut expected = vec![("docker.item-host-actions", "switch-tag")];
     // Absent by design when the registry is built with agent-infra — see the
     // `proxmox_present` note in the forward-direction test.
-    if deliveries.iter().any(|(s, _, _)| s.starts_with("proxmox.")) {
+    if deliveries
+        .iter()
+        .any(|(s, _, _, _)| s.starts_with("proxmox."))
+    {
         expected.push(("proxmox.hosts", "discover"));
     }
     for (surface, interaction) in expected {
         assert!(
-            deliveries.iter().any(|(s, i, k)| s == surface
+            deliveries.iter().any(|(s, i, _, k)| s == surface
                 && i == interaction
                 && *k == registry::InteractionDeliveryKind::PluginHandled),
             "known member ({surface}, {interaction}) missing"

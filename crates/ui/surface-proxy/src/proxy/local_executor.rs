@@ -162,6 +162,7 @@ impl SurfaceLocalActionExecutor for PluginSurfaceLocalExecutor {
             resolved.provider_id.as_str(),
             resolved.descriptor.surface_id.as_str(),
             resolved.interaction.interaction_id.as_str(),
+            &request.method,
         )
         .is_some()
         {
@@ -209,6 +210,7 @@ impl SurfaceLocalActionExecutor for PluginSurfaceLocalExecutor {
             resolved.provider_id.as_str(),
             resolved.descriptor.surface_id.as_str(),
             resolved.interaction.interaction_id.as_str(),
+            &request.method,
         ) {
             let result = self
                 .plugin_invoker
@@ -238,6 +240,7 @@ impl SurfaceLocalActionExecutor for PluginSurfaceLocalExecutor {
             resolved.provider_id.as_str(),
             resolved.descriptor.surface_id.as_str(),
             resolved.interaction.interaction_id.as_str(),
+            &request.method,
         ) {
             let result = self
                 .plugin_invoker
@@ -265,6 +268,7 @@ impl SurfaceLocalActionExecutor for PluginSurfaceLocalExecutor {
         if let Some(action) = allowlisted_proxmox_update_protection_controller_local_action(
             resolved.descriptor.surface_id.as_str(),
             resolved.interaction.interaction_id.as_str(),
+            &request.method,
         ) {
             let result = self
                 .plugin_invoker

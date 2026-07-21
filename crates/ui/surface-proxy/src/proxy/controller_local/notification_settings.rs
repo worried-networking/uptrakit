@@ -1,3 +1,4 @@
+use uptrakit_wire::surfaces::InteractionHttpMethod;
 use uuid::Uuid;
 
 use super::SurfaceProxyError;
@@ -14,8 +15,11 @@ pub(crate) fn allowlisted_notification_settings_controller_local_action(
     provider_id: &str,
     surface_id: &str,
     interaction_id: &str,
+    method: &InteractionHttpMethod,
 ) -> Option<NotificationSettingsAction> {
-    if super::table_tier(surface_id, interaction_id) != Some(super::ExecutorTier::PluginWithAudit) {
+    if super::table_tier(surface_id, interaction_id, method)
+        != Some(super::ExecutorTier::PluginWithAudit)
+    {
         return None;
     }
     let channel_type = surface_id

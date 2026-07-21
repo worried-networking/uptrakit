@@ -199,7 +199,7 @@ impl SurfaceRegistry {
         service_id: Uuid,
         service_app_name: &str,
         service_tenant_id: Option<Uuid>,
-        registration: surfaces::SurfaceRegistration,
+        mut registration: surfaces::SurfaceRegistration,
     ) -> Result<(), SurfaceRegistryError> {
         self.validate_registration_basics(
             surfaces::ProviderKind::Service,
@@ -235,6 +235,9 @@ impl SurfaceRegistry {
             return Err(error);
         }
 
+        normalize_interaction_methods(&mut registration);
+        warn_dataloads_without_params(&registration);
+
         if let Some(existing) = inner.providers.get(&provider_id)
             && existing.service_id != Some(service_id)
         {
@@ -260,12 +263,15 @@ impl SurfaceRegistry {
 
     pub fn bootstrap_builtin(
         &self,
-        registration: surfaces::SurfaceRegistration,
+        mut registration: surfaces::SurfaceRegistration,
     ) -> Result<(), SurfaceRegistryError> {
         self.validate_registration_basics(surfaces::ProviderKind::BuiltIn, &registration, None)?;
         let provider_id = registration.provider.provider_id.clone();
         let mut inner = self.inner.lock();
         self.validate_registration_admission_locked(&inner, &registration, None, None)?;
+
+        normalize_interaction_methods(&mut registration);
+        warn_dataloads_without_params(&registration);
 
         if let Some(existing) = inner.providers.get(&provider_id)
             && existing.registration.provider.provider_kind != surfaces::ProviderKind::BuiltIn
@@ -289,12 +295,15 @@ impl SurfaceRegistry {
 
     pub fn bootstrap_plugin(
         &self,
-        registration: surfaces::SurfaceRegistration,
+        mut registration: surfaces::SurfaceRegistration,
     ) -> Result<(), SurfaceRegistryError> {
         self.validate_registration_basics(surfaces::ProviderKind::Plugin, &registration, None)?;
         let provider_id = registration.provider.provider_id.clone();
         let mut inner = self.inner.lock();
         self.validate_registration_admission_locked(&inner, &registration, None, None)?;
+
+        normalize_interaction_methods(&mut registration);
+        warn_dataloads_without_params(&registration);
 
         if let Some(existing) = inner.providers.get(&provider_id)
             && existing.registration.provider.provider_kind != surfaces::ProviderKind::Plugin
@@ -472,12 +481,20 @@ impl SurfaceRegistry {
             .iter()
             .find(|surface| surface.descriptor.surface_id.as_str() == surface_id)
             .ok_or(SurfaceRegistryLookupError::SurfaceNotFound)?;
-        let interaction = surface
+        // Plan-2-window guard: this lookup stays id-only (Plan 3 adds a
+        // method-aware resolve). Task 4 admission accepts `(id, GET)` +
+        // `(id, POST)` pairs under the same surface, so an id-only match here
+        // could silently pick either sibling. Fail closed instead of guessing
+        // — reuse the existing not-found variant rather than adding a new one.
+        let mut matching_interactions = surface
             .interactions
             .iter()
-            .find(|interaction| interaction.interaction_id.as_str() == interaction_id)
-            .cloned()
-            .ok_or(SurfaceRegistryLookupError::InteractionNotFound)?;
+            .filter(|interaction| interaction.interaction_id.as_str() == interaction_id);
+        let interaction = match (matching_interactions.next(), matching_interactions.next()) {
+            (None, _) => return Err(SurfaceRegistryLookupError::InteractionNotFound),
+            (Some(_), Some(_)) => return Err(SurfaceRegistryLookupError::InteractionNotFound),
+            (Some(interaction), None) => interaction.clone(),
+        };
 
         Ok(ResolvedSurfaceAction {
             provider_id: selected_provider.provider_id.clone(),
@@ -942,6 +959,39 @@ pub enum SurfaceRegistryLookupError {
     NoTenantCompatibleProvider,
 }
 
+/// DataLoads are GET-only (B1): rewrite the stored method so every consumer
+/// (read model, dispatch, guard tests) sees the effective value.
+fn normalize_interaction_methods(registration: &mut surfaces::SurfaceRegistration) {
+    for surface in &mut registration.surfaces {
+        for interaction in &mut surface.interactions {
+            interaction.http_method = interaction.effective_http_method();
+        }
+    }
+}
+
+fn warn_dataloads_without_params(registration: &surfaces::SurfaceRegistration) {
+    for surface in &registration.surfaces {
+        for interaction in &surface.interactions {
+            if interaction.kind == surfaces::InteractionKind::DataLoad
+                && interaction.params.is_empty()
+            {
+                tracing::warn!(
+                    provider_id = %registration.provider.provider_id,
+                    surface_id = %surface.descriptor.surface_id,
+                    interaction_id = %interaction.interaction_id,
+                    "data-load interaction registered without param declarations"
+                );
+                metrics::counter!(
+                    "uptrakit_surface_registration_dataload_missing_params_total",
+                    "surface" => surface.descriptor.surface_id.as_str().to_string(),
+                    "interaction" => interaction.interaction_id.as_str().to_string()
+                )
+                .increment(1);
+            }
+        }
+    }
+}
+
 fn upsert_provider(
     inner: &mut SurfaceRegistryInner,
     provider_id: String,
@@ -1146,43 +1196,49 @@ fn validate_section_header_actions(
                 });
             }
             for action_id in header_action_ids {
-                match interactions.iter().find(|i| &i.interaction_id == action_id) {
-                    None => {
+                // Under `(id, method)` admission (Task 4) several interactions can
+                // share an id, so every match — not just the first — must satisfy
+                // the header-action kind gate.
+                let matching_interactions: Vec<&surfaces::InteractionDescriptor> = interactions
+                    .iter()
+                    .filter(|i| &i.interaction_id == action_id)
+                    .collect();
+                if matching_interactions.is_empty() {
+                    reasons.push(SurfaceProviderRejectionReason {
+                        code: SurfaceProviderRejectionCode::SchemaOrLimitFailure,
+                        message: format!(
+                            "section header_action_ids references unknown interaction `{action_id}`"
+                        ),
+                        surface_id: surface_id.clone(),
+                    });
+                    continue;
+                }
+                for interaction in matching_interactions {
+                    let valid_kind = matches!(
+                        interaction.kind,
+                        surfaces::InteractionKind::Workflow
+                            | surfaces::InteractionKind::MutationAction
+                    );
+                    if !valid_kind {
                         reasons.push(SurfaceProviderRejectionReason {
                             code: SurfaceProviderRejectionCode::SchemaOrLimitFailure,
                             message: format!(
-                                "section header_action_ids references unknown interaction `{action_id}`"
+                                "interaction `{action_id}` in header_action_ids must be \
+                                 kind Workflow or MutationAction (got {:?})",
+                                interaction.kind
                             ),
                             surface_id: surface_id.clone(),
                         });
                     }
-                    Some(interaction) => {
-                        let valid_kind = matches!(
-                            interaction.kind,
-                            surfaces::InteractionKind::Workflow
-                                | surfaces::InteractionKind::MutationAction
-                        );
-                        if !valid_kind {
-                            reasons.push(SurfaceProviderRejectionReason {
-                                code: SurfaceProviderRejectionCode::SchemaOrLimitFailure,
-                                message: format!(
-                                    "interaction `{action_id}` in header_action_ids must be \
-                                     kind Workflow or MutationAction (got {:?})",
-                                    interaction.kind
-                                ),
-                                surface_id: surface_id.clone(),
-                            });
-                        }
-                        if interaction.form_ui.is_some() {
-                            reasons.push(SurfaceProviderRejectionReason {
-                                code: SurfaceProviderRejectionCode::SchemaOrLimitFailure,
-                                message: format!(
-                                    "interaction `{action_id}` in header_action_ids must not \
-                                     have form_ui set"
-                                ),
-                                surface_id: surface_id.clone(),
-                            });
-                        }
+                    if interaction.form_ui.is_some() {
+                        reasons.push(SurfaceProviderRejectionReason {
+                            code: SurfaceProviderRejectionCode::SchemaOrLimitFailure,
+                            message: format!(
+                                "interaction `{action_id}` in header_action_ids must not \
+                                 have form_ui set"
+                            ),
+                            surface_id: surface_id.clone(),
+                        });
                     }
                 }
             }
@@ -1431,6 +1487,161 @@ mod tests {
             SurfaceRegistryError::ProviderRejected(rejection) => rejection,
             other => panic!("expected ProviderRejected, got {other:?}"),
         }
+    }
+
+    /// Builds a minimal plugin [`SurfaceRegistration`] carrying `interactions`
+    /// on a single global/universal surface, with `extra_capabilities`
+    /// merged in alongside the baseline node/targeting capabilities.
+    fn registration_with_interactions(
+        extra_capabilities: Vec<surfaces::Capability>,
+        interactions: Vec<surfaces::InteractionDescriptor>,
+    ) -> surfaces::SurfaceRegistration {
+        let mut capabilities = vec![
+            surfaces::Capability::TextBlockNode,
+            surfaces::Capability::UniversalTargeting,
+        ];
+        capabilities.extend(extra_capabilities);
+
+        surfaces::SurfaceRegistration {
+            provider: surfaces::ProviderIdentity {
+                provider_id: "plugin.dataload_test_provider".to_string(),
+                provider_kind: surfaces::ProviderKind::Plugin,
+                provider_namespace: "plugin".to_string(),
+            },
+            framework_generation: surfaces::FrameworkGeneration::new(1, 0),
+            capabilities: surfaces::CapabilitySet::from_capabilities(capabilities.clone()),
+            effective_tenant_binding: surfaces::EffectiveTenantBinding {
+                scope: surfaces::Scope::Global,
+                tenant_id: None,
+            },
+            surfaces: vec![surfaces::RegisteredSurface {
+                descriptor: surfaces::SurfaceDescriptor::builder()
+                    .surface_id(surfaces::SurfaceId::new("test.dataload.surface").unwrap())
+                    .label("Test DataLoad Surface")
+                    .priority(100)
+                    .slot(surfaces::SLOT_SETTINGS_BELOW_GLOBAL)
+                    .scope(surfaces::Scope::Global)
+                    .targeting(surfaces::Targeting::Universal)
+                    .provider_kind(surfaces::ProviderKind::Plugin)
+                    .required_capabilities(surfaces::CapabilitySet::from_capabilities(capabilities))
+                    .root_node(surfaces::SurfaceNode::TextBlock {
+                        text: "ok".to_string(),
+                    })
+                    .build(),
+                interactions,
+                data_sources: vec![],
+            }],
+            encryption_metadata: None,
+        }
+    }
+
+    #[test]
+    fn admission_normalizes_dataload_http_method_to_get() {
+        let registry = registry();
+        let interaction = surfaces::InteractionDescriptor::new(
+            surfaces::InteractionId::new("load-data").unwrap(),
+            surfaces::InteractionKind::DataLoad,
+            "Load Data",
+            surfaces::InteractionTransport::ProviderProxied,
+        );
+        // Wire default is POST (omitted on the wire); admission must rewrite
+        // DataLoad interactions to GET regardless of the declared value.
+        assert_eq!(
+            interaction.http_method,
+            surfaces::InteractionHttpMethod::Post
+        );
+        let registration = registration_with_interactions(
+            vec![
+                surfaces::Capability::DataLoad,
+                surfaces::Capability::ProviderInitiatedActions,
+            ],
+            vec![interaction],
+        );
+
+        registry
+            .bootstrap_plugin(registration)
+            .expect("data-load registration should admit");
+
+        let resolved = registry
+            .resolve_surface_action(
+                tenant_a(),
+                "test.dataload.surface",
+                "load-data",
+                Some("plugin.dataload_test_provider"),
+            )
+            .expect("stored interaction should resolve");
+        assert_eq!(
+            resolved.interaction.http_method,
+            surfaces::InteractionHttpMethod::Get,
+            "admission must normalize the stored DataLoad method to GET"
+        );
+    }
+
+    #[test]
+    fn dataload_without_params_still_admits() {
+        let registry = registry();
+        let interaction = surfaces::InteractionDescriptor::new(
+            surfaces::InteractionId::new("load-data").unwrap(),
+            surfaces::InteractionKind::DataLoad,
+            "Load Data",
+            surfaces::InteractionTransport::ProviderProxied,
+        );
+        assert!(interaction.params.is_empty());
+        let registration = registration_with_interactions(
+            vec![
+                surfaces::Capability::DataLoad,
+                surfaces::Capability::ProviderInitiatedActions,
+            ],
+            vec![interaction],
+        );
+
+        let result = registry.bootstrap_plugin(registration);
+        assert!(
+            result.is_ok(),
+            "param-less DataLoad must remain admissible (advisory-only telemetry): {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn id_only_resolve_errors_on_multi_method_id() {
+        let registry = registry();
+        let id = surfaces::InteractionId::new("dup-action").unwrap();
+        let data_load = surfaces::InteractionDescriptor::new(
+            id.clone(),
+            surfaces::InteractionKind::DataLoad,
+            "Load",
+            surfaces::InteractionTransport::ProviderProxied,
+        );
+        let mutation = surfaces::InteractionDescriptor::new(
+            id,
+            surfaces::InteractionKind::MutationAction,
+            "Mutate",
+            surfaces::InteractionTransport::ProviderProxied,
+        );
+        let registration = registration_with_interactions(
+            vec![
+                surfaces::Capability::DataLoad,
+                surfaces::Capability::MutationAction,
+                surfaces::Capability::ProviderInitiatedActions,
+            ],
+            vec![data_load, mutation],
+        );
+
+        registry
+            .bootstrap_plugin(registration)
+            .expect("multi-method same-id registration is accepted at admission (Task 4)");
+
+        let result = registry.resolve_surface_action(
+            tenant_a(),
+            "test.dataload.surface",
+            "dup-action",
+            Some("plugin.dataload_test_provider"),
+        );
+        assert!(
+            matches!(result, Err(SurfaceRegistryLookupError::InteractionNotFound)),
+            "id-only resolve must fail closed on an ambiguous multi-method id, got {result:?}"
+        );
     }
 
     #[test]

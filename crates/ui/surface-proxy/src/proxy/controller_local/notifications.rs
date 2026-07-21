@@ -1,4 +1,5 @@
 use uptrakit_plugin_infrastructure_registry::PluginOps;
+use uptrakit_wire::surfaces::InteractionHttpMethod;
 use uuid::Uuid;
 
 use super::SurfaceProxyError;
@@ -27,8 +28,9 @@ pub(crate) fn allowlisted_notification_channel_controller_local_action<'a>(
     provider_id: &str,
     surface_id: &'a str,
     interaction_id: &str,
+    method: &InteractionHttpMethod,
 ) -> Option<&'a str> {
-    if super::table_tier(surface_id, interaction_id)
+    if super::table_tier(surface_id, interaction_id, method)
         != Some(super::ExecutorTier::ControllerExecutes)
     {
         return None;

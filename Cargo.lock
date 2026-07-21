@@ -8505,6 +8505,7 @@ name = "uptrakit-surface-proxy"
 version = "0.0.1"
 dependencies = [
  "async-trait",
+ "metrics",
  "parking_lot",
  "rand 0.9.5",
  "rootcause",

@@ -1,5 +1,6 @@
 use super::SurfaceProxyError;
 use uptrakit_plugin_infrastructure_registry::{SurfaceActionController, SurfaceActionError};
+use uptrakit_wire::surfaces::InteractionHttpMethod;
 use uuid::Uuid;
 
 mod docker;
@@ -45,121 +46,152 @@ pub enum ExecutorTier {
     PluginWithAudit,
 }
 
-/// Single source for every allowlisted controller-local executor pair.
-pub const CONTROLLER_LOCAL_EXECUTOR_TABLE: &[(&str, &str, ExecutorTier)] = &[
+/// Single source for every allowlisted controller-local executor pair. All
+/// current rows name `MutationAction`/`FormSubmit`/`ConfirmableAction`
+/// interactions (none are `DataLoad`), so every method column is
+/// `InteractionHttpMethod::Post`; verified against each interaction's actual
+/// registration, not guessed from the name. Re-keyed and checked
+/// bidirectionally by `interaction_executor_guard` in web-api (spec D5).
+pub const CONTROLLER_LOCAL_EXECUTOR_TABLE: &[(&str, &str, InteractionHttpMethod, ExecutorTier)] = &[
     // Tier 1a — notification channel CRUD
     (
         "notifications.webhook",
         "create",
+        InteractionHttpMethod::Post,
         ExecutorTier::ControllerExecutes,
     ),
     (
         "notifications.webhook",
         "edit",
+        InteractionHttpMethod::Post,
         ExecutorTier::ControllerExecutes,
     ),
     (
         "notifications.webhook",
         "test",
+        InteractionHttpMethod::Post,
         ExecutorTier::ControllerExecutes,
     ),
     (
         "notifications.webhook",
         "delete",
+        InteractionHttpMethod::Post,
         ExecutorTier::ControllerExecutes,
     ),
     (
         "notifications.telegram",
         "create",
+        InteractionHttpMethod::Post,
         ExecutorTier::ControllerExecutes,
     ),
     (
         "notifications.telegram",
         "edit",
+        InteractionHttpMethod::Post,
         ExecutorTier::ControllerExecutes,
     ),
     (
         "notifications.telegram",
         "test",
+        InteractionHttpMethod::Post,
         ExecutorTier::ControllerExecutes,
     ),
     (
         "notifications.telegram",
         "delete",
+        InteractionHttpMethod::Post,
         ExecutorTier::ControllerExecutes,
     ),
     (
         "notifications.email",
         "create",
+        InteractionHttpMethod::Post,
         ExecutorTier::ControllerExecutes,
     ),
     (
         "notifications.email",
         "edit",
+        InteractionHttpMethod::Post,
         ExecutorTier::ControllerExecutes,
     ),
     (
         "notifications.email",
         "test",
+        InteractionHttpMethod::Post,
         ExecutorTier::ControllerExecutes,
     ),
     (
         "notifications.email",
         "delete",
+        InteractionHttpMethod::Post,
         ExecutorTier::ControllerExecutes,
     ),
     // Tier 2a — notification settings saves
     (
         "notifications.email",
         "configure_smtp",
+        InteractionHttpMethod::Post,
         ExecutorTier::PluginWithAudit,
     ),
     (
         "notifications.email.global_smtp",
         "save_global_smtp",
+        InteractionHttpMethod::Post,
         ExecutorTier::PluginWithAudit,
     ),
     (
         "notifications.telegram.global_settings",
         "save_global_telegram",
+        InteractionHttpMethod::Post,
         ExecutorTier::PluginWithAudit,
     ),
     // Tier 2b — docker switch-tag
     (
         "docker.item-host-actions",
         "switch-tag",
+        InteractionHttpMethod::Post,
         ExecutorTier::PluginWithAudit,
     ),
     // Tier 2c — proxmox update-protection / scaling saves
     (
         "proxmox.settings.update-hooks",
         "save-global-defaults",
+        InteractionHttpMethod::Post,
         ExecutorTier::PluginWithAudit,
     ),
     (
         "proxmox.software-item.update-hooks",
         "save-item-overrides",
+        InteractionHttpMethod::Post,
         ExecutorTier::PluginWithAudit,
     ),
     (
         "proxmox.settings.resource-scaling",
         "save-scaling-global-defaults",
+        InteractionHttpMethod::Post,
         ExecutorTier::PluginWithAudit,
     ),
     (
         "proxmox.software-item.resource-scaling",
         "save-scaling-item-overrides",
+        InteractionHttpMethod::Post,
         ExecutorTier::PluginWithAudit,
     ),
 ];
 
-/// Looks up the tier for a pair. Linear scan over a 20-row const — a map
-/// would be complexity without a consumer.
-pub(crate) fn table_tier(surface_id: &str, interaction_id: &str) -> Option<ExecutorTier> {
+/// Looks up the tier for a `(surface, interaction, method)` triple. Linear
+/// scan over a 20-row const — a map would be complexity without a consumer.
+pub(crate) fn table_tier(
+    surface_id: &str,
+    interaction_id: &str,
+    method: &InteractionHttpMethod,
+) -> Option<ExecutorTier> {
     CONTROLLER_LOCAL_EXECUTOR_TABLE
         .iter()
-        .find(|(surface, interaction, _)| *surface == surface_id && *interaction == interaction_id)
-        .map(|(_, _, tier)| *tier)
+        .find(|(surface, interaction, row_method, _)| {
+            *surface == surface_id && *interaction == interaction_id && row_method == method
+        })
+        .map(|(_, _, _, tier)| *tier)
 }
 
 // TODO(adr-0018): The collapse of ControllerIntegration/PluginInternal → SendFailed is only
@@ -227,11 +259,13 @@ mod table_tests {
 
     #[test]
     fn executor_table_has_no_duplicate_pairs() {
+        // `InteractionHttpMethod` derives no `Ord`/`Hash` (wire-safe enum
+        // convention); key on its wire string instead of adding either.
         let mut seen = std::collections::BTreeSet::new();
-        for (surface, interaction, _) in CONTROLLER_LOCAL_EXECUTOR_TABLE {
+        for (surface, interaction, method, _) in CONTROLLER_LOCAL_EXECUTOR_TABLE {
             assert!(
-                seen.insert((*surface, *interaction)),
-                "duplicate row ({surface}, {interaction})"
+                seen.insert((*surface, *interaction, method.as_str())),
+                "duplicate row ({surface}, {interaction}, {method})"
             );
         }
         assert_eq!(seen.len(), CONTROLLER_LOCAL_EXECUTOR_TABLE.len());

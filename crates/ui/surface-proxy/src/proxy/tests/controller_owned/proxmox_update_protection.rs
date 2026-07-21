@@ -132,7 +132,7 @@ async fn invoke_proxmox_save_global_defaults_emits_success_audit_row() {
     if !catalog
         .interaction_deliveries()
         .iter()
-        .any(|(surface, _, _)| surface.starts_with("proxmox."))
+        .any(|(surface, _, _, _)| surface.starts_with("proxmox."))
     {
         return;
     }
@@ -228,7 +228,7 @@ async fn invoke_proxmox_save_item_overrides_emits_software_item_update_audit_row
     if !catalog
         .interaction_deliveries()
         .iter()
-        .any(|(surface, _, _)| surface.starts_with("proxmox."))
+        .any(|(surface, _, _, _)| surface.starts_with("proxmox."))
     {
         return;
     }
@@ -318,7 +318,7 @@ async fn invoke_proxmox_save_scaling_global_defaults_emits_tenant_setting_update
     if !catalog
         .interaction_deliveries()
         .iter()
-        .any(|(surface, _, _)| surface.starts_with("proxmox."))
+        .any(|(surface, _, _, _)| surface.starts_with("proxmox."))
     {
         return;
     }
@@ -410,7 +410,7 @@ async fn invoke_proxmox_save_scaling_item_overrides_emits_software_item_update_a
     if !catalog
         .interaction_deliveries()
         .iter()
-        .any(|(surface, _, _)| surface.starts_with("proxmox."))
+        .any(|(surface, _, _, _)| surface.starts_with("proxmox."))
     {
         return;
     }

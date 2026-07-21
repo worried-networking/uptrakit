@@ -1,3 +1,4 @@
+use uptrakit_wire::surfaces::InteractionHttpMethod;
 use uuid::Uuid;
 
 use super::SurfaceProxyError;
@@ -19,8 +20,11 @@ pub(crate) enum ProxmoxUpdateProtectionAction {
 pub(crate) fn allowlisted_proxmox_update_protection_controller_local_action(
     surface_id: &str,
     interaction_id: &str,
+    method: &InteractionHttpMethod,
 ) -> Option<ProxmoxUpdateProtectionAction> {
-    if super::table_tier(surface_id, interaction_id) != Some(super::ExecutorTier::PluginWithAudit) {
+    if super::table_tier(surface_id, interaction_id, method)
+        != Some(super::ExecutorTier::PluginWithAudit)
+    {
         return None;
     }
     match (surface_id, interaction_id) {

@@ -1,3 +1,4 @@
+use uptrakit_wire::surfaces::InteractionHttpMethod;
 use uuid::Uuid;
 
 use super::SurfaceProxyError;
@@ -8,9 +9,10 @@ pub(crate) fn allowlisted_docker_switch_tag_controller_local_action(
     provider_id: &str,
     surface_id: &str,
     interaction_id: &str,
+    method: &InteractionHttpMethod,
 ) -> bool {
     matches!(provider_id, "plugin.releases_docker" | "releases_docker")
-        && super::table_tier(surface_id, interaction_id)
+        && super::table_tier(surface_id, interaction_id, method)
             == Some(super::ExecutorTier::PluginWithAudit)
         && surface_id == "docker.item-host-actions"
 }

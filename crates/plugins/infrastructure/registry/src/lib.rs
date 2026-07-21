@@ -58,6 +58,11 @@ pub use uptrakit_plugin_infrastructure_core::SurfaceActionContext;
 // `uptrakit-plugin-infrastructure-core` directly.
 pub use uptrakit_plugin_infrastructure_core::InteractionDeliveryKind;
 
+// Re-export the wire-safe HTTP-method enum (ADR-0028 companion) so guard
+// tests can key on method alongside delivery kind without a direct
+// `uptrakit-surfaces` dependency.
+pub use uptrakit_plugin_infrastructure_core::surfaces::InteractionHttpMethod;
+
 // Re-export executor types for downstream convenience
 pub use uptrakit_command::{CommandExecutor, LocalCommandExecutor};
 

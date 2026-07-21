@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use uptrakit_shared_types::PluginTypeId;
+use uptrakit_surfaces as surfaces;
 
 /// Per-plugin enable state for `PluginScope::Instance` plugins, snapshotted at
 /// controller boot from the `instance_plugin_setting` table. Tenant-scoped
@@ -308,12 +309,23 @@ impl PluginCatalog {
         })
     }
 
-    /// Every surface interaction, as `(surface_id, interaction_id, kind)`
-    /// triples. Used by consumers (e.g. the D5 executor-allowlist guard) that need
-    /// to enumerate how each registered interaction is delivered without exposing
-    /// the underlying handler function pointer.
+    /// Every surface interaction, as `(surface_id, interaction_id, method,
+    /// kind)` tuples. Used by consumers (e.g. the D5 executor-allowlist guard)
+    /// that need to enumerate how each registered interaction is delivered
+    /// without exposing the underlying handler function pointer. `method` is
+    /// `descriptor().effective_http_method()`, not the raw `http_method`
+    /// field: these are raw plugin declarations straight from the catalog —
+    /// the registry's admission-time normalization (DataLoad → GET) has not
+    /// run yet.
     #[must_use]
-    pub fn interaction_deliveries(&self) -> Vec<(String, String, InteractionDeliveryKind)> {
+    pub fn interaction_deliveries(
+        &self,
+    ) -> Vec<(
+        String,
+        String,
+        surfaces::InteractionHttpMethod,
+        InteractionDeliveryKind,
+    )> {
         self.descriptors
             .values()
             .filter_map(|descriptor| descriptor.surfaces)
@@ -327,8 +339,9 @@ impl PluginCatalog {
                     .map(move |interaction| {
                         let interaction_id =
                             interaction.descriptor().interaction_id.as_str().to_string();
+                        let method = interaction.descriptor().effective_http_method();
                         let kind = interaction.delivery().kind();
-                        (surface_id.clone(), interaction_id, kind)
+                        (surface_id.clone(), interaction_id, method, kind)
                     })
                     .collect::<Vec<_>>()
             })
@@ -1077,6 +1090,7 @@ mod tests {
             deliveries.contains(&(
                 "demo.surface".to_string(),
                 "ping".to_string(),
+                surfaces::InteractionHttpMethod::Post,
                 InteractionDeliveryKind::PluginHandled,
             )),
             "must report the PluginHandled interaction: {deliveries:?}"
@@ -1085,6 +1099,7 @@ mod tests {
             deliveries.contains(&(
                 "demo.surface".to_string(),
                 "confirm".to_string(),
+                surfaces::InteractionHttpMethod::Post,
                 InteractionDeliveryKind::ControllerExecutor,
             )),
             "must report the ControllerExecutor interaction: {deliveries:?}"
