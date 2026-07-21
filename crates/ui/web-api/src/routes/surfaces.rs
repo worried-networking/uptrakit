@@ -990,6 +990,20 @@ mod tests {
     }
 
     #[test]
+    fn classify_surface_lookup_error_for_audit_maps_method_not_allowed_reason() {
+        let error = SurfaceRegistryLookupError::MethodNotAllowed {
+            allowed: vec![surfaces::InteractionHttpMethod::Get],
+            descriptor_required_permission: None,
+            interaction_required_permissions: vec![Some("view_software".to_string())],
+        };
+
+        let (outcome, reason_code) = classify_surface_lookup_error_for_audit(&error);
+
+        assert_eq!(outcome, uptrakit_audit_log::AuditOutcome::ValidationFailed);
+        assert_eq!(reason_code, "method_not_allowed");
+    }
+
+    #[test]
     fn enforce_required_permission_accepts_missing_permission() {
         let auth_user = auth_user_with_permissions(vec![]);
         let response = enforce_required_permission(None, &auth_user, "surface.one", "surface");

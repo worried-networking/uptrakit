@@ -214,4 +214,23 @@ mod tests {
         assert_eq!(parsed["provider_id"], "provider-a");
         assert_eq!(parsed["reasons"][0]["message"], "invalid transport");
     }
+
+    #[test]
+    fn surface_registry_lookup_error_to_wire_maps_method_not_allowed_to_invalid_request() {
+        let error = crate::surface_registry::SurfaceRegistryLookupError::MethodNotAllowed {
+            allowed: vec![
+                uptrakit_wire::surfaces::InteractionHttpMethod::Get,
+                uptrakit_wire::surfaces::InteractionHttpMethod::Post,
+            ],
+            descriptor_required_permission: Some("view_software".to_string()),
+            interaction_required_permissions: vec![Some("view_software".to_string()), None],
+        };
+
+        let wire_error = surface_registry_lookup_error_to_wire(error);
+
+        assert_eq!(
+            wire_error.code,
+            uptrakit_wire::surfaces::SurfaceActionErrorCode::InvalidRequest
+        );
+    }
 }

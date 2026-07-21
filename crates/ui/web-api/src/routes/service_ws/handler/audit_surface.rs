@@ -461,4 +461,18 @@ mod tests {
             "notifications.email/configure_smtp"
         );
     }
+
+    #[test]
+    fn classify_surface_lookup_error_for_audit_maps_method_not_allowed_reason() {
+        let error = crate::surface_registry::SurfaceRegistryLookupError::MethodNotAllowed {
+            allowed: vec![surfaces::InteractionHttpMethod::Get],
+            descriptor_required_permission: None,
+            interaction_required_permissions: vec![Some("view_software".to_string())],
+        };
+
+        let (outcome, reason_code) = classify_surface_lookup_error_for_audit(&error);
+
+        assert_eq!(outcome, uptrakit_audit_log::AuditOutcome::ValidationFailed);
+        assert_eq!(reason_code, "method_not_allowed");
+    }
 }
