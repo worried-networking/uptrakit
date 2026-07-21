@@ -58,6 +58,18 @@ impl TestClient {
     pub(crate) fn post_form(&self, uri: &str, body: &str) -> RequestBuilder {
         RequestBuilder::new(self.router.clone(), http::Method::POST, uri).form_body(body)
     }
+
+    /// Start building a `HEAD` request.
+    pub(crate) fn head(&self, uri: &str) -> RequestBuilder {
+        RequestBuilder::new(self.router.clone(), http::Method::HEAD, uri)
+    }
+
+    /// Start building a request with an arbitrary HTTP method (e.g. `PATCH`,
+    /// or a method-model router test that needs `GET`/`PUT`/`DELETE` without
+    /// a pre-canned convenience wrapper).
+    pub(crate) fn request(&self, method: http::Method, uri: &str) -> RequestBuilder {
+        RequestBuilder::new(self.router.clone(), method, uri)
+    }
 }
 
 /// Builder for a single HTTP request.

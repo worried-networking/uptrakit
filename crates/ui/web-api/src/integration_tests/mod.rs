@@ -20,4 +20,5 @@ mod services_crud;
 mod settings;
 mod settings_access;
 mod software_items_crud;
+mod surfaces_method_routes;
 mod surfaces_routes;

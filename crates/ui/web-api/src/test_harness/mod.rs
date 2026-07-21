@@ -64,6 +64,170 @@ impl TestApp {
     pub(crate) fn client(&self) -> http_client::TestClient {
         http_client::TestClient::new(self.router.clone())
     }
+
+    /// Build a [`TestApp`] with a single stub surface provider (`"test.stub"`)
+    /// registered on `ControllerLocal` transport, backed by a
+    /// [`RecordingSurfaceExecutor`] that records every dispatched
+    /// [`surfaces::SurfaceActionRequest`] and always returns
+    /// `{"ok": true}`.
+    ///
+    /// **Dispatch-only.** [`crate::surface_registry::SurfaceRegistry::register_provider_for_test`]
+    /// bypasses the admission pipeline entirely (no `validate_against`, no
+    /// `normalize_interaction_methods`), so this stub is unsuitable for
+    /// testing admission-time rejection or normalization behavior — only for
+    /// exercising router → proxy → local-executor dispatch once a descriptor
+    /// is already registered. Admission coverage (`register_service` /
+    /// `bootstrap_plugin`) is Plan 3 scope.
+    ///
+    /// Each [`StubInteraction`]'s stored `http_method` is normalized to its
+    /// `effective_http_method()` before registration, mirroring what
+    /// production admission (`normalize_interaction_methods`) would have
+    /// done — so DataLoad stubs carry `Get` exactly like real descriptors.
+    pub(crate) async fn with_stub_surfaces(
+        stubs: Vec<StubInteraction>,
+    ) -> (Self, StubSurfaceCalls) {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (state, jwt) = build_test_state(db.clone(), tenant_id).await;
+
+        let calls: StubSurfaceCalls = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let surface_registry = Arc::new(crate::surface_registry::SurfaceRegistry::new(
+            crate::surface_registry::SurfaceRegistryConfig::default(),
+        ));
+        let surface_proxy = Arc::new(
+            crate::surface_proxy::SurfaceProxy::new().with_local_executor(Arc::new(
+                RecordingSurfaceExecutor {
+                    calls: Arc::clone(&calls),
+                },
+            )),
+        );
+
+        let mut app_state = (*state).clone();
+        app_state.surface_proxy_deps =
+            crate::app_state::SurfaceProxyDeps::new(Arc::clone(&surface_registry), surface_proxy);
+        let state = Arc::new(app_state);
+
+        surface_registry.register_provider_for_test(stub_surface_registration(stubs), None, None);
+
+        let router = build_router(Arc::clone(&state));
+
+        let app = Self {
+            state,
+            router,
+            db,
+            jwt,
+            tenant_id,
+        };
+        (app, calls)
+    }
+}
+
+/// Input descriptor for [`TestApp::with_stub_surfaces`]: a minimal,
+/// caller-authored interaction to register on the `"test.stub"` surface.
+pub(crate) struct StubInteraction {
+    pub interaction_id: &'static str,
+    pub kind: uptrakit_wire::surfaces::InteractionKind,
+    pub http_method: Option<uptrakit_wire::surfaces::InteractionHttpMethod>,
+    pub params: Vec<uptrakit_wire::surfaces::ParamFieldDescriptor>,
+    pub required_permission: Option<String>,
+}
+
+/// Requests recorded by [`RecordingSurfaceExecutor`], shared with the test
+/// via [`TestApp::with_stub_surfaces`]'s return value.
+pub(crate) type StubSurfaceCalls =
+    Arc<parking_lot::Mutex<Vec<uptrakit_wire::surfaces::SurfaceActionRequest>>>;
+
+/// Builds the `"test.stub"` [`surfaces::SurfaceRegistration`] carrying
+/// `stubs` as `ControllerLocal` interactions on a global, universally
+/// targeted surface (provider kind `Plugin` — required by
+/// `SurfaceProxy::invoke` for `ControllerLocal` transport regardless of the
+/// local executor wired in).
+fn stub_surface_registration(
+    stubs: Vec<StubInteraction>,
+) -> uptrakit_wire::surfaces::SurfaceRegistration {
+    use uptrakit_wire::surfaces;
+
+    let interactions = stubs
+        .into_iter()
+        .map(|stub| {
+            let declared_method = stub.http_method.unwrap_or_default();
+            let mut descriptor = surfaces::InteractionDescriptor::new(
+                surfaces::InteractionId::new(stub.interaction_id)
+                    .expect("stub interaction_id must be a valid InteractionId"),
+                stub.kind,
+                stub.interaction_id,
+                surfaces::InteractionTransport::ControllerLocal,
+            )
+            .with_http_method(declared_method)
+            .with_params(stub.params);
+            descriptor.required_permission = stub.required_permission;
+            // Normalize before registering: `register_provider_for_test`
+            // bypasses admission's `normalize_interaction_methods`, so do it
+            // here instead — DataLoad stubs must carry `Get` like production
+            // descriptors do.
+            let normalized_method = descriptor.effective_http_method();
+            descriptor.with_http_method(normalized_method)
+        })
+        .collect();
+
+    surfaces::SurfaceRegistration {
+        provider: surfaces::ProviderIdentity {
+            provider_id: "test.stub.provider".to_string(),
+            provider_kind: surfaces::ProviderKind::Plugin,
+            provider_namespace: "plugin".to_string(),
+        },
+        framework_generation: surfaces::FrameworkGeneration::new(1, 0),
+        capabilities: surfaces::CapabilitySet::from_capabilities([
+            surfaces::Capability::TextBlockNode,
+            surfaces::Capability::UniversalTargeting,
+            surfaces::Capability::MutationAction,
+            surfaces::Capability::DataLoad,
+        ]),
+        effective_tenant_binding: surfaces::EffectiveTenantBinding {
+            scope: surfaces::Scope::Global,
+            tenant_id: None,
+        },
+        surfaces: vec![surfaces::RegisteredSurface {
+            descriptor: surfaces::SurfaceDescriptor::builder()
+                .surface_id(surfaces::SurfaceId::new("test.stub").expect("valid surface id"))
+                .label("Stub Surface")
+                .priority(100)
+                .slot(surfaces::SLOT_SETTINGS_BELOW_GLOBAL)
+                .scope(surfaces::Scope::Global)
+                .targeting(surfaces::Targeting::Universal)
+                .provider_kind(surfaces::ProviderKind::Plugin)
+                .required_capabilities(surfaces::CapabilitySet::from_capabilities([
+                    surfaces::Capability::TextBlockNode,
+                    surfaces::Capability::UniversalTargeting,
+                ]))
+                .root_node(surfaces::SurfaceNode::section(None::<String>, vec![]))
+                .build(),
+            interactions,
+            data_sources: vec![],
+        }],
+        encryption_metadata: None,
+    }
+}
+
+/// [`crate::surface_proxy::SurfaceLocalActionExecutor`] that records every
+/// dispatched request into a shared [`StubSurfaceCalls`] and always succeeds
+/// with `{"ok": true}` — the harness counterpart to
+/// [`crate::surface_proxy::PluginSurfaceLocalExecutor`] (real dispatch) and
+/// the crate-internal `NoopSurfaceLocalExecutor` (always errors).
+struct RecordingSurfaceExecutor {
+    calls: StubSurfaceCalls,
+}
+
+#[async_trait::async_trait]
+impl crate::surface_proxy::SurfaceLocalActionExecutor for RecordingSurfaceExecutor {
+    async fn execute(
+        &self,
+        _resolved: &crate::surface_registry::ResolvedSurfaceAction,
+        request: &uptrakit_wire::surfaces::SurfaceActionRequest,
+    ) -> Result<serde_json::Value, crate::surface_proxy::SurfaceProxyError> {
+        self.calls.lock().push(request.clone());
+        Ok(serde_json::json!({"ok": true}))
+    }
 }
 
 /// Create an in-memory SQLite database with all migrations applied.
