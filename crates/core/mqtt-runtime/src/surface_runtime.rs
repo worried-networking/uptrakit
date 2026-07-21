@@ -379,6 +379,7 @@ mod tests {
             tenant_id: tenant_id.to_string(),
             surface_id: SurfaceId::new(EXT_ID).expect("surface id"),
             interaction_id: InteractionId::new(ACTION_GET).expect("interaction id"),
+            method: Default::default(),
             idempotency_key: "req-1".to_string(),
             target_provider_id: None,
             caller_origin: surfaces::CallerOrigin::BuiltInSystem {
@@ -430,6 +431,7 @@ mod tests {
             tenant_id: tenant_a.to_string(),
             surface_id: SurfaceId::new(EXT_ID).expect("surface id"),
             interaction_id: InteractionId::new(ACTION_LIST).expect("interaction id"),
+            method: Default::default(),
             idempotency_key: "req-1".to_string(),
             target_provider_id: None,
             caller_origin: surfaces::CallerOrigin::BuiltInSystem {
@@ -498,6 +500,7 @@ mod tests {
             tenant_id: tenant_id.to_string(),
             surface_id: SurfaceId::new(EXT_ID).expect("surface id"),
             interaction_id: InteractionId::new(ACTION_LIST).expect("interaction id"),
+            method: Default::default(),
             idempotency_key: "req-1".to_string(),
             target_provider_id: None,
             caller_origin: surfaces::CallerOrigin::BuiltInSystem {
@@ -585,6 +588,7 @@ mod tests {
             tenant_id: tenant_id.to_string(),
             surface_id: SurfaceId::new(EXT_ID).expect("surface id"),
             interaction_id: InteractionId::new(ACTION_LIST).expect("interaction id"),
+            method: Default::default(),
             idempotency_key: "req-1".to_string(),
             target_provider_id: None,
             caller_origin: surfaces::CallerOrigin::BuiltInSystem {
@@ -639,6 +643,7 @@ mod tests {
             tenant_id: tenant_a.to_string(),
             surface_id: SurfaceId::new(EXT_ID).expect("surface id"),
             interaction_id: InteractionId::new(ACTION_GET).expect("interaction id"),
+            method: Default::default(),
             idempotency_key: "req-1".to_string(),
             target_provider_id: None,
             caller_origin: surfaces::CallerOrigin::BuiltInSystem {

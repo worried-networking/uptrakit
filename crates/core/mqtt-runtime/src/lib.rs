@@ -1045,6 +1045,7 @@ mod tests {
                 surface_runtime::ACTION_EDIT,
             )
             .expect("interaction id"),
+            method: Default::default(),
             idempotency_key: "req-1".to_string(),
             target_provider_id: Some("service.uptrakit-mqtt".to_string()),
             caller_origin: CallerOrigin::BuiltInSystem {
@@ -1124,6 +1125,7 @@ mod tests {
                 .expect("surface id"),
             interaction_id: uptrakit_wire::surfaces::InteractionId::new(interaction_id)
                 .expect("interaction id"),
+            method: Default::default(),
             idempotency_key: "req-1".to_string(),
             target_provider_id: target_provider_id.map(ToString::to_string),
             caller_origin: CallerOrigin::BuiltInSystem {

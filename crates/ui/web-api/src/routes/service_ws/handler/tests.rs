@@ -230,6 +230,7 @@ async fn surface_action_scope_violation_emits_denied_tenant_audit_row() {
             tenant_id: requested_tenant_id.to_string(),
             surface_id: surfaces::SurfaceId::new("notifications.email").unwrap(),
             interaction_id: surfaces::InteractionId::new("configure_smtp").unwrap(),
+            method: Default::default(),
             idempotency_key: "scope-violation".to_string(),
             target_provider_id: Some("provider-a".to_string()),
             caller_origin: surfaces::CallerOrigin::Provider {
@@ -329,6 +330,7 @@ async fn surface_action_invalid_payload_emits_validation_failed_tenant_audit_row
             tenant_id: tenant_id.to_string(),
             surface_id: surfaces::SurfaceId::new("ssh.guest.panel").unwrap(),
             interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
+            method: Default::default(),
             idempotency_key: "x".repeat(MAX_SHORT_STRING_LEN + 1),
             target_provider_id: Some("provider-a".to_string()),
             caller_origin: surfaces::CallerOrigin::Provider {
@@ -411,6 +413,7 @@ async fn surface_action_invalid_tenant_emits_validation_failed_tenant_audit_row(
             tenant_id: "not-a-uuid".to_string(),
             surface_id: surfaces::SurfaceId::new("ssh.guest.panel").unwrap(),
             interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
+            method: Default::default(),
             idempotency_key: "invalid-tenant".to_string(),
             target_provider_id: Some("provider-a".to_string()),
             caller_origin: surfaces::CallerOrigin::Provider {
@@ -500,6 +503,7 @@ async fn surface_action_lookup_failure_emits_validation_failed_tenant_audit_row(
             tenant_id: tenant_id.to_string(),
             surface_id: surfaces::SurfaceId::new("ssh.guest.panel").unwrap(),
             interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
+            method: Default::default(),
             idempotency_key: "lookup-failure".to_string(),
             target_provider_id: Some("missing-provider".to_string()),
             caller_origin: surfaces::CallerOrigin::Provider {
@@ -614,6 +618,7 @@ async fn surface_action_success_emits_success_tenant_audit_row() {
             tenant_id: tenant_id.to_string(),
             surface_id: surfaces::SurfaceId::new("ssh.guest.panel").unwrap(),
             interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
+            method: Default::default(),
             idempotency_key: "surface-success".to_string(),
             target_provider_id: Some("provider-a".to_string()),
             caller_origin: surfaces::CallerOrigin::Provider {
@@ -720,6 +725,7 @@ async fn surface_action_provider_unavailable_emits_failed_tenant_audit_row() {
             tenant_id: tenant_id.to_string(),
             surface_id: surfaces::SurfaceId::new("ssh.guest.panel").unwrap(),
             interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
+            method: Default::default(),
             idempotency_key: "surface-provider-unavailable".to_string(),
             target_provider_id: Some("provider-a".to_string()),
             caller_origin: surfaces::CallerOrigin::Provider {
@@ -1195,6 +1201,7 @@ async fn provider_origin_denied_for_unflagged_permissioned_interaction() {
             tenant_id: tenant_id.to_string(),
             surface_id: surfaces::SurfaceId::new("proxmox.hosts").unwrap(),
             interaction_id: surfaces::InteractionId::new("discover").unwrap(),
+            method: Default::default(),
             idempotency_key: "provider-origin-discover-denied".to_string(),
             target_provider_id: Some("plugin.infrastructure_proxmox".to_string()),
             caller_origin: surfaces::CallerOrigin::Provider {
@@ -1289,6 +1296,7 @@ async fn provider_origin_unmatched_guests_executes_and_audits_service_actor() {
             tenant_id: tenant_id.to_string(),
             surface_id: surfaces::SurfaceId::new("proxmox.hosts").unwrap(),
             interaction_id: surfaces::InteractionId::new("unmatched-guests").unwrap(),
+            method: Default::default(),
             idempotency_key: "provider-origin-unmatched-guests".to_string(),
             target_provider_id: Some("plugin.infrastructure_proxmox".to_string()),
             caller_origin: surfaces::CallerOrigin::Provider {
@@ -1397,6 +1405,7 @@ async fn provider_origin_unmatched_guests_resolves_target_from_surface() {
             tenant_id: tenant_id.to_string(),
             surface_id: surfaces::SurfaceId::new("proxmox.hosts").unwrap(),
             interaction_id: surfaces::InteractionId::new("unmatched-guests").unwrap(),
+            method: Default::default(),
             idempotency_key: "provider-origin-unmatched-guests-implicit".to_string(),
             target_provider_id: None,
             caller_origin: surfaces::CallerOrigin::Provider {
@@ -1500,6 +1509,7 @@ async fn provider_origin_match_completes_handler() {
             tenant_id: tenant_id.to_string(),
             surface_id: surfaces::SurfaceId::new("proxmox.hosts").unwrap(),
             interaction_id: surfaces::InteractionId::new("match").unwrap(),
+            method: Default::default(),
             idempotency_key: "provider-origin-match".to_string(),
             target_provider_id: Some("plugin.infrastructure_proxmox".to_string()),
             caller_origin: surfaces::CallerOrigin::Provider {

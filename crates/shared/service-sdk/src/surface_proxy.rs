@@ -147,6 +147,7 @@ impl ServiceSurfaceProxy {
             tenant_id: tenant_id.to_string(),
             surface_id,
             interaction_id,
+            method: Default::default(),
             idempotency_key: idempotency_key.to_string(),
             target_provider_id,
             caller_origin,

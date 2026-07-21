@@ -805,6 +805,7 @@ impl WireValidate for surfaces::SurfaceActionRequest {
             MAX_SHORT_STRING_LEN,
             "idempotency_key",
         )?;
+        check_string_len(self.method.as_str(), MAX_SHORT_STRING_LEN, "method")?;
         check_opt_string_len(
             &self.target_provider_id,
             MAX_SHORT_STRING_LEN,
@@ -2035,6 +2036,7 @@ mod tests {
             tenant_id: "not-a-uuid".to_string(),
             surface_id: surfaces::SurfaceId::new("ssh.guest.panel").unwrap(),
             interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
+            method: Default::default(),
             idempotency_key: "idem-1".to_string(),
             target_provider_id: None,
             caller_origin: surfaces::CallerOrigin::Provider {
@@ -2055,6 +2057,7 @@ mod tests {
             tenant_id: uuid::Uuid::nil().to_string(),
             surface_id: surfaces::SurfaceId::new("ssh.guest.panel").unwrap(),
             interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
+            method: Default::default(),
             idempotency_key: "idem-1".to_string(),
             target_provider_id: None,
             caller_origin: surfaces::CallerOrigin::Provider {
@@ -2080,6 +2083,7 @@ mod tests {
             tenant_id: uuid::Uuid::nil().to_string(),
             surface_id: surfaces::SurfaceId::new("ssh.guest.panel").unwrap(),
             interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
+            method: Default::default(),
             idempotency_key: "idem-1".to_string(),
             target_provider_id: None,
             caller_origin: surfaces::CallerOrigin::Provider {

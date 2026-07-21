@@ -1762,6 +1762,7 @@ mod tests {
                 .expect("surface id"),
             interaction_id: uptrakit_wire::surfaces::InteractionId::new("bootstrap-connect")
                 .expect("interaction id"),
+            method: Default::default(),
             idempotency_key: uuid::Uuid::now_v7().to_string(),
             target_provider_id: None,
             caller_origin: uptrakit_wire::surfaces::CallerOrigin::BuiltInSystem {

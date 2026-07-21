@@ -321,6 +321,7 @@ impl SurfaceProxy {
                     tenant_id: request.tenant_id.to_string(),
                     surface_id: resolved.descriptor.surface_id.clone(),
                     interaction_id: resolved.interaction.interaction_id.clone(),
+                    method: resolved.interaction.effective_http_method(),
                     idempotency_key: request.idempotency_key.clone(),
                     target_provider_id: Some(resolved.provider_id.clone()),
                     caller_origin,
@@ -377,6 +378,7 @@ impl SurfaceProxy {
                     tenant_id: request.tenant_id.to_string(),
                     surface_id: resolved.descriptor.surface_id.clone(),
                     interaction_id: resolved.interaction.interaction_id.clone(),
+                    method: resolved.interaction.effective_http_method(),
                     idempotency_key: request.idempotency_key.clone(),
                     target_provider_id: Some(resolved.provider_id.clone()),
                     caller_origin,
@@ -945,6 +947,25 @@ fn validate_input_schema(
             ));
         }
     }
+
+    for field in &interaction.params {
+        match params.get(&field.key) {
+            None if field.required => {
+                return Err(SurfaceProxyError::SchemaValidationFailed(format!(
+                    "missing required param `{}`",
+                    field.key
+                )));
+            }
+            Some(value) if !schema_matches(&field.schema, value) => {
+                return Err(SurfaceProxyError::SchemaValidationFailed(format!(
+                    "param `{}` does not match its declared schema",
+                    field.key
+                )));
+            }
+            _ => {}
+        }
+    }
+
     Ok(())
 }
 

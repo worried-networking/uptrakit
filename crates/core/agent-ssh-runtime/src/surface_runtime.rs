@@ -2679,6 +2679,7 @@ mod tests {
                 .expect("surface id should be valid"),
             interaction_id: surfaces::InteractionId::new("non-registered-action".to_string())
                 .expect("interaction id should be valid"),
+            method: Default::default(),
             idempotency_key: uuid::Uuid::now_v7().to_string(),
             target_provider_id: None,
             caller_origin: surfaces::CallerOrigin::BuiltInSystem {
@@ -2781,6 +2782,7 @@ mod tests {
                 .expect("surface id should be valid"),
             interaction_id: surfaces::InteractionId::new("remove-host".to_string())
                 .expect("interaction id should be valid"),
+            method: Default::default(),
             idempotency_key: uuid::Uuid::now_v7().to_string(),
             target_provider_id: None,
             caller_origin: surfaces::CallerOrigin::BuiltInSystem {
@@ -2840,6 +2842,7 @@ mod tests {
                 .expect("surface id should be valid"),
             interaction_id: surfaces::InteractionId::new("remove-host".to_string())
                 .expect("interaction id should be valid"),
+            method: Default::default(),
             idempotency_key: uuid::Uuid::now_v7().to_string(),
             target_provider_id: None,
             caller_origin: surfaces::CallerOrigin::BuiltInSystem {

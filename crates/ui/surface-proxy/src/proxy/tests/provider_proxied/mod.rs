@@ -362,6 +362,53 @@ async fn invoke_allows_provider_proxied_requests_without_sensitive_payload() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn invoke_stamps_effective_post_method_for_mutation() {
+    let registry = registry();
+    let service_connections = ServiceConnectionRegistry::new();
+    let proxy = Arc::new(SurfaceProxy::new());
+    let (_service_id, mut rx) = register_service_for_proxy(&registry, &service_connections).await;
+
+    let invoke_task = tokio::spawn({
+        let request = request_with_idem("idem-method-post");
+        let proxy = Arc::clone(&proxy);
+        async move {
+            proxy
+                .invoke(
+                    &service_connections,
+                    &registry,
+                    request,
+                    Some(Duration::from_secs(5)),
+                )
+                .await
+        }
+    });
+
+    let Some(ControllerMessage::SurfaceActionRequest(forwarded_request)) = rx.recv().await else {
+        panic!("expected forwarded ControllerMessage::SurfaceActionRequest");
+    };
+    assert_eq!(
+        forwarded_request.method,
+        surfaces::InteractionHttpMethod::Post
+    );
+
+    proxy.complete(
+        forwarded_request.request_id,
+        surfaces::SurfaceActionResponse {
+            request_id: forwarded_request.request_id,
+            success: true,
+            result: Some(serde_json::json!({"ok": true})),
+            error: None,
+        },
+    );
+
+    let result = invoke_task
+        .await
+        .expect("invoke task should complete")
+        .expect("provider-proxied mutation should succeed");
+    assert!(result.success);
+}
+
+#[tokio::test(start_paused = true)]
 async fn invoke_times_out_and_emits_cancellation() {
     let registry = registry();
     let service_connections = ServiceConnectionRegistry::new();

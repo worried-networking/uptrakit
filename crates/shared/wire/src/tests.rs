@@ -2932,6 +2932,7 @@ fn test_surface_action_request() -> surfaces::SurfaceActionRequest {
         tenant_id: TEST_UUID_1.to_string(),
         surface_id: surfaces::SurfaceId::new("ssh.guest.panel").unwrap(),
         interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
+        method: Default::default(),
         idempotency_key: "idem-1".to_string(),
         target_provider_id: Some("uptrakit-agent-ssh".to_string()),
         caller_origin: surfaces::CallerOrigin::Provider {

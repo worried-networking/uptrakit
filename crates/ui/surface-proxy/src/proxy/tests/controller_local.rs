@@ -9,7 +9,8 @@ use uptrakit_wire::surfaces;
 
 use super::super::{
     PluginSurfaceActionInvoker, PluginSurfaceLocalExecutor, SurfaceCallerOrigin,
-    SurfaceInvokeRequest, SurfaceProxy, SurfaceProxyError, map_surface_action_error,
+    SurfaceInvokeRequest, SurfaceLocalActionExecutor, SurfaceProxy, SurfaceProxyError,
+    map_surface_action_error,
 };
 use super::{TestPluginInvoker, tenant_id, user_id};
 use crate::registry::{SurfaceRegistry, SurfaceRegistryConfig};
@@ -76,6 +77,82 @@ fn plugin_registration_with_local_sensitive(provider_id: &str) -> surfaces::Surf
         .insert(surfaces::Capability::SensitiveFields);
     registration.surfaces[0].interactions[0].sensitive_fields = vec!["smtp_password".to_string()];
     registration
+}
+
+fn plugin_registration_with_declared_params(provider_id: &str) -> surfaces::SurfaceRegistration {
+    let mut registration = plugin_registration(provider_id);
+    registration.surfaces[0].interactions[0].params = vec![
+        surfaces::ParamFieldDescriptor::new("email", surfaces::SchemaContract::String).required(),
+    ];
+    registration
+}
+
+fn plugin_registration_data_load(provider_id: &str) -> surfaces::SurfaceRegistration {
+    surfaces::SurfaceRegistration {
+        provider: surfaces::ProviderIdentity {
+            provider_id: provider_id.to_string(),
+            provider_kind: surfaces::ProviderKind::Plugin,
+            provider_namespace: "plugin".to_string(),
+        },
+        framework_generation: surfaces::FrameworkGeneration::new(1, 0),
+        capabilities: surfaces::CapabilitySet::from_capabilities([
+            surfaces::Capability::TextBlockNode,
+            surfaces::Capability::UniversalTargeting,
+            surfaces::Capability::DataLoad,
+        ]),
+        effective_tenant_binding: surfaces::EffectiveTenantBinding {
+            scope: surfaces::Scope::Tenant,
+            tenant_id: Some(tenant_id().to_string()),
+        },
+        surfaces: vec![surfaces::RegisteredSurface {
+            descriptor: surfaces::SurfaceDescriptor::builder()
+                .surface_id(
+                    surfaces::SurfaceId::new("notifications.email.global_smtp_load").unwrap(),
+                )
+                .label("SMTP Defaults Load")
+                .priority(100)
+                .slot(surfaces::SLOT_SETTINGS_BELOW_GLOBAL)
+                .scope(surfaces::Scope::Global)
+                .targeting(surfaces::Targeting::Universal)
+                .provider_kind(surfaces::ProviderKind::Plugin)
+                .required_capabilities(surfaces::CapabilitySet::from_capabilities([
+                    surfaces::Capability::TextBlockNode,
+                    surfaces::Capability::DataLoad,
+                    surfaces::Capability::UniversalTargeting,
+                ]))
+                .root_node(surfaces::SurfaceNode::TextBlock {
+                    text: "ok".to_string(),
+                })
+                .build(),
+            interactions: vec![surfaces::InteractionDescriptor::new(
+                surfaces::InteractionId::new("load_global_smtp").unwrap(),
+                surfaces::InteractionKind::DataLoad,
+                "Load",
+                surfaces::InteractionTransport::ControllerLocal,
+            )],
+            data_sources: vec![],
+        }],
+        encryption_metadata: None,
+    }
+}
+
+/// Captures the full `SurfaceActionRequest` handed to a `ControllerLocal`
+/// executor so tests can assert the stamped `method` — `PluginSurfaceActionInvoker`
+/// (used by `TestPluginInvoker` and friends above) never sees it.
+struct CapturingLocalExecutor {
+    captured: StdArc<Mutex<Option<surfaces::SurfaceActionRequest>>>,
+}
+
+#[async_trait]
+impl SurfaceLocalActionExecutor for CapturingLocalExecutor {
+    async fn execute(
+        &self,
+        _resolved: &crate::registry::ResolvedSurfaceAction,
+        request: &surfaces::SurfaceActionRequest,
+    ) -> Result<serde_json::Value, SurfaceProxyError> {
+        *self.captured.lock() = Some(request.clone());
+        Ok(serde_json::json!({"ok": true}))
+    }
 }
 
 struct BlockingPluginInvoker {
@@ -448,4 +525,143 @@ async fn invoke_controller_local_allows_cleartext_sensitive_fields() {
 
     assert!(response.success);
     assert_eq!(response.result, Some(serde_json::json!({"ok": true})));
+}
+
+#[tokio::test(start_paused = true)]
+async fn invoke_stamps_effective_get_method_for_data_load_controller_local() {
+    let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+    registry
+        .bootstrap_plugin(plugin_registration_data_load(
+            "plugin.notifications_email_load",
+        ))
+        .expect("plugin registration should succeed");
+
+    let captured = StdArc::new(Mutex::new(None));
+    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(CapturingLocalExecutor {
+        captured: StdArc::clone(&captured),
+    }));
+    let service_connections = ServiceConnectionRegistry::new();
+
+    let response = proxy
+        .invoke(
+            &service_connections,
+            &registry,
+            SurfaceInvokeRequest {
+                tenant_id: tenant_id(),
+                surface_id: "notifications.email.global_smtp_load".to_string(),
+                interaction_id: "load_global_smtp".to_string(),
+                idempotency_key: "idem-data-load-method".to_string(),
+                target_provider_id: None,
+                caller_origin: SurfaceCallerOrigin::UserSession {
+                    user_id: user_id(),
+                    session_id: "session-1".to_string(),
+                },
+                params: serde_json::Map::new(),
+                encrypted_sensitive_params: None,
+            },
+            Some(Duration::from_secs(5)),
+        )
+        .await
+        .expect("data-load controller-local interaction should succeed");
+
+    assert!(response.success);
+    let captured_request = captured
+        .lock()
+        .clone()
+        .expect("executor should capture the dispatched request");
+    assert_eq!(
+        captured_request.method,
+        surfaces::InteractionHttpMethod::Get
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn invoke_rejects_body_missing_required_declared_param() {
+    let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+    registry
+        .bootstrap_plugin(plugin_registration_with_declared_params(
+            "plugin.notifications_email_params",
+        ))
+        .expect("plugin registration should succeed");
+
+    let invoker = TestPluginInvoker {
+        response: serde_json::json!({"ok": true}),
+        seen: StdArc::new(Mutex::new(Vec::new())),
+    };
+    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
+        PluginSurfaceLocalExecutor::new_without_database(Arc::new(invoker)),
+    ));
+    let service_connections = ServiceConnectionRegistry::new();
+
+    let err = proxy
+        .invoke(
+            &service_connections,
+            &registry,
+            SurfaceInvokeRequest {
+                tenant_id: tenant_id(),
+                surface_id: "notifications.email.global_smtp".to_string(),
+                interaction_id: "save_global_smtp".to_string(),
+                idempotency_key: "idem-missing-required-param".to_string(),
+                target_provider_id: None,
+                caller_origin: SurfaceCallerOrigin::UserSession {
+                    user_id: user_id(),
+                    session_id: "session-1".to_string(),
+                },
+                params: serde_json::Map::new(),
+                encrypted_sensitive_params: None,
+            },
+            Some(Duration::from_secs(5)),
+        )
+        .await
+        .expect_err("missing required declared param must be rejected");
+
+    assert!(matches!(err, SurfaceProxyError::SchemaValidationFailed(_)));
+}
+
+#[tokio::test(start_paused = true)]
+async fn invoke_allows_undeclared_body_key_to_pass_through() {
+    let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+    registry
+        .bootstrap_plugin(plugin_registration_with_declared_params(
+            "plugin.notifications_email_params",
+        ))
+        .expect("plugin registration should succeed");
+
+    let seen = StdArc::new(Mutex::new(Vec::new()));
+    let invoker = TestPluginInvoker {
+        response: serde_json::json!({"ok": true}),
+        seen: StdArc::clone(&seen),
+    };
+    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
+        PluginSurfaceLocalExecutor::new_without_database(Arc::new(invoker)),
+    ));
+    let service_connections = ServiceConnectionRegistry::new();
+
+    let mut params = serde_json::Map::new();
+    params.insert("email".to_string(), serde_json::json!("admin@example.test"));
+    params.insert("undeclared_key".to_string(), serde_json::json!("passes"));
+
+    let response = proxy
+        .invoke(
+            &service_connections,
+            &registry,
+            SurfaceInvokeRequest {
+                tenant_id: tenant_id(),
+                surface_id: "notifications.email.global_smtp".to_string(),
+                interaction_id: "save_global_smtp".to_string(),
+                idempotency_key: "idem-undeclared-key".to_string(),
+                target_provider_id: None,
+                caller_origin: SurfaceCallerOrigin::UserSession {
+                    user_id: user_id(),
+                    session_id: "session-1".to_string(),
+                },
+                params,
+                encrypted_sensitive_params: None,
+            },
+            Some(Duration::from_secs(5)),
+        )
+        .await
+        .expect("undeclared body keys must pass through untyped");
+
+    assert!(response.success);
 }

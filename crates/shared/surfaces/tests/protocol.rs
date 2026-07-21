@@ -301,6 +301,7 @@ fn protocol_action_request_round_trip_preserves_origin_and_encrypted_sensitive_p
         tenant_id: "tenant-a".to_string(),
         surface_id: SurfaceId::new("provider.sample.surface").expect("valid id"),
         interaction_id: InteractionId::new("surface.refresh").expect("valid id"),
+        method: Default::default(),
         idempotency_key: "idem-123".to_string(),
         target_provider_id: Some("provider-1".to_string()),
         caller_origin: CallerOrigin::UserSession {

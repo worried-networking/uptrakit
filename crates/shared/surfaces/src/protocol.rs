@@ -1096,6 +1096,10 @@ pub struct SurfaceActionRequest {
     pub tenant_id: String,
     pub surface_id: SurfaceId,
     pub interaction_id: InteractionId,
+    /// Dispatch method (REST method model). Old controllers never set it;
+    /// old services drop it — default POST both ways.
+    #[serde(default)]
+    pub method: InteractionHttpMethod,
     pub idempotency_key: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_provider_id: Option<String>,
@@ -1165,4 +1169,24 @@ pub enum SurfaceActionErrorCode {
     Timeout,
     DuplicateRequest,
     InternalError,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn surface_action_request_without_method_deserializes_to_post() {
+        // Old-peer wire shape (no `method` key).
+        let json = serde_json::json!({
+            "request_id": "018f0000-0000-7000-8000-000000000000",
+            "tenant_id": "018f0000-0000-7000-8000-000000000001",
+            "surface_id": "test.surface",
+            "interaction_id": "save",
+            "idempotency_key": "k1",
+            "caller_origin": { "kind": "built_in_system", "principal": "test" }
+        });
+        let request: SurfaceActionRequest = serde_json::from_value(json).expect("old-peer shape");
+        assert_eq!(request.method, InteractionHttpMethod::Post);
+    }
 }
