@@ -1,15 +1,16 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 use uptrakit_shared_macros::wire_safe_enum;
 use uuid::Uuid;
 
 use crate::{
     Capability, CapabilitySet, DataSourceDescriptor, DataSourceKind, FrameworkGeneration,
-    FrameworkGenerationRange, InteractionDescriptor, InteractionId, InteractionKind,
-    InteractionTransport, ProviderKind, Scope, SlotValidationError, SurfaceDescriptor, SurfaceId,
-    SurfaceNode, SurfaceSlotDef, Targeting, validate_slot_id, validate_surface_identifier,
+    FrameworkGenerationRange, InteractionDescriptor, InteractionHttpMethod, InteractionId,
+    InteractionKind, InteractionTransport, ProviderKind, RESERVED_PARAM_KEYS, SchemaContract,
+    Scope, SlotValidationError, SurfaceDescriptor, SurfaceId, SurfaceNode, SurfaceSlotDef,
+    Targeting, validate_slot_id, validate_surface_identifier,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -130,18 +131,19 @@ impl<'a> RegisteredSurfacesValidator<'a> {
             &mut self.single_entry_slots,
         )?;
 
-        let interaction_ids = validate_surface_interaction_rules(surface)?;
+        let interaction_methods = validate_surface_interaction_rules(surface)?;
         validate_workflow_step_references(
             &surface.descriptor.surface_id,
             &surface.interactions,
-            &interaction_ids,
+            &interaction_methods,
         )?;
 
-        let data_source_ids = validate_surface_data_source_rules(surface)?;
+        let data_source_ids = validate_surface_data_source_rules(surface, &interaction_methods)?;
         validate_root_node_references(
             &surface.descriptor.surface_id,
             &surface.descriptor.root_node,
-            &interaction_ids,
+            &interaction_methods,
+            &surface.interactions,
             &data_source_ids,
         )
     }
@@ -258,29 +260,136 @@ fn validate_surface_required_capabilities(
 
 fn validate_surface_interaction_rules(
     surface: &RegisteredSurface,
-) -> Result<HashSet<&str>, SurfaceRegistrationError> {
-    let mut interaction_ids: HashSet<&str> = HashSet::new();
+) -> Result<HashMap<&str, Vec<InteractionHttpMethod>>, SurfaceRegistrationError> {
+    let mut interaction_methods: HashMap<&str, Vec<InteractionHttpMethod>> = HashMap::new();
     for interaction in &surface.interactions {
-        validate_unique_interaction_id(surface, interaction, &mut interaction_ids)?;
+        validate_unique_interaction_id(surface, interaction, &mut interaction_methods)?;
+        validate_interaction_method(surface, interaction)?;
+        validate_interaction_params(surface, interaction)?;
         validate_interaction_provider_rules(surface, interaction)?;
     }
 
-    Ok(interaction_ids)
+    Ok(interaction_methods)
 }
 
+/// Re-keyed on `(interaction_id, effective_http_method)` (REST method model,
+/// spec B1): a single `interaction_id` may legitimately register under
+/// multiple HTTP methods within one surface. This map doubles as the
+/// reference-resolution index consumed by `resolve_interaction_reference`
+/// and `require_pair_reference`.
 fn validate_unique_interaction_id<'a>(
     surface: &'a RegisteredSurface,
     interaction: &'a InteractionDescriptor,
-    interaction_ids: &mut HashSet<&'a str>,
+    interaction_methods: &mut HashMap<&'a str, Vec<InteractionHttpMethod>>,
 ) -> Result<(), SurfaceRegistrationError> {
-    if interaction_ids.insert(interaction.interaction_id.as_str()) {
-        return Ok(());
+    let method = interaction.effective_http_method();
+    let methods = interaction_methods
+        .entry(interaction.interaction_id.as_str())
+        .or_default();
+    if methods.contains(&method) {
+        return Err(invalid_contract(format!(
+            "duplicate interaction `{}` [{}] within surface `{}`",
+            interaction.interaction_id, method, surface.descriptor.surface_id
+        )));
     }
+    methods.push(method);
+    Ok(())
+}
 
-    Err(invalid_contract(format!(
-        "duplicate interaction_id `{}` within surface `{}`",
-        interaction.interaction_id, surface.descriptor.surface_id
-    )))
+/// Kind/method matrix (spec B1): `Other(_)` declared methods are always
+/// rejected; `DataLoad` must not declare PUT/DELETE; `Workflow` must declare
+/// POST; every other kind must not declare GET.
+fn validate_interaction_method(
+    surface: &RegisteredSurface,
+    interaction: &InteractionDescriptor,
+) -> Result<(), SurfaceRegistrationError> {
+    let id = &interaction.interaction_id;
+    let surface_id = &surface.descriptor.surface_id;
+    if matches!(interaction.http_method, InteractionHttpMethod::Other(_)) {
+        return Err(invalid_contract(format!(
+            "interaction `{id}` in surface `{surface_id}` declares an unknown http_method"
+        )));
+    }
+    match interaction.kind {
+        // POST is indistinguishable from an omitted field (serde default) and
+        // normalizes to GET; only PUT/DELETE are observably-wrong declarations.
+        InteractionKind::DataLoad => {
+            if matches!(
+                interaction.http_method,
+                InteractionHttpMethod::Put | InteractionHttpMethod::Delete
+            ) {
+                return Err(invalid_contract(format!(
+                    "data-load interaction `{id}` in surface `{surface_id}` must use GET"
+                )));
+            }
+        }
+        InteractionKind::Workflow => {
+            if interaction.http_method != InteractionHttpMethod::Post {
+                return Err(invalid_contract(format!(
+                    "workflow interaction `{id}` in surface `{surface_id}` must use POST"
+                )));
+            }
+        }
+        // Navigate is deliberately in this catch-all: spec B1 assigns it no
+        // method (it is never HTTP-dispatched), so it keeps the declared-method
+        // rule like FormSubmit/MutationAction/ConfirmableAction.
+        _ => {
+            if interaction.http_method == InteractionHttpMethod::Get {
+                return Err(invalid_contract(format!(
+                    "interaction `{id}` in surface `{surface_id}` is not a data-load and cannot use GET"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Params rules (spec §4 rule 1): reserved key collisions, duplicate keys,
+/// non-scalar `DataLoad` param schemas (GET query strings carry scalars
+/// only), and non-empty `sensitive_fields` on `DataLoad` (GET params travel
+/// in query strings, never a request body).
+fn validate_interaction_params(
+    surface: &RegisteredSurface,
+    interaction: &InteractionDescriptor,
+) -> Result<(), SurfaceRegistrationError> {
+    let id = &interaction.interaction_id;
+    let surface_id = &surface.descriptor.surface_id;
+    let mut seen = HashSet::new();
+    for field in &interaction.params {
+        if RESERVED_PARAM_KEYS.contains(&field.key.as_str()) {
+            return Err(invalid_contract(format!(
+                "interaction `{id}` in surface `{surface_id}` declares reserved param key `{}`",
+                field.key
+            )));
+        }
+        if !seen.insert(field.key.as_str()) {
+            return Err(invalid_contract(format!(
+                "interaction `{id}` in surface `{surface_id}` declares duplicate param key `{}`",
+                field.key
+            )));
+        }
+        if interaction.kind == InteractionKind::DataLoad
+            && !matches!(
+                field.schema,
+                SchemaContract::String
+                    | SchemaContract::Integer
+                    | SchemaContract::Number
+                    | SchemaContract::Boolean
+            )
+        {
+            return Err(invalid_contract(format!(
+                "data-load interaction `{id}` in surface `{surface_id}` param `{}` must be a scalar schema",
+                field.key
+            )));
+        }
+    }
+    if interaction.kind == InteractionKind::DataLoad && !interaction.sensitive_fields.is_empty() {
+        return Err(invalid_contract(format!(
+            "data-load interaction `{id}` in surface `{surface_id}` must not declare sensitive_fields \
+             (GET params travel in query strings)"
+        )));
+    }
+    Ok(())
 }
 
 fn validate_interaction_provider_rules(
@@ -292,16 +401,41 @@ fn validate_interaction_provider_rules(
         .map_err(|err| invalid_contract(err.to_string()))
 }
 
-fn validate_surface_data_source_rules(
-    surface: &RegisteredSurface,
-) -> Result<HashSet<&str>, SurfaceRegistrationError> {
+fn validate_surface_data_source_rules<'a>(
+    surface: &'a RegisteredSurface,
+    interaction_methods: &HashMap<&str, Vec<InteractionHttpMethod>>,
+) -> Result<HashSet<&'a str>, SurfaceRegistrationError> {
     let mut data_source_ids: HashSet<&str> = HashSet::new();
     for data_source in &surface.data_sources {
         validate_unique_data_source_id(surface, data_source, &mut data_source_ids)?;
         validate_data_source_provider_rules(surface, data_source)?;
+        validate_data_source_reference_rules(surface, data_source, interaction_methods)?;
     }
 
     Ok(data_source_ids)
+}
+
+/// `DataSourceKind::ProviderQuery.operation_id` must resolve to a same-surface
+/// interaction registered under GET (NEW rule — previously unvalidated).
+fn validate_data_source_reference_rules(
+    surface: &RegisteredSurface,
+    data_source: &DataSourceDescriptor,
+    interaction_methods: &HashMap<&str, Vec<InteractionHttpMethod>>,
+) -> Result<(), SurfaceRegistrationError> {
+    if let DataSourceKind::ProviderQuery { operation_id } = &data_source.kind {
+        require_pair_reference(
+            interaction_methods,
+            operation_id,
+            InteractionHttpMethod::Get,
+            || {
+                format!(
+                    "surface `{}` data source `{}` references unknown provider_query operation_id `{}`",
+                    surface.descriptor.surface_id, data_source.data_source_id, operation_id
+                )
+            },
+        )?;
+    }
+    Ok(())
 }
 
 fn validate_unique_data_source_id<'a>(
@@ -493,33 +627,44 @@ fn require_capability(
 fn validate_root_node_references(
     surface_id: &SurfaceId,
     node: &SurfaceNode,
-    interaction_ids: &HashSet<&str>,
+    interaction_methods: &HashMap<&str, Vec<InteractionHttpMethod>>,
+    interactions: &[InteractionDescriptor],
     data_source_ids: &HashSet<&str>,
 ) -> Result<(), SurfaceRegistrationError> {
-    RootNodeReferenceValidator::new(surface_id, interaction_ids, data_source_ids).validate(node)
+    RootNodeReferenceValidator::new(
+        surface_id,
+        interaction_methods,
+        interactions,
+        data_source_ids,
+    )
+    .validate(node)
 }
 
 struct RootNodeReferenceValidator<'a> {
     surface_id: &'a SurfaceId,
-    interaction_ids: &'a HashSet<&'a str>,
+    interaction_methods: &'a HashMap<&'a str, Vec<InteractionHttpMethod>>,
+    interactions: &'a [InteractionDescriptor],
     data_source_ids: &'a HashSet<&'a str>,
 }
 
 impl<'a> RootNodeReferenceValidator<'a> {
     fn new(
         surface_id: &'a SurfaceId,
-        interaction_ids: &'a HashSet<&'a str>,
+        interaction_methods: &'a HashMap<&'a str, Vec<InteractionHttpMethod>>,
+        interactions: &'a [InteractionDescriptor],
         data_source_ids: &'a HashSet<&'a str>,
     ) -> Self {
         Self {
             surface_id,
-            interaction_ids,
+            interaction_methods,
+            interactions,
             data_source_ids,
         }
     }
 
     fn validate(&self, node: &SurfaceNode) -> Result<(), SurfaceRegistrationError> {
         match node {
+            // header_action_ids are kind-gated in registry.rs, not resolved here (out of scope).
             SurfaceNode::Section { children, .. } => self.validate_children(children),
             SurfaceNode::TextBlock { .. } => Ok(()),
             SurfaceNode::KeyValue { data_source_id } => {
@@ -533,25 +678,35 @@ impl<'a> RootNodeReferenceValidator<'a> {
                 self.require_data_source_reference(data_source_id.as_str())?;
                 self.validate_table_row_actions(row_actions)
             }
-            SurfaceNode::Form { interaction_id, .. } => {
-                self.require_root_interaction_reference(interaction_id.as_str())
+            SurfaceNode::Form {
+                interaction_id,
+                http_method,
+            } => {
+                self.require_root_interaction_reference(
+                    interaction_id.as_str(),
+                    http_method.as_ref(),
+                )?;
+                self.require_form_pre_load_reference(interaction_id.as_str(), http_method.as_ref())
             }
             SurfaceNode::ActionBar { action_ids } => self.validate_action_bar(action_ids),
             SurfaceNode::Tabs { tabs } => self.validate_tabs(tabs),
             SurfaceNode::Callout { .. } | SurfaceNode::EmptyState { .. } => Ok(()),
             SurfaceNode::ModalTrigger {
                 interaction_id,
+                http_method,
                 modal_nodes,
-                ..
             } => {
-                self.require_root_interaction_reference(interaction_id.as_str())?;
+                self.require_root_interaction_reference(
+                    interaction_id.as_str(),
+                    http_method.as_ref(),
+                )?;
                 self.validate_children(modal_nodes)
             }
             SurfaceNode::WorkflowTrigger {
                 interaction_id,
                 step_nodes,
             } => {
-                self.require_root_interaction_reference(interaction_id.as_str())?;
+                self.require_root_workflow_trigger_reference(interaction_id.as_str())?;
                 self.validate_children(step_nodes)
             }
         }
@@ -569,12 +724,17 @@ impl<'a> RootNodeReferenceValidator<'a> {
         row_actions: &[crate::SurfaceTableRowAction],
     ) -> Result<(), SurfaceRegistrationError> {
         for row_action in row_actions {
-            self.require_interaction_reference(row_action.interaction_id.as_str(), || {
-                format!(
-                    "surface `{}` table references unknown row-action interaction_id `{}`",
-                    self.surface_id, row_action.interaction_id
-                )
-            })?;
+            resolve_interaction_reference(
+                self.interaction_methods,
+                row_action.interaction_id.as_str(),
+                row_action.http_method.as_ref(),
+                || {
+                    format!(
+                        "surface `{}` table references unknown row-action interaction_id `{}`",
+                        self.surface_id, row_action.interaction_id
+                    )
+                },
+            )?;
         }
         Ok(())
     }
@@ -584,7 +744,18 @@ impl<'a> RootNodeReferenceValidator<'a> {
         action_ids: &[crate::ActionRef],
     ) -> Result<(), SurfaceRegistrationError> {
         for action_ref in action_ids {
-            self.require_root_interaction_reference(action_ref.interaction_id().as_str())?;
+            resolve_interaction_reference(
+                self.interaction_methods,
+                action_ref.interaction_id().as_str(),
+                action_ref.http_method(),
+                || {
+                    format!(
+                        "surface `{}` root_node references unknown interaction_id `{}`",
+                        self.surface_id,
+                        action_ref.interaction_id()
+                    )
+                },
+            )?;
         }
         Ok(())
     }
@@ -616,13 +787,75 @@ impl<'a> RootNodeReferenceValidator<'a> {
     fn require_root_interaction_reference(
         &self,
         interaction_id: &str,
+        declared_method: Option<&InteractionHttpMethod>,
     ) -> Result<(), SurfaceRegistrationError> {
-        self.require_interaction_reference(interaction_id, || {
-            format!(
-                "surface `{}` root_node references unknown interaction_id `{}`",
-                self.surface_id, interaction_id
-            )
-        })
+        resolve_interaction_reference(
+            self.interaction_methods,
+            interaction_id,
+            declared_method,
+            || {
+                format!(
+                    "surface `{}` root_node references unknown interaction_id `{}`",
+                    self.surface_id, interaction_id
+                )
+            },
+        )
+    }
+
+    fn require_root_workflow_trigger_reference(
+        &self,
+        interaction_id: &str,
+    ) -> Result<(), SurfaceRegistrationError> {
+        require_pair_reference(
+            self.interaction_methods,
+            interaction_id,
+            InteractionHttpMethod::Post,
+            || {
+                format!(
+                    "surface `{}` root_node references unknown interaction_id `{}`",
+                    self.surface_id, interaction_id
+                )
+            },
+        )
+    }
+
+    /// Root-level `Form` `form_ui.pre_load_interaction_id` (NEW — previously
+    /// unvalidated; workflow-step forms already had this check). Looks up the
+    /// target interaction by `(id, declared_method)` to find its `form_ui`
+    /// since `SurfaceNode::Form` itself carries no `form_ui` field.
+    fn require_form_pre_load_reference(
+        &self,
+        interaction_id: &str,
+        declared_method: Option<&InteractionHttpMethod>,
+    ) -> Result<(), SurfaceRegistrationError> {
+        let Some(target) = self.interactions.iter().find(|interaction| {
+            interaction.interaction_id.as_str() == interaction_id
+                && declared_method
+                    .map(|method| interaction.effective_http_method() == *method)
+                    .unwrap_or(true)
+        }) else {
+            // Unknown/ambiguous id already reported by require_root_interaction_reference.
+            return Ok(());
+        };
+        let Some(pre_load_interaction_id) = target
+            .form_ui
+            .as_ref()
+            .and_then(|form_ui| form_ui.pre_load_interaction_id.as_ref())
+        else {
+            return Ok(());
+        };
+
+        require_pair_reference(
+            self.interaction_methods,
+            pre_load_interaction_id.as_str(),
+            InteractionHttpMethod::Get,
+            || {
+                format!(
+                    "surface `{}` root_node form `{}` references unknown pre_load_interaction_id `{}`",
+                    self.surface_id, interaction_id, pre_load_interaction_id
+                )
+            },
+        )
     }
 
     fn require_data_source_reference(
@@ -636,34 +869,29 @@ impl<'a> RootNodeReferenceValidator<'a> {
             )
         })
     }
-
-    fn require_interaction_reference(
-        &self,
-        interaction_id: &str,
-        error_message: impl FnOnce() -> String,
-    ) -> Result<(), SurfaceRegistrationError> {
-        ensure_known_reference(self.interaction_ids, interaction_id, error_message)
-    }
 }
 
 fn validate_workflow_step_references(
     surface_id: &SurfaceId,
     interactions: &[InteractionDescriptor],
-    interaction_ids: &HashSet<&str>,
+    interaction_methods: &HashMap<&str, Vec<InteractionHttpMethod>>,
 ) -> Result<(), SurfaceRegistrationError> {
-    WorkflowStepReferenceValidator::new(surface_id, interaction_ids).validate(interactions)
+    WorkflowStepReferenceValidator::new(surface_id, interaction_methods).validate(interactions)
 }
 
 struct WorkflowStepReferenceValidator<'a> {
     surface_id: &'a SurfaceId,
-    interaction_ids: &'a HashSet<&'a str>,
+    interaction_methods: &'a HashMap<&'a str, Vec<InteractionHttpMethod>>,
 }
 
 impl<'a> WorkflowStepReferenceValidator<'a> {
-    fn new(surface_id: &'a SurfaceId, interaction_ids: &'a HashSet<&'a str>) -> Self {
+    fn new(
+        surface_id: &'a SurfaceId,
+        interaction_methods: &'a HashMap<&'a str, Vec<InteractionHttpMethod>>,
+    ) -> Self {
         Self {
             surface_id,
-            interaction_ids,
+            interaction_methods,
         }
     }
 
@@ -687,9 +915,10 @@ impl<'a> WorkflowStepReferenceValidator<'a> {
     ) -> Result<(), SurfaceRegistrationError> {
         for step in &interaction.workflow_steps {
             if let Some(submit_interaction_id) = &step.submit_interaction_id {
-                ensure_known_reference(
-                    self.interaction_ids,
+                require_pair_reference(
+                    self.interaction_methods,
                     submit_interaction_id.as_str(),
+                    InteractionHttpMethod::Post,
                     || {
                         format!(
                             "surface `{}` workflow interaction `{}` references unknown submit_interaction_id `{}` in step `{}`",
@@ -705,9 +934,10 @@ impl<'a> WorkflowStepReferenceValidator<'a> {
             if let Some(form_ui) = &step.form_ui
                 && let Some(pre_load_interaction_id) = &form_ui.pre_load_interaction_id
             {
-                ensure_known_reference(
-                    self.interaction_ids,
+                require_pair_reference(
+                    self.interaction_methods,
                     pre_load_interaction_id.as_str(),
+                    InteractionHttpMethod::Get,
                     || {
                         format!(
                             "surface `{}` workflow interaction `{}` references unknown pre_load_interaction_id `{}` in step `{}`",
@@ -735,6 +965,55 @@ fn ensure_known_reference(
     }
 
     Err(invalid_contract(error_message()))
+}
+
+/// Resolves a bare/explicit interaction reference against the `(id, method)`
+/// index (REST method model, spec §2a). A `declared_method` (explicit
+/// `(id, method)` reference) must be registered exactly; a bare reference
+/// (`declared_method: None`) resolves only when the id registers under
+/// exactly one method — no POST fallback, fail-closed on ambiguity.
+fn resolve_interaction_reference(
+    interaction_methods: &HashMap<&str, Vec<InteractionHttpMethod>>,
+    reference_id: &str,
+    declared_method: Option<&InteractionHttpMethod>,
+    error_context: impl FnOnce() -> String,
+) -> Result<(), SurfaceRegistrationError> {
+    let Some(methods) = interaction_methods.get(reference_id) else {
+        return Err(invalid_contract(error_context()));
+    };
+    match declared_method {
+        Some(method) if !methods.contains(method) => Err(invalid_contract(format!(
+            "{} — `{reference_id}` is not registered under method `{method}`",
+            error_context()
+        ))),
+        // No Post fallback: a bare reference to a multi-method ID must fail
+        // closed (a default would silently resolve a delete-intent reference
+        // to a registered create sibling).
+        None if methods.len() > 1 => Err(invalid_contract(format!(
+            "{} — `{reference_id}` is registered under multiple methods; declare http_method — ambiguous",
+            error_context()
+        ))),
+        _ => Ok(()),
+    }
+}
+
+/// Resolves a reference that must land under one exact required method
+/// (workflow triggers/submits are POST-fixed; pre-load/`ProviderQuery`
+/// sources are GET-fixed) — used where the node/field carries no explicit
+/// `http_method` of its own to disambiguate with.
+fn require_pair_reference(
+    interaction_methods: &HashMap<&str, Vec<InteractionHttpMethod>>,
+    reference_id: &str,
+    required: InteractionHttpMethod,
+    error_context: impl FnOnce() -> String,
+) -> Result<(), SurfaceRegistrationError> {
+    match interaction_methods.get(reference_id) {
+        Some(methods) if methods.contains(&required) => Ok(()),
+        _ => Err(invalid_contract(format!(
+            "{} — `{reference_id}` must be registered under method `{required}`",
+            error_context()
+        ))),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

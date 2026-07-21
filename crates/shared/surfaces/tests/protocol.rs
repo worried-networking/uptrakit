@@ -7,16 +7,17 @@ use serde_json::{Map, Value, json};
 use uuid::Uuid;
 
 use uptrakit_surfaces::{
-    CallerOrigin, Capability, CapabilitySet, ControllerQueryId, DataSourceDescriptor,
+    ActionRef, CallerOrigin, Capability, CapabilitySet, ControllerQueryId, DataSourceDescriptor,
     DataSourceEmptyState, DataSourceFiltering, DataSourceId, DataSourceKind, DataSourcePagination,
     DataSourceSorting, EffectiveTenantBinding, EncryptedSensitiveParams, FormFieldDescriptor,
     FormUiDescriptor, FrameworkGeneration, FrameworkGenerationRange, InteractionConfirmation,
-    InteractionDescriptor, InteractionId, InteractionKind, InteractionTransport,
-    MIN_PROVIDER_REFRESH_INTERVAL_SECONDS, ProviderEncryptionAlgorithm, ProviderIdentity,
-    ProviderKind, RefreshPolicy, RegisteredSurface, SLOT_SETTINGS_TABS, SLOT_SURFACE_PAGE,
-    SchemaContract, Scope, SurfaceActionRequest, SurfaceDescriptor, SurfaceId, SurfaceNode,
-    SurfaceRegistration, SurfaceRegistrationErrorCode, SurfaceRegistrationPolicy, SurfaceTab,
-    SurfaceTabId, Targeting, WorkflowStepDescriptor,
+    InteractionDescriptor, InteractionHttpMethod, InteractionId, InteractionKind,
+    InteractionTransport, MIN_PROVIDER_REFRESH_INTERVAL_SECONDS, ParamFieldDescriptor,
+    ProviderEncryptionAlgorithm, ProviderIdentity, ProviderKind, RESERVED_PARAM_KEYS,
+    RefreshPolicy, RegisteredSurface, SLOT_SETTINGS_TABS, SLOT_SURFACE_PAGE, SchemaContract, Scope,
+    SurfaceActionRequest, SurfaceDescriptor, SurfaceId, SurfaceNode, SurfaceRegistration,
+    SurfaceRegistrationErrorCode, SurfaceRegistrationPolicy, SurfaceTab, SurfaceTabId, Targeting,
+    WorkflowStepDescriptor,
 };
 
 fn registration_policy(required_capabilities: CapabilitySet) -> SurfaceRegistrationPolicy {
@@ -57,7 +58,7 @@ fn minimal_surface(provider_kind: ProviderKind) -> RegisteredSurface {
         data_sources: vec![DataSourceDescriptor {
             data_source_id: DataSourceId::new("surface.data").expect("valid data source id"),
             kind: DataSourceKind::ProviderQuery {
-                operation_id: "list".to_string(),
+                operation_id: "surface.refresh".to_string(),
             },
             result_schema: SchemaContract::Object,
             pagination: Some(DataSourcePagination {
@@ -134,19 +135,20 @@ fn protocol_registration_rejects_missing_capability() {
 
 #[test]
 fn protocol_registration_rejects_duplicate_surface_local_ids() {
+    // REST method model (spec B1): `interaction_id` is unique per
+    // `(id, effective_http_method)` pair, not per bare id — so the duplicate
+    // must collide on the *same* effective method (GET, matching the
+    // existing DataLoad "surface.refresh") to still be rejected. The
+    // different-method case is covered by `same_id_different_methods_accepted`.
     let mut registration = minimal_registration(ProviderKind::Plugin);
-    registration
-        .capabilities
-        .0
-        .insert(Capability::MutationAction);
     let duplicate_interaction = {
         let mut i = InteractionDescriptor::new(
             InteractionId::new("surface.refresh").expect("valid id"),
-            InteractionKind::MutationAction,
+            InteractionKind::DataLoad,
             "Refresh",
             InteractionTransport::ProviderProxied,
         );
-        i.input_schema = Some(SchemaContract::Object);
+        i.input_schema = Some(SchemaContract::Any);
         i.result_schema = Some(SchemaContract::Any);
         i.timeout_seconds = Some(30);
         i
@@ -157,7 +159,7 @@ fn protocol_registration_rejects_duplicate_surface_local_ids() {
 
     let err = registration
         .validate_against(&registration_policy(CapabilitySet::default()))
-        .expect_err("duplicate interaction id must be rejected");
+        .expect_err("duplicate (id, method) pair must be rejected");
     assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
 }
 
@@ -704,4 +706,366 @@ fn provider_encryption_algorithm_known_variants_round_trip() {
         let back: ProviderEncryptionAlgorithm = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(*v, back);
     }
+}
+
+// REST method model — (id, method) uniqueness, kind/method matrix, params
+// rules, method-aware reference resolution (spec B1, B5, §2a, §4 rule 1).
+
+#[test]
+fn duplicate_id_method_pair_rejected() {
+    let mut registration = minimal_registration(ProviderKind::Plugin);
+    let duplicate = {
+        let mut i = InteractionDescriptor::new(
+            InteractionId::new("surface.refresh").expect("valid id"),
+            InteractionKind::DataLoad,
+            "Refresh",
+            InteractionTransport::ProviderProxied,
+        );
+        i.input_schema = Some(SchemaContract::Any);
+        i.result_schema = Some(SchemaContract::Any);
+        i.timeout_seconds = Some(30);
+        i
+    };
+    registration.surfaces[0].interactions.push(duplicate);
+
+    let err = registration
+        .validate_against(&registration_policy(CapabilitySet::default()))
+        .expect_err("duplicate (id, method) pair should be rejected");
+    assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
+}
+
+#[test]
+fn same_id_different_methods_accepted() {
+    let mut registration = minimal_registration(ProviderKind::Plugin);
+    registration
+        .capabilities
+        .0
+        .insert(Capability::MutationAction);
+    let mutation = {
+        let mut i = InteractionDescriptor::new(
+            InteractionId::new("surface.refresh").expect("valid id"),
+            InteractionKind::MutationAction,
+            "Refresh (mutate)",
+            InteractionTransport::ProviderProxied,
+        );
+        i.input_schema = Some(SchemaContract::Object);
+        i.result_schema = Some(SchemaContract::Any);
+        i.timeout_seconds = Some(30);
+        i
+    };
+    registration.surfaces[0].interactions.push(mutation);
+
+    registration
+        .validate_against(&registration_policy(CapabilitySet::default()))
+        .expect("same id registered under different methods should be accepted");
+}
+
+#[test]
+fn dataload_put_rejected() {
+    let mut registration = minimal_registration(ProviderKind::Plugin);
+    registration.surfaces[0].interactions[0].http_method = InteractionHttpMethod::Put;
+
+    let err = registration
+        .validate_against(&registration_policy(CapabilitySet::default()))
+        .expect_err("data-load interaction declaring PUT should be rejected");
+    assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
+}
+
+#[test]
+fn dataload_delete_rejected() {
+    let mut registration = minimal_registration(ProviderKind::Plugin);
+    registration.surfaces[0].interactions[0].http_method = InteractionHttpMethod::Delete;
+
+    let err = registration
+        .validate_against(&registration_policy(CapabilitySet::default()))
+        .expect_err("data-load interaction declaring DELETE should be rejected");
+    assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
+}
+
+#[test]
+fn other_method_rejected() {
+    let mut registration = minimal_registration(ProviderKind::Plugin);
+    registration.surfaces[0].interactions[0].http_method =
+        InteractionHttpMethod::Other("patch".to_string());
+
+    let err = registration
+        .validate_against(&registration_policy(CapabilitySet::default()))
+        .expect_err("an unknown declared http_method should be rejected");
+    assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
+}
+
+#[test]
+fn workflow_non_post_rejected() {
+    let mut registration = minimal_registration(ProviderKind::Plugin);
+    registration.capabilities.0.insert(Capability::Workflow);
+    let interaction = &mut registration.surfaces[0].interactions[0];
+    interaction.kind = InteractionKind::Workflow;
+    interaction.http_method = InteractionHttpMethod::Get;
+    interaction.workflow_steps = vec![WorkflowStepDescriptor {
+        step_id: "connect".to_string(),
+        label: "Connect".to_string(),
+        form_ui: None,
+        submit_interaction_id: None,
+        render_previous_response: false,
+        input_schema: SchemaContract::Object,
+        result_schema: SchemaContract::Any,
+    }];
+
+    let err = registration
+        .validate_against(&registration_policy(CapabilitySet::default()))
+        .expect_err("workflow interaction not declaring POST should be rejected");
+    assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
+}
+
+#[test]
+fn non_dataload_get_rejected() {
+    let mut registration = minimal_registration(ProviderKind::Plugin);
+    registration
+        .capabilities
+        .0
+        .insert(Capability::MutationAction);
+    let interaction = &mut registration.surfaces[0].interactions[0];
+    interaction.kind = InteractionKind::MutationAction;
+    interaction.http_method = InteractionHttpMethod::Get;
+
+    let err = registration
+        .validate_against(&registration_policy(CapabilitySet::default()))
+        .expect_err("a non data-load interaction declaring GET should be rejected");
+    assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
+}
+
+#[test]
+fn reserved_param_key_rejected() {
+    let mut registration = minimal_registration(ProviderKind::Plugin);
+    let reserved_key = RESERVED_PARAM_KEYS[0];
+    registration.surfaces[0].interactions[0].params = vec![ParamFieldDescriptor::new(
+        reserved_key,
+        SchemaContract::String,
+    )];
+
+    let err = registration
+        .validate_against(&registration_policy(CapabilitySet::default()))
+        .expect_err("a param key colliding with a reserved key should be rejected");
+    assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
+}
+
+#[test]
+fn dataload_array_param_rejected() {
+    let mut registration = minimal_registration(ProviderKind::Plugin);
+    registration.surfaces[0].interactions[0].params =
+        vec![ParamFieldDescriptor::new("tags", SchemaContract::Array)];
+
+    let err = registration
+        .validate_against(&registration_policy(CapabilitySet::default()))
+        .expect_err(
+            "a data-load interaction declaring a non-scalar param schema should be rejected",
+        );
+    assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
+}
+
+#[test]
+fn dataload_sensitive_fields_rejected() {
+    let mut registration = minimal_registration(ProviderKind::Plugin);
+    registration
+        .capabilities
+        .0
+        .insert(Capability::SensitiveFields);
+    registration.surfaces[0].interactions[0]
+        .sensitive_fields
+        .push("token".to_string());
+
+    let err = registration
+        .validate_against(&registration_policy(CapabilitySet::default()))
+        .expect_err("a data-load interaction declaring sensitive_fields should be rejected");
+    assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
+}
+
+#[test]
+fn bare_reference_to_multi_method_id_rejected() {
+    let mut registration = minimal_registration(ProviderKind::Plugin);
+    registration
+        .capabilities
+        .0
+        .insert(Capability::ActionBarNode);
+    registration
+        .capabilities
+        .0
+        .insert(Capability::MutationAction);
+    let mutation = {
+        let mut i = InteractionDescriptor::new(
+            InteractionId::new("surface.refresh").expect("valid id"),
+            InteractionKind::MutationAction,
+            "Refresh (mutate)",
+            InteractionTransport::ProviderProxied,
+        );
+        i.input_schema = Some(SchemaContract::Object);
+        i.result_schema = Some(SchemaContract::Any);
+        i.timeout_seconds = Some(30);
+        i
+    };
+    registration.surfaces[0].interactions.push(mutation);
+    registration.surfaces[0].descriptor.root_node = SurfaceNode::ActionBar {
+        action_ids: vec![ActionRef::from(
+            InteractionId::new("surface.refresh").expect("valid id"),
+        )],
+    };
+
+    let err = registration
+        .validate_against(&registration_policy(CapabilitySet::default()))
+        .expect_err("a bare reference to an id registered under multiple methods must fail closed");
+    assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
+}
+
+#[test]
+fn explicit_reference_to_unregistered_pair_rejected() {
+    let mut registration = minimal_registration(ProviderKind::Plugin);
+    registration
+        .capabilities
+        .0
+        .insert(Capability::ActionBarNode);
+    registration.surfaces[0].descriptor.root_node = SurfaceNode::ActionBar {
+        action_ids: vec![ActionRef::WithMethod {
+            interaction_id: InteractionId::new("surface.refresh").expect("valid id"),
+            http_method: Some(InteractionHttpMethod::Delete),
+        }],
+    };
+
+    let err = registration
+        .validate_against(&registration_policy(CapabilitySet::default()))
+        .expect_err(
+            "an explicit (id, method) reference to a pair that was never registered must be rejected",
+        );
+    assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
+}
+
+#[test]
+fn pre_load_reference_must_be_get() {
+    let mut registration = minimal_registration(ProviderKind::Plugin);
+    registration.capabilities.0.insert(Capability::FormNode);
+    registration.capabilities.0.insert(Capability::FormSubmit);
+    registration
+        .capabilities
+        .0
+        .insert(Capability::MutationAction);
+
+    let preload = {
+        let mut i = InteractionDescriptor::new(
+            InteractionId::new("preload").expect("valid id"),
+            InteractionKind::MutationAction,
+            "Preload",
+            InteractionTransport::ProviderProxied,
+        );
+        i.input_schema = Some(SchemaContract::Object);
+        i.result_schema = Some(SchemaContract::Any);
+        i.timeout_seconds = Some(30);
+        i
+    };
+    let create = {
+        let mut i = InteractionDescriptor::new(
+            InteractionId::new("create").expect("valid id"),
+            InteractionKind::FormSubmit,
+            "Create",
+            InteractionTransport::ProviderProxied,
+        );
+        i.input_schema = Some(SchemaContract::Object);
+        i.result_schema = Some(SchemaContract::Any);
+        i.timeout_seconds = Some(30);
+        i.form_ui = Some(FormUiDescriptor {
+            fields: vec![],
+            pre_load_interaction_id: Some(InteractionId::new("preload").expect("valid id")),
+        });
+        i
+    };
+    registration.surfaces[0].interactions.push(preload);
+    registration.surfaces[0].interactions.push(create);
+    registration.surfaces[0].descriptor.root_node = SurfaceNode::Form {
+        interaction_id: InteractionId::new("create").expect("valid id"),
+        http_method: None,
+    };
+
+    let err = registration
+        .validate_against(&registration_policy(CapabilitySet::default()))
+        .expect_err(
+            "a root-level form's pre_load_interaction_id must resolve to a GET-registered interaction",
+        );
+    assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
+}
+
+#[test]
+fn provider_query_operation_id_must_resolve_get() {
+    let mut registration = minimal_registration(ProviderKind::Plugin);
+    registration
+        .capabilities
+        .0
+        .insert(Capability::MutationAction);
+    let mutation = {
+        let mut i = InteractionDescriptor::new(
+            InteractionId::new("mutate-op").expect("valid id"),
+            InteractionKind::MutationAction,
+            "Mutate",
+            InteractionTransport::ProviderProxied,
+        );
+        i.input_schema = Some(SchemaContract::Object);
+        i.result_schema = Some(SchemaContract::Any);
+        i.timeout_seconds = Some(30);
+        i
+    };
+    registration.surfaces[0].interactions.push(mutation);
+    registration.surfaces[0].data_sources[0].kind = DataSourceKind::ProviderQuery {
+        operation_id: "mutate-op".to_string(),
+    };
+
+    let err = registration
+        .validate_against(&registration_policy(CapabilitySet::default()))
+        .expect_err("a provider_query operation_id must resolve to a GET-registered interaction");
+    assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
+}
+
+#[test]
+fn legacy_single_method_bare_references_still_admit() {
+    // Simulates an old peer's wire payload: no interaction registers under
+    // more than one method, and every reference is a bare id string (no
+    // `http_method` anywhere). Must still admit under the new resolver.
+    let mut registration = minimal_registration(ProviderKind::Plugin);
+    registration
+        .capabilities
+        .0
+        .insert(Capability::ActionBarNode);
+    registration
+        .capabilities
+        .0
+        .insert(Capability::MutationAction);
+    let create = {
+        let mut i = InteractionDescriptor::new(
+            InteractionId::new("create").expect("valid id"),
+            InteractionKind::MutationAction,
+            "Create",
+            InteractionTransport::ProviderProxied,
+        );
+        i.input_schema = Some(SchemaContract::Object);
+        i.result_schema = Some(SchemaContract::Any);
+        i.timeout_seconds = Some(30);
+        i
+    };
+    registration.surfaces[0].interactions.push(create);
+    registration.surfaces[0].descriptor.root_node = SurfaceNode::ActionBar {
+        action_ids: vec![
+            ActionRef::from(InteractionId::new("surface.refresh").expect("valid id")),
+            ActionRef::from(InteractionId::new("create").expect("valid id")),
+        ],
+    };
+
+    let encoded = serde_json::to_value(&registration).expect("serialize registration");
+    assert_eq!(
+        encoded["surfaces"][0]["descriptor"]["root_node"]["action_ids"],
+        json!(["surface.refresh", "create"]),
+        "legacy bare references must serialize as plain id strings, not method-tagged objects"
+    );
+
+    let decoded: SurfaceRegistration =
+        serde_json::from_value(encoded).expect("deserialize legacy-shaped registration");
+
+    decoded
+        .validate_against(&registration_policy(CapabilitySet::default()))
+        .expect("legacy single-method bare-reference payload should still admit");
 }
