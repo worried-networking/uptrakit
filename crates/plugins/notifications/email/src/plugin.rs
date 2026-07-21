@@ -476,10 +476,14 @@ fn email_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                     vec![
                         surfaces::SurfaceNode::ActionBar {
                             action_ids: vec![
-                                surfaces::InteractionId::new("create")
-                                    .expect("literal interaction id is valid"),
-                                surfaces::InteractionId::new("configure_smtp")
-                                    .expect("literal interaction id is valid"),
+                                surfaces::ActionRef::from(
+                                    surfaces::InteractionId::new("create")
+                                        .expect("literal interaction id is valid"),
+                                ),
+                                surfaces::ActionRef::from(
+                                    surfaces::InteractionId::new("configure_smtp")
+                                        .expect("literal interaction id is valid"),
+                                ),
                             ],
                         },
                         surfaces::SurfaceNode::Table {
@@ -494,16 +498,19 @@ fn email_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                                 surfaces::SurfaceTableRowAction {
                                     interaction_id: surfaces::InteractionId::new("edit")
                                         .expect("literal interaction id is valid"),
+                                    http_method: None,
                                     visible_when: None,
                                 },
                                 surfaces::SurfaceTableRowAction {
                                     interaction_id: surfaces::InteractionId::new("test")
                                         .expect("literal interaction id is valid"),
+                                    http_method: None,
                                     visible_when: None,
                                 },
                                 surfaces::SurfaceTableRowAction {
                                     interaction_id: surfaces::InteractionId::new("delete")
                                         .expect("literal interaction id is valid"),
+                                    http_method: None,
                                     visible_when: None,
                                 },
                             ],
@@ -912,12 +919,13 @@ fn email_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                     vec![
                         surfaces::SurfaceNode::Form {
                             interaction_id: save_global_smtp_interaction.clone(),
+                            http_method: None,
                         },
                         surfaces::SurfaceNode::ActionBar {
-                            action_ids: vec![
+                            action_ids: vec![surfaces::ActionRef::from(
                                 surfaces::InteractionId::new("test_global_smtp_email")
                                     .expect("literal interaction id is valid"),
-                            ],
+                            )],
                         },
                     ],
                 ))
@@ -1339,7 +1347,10 @@ mod tests {
                 assert!(matches!(
                     children.first(),
                     Some(surfaces::SurfaceNode::ActionBar { action_ids })
-                        if action_ids.iter().map(|id| id.as_str()).collect::<Vec<_>>()
+                        if action_ids
+                            .iter()
+                            .map(|action_ref| action_ref.interaction_id().as_str())
+                            .collect::<Vec<_>>()
                             == vec!["create", "configure_smtp"]
                 ));
                 assert!(matches!(
@@ -1432,13 +1443,16 @@ mod tests {
             surfaces::SurfaceNode::Section { children, .. } => {
                 assert!(matches!(
                     children.first(),
-                    Some(surfaces::SurfaceNode::Form { interaction_id })
+                    Some(surfaces::SurfaceNode::Form { interaction_id, .. })
                         if interaction_id.as_str() == "save_global_smtp"
                 ));
                 assert!(matches!(
                     children.get(1),
                     Some(surfaces::SurfaceNode::ActionBar { action_ids })
-                        if action_ids.iter().map(|id| id.as_str()).collect::<Vec<_>>()
+                        if action_ids
+                            .iter()
+                            .map(|action_ref| action_ref.interaction_id().as_str())
+                            .collect::<Vec<_>>()
                             == vec!["test_global_smtp_email"]
                 ));
             }

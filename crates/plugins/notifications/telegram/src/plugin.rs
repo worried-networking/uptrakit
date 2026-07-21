@@ -225,10 +225,10 @@ fn telegram_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                     None::<String>,
                     vec![
                         surfaces::SurfaceNode::ActionBar {
-                            action_ids: vec![
+                            action_ids: vec![surfaces::ActionRef::from(
                                 surfaces::InteractionId::new("create")
                                     .expect("literal interaction id is valid"),
-                            ],
+                            )],
                         },
                         surfaces::SurfaceNode::Table {
                             data_source_id: data_source_id.clone(),
@@ -242,16 +242,19 @@ fn telegram_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                                 surfaces::SurfaceTableRowAction {
                                     interaction_id: surfaces::InteractionId::new("edit")
                                         .expect("literal interaction id is valid"),
+                                    http_method: None,
                                     visible_when: None,
                                 },
                                 surfaces::SurfaceTableRowAction {
                                     interaction_id: surfaces::InteractionId::new("test")
                                         .expect("literal interaction id is valid"),
+                                    http_method: None,
                                     visible_when: None,
                                 },
                                 surfaces::SurfaceTableRowAction {
                                     interaction_id: surfaces::InteractionId::new("delete")
                                         .expect("literal interaction id is valid"),
+                                    http_method: None,
                                     visible_when: None,
                                 },
                             ],
@@ -529,6 +532,7 @@ fn telegram_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                 ]))
                 .root_node(surfaces::SurfaceNode::Form {
                     interaction_id: save_global_interaction.clone(),
+                    http_method: None,
                 })
                 .build(),
             interactions: vec![
@@ -833,7 +837,7 @@ mod tests {
         );
         assert!(matches!(
             settings_surface.descriptor.root_node,
-            surfaces::SurfaceNode::Form { ref interaction_id }
+            surfaces::SurfaceNode::Form { ref interaction_id, .. }
                 if interaction_id.as_str() == "save_global_telegram"
         ));
 

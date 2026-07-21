@@ -304,6 +304,7 @@ pub(crate) fn docker_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
             .root_node(surfaces::SurfaceNode::Form {
                 interaction_id: surfaces::InteractionId::new("switch-tag")
                     .expect("literal interaction id is valid"),
+                http_method: None,
             })
             .build(),
         interactions: vec![

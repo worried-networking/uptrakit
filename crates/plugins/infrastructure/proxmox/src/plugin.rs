@@ -114,8 +114,12 @@ fn proxmox_hosts_surface() -> PluginSurface {
                 vec![
                     surfaces::SurfaceNode::ActionBar {
                         action_ids: vec![
-                            surfaces::InteractionId::new("discover").expect("literal"),
-                            surfaces::InteractionId::new("test-connection").expect("literal"),
+                            surfaces::ActionRef::from(
+                                surfaces::InteractionId::new("discover").expect("literal"),
+                            ),
+                            surfaces::ActionRef::from(
+                                surfaces::InteractionId::new("test-connection").expect("literal"),
+                            ),
                         ],
                     },
                     surfaces::SurfaceNode::Table {
@@ -144,6 +148,7 @@ fn proxmox_hosts_surface() -> PluginSurface {
                             surfaces::SurfaceTableRowAction {
                                 interaction_id: surfaces::InteractionId::new("approve-match")
                                     .expect("literal"),
+                                http_method: None,
                                 visible_when: Some(surfaces::SurfaceRowVisibleWhen {
                                     field: "suggested_host_id".to_string(),
                                     condition: surfaces::SurfaceRowCondition::Present,
@@ -152,11 +157,13 @@ fn proxmox_hosts_surface() -> PluginSurface {
                             surfaces::SurfaceTableRowAction {
                                 interaction_id: surfaces::InteractionId::new("match")
                                     .expect("literal"),
+                                http_method: None,
                                 visible_when: None,
                             },
                             surfaces::SurfaceTableRowAction {
                                 interaction_id: surfaces::InteractionId::new("unmatch")
                                     .expect("literal"),
+                                http_method: None,
                                 visible_when: Some(surfaces::SurfaceRowVisibleWhen {
                                     field: "matched_host".to_string(),
                                     condition: surfaces::SurfaceRowCondition::Present,
@@ -453,6 +460,7 @@ fn proxmox_settings_update_protection_surface() -> PluginSurface {
                     surfaces::SurfaceNode::Form {
                         interaction_id: surfaces::InteractionId::new("save-global-defaults")
                             .expect("literal interaction id is valid"),
+                        http_method: None,
                     },
                 ],
             ))
@@ -659,6 +667,7 @@ fn proxmox_settings_resource_scaling_surface() -> PluginSurface {
                 vec![surfaces::SurfaceNode::Form {
                     interaction_id: surfaces::InteractionId::new("save-scaling-global-defaults")
                         .expect("literal interaction id is valid"),
+                    http_method: None,
                 }],
             ))
             .build(),
@@ -874,6 +883,7 @@ fn proxmox_software_item_update_protection_surface() -> PluginSurface {
                     surfaces::SurfaceNode::Form {
                         interaction_id: surfaces::InteractionId::new("save-item-overrides")
                             .expect("literal interaction id is valid"),
+                        http_method: None,
                     },
                 ],
             ))
@@ -1088,6 +1098,7 @@ fn proxmox_software_item_resource_scaling_surface() -> PluginSurface {
                 vec![surfaces::SurfaceNode::Form {
                     interaction_id: surfaces::InteractionId::new("save-scaling-item-overrides")
                         .expect("literal interaction id is valid"),
+                    http_method: None,
                 }],
             ))
             .build(),

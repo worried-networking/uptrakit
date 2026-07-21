@@ -533,7 +533,7 @@ impl<'a> RootNodeReferenceValidator<'a> {
                 self.require_data_source_reference(data_source_id.as_str())?;
                 self.validate_table_row_actions(row_actions)
             }
-            SurfaceNode::Form { interaction_id } => {
+            SurfaceNode::Form { interaction_id, .. } => {
                 self.require_root_interaction_reference(interaction_id.as_str())
             }
             SurfaceNode::ActionBar { action_ids } => self.validate_action_bar(action_ids),
@@ -542,6 +542,7 @@ impl<'a> RootNodeReferenceValidator<'a> {
             SurfaceNode::ModalTrigger {
                 interaction_id,
                 modal_nodes,
+                ..
             } => {
                 self.require_root_interaction_reference(interaction_id.as_str())?;
                 self.validate_children(modal_nodes)
@@ -580,10 +581,10 @@ impl<'a> RootNodeReferenceValidator<'a> {
 
     fn validate_action_bar(
         &self,
-        action_ids: &[InteractionId],
+        action_ids: &[crate::ActionRef],
     ) -> Result<(), SurfaceRegistrationError> {
-        for action_id in action_ids {
-            self.require_root_interaction_reference(action_id.as_str())?;
+        for action_ref in action_ids {
+            self.require_root_interaction_reference(action_ref.interaction_id().as_str())?;
         }
         Ok(())
     }

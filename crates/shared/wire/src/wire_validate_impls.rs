@@ -430,6 +430,13 @@ fn validate_surface_node(
                 MAX_SURFACE_ACTION_REFS,
                 "surfaces[].descriptor.root_node.action_ids",
             )?;
+            for action_ref in action_ids {
+                check_string_len(
+                    action_ref.interaction_id().as_str(),
+                    MAX_SHORT_STRING_LEN,
+                    "surfaces[].descriptor.root_node.action_ids[]",
+                )?;
+            }
         }
         surfaces::SurfaceNode::Tabs { tabs } => {
             check_vec_len(

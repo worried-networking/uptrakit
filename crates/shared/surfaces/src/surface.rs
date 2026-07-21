@@ -54,10 +54,12 @@ pub enum SurfaceNode {
     },
     Form {
         interaction_id: crate::InteractionId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        http_method: Option<crate::InteractionHttpMethod>,
     },
     ActionBar {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        action_ids: Vec<crate::InteractionId>,
+        action_ids: Vec<ActionRef>,
     },
     Tabs {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -74,6 +76,8 @@ pub enum SurfaceNode {
     },
     ModalTrigger {
         interaction_id: crate::InteractionId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        http_method: Option<crate::InteractionHttpMethod>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         modal_nodes: Vec<SurfaceNode>,
     },
@@ -118,6 +122,46 @@ impl SurfaceNode {
             header_action_ids,
             children,
         }
+    }
+}
+
+/// Reference to an interaction from an action bar. Untagged two-form reader:
+/// the legacy bare-string form (method omitted — resolves only when the
+/// target ID registers exactly one method) and an object form for
+/// multi-method IDs. NOTE: adding a third form later hard-fails two-form
+/// readers on old peers (accepted, spec §2a).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ActionRef {
+    Bare(crate::InteractionId),
+    WithMethod {
+        interaction_id: crate::InteractionId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        http_method: Option<crate::InteractionHttpMethod>,
+    },
+}
+
+impl ActionRef {
+    #[must_use]
+    pub fn interaction_id(&self) -> &crate::InteractionId {
+        match self {
+            Self::Bare(id) => id,
+            Self::WithMethod { interaction_id, .. } => interaction_id,
+        }
+    }
+
+    #[must_use]
+    pub fn http_method(&self) -> Option<&crate::InteractionHttpMethod> {
+        match self {
+            Self::Bare(_) => None,
+            Self::WithMethod { http_method, .. } => http_method.as_ref(),
+        }
+    }
+}
+
+impl From<crate::InteractionId> for ActionRef {
+    fn from(id: crate::InteractionId) -> Self {
+        Self::Bare(id)
     }
 }
 
@@ -243,6 +287,8 @@ impl SurfaceEntityRef {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SurfaceTableRowAction {
     pub interaction_id: crate::InteractionId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub http_method: Option<crate::InteractionHttpMethod>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visible_when: Option<SurfaceRowVisibleWhen>,
 }
@@ -762,5 +808,35 @@ mod tests {
         let cap = Capability::EntityLinkColumn;
         let s = serde_json::to_string(&cap).expect("serialize");
         assert_eq!(s, r#""entity_link_column""#);
+    }
+
+    #[test]
+    fn action_ref_reads_legacy_bare_string() {
+        let refs: Vec<ActionRef> =
+            serde_json::from_value(serde_json::json!(["create", "delete"])).expect("legacy form");
+        assert_eq!(refs[0].interaction_id().as_str(), "create");
+        assert!(refs[0].http_method().is_none());
+    }
+
+    #[test]
+    fn action_ref_reads_object_form_with_method() {
+        let refs: Vec<ActionRef> = serde_json::from_value(serde_json::json!([
+            { "interaction_id": "clients", "http_method": "delete" }
+        ]))
+        .expect("object form");
+        assert_eq!(refs[0].interaction_id().as_str(), "clients");
+        assert_eq!(
+            refs[0].http_method(),
+            Some(&crate::InteractionHttpMethod::Delete)
+        );
+    }
+
+    #[test]
+    fn action_ref_bare_serializes_as_plain_string() {
+        let json = serde_json::to_value(vec![ActionRef::from(
+            crate::InteractionId::new("create").expect("id"),
+        )])
+        .expect("serialize");
+        assert_eq!(json, serde_json::json!(["create"]));
     }
 }

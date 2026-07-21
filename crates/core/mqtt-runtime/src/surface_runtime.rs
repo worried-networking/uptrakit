@@ -9,13 +9,13 @@
 use uptrakit_wire::{
     ServiceMessage,
     surfaces::{
-        self, Capability, CapabilitySet, DataSourceDescriptor, DataSourceId, DataSourceKind,
-        DataSourcePagination, FrameworkGeneration, InteractionConfirmation, InteractionDescriptor,
-        InteractionId, InteractionKind, InteractionTransport, ProviderEncryptionAlgorithm,
-        ProviderEncryptionMetadata, RefreshPolicy, SurfaceActionError, SurfaceActionErrorCode,
-        SurfaceActionRequest, SurfaceActionResponse, SurfaceDescriptor, SurfaceId, SurfaceNode,
-        SurfaceRegistration, SurfaceRowCondition, SurfaceRowVisibleWhen, SurfaceTableColumn,
-        SurfaceTableRowAction,
+        self, ActionRef, Capability, CapabilitySet, DataSourceDescriptor, DataSourceId,
+        DataSourceKind, DataSourcePagination, FrameworkGeneration, InteractionConfirmation,
+        InteractionDescriptor, InteractionId, InteractionKind, InteractionTransport,
+        ProviderEncryptionAlgorithm, ProviderEncryptionMetadata, RefreshPolicy, SurfaceActionError,
+        SurfaceActionErrorCode, SurfaceActionRequest, SurfaceActionResponse, SurfaceDescriptor,
+        SurfaceId, SurfaceNode, SurfaceRegistration, SurfaceRowCondition, SurfaceRowVisibleWhen,
+        SurfaceTableColumn, SurfaceTableRowAction,
     },
 };
 
@@ -88,9 +88,9 @@ pub(crate) fn build_surface_registration_with_ids(
                 None::<String>,
                 vec![
                     SurfaceNode::ActionBar {
-                        action_ids: vec![
+                        action_ids: vec![ActionRef::from(
                             InteractionId::new(ACTION_CREATE).expect("interaction id is valid"),
-                        ],
+                        )],
                     },
                     SurfaceNode::Table {
                         data_source_id: data_source_id.clone(),
@@ -105,11 +105,13 @@ pub(crate) fn build_surface_registration_with_ids(
                             SurfaceTableRowAction {
                                 interaction_id: InteractionId::new(ACTION_EDIT)
                                     .expect("interaction id is valid"),
+                                http_method: None,
                                 visible_when: None,
                             },
                             SurfaceTableRowAction {
                                 interaction_id: InteractionId::new(ACTION_DELETE)
                                     .expect("interaction id is valid"),
+                                http_method: None,
                                 visible_when: Some(SurfaceRowVisibleWhen {
                                     field: "client_id".to_string(),
                                     condition: SurfaceRowCondition::Present,

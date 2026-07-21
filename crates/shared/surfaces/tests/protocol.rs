@@ -404,6 +404,7 @@ fn protocol_registration_rejects_dangling_node_references() {
     registration.capabilities.0.insert(Capability::FormNode);
     registration.surfaces[0].descriptor.root_node = SurfaceNode::Form {
         interaction_id: InteractionId::new("missing.interaction").expect("valid id"),
+        http_method: None,
     };
 
     let err = registration

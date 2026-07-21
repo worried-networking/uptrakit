@@ -177,7 +177,7 @@ fn docker_item_host_actions_surface_keeps_form_preload_contract() {
     assert!(docker_surface.data_sources.is_empty());
 
     match &docker_surface.descriptor.root_node {
-        surfaces::SurfaceNode::Form { interaction_id } => {
+        surfaces::SurfaceNode::Form { interaction_id, .. } => {
             assert_eq!(interaction_id.as_str(), "switch-tag");
         }
         other => panic!("expected form root node, got {other:?}"),

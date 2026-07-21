@@ -313,6 +313,7 @@ mod tests {
         use uptrakit_wire::surfaces::InteractionId;
         let node = SurfaceNode::ModalTrigger {
             interaction_id: InteractionId::new("open").expect("literal"),
+            http_method: None,
             modal_nodes: vec![entity_link_table_node("host_col")],
         };
         let cols = collect_entity_link_columns(&node);

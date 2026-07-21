@@ -228,10 +228,10 @@ fn webhook_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                 None::<String>,
                 vec![
                     surfaces::SurfaceNode::ActionBar {
-                        action_ids: vec![
+                        action_ids: vec![surfaces::ActionRef::from(
                             surfaces::InteractionId::new("create")
                                 .expect("literal interaction id is valid"),
-                        ],
+                        )],
                     },
                     surfaces::SurfaceNode::Table {
                         data_source_id: data_source_id.clone(),
@@ -245,16 +245,19 @@ fn webhook_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                             surfaces::SurfaceTableRowAction {
                                 interaction_id: surfaces::InteractionId::new("edit")
                                     .expect("literal interaction id is valid"),
+                                http_method: None,
                                 visible_when: None,
                             },
                             surfaces::SurfaceTableRowAction {
                                 interaction_id: surfaces::InteractionId::new("test")
                                     .expect("literal interaction id is valid"),
+                                http_method: None,
                                 visible_when: None,
                             },
                             surfaces::SurfaceTableRowAction {
                                 interaction_id: surfaces::InteractionId::new("delete")
                                     .expect("literal interaction id is valid"),
+                                http_method: None,
                                 visible_when: None,
                             },
                         ],

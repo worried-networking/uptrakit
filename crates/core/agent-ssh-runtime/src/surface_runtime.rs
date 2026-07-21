@@ -284,7 +284,7 @@ fn build_surface_parts(
                 let Ok(interaction_id) = InteractionId::new(action_id.clone()) else {
                     continue;
                 };
-                primary_ids.push(interaction_id);
+                primary_ids.push(surfaces::ActionRef::from(interaction_id));
                 let form_ui = action.ui.as_ref().and_then(action_ui_to_form_ui);
                 refs.push(InteractionRef {
                     action_id: action_id.clone(),
@@ -313,6 +313,7 @@ fn build_surface_parts(
                 };
                 row_ids.push(SurfaceTableRowAction {
                     interaction_id,
+                    http_method: None,
                     visible_when: interaction
                         .row_visible_when
                         .as_ref()
@@ -2526,7 +2527,10 @@ mod tests {
         let Some(SurfaceNode::ActionBar { action_ids }) = children.first() else {
             panic!("first section child should be an action bar");
         };
-        let action_ids: BTreeSet<&str> = action_ids.iter().map(|id| id.as_str()).collect();
+        let action_ids: BTreeSet<&str> = action_ids
+            .iter()
+            .map(|action_ref| action_ref.interaction_id().as_str())
+            .collect();
         assert!(action_ids.contains("bootstrap"));
         assert!(action_ids.contains("bootstrap-proxmox-guest"));
     }
