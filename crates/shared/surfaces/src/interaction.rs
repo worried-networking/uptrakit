@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uptrakit_shared_macros::wire_safe_enum;
 
-use crate::{FormUiDescriptor, InteractionId, ProviderKind, SchemaContract};
+use crate::{FormUiDescriptor, InteractionId, ParamFieldDescriptor, ProviderKind, SchemaContract};
 
 pub const MIN_INTERACTION_TIMEOUT_SECONDS: u16 = 1;
 pub const MAX_INTERACTION_TIMEOUT_SECONDS: u16 = 300;
@@ -85,6 +85,9 @@ pub struct InteractionDescriptor {
     pub result_schema: Option<SchemaContract>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sensitive_fields: Vec<String>,
+    /// Opt-in per-field param declarations (GET query typing + body validation).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub params: Vec<ParamFieldDescriptor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_seconds: Option<u16>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -180,6 +183,7 @@ impl InteractionDescriptor {
             input_schema: None,
             result_schema: None,
             sensitive_fields: vec![],
+            params: Vec::new(),
             timeout_seconds: None,
             confirmation: None,
             workflow_steps: vec![],
@@ -194,6 +198,13 @@ impl InteractionDescriptor {
     #[must_use]
     pub fn with_http_method(mut self, http_method: InteractionHttpMethod) -> Self {
         self.http_method = http_method;
+        self
+    }
+
+    /// Declare per-field param descriptors (GET query typing + body validation).
+    #[must_use]
+    pub fn with_params(mut self, params: Vec<ParamFieldDescriptor>) -> Self {
+        self.params = params;
         self
     }
 

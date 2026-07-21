@@ -516,6 +516,23 @@ fn validate_surface_interaction(
             "surfaces[].interactions[].sensitive_fields[]",
         )?;
     }
+    check_vec_len(
+        &interaction.params,
+        MAX_SURFACE_FIELDS,
+        "surfaces[].interactions[].params",
+    )?;
+    for field in &interaction.params {
+        check_string_len(
+            &field.key,
+            MAX_SHORT_STRING_LEN,
+            "surfaces[].interactions[].params[].key",
+        )?;
+    }
+    check_string_len(
+        interaction.http_method.as_str(),
+        MAX_SHORT_STRING_LEN,
+        "surfaces[].interactions[].http_method",
+    )?;
 
     if let Some(confirmation) = &interaction.confirmation {
         check_string_len(
@@ -1934,6 +1951,21 @@ mod tests {
         payload.surfaces[0].interactions[0].icon = Some("trash_2".to_string());
         let err = payload.wire_validate().unwrap_err();
         assert_eq!(err.field, "surfaces[].interactions[].icon");
+    }
+
+    #[test]
+    fn surface_interaction_params_over_limit_rejected() {
+        let mut payload = test_surface_registration();
+        payload.surfaces[0].interactions[0].params = (0..=MAX_SURFACE_FIELDS)
+            .map(|i| {
+                surfaces::ParamFieldDescriptor::new(
+                    format!("f{i}"),
+                    surfaces::SchemaContract::String,
+                )
+            })
+            .collect();
+        let err = payload.wire_validate().unwrap_err();
+        assert_eq!(err.field, "surfaces[].interactions[].params");
     }
 
     #[test]
