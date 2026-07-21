@@ -129,6 +129,31 @@ Canonical type ownership:
 - Contract model: `crates/shared/surfaces/`
 - Wire barrel re-export: `crates/shared/wire/src/surfaces.rs`
 
+## Method model (contract fields)
+
+Each interaction descriptor carries an `http_method` field (`get`, `post`, `put`, or `delete`) describing the REST
+method the interaction is conceptually dispatched with. The wire default is `post` — providers registered before this
+field existed omit it, and it deserializes the same as an explicit `"post"`. `DataLoad` interactions are the one
+exception: regardless of the declared value, they are normalized to `get` at admission (a declared `put`/`delete` on a
+`DataLoad` is rejected outright; a declared `post` is silently equivalent to omission and normalizes to `get`), so
+they are always stored and served as `get`. Every other interaction kind keeps its declared method, with `workflow`
+interactions required to declare `post` and all non-`DataLoad` kinds forbidden from declaring `get`.
+
+Descriptors may also opt in to `params`: a list of per-field declarations (`key`, `schema`, `required`) used for
+strict typed parsing of GET query strings and per-field body validation on mutating methods. Fields not listed in
+`params` still pass through untyped. Declared keys must not collide with the framework-reserved envelope keys (`id`,
+`page`, `per_page`, `target_provider_id`, `timeout_seconds`).
+
+On the wire side, `SurfaceActionRequest` (the controller↔service message that actually dispatches an interaction)
+carries its own `method` field, independent of the descriptor's `http_method`. It defaults to `post` the same way:
+older peers that predate this field simply omit it, and it parses as `post` on receipt. This wire field is what the
+proxy stamps with the interaction's effective method before delivery.
+
+None of this changes the REST surface today — `POST /api/v1/surfaces/{surface_id}/interactions/{interaction_id}`
+remains the sole HTTP entry point, dispatch stays interaction-id-only, and `http_method`/`params` surface in the REST
+response only as opaque descriptor JSON. Exposing distinct REST verbs/paths per interaction is a later cutover, not
+part of this contract.
+
 ## Notes
 
 - `/api/v1/surfaces/*` is the active runtime path for shared surfaces.
