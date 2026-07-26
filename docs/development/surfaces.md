@@ -116,9 +116,36 @@ service-side oneshot-correlation pattern for these session-scoped messages: each
 is tracked by a generated correlation ID mapped to a `tokio::sync::oneshot::Sender`, and the
 matching response resolves it.
 
-Interaction IDs follow a naming convention by kind: data-retrieval interactions use noun phrases
-(`discovered-guests`, `unmatched-guests`); mutations keep verbs (`bootstrap-proxmox-guest`,
-`match`).
+Interaction, data-source, and surface identifiers follow a single naming convention
+([ADR-0031](../adr/0031-surface-identifier-naming.md)):
+
+- **Interaction IDs and data-source IDs:** kebab-case only — `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`. No underscores, no
+  dots, no provider/surface prefixes (the surface ID already namespaces).
+- **Surface IDs:** dot-separated kebab-case segments — each segment matches the interaction regex. First segment
+  names the provider family (`proxmox`, `notifications.email`, `mqtt`, `ssh-agent`).
+- **CRUD over a collection:** one plural noun registered under multiple HTTP methods — GET (list / item read via
+  `/{item_id}`), POST (create), PUT `/{item_id}` (replace), DELETE `/{item_id}`. Never `list-`, `get-`,
+  `create-`, `edit-`, `delete-`, `remove-`, `preload-`, `load-`, `save-` prefixes. **One GET registration
+  serves both list and item read** — `(surface, noun, GET)` is a single registered interaction whose handler
+  branches on `params["id"]` presence; registering list and item-get separately would collide on the
+  `(id, method)` uniqueness key.
+- **Two shapes outside the buckets (allowed, by rule):** a read-only singleton may pair with a _separate_ POST
+  domain operation instead of a PUT (docker `current-tag` + `switch-tag`); an item-_targeted_ domain operation
+  stays a collection-level POST with the item id in `params["id"]` (POST accepts no item segment —
+  notifications `test`). Providers read `params["id"]` uniformly regardless of whether the framework populated
+  it from the path segment, query, or body (companion spec, reserved-key contract).
+- **Singleton resources** (settings blobs with no collection): singular/uncounted noun under GET + PUT
+  (`smtp`, `global-defaults`, `overrides`).
+- **Domain operations** (not CRUD): imperative verb phrase under POST (`test-connection`, `discover`, `match`,
+  `bootstrap`, `switch-tag`, `sync`). Bare verbs fine; no nouns the surface already implies.
+- **Data sources** pair with their GET interaction: `DataSourceKind::ProviderQuery.operation_id` equals the
+  paired GET interaction ID, and the data-source ID uses the same noun (`mappings` ↔ GET `mappings`).
+- **Workflow step-submit IDs** follow the domain-operation rule (`sync-connect`, `bootstrap-execute` — already
+  compliant).
+
+Third-party and externally-registered service providers get this convention as normative guidance only: the
+wire-level identifier charset validator (`validate_surface_identifier`) stays permissive and does not itself
+reject a non-conforming ID.
 
 ## Plugin integration pattern
 
