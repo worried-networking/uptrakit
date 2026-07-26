@@ -6,7 +6,7 @@ use crate::output::HumanOutput;
 use clap::Subcommand;
 use rootcause::prelude::*;
 use serde::Serialize;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::PathBuf;
 use uptrakit_crypto::ecies::sealed_box_encrypt_base64;
@@ -49,6 +49,10 @@ pub enum SurfacesCommands {
         /// Raw JSON params.
         #[arg(long, default_value = "{}")]
         params: String,
+        /// HTTP method to select when the interaction ID is registered
+        /// under multiple methods (e.g. `get`, `post`, `put`, `delete`).
+        #[arg(long)]
+        method: Option<String>,
         /// Target provider ID for targeted surfaces.
         #[arg(long)]
         target_provider_id: Option<String>,
@@ -101,14 +105,17 @@ pub async fn dispatch(command: SurfacesCommands, ctx: &CliContext) -> Result<()>
             surface_id,
             interaction_id,
             params,
+            method,
             target_provider_id,
             timeout_seconds,
         } => {
             let params = parse_params(&params)?;
+            let method = parse_http_method(method.as_deref())?;
             let resp = invoke(InvokeParams {
                 surface_id,
                 interaction_id,
                 params,
+                method,
                 target_provider_id,
                 timeout_seconds,
                 server: ctx.server.as_deref(),
@@ -291,6 +298,10 @@ pub struct InvokeParams<'a> {
     pub surface_id: String,
     pub interaction_id: String,
     pub params: serde_json::Map<String, serde_json::Value>,
+    /// Disambiguates `interaction_id` when the surface registers it under
+    /// more than one HTTP method (see `select_interaction`). `None` is the
+    /// zero-UX-change path for single-method IDs.
+    pub method: Option<InteractionHttpMethod>,
     pub target_provider_id: Option<String>,
     pub timeout_seconds: Option<u16>,
     pub server: Option<&'a str>,
@@ -343,16 +354,7 @@ pub async fn invoke(params: InvokeParams<'_>) -> Result<InvokeOutput> {
         params.request_timeout,
     )?;
     let surface = client.read_surface(&params.surface_id).await.context_to()?;
-    let interaction = surface
-        .interactions
-        .iter()
-        .find(|candidate| candidate.interaction_id.as_str() == params.interaction_id)
-        .ok_or_else(|| {
-            report!(crate::error::CliError::Other(format!(
-                "interaction '{}' is not part of surface '{}'",
-                params.interaction_id, params.surface_id
-            )))
-        })?;
+    let interaction = select_interaction(&surface, &params.interaction_id, params.method)?;
     if surface.descriptor.targeting == Targeting::Targeted && params.target_provider_id.is_none() {
         return Err(report!(crate::error::CliError::Other(
             "targeted surfaces require --target-provider-id <PROVIDER_ID>".to_string()
@@ -404,7 +406,25 @@ pub async fn dynamic_invoke(
 
     let client = authenticated_client(server, token, insecure, request_timeout)?;
     let surface = client.read_surface(&surface_id).await.context_to()?;
-    let cmd = build_surface_command(&surface);
+
+    // Pre-resolve (not arg-union, see Task 1b): clap subcommands must be
+    // built *before* parsing, but a multi-method interaction ID's
+    // subcommand shape depends on which method the caller asked for. Scan
+    // the raw args once, before clap ever sees them, for the target
+    // subcommand name and an explicit `--method` token.
+    let (target_interaction, method_token) = prescan_target_and_method(&args);
+    let prescanned_method = parse_http_method(method_token.as_deref())?;
+    let resolved_target = target_interaction
+        .as_deref()
+        .zip(prescanned_method.as_ref())
+        .map(|(id, method)| (id.to_string(), method.clone()));
+
+    let cmd = build_surface_command(
+        &surface,
+        resolved_target
+            .as_ref()
+            .map(|(id, method)| (id.as_str(), method)),
+    );
 
     let matches = match cmd.try_get_matches_from(
         std::iter::once(OsString::from("surfaces")).chain(args.into_iter().skip(1)),
@@ -437,15 +457,19 @@ pub async fn dynamic_invoke(
         ))
     })?;
 
-    let interaction = surface
-        .interactions
-        .iter()
-        .find(|candidate| candidate.interaction_id.as_str() == interaction_id)
-        .ok_or_else(|| {
-            report!(CliError::Other(format!(
-                "interaction '{interaction_id}' is not part of surface '{surface_id}'"
-            )))
-        })?;
+    // The subcommand's own parsed `--method` (only present when the built
+    // shape declared one -- see `build_interaction_subcommand`) is the
+    // source of truth for dispatch method; the pre-scan above only shaped
+    // which args clap would accept.
+    let selected_method = parse_http_method(
+        interaction_matches
+            .try_get_one::<String>("method")
+            .ok()
+            .flatten()
+            .map(String::as_str),
+    )?;
+
+    let interaction = select_interaction(&surface, interaction_id, selected_method)?;
 
     let render_mode = render_mode_for_interaction(interaction);
     let params = extract_invocation_params(interaction, &render_mode, interaction_matches)?;
@@ -525,7 +549,152 @@ impl HumanOutput for SurfaceReadResponse {
     }
 }
 
-fn build_surface_command(surface: &SurfaceReadResponse) -> clap::Command {
+/// Selects the concrete [`InteractionDescriptor`] a caller means by
+/// `interaction_id`, disambiguating by `method` when the surface registers
+/// that ID under more than one HTTP method (see ADR-0030's `(id, method)`
+/// registry uniqueness key).
+///
+/// - Zero matches: the existing "not part of surface" error (unchanged
+///   behavior).
+/// - Exactly one match: used unconditionally, regardless of `method` --
+///   zero UX change for single-method IDs.
+/// - More than one match: `method` must be `Some` and match exactly one
+///   candidate's [`InteractionDescriptor::effective_http_method`]; otherwise
+///   a typed error listing the available methods.
+fn select_interaction<'a>(
+    surface: &'a SurfaceReadResponse,
+    interaction_id: &str,
+    method: Option<InteractionHttpMethod>,
+) -> Result<&'a InteractionDescriptor> {
+    use crate::error::CliError;
+
+    let candidates: Vec<&InteractionDescriptor> = surface
+        .interactions
+        .iter()
+        .filter(|candidate| candidate.interaction_id.as_str() == interaction_id)
+        .collect();
+
+    match candidates.as_slice() {
+        [] => Err(report!(CliError::Other(format!(
+            "interaction '{interaction_id}' is not part of surface '{}'",
+            surface.descriptor.surface_id
+        )))),
+        [only] => Ok(*only),
+        multiple => match method {
+            Some(method) => multiple
+                .iter()
+                .find(|candidate| candidate.effective_http_method() == method)
+                .copied()
+                .ok_or_else(|| {
+                    report!(CliError::Other(format!(
+                        "interaction '{interaction_id}' has no variant registered under method '{method}'"
+                    )))
+                }),
+            None => {
+                let methods = multiple
+                    .iter()
+                    .map(|candidate| candidate.effective_http_method().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                Err(report!(CliError::Other(format!(
+                    "interaction '{interaction_id}' is registered under multiple methods ({methods}); pass --method"
+                ))))
+            }
+        },
+    }
+}
+
+/// Parses a raw `--method` value using [`InteractionHttpMethod`]'s strict
+/// `FromStr` (generated by `wire_safe_enum!`). `None` in, `None` out --
+/// this is the zero-UX-change path when the caller didn't pass `--method`.
+fn parse_http_method(raw: Option<&str>) -> Result<Option<InteractionHttpMethod>> {
+    use crate::error::CliError;
+
+    raw.map(|value| {
+        value.parse::<InteractionHttpMethod>().map_err(|_err| {
+            report!(CliError::Other(format!(
+                "invalid --method value '{value}'; expected one of: get, post, put, delete"
+            )))
+        })
+    })
+    .transpose()
+}
+
+/// Scans the raw `Dynamic` subcommand args -- *before* clap parses them --
+/// for the target interaction subcommand name (the first non-flag token)
+/// and an explicit `--method`/`--method=value` token anywhere after it.
+///
+/// This is a lightweight pre-resolve step only: it decides which shape to
+/// build the target subcommand in (see `build_interaction_subcommand`). The
+/// authoritative dispatch method is re-derived *after* clap parses, by
+/// reading the `"method"` arg back out of the matched subcommand.
+fn prescan_target_and_method(args: &[OsString]) -> (Option<String>, Option<String>) {
+    let rest: Vec<&OsString> = args.iter().skip(1).collect();
+
+    let mut target = None;
+    let mut index = 0;
+    while let Some(current) = rest.get(index) {
+        if let Some(value) = current.to_str()
+            && !value.starts_with('-')
+        {
+            target = Some(value.to_string());
+            index += 1;
+            break;
+        }
+        index += 1;
+    }
+
+    let mut method = None;
+    while let Some(current) = rest.get(index) {
+        if let Some(value) = current.to_str() {
+            if let Some(inline) = value.strip_prefix("--method=") {
+                method = Some(inline.to_string());
+                break;
+            }
+            if value == "--method" {
+                if let Some(next) = rest.get(index + 1).and_then(|arg| arg.to_str()) {
+                    method = Some(next.to_string());
+                }
+                break;
+            }
+        }
+        index += 1;
+    }
+
+    (target, method)
+}
+
+/// Groups `surface.interactions` by `interaction_id`, preserving first-seen
+/// order, so `build_surface_command` builds exactly one clap subcommand per
+/// unique ID (never one per descriptor -- that produced duplicate
+/// subcommand names for multi-method IDs).
+fn group_interactions_by_id(
+    surface: &SurfaceReadResponse,
+) -> Vec<(String, Vec<&InteractionDescriptor>)> {
+    let mut order: Vec<String> = Vec::new();
+    let mut groups: HashMap<String, Vec<&InteractionDescriptor>> = HashMap::new();
+
+    for interaction in &surface.interactions {
+        let id = interaction.interaction_id.to_string();
+        if !groups.contains_key(&id) {
+            order.push(id.clone());
+        }
+        groups.entry(id).or_default().push(interaction);
+    }
+
+    order
+        .into_iter()
+        .map(|id| {
+            let descriptors = groups.remove(&id).unwrap_or_default();
+            (id, descriptors)
+        })
+        .collect()
+}
+
+fn build_surface_command(
+    surface: &SurfaceReadResponse,
+    resolved: Option<(&str, &InteractionHttpMethod)>,
+) -> clap::Command {
     let mut cmd = clap::Command::new(surface.descriptor.surface_id.to_string())
         .about(surface.descriptor.label.clone())
         .subcommand_required(true);
@@ -539,30 +708,100 @@ fn build_surface_command(surface: &SurfaceReadResponse) -> clap::Command {
         );
     }
 
-    for interaction in &surface.interactions {
-        let render_mode = render_mode_for_interaction(interaction);
-        let mut subcmd = clap::Command::new(interaction.interaction_id.to_string())
-            .about(render_mode_about(&render_mode))
-            .arg(raw_params_arg());
-
-        match &render_mode {
-            InteractionRenderMode::Typed { fields, .. } => {
-                for field in fields {
-                    subcmd = subcmd.arg(build_field_arg(field));
-                }
-            }
-            InteractionRenderMode::DeclaredParams { params, .. } => {
-                for field in params {
-                    subcmd = subcmd.arg(build_param_arg(field));
-                }
-            }
-            InteractionRenderMode::RawOnly { .. } => {}
-        }
-
-        cmd = cmd.subcommand(subcmd);
+    for (interaction_id, descriptors) in group_interactions_by_id(surface) {
+        cmd = cmd.subcommand(build_interaction_subcommand(
+            &interaction_id,
+            &descriptors,
+            resolved,
+        ));
     }
 
     cmd
+}
+
+/// Builds the single clap subcommand for one interaction ID.
+///
+/// - Single-method ID: today's shape, built from its sole descriptor.
+/// - Multi-method ID with a resolved match (`resolved` names this ID and
+///   its `effective_http_method` matches one of `descriptors`): the
+///   resolved descriptor's shape, plus a `--method` arg so clap accepts the
+///   already-known token.
+/// - Multi-method ID without a resolution: a fallback shape with only a
+///   required `--method` plus raw `--params`, so parsing yields a clear
+///   missing-`--method` error and `--help` documents it.
+fn build_interaction_subcommand(
+    interaction_id: &str,
+    descriptors: &[&InteractionDescriptor],
+    resolved: Option<(&str, &InteractionHttpMethod)>,
+) -> clap::Command {
+    match descriptors {
+        [only] => build_subcommand_for_descriptor(interaction_id, only, false),
+        multiple => {
+            if let Some((target_id, target_method)) = resolved
+                && target_id == interaction_id
+                && let Some(descriptor) = multiple
+                    .iter()
+                    .find(|candidate| candidate.effective_http_method() == *target_method)
+            {
+                return build_subcommand_for_descriptor(interaction_id, descriptor, true);
+            }
+
+            let methods = multiple
+                .iter()
+                .map(|candidate| candidate.effective_http_method().to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            clap::Command::new(interaction_id.to_string())
+                .about(format!(
+                    "registered under multiple methods ({methods}); pass --method"
+                ))
+                .arg(raw_params_arg())
+                .arg(
+                    clap::Arg::new("method")
+                        .long("method")
+                        .required(true)
+                        .help(format!("HTTP method to dispatch (one of: {methods})")),
+                )
+        }
+    }
+}
+
+/// Builds a clap subcommand from a single resolved [`InteractionDescriptor`],
+/// optionally adding a non-required `--method` arg (multi-method IDs need
+/// clap to accept the already-pre-resolved `--method` token).
+fn build_subcommand_for_descriptor(
+    interaction_id: &str,
+    interaction: &InteractionDescriptor,
+    with_method_arg: bool,
+) -> clap::Command {
+    let render_mode = render_mode_for_interaction(interaction);
+    let mut subcmd = clap::Command::new(interaction_id.to_string())
+        .about(render_mode_about(&render_mode))
+        .arg(raw_params_arg());
+
+    if with_method_arg {
+        subcmd = subcmd.arg(
+            clap::Arg::new("method")
+                .long("method")
+                .help("HTTP method for this interaction (already resolved)"),
+        );
+    }
+
+    match &render_mode {
+        InteractionRenderMode::Typed { fields, .. } => {
+            for field in fields {
+                subcmd = subcmd.arg(build_field_arg(field));
+            }
+        }
+        InteractionRenderMode::DeclaredParams { params, .. } => {
+            for field in params {
+                subcmd = subcmd.arg(build_param_arg(field));
+            }
+        }
+        InteractionRenderMode::RawOnly { .. } => {}
+    }
+
+    subcmd
 }
 
 fn render_mode_about(render_mode: &InteractionRenderMode<'_>) -> String {
@@ -1115,7 +1354,7 @@ mod tests {
             data_sources: vec![],
         };
 
-        let cmd = build_surface_command(&surface);
+        let cmd = build_surface_command(&surface, None);
         let subcmd = cmd
             .get_subcommands()
             .find(|candidate| candidate.get_name() == "surface.sample.submit")
@@ -1176,5 +1415,221 @@ mod tests {
         interaction.http_method = InteractionHttpMethod::Put;
 
         assert_eq!(dispatch_verb_for(&interaction), DispatchVerb::Put);
+    }
+
+    /// Factored from the descriptor literal above; shared by the
+    /// method-disambiguation fixtures below.
+    fn sample_surface_descriptor() -> uptrakit_wire::surfaces::SurfaceDescriptor {
+        uptrakit_wire::surfaces::SurfaceDescriptor::builder()
+            .surface_id("surface.sample".parse().unwrap())
+            .label("Sample surface")
+            .priority(200)
+            .slot(uptrakit_wire::surfaces::SLOT_SETTINGS_TABS)
+            .scope(uptrakit_wire::surfaces::Scope::Tenant)
+            .targeting(Targeting::Universal)
+            .provider_kind(uptrakit_wire::surfaces::ProviderKind::Plugin)
+            .required_capabilities(uptrakit_wire::surfaces::CapabilitySet::default())
+            .root_node(uptrakit_wire::surfaces::SurfaceNode::section(
+                Some("Sample surface".to_string()),
+                vec![],
+            ))
+            .build()
+    }
+
+    fn sample_surface(interactions: Vec<InteractionDescriptor>) -> SurfaceReadResponse {
+        SurfaceReadResponse {
+            descriptor: sample_surface_descriptor(),
+            interactions,
+            data_sources: vec![],
+        }
+    }
+
+    /// A `channels`-shaped fixture: GET `DataLoad` + POST `FormSubmit` (with
+    /// a required `name` field) + PUT `MutationAction` + DELETE
+    /// `MutationAction`, all sharing `interaction_id: "channels"` -- the
+    /// first real multi-method interaction (Task 2).
+    fn build_channels_surface() -> SurfaceReadResponse {
+        let get_descriptor = InteractionDescriptor::new(
+            "channels".parse().unwrap(),
+            InteractionKind::DataLoad,
+            "List channels",
+            InteractionTransport::ControllerLocal,
+        );
+
+        let mut post_descriptor = InteractionDescriptor::new(
+            "channels".parse().unwrap(),
+            InteractionKind::FormSubmit,
+            "Create channel",
+            InteractionTransport::ControllerLocal,
+        );
+        post_descriptor.form_ui = Some(uptrakit_wire::surfaces::FormUiDescriptor {
+            fields: vec![FormFieldDescriptor {
+                key: "name".to_string(),
+                label: "Name".to_string(),
+                field_type: "text".to_string(),
+                required: true,
+                placeholder: None,
+                help_text: None,
+                default_value: None,
+                options: vec![],
+                select_source: None,
+                sensitive: false,
+                list: false,
+                visible_when: None,
+            }],
+            pre_load_interaction_id: None,
+        });
+
+        let put_descriptor = InteractionDescriptor::new(
+            "channels".parse().unwrap(),
+            InteractionKind::MutationAction,
+            "Update channel",
+            InteractionTransport::ControllerLocal,
+        )
+        .with_http_method(InteractionHttpMethod::Put);
+
+        let delete_descriptor = InteractionDescriptor::new(
+            "channels".parse().unwrap(),
+            InteractionKind::MutationAction,
+            "Delete channel",
+            InteractionTransport::ControllerLocal,
+        )
+        .with_http_method(InteractionHttpMethod::Delete);
+
+        sample_surface(vec![
+            get_descriptor,
+            post_descriptor,
+            put_descriptor,
+            delete_descriptor,
+        ])
+    }
+
+    #[test]
+    fn select_interaction_multi_method_resolves_by_explicit_method() {
+        let get = InteractionDescriptor::new(
+            "widget".parse().unwrap(),
+            InteractionKind::DataLoad,
+            "Get widget",
+            InteractionTransport::ControllerLocal,
+        );
+        let put = InteractionDescriptor::new(
+            "widget".parse().unwrap(),
+            InteractionKind::MutationAction,
+            "Update widget",
+            InteractionTransport::ControllerLocal,
+        )
+        .with_http_method(InteractionHttpMethod::Put);
+
+        let surface = sample_surface(vec![get, put]);
+
+        let resolved = select_interaction(&surface, "widget", Some(InteractionHttpMethod::Put))
+            .expect("Some(Put) should resolve the PUT descriptor");
+
+        assert_eq!(resolved.effective_http_method(), InteractionHttpMethod::Put);
+    }
+
+    #[test]
+    fn select_interaction_multi_method_without_method_lists_choices() {
+        let get = InteractionDescriptor::new(
+            "widget".parse().unwrap(),
+            InteractionKind::DataLoad,
+            "Get widget",
+            InteractionTransport::ControllerLocal,
+        );
+        let put = InteractionDescriptor::new(
+            "widget".parse().unwrap(),
+            InteractionKind::MutationAction,
+            "Update widget",
+            InteractionTransport::ControllerLocal,
+        )
+        .with_http_method(InteractionHttpMethod::Put);
+
+        let surface = sample_surface(vec![get, put]);
+
+        let err = select_interaction(&surface, "widget", None)
+            .expect_err("None must fail when the ID is registered under multiple methods");
+
+        match err.current_context() {
+            crate::error::CliError::Other(message) => {
+                assert!(
+                    message.contains("multiple methods"),
+                    "unexpected message: {message}"
+                );
+                assert!(message.contains("get"), "unexpected message: {message}");
+                assert!(message.contains("put"), "unexpected message: {message}");
+            }
+            other => panic!("unexpected error variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn select_interaction_single_method_ignores_missing_method() {
+        let get = InteractionDescriptor::new(
+            "widget".parse().unwrap(),
+            InteractionKind::DataLoad,
+            "Get widget",
+            InteractionTransport::ControllerLocal,
+        );
+        let surface = sample_surface(vec![get]);
+
+        // Regression guard: today's UX for single-method IDs is unaffected
+        // by the new disambiguation -- `None` still resolves.
+        let resolved = select_interaction(&surface, "widget", None)
+            .expect("single-method ID resolves regardless of --method");
+        assert_eq!(resolved.interaction_id.as_str(), "widget");
+    }
+
+    #[test]
+    fn multi_method_channels_get_reaches_dataload_descriptor_without_post_fields() {
+        let surface = build_channels_surface();
+        let method = InteractionHttpMethod::Get;
+        let cmd = build_surface_command(&surface, Some(("channels", &method)));
+
+        let matches = cmd
+            .try_get_matches_from(["surfaces", "channels", "--method", "get"])
+            .expect("GET variant must parse without POST's required `name` field");
+
+        let (interaction_id, interaction_matches) =
+            matches.subcommand().expect("subcommand present");
+        assert_eq!(interaction_id, "channels");
+
+        let selected_method = parse_http_method(
+            interaction_matches
+                .try_get_one::<String>("method")
+                .ok()
+                .flatten()
+                .map(String::as_str),
+        )
+        .expect("valid --method value");
+
+        let resolved = select_interaction(&surface, interaction_id, selected_method)
+            .expect("resolves to the GET descriptor");
+        assert_eq!(resolved.kind, InteractionKind::DataLoad);
+    }
+
+    #[test]
+    fn multi_method_channels_without_method_flag_requires_method() {
+        let surface = build_channels_surface();
+        let cmd = build_surface_command(&surface, None);
+
+        let result = cmd.try_get_matches_from(["surfaces", "channels"]);
+        assert!(
+            result.is_err(),
+            "multi-method ID without --method must fail to parse, not silently pick one"
+        );
+    }
+
+    #[test]
+    fn build_surface_command_has_no_duplicate_subcommand_names() {
+        let surface = build_channels_surface();
+        let cmd = build_surface_command(&surface, None);
+
+        let names: Vec<&str> = cmd.get_subcommands().map(clap::Command::get_name).collect();
+        let unique: HashSet<&str> = names.iter().copied().collect();
+        assert_eq!(
+            names.len(),
+            unique.len(),
+            "duplicate subcommand names: {names:?}"
+        );
     }
 }
