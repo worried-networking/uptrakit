@@ -6,7 +6,8 @@ import type { InteractionDescriptor } from '$lib/surfaces/contract';
 
 vi.mock('$lib/api', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/api')>()),
-	invokeSurfaceInteraction: vi.fn()
+	invokeSurfaceInteraction: vi.fn(),
+	readSurfaceInteraction: vi.fn()
 }));
 
 vi.mock('$lib/notifications.svelte', () => ({
@@ -14,7 +15,8 @@ vi.mock('$lib/notifications.svelte', () => ({
 	showSuccess: vi.fn()
 }));
 
-vi.mock('$lib/surfaces/interactions', () => ({
+vi.mock('$lib/surfaces/interactions', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/surfaces/interactions')>()),
 	buildSurfaceInteractionRequest: vi.fn(async (_interaction, params, options) => ({
 		params,
 		target_provider_id: options.targetProviderId,
@@ -22,11 +24,12 @@ vi.mock('$lib/surfaces/interactions', () => ({
 	}))
 }));
 
-import { invokeSurfaceInteraction } from '$lib/api';
+import { invokeSurfaceInteraction, readSurfaceInteraction } from '$lib/api';
 
 describe('SurfaceForm', () => {
 	beforeEach(() => {
 		vi.mocked(invokeSurfaceInteraction).mockReset();
+		vi.mocked(readSurfaceInteraction).mockReset();
 	});
 
 	afterEach(() => {
@@ -35,14 +38,16 @@ describe('SurfaceForm', () => {
 	});
 
 	it('renders schema fields and preloads values for form-backed surface interactions', async () => {
-		vi.mocked(invokeSurfaceInteraction)
-			.mockResolvedValueOnce({ data: { new_image_ref: 'ghcr.io/example/app:1.2.3' } } as unknown as Awaited<
-				ReturnType<typeof invokeSurfaceInteraction>
-			>)
-			.mockResolvedValueOnce({ data: {} } as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>);
+		vi.mocked(readSurfaceInteraction).mockResolvedValueOnce({
+			data: { new_image_ref: 'ghcr.io/example/app:1.2.3' }
+		} as unknown as Awaited<ReturnType<typeof readSurfaceInteraction>>);
+		vi.mocked(invokeSurfaceInteraction).mockResolvedValueOnce({ data: {} } as unknown as Awaited<
+			ReturnType<typeof invokeSurfaceInteraction>
+		>);
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'switch-tag',
 			kind: 'form_submit',
+			http_method: 'post',
 			label: 'Switch Tag',
 			transport: { mode: 'controller_local' },
 			form_ui: {
@@ -62,6 +67,7 @@ describe('SurfaceForm', () => {
 		const preLoadInteraction: InteractionDescriptor = {
 			interaction_id: 'get-current-tag',
 			kind: 'data_load',
+			http_method: 'get',
 			label: 'Get Current Tag',
 			transport: { mode: 'controller_local' }
 		};
@@ -89,16 +95,16 @@ describe('SurfaceForm', () => {
 		await fireEvent.submit(input.closest('form')!);
 
 		await waitFor(() => {
-			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenNthCalledWith(1, {
+			expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledWith({
 				path: { surface_id: 'docker.item-host-actions', interaction_id: 'get-current-tag' },
-				body: expect.objectContaining({
-					params: {
-						software_item_id: 'software-1',
-						host_id: 'host-1'
-					}
-				})
+				query: {
+					target_provider_id: undefined,
+					timeout_seconds: undefined,
+					software_item_id: 'software-1',
+					host_id: 'host-1'
+				}
 			});
-			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenNthCalledWith(2, {
+			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledWith({
 				path: { surface_id: 'docker.item-host-actions', interaction_id: 'switch-tag' },
 				body: expect.objectContaining({
 					params: {
@@ -112,16 +118,18 @@ describe('SurfaceForm', () => {
 	});
 
 	it('loads action-backed select options via surface interactions', async () => {
-		vi.mocked(invokeSurfaceInteraction)
-			.mockResolvedValueOnce({
-				data: {
-					options: [{ value: 'eu-west-1', label: 'EU West 1' }]
-				}
-			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>)
-			.mockResolvedValueOnce({ data: {} } as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>);
+		vi.mocked(readSurfaceInteraction).mockResolvedValueOnce({
+			data: {
+				options: [{ value: 'eu-west-1', label: 'EU West 1' }]
+			}
+		} as unknown as Awaited<ReturnType<typeof readSurfaceInteraction>>);
+		vi.mocked(invokeSurfaceInteraction).mockResolvedValueOnce({ data: {} } as unknown as Awaited<
+			ReturnType<typeof invokeSurfaceInteraction>
+		>);
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'switch-region',
 			kind: 'form_submit',
+			http_method: 'post',
 			label: 'Switch Region',
 			transport: { mode: 'controller_local' },
 			form_ui: {
@@ -143,12 +151,14 @@ describe('SurfaceForm', () => {
 			{
 				interaction_id: 'list-regions',
 				kind: 'data_load',
+				http_method: 'get',
 				label: 'List Regions',
 				transport: { mode: 'controller_local' }
 			},
 			{
 				interaction_id: 'switch-region',
 				kind: 'form_submit',
+				http_method: 'post',
 				label: 'Switch Region',
 				transport: { mode: 'controller_local' }
 			}
@@ -165,14 +175,14 @@ describe('SurfaceForm', () => {
 		});
 
 		await waitFor(() => {
-			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenNthCalledWith(1, {
+			expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledWith({
 				path: { surface_id: 'docker.item-host-actions', interaction_id: 'list-regions' },
-				body: expect.objectContaining({
-					params: {
-						software_item_id: 'software-1',
-						host_id: 'host-1'
-					}
-				})
+				query: {
+					target_provider_id: undefined,
+					timeout_seconds: undefined,
+					software_item_id: 'software-1',
+					host_id: 'host-1'
+				}
 			});
 		});
 		expect(await screen.findByRole('option', { name: 'EU West 1' })).toBeInTheDocument();
@@ -184,7 +194,7 @@ describe('SurfaceForm', () => {
 		await fireEvent.submit(select.closest('form')!);
 
 		await waitFor(() => {
-			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenNthCalledWith(2, {
+			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledWith({
 				path: { surface_id: 'docker.item-host-actions', interaction_id: 'switch-region' },
 				body: expect.objectContaining({
 					params: {
@@ -204,6 +214,7 @@ describe('SurfaceForm', () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'save-client',
 			kind: 'form_submit',
+			http_method: 'post',
 			label: 'Save Client',
 			transport: { mode: 'controller_local' },
 			form_ui: {
@@ -242,12 +253,13 @@ describe('SurfaceForm', () => {
 	});
 
 	it('does not send synthetic _row helper in preload requests', async () => {
-		vi.mocked(invokeSurfaceInteraction).mockResolvedValueOnce({ data: { value: 'preloaded' } } as unknown as Awaited<
-			ReturnType<typeof invokeSurfaceInteraction>
-		>);
+		vi.mocked(readSurfaceInteraction).mockResolvedValueOnce({
+			data: { value: 'preloaded' }
+		} as unknown as Awaited<ReturnType<typeof readSurfaceInteraction>>);
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'save',
 			kind: 'form_submit',
+			http_method: 'post',
 			label: 'Save',
 			transport: { mode: 'controller_local' },
 			form_ui: {
@@ -258,6 +270,7 @@ describe('SurfaceForm', () => {
 		const preLoadInteraction: InteractionDescriptor = {
 			interaction_id: 'load',
 			kind: 'data_load',
+			http_method: 'get',
 			label: 'Load',
 			transport: { mode: 'controller_local' }
 		};
@@ -273,13 +286,13 @@ describe('SurfaceForm', () => {
 		});
 
 		await waitFor(() => {
-			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenNthCalledWith(1, {
+			expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledWith({
 				path: { surface_id: 'example.surface', interaction_id: 'load' },
-				body: expect.objectContaining({
-					params: {
-						host_id: 'host-1'
-					}
-				})
+				query: {
+					target_provider_id: undefined,
+					timeout_seconds: undefined,
+					host_id: 'host-1'
+				}
 			});
 		});
 	});
@@ -291,6 +304,7 @@ describe('SurfaceForm', () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'save',
 			kind: 'form_submit',
+			http_method: 'post',
 			label: 'Save',
 			transport: { mode: 'controller_local' },
 			form_ui: {
@@ -333,6 +347,7 @@ describe('SurfaceForm', () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'provider.form.delete',
 			kind: 'mutation_action',
+			http_method: 'post',
 			label: 'Delete Provider Form',
 			transport: { mode: 'controller_local' },
 			confirmation: {
@@ -375,6 +390,7 @@ describe('SurfaceForm', () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'raw-submit',
 			kind: 'form_submit',
+			http_method: 'post',
 			label: 'Raw Submit',
 			transport: { mode: 'controller_local' },
 			form_ui: { fields: [] }
@@ -398,6 +414,7 @@ describe('SurfaceForm', () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'save-form',
 			kind: 'form_submit',
+			http_method: 'post',
 			label: 'Save Settings',
 			transport: { mode: 'controller_local' },
 			form_ui: {
@@ -419,6 +436,7 @@ describe('SurfaceForm', () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'rotate',
 			kind: 'form_submit',
+			http_method: 'post',
 			label: 'Rotate CA',
 			submit_label: 'Rotate CA',
 			transport: { mode: 'controller_local' },
@@ -448,6 +466,7 @@ describe('SurfaceForm', () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'raw-submit',
 			kind: 'form_submit',
+			http_method: 'post',
 			label: 'Raw Submit',
 			transport: { mode: 'controller_local' },
 			form_ui: { fields: [] }

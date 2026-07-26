@@ -1,10 +1,13 @@
 <script lang="ts">
 	import DataTable from '$lib/components/ui/DataTable.svelte';
 	import TableFooterBar from '$lib/components/ui/TableFooterBar.svelte';
-	import { invokeSurfaceInteraction } from '$lib/api';
-	import type { InvokeSurfaceInteractionRequest } from '$lib/api';
 	import SurfaceInteractionButton from './SurfaceInteractionButton.svelte';
-	import { buildSurfaceInteractionRequest, type SurfaceEncryptionContext } from '$lib/surfaces/interactions';
+	import {
+		buildSurfaceInteractionRequest,
+		dispatchSurfaceInteraction,
+		resolveInteraction,
+		type SurfaceEncryptionContext
+	} from '$lib/surfaces/interactions';
 	import type {
 		DataSourceDescriptor,
 		InteractionDescriptor,
@@ -52,19 +55,24 @@
 	let perPage = $derived(dataSource?.pagination?.default_page_size ?? 20);
 	let latestRequestId = 0;
 
-	const interactionMap = $derived(
-		new Map(interactions.map((interaction) => [interaction.interaction_id, interaction]))
-	);
 	const resolvedRowActions = $derived(
 		(node.row_actions ?? [])
 			.map((rowAction) => ({
 				rowAction,
-				interaction: interactionMap.get(rowAction.interaction_id)
+				interaction: resolveInteraction(interactions, rowAction.interaction_id, rowAction.http_method)
 			}))
 			.filter((candidate): candidate is { rowAction: SurfaceTableRowAction; interaction: InteractionDescriptor } =>
 				Boolean(candidate.interaction)
 			)
 	);
+
+	function rowItemId(row: Record<string, unknown>): string | undefined {
+		return typeof row.id === 'string' || typeof row.id === 'number' ? String(row.id) : undefined;
+	}
+
+	function rowActionItemId(rowAction: SurfaceTableRowAction, row: Record<string, unknown>): string | undefined {
+		return rowAction.http_method === 'put' || rowAction.http_method === 'delete' ? rowItemId(row) : undefined;
+	}
 	const hasRowActions = $derived(resolvedRowActions.length > 0);
 	const resolvedColumns = $derived<SurfaceTableColumn[]>(
 		(node.columns?.length ?? 0) > 0
@@ -171,10 +179,7 @@
 					encryption: encryptionContext
 				}
 			);
-			const { data: result } = await invokeSurfaceInteraction({
-				path: { surface_id: surfaceId, interaction_id: dataLoadInteraction.interaction_id },
-				body: request as unknown as InvokeSurfaceInteractionRequest
-			});
+			const result = await dispatchSurfaceInteraction(surfaceId, dataLoadInteraction, request);
 			const resultObj = result as Record<string, unknown>;
 			if (requestId !== latestRequestId) {
 				return;
@@ -263,7 +268,7 @@
 				{#if hasRowActions}
 					<td class="table-cell-pad whitespace-nowrap">
 						<div class="@container/buttons flex flex-nowrap items-center gap-1">
-							{#each resolvedRowActions as { rowAction, interaction } (rowAction.interaction_id)}
+							{#each resolvedRowActions as { rowAction, interaction } (`${rowAction.interaction_id}:${rowAction.http_method}`)}
 								{#if isRowActionVisible(rowAction, rowRecord)}
 									<SurfaceInteractionButton
 										{surfaceId}
@@ -273,6 +278,7 @@
 										{encryptionContext}
 										baseParams={rowParams(rowRecord)}
 										rowSeed={rowRecord}
+										itemId={rowActionItemId(rowAction, rowRecord)}
 										size="sm"
 										labelDisplay={interaction.icon ? 'icon-only' : 'always'}
 										oncomplete={async () => {
@@ -315,7 +321,7 @@
 		>
 			{#snippet rowActions(row)}
 				<div class="@container/buttons flex flex-nowrap items-center gap-1">
-					{#each resolvedRowActions as { rowAction, interaction } (rowAction.interaction_id)}
+					{#each resolvedRowActions as { rowAction, interaction } (`${rowAction.interaction_id}:${rowAction.http_method}`)}
 						{#if isRowActionVisible(rowAction, row)}
 							<SurfaceInteractionButton
 								{surfaceId}
@@ -325,6 +331,7 @@
 								{encryptionContext}
 								baseParams={rowParams(row)}
 								rowSeed={row}
+								itemId={rowActionItemId(rowAction, row)}
 								size="sm"
 								labelDisplay={interaction.icon ? 'icon-only' : 'always'}
 								oncomplete={async () => {

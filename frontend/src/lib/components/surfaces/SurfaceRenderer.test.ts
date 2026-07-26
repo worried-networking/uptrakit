@@ -46,6 +46,7 @@ describe('SurfaceRenderer', () => {
 				kind: 'form_submit',
 				label: 'Submit form',
 				transport: { mode: 'provider_proxied' },
+				http_method: 'post',
 				sensitive_fields: ['password']
 			}
 		];
@@ -156,7 +157,8 @@ describe('SurfaceRenderer', () => {
 			interaction_id: 'provider.action.open',
 			kind: 'mutation_action',
 			label: 'Open modal',
-			transport: { mode: 'controller_local' }
+			transport: { mode: 'controller_local' },
+			http_method: 'post'
 		};
 
 		render(SurfaceRenderer, {
@@ -188,7 +190,8 @@ describe('SurfaceRenderer', () => {
 			interaction_id: 'provider.action.open',
 			kind: 'mutation_action',
 			label: 'Open modal',
-			transport: { mode: 'controller_local' }
+			transport: { mode: 'controller_local' },
+			http_method: 'post'
 		};
 
 		render(SurfaceRenderer, {
@@ -237,7 +240,8 @@ describe('SurfaceRenderer', () => {
 				interaction_id: 'create-item',
 				kind: 'mutation_action',
 				label: 'Create Item',
-				transport: { mode: 'controller_local' }
+				transport: { mode: 'controller_local' },
+				http_method: 'post'
 			}
 		];
 		const { container } = render(SurfaceRenderer, {

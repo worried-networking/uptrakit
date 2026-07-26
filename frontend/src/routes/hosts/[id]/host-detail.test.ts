@@ -12,6 +12,7 @@ vi.mock('$lib/api', async (importOriginal) => ({
 	deactivateHost: vi.fn(),
 	discoverHost: vi.fn(),
 	invokeSurfaceInteraction: vi.fn(),
+	readSurfaceInteraction: vi.fn(),
 	listPluginTypes: vi.fn(),
 	listHostDiscoveryAllowlist: vi.fn(),
 	addHostDiscoveryAllowlistEntry: vi.fn(),
@@ -520,7 +521,8 @@ describe('Host Detail Page', () => {
 					interaction_id: 'proxmox.host-info.load',
 					kind: 'data_load',
 					label: 'Load Proxmox Host Info',
-					transport: { mode: 'controller_local' }
+					transport: { mode: 'controller_local' },
+					http_method: 'get'
 				}
 			],
 			data_sources: [
@@ -538,7 +540,7 @@ describe('Host Detail Page', () => {
 		vi.mocked(surfaceRegistry.getSurfaceReadModel).mockImplementation((surfaceId: string) =>
 			surfaceId === surface.surface_id ? read : undefined
 		);
-		vi.mocked(api.invokeSurfaceInteraction).mockRejectedValue(new Error('boom'));
+		vi.mocked(api.readSurfaceInteraction).mockRejectedValue(new Error('boom'));
 
 		render(HostDetailPage);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Production Server' })).toBeInTheDocument());

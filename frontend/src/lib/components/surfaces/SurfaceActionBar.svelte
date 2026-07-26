@@ -2,8 +2,13 @@
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import SurfaceInteractionButton from './SurfaceInteractionButton.svelte';
-	import type { SurfaceEncryptionContext } from '$lib/surfaces/interactions';
-	import type { InteractionDescriptor, InteractionId } from '$lib/surfaces/contract';
+	import {
+		actionRefId,
+		actionRefMethod,
+		resolveInteraction,
+		type SurfaceEncryptionContext
+	} from '$lib/surfaces/interactions';
+	import type { ActionRef, InteractionDescriptor } from '$lib/surfaces/contract';
 
 	let {
 		surfaceId,
@@ -16,7 +21,7 @@
 		requiredForInteractionIds = []
 	}: {
 		surfaceId: string;
-		actionIds?: InteractionId[];
+		actionIds?: ActionRef[];
 		interactions?: InteractionDescriptor[];
 		targetProviderId?: string;
 		encryptionContext?: SurfaceEncryptionContext;
@@ -25,12 +30,9 @@
 		requiredForInteractionIds?: string[];
 	} = $props();
 
-	const interactionMap = $derived(
-		new Map(interactions.map((interaction) => [interaction.interaction_id, interaction]))
-	);
 	const resolvedActions = $derived(
 		actionIds
-			.map((actionId) => interactionMap.get(actionId))
+			.map((ref) => resolveInteraction(interactions, actionRefId(ref), actionRefMethod(ref)))
 			.filter((interaction): interaction is InteractionDescriptor => Boolean(interaction))
 	);
 
@@ -55,7 +57,7 @@
 	<Callout tone="warning" title="Action unavailable" message="This action is not available right now." />
 {:else}
 	<div class="@container/buttons flex flex-wrap justify-end gap-2" data-ui="surface-action-bar">
-		{#each resolvedActions as interaction (interaction.interaction_id)}
+		{#each resolvedActions as interaction, idx (`${interaction.interaction_id}:${interaction.http_method}:${idx}`)}
 			<SurfaceInteractionButton
 				{surfaceId}
 				{interaction}

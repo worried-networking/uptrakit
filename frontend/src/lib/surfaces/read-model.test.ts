@@ -83,7 +83,8 @@ function makeProviderQueryRead(options: {
 						interaction_id: 'get-info',
 						kind: 'data_load',
 						label: 'Get Info',
-						transport: { mode: 'controller_local' }
+						transport: { mode: 'controller_local' },
+						http_method: 'get'
 					}
 				]
 			: [],

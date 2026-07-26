@@ -41,6 +41,7 @@ describe('SurfaceWorkflow', () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'bootstrap',
 			kind: 'workflow',
+			http_method: 'post',
 			label: 'Bootstrap Host',
 			transport: { mode: 'provider_proxied' },
 			workflow_steps: [
@@ -91,6 +92,7 @@ describe('SurfaceWorkflow', () => {
 			{
 				interaction_id: 'bootstrap-connect',
 				kind: 'mutation_action',
+				http_method: 'post',
 				label: 'Bootstrap Connect',
 				transport: { mode: 'provider_proxied' },
 				sensitive_fields: ['auth_password']
@@ -98,6 +100,7 @@ describe('SurfaceWorkflow', () => {
 			{
 				interaction_id: 'bootstrap-execute',
 				kind: 'mutation_action',
+				http_method: 'post',
 				label: 'Bootstrap Execute',
 				transport: { mode: 'provider_proxied' },
 				sensitive_fields: ['auth_password']
@@ -178,6 +181,7 @@ describe('SurfaceWorkflow', () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'bootstrap',
 			kind: 'workflow',
+			http_method: 'post',
 			label: 'Bootstrap Host',
 			transport: { mode: 'provider_proxied' },
 			workflow_steps: [
@@ -218,12 +222,14 @@ describe('SurfaceWorkflow', () => {
 			{
 				interaction_id: 'bootstrap-connect',
 				kind: 'mutation_action',
+				http_method: 'post',
 				label: 'Bootstrap Connect',
 				transport: { mode: 'provider_proxied' }
 			},
 			{
 				interaction_id: 'bootstrap-execute',
 				kind: 'mutation_action',
+				http_method: 'post',
 				label: 'Bootstrap Execute',
 				transport: { mode: 'provider_proxied' }
 			}
@@ -267,6 +273,7 @@ describe('SurfaceWorkflow', () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'bootstrap',
 			kind: 'workflow',
+			http_method: 'post',
 			label: 'Bootstrap Host',
 			transport: { mode: 'provider_proxied' },
 			workflow_steps: [
@@ -307,12 +314,14 @@ describe('SurfaceWorkflow', () => {
 			{
 				interaction_id: 'bootstrap-connect',
 				kind: 'mutation_action',
+				http_method: 'post',
 				label: 'Bootstrap Connect',
 				transport: { mode: 'provider_proxied' }
 			},
 			{
 				interaction_id: 'bootstrap-execute',
 				kind: 'mutation_action',
+				http_method: 'post',
 				label: 'Bootstrap Execute',
 				transport: { mode: 'provider_proxied' }
 			}
@@ -350,6 +359,7 @@ describe('SurfaceWorkflow', () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'bootstrap',
 			kind: 'workflow',
+			http_method: 'post',
 			label: 'Bootstrap Host',
 			transport: { mode: 'provider_proxied' },
 			workflow_steps: [
@@ -378,12 +388,14 @@ describe('SurfaceWorkflow', () => {
 			{
 				interaction_id: 'bootstrap-connect',
 				kind: 'mutation_action',
+				http_method: 'post',
 				label: 'Bootstrap Connect',
 				transport: { mode: 'provider_proxied' }
 			},
 			{
 				interaction_id: 'bootstrap-execute',
 				kind: 'mutation_action',
+				http_method: 'post',
 				label: 'Bootstrap Execute',
 				transport: { mode: 'provider_proxied' }
 			}
@@ -436,6 +448,7 @@ describe('SurfaceWorkflow', () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'bootstrap',
 			kind: 'workflow',
+			http_method: 'post',
 			label: 'Bootstrap Host',
 			transport: { mode: 'provider_proxied' },
 			workflow_steps: [
@@ -472,12 +485,14 @@ describe('SurfaceWorkflow', () => {
 			{
 				interaction_id: 'bootstrap-connect',
 				kind: 'mutation_action',
+				http_method: 'post',
 				label: 'Bootstrap Connect',
 				transport: { mode: 'provider_proxied' }
 			},
 			{
 				interaction_id: 'bootstrap-execute',
 				kind: 'mutation_action',
+				http_method: 'post',
 				label: 'Bootstrap Execute',
 				transport: { mode: 'provider_proxied' }
 			}
@@ -509,6 +524,7 @@ describe('SurfaceWorkflow', () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'provider.workflow.bootstrap',
 			kind: 'workflow',
+			http_method: 'post',
 			label: 'Bootstrap Provider',
 			transport: { mode: 'provider_proxied' },
 			confirmation: {
@@ -530,6 +546,7 @@ describe('SurfaceWorkflow', () => {
 		const executeInteraction: InteractionDescriptor = {
 			interaction_id: 'provider.workflow.execute',
 			kind: 'mutation_action',
+			http_method: 'post',
 			label: 'Execute Provider Bootstrap',
 			transport: { mode: 'provider_proxied' }
 		};
@@ -553,6 +570,7 @@ describe('SurfaceWorkflow', () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'bootstrap',
 			kind: 'workflow',
+			http_method: 'post',
 			label: 'Bootstrap Host',
 			transport: { mode: 'provider_proxied' },
 			workflow_steps: [
@@ -581,6 +599,7 @@ describe('SurfaceWorkflow', () => {
 		const interaction = {
 			interaction_id: 'provider.workflow.invalid',
 			kind: 'workflow',
+			http_method: 'post',
 			label: undefined,
 			transport: { mode: 'provider_proxied' },
 			workflow_steps: [
@@ -607,6 +626,7 @@ describe('SurfaceWorkflow', () => {
 		const interaction = {
 			interaction_id: 'bootstrap',
 			kind: 'workflow',
+			http_method: 'post',
 			label: 'Bootstrap Host',
 			transport: { mode: 'provider_proxied' },
 			workflow_steps: [
@@ -634,6 +654,7 @@ describe('SurfaceWorkflow', () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'bootstrap',
 			kind: 'workflow',
+			http_method: 'post',
 			label: 'Bootstrap Host',
 			transport: { mode: 'provider_proxied' },
 			workflow_steps: [
@@ -665,6 +686,7 @@ describe('SurfaceWorkflow', () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'bootstrap',
 			kind: 'workflow',
+			http_method: 'post',
 			label: 'Bootstrap Host',
 			transport: { mode: 'provider_proxied' },
 			workflow_steps: []
@@ -691,6 +713,7 @@ describe('SurfaceWorkflow', () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'bootstrap',
 			kind: 'workflow',
+			http_method: 'post',
 			label: 'Bootstrap Host',
 			transport: { mode: 'provider_proxied' },
 			workflow_steps: [
@@ -723,6 +746,7 @@ describe('SurfaceWorkflow', () => {
 				{
 					interaction_id: 'bootstrap-execute',
 					kind: 'mutation_action',
+					http_method: 'post',
 					label: 'Execute',
 					transport: { mode: 'provider_proxied' }
 				}
@@ -749,6 +773,7 @@ describe('SurfaceWorkflow', () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'bootstrap',
 			kind: 'workflow',
+			http_method: 'post',
 			label: 'Bootstrap Host',
 			transport: { mode: 'provider_proxied' },
 			workflow_steps: [
@@ -777,6 +802,7 @@ describe('SurfaceWorkflow', () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'delete-workflow',
 			kind: 'workflow',
+			http_method: 'post',
 			label: 'Delete Workflow',
 			transport: { mode: 'provider_proxied' },
 			confirmation: {
@@ -812,6 +838,7 @@ describe('SurfaceWorkflow', () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'multi-step',
 			kind: 'workflow',
+			http_method: 'post',
 			label: 'Multi Step',
 			transport: { mode: 'provider_proxied' },
 			workflow_steps: [
@@ -837,6 +864,7 @@ describe('SurfaceWorkflow', () => {
 			{
 				interaction_id: 'step1-submit',
 				kind: 'mutation_action',
+				http_method: 'post',
 				label: 'Step1',
 				transport: { mode: 'provider_proxied' }
 			}
@@ -872,6 +900,7 @@ describe('SurfaceWorkflow', () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'single',
 			kind: 'workflow',
+			http_method: 'post',
 			label: 'Single Step',
 			transport: { mode: 'provider_proxied' },
 			workflow_steps: [
@@ -890,6 +919,7 @@ describe('SurfaceWorkflow', () => {
 			{
 				interaction_id: 'only-submit',
 				kind: 'mutation_action',
+				http_method: 'post',
 				label: 'Only Submit',
 				transport: { mode: 'provider_proxied' }
 			}
@@ -917,6 +947,7 @@ describe('SurfaceWorkflow', () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'long-workflow',
 			kind: 'workflow',
+			http_method: 'post',
 			label: 'Long Workflow',
 			transport: { mode: 'provider_proxied' },
 			workflow_steps: [
@@ -935,6 +966,7 @@ describe('SurfaceWorkflow', () => {
 			{
 				interaction_id: 'step-submit',
 				kind: 'mutation_action',
+				http_method: 'post',
 				label: 'Step Submit',
 				transport: { mode: 'provider_proxied' }
 			}
@@ -957,6 +989,7 @@ describe('SurfaceWorkflow', () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'wizard',
 			kind: 'workflow',
+			http_method: 'post',
 			label: 'Run Wizard',
 			transport: { mode: 'controller_local' },
 			icon: 'server-cog',
@@ -989,6 +1022,7 @@ describe('SurfaceWorkflow', () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'bootstrap',
 			kind: 'workflow',
+			http_method: 'post',
 			label: 'Bootstrap Host',
 			transport: { mode: 'provider_proxied' },
 			workflow_steps: [

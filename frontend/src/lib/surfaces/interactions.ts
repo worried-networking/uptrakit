@@ -1,5 +1,25 @@
-import { sealedBoxEncrypt } from '$lib/api';
-import type { InteractionDescriptor, InvokeSurfaceInteractionRequest, SurfaceResponse } from '$lib/surfaces/contract';
+import {
+	deleteSurfaceInteraction,
+	deleteSurfaceInteractionItem,
+	invokeSurfaceInteraction,
+	readSurfaceInteraction,
+	readSurfaceInteractionItem,
+	sealedBoxEncrypt,
+	updateSurfaceInteraction,
+	updateSurfaceInteractionItem
+} from '$lib/api';
+import type {
+	InvokeSurfaceInteractionRequest as GeneratedInvokeRequest,
+	ReadSurfaceInteractionData,
+	ReadSurfaceInteractionItemData
+} from '$lib/api';
+import type {
+	ActionRef,
+	InteractionDescriptor,
+	InteractionHttpMethod,
+	InvokeSurfaceInteractionRequest,
+	SurfaceResponse
+} from '$lib/surfaces/contract';
 
 export interface SurfaceEncryptionContext {
 	keyId: string;
@@ -95,4 +115,91 @@ export async function buildSurfaceInteractionRequest(
 	};
 
 	return request;
+}
+
+export function resolveInteraction(
+	interactions: InteractionDescriptor[],
+	interactionId: string,
+	httpMethod?: InteractionHttpMethod
+): InteractionDescriptor | undefined {
+	const candidates = interactions.filter((interaction) => interaction.interaction_id === interactionId);
+	if (httpMethod !== undefined) {
+		return candidates.find((interaction) => interaction.http_method === httpMethod);
+	}
+	if (candidates.length === 1) {
+		return candidates[0];
+	}
+	return undefined;
+}
+
+export function actionRefId(ref: ActionRef): string {
+	return typeof ref === 'string' ? ref : ref.interaction_id;
+}
+
+export function actionRefMethod(ref: ActionRef): InteractionHttpMethod | undefined {
+	return typeof ref === 'string' ? undefined : ref.http_method;
+}
+
+export async function dispatchSurfaceInteraction(
+	surfaceId: string,
+	interaction: InteractionDescriptor,
+	request: InvokeSurfaceInteractionRequest,
+	options?: { itemId?: string }
+): Promise<unknown> {
+	const path = {
+		surface_id: surfaceId,
+		interaction_id: interaction.interaction_id
+	};
+	const itemPath = options?.itemId ? { ...path, item_id: options.itemId } : undefined;
+	switch (interaction.http_method) {
+		case 'get': {
+			const query = {
+				target_provider_id: request.target_provider_id ?? undefined,
+				timeout_seconds: request.timeout_seconds ?? undefined,
+				...Object.fromEntries(
+					Object.entries((request.params as Record<string, unknown>) ?? {})
+						// Drop unset params instead of sending literal "null"/"undefined"
+						// strings — matches the old POST-body omission semantics.
+						.filter(([, value]) => value != null)
+						.map(([key, value]) => [key, String(value)])
+				)
+			};
+			// The generated query type is closed (reserved keys only); dynamic
+			// DataLoad params are string-passthrough by contract, so widen here.
+			// Sanctioned escape hatch — see frontend/AGENTS.md.
+			if (itemPath) {
+				const { data } = await readSurfaceInteractionItem({
+					path: itemPath,
+					query: query as ReadSurfaceInteractionItemData['query']
+				});
+				return data;
+			}
+			const { data } = await readSurfaceInteraction({
+				path,
+				query: query as ReadSurfaceInteractionData['query']
+			});
+			return data;
+		}
+		case 'put': {
+			const call = itemPath
+				? updateSurfaceInteractionItem({ path: itemPath, body: request as unknown as GeneratedInvokeRequest })
+				: updateSurfaceInteraction({ path, body: request as unknown as GeneratedInvokeRequest });
+			const { data } = await call;
+			return data;
+		}
+		case 'delete': {
+			const call = itemPath
+				? deleteSurfaceInteractionItem({ path: itemPath, body: request as unknown as GeneratedInvokeRequest })
+				: deleteSurfaceInteraction({ path, body: request as unknown as GeneratedInvokeRequest });
+			const { data } = await call;
+			return data;
+		}
+		default: {
+			const { data } = await invokeSurfaceInteraction({
+				path,
+				body: request as unknown as GeneratedInvokeRequest
+			});
+			return data;
+		}
+	}
 }

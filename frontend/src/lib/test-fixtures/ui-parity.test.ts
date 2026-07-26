@@ -178,6 +178,7 @@ describe('ui parity fixtures', () => {
 						{
 							interaction_id: 'table-footer.load',
 							kind: 'data_load',
+							http_method: 'get',
 							label: 'Load table footer parity data',
 							input_schema: 'object',
 							result_schema: 'object',
@@ -264,6 +265,7 @@ describe('ui parity fixtures', () => {
 						{
 							interaction_id: 'entity-link.load',
 							kind: 'data_load',
+							http_method: 'get',
 							label: 'Load entity link parity data',
 							input_schema: 'object',
 							result_schema: 'object',

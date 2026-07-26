@@ -17,7 +17,8 @@ vi.mock('$lib/api', async (importOriginal) => ({
 	getUpdateHistory: vi.fn(),
 	previewSoftwareItemMerge: vi.fn(),
 	executeSoftwareItemMerge: vi.fn(),
-	invokeSurfaceInteraction: vi.fn(() => Promise.resolve({ data: {} }))
+	invokeSurfaceInteraction: vi.fn(() => Promise.resolve({ data: {} })),
+	readSurfaceInteraction: vi.fn(() => Promise.resolve({ data: {} }))
 }));
 
 vi.mock('$lib/auth.svelte', () => ({
@@ -151,7 +152,8 @@ function makeRenderableRead(surface: SurfaceResponse, interactionId: string): Su
 				interaction_id: interactionId,
 				kind: 'data_load',
 				label: 'Load Surface Data',
-				transport: { mode: 'provider_proxied' }
+				transport: { mode: 'provider_proxied' },
+				http_method: 'get'
 			}
 		],
 		data_sources: [
@@ -215,11 +217,12 @@ describe('Software Detail shared-surface slots', () => {
 		// Click the tab — panel mounts, preload fires
 		await fireEvent.click(tabBtn);
 		await waitFor(() =>
-			expect(vi.mocked(api.invokeSurfaceInteraction)).toHaveBeenCalledWith({
+			expect(vi.mocked(api.readSurfaceInteraction)).toHaveBeenCalledWith({
 				path: { surface_id: 'software.item.tab.surface', interaction_id: 'load_software_item_tab' },
-				body: {
-					params: { software_item_id: 'software-1' },
-					target_provider_id: undefined
+				query: {
+					target_provider_id: undefined,
+					timeout_seconds: undefined,
+					software_item_id: 'software-1'
 				}
 			})
 		);
@@ -255,7 +258,7 @@ describe('Software Detail shared-surface slots', () => {
 		// DataTable renders a columnheader for Hostname in the Overview tab
 		expect(screen.getByRole('columnheader', { name: 'Hostname' })).toBeInTheDocument();
 		// Surface interaction has not been called (panel not mounted)
-		expect(vi.mocked(api.invokeSurfaceInteraction)).not.toHaveBeenCalled();
+		expect(vi.mocked(api.readSurfaceInteraction)).not.toHaveBeenCalled();
 	});
 
 	it('renders flat layout when no surfaces are registered', async () => {
@@ -317,16 +320,18 @@ describe('Software Detail shared-surface slots', () => {
 		expect(screen.getByRole('menuitem', { name: 'Configure Plugins' })).toHaveAttribute('data-ui', 'context-menu-item');
 		expect(screen.getByRole('menuitem', { name: 'Run Host Action' })).toHaveAttribute('data-ui', 'context-menu-item');
 
-		vi.mocked(api.invokeSurfaceInteraction).mockClear();
+		vi.mocked(api.readSurfaceInteraction).mockClear();
 		await fireEvent.click(screen.getByRole('menuitem', { name: 'Run Host Action' }));
 
 		await waitFor(() => expect(screen.getByRole('heading', { name: /Run Host Action/ })).toBeInTheDocument());
 		await waitFor(() =>
-			expect(vi.mocked(api.invokeSurfaceInteraction)).toHaveBeenCalledWith({
+			expect(vi.mocked(api.readSurfaceInteraction)).toHaveBeenCalledWith({
 				path: { surface_id: 'software.item.host.context.surface', interaction_id: 'load_host_context' },
-				body: {
-					params: { software_item_id: 'software-1', host_id: 'host-1' },
-					target_provider_id: undefined
+				query: {
+					target_provider_id: undefined,
+					timeout_seconds: undefined,
+					software_item_id: 'software-1',
+					host_id: 'host-1'
 				}
 			})
 		);

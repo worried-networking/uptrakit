@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import SurfaceReadPanel from './SurfaceReadPanel.svelte';
 import type { SurfaceReadResponse, SurfaceResponse } from '$lib/surfaces/contract';
-import { invokeSurfaceInteraction } from '$lib/api';
+import { readSurfaceInteraction } from '$lib/api';
 import { getSurfaceProviders } from '$lib/surfaces/registry.svelte';
 
 vi.mock('$lib/surfaces/registry.svelte', () => ({
@@ -11,7 +11,7 @@ vi.mock('$lib/surfaces/registry.svelte', () => ({
 
 vi.mock('$lib/api', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/api')>()),
-	invokeSurfaceInteraction: vi.fn(),
+	readSurfaceInteraction: vi.fn(),
 	apiGet: vi.fn(async (path: string) => {
 		const res = await fetch(path);
 		return res.json();
@@ -202,6 +202,7 @@ describe('SurfaceReadPanel', () => {
 				{
 					interaction_id: 'get-info',
 					kind: 'data_load',
+					http_method: 'get',
 					label: 'Get Info',
 					transport: { mode: 'controller_local' }
 				}
@@ -224,7 +225,7 @@ describe('SurfaceReadPanel', () => {
 
 		expect(screen.getByText('No provider connected')).toBeInTheDocument();
 		expect(screen.getByText('Connect a compatible service to use this surface.')).toBeInTheDocument();
-		expect(vi.mocked(invokeSurfaceInteraction)).not.toHaveBeenCalled();
+		expect(vi.mocked(readSurfaceInteraction)).not.toHaveBeenCalled();
 	});
 
 	it('keeps exactly one provider selector visible above loading for targeted surface.page hydration', async () => {
@@ -236,11 +237,11 @@ describe('SurfaceReadPanel', () => {
 				availability: 'available'
 			}
 		]);
-		vi.mocked(invokeSurfaceInteraction).mockImplementation(
+		vi.mocked(readSurfaceInteraction).mockImplementation(
 			() =>
 				new Promise(() => {
 					// Keep hydration in-flight to assert loading-state layout.
-				}) as unknown as ReturnType<typeof invokeSurfaceInteraction>
+				}) as unknown as ReturnType<typeof readSurfaceInteraction>
 		);
 		const surface: SurfaceResponse = {
 			...makeSurface(),
@@ -266,6 +267,7 @@ describe('SurfaceReadPanel', () => {
 				{
 					interaction_id: 'get-info',
 					kind: 'data_load',
+					http_method: 'get',
 					label: 'Get Info',
 					transport: { mode: 'controller_local' }
 				}
@@ -303,7 +305,7 @@ describe('SurfaceReadPanel', () => {
 				availability: 'available'
 			}
 		]);
-		vi.mocked(invokeSurfaceInteraction).mockRejectedValue(new Error('boom'));
+		vi.mocked(readSurfaceInteraction).mockRejectedValue(new Error('boom'));
 		const surface: SurfaceResponse = {
 			...makeSurface(),
 			targeting: 'targeted',
@@ -328,6 +330,7 @@ describe('SurfaceReadPanel', () => {
 				{
 					interaction_id: 'get-info',
 					kind: 'data_load',
+					http_method: 'get',
 					label: 'Get Info',
 					transport: { mode: 'controller_local' }
 				}
@@ -358,9 +361,9 @@ describe('SurfaceReadPanel', () => {
 	});
 
 	it('hydrates key-value provider-query data via the surface interaction endpoint', async () => {
-		vi.mocked(invokeSurfaceInteraction).mockResolvedValue({
+		vi.mocked(readSurfaceInteraction).mockResolvedValue({
 			data: { region: 'eu-west-1', node: 'pve-01' }
-		} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>);
+		} as unknown as Awaited<ReturnType<typeof readSurfaceInteraction>>);
 		const read: SurfaceReadResponse = {
 			descriptor: {
 				surface_id: 'surface.one',
@@ -380,6 +383,7 @@ describe('SurfaceReadPanel', () => {
 				{
 					interaction_id: 'get-info',
 					kind: 'data_load',
+					http_method: 'get',
 					label: 'Get Info',
 					transport: { mode: 'controller_local' }
 				}
@@ -403,16 +407,16 @@ describe('SurfaceReadPanel', () => {
 
 		await screen.findByText('region');
 		expect(screen.getByText('eu-west-1')).toBeInTheDocument();
-		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledWith({
+		expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledWith({
 			path: { surface_id: 'surface.one', interaction_id: 'get-info' },
-			body: expect.objectContaining({ params: { host_id: 'host-001' } })
+			query: expect.objectContaining({ host_id: 'host-001' })
 		});
 	});
 
 	it('does not rehydrate key-value provider-query data on rerender when base params are semantically unchanged', async () => {
-		vi.mocked(invokeSurfaceInteraction).mockResolvedValue({
+		vi.mocked(readSurfaceInteraction).mockResolvedValue({
 			data: { region: 'eu-west-1' }
-		} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>);
+		} as unknown as Awaited<ReturnType<typeof readSurfaceInteraction>>);
 		const read: SurfaceReadResponse = {
 			descriptor: {
 				surface_id: 'surface.one',
@@ -432,6 +436,7 @@ describe('SurfaceReadPanel', () => {
 				{
 					interaction_id: 'get-info',
 					kind: 'data_load',
+					http_method: 'get',
 					label: 'Get Info',
 					transport: { mode: 'controller_local' }
 				}
@@ -453,7 +458,7 @@ describe('SurfaceReadPanel', () => {
 			reloadToken: 0
 		});
 		await screen.findByText('region');
-		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledTimes(1);
+		expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledTimes(1);
 
 		await view.rerender({
 			surface: makeSurface(),
@@ -463,13 +468,13 @@ describe('SurfaceReadPanel', () => {
 		});
 		await screen.findByText('region');
 
-		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledTimes(1);
+		expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledTimes(1);
 	});
 
 	it('keeps base params stable when undefined keys are present', async () => {
-		vi.mocked(invokeSurfaceInteraction).mockResolvedValueOnce({
+		vi.mocked(readSurfaceInteraction).mockResolvedValueOnce({
 			data: { region: 'eu-west-1' }
-		} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>);
+		} as unknown as Awaited<ReturnType<typeof readSurfaceInteraction>>);
 		const read: SurfaceReadResponse = {
 			descriptor: {
 				surface_id: 'surface.one',
@@ -489,6 +494,7 @@ describe('SurfaceReadPanel', () => {
 				{
 					interaction_id: 'get-info',
 					kind: 'data_load',
+					http_method: 'get',
 					label: 'Get Info',
 					transport: { mode: 'controller_local' }
 				}
@@ -510,11 +516,11 @@ describe('SurfaceReadPanel', () => {
 			reloadToken: 0
 		});
 		await screen.findByText('region');
-		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledWith({
+		expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledWith({
 			path: { surface_id: 'surface.one', interaction_id: 'get-info' },
-			body: expect.objectContaining({ params: { host_id: 'host-001' } })
+			query: expect.objectContaining({ host_id: 'host-001' })
 		});
-		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledTimes(1);
+		expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledTimes(1);
 
 		await view.rerender({
 			surface: makeSurface(),
@@ -523,11 +529,11 @@ describe('SurfaceReadPanel', () => {
 			reloadToken: 0
 		});
 		await screen.findByText('region');
-		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledTimes(1);
+		expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledTimes(1);
 	});
 
 	it('shows an explicit error state when provider-query hydration fails', async () => {
-		vi.mocked(invokeSurfaceInteraction).mockRejectedValue(new Error('boom'));
+		vi.mocked(readSurfaceInteraction).mockRejectedValue(new Error('boom'));
 		const read: SurfaceReadResponse = {
 			descriptor: {
 				surface_id: 'surface.one',
@@ -547,6 +553,7 @@ describe('SurfaceReadPanel', () => {
 				{
 					interaction_id: 'get-info',
 					kind: 'data_load',
+					http_method: 'get',
 					label: 'Get Info',
 					transport: { mode: 'controller_local' }
 				}
@@ -575,11 +582,11 @@ describe('SurfaceReadPanel', () => {
 	});
 
 	it('retries hydration from the in-UI retry action after failure', async () => {
-		vi.mocked(invokeSurfaceInteraction)
+		vi.mocked(readSurfaceInteraction)
 			.mockRejectedValueOnce(new Error('boom'))
 			.mockResolvedValueOnce({
 				data: { region: 'eu-west-1' }
-			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>);
+			} as unknown as Awaited<ReturnType<typeof readSurfaceInteraction>>);
 		const read: SurfaceReadResponse = {
 			descriptor: {
 				surface_id: 'surface.one',
@@ -599,6 +606,7 @@ describe('SurfaceReadPanel', () => {
 				{
 					interaction_id: 'get-info',
 					kind: 'data_load',
+					http_method: 'get',
 					label: 'Get Info',
 					transport: { mode: 'controller_local' }
 				}
@@ -621,24 +629,24 @@ describe('SurfaceReadPanel', () => {
 		});
 
 		expect(await screen.findByText('Failed to load surface data. Please try again.')).toBeInTheDocument();
-		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledTimes(1);
+		expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledTimes(1);
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
 
 		expect(await screen.findByText('region')).toBeInTheDocument();
 		expect(screen.getByText('eu-west-1')).toBeInTheDocument();
-		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledTimes(2);
+		expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledTimes(2);
 	});
 
 	it('retries hydration on same-key rerender after failure', async () => {
-		vi.mocked(invokeSurfaceInteraction)
+		vi.mocked(readSurfaceInteraction)
 			.mockRejectedValueOnce(new Error('boom'))
 			.mockResolvedValueOnce({
 				data: { region: 'eu-west-1' }
-			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>)
+			} as unknown as Awaited<ReturnType<typeof readSurfaceInteraction>>)
 			.mockResolvedValueOnce({
 				data: { region: 'eu-west-2' }
-			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>);
+			} as unknown as Awaited<ReturnType<typeof readSurfaceInteraction>>);
 		const read: SurfaceReadResponse = {
 			descriptor: {
 				surface_id: 'surface.one',
@@ -658,6 +666,7 @@ describe('SurfaceReadPanel', () => {
 				{
 					interaction_id: 'get-info',
 					kind: 'data_load',
+					http_method: 'get',
 					label: 'Get Info',
 					transport: { mode: 'controller_local' }
 				}
@@ -679,7 +688,7 @@ describe('SurfaceReadPanel', () => {
 			reloadToken: 0
 		});
 		expect(await screen.findByText('Failed to load surface data. Please try again.')).toBeInTheDocument();
-		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledTimes(1);
+		expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledTimes(1);
 
 		await view.rerender({
 			surface: makeSurface(),
@@ -689,7 +698,7 @@ describe('SurfaceReadPanel', () => {
 		});
 		await screen.findByText('region');
 
-		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledTimes(2);
+		expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledTimes(2);
 		expect(screen.getByText('eu-west-1')).toBeInTheDocument();
 
 		await view.rerender({
@@ -699,7 +708,7 @@ describe('SurfaceReadPanel', () => {
 			reloadToken: 0
 		});
 		await screen.findByText('region');
-		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledTimes(2);
+		expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledTimes(2);
 
 		await view.rerender({
 			surface: makeSurface(),
@@ -708,16 +717,16 @@ describe('SurfaceReadPanel', () => {
 			reloadToken: 1
 		});
 		await screen.findByText('eu-west-2');
-		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledTimes(3);
+		expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledTimes(3);
 	});
 
 	it('keeps in-flight hydration active across same-key rerender and applies the result', async () => {
-		let resolveHydration: ((value: Awaited<ReturnType<typeof invokeSurfaceInteraction>>) => void) | undefined;
-		vi.mocked(invokeSurfaceInteraction).mockImplementation(
+		let resolveHydration: ((value: Awaited<ReturnType<typeof readSurfaceInteraction>>) => void) | undefined;
+		vi.mocked(readSurfaceInteraction).mockImplementation(
 			() =>
 				new Promise((resolve) => {
 					resolveHydration = resolve;
-				}) as unknown as ReturnType<typeof invokeSurfaceInteraction>
+				}) as unknown as ReturnType<typeof readSurfaceInteraction>
 		);
 		const read: SurfaceReadResponse = {
 			descriptor: {
@@ -738,6 +747,7 @@ describe('SurfaceReadPanel', () => {
 				{
 					interaction_id: 'get-info',
 					kind: 'data_load',
+					http_method: 'get',
 					label: 'Get Info',
 					transport: { mode: 'controller_local' }
 				}
@@ -772,10 +782,10 @@ describe('SurfaceReadPanel', () => {
 			reloadToken: 0
 		});
 
-		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledTimes(1);
+		expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledTimes(1);
 		if (resolveHydration) {
 			resolveHydration({ data: { region: 'eu-west-1' } } as unknown as Awaited<
-				ReturnType<typeof invokeSurfaceInteraction>
+				ReturnType<typeof readSurfaceInteraction>
 			>);
 		}
 
@@ -784,10 +794,10 @@ describe('SurfaceReadPanel', () => {
 	});
 
 	it('restores cached successful hydration when returning to a completed fingerprint', async () => {
-		vi.mocked(invokeSurfaceInteraction)
+		vi.mocked(readSurfaceInteraction)
 			.mockResolvedValueOnce({
 				data: { region: 'host-001' }
-			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>)
+			} as unknown as Awaited<ReturnType<typeof readSurfaceInteraction>>)
 			.mockRejectedValueOnce(new Error('boom'));
 		const read: SurfaceReadResponse = {
 			descriptor: {
@@ -808,6 +818,7 @@ describe('SurfaceReadPanel', () => {
 				{
 					interaction_id: 'get-info',
 					kind: 'data_load',
+					http_method: 'get',
 					label: 'Get Info',
 					transport: { mode: 'controller_local' }
 				}
@@ -829,7 +840,7 @@ describe('SurfaceReadPanel', () => {
 			reloadToken: 0
 		});
 		await screen.findByText('host-001');
-		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledTimes(1);
+		expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledTimes(1);
 
 		await view.rerender({
 			surface: makeSurface(),
@@ -838,7 +849,7 @@ describe('SurfaceReadPanel', () => {
 			reloadToken: 0
 		});
 		expect(await screen.findByText('Failed to load surface data. Please try again.')).toBeInTheDocument();
-		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledTimes(2);
+		expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledTimes(2);
 
 		await view.rerender({
 			surface: makeSurface(),
@@ -848,11 +859,11 @@ describe('SurfaceReadPanel', () => {
 		});
 		expect(await screen.findByText('host-001')).toBeInTheDocument();
 		expect(screen.queryByText('Failed to load surface data. Please try again.')).not.toBeInTheDocument();
-		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledTimes(2);
+		expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledTimes(2);
 	});
 
 	it('retry button uses danger variant — h-[19px] and no raw class string', async () => {
-		vi.mocked(invokeSurfaceInteraction).mockRejectedValue(new Error('boom'));
+		vi.mocked(readSurfaceInteraction).mockRejectedValue(new Error('boom'));
 		const read: SurfaceReadResponse = {
 			descriptor: {
 				surface_id: 'surface.one',
@@ -866,7 +877,13 @@ describe('SurfaceReadPanel', () => {
 				root_node: { kind: 'key_value', data_source_id: 'data.remote' }
 			},
 			interactions: [
-				{ interaction_id: 'get-info', kind: 'data_load', label: 'Get Info', transport: { mode: 'controller_local' } }
+				{
+					interaction_id: 'get-info',
+					kind: 'data_load',
+					http_method: 'get',
+					label: 'Get Info',
+					transport: { mode: 'controller_local' }
+				}
 			],
 			data_sources: [
 				{
@@ -890,7 +907,7 @@ describe('SurfaceReadPanel', () => {
 	});
 
 	it('no raw preset-filled-* or preset-tonal-* on retry buttons', async () => {
-		vi.mocked(invokeSurfaceInteraction).mockRejectedValue(new Error('boom'));
+		vi.mocked(readSurfaceInteraction).mockRejectedValue(new Error('boom'));
 		const read: SurfaceReadResponse = {
 			descriptor: {
 				surface_id: 'surface.one',
@@ -904,7 +921,13 @@ describe('SurfaceReadPanel', () => {
 				root_node: { kind: 'key_value', data_source_id: 'data.remote' }
 			},
 			interactions: [
-				{ interaction_id: 'get-info', kind: 'data_load', label: 'Get Info', transport: { mode: 'controller_local' } }
+				{
+					interaction_id: 'get-info',
+					kind: 'data_load',
+					http_method: 'get',
+					label: 'Get Info',
+					transport: { mode: 'controller_local' }
+				}
 			],
 			data_sources: [
 				{
@@ -999,8 +1022,8 @@ describe('SurfaceReadPanel', () => {
 				json: async () => [{ id: 'cfg-1', name: 'Cluster 1' }]
 			} as Response);
 
-			vi.mocked(invokeSurfaceInteraction).mockResolvedValue({ data: {} } as unknown as Awaited<
-				ReturnType<typeof invokeSurfaceInteraction>
+			vi.mocked(readSurfaceInteraction).mockResolvedValue({ data: {} } as unknown as Awaited<
+				ReturnType<typeof readSurfaceInteraction>
 			>);
 
 			const read = makeReadWithContextSelector();
@@ -1016,6 +1039,7 @@ describe('SurfaceReadPanel', () => {
 				{
 					interaction_id: 'list',
 					kind: 'data_load',
+					http_method: 'get',
 					label: 'List',
 					transport: { mode: 'controller_local' }
 				}
@@ -1036,9 +1060,9 @@ describe('SurfaceReadPanel', () => {
 			await fireEvent.change(select, { target: { value: 'cfg-1' } });
 
 			await waitFor(() => {
-				const calls = vi.mocked(invokeSurfaceInteraction).mock.calls;
+				const calls = vi.mocked(readSurfaceInteraction).mock.calls;
 				const lastCall = calls[calls.length - 1];
-				expect(lastCall[0].body.params).toMatchObject({ plugin_config_id: 'cfg-1' });
+				expect(lastCall[0].query).toMatchObject({ plugin_config_id: 'cfg-1' });
 			});
 		});
 

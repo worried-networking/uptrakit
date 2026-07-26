@@ -35,6 +35,7 @@ describe('SurfaceActionBar', () => {
 			kind: 'form_submit',
 			label: 'Create Channel',
 			transport: { mode: 'controller_local' },
+			http_method: 'post',
 			form_ui: {
 				fields: [
 					{
@@ -84,7 +85,8 @@ describe('SurfaceActionBar', () => {
 			interaction_id: 'delete',
 			kind: 'mutation_action',
 			label: 'Delete',
-			transport: { mode: 'controller_local' }
+			transport: { mode: 'controller_local' },
+			http_method: 'post'
 		};
 
 		const { container } = render(SurfaceActionBar, {
@@ -106,13 +108,15 @@ describe('SurfaceActionBar', () => {
 			interaction_id: 'discover',
 			kind: 'mutation_action',
 			label: 'Discover',
-			transport: { mode: 'controller_local' }
+			transport: { mode: 'controller_local' },
+			http_method: 'post'
 		};
 		const testInteraction: InteractionDescriptor = {
 			interaction_id: 'test-connection',
 			kind: 'mutation_action',
 			label: 'Test Connection',
-			transport: { mode: 'controller_local' }
+			transport: { mode: 'controller_local' },
+			http_method: 'post'
 		};
 
 		render(SurfaceActionBar, {
@@ -136,7 +140,8 @@ describe('SurfaceActionBar', () => {
 			kind: 'mutation_action',
 			label: 'Sync',
 			transport: { mode: 'controller_local' },
-			icon: 'refresh-cw'
+			icon: 'refresh-cw',
+			http_method: 'post'
 		};
 
 		const { container } = render(SurfaceActionBar, {
@@ -156,7 +161,8 @@ describe('SurfaceActionBar', () => {
 			kind: 'mutation_action',
 			label: 'Sync',
 			transport: { mode: 'controller_local' },
-			icon: 'refresh-cw'
+			icon: 'refresh-cw',
+			http_method: 'post'
 		};
 
 		const { container } = render(SurfaceActionBar, {
@@ -173,7 +179,8 @@ describe('SurfaceActionBar', () => {
 			interaction_id: 'sync',
 			kind: 'mutation_action',
 			label: 'Sync',
-			transport: { mode: 'controller_local' }
+			transport: { mode: 'controller_local' },
+			http_method: 'post'
 		};
 
 		const { container } = render(SurfaceActionBar, {

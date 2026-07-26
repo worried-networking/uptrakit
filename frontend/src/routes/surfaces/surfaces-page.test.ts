@@ -54,7 +54,8 @@ vi.mock('$lib/surfaces/registry.svelte', () => ({
 
 vi.mock('$lib/api', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/api')>()),
-	invokeSurfaceInteraction: vi.fn()
+	invokeSurfaceInteraction: vi.fn(),
+	readSurfaceInteraction: vi.fn()
 }));
 
 vi.mock('$app/navigation', () => ({
@@ -64,7 +65,7 @@ vi.mock('$app/navigation', () => ({
 import SurfacesPage from './[id]/+page.svelte';
 import { goto } from '$app/navigation';
 import { getUser } from '$lib/auth.svelte';
-import { invokeSurfaceInteraction } from '$lib/api';
+import { invokeSurfaceInteraction, readSurfaceInteraction } from '$lib/api';
 import {
 	getSurfaceById,
 	getSurfaceReadModel,
@@ -259,7 +260,8 @@ describe('/surfaces/[id] canonical surface page', () => {
 					interaction_id: 'surface.load',
 					kind: 'data_load',
 					label: 'Load Surface',
-					transport: { mode: 'controller_local' }
+					transport: { mode: 'controller_local' },
+					http_method: 'get'
 				}
 			],
 			data_sources: [
@@ -271,18 +273,16 @@ describe('/surfaces/[id] canonical surface page', () => {
 				}
 			]
 		});
-		vi.mocked(invokeSurfaceInteraction).mockRejectedValue(new Error('boom'));
+		vi.mocked(readSurfaceInteraction).mockRejectedValue(new Error('boom'));
 
 		render(SurfacesPage);
 
 		expect(screen.getByRole('heading', { name: 'Surface One' })).toBeInTheDocument();
 		expect(await screen.findByText('Unable to load surface data')).toBeInTheDocument();
 		expect(screen.getByText('Failed to load surface data. Please try again.')).toBeInTheDocument();
-		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledWith({
+		expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledWith({
 			path: { surface_id: 'surface.one', interaction_id: 'surface.load' },
-			body: expect.objectContaining({
-				params: {}
-			})
+			query: expect.objectContaining({})
 		});
 	});
 

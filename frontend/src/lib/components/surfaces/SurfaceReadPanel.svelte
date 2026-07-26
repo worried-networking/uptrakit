@@ -1,15 +1,24 @@
 <script lang="ts">
 	import SurfaceRenderer from './SurfaceRenderer.svelte';
-	import { apiGet, invokeSurfaceInteraction } from '$lib/api';
-	import type { InvokeSurfaceInteractionRequest } from '$lib/api';
+	import { apiGet } from '$lib/api';
 	import Button from '$lib/components/Button.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import ProviderSelector from '$lib/components/ui/ProviderSelector.svelte';
 	import { getSurfaceProviders } from '$lib/surfaces/registry.svelte';
 	import { buildStaticSurfaceData, isSurfaceReadRenderable } from '$lib/surfaces/read-model';
-	import type { SurfaceEncryptionContext } from '$lib/surfaces/interactions';
-	import type { DataSourceDescriptor, SurfaceReadResponse, SurfaceResponse } from '$lib/surfaces/contract';
+	import {
+		buildSurfaceInteractionRequest,
+		dispatchSurfaceInteraction,
+		resolveInteraction,
+		type SurfaceEncryptionContext
+	} from '$lib/surfaces/interactions';
+	import type {
+		DataSourceDescriptor,
+		InteractionDescriptor,
+		SurfaceReadResponse,
+		SurfaceResponse
+	} from '$lib/surfaces/contract';
 
 	let {
 		surface,
@@ -90,7 +99,9 @@
 		return stableStringify({
 			surface_id: descriptor.surface_id,
 			target_provider_id: targetProviderId,
-			requests: hydrationRequests.map((request) => `${request.dataSourceId}:${request.interactionId}`).sort(),
+			requests: hydrationRequests
+				.map((request) => `${request.dataSourceId}:${request.interaction.interaction_id}`)
+				.sort(),
 			base_params: baseParamsFingerprint
 		});
 	});
@@ -156,13 +167,10 @@
 			let failureMessage: string | null = null;
 			for (const request of hydrationRequests) {
 				try {
-					const { data: response } = await invokeSurfaceInteraction({
-						path: { surface_id: descriptor.surface_id, interaction_id: request.interactionId },
-						body: {
-							params: requestParams,
-							target_provider_id: targetProviderId
-						} as unknown as InvokeSurfaceInteractionRequest
+					const builtRequest = await buildSurfaceInteractionRequest(request.interaction, requestParams, {
+						targetProviderId
 					});
+					const response = await dispatchSurfaceInteraction(descriptor.surface_id, request.interaction, builtRequest);
 					loadedData[request.dataSourceId] = normalizeKeyValuePayload(response);
 				} catch (error) {
 					console.error(`Failed to hydrate data source ${request.dataSourceId}:`, error);
@@ -196,7 +204,7 @@
 
 	interface ProviderQueryHydrationRequest {
 		dataSourceId: string;
-		interactionId: string;
+		interaction: InteractionDescriptor;
 	}
 
 	function collectProviderQueryHydrationRequests(model: SurfaceReadResponse): ProviderQueryHydrationRequest[] {
@@ -209,16 +217,13 @@
 			if (!isProviderQueryDataSource(dataSource)) {
 				continue;
 			}
-			const interactionId = dataSource.kind.operation_id;
-			const interaction = model.interactions.find(
-				(candidate) => candidate.interaction_id === interactionId && candidate.kind === 'data_load'
-			);
-			if (!interaction) {
+			const interaction = resolveInteraction(model.interactions, dataSource.kind.operation_id, 'get');
+			if (!interaction || interaction.kind !== 'data_load') {
 				continue;
 			}
 			requests.push({
 				dataSourceId,
-				interactionId
+				interaction
 			});
 		}
 		return requests;

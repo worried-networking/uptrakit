@@ -6,6 +6,7 @@ import type { DataSourceDescriptor, InteractionDescriptor, SurfaceNode } from '$
 vi.mock('$lib/api', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/api')>()),
 	invokeSurfaceInteraction: vi.fn(),
+	readSurfaceInteraction: vi.fn(),
 	sealedBoxEncrypt: vi.fn()
 }));
 
@@ -14,7 +15,7 @@ vi.mock('$lib/notifications.svelte', () => ({
 	showSuccess: vi.fn()
 }));
 
-import { invokeSurfaceInteraction, sealedBoxEncrypt } from '$lib/api';
+import { invokeSurfaceInteraction, readSurfaceInteraction, sealedBoxEncrypt } from '$lib/api';
 
 function deferred<T>() {
 	let resolve!: (value: T | PromiseLike<T>) => void;
@@ -29,7 +30,7 @@ function deferred<T>() {
 describe('SurfaceTable', () => {
 	beforeEach(() => {
 		vi.mocked(sealedBoxEncrypt).mockResolvedValue('ciphertext');
-		vi.mocked(invokeSurfaceInteraction)
+		vi.mocked(readSurfaceInteraction)
 			.mockResolvedValueOnce({
 				data: {
 					items: [{ id: 'chan-1', name: 'Alpha' }],
@@ -38,8 +39,7 @@ describe('SurfaceTable', () => {
 					per_page: 20,
 					total_pages: 1
 				}
-			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>)
-			.mockResolvedValueOnce({ data: {} } as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>)
+			} as unknown as Awaited<ReturnType<typeof readSurfaceInteraction>>)
 			.mockResolvedValueOnce({
 				data: {
 					items: [{ id: 'chan-1', name: 'Alpha' }],
@@ -48,7 +48,10 @@ describe('SurfaceTable', () => {
 					per_page: 20,
 					total_pages: 1
 				}
-			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>);
+			} as unknown as Awaited<ReturnType<typeof readSurfaceInteraction>>);
+		vi.mocked(invokeSurfaceInteraction).mockResolvedValueOnce({ data: {} } as unknown as Awaited<
+			ReturnType<typeof invokeSurfaceInteraction>
+		>);
 	});
 
 	afterEach(() => {
@@ -78,13 +81,15 @@ describe('SurfaceTable', () => {
 				interaction_id: 'list',
 				kind: 'data_load',
 				label: 'List',
-				transport: { mode: 'controller_local' }
+				transport: { mode: 'controller_local' },
+				http_method: 'get'
 			},
 			{
 				interaction_id: 'delete',
 				kind: 'mutation_action',
 				label: 'Delete',
-				transport: { mode: 'controller_local' }
+				transport: { mode: 'controller_local' },
+				http_method: 'post'
 			}
 		];
 
@@ -99,23 +104,21 @@ describe('SurfaceTable', () => {
 
 		expect(await screen.findByText('Alpha')).toBeInTheDocument();
 		expect(container.querySelector('[data-ui="data-table"]')).toBeInTheDocument();
-		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenNthCalledWith(1, {
+		expect(vi.mocked(readSurfaceInteraction)).toHaveBeenNthCalledWith(1, {
 			path: { surface_id: 'notifications.email', interaction_id: 'list' },
-			body: {
-				params: {
-					channel_type: 'email',
-					page: 1,
-					per_page: 20
-				},
+			query: {
 				target_provider_id: undefined,
-				timeout_seconds: undefined
+				timeout_seconds: undefined,
+				channel_type: 'email',
+				page: '1',
+				per_page: '20'
 			}
 		});
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
 
 		await waitFor(() => {
-			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenNthCalledWith(2, {
+			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenNthCalledWith(1, {
 				path: { surface_id: 'notifications.email', interaction_id: 'delete' },
 				body: {
 					params: {
@@ -211,7 +214,7 @@ describe('SurfaceTable', () => {
 	});
 
 	it('loads exactly once when pagination changes', async () => {
-		vi.mocked(invokeSurfaceInteraction)
+		vi.mocked(readSurfaceInteraction)
 			.mockReset()
 			.mockResolvedValueOnce({
 				data: {
@@ -221,7 +224,7 @@ describe('SurfaceTable', () => {
 					per_page: 20,
 					total_pages: 2
 				}
-			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>)
+			} as unknown as Awaited<ReturnType<typeof readSurfaceInteraction>>)
 			.mockResolvedValueOnce({
 				data: {
 					items: [{ id: 'chan-2', name: 'Beta' }],
@@ -230,7 +233,7 @@ describe('SurfaceTable', () => {
 					per_page: 20,
 					total_pages: 2
 				}
-			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>);
+			} as unknown as Awaited<ReturnType<typeof readSurfaceInteraction>>);
 
 		const node: Extract<SurfaceNode, { kind: 'table' }> = {
 			kind: 'table',
@@ -253,7 +256,8 @@ describe('SurfaceTable', () => {
 				interaction_id: 'list',
 				kind: 'data_load',
 				label: 'List',
-				transport: { mode: 'controller_local' }
+				transport: { mode: 'controller_local' },
+				http_method: 'get'
 			}
 		];
 
@@ -269,22 +273,20 @@ describe('SurfaceTable', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Next' }));
 
 		expect(await screen.findByText('Beta')).toBeInTheDocument();
-		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledTimes(2);
-		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenNthCalledWith(2, {
+		expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledTimes(2);
+		expect(vi.mocked(readSurfaceInteraction)).toHaveBeenNthCalledWith(2, {
 			path: { surface_id: 'notifications.email', interaction_id: 'list' },
-			body: {
-				params: {
-					page: 2,
-					per_page: 20
-				},
+			query: {
 				target_provider_id: undefined,
-				timeout_seconds: undefined
+				timeout_seconds: undefined,
+				page: '2',
+				per_page: '20'
 			}
 		});
 	});
 
 	it('reloads the current page when the shared surface reload event fires', async () => {
-		vi.mocked(invokeSurfaceInteraction)
+		vi.mocked(readSurfaceInteraction)
 			.mockReset()
 			.mockResolvedValueOnce({
 				data: {
@@ -294,7 +296,7 @@ describe('SurfaceTable', () => {
 					per_page: 20,
 					total_pages: 1
 				}
-			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>)
+			} as unknown as Awaited<ReturnType<typeof readSurfaceInteraction>>)
 			.mockResolvedValueOnce({
 				data: {
 					items: [{ id: 'chan-1', name: 'Gamma' }],
@@ -303,7 +305,7 @@ describe('SurfaceTable', () => {
 					per_page: 20,
 					total_pages: 1
 				}
-			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>);
+			} as unknown as Awaited<ReturnType<typeof readSurfaceInteraction>>);
 
 		const node: Extract<SurfaceNode, { kind: 'table' }> = {
 			kind: 'table',
@@ -326,7 +328,8 @@ describe('SurfaceTable', () => {
 				interaction_id: 'list',
 				kind: 'data_load',
 				label: 'List',
-				transport: { mode: 'controller_local' }
+				transport: { mode: 'controller_local' },
+				http_method: 'get'
 			}
 		];
 
@@ -349,14 +352,14 @@ describe('SurfaceTable', () => {
 		);
 
 		expect(await screen.findByText('Gamma')).toBeInTheDocument();
-		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledTimes(2);
+		expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledTimes(2);
 	});
 
 	it('ignores stale provider-query responses when newer loads finish first', async () => {
-		vi.mocked(invokeSurfaceInteraction).mockReset();
-		const olderReload = deferred<Awaited<ReturnType<typeof invokeSurfaceInteraction>>>();
-		const newerReload = deferred<Awaited<ReturnType<typeof invokeSurfaceInteraction>>>();
-		vi.mocked(invokeSurfaceInteraction)
+		vi.mocked(readSurfaceInteraction).mockReset();
+		const olderReload = deferred<Awaited<ReturnType<typeof readSurfaceInteraction>>>();
+		const newerReload = deferred<Awaited<ReturnType<typeof readSurfaceInteraction>>>();
+		vi.mocked(readSurfaceInteraction)
 			.mockResolvedValueOnce({
 				data: {
 					items: [{ id: 'chan-1', name: 'Alpha' }],
@@ -365,9 +368,9 @@ describe('SurfaceTable', () => {
 					per_page: 20,
 					total_pages: 1
 				}
-			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>)
-			.mockImplementationOnce(() => olderReload.promise as unknown as ReturnType<typeof invokeSurfaceInteraction>)
-			.mockImplementationOnce(() => newerReload.promise as unknown as ReturnType<typeof invokeSurfaceInteraction>);
+			} as unknown as Awaited<ReturnType<typeof readSurfaceInteraction>>)
+			.mockImplementationOnce(() => olderReload.promise as unknown as ReturnType<typeof readSurfaceInteraction>)
+			.mockImplementationOnce(() => newerReload.promise as unknown as ReturnType<typeof readSurfaceInteraction>);
 
 		const node: Extract<SurfaceNode, { kind: 'table' }> = {
 			kind: 'table',
@@ -390,7 +393,8 @@ describe('SurfaceTable', () => {
 				interaction_id: 'list',
 				kind: 'data_load',
 				label: 'List',
-				transport: { mode: 'controller_local' }
+				transport: { mode: 'controller_local' },
+				http_method: 'get'
 			}
 		];
 
@@ -419,7 +423,7 @@ describe('SurfaceTable', () => {
 		});
 
 		await waitFor(() => {
-			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledTimes(3);
+			expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledTimes(3);
 		});
 
 		newerReload.resolve({
@@ -430,7 +434,7 @@ describe('SurfaceTable', () => {
 				per_page: 20,
 				total_pages: 1
 			}
-		} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>);
+		} as unknown as Awaited<ReturnType<typeof readSurfaceInteraction>>);
 		expect(await screen.findByText('Gamma')).toBeInTheDocument();
 
 		olderReload.resolve({
@@ -441,7 +445,7 @@ describe('SurfaceTable', () => {
 				per_page: 20,
 				total_pages: 1
 			}
-		} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>);
+		} as unknown as Awaited<ReturnType<typeof readSurfaceInteraction>>);
 		await olderReload.promise;
 		await waitFor(() => {
 			expect(screen.getByText('Gamma')).toBeInTheDocument();
@@ -450,10 +454,10 @@ describe('SurfaceTable', () => {
 	});
 
 	it('cancels in-flight provider-query loads when switching to static data', async () => {
-		vi.mocked(invokeSurfaceInteraction).mockReset();
-		const inFlightLoad = deferred<Awaited<ReturnType<typeof invokeSurfaceInteraction>>>();
-		vi.mocked(invokeSurfaceInteraction).mockImplementationOnce(
-			() => inFlightLoad.promise as unknown as ReturnType<typeof invokeSurfaceInteraction>
+		vi.mocked(readSurfaceInteraction).mockReset();
+		const inFlightLoad = deferred<Awaited<ReturnType<typeof readSurfaceInteraction>>>();
+		vi.mocked(readSurfaceInteraction).mockImplementationOnce(
+			() => inFlightLoad.promise as unknown as ReturnType<typeof readSurfaceInteraction>
 		);
 
 		const node: Extract<SurfaceNode, { kind: 'table' }> = {
@@ -483,7 +487,8 @@ describe('SurfaceTable', () => {
 				interaction_id: 'list',
 				kind: 'data_load',
 				label: 'List',
-				transport: { mode: 'controller_local' }
+				transport: { mode: 'controller_local' },
+				http_method: 'get'
 			}
 		];
 
@@ -515,7 +520,7 @@ describe('SurfaceTable', () => {
 				per_page: 20,
 				total_pages: 1
 			}
-		} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>);
+		} as unknown as Awaited<ReturnType<typeof readSurfaceInteraction>>);
 		await inFlightLoad.promise;
 
 		await waitFor(() => {
@@ -525,7 +530,7 @@ describe('SurfaceTable', () => {
 	});
 
 	it('loads from initialPage prop when provided', async () => {
-		vi.mocked(invokeSurfaceInteraction)
+		vi.mocked(readSurfaceInteraction)
 			.mockReset()
 			.mockResolvedValueOnce({
 				data: {
@@ -535,7 +540,7 @@ describe('SurfaceTable', () => {
 					per_page: 20,
 					total_pages: 2
 				}
-			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>);
+			} as unknown as Awaited<ReturnType<typeof readSurfaceInteraction>>);
 
 		const node: Extract<SurfaceNode, { kind: 'table' }> = {
 			kind: 'table',
@@ -551,7 +556,13 @@ describe('SurfaceTable', () => {
 			refresh_policy: { type: 'manual' }
 		};
 		const interactions: InteractionDescriptor[] = [
-			{ interaction_id: 'list', kind: 'data_load', label: 'List', transport: { mode: 'controller_local' } }
+			{
+				interaction_id: 'list',
+				kind: 'data_load',
+				label: 'List',
+				transport: { mode: 'controller_local' },
+				http_method: 'get'
+			}
 		];
 
 		render(SurfaceTable, {
@@ -564,19 +575,20 @@ describe('SurfaceTable', () => {
 		});
 
 		expect(await screen.findByText('Alpha')).toBeInTheDocument();
-		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledOnce();
-		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledWith({
+		expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledOnce();
+		expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledWith({
 			path: { surface_id: 'notifications.email', interaction_id: 'list' },
-			body: {
-				params: { page: 2, per_page: 20 },
+			query: {
 				target_provider_id: undefined,
-				timeout_seconds: undefined
+				timeout_seconds: undefined,
+				page: '2',
+				per_page: '20'
 			}
 		});
 	});
 
 	it('fires onPageChange callback with data_source_id and new page when page changes', async () => {
-		vi.mocked(invokeSurfaceInteraction)
+		vi.mocked(readSurfaceInteraction)
 			.mockReset()
 			.mockResolvedValueOnce({
 				data: {
@@ -586,7 +598,7 @@ describe('SurfaceTable', () => {
 					per_page: 20,
 					total_pages: 2
 				}
-			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>)
+			} as unknown as Awaited<ReturnType<typeof readSurfaceInteraction>>)
 			.mockResolvedValueOnce({
 				data: {
 					items: [{ id: 'chan-2', name: 'Beta' }],
@@ -595,7 +607,7 @@ describe('SurfaceTable', () => {
 					per_page: 20,
 					total_pages: 2
 				}
-			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>);
+			} as unknown as Awaited<ReturnType<typeof readSurfaceInteraction>>);
 
 		const onPageChange = vi.fn();
 		const node: Extract<SurfaceNode, { kind: 'table' }> = {
@@ -612,7 +624,13 @@ describe('SurfaceTable', () => {
 			refresh_policy: { type: 'manual' }
 		};
 		const interactions: InteractionDescriptor[] = [
-			{ interaction_id: 'list', kind: 'data_load', label: 'List', transport: { mode: 'controller_local' } }
+			{
+				interaction_id: 'list',
+				kind: 'data_load',
+				label: 'List',
+				transport: { mode: 'controller_local' },
+				http_method: 'get'
+			}
 		];
 
 		render(SurfaceTable, {
@@ -634,7 +652,7 @@ describe('SurfaceTable', () => {
 	});
 
 	it('syncs currentPage from initialPage prop when it changes (browser back simulation)', async () => {
-		vi.mocked(invokeSurfaceInteraction)
+		vi.mocked(readSurfaceInteraction)
 			.mockReset()
 			.mockResolvedValue({
 				data: {
@@ -644,7 +662,7 @@ describe('SurfaceTable', () => {
 					per_page: 20,
 					total_pages: 2
 				}
-			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>);
+			} as unknown as Awaited<ReturnType<typeof readSurfaceInteraction>>);
 
 		const node: Extract<SurfaceNode, { kind: 'table' }> = {
 			kind: 'table',
@@ -660,7 +678,13 @@ describe('SurfaceTable', () => {
 			refresh_policy: { type: 'manual' }
 		};
 		const interactions: InteractionDescriptor[] = [
-			{ interaction_id: 'list', kind: 'data_load', label: 'List', transport: { mode: 'controller_local' } }
+			{
+				interaction_id: 'list',
+				kind: 'data_load',
+				label: 'List',
+				transport: { mode: 'controller_local' },
+				http_method: 'get'
+			}
 		];
 
 		const view = render(SurfaceTable, {
@@ -673,13 +697,13 @@ describe('SurfaceTable', () => {
 		});
 
 		await waitFor(() => {
-			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledWith({
+			expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledWith({
 				path: { surface_id: 'notifications.email', interaction_id: 'list' },
-				body: expect.objectContaining({ params: expect.objectContaining({ page: 2 }) })
+				query: expect.objectContaining({ page: '2' })
 			});
 		});
 
-		vi.mocked(invokeSurfaceInteraction).mockClear();
+		vi.mocked(readSurfaceInteraction).mockClear();
 
 		await view.rerender({
 			surfaceId: 'notifications.email',
@@ -691,11 +715,11 @@ describe('SurfaceTable', () => {
 		});
 
 		await waitFor(() => {
-			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledWith({
+			expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledWith({
 				path: { surface_id: 'notifications.email', interaction_id: 'list' },
-				body: expect.objectContaining({ params: expect.objectContaining({ page: 1 }) })
+				query: expect.objectContaining({ page: '1' })
 			});
-			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledTimes(1);
+			expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledTimes(1);
 		});
 	});
 
@@ -720,7 +744,8 @@ describe('SurfaceTable', () => {
 				kind: 'mutation_action',
 				label: 'Delete',
 				icon: 'trash-2',
-				transport: { mode: 'controller_local' }
+				transport: { mode: 'controller_local' },
+				http_method: 'post'
 			}
 		];
 
@@ -760,7 +785,8 @@ describe('SurfaceTable', () => {
 				kind: 'mutation_action',
 				label: 'Delete',
 				icon: 'trash-2',
-				transport: { mode: 'controller_local' }
+				transport: { mode: 'controller_local' },
+				http_method: 'post'
 			}
 		];
 
@@ -797,7 +823,8 @@ describe('SurfaceTable', () => {
 				interaction_id: 'act',
 				kind: 'mutation_action',
 				label: 'Do It',
-				transport: { mode: 'controller_local' }
+				transport: { mode: 'controller_local' },
+				http_method: 'post'
 			}
 		];
 
@@ -834,7 +861,8 @@ describe('SurfaceTable', () => {
 				kind: 'mutation_action',
 				label: 'Delete',
 				icon: 'trash-2',
-				transport: { mode: 'controller_local' }
+				transport: { mode: 'controller_local' },
+				http_method: 'post'
 			}
 		];
 
@@ -851,7 +879,7 @@ describe('SurfaceTable', () => {
 	});
 
 	it('keeps the footer visible for provider-query pagination when the current page has no rows', async () => {
-		vi.mocked(invokeSurfaceInteraction)
+		vi.mocked(readSurfaceInteraction)
 			.mockReset()
 			.mockResolvedValueOnce({
 				data: {
@@ -861,7 +889,7 @@ describe('SurfaceTable', () => {
 					per_page: 20,
 					total_pages: 3
 				}
-			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>)
+			} as unknown as Awaited<ReturnType<typeof readSurfaceInteraction>>)
 			.mockResolvedValueOnce({
 				data: {
 					items: [],
@@ -870,7 +898,7 @@ describe('SurfaceTable', () => {
 					per_page: 20,
 					total_pages: 3
 				}
-			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>);
+			} as unknown as Awaited<ReturnType<typeof readSurfaceInteraction>>);
 
 		const node: Extract<SurfaceNode, { kind: 'table' }> = {
 			kind: 'table',
@@ -893,7 +921,8 @@ describe('SurfaceTable', () => {
 				interaction_id: 'list',
 				kind: 'data_load',
 				label: 'List',
-				transport: { mode: 'controller_local' }
+				transport: { mode: 'controller_local' },
+				http_method: 'get'
 			}
 		];
 

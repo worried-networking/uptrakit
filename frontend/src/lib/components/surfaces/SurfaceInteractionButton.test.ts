@@ -35,6 +35,7 @@ describe('SurfaceInteractionButton', () => {
 			kind: 'form_submit',
 			label: 'Create Channel',
 			transport: { mode: 'controller_local' },
+			http_method: 'post',
 			form_ui: {
 				fields: [
 					{
@@ -82,6 +83,7 @@ describe('SurfaceInteractionButton', () => {
 			kind: 'workflow',
 			label: 'Bootstrap Host',
 			transport: { mode: 'provider_proxied' },
+			http_method: 'post',
 			workflow_steps: [
 				{
 					step_id: 'connect',
@@ -99,7 +101,8 @@ describe('SurfaceInteractionButton', () => {
 			interaction_id: 'bootstrap-connect',
 			kind: 'mutation_action',
 			label: 'Bootstrap Connect',
-			transport: { mode: 'provider_proxied' }
+			transport: { mode: 'provider_proxied' },
+			http_method: 'post'
 		};
 
 		render(SurfaceInteractionButton, {
@@ -134,6 +137,7 @@ describe('SurfaceInteractionButton', () => {
 			kind: 'form_submit',
 			label: 'Reset Provider',
 			transport: { mode: 'controller_local' },
+			http_method: 'post',
 			form_ui: {
 				fields: [{ key: 'name', label: 'Name', field_type: 'text', required: true }]
 			}
@@ -173,6 +177,7 @@ describe('SurfaceInteractionButton', () => {
 			kind: 'mutation_action',
 			label: 'Delete Provider',
 			transport: { mode: 'controller_local' },
+			http_method: 'post',
 			confirmation: {
 				title: 'Confirm action',
 				message: 'Run',
@@ -212,7 +217,8 @@ describe('SurfaceInteractionButton', () => {
 			interaction_id: 'do-thing',
 			kind: 'mutation_action',
 			label: 'Do Thing',
-			transport: { mode: 'controller_local' }
+			transport: { mode: 'controller_local' },
+			http_method: 'post'
 		};
 
 		render(SurfaceInteractionButton, {
@@ -233,6 +239,7 @@ describe('SurfaceInteractionButton', () => {
 			kind: 'mutation_action',
 			label: 'Delete Thing',
 			transport: { mode: 'controller_local' },
+			http_method: 'post',
 			confirmation: {
 				title: 'Confirm',
 				message: 'Are you sure?',
@@ -258,7 +265,8 @@ describe('SurfaceInteractionButton', () => {
 			interaction_id: 'slow-thing',
 			kind: 'mutation_action',
 			label: 'Slow Thing',
-			transport: { mode: 'controller_local' }
+			transport: { mode: 'controller_local' },
+			http_method: 'post'
 		};
 
 		render(SurfaceInteractionButton, {
@@ -282,7 +290,8 @@ describe('SurfaceInteractionButton', () => {
 			interaction_id: 'sm-thing',
 			kind: 'mutation_action',
 			label: 'Sm Thing',
-			transport: { mode: 'controller_local' }
+			transport: { mode: 'controller_local' },
+			http_method: 'post'
 		};
 
 		render(SurfaceInteractionButton, {
@@ -299,7 +308,8 @@ describe('SurfaceInteractionButton', () => {
 			interaction_id: 'any-thing',
 			kind: 'mutation_action',
 			label: 'Any Thing',
-			transport: { mode: 'controller_local' }
+			transport: { mode: 'controller_local' },
+			http_method: 'post'
 		};
 
 		const { container } = render(SurfaceInteractionButton, {
@@ -318,7 +328,8 @@ describe('SurfaceInteractionButton', () => {
 			interaction_id: 'discover',
 			kind: 'mutation_action',
 			label: 'Discover',
-			transport: { mode: 'controller_local' }
+			transport: { mode: 'controller_local' },
+			http_method: 'post'
 		};
 
 		it('renders button disabled with tooltip wrapper when requiredContextParam absent from baseParams', () => {
@@ -372,7 +383,8 @@ describe('SurfaceInteractionButton', () => {
 			kind: 'mutation_action',
 			label: 'Sync',
 			transport: { mode: 'controller_local' },
-			icon: 'refresh-cw'
+			icon: 'refresh-cw',
+			http_method: 'post'
 		};
 
 		const { container } = render(SurfaceInteractionButton, {
@@ -393,7 +405,8 @@ describe('SurfaceInteractionButton', () => {
 			kind: 'mutation_action',
 			label: 'Sync',
 			transport: { mode: 'controller_local' },
-			icon: 'refresh-cw'
+			icon: 'refresh-cw',
+			http_method: 'post'
 		};
 
 		const { container } = render(SurfaceInteractionButton, {
@@ -418,6 +431,7 @@ describe('SurfaceInteractionButton', () => {
 			label: 'Run Wizard',
 			transport: { mode: 'controller_local' },
 			icon: 'server-cog',
+			http_method: 'post',
 			workflow_steps: [{ step_id: 's1', label: 'Step 1', input_schema: 'object', result_schema: 'any' }]
 		};
 

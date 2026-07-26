@@ -66,8 +66,19 @@ export interface SurfaceRowVisibleWhen {
 	condition: 'present' | 'absent';
 }
 
+export type InteractionHttpMethod = 'get' | 'post' | 'put' | 'delete';
+
+export interface ParamFieldDescriptor {
+	key: string;
+	schema: SchemaContract;
+	required?: boolean;
+}
+
+export type ActionRef = InteractionId | { interaction_id: InteractionId; http_method?: InteractionHttpMethod };
+
 export interface SurfaceTableRowAction {
 	interaction_id: InteractionId;
+	http_method?: InteractionHttpMethod;
 	visible_when?: SurfaceRowVisibleWhen;
 }
 
@@ -95,10 +106,11 @@ export type SurfaceNode =
 	| {
 			kind: 'form';
 			interaction_id: InteractionId;
+			http_method?: InteractionHttpMethod;
 	  }
 	| {
 			kind: 'action_bar';
-			action_ids?: InteractionId[];
+			action_ids?: ActionRef[];
 	  }
 	| {
 			kind: 'tabs';
@@ -117,6 +129,7 @@ export type SurfaceNode =
 	| {
 			kind: 'modal_trigger';
 			interaction_id: InteractionId;
+			http_method?: InteractionHttpMethod;
 			modal_nodes?: SurfaceNode[];
 	  }
 	| {
@@ -237,6 +250,8 @@ export interface InteractionDescriptor {
 	workflow_steps?: WorkflowStepDescriptor[];
 	form_ui?: FormUiDescriptor;
 	submit_label?: string;
+	http_method: InteractionHttpMethod;
+	params?: ParamFieldDescriptor[];
 }
 
 export interface RegisteredSurface {

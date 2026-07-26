@@ -4,16 +4,19 @@
 	import SurfaceActionButton from './SurfaceActionButton.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import SchemaForm from '$lib/components/surfaces/SchemaForm.svelte';
-	import { invokeSurfaceInteraction } from '$lib/api';
-	import type { InvokeSurfaceInteractionRequest } from '$lib/api';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import SectionCard from '$lib/components/ui/SectionCard.svelte';
 	import StatusBadge from '$lib/components/ui/StatusBadge.svelte';
-	import { buildSurfaceInteractionRequest, type SurfaceEncryptionContext } from '$lib/surfaces/interactions';
+	import {
+		buildSurfaceInteractionRequest,
+		dispatchSurfaceInteraction,
+		resolveInteraction,
+		type SurfaceEncryptionContext
+	} from '$lib/surfaces/interactions';
 	import type { LabelDisplay } from '$lib/surfaces/label-display';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import type { SelectOption } from '$lib/api';
-	import type { InteractionDescriptor, WorkflowStepDescriptor } from '$lib/surfaces/contract';
+	import type { InteractionDescriptor, InteractionHttpMethod, WorkflowStepDescriptor } from '$lib/surfaces/contract';
 	import { SvelteMap } from 'svelte/reactivity';
 
 	let {
@@ -82,7 +85,7 @@
 			if (
 				typeof stepDescriptor.label !== 'string' ||
 				stepDescriptor.label.trim().length === 0 ||
-				(stepDescriptor.submit_interaction_id && !findInteraction(stepDescriptor.submit_interaction_id))
+				(stepDescriptor.submit_interaction_id && !findInteraction(stepDescriptor.submit_interaction_id, 'post'))
 			) {
 				return true;
 			}
@@ -131,8 +134,11 @@
 		return Array.isArray(unchecked) ? unchecked.filter((entry): entry is string => typeof entry === 'string') : [];
 	}
 
-	function findInteraction(interactionId: string): InteractionDescriptor | undefined {
-		return interactions.find((candidate) => candidate.interaction_id === interactionId);
+	function findInteraction(
+		interactionId: string,
+		httpMethod?: InteractionHttpMethod
+	): InteractionDescriptor | undefined {
+		return resolveInteraction(interactions, interactionId, httpMethod);
 	}
 
 	function isAutoExecutableStep(stepDescriptor: WorkflowStepDescriptor | undefined): boolean {
@@ -171,7 +177,7 @@
 		const autoMode = accumulatedParams.auto === true;
 
 		if (stepDescriptor.submit_interaction_id) {
-			const submitInteraction = findInteraction(stepDescriptor.submit_interaction_id);
+			const submitInteraction = findInteraction(stepDescriptor.submit_interaction_id, 'post');
 			if (!submitInteraction) {
 				markContractIssue();
 				return;
@@ -195,10 +201,7 @@
 						encryption: encryptionContext
 					}
 				);
-				const { data: result } = await invokeSurfaceInteraction({
-					path: { surface_id: surfaceId, interaction_id: stepDescriptor.submit_interaction_id },
-					body: request as unknown as InvokeSurfaceInteractionRequest
-				});
+				const result = await dispatchSurfaceInteraction(surfaceId, submitInteraction, request);
 				stepResponses.set(stepIndex, result);
 
 				if (stepIndex === workflowSteps.length - 1) {
@@ -304,7 +307,7 @@
 		if (!preLoadInteractionId) {
 			return {};
 		}
-		const preLoadInteraction = findInteraction(preLoadInteractionId);
+		const preLoadInteraction = findInteraction(preLoadInteractionId, 'get');
 		if (!preLoadInteraction) {
 			return {};
 		}
@@ -313,10 +316,7 @@
 			{ ...requestBaseParams, ...accumulatedParams },
 			{ targetProviderId }
 		);
-		const { data: result } = await invokeSurfaceInteraction({
-			path: { surface_id: surfaceId, interaction_id: preLoadInteraction.interaction_id },
-			body: request as unknown as InvokeSurfaceInteractionRequest
-		});
+		const result = await dispatchSurfaceInteraction(surfaceId, preLoadInteraction, request);
 		if (result && typeof result === 'object' && !Array.isArray(result)) {
 			return result as Record<string, unknown>;
 		}
@@ -324,7 +324,7 @@
 	}
 
 	async function loadSelectOptions(actionId: string): Promise<SelectOption[]> {
-		const loadOptionsInteraction = findInteraction(actionId);
+		const loadOptionsInteraction = findInteraction(actionId, 'get');
 		if (!loadOptionsInteraction) {
 			return [];
 		}
@@ -336,10 +336,7 @@
 				encryption: encryptionContext
 			}
 		);
-		const { data: result } = await invokeSurfaceInteraction({
-			path: { surface_id: surfaceId, interaction_id: loadOptionsInteraction.interaction_id },
-			body: request as unknown as InvokeSurfaceInteractionRequest
-		});
+		const result = await dispatchSurfaceInteraction(surfaceId, loadOptionsInteraction, request);
 		if (!result || typeof result !== 'object' || Array.isArray(result)) {
 			return [];
 		}

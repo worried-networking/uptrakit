@@ -6,7 +6,8 @@
 		interaction_id: 'demo.primary',
 		kind: 'mutation_action',
 		label: 'Primary Action',
-		transport: { mode: 'controller_local' }
+		transport: { mode: 'controller_local' },
+		http_method: 'post'
 	};
 
 	const dangerInteraction: InteractionDescriptor = {
@@ -14,6 +15,7 @@
 		kind: 'mutation_action',
 		label: 'Danger Action',
 		transport: { mode: 'controller_local' },
+		http_method: 'post',
 		confirmation: {
 			title: 'Confirm',
 			message: 'Are you sure?',
@@ -26,6 +28,7 @@
 		kind: 'form_submit',
 		label: 'Form Action',
 		transport: { mode: 'controller_local' },
+		http_method: 'post',
 		form_ui: {
 			fields: [{ key: 'name', label: 'Name', field_type: 'text', required: false }]
 		}

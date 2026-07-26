@@ -1,12 +1,15 @@
 <script lang="ts">
 	import Button from '$lib/components/Button.svelte';
-	import { invokeSurfaceInteraction } from '$lib/api';
-	import type { InvokeSurfaceInteractionRequest } from '$lib/api';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import SchemaForm from '$lib/components/surfaces/SchemaForm.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { Textarea } from '$lib/components/forms';
-	import { buildSurfaceInteractionRequest, type SurfaceEncryptionContext } from '$lib/surfaces/interactions';
+	import {
+		buildSurfaceInteractionRequest,
+		dispatchSurfaceInteraction,
+		resolveInteraction,
+		type SurfaceEncryptionContext
+	} from '$lib/surfaces/interactions';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import type { SelectOption } from '$lib/api';
 	import type { InteractionDescriptor } from '$lib/surfaces/contract';
@@ -51,10 +54,7 @@
 				targetProviderId,
 				encryption: encryptionContext
 			});
-			const { data: result } = await invokeSurfaceInteraction({
-				path: { surface_id: surfaceId, interaction_id: interaction.interaction_id },
-				body: request as unknown as InvokeSurfaceInteractionRequest
-			});
+			const result = await dispatchSurfaceInteraction(surfaceId, interaction, request);
 			showSuccess(`${actionLabel} completed`);
 			await oncomplete?.(result);
 			return result;
@@ -101,10 +101,7 @@
 		const request = await buildSurfaceInteractionRequest(preLoadInteraction, requestBaseParams, {
 			targetProviderId
 		});
-		const { data: result } = await invokeSurfaceInteraction({
-			path: { surface_id: surfaceId, interaction_id: preLoadInteraction.interaction_id },
-			body: request as unknown as InvokeSurfaceInteractionRequest
-		});
+		const result = await dispatchSurfaceInteraction(surfaceId, preLoadInteraction, request);
 		if (result && typeof result === 'object' && !Array.isArray(result)) {
 			return result as Record<string, unknown>;
 		}
@@ -112,7 +109,7 @@
 	}
 
 	async function loadSelectOptions(actionId: string): Promise<SelectOption[]> {
-		const loadOptionsInteraction = interactions.find((candidate) => candidate.interaction_id === actionId);
+		const loadOptionsInteraction = resolveInteraction(interactions, actionId, 'get');
 		if (!loadOptionsInteraction) {
 			return [];
 		}
@@ -120,10 +117,7 @@
 			targetProviderId,
 			encryption: encryptionContext
 		});
-		const { data: result } = await invokeSurfaceInteraction({
-			path: { surface_id: surfaceId, interaction_id: loadOptionsInteraction.interaction_id },
-			body: request as unknown as InvokeSurfaceInteractionRequest
-		});
+		const result = await dispatchSurfaceInteraction(surfaceId, loadOptionsInteraction, request);
 		if (!result || typeof result !== 'object' || Array.isArray(result)) {
 			return [];
 		}

@@ -2,12 +2,15 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import SurfaceActionButton from './SurfaceActionButton.svelte';
-	import { invokeSurfaceInteraction } from '$lib/api';
-	import type { InvokeSurfaceInteractionRequest } from '$lib/api';
 	import SurfaceForm from './SurfaceForm.svelte';
 	import SurfaceWorkflow from './SurfaceWorkflow.svelte';
 	import SurfaceModal from './SurfaceModal.svelte';
-	import { buildSurfaceInteractionRequest, type SurfaceEncryptionContext } from '$lib/surfaces/interactions';
+	import {
+		buildSurfaceInteractionRequest,
+		dispatchSurfaceInteraction,
+		resolveInteraction,
+		type SurfaceEncryptionContext
+	} from '$lib/surfaces/interactions';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import type { InteractionDescriptor } from '$lib/surfaces/contract';
 	import type { LabelDisplay } from '$lib/surfaces/label-display';
@@ -20,6 +23,7 @@
 		encryptionContext,
 		baseParams = {},
 		rowSeed,
+		itemId,
 		size = 'md',
 		labelDisplay = 'always',
 		oncomplete,
@@ -32,6 +36,7 @@
 		encryptionContext?: SurfaceEncryptionContext;
 		baseParams?: Record<string, unknown>;
 		rowSeed?: Record<string, unknown>;
+		itemId?: string;
 		size?: 'sm' | 'md';
 		labelDisplay?: LabelDisplay;
 		oncomplete?: (result: unknown) => void | Promise<void>;
@@ -48,7 +53,7 @@
 	const formBaseParams = $derived(rowSeed ? { ...baseParams, _row: rowSeed } : baseParams);
 	const preLoadInteraction = $derived(
 		interaction.form_ui?.pre_load_interaction_id
-			? interactions.find((candidate) => candidate.interaction_id === interaction.form_ui?.pre_load_interaction_id)
+			? resolveInteraction(interactions, interaction.form_ui.pre_load_interaction_id, 'get')
 			: undefined
 	);
 	const hasFormUi = $derived((interaction.form_ui?.fields?.length ?? 0) > 0);
@@ -64,10 +69,7 @@
 				targetProviderId,
 				encryption: encryptionContext
 			});
-			const { data: result } = await invokeSurfaceInteraction({
-				path: { surface_id: surfaceId, interaction_id: interaction.interaction_id },
-				body: request as unknown as InvokeSurfaceInteractionRequest
-			});
+			const result = await dispatchSurfaceInteraction(surfaceId, interaction, request, { itemId });
 			showSuccess(`${actionLabel} completed`);
 			showModal = false;
 			await oncomplete?.(result);

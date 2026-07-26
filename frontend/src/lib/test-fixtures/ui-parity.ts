@@ -204,7 +204,8 @@ export function buildSharedVisualParityFixture(): SharedVisualParityFixture {
 			label: 'Load table footer parity data',
 			input_schema: 'object',
 			result_schema: 'object',
-			transport: { mode: 'provider_proxied' }
+			transport: { mode: 'provider_proxied' },
+			http_method: 'get'
 		}
 	];
 
@@ -256,7 +257,8 @@ export function buildSharedVisualParityFixture(): SharedVisualParityFixture {
 			label: 'Load entity link parity data',
 			input_schema: 'object',
 			result_schema: 'object',
-			transport: { mode: 'provider_proxied' }
+			transport: { mode: 'provider_proxied' },
+			http_method: 'get'
 		}
 	];
 

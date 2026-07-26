@@ -12,8 +12,13 @@
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import SectionCard from '$lib/components/ui/SectionCard.svelte';
 	import TabStrip from '$lib/components/ui/TabStrip.svelte';
-	import { clampSurfaceTabIndex, type SurfaceEncryptionContext } from '$lib/surfaces/interactions';
-	import type { DataSourceDescriptor, InteractionDescriptor, SurfaceNode } from '$lib/surfaces/contract';
+	import { clampSurfaceTabIndex, resolveInteraction, type SurfaceEncryptionContext } from '$lib/surfaces/interactions';
+	import type {
+		DataSourceDescriptor,
+		InteractionDescriptor,
+		InteractionHttpMethod,
+		SurfaceNode
+	} from '$lib/surfaces/contract';
 
 	let {
 		surfaceId,
@@ -58,8 +63,11 @@
 		}
 	});
 
-	function findInteraction(interactionId: string): InteractionDescriptor | undefined {
-		return interactions.find((interaction) => interaction.interaction_id === interactionId);
+	function findInteraction(
+		interactionId: string,
+		httpMethod?: InteractionHttpMethod
+	): InteractionDescriptor | undefined {
+		return resolveInteraction(interactions, interactionId, httpMethod);
 	}
 
 	function findDataSource(dataSourceId: string): DataSourceDescriptor | undefined {
@@ -71,7 +79,7 @@
 		if (!dataSource || dataSource.kind.kind !== 'provider_query') {
 			return undefined;
 		}
-		return findInteraction(dataSource.kind.operation_id);
+		return findInteraction(dataSource.kind.operation_id, 'get');
 	}
 
 	function calloutTone(level: 'info' | 'warning' | 'danger'): 'info' | 'warning' | 'danger' {
@@ -183,14 +191,14 @@
 		{onPageChange}
 	/>
 {:else if node.kind === 'form'}
-	{@const interaction = findInteraction(node.interaction_id)}
+	{@const interaction = findInteraction(node.interaction_id, node.http_method)}
 	{#if interaction}
 		<SurfaceForm
 			{surfaceId}
 			{interaction}
 			{interactions}
 			preLoadInteraction={interaction.form_ui?.pre_load_interaction_id
-				? findInteraction(interaction.form_ui.pre_load_interaction_id)
+				? findInteraction(interaction.form_ui.pre_load_interaction_id, 'get')
 				: undefined}
 			{targetProviderId}
 			{encryptionContext}
@@ -252,7 +260,7 @@
 {:else if node.kind === 'empty_state'}
 	<EmptyState title={node.title} description={node.description} />
 {:else if node.kind === 'modal_trigger'}
-	{@const interaction = findInteraction(node.interaction_id)}
+	{@const interaction = findInteraction(node.interaction_id, node.http_method)}
 	{#if interaction}
 		{#if interactionLabel(interaction)}
 			<Button variant="secondary" type="button" data-ui="modal-trigger" onclick={() => (modalOpen = true)}>

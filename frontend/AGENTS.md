@@ -52,7 +52,6 @@ frontend/
         │   ├── client.ts            # configured hey-api client + interceptors (auth, 401 refresh-retry, ETag, 2FA, ApiError)
         │   ├── errors.ts            # ApiError + Response→message/ApiError mappers
         │   ├── raw.ts               # raw-Response escape hatch (authenticatedFetch/apiGet/loginRaw) over the configured client
-        │   ├── surfaces.ts          # non-spec surface endpoints (0 utoipa paths) over the configured client
         │   ├── crypto.ts            # sealed-box encryption (Web Crypto)
         │   ├── batch.ts             # executeBatchChunked (client-side 100-id chunking)
         │   ├── oauth.ts             # OAuth client/consent shim (paths outside /api/v1)
@@ -117,8 +116,13 @@ src/routes/
    option-object args (`{ path, query, body }`, snake_case keys), destructuring `{ data }`; the
    configured client adds bearer auth, deduped 401 refresh-retry, ETag `If-Match`, the 2FA redirect,
    and `ApiError` mapping. Generated types come from `$lib/api` too (no hand-maintained mirror).
-   Non-spec endpoints (surfaces) and escape hatches live in the hand-written `api/*` modules listed
-   in the tree above. The source of truth for the frontend client is the committed spec
+   Surface interactions are fully spec'd — dispatched by their declared `http_method` (GET/PUT/DELETE/POST)
+   via `dispatchSurfaceInteraction` in `src/lib/surfaces/interactions.ts`, which calls the matching generated
+   operation. The one sanctioned escape hatch left is in that function's GET branch: the generated query type
+   is closed to reserved keys, but DataLoad params are dynamic string-passthrough by contract, so the params
+   object is cast to the generated query type (`as ReadSurfaceInteraction(Item)?Data['query']`), marked with a
+   `// Sanctioned escape hatch` comment. Other escape hatches (raw-Response, OAuth) live in the hand-written
+   `api/*` modules listed in the tree above. The source of truth for the frontend client is the committed spec
    `crates/ui/web-api/openapi.json`; after any backend route change run `./scripts/regen-api.sh` and
    commit both `openapi.json` and `src/lib/api/generated/`.
    - **Scope (honest):** today only the **frontend** client is generated from / gated against the
