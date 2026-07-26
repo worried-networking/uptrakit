@@ -6,6 +6,7 @@ import type { InteractionDescriptor } from '$lib/surfaces/contract';
 vi.mock('$lib/api', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/api')>()),
 	invokeSurfaceInteraction: vi.fn(),
+	readSurfaceInteraction: vi.fn(),
 	sealedBoxEncrypt: vi.fn()
 }));
 
@@ -14,7 +15,7 @@ vi.mock('$lib/notifications.svelte', () => ({
 	showSuccess: vi.fn()
 }));
 
-import { invokeSurfaceInteraction, sealedBoxEncrypt } from '$lib/api';
+import { invokeSurfaceInteraction, readSurfaceInteraction, sealedBoxEncrypt } from '$lib/api';
 import { showError } from '$lib/notifications.svelte';
 
 describe('SurfaceWorkflow', () => {
@@ -1013,6 +1014,73 @@ describe('SurfaceWorkflow', () => {
 		expect(container.querySelector('.sr-only')?.textContent).toBe('Run Wizard');
 		expect(container.querySelector('span[title="Run Wizard"]')).not.toBeNull();
 		expect(container.querySelector('svg')).not.toBeNull();
+	});
+
+	it('resolves pre_load_interaction_id via readSurfaceInteraction (GET) and populates step initial values', async () => {
+		vi.mocked(readSurfaceInteraction).mockResolvedValue({
+			data: { target: 'preloaded-host' }
+		} as unknown as Awaited<ReturnType<typeof readSurfaceInteraction>>);
+
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'bootstrap',
+			kind: 'workflow',
+			http_method: 'post',
+			label: 'Bootstrap Host',
+			transport: { mode: 'provider_proxied' },
+			workflow_steps: [
+				{
+					step_id: 'connect',
+					label: 'Connection',
+					input_schema: 'object',
+					result_schema: 'any',
+					submit_interaction_id: 'bootstrap-connect',
+					form_ui: {
+						fields: [{ key: 'target', label: 'SSH Target', field_type: 'text', required: false }],
+						pre_load_interaction_id: 'bootstrap-preload'
+					}
+				}
+			]
+		};
+
+		const interactions: InteractionDescriptor[] = [
+			interaction,
+			{
+				interaction_id: 'bootstrap-preload',
+				kind: 'data_load',
+				http_method: 'get',
+				label: 'Preload Connection',
+				transport: { mode: 'provider_proxied' }
+			},
+			{
+				interaction_id: 'bootstrap-connect',
+				kind: 'mutation_action',
+				http_method: 'post',
+				label: 'Bootstrap Connect',
+				transport: { mode: 'provider_proxied' }
+			}
+		];
+
+		render(SurfaceWorkflow, {
+			surfaceId: 'ssh-agent.hosts',
+			interaction,
+			interactions,
+			baseParams: { host_id: 'host-1' }
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Bootstrap Host' }));
+
+		await waitFor(() => {
+			expect(readSurfaceInteraction).toHaveBeenCalledWith({
+				path: { surface_id: 'ssh-agent.hosts', interaction_id: 'bootstrap-preload' },
+				query: expect.objectContaining({ host_id: 'host-1' })
+			});
+		});
+
+		await waitFor(() => {
+			expect(screen.getByRole('textbox', { name: /SSH Target/i })).toHaveValue('preloaded-host');
+		});
+
+		expect(invokeSurfaceInteraction).not.toHaveBeenCalled();
 	});
 
 	it('no raw preset-filled-* or preset-tonal-* classes on any button in modal', async () => {
