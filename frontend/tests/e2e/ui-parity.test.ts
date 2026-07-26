@@ -414,7 +414,7 @@ async function mockParityApi(page: Page, scenario: MockScenario = {}): Promise<M
 			}
 			return json(readModel);
 		}
-		const invokeMatch = path.match(/^\/api\/v1\/surfaces\/([^/]+)\/interactions\/([^/]+)(?:\/invoke)?$/);
+		const invokeMatch = path.match(/^\/api\/v1\/surfaces\/([^/]+)\/interactions\/([^/]+)(?:\/[^/]+)?$/);
 		if (['GET', 'POST', 'PUT', 'DELETE'].includes(method) && invokeMatch) {
 			const surfaceId = decodeURIComponent(invokeMatch[1] ?? '');
 			const interactionId = decodeURIComponent(invokeMatch[2] ?? '');

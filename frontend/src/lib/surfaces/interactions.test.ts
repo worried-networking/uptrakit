@@ -283,6 +283,19 @@ describe('dispatchSurfaceInteraction', () => {
 		});
 	});
 
+	it('routes a delete-method interaction without an itemId to deleteSurfaceInteraction', async () => {
+		const api = await import('$lib/api');
+		const interaction = makeInteraction({ interaction_id: 'bulk', http_method: 'delete' });
+		const request = { params: {} };
+
+		await dispatchSurfaceInteraction('surface.page', interaction, request);
+
+		expect(api.deleteSurfaceInteraction).toHaveBeenCalledWith({
+			path: { surface_id: 'surface.page', interaction_id: 'bulk' },
+			body: request
+		});
+	});
+
 	it('routes a post-method (or default) interaction to invokeSurfaceInteraction unchanged', async () => {
 		const api = await import('$lib/api');
 		const interaction = makeInteraction({ interaction_id: 'surface.submit', http_method: 'post' });
