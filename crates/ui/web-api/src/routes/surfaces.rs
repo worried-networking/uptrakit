@@ -14,12 +14,11 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use sea_orm::EntityTrait;
-use serde::Deserialize;
 use serde_json::Value;
 use uptrakit_shared_types::{Permission, PluginTypeId};
 use uptrakit_web_api_types::surfaces::{
-    InvokeSurfaceInteractionRequest, ListSurfacesQuery, SurfaceProviderAvailability,
-    SurfaceProviderInfo, SurfaceReadResponse, SurfaceResponse,
+    InvokeSurfaceInteractionRequest, ListSurfacesQuery, ReadSurfaceInteractionQuery,
+    SurfaceProviderAvailability, SurfaceProviderInfo, SurfaceReadResponse, SurfaceResponse,
 };
 use uptrakit_wire::surfaces;
 use uuid::Uuid;
@@ -317,10 +316,6 @@ fn method_not_allowed_response(allowed: &[surfaces::InteractionHttpMethod]) -> R
 /// `Cache-Control: private, no-store` is applied to every response reached
 /// via a `Get` input (success and error alike); non-GET responses are
 /// returned as-is (existing behavior for the mutation-verb routes).
-#[expect(
-    clippy::too_many_lines,
-    reason = "single resolution-ordered dispatch path; splitting would fragment the security-critical ordering across functions"
-)]
 async fn dispatch_surface_interaction(
     ctx: InteractionCallCtx,
     method: surfaces::InteractionHttpMethod,
@@ -592,27 +587,6 @@ async fn dispatch_surface_interaction(
         error_message,
         error_code,
     ))
-}
-
-/// OpenAPI-only shape for the query keys accepted by GET surface
-/// interaction routes. The real extractor parses `Vec<(String, String)>`
-/// (see [`dispatch_surface_interaction`]); this struct documents the fixed
-/// envelope keys (`target_provider_id`/`timeout_seconds`, stripped by
-/// [`split_get_envelope`]) plus the reserved pagination keys (coerced by
-/// [`coerce_get_params`]) via `params(<IntoParamsStruct>)` (ADR-0025) —
-/// dynamic per-interaction declared params cannot appear in a static
-/// parameter list.
-#[derive(Deserialize, utoipa::IntoParams)]
-#[into_params(parameter_in = Query)]
-pub struct ReadSurfaceInteractionQuery {
-    /// Explicit provider to target; required for multi-provider surfaces.
-    pub target_provider_id: Option<String>,
-    /// Overrides the provider's default timeout, in seconds.
-    pub timeout_seconds: Option<u16>,
-    /// Reserved key; coerces to an unsigned integer.
-    pub page: Option<u64>,
-    /// Reserved key; coerces to an unsigned integer.
-    pub per_page: Option<u64>,
 }
 
 /// Read a surface interaction via `GET`. Query keys: reserved (`page`,

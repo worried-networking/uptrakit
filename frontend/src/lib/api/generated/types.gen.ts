@@ -8308,11 +8308,11 @@ export type ReadSurfaceInteractionData = {
          */
         timeout_seconds?: number;
         /**
-         * Reserved key; coerces to an unsigned integer.
+         * Reserved typed key — coerced to a JSON number.
          */
         page?: number;
         /**
-         * Reserved key; coerces to an unsigned integer.
+         * Reserved typed key — coerced to a JSON number.
          */
         per_page?: number;
     };
@@ -8588,11 +8588,11 @@ export type ReadSurfaceInteractionItemData = {
          */
         timeout_seconds?: number;
         /**
-         * Reserved key; coerces to an unsigned integer.
+         * Reserved typed key — coerced to a JSON number.
          */
         page?: number;
         /**
-         * Reserved key; coerces to an unsigned integer.
+         * Reserved typed key — coerced to a JSON number.
          */
         per_page?: number;
     };

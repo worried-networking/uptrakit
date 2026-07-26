@@ -7098,7 +7098,7 @@
           {
             "name": "page",
             "in": "query",
-            "description": "Reserved key; coerces to an unsigned integer.",
+            "description": "Reserved typed key — coerced to a JSON number.",
             "required": false,
             "schema": {
               "type": "integer",
@@ -7109,7 +7109,7 @@
           {
             "name": "per_page",
             "in": "query",
-            "description": "Reserved key; coerces to an unsigned integer.",
+            "description": "Reserved typed key — coerced to a JSON number.",
             "required": false,
             "schema": {
               "type": "integer",
@@ -7465,7 +7465,7 @@
           {
             "name": "page",
             "in": "query",
-            "description": "Reserved key; coerces to an unsigned integer.",
+            "description": "Reserved typed key — coerced to a JSON number.",
             "required": false,
             "schema": {
               "type": "integer",
@@ -7476,7 +7476,7 @@
           {
             "name": "per_page",
             "in": "query",
-            "description": "Reserved key; coerces to an unsigned integer.",
+            "description": "Reserved typed key — coerced to a JSON number.",
             "required": false,
             "schema": {
               "type": "integer",

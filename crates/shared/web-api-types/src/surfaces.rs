@@ -71,22 +71,29 @@ pub struct SurfaceReadResponse {
 /// Documentation-only: the handler reads raw query pairs (to support
 /// undeclared provider-defined keys) rather than deserializing through this
 /// struct directly. It exists purely to drive the OpenAPI `params(...)`
-/// declaration (ADR-0025) for the method-mapped REST route family.
+/// declaration (ADR-0025) for the method-mapped REST route family: reserved
+/// keys (`page`/`per_page`) coerce to numbers; `target_provider_id` and
+/// `timeout_seconds` are envelope keys stripped before provider dispatch and
+/// never reach provider `params`.
 #[derive(Debug, Clone, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::IntoParams))]
+#[cfg_attr(
+    feature = "openapi",
+    derive(utoipa::IntoParams),
+    into_params(parameter_in = Query)
+)]
 pub struct ReadSurfaceInteractionQuery {
+    /// Explicit provider to target; required for multi-provider surfaces.
+    #[serde(default)]
+    pub target_provider_id: Option<String>,
+    /// Overrides the provider's default timeout, in seconds.
+    #[serde(default)]
+    pub timeout_seconds: Option<u16>,
     /// Reserved typed key — coerced to a JSON number.
     #[serde(default)]
     pub page: Option<u64>,
     /// Reserved typed key — coerced to a JSON number.
     #[serde(default)]
     pub per_page: Option<u64>,
-    /// Envelope key — provider targeting; never reaches provider params.
-    #[serde(default)]
-    pub target_provider_id: Option<String>,
-    /// Envelope key — timeout override; never reaches provider params.
-    #[serde(default)]
-    pub timeout_seconds: Option<u16>,
 }
 
 /// Request body for invoking a surface interaction.
