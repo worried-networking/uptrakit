@@ -66,8 +66,31 @@ pub struct SurfaceReadResponse {
     pub data_sources: Vec<surfaces::DataSourceDescriptor>,
 }
 
+/// Query parameters for GET-origin surface interaction invocation.
+///
+/// Documentation-only: the handler reads raw query pairs (to support
+/// undeclared provider-defined keys) rather than deserializing through this
+/// struct directly. It exists purely to drive the OpenAPI `params(...)`
+/// declaration (ADR-0025) for the method-mapped REST route family.
+#[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::IntoParams))]
+pub struct ReadSurfaceInteractionQuery {
+    /// Reserved typed key — coerced to a JSON number.
+    #[serde(default)]
+    pub page: Option<u64>,
+    /// Reserved typed key — coerced to a JSON number.
+    #[serde(default)]
+    pub per_page: Option<u64>,
+    /// Envelope key — provider targeting; never reaches provider params.
+    #[serde(default)]
+    pub target_provider_id: Option<String>,
+    /// Envelope key — timeout override; never reaches provider params.
+    #[serde(default)]
+    pub timeout_seconds: Option<u16>,
+}
+
 /// Request body for invoking a surface interaction.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct InvokeSurfaceInteractionRequest {
     /// Interaction parameters (free-form JSON object).

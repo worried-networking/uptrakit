@@ -623,6 +623,26 @@ action = "software_item.update"
 site = "uptrakit_web_api::routes::surfaces::invoke_surface_interaction"
 action = "surface_action.invoke"
 
+[[entries]]
+site = "uptrakit_web_api::routes::surfaces::update_surface_interaction"
+action = "surface_action.invoke"
+
+[[entries]]
+site = "uptrakit_web_api::routes::surfaces::delete_surface_interaction"
+action = "surface_action.invoke"
+
+[[entries]]
+site = "uptrakit_web_api::routes::surfaces::update_surface_interaction_item"
+action = "surface_action.invoke"
+
+[[entries]]
+site = "uptrakit_web_api::routes::surfaces::delete_surface_interaction_item"
+action = "surface_action.invoke"
+
+[[entries]]
+site = "uptrakit_web_api::routes::surfaces::invoke_surface_interaction_item"
+skip = "always returns 405 (POST is not valid on an item-addressed interaction); no AuditEntry emitted"
+
 # ---------------------------------------------------------------------------
 # System enrollment tokens
 # ---------------------------------------------------------------------------

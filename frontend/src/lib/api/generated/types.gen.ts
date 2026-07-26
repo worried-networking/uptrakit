@@ -8217,6 +8217,146 @@ export type GetSurfaceReadResponses = {
 
 export type GetSurfaceReadResponse = GetSurfaceReadResponses[keyof GetSurfaceReadResponses];
 
+export type DeleteSurfaceInteractionData = {
+    /**
+     * Optional body
+     */
+    body: InvokeSurfaceInteractionRequest;
+    path: {
+        /**
+         * Surface ID
+         */
+        surface_id: string;
+        /**
+         * Interaction ID
+         */
+        interaction_id: string;
+    };
+    query?: never;
+    url: '/api/v1/surfaces/{surface_id}/interactions/{interaction_id}';
+};
+
+export type DeleteSurfaceInteractionErrors = {
+    /**
+     * Invalid or missing target provider
+     */
+    400: unknown;
+    /**
+     * Not authenticated
+     */
+    401: unknown;
+    /**
+     * Missing a permission declared by the descriptor or interaction
+     */
+    403: unknown;
+    /**
+     * Surface, interaction, or provider not found
+     */
+    404: unknown;
+    /**
+     * Interaction is not registered under DELETE (Allow header lists methods)
+     */
+    405: unknown;
+    /**
+     * Duplicate idempotency key or provider-reported conflict
+     */
+    409: unknown;
+    /**
+     * Schema validation failed or provider-reported failure
+     */
+    422: unknown;
+    /**
+     * Rate limited
+     */
+    429: unknown;
+    /**
+     * Provider unavailable
+     */
+    503: unknown;
+    /**
+     * Surface action timed out
+     */
+    504: unknown;
+};
+
+export type DeleteSurfaceInteractionResponses = {
+    /**
+     * Provider-defined free-form JSON result
+     */
+    200: unknown;
+};
+
+export type ReadSurfaceInteractionData = {
+    body?: never;
+    path: {
+        /**
+         * Surface ID
+         */
+        surface_id: string;
+        /**
+         * Interaction ID
+         */
+        interaction_id: string;
+    };
+    query?: {
+        /**
+         * Explicit provider to target; required for multi-provider surfaces.
+         */
+        target_provider_id?: string;
+        /**
+         * Overrides the provider's default timeout, in seconds.
+         */
+        timeout_seconds?: number;
+        /**
+         * Reserved key; coerces to an unsigned integer.
+         */
+        page?: number;
+        /**
+         * Reserved key; coerces to an unsigned integer.
+         */
+        per_page?: number;
+    };
+    url: '/api/v1/surfaces/{surface_id}/interactions/{interaction_id}';
+};
+
+export type ReadSurfaceInteractionErrors = {
+    /**
+     * Not authenticated
+     */
+    401: unknown;
+    /**
+     * Missing a permission declared by the descriptor or interaction
+     */
+    403: unknown;
+    /**
+     * Surface, interaction, or provider not found
+     */
+    404: unknown;
+    /**
+     * Interaction is not registered under GET (Allow header lists methods)
+     */
+    405: unknown;
+    /**
+     * Reserved or declared query key failed strict parsing
+     */
+    422: unknown;
+    /**
+     * Provider unavailable
+     */
+    503: unknown;
+    /**
+     * Surface action timed out
+     */
+    504: unknown;
+};
+
+export type ReadSurfaceInteractionResponses = {
+    /**
+     * Provider-defined free-form JSON result
+     */
+    200: unknown;
+};
+
 export type InvokeSurfaceInteractionData = {
     body: InvokeSurfaceInteractionRequest;
     path: {
@@ -8251,6 +8391,10 @@ export type InvokeSurfaceInteractionErrors = {
      */
     404: unknown;
     /**
+     * Interaction is not registered under POST (Allow header lists methods)
+     */
+    405: unknown;
+    /**
      * Duplicate idempotency key or provider-reported conflict
      */
     409: unknown;
@@ -8273,6 +8417,317 @@ export type InvokeSurfaceInteractionErrors = {
 };
 
 export type InvokeSurfaceInteractionResponses = {
+    /**
+     * Provider-defined free-form JSON result
+     */
+    200: unknown;
+};
+
+export type UpdateSurfaceInteractionData = {
+    body: InvokeSurfaceInteractionRequest;
+    path: {
+        /**
+         * Surface ID
+         */
+        surface_id: string;
+        /**
+         * Interaction ID
+         */
+        interaction_id: string;
+    };
+    query?: never;
+    url: '/api/v1/surfaces/{surface_id}/interactions/{interaction_id}';
+};
+
+export type UpdateSurfaceInteractionErrors = {
+    /**
+     * Invalid or missing target provider
+     */
+    400: unknown;
+    /**
+     * Not authenticated
+     */
+    401: unknown;
+    /**
+     * Missing a permission declared by the descriptor or interaction
+     */
+    403: unknown;
+    /**
+     * Surface, interaction, or provider not found
+     */
+    404: unknown;
+    /**
+     * Interaction is not registered under PUT (Allow header lists methods)
+     */
+    405: unknown;
+    /**
+     * Duplicate idempotency key or provider-reported conflict
+     */
+    409: unknown;
+    /**
+     * Schema validation failed or provider-reported failure
+     */
+    422: unknown;
+    /**
+     * Rate limited
+     */
+    429: unknown;
+    /**
+     * Provider unavailable
+     */
+    503: unknown;
+    /**
+     * Surface action timed out
+     */
+    504: unknown;
+};
+
+export type UpdateSurfaceInteractionResponses = {
+    /**
+     * Provider-defined free-form JSON result
+     */
+    200: unknown;
+};
+
+export type DeleteSurfaceInteractionItemData = {
+    /**
+     * Optional body
+     */
+    body: InvokeSurfaceInteractionRequest;
+    path: {
+        /**
+         * Surface ID
+         */
+        surface_id: string;
+        /**
+         * Interaction ID
+         */
+        interaction_id: string;
+        /**
+         * Item ID (overwrites `id` from the body)
+         */
+        item_id: string;
+    };
+    query?: never;
+    url: '/api/v1/surfaces/{surface_id}/interactions/{interaction_id}/{item_id}';
+};
+
+export type DeleteSurfaceInteractionItemErrors = {
+    /**
+     * Invalid or missing target provider
+     */
+    400: unknown;
+    /**
+     * Not authenticated
+     */
+    401: unknown;
+    /**
+     * Missing a permission declared by the descriptor or interaction
+     */
+    403: unknown;
+    /**
+     * Surface, interaction, or provider not found
+     */
+    404: unknown;
+    /**
+     * Interaction is not registered under DELETE (Allow header lists methods)
+     */
+    405: unknown;
+    /**
+     * Duplicate idempotency key or provider-reported conflict
+     */
+    409: unknown;
+    /**
+     * Schema validation failed or provider-reported failure
+     */
+    422: unknown;
+    /**
+     * Rate limited
+     */
+    429: unknown;
+    /**
+     * Provider unavailable
+     */
+    503: unknown;
+    /**
+     * Surface action timed out
+     */
+    504: unknown;
+};
+
+export type DeleteSurfaceInteractionItemResponses = {
+    /**
+     * Provider-defined free-form JSON result
+     */
+    200: unknown;
+};
+
+export type ReadSurfaceInteractionItemData = {
+    body?: never;
+    path: {
+        /**
+         * Surface ID
+         */
+        surface_id: string;
+        /**
+         * Interaction ID
+         */
+        interaction_id: string;
+        /**
+         * Item ID (overwrites `id` from the query string)
+         */
+        item_id: string;
+    };
+    query?: {
+        /**
+         * Explicit provider to target; required for multi-provider surfaces.
+         */
+        target_provider_id?: string;
+        /**
+         * Overrides the provider's default timeout, in seconds.
+         */
+        timeout_seconds?: number;
+        /**
+         * Reserved key; coerces to an unsigned integer.
+         */
+        page?: number;
+        /**
+         * Reserved key; coerces to an unsigned integer.
+         */
+        per_page?: number;
+    };
+    url: '/api/v1/surfaces/{surface_id}/interactions/{interaction_id}/{item_id}';
+};
+
+export type ReadSurfaceInteractionItemErrors = {
+    /**
+     * Not authenticated
+     */
+    401: unknown;
+    /**
+     * Missing a permission declared by the descriptor or interaction
+     */
+    403: unknown;
+    /**
+     * Surface, interaction, or provider not found
+     */
+    404: unknown;
+    /**
+     * Interaction is not registered under GET (Allow header lists methods)
+     */
+    405: unknown;
+    /**
+     * Reserved or declared query key failed strict parsing
+     */
+    422: unknown;
+    /**
+     * Provider unavailable
+     */
+    503: unknown;
+    /**
+     * Surface action timed out
+     */
+    504: unknown;
+};
+
+export type ReadSurfaceInteractionItemResponses = {
+    /**
+     * Provider-defined free-form JSON result
+     */
+    200: unknown;
+};
+
+export type InvokeSurfaceInteractionItemData = {
+    body?: never;
+    path: {
+        /**
+         * Surface ID
+         */
+        surface_id: string;
+        /**
+         * Interaction ID
+         */
+        interaction_id: string;
+        /**
+         * Item ID
+         */
+        item_id: string;
+    };
+    query?: never;
+    url: '/api/v1/surfaces/{surface_id}/interactions/{interaction_id}/{item_id}';
+};
+
+export type InvokeSurfaceInteractionItemErrors = {
+    /**
+     * POST is not valid on an item-addressed interaction (Allow: GET, PUT, DELETE)
+     */
+    405: unknown;
+};
+
+export type UpdateSurfaceInteractionItemData = {
+    body: InvokeSurfaceInteractionRequest;
+    path: {
+        /**
+         * Surface ID
+         */
+        surface_id: string;
+        /**
+         * Interaction ID
+         */
+        interaction_id: string;
+        /**
+         * Item ID (overwrites `id` from the body)
+         */
+        item_id: string;
+    };
+    query?: never;
+    url: '/api/v1/surfaces/{surface_id}/interactions/{interaction_id}/{item_id}';
+};
+
+export type UpdateSurfaceInteractionItemErrors = {
+    /**
+     * Invalid or missing target provider
+     */
+    400: unknown;
+    /**
+     * Not authenticated
+     */
+    401: unknown;
+    /**
+     * Missing a permission declared by the descriptor or interaction
+     */
+    403: unknown;
+    /**
+     * Surface, interaction, or provider not found
+     */
+    404: unknown;
+    /**
+     * Interaction is not registered under PUT (Allow header lists methods)
+     */
+    405: unknown;
+    /**
+     * Duplicate idempotency key or provider-reported conflict
+     */
+    409: unknown;
+    /**
+     * Schema validation failed or provider-reported failure
+     */
+    422: unknown;
+    /**
+     * Rate limited
+     */
+    429: unknown;
+    /**
+     * Provider unavailable
+     */
+    503: unknown;
+    /**
+     * Surface action timed out
+     */
+    504: unknown;
+};
+
+export type UpdateSurfaceInteractionItemResponses = {
     /**
      * Provider-defined free-form JSON result
      */

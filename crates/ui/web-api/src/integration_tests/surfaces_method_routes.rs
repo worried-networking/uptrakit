@@ -66,3 +66,93 @@ async fn arbitrary_method_test_client_helpers_reach_router() {
         .await;
     assert_eq!(request_status, http::StatusCode::OK);
 }
+
+/// Fail-first (Task 3, Step 0): anti-probe ordering. Registers the same
+/// `interaction_id` under two methods that do NOT include `GET`, one of
+/// which (`PUT`) is gated by a permission string that maps to
+/// `Permission::Other` (never granted to any role). A `GET` request against
+/// this interaction has no registered handler for that method, so the
+/// registry resolves `MethodNotAllowed`. The security property under test:
+/// the missing-permission check on candidate methods MUST run before the
+/// 405/Allow disclosure, so an unauthorized caller gets 403 — never a 405
+/// that would leak which methods exist.
+#[tokio::test]
+async fn missing_permission_is_403_before_method_disclosure() {
+    let (app, calls): (TestApp, StubSurfaceCalls) = TestApp::with_stub_surfaces(vec![
+        StubInteraction {
+            interaction_id: "gated",
+            kind: InteractionKind::MutationAction,
+            http_method: Some(InteractionHttpMethod::Put),
+            params: vec![],
+            required_permission: Some("__nonexistent_test_permission__".to_string()),
+        },
+        StubInteraction {
+            interaction_id: "gated",
+            kind: InteractionKind::MutationAction,
+            http_method: Some(InteractionHttpMethod::Delete),
+            params: vec![],
+            required_permission: None,
+        },
+    ])
+    .await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let response = client
+        .request(
+            http::Method::GET,
+            "/api/v1/surfaces/test.stub/interactions/gated",
+        )
+        .bearer(&token)
+        .send()
+        .await;
+
+    assert_eq!(response.status(), http::StatusCode::FORBIDDEN);
+    assert!(
+        response.headers().get(http::header::ALLOW).is_none(),
+        "a 403 anti-probe response must never disclose the Allow set"
+    );
+    assert!(calls.lock().is_empty(), "provider must never be reached");
+}
+
+/// Fail-first (Task 3, Step 0): HEAD must be auto-derived from the GET
+/// registration and short-circuited before it ever reaches the provider.
+/// Asserts the full triple: 200 status (proves utoipa-axum's route
+/// composition actually derives HEAD from the GET registration — a
+/// router-level 405 here means the routing needs an explicit HEAD route,
+/// not a handler-level workaround), an empty recorded-calls list (proves the
+/// provider was never invoked), and the mandatory
+/// `Cache-Control: private, no-store` header on every surface GET response.
+#[tokio::test]
+async fn head_does_not_reach_provider() {
+    let (app, calls): (TestApp, StubSurfaceCalls) =
+        TestApp::with_stub_surfaces(vec![StubInteraction {
+            interaction_id: "peek",
+            kind: InteractionKind::DataLoad,
+            http_method: Some(InteractionHttpMethod::Get),
+            params: vec![],
+            required_permission: None,
+        }])
+        .await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let response = client
+        .head("/api/v1/surfaces/test.stub/interactions/peek")
+        .bearer(&token)
+        .send()
+        .await;
+
+    assert_eq!(response.status(), http::StatusCode::OK);
+    assert!(
+        calls.lock().is_empty(),
+        "HEAD must never reach the provider"
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get(http::header::CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok()),
+        Some("private, no-store")
+    );
+}

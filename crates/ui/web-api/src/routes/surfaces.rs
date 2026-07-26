@@ -14,6 +14,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use sea_orm::EntityTrait;
+use serde::Deserialize;
 use serde_json::Value;
 use uptrakit_shared_types::{Permission, PluginTypeId};
 use uptrakit_web_api_types::surfaces::{
@@ -264,7 +265,414 @@ pub async fn get_surface_read(
     with_private_no_store(response)
 }
 
-/// Invoke a surface interaction. The success body is a free-form,
+/// Caller-context bundle threaded through [`dispatch_surface_interaction`],
+/// grouping the extractors every method-mapped wrapper handler collects —
+/// keeps the shared dispatch fn's own argument list under clippy's
+/// `too_many_arguments` threshold.
+struct InteractionCallCtx {
+    state: Arc<AppState>,
+    tenant_ctx: TenantContext,
+    auth_user: crate::middleware::require_auth::AuthenticatedUser,
+    api_token_id: Option<AuthenticatedApiTokenId>,
+}
+
+/// Per-method-family input to [`dispatch_surface_interaction`]: a JSON body
+/// (POST/PUT/DELETE) or raw GET query pairs (GET/HEAD, pre-coercion).
+enum InteractionInput {
+    Body(InvokeSurfaceInteractionRequest),
+    Get {
+        raw_query: Vec<(String, String)>,
+        is_head: bool,
+    },
+}
+
+/// Builds a `405 Method Not Allowed` response carrying an `Allow` header
+/// listing every method actually registered for the interaction — used once
+/// the anti-probe permission gate (see [`dispatch_surface_interaction`]) has
+/// confirmed the caller is authorized to know that set.
+fn method_not_allowed_response(allowed: &[surfaces::InteractionHttpMethod]) -> Response {
+    let allow_value = allowed
+        .iter()
+        .map(|method| method.as_str().to_ascii_uppercase())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut response = error_response_with_code(
+        StatusCode::METHOD_NOT_ALLOWED,
+        "Method not allowed for this interaction",
+        "method_not_allowed",
+    );
+    if let Ok(header_value) = header::HeaderValue::from_str(&allow_value) {
+        response.headers_mut().insert(header::ALLOW, header_value);
+    }
+    response
+}
+
+/// Shared dispatch path for every method-mapped surface interaction route
+/// (`read`/`invoke`/`update`/`delete`, base and `:item_id` variants). Owns
+/// the full resolution order: envelope split → registry resolution →
+/// anti-probe permission gate on `MethodNotAllowed` → descriptor/interaction
+/// permission checks → HEAD short-circuit → GET coercion / body read → item
+/// segment overlay → provider dispatch → audit emission.
+///
+/// `Cache-Control: private, no-store` is applied to every response reached
+/// via a `Get` input (success and error alike); non-GET responses are
+/// returned as-is (existing behavior for the mutation-verb routes).
+#[expect(
+    clippy::too_many_lines,
+    reason = "single resolution-ordered dispatch path; splitting would fragment the security-critical ordering across functions"
+)]
+async fn dispatch_surface_interaction(
+    ctx: InteractionCallCtx,
+    method: surfaces::InteractionHttpMethod,
+    surface_id: String,
+    interaction_id: String,
+    item_id: Option<String>,
+    input: InteractionInput,
+) -> Response {
+    let is_get = matches!(input, InteractionInput::Get { .. });
+    let wrap = |response: Response| -> Response {
+        if is_get {
+            with_private_no_store(response)
+        } else {
+            response
+        }
+    };
+
+    // Step 1: split the GET envelope, or read the body's envelope fields.
+    let (target_provider_id, timeout_seconds, rest, is_head, body) = match input {
+        InteractionInput::Body(body) => (
+            body.target_provider_id.clone(),
+            body.timeout_seconds,
+            None,
+            false,
+            Some(body),
+        ),
+        InteractionInput::Get { raw_query, is_head } => {
+            let (envelope, rest) = match split_get_envelope(raw_query) {
+                Ok(pair) => pair,
+                Err(response) => return wrap(*response),
+            };
+            (
+                envelope.target_provider_id,
+                envelope.timeout_seconds,
+                Some(rest),
+                is_head,
+                None,
+            )
+        }
+    };
+
+    let audit_ctx = SurfaceAuditContext {
+        state: &ctx.state,
+        tenant_id: ctx.tenant_ctx.tenant_id,
+        auth_user: &ctx.auth_user,
+        api_token_id: ctx.api_token_id,
+        method: &method,
+        surface_id: &surface_id,
+        interaction_id: &interaction_id,
+        target_provider_id: target_provider_id.as_deref(),
+    };
+
+    // Step 2: resolve against the concrete method.
+    let resolved = match ctx
+        .state
+        .surface_proxy_deps
+        .registry
+        .resolve_surface_action_for_method(
+            ctx.tenant_ctx.tenant_id,
+            &surface_id,
+            &interaction_id,
+            Some(&method),
+            target_provider_id.as_deref(),
+        ) {
+        Ok(resolved) => resolved,
+        Err(SurfaceRegistryLookupError::MethodNotAllowed {
+            allowed,
+            descriptor_required_permission,
+            interaction_required_permissions,
+        }) => {
+            // Anti-probe ordering: check every candidate permission (descriptor,
+            // then each sibling interaction registration) BEFORE disclosing the
+            // 405/Allow set, so an unauthorized caller gets 403 instead of a
+            // methods-that-exist leak.
+            if let Some(response) = enforce_required_permission(
+                descriptor_required_permission.as_deref(),
+                &ctx.auth_user,
+                &surface_id,
+                "surface",
+            ) {
+                if response.status() == StatusCode::FORBIDDEN
+                    && let Some(required_permission) = descriptor_required_permission.as_deref()
+                {
+                    emit_surface_action_permission_denied_audit(
+                        &audit_ctx,
+                        "surface",
+                        required_permission,
+                    );
+                }
+                return wrap(response);
+            }
+            for candidate_permission in &interaction_required_permissions {
+                if let Some(response) = enforce_required_permission(
+                    candidate_permission.as_deref(),
+                    &ctx.auth_user,
+                    &surface_id,
+                    "interaction",
+                ) {
+                    if response.status() == StatusCode::FORBIDDEN
+                        && let Some(required_permission) = candidate_permission.as_deref()
+                    {
+                        emit_surface_action_permission_denied_audit(
+                            &audit_ctx,
+                            "interaction",
+                            required_permission,
+                        );
+                    }
+                    return wrap(response);
+                }
+            }
+            return wrap(method_not_allowed_response(&allowed));
+        }
+        Err(error) => {
+            let (outcome, reason_code) = classify_surface_lookup_error_for_audit(&error);
+            emit_surface_action_invoke_audit(&audit_ctx, None, outcome, Some(reason_code));
+            return wrap(map_lookup_error(error));
+        }
+    };
+
+    // Step 3: descriptor then interaction permission checks (unchanged from
+    // the legacy route, now method-aware via the audit `method` field).
+    if let Some(response) = enforce_required_permission(
+        resolved.descriptor.required_permission.as_deref(),
+        &ctx.auth_user,
+        &surface_id,
+        "interaction",
+    ) {
+        if response.status() == StatusCode::FORBIDDEN
+            && let Some(required_permission) = resolved.descriptor.required_permission.as_deref()
+        {
+            emit_surface_action_permission_denied_audit(&audit_ctx, "surface", required_permission);
+        }
+        return wrap(response);
+    }
+    if let Some(response) = enforce_required_permission(
+        resolved.interaction.required_permission.as_deref(),
+        &ctx.auth_user,
+        &surface_id,
+        "interaction",
+    ) {
+        if response.status() == StatusCode::FORBIDDEN
+            && let Some(required_permission) = resolved.interaction.required_permission.as_deref()
+        {
+            emit_surface_action_permission_denied_audit(
+                &audit_ctx,
+                "interaction",
+                required_permission,
+            );
+        }
+        return wrap(response);
+    }
+
+    // Step 4: HEAD short-circuit — after permission checks, before any
+    // coercion or provider dispatch. The provider is never reached.
+    if is_head {
+        return with_private_no_store(StatusCode::OK.into_response());
+    }
+
+    // Step 5: GET coercion (422 short-circuits) or direct body read.
+    let (mut params, idempotency_key, encrypted_sensitive_params) = match body {
+        Some(body) => {
+            let idempotency_key = body
+                .idempotency_key
+                .clone()
+                .unwrap_or_else(|| Uuid::now_v7().to_string());
+            (
+                body.params,
+                idempotency_key,
+                body.encrypted_sensitive_params,
+            )
+        }
+        None => {
+            let params =
+                match coerce_get_params(rest.unwrap_or_default(), &resolved.interaction.params) {
+                    Ok(params) => params,
+                    Err(response) => return wrap(*response),
+                };
+            (params, Uuid::now_v7().to_string(), None)
+        }
+    };
+    // Path segment overwrites any `id` carried in the query/body.
+    if let Some(item_id) = item_id {
+        params.insert("id".to_string(), serde_json::Value::String(item_id));
+    }
+
+    let session_id = match ctx.auth_user.auth_method {
+        crate::auth::AuthMethod::Password => "password".to_string(),
+        crate::auth::AuthMethod::ApiToken => "api_token".to_string(),
+        crate::auth::AuthMethod::Oidc { provider_id } => format!("oidc:{provider_id}"),
+    };
+
+    // Step 6/7: build and dispatch the invocation.
+    let request = SurfaceInvokeRequest::new(
+        ctx.tenant_ctx.tenant_id,
+        surface_id.clone(),
+        interaction_id.clone(),
+        Some(method.clone()),
+        idempotency_key,
+        target_provider_id.clone(),
+        SurfaceCallerOrigin::UserSession {
+            user_id: ctx.auth_user.user_id,
+            session_id,
+        },
+        params,
+        encrypted_sensitive_params,
+    );
+    let timeout_override = timeout_seconds.map(|seconds| Duration::from_secs(u64::from(seconds)));
+
+    let result = ctx
+        .state
+        .surface_proxy_deps
+        .proxy
+        .invoke(
+            &ctx.state.service_connections,
+            &ctx.state.surface_proxy_deps.registry,
+            request,
+            timeout_override,
+        )
+        .await;
+
+    let mut result = result;
+    if let Ok(ref mut action_response) = result
+        && let Some(result_value) = action_response.result.take()
+    {
+        action_response.result = Some(
+            enrich_entity_links(
+                ctx.state.db(),
+                Some(ctx.tenant_ctx.tenant_id),
+                &resolved.descriptor.root_node,
+                result_value,
+            )
+            .await,
+        );
+    }
+
+    let response = match result {
+        Ok(response) => response,
+        Err(error) => {
+            let (outcome, reason_code) = classify_surface_proxy_error_for_audit(&error);
+            emit_surface_action_invoke_audit(
+                &audit_ctx,
+                Some(&resolved),
+                outcome,
+                Some(reason_code),
+            );
+            return wrap(map_proxy_error(error));
+        }
+    };
+
+    let (outcome, reason_code) = classify_surface_action_response_for_audit(&response);
+    emit_surface_action_invoke_audit(&audit_ctx, Some(&resolved), outcome, reason_code);
+
+    if response.success {
+        return wrap(
+            (StatusCode::OK, Json(response.result.unwrap_or(Value::Null))).into_response(),
+        );
+    }
+
+    let (error_message, error_code) = if let Some(error) = response.error {
+        (error.message, action_error_code(&error.code).to_string())
+    } else {
+        (
+            "surface interaction failed".to_string(),
+            "action_failed".to_string(),
+        )
+    };
+    wrap(error_response_with_code(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        error_message,
+        error_code,
+    ))
+}
+
+/// OpenAPI-only shape for the query keys accepted by GET surface
+/// interaction routes. The real extractor parses `Vec<(String, String)>`
+/// (see [`dispatch_surface_interaction`]); this struct documents the fixed
+/// envelope keys (`target_provider_id`/`timeout_seconds`, stripped by
+/// [`split_get_envelope`]) plus the reserved pagination keys (coerced by
+/// [`coerce_get_params`]) via `params(<IntoParamsStruct>)` (ADR-0025) —
+/// dynamic per-interaction declared params cannot appear in a static
+/// parameter list.
+#[derive(Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct ReadSurfaceInteractionQuery {
+    /// Explicit provider to target; required for multi-provider surfaces.
+    pub target_provider_id: Option<String>,
+    /// Overrides the provider's default timeout, in seconds.
+    pub timeout_seconds: Option<u16>,
+    /// Reserved key; coerces to an unsigned integer.
+    pub page: Option<u64>,
+    /// Reserved key; coerces to an unsigned integer.
+    pub per_page: Option<u64>,
+}
+
+/// Read a surface interaction via `GET`. Query keys: reserved (`page`,
+/// `per_page`) coerce to numbers; declared keys parse strictly per their
+/// schema; undeclared keys pass through as strings. `target_provider_id` and
+/// `timeout_seconds` are envelope keys and never reach provider `params`.
+/// `HEAD` is auto-derived from this registration and short-circuits before
+/// the provider is ever reached.
+#[utoipa::path(
+    get,
+    path = "/api/v1/surfaces/{surface_id}/interactions/{interaction_id}",
+    params(
+        ("surface_id" = String, Path, description = "Surface ID"),
+        ("interaction_id" = String, Path, description = "Interaction ID"),
+        ReadSurfaceInteractionQuery
+    ),
+    responses(
+        (status = 200, description = "Provider-defined free-form JSON result", body = serde_json::Value),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Missing a permission declared by the descriptor or interaction"),
+        (status = 404, description = "Surface, interaction, or provider not found"),
+        (status = 405, description = "Interaction is not registered under GET (Allow header lists methods)"),
+        (status = 422, description = "Reserved or declared query key failed strict parsing"),
+        (status = 503, description = "Provider unavailable"),
+        (status = 504, description = "Surface action timed out")
+    ),
+    tag = "Surfaces",
+    extensions(("x-required-permission" = json!("dynamic: declared by the surface descriptor / interaction"))),
+    security(("bearer_token" = []))
+)]
+#[tracing::instrument(skip_all)]
+pub async fn read_surface_interaction(
+    State(state): State<Arc<AppState>>,
+    tenant_ctx: TenantContext,
+    axum::Extension(auth_user): axum::Extension<crate::middleware::require_auth::AuthenticatedUser>,
+    api_token_id: Option<axum::Extension<AuthenticatedApiTokenId>>,
+    http_method: axum::http::Method,
+    Path((surface_id, interaction_id)): Path<(String, String)>,
+    Query(raw_query): Query<Vec<(String, String)>>,
+) -> Response {
+    dispatch_surface_interaction(
+        InteractionCallCtx {
+            state,
+            tenant_ctx,
+            auth_user,
+            api_token_id: api_token_id.map(|axum::Extension(id)| id),
+        },
+        surfaces::InteractionHttpMethod::Get,
+        surface_id,
+        interaction_id,
+        None,
+        InteractionInput::Get {
+            raw_query,
+            is_head: http_method == axum::http::Method::HEAD,
+        },
+    )
+    .await
+}
+
+/// Invoke a surface interaction via `POST`. The success body is a free-form,
 /// provider-defined JSON value.
 #[utoipa::path(
     post,
@@ -280,6 +688,7 @@ pub async fn get_surface_read(
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Missing a permission declared by the descriptor or interaction"),
         (status = 404, description = "Surface, interaction, or provider not found"),
+        (status = 405, description = "Interaction is not registered under POST (Allow header lists methods)"),
         (status = 409, description = "Duplicate idempotency key or provider-reported conflict"),
         (status = 422, description = "Schema validation failed or provider-reported failure"),
         (status = 429, description = "Rate limited"),
@@ -299,182 +708,310 @@ pub async fn invoke_surface_interaction(
     Path((surface_id, interaction_id)): Path<(String, String)>,
     Json(body): Json<InvokeSurfaceInteractionRequest>,
 ) -> Response {
-    let api_token_id = api_token_id.map(|value| value.0);
-    let audit_ctx = SurfaceAuditContext {
-        state: &state,
-        tenant_id: tenant_ctx.tenant_id,
-        auth_user: &auth_user,
-        api_token_id,
-    };
-
-    let resolved = match state
-        .surface_proxy_deps
-        .registry
-        .resolve_surface_action_for_method(
-            tenant_ctx.tenant_id,
-            &surface_id,
-            &interaction_id,
-            None,
-            body.target_provider_id.as_deref(),
-        ) {
-        Ok(resolved) => resolved,
-        Err(error) => {
-            let (outcome, reason_code) = classify_surface_lookup_error_for_audit(&error);
-            emit_surface_action_invoke_audit(
-                &audit_ctx,
-                None,
-                &surface_id,
-                &interaction_id,
-                body.target_provider_id.as_deref(),
-                outcome,
-                Some(reason_code),
-            );
-            return map_lookup_error(error);
-        }
-    };
-
-    if let Some(response) = enforce_required_permission(
-        resolved.descriptor.required_permission.as_deref(),
-        &auth_user,
-        &surface_id,
-        "interaction",
-    ) {
-        if response.status() == StatusCode::FORBIDDEN
-            && let Some(required_permission) = resolved.descriptor.required_permission.as_deref()
-        {
-            emit_surface_action_permission_denied_audit(
-                &audit_ctx,
-                &surface_id,
-                &interaction_id,
-                body.target_provider_id.as_deref(),
-                "surface",
-                required_permission,
-            );
-        }
-        return response;
-    }
-    if let Some(response) = enforce_required_permission(
-        resolved.interaction.required_permission.as_deref(),
-        &auth_user,
-        &surface_id,
-        "interaction",
-    ) {
-        if response.status() == StatusCode::FORBIDDEN
-            && let Some(required_permission) = resolved.interaction.required_permission.as_deref()
-        {
-            emit_surface_action_permission_denied_audit(
-                &audit_ctx,
-                &surface_id,
-                &interaction_id,
-                body.target_provider_id.as_deref(),
-                "interaction",
-                required_permission,
-            );
-        }
-        return response;
-    }
-
-    let idempotency_key = body
-        .idempotency_key
-        .clone()
-        .unwrap_or_else(|| Uuid::now_v7().to_string());
-    let session_id = match auth_user.auth_method {
-        crate::auth::AuthMethod::Password => "password".to_string(),
-        crate::auth::AuthMethod::ApiToken => "api_token".to_string(),
-        crate::auth::AuthMethod::Oidc { provider_id } => format!("oidc:{provider_id}"),
-    };
-
-    // This legacy route stays POST-only and id-addressed (no `:method` in the
-    // path), so it keeps resolving without a concrete method — the pre-check
-    // above and this invocation both delegate to
-    // `resolve_surface_action_for_method` with `method: None`, so they
-    // resolve identically. The REST method-model route family (Task 3) is
-    // what threads a concrete method through.
-    let request = SurfaceInvokeRequest::new(
-        tenant_ctx.tenant_id,
-        surface_id.clone(),
-        interaction_id.clone(),
-        None,
-        idempotency_key,
-        body.target_provider_id.clone(),
-        SurfaceCallerOrigin::UserSession {
-            user_id: auth_user.user_id,
-            session_id,
+    dispatch_surface_interaction(
+        InteractionCallCtx {
+            state,
+            tenant_ctx,
+            auth_user,
+            api_token_id: api_token_id.map(|axum::Extension(id)| id),
         },
-        body.params.clone(),
-        body.encrypted_sensitive_params.clone(),
-    );
-    let timeout_override = body
-        .timeout_seconds
-        .map(|seconds| Duration::from_secs(u64::from(seconds)));
+        surfaces::InteractionHttpMethod::Post,
+        surface_id,
+        interaction_id,
+        None,
+        InteractionInput::Body(body),
+    )
+    .await
+}
 
-    let result = state
-        .surface_proxy_deps
-        .proxy
-        .invoke(
-            &state.service_connections,
-            &state.surface_proxy_deps.registry,
-            request,
-            timeout_override,
-        )
-        .await;
+/// Invoke a surface interaction via `PUT` (full-replace semantics by REST
+/// convention; the provider defines actual behavior).
+#[utoipa::path(
+    put,
+    path = "/api/v1/surfaces/{surface_id}/interactions/{interaction_id}",
+    params(
+        ("surface_id" = String, Path, description = "Surface ID"),
+        ("interaction_id" = String, Path, description = "Interaction ID")
+    ),
+    request_body = InvokeSurfaceInteractionRequest,
+    responses(
+        (status = 200, description = "Provider-defined free-form JSON result", body = serde_json::Value),
+        (status = 400, description = "Invalid or missing target provider"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Missing a permission declared by the descriptor or interaction"),
+        (status = 404, description = "Surface, interaction, or provider not found"),
+        (status = 405, description = "Interaction is not registered under PUT (Allow header lists methods)"),
+        (status = 409, description = "Duplicate idempotency key or provider-reported conflict"),
+        (status = 422, description = "Schema validation failed or provider-reported failure"),
+        (status = 429, description = "Rate limited"),
+        (status = 503, description = "Provider unavailable"),
+        (status = 504, description = "Surface action timed out")
+    ),
+    tag = "Surfaces",
+    extensions(("x-required-permission" = json!("dynamic: declared by the surface descriptor / interaction"))),
+    security(("bearer_token" = []))
+)]
+#[tracing::instrument(skip_all)]
+pub async fn update_surface_interaction(
+    State(state): State<Arc<AppState>>,
+    tenant_ctx: TenantContext,
+    axum::Extension(auth_user): axum::Extension<crate::middleware::require_auth::AuthenticatedUser>,
+    api_token_id: Option<axum::Extension<AuthenticatedApiTokenId>>,
+    Path((surface_id, interaction_id)): Path<(String, String)>,
+    body: Option<Json<InvokeSurfaceInteractionRequest>>,
+) -> Response {
+    dispatch_surface_interaction(
+        InteractionCallCtx {
+            state,
+            tenant_ctx,
+            auth_user,
+            api_token_id: api_token_id.map(|axum::Extension(id)| id),
+        },
+        surfaces::InteractionHttpMethod::Put,
+        surface_id,
+        interaction_id,
+        None,
+        InteractionInput::Body(body.map(|Json(b)| b).unwrap_or_default()),
+    )
+    .await
+}
 
-    let mut result = result;
-    if let Ok(ref mut action_response) = result
-        && let Some(result_value) = action_response.result.take()
-    {
-        action_response.result = Some(
-            enrich_entity_links(
-                state.db(),
-                Some(tenant_ctx.tenant_id),
-                &resolved.descriptor.root_node,
-                result_value,
-            )
-            .await,
-        );
-    }
+/// Invoke a surface interaction via `DELETE`.
+#[utoipa::path(
+    delete,
+    path = "/api/v1/surfaces/{surface_id}/interactions/{interaction_id}",
+    params(
+        ("surface_id" = String, Path, description = "Surface ID"),
+        ("interaction_id" = String, Path, description = "Interaction ID")
+    ),
+    request_body(content = InvokeSurfaceInteractionRequest, description = "Optional body", content_type = "application/json"),
+    responses(
+        (status = 200, description = "Provider-defined free-form JSON result", body = serde_json::Value),
+        (status = 400, description = "Invalid or missing target provider"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Missing a permission declared by the descriptor or interaction"),
+        (status = 404, description = "Surface, interaction, or provider not found"),
+        (status = 405, description = "Interaction is not registered under DELETE (Allow header lists methods)"),
+        (status = 409, description = "Duplicate idempotency key or provider-reported conflict"),
+        (status = 422, description = "Schema validation failed or provider-reported failure"),
+        (status = 429, description = "Rate limited"),
+        (status = 503, description = "Provider unavailable"),
+        (status = 504, description = "Surface action timed out")
+    ),
+    tag = "Surfaces",
+    extensions(("x-required-permission" = json!("dynamic: declared by the surface descriptor / interaction"))),
+    security(("bearer_token" = []))
+)]
+#[tracing::instrument(skip_all)]
+pub async fn delete_surface_interaction(
+    State(state): State<Arc<AppState>>,
+    tenant_ctx: TenantContext,
+    axum::Extension(auth_user): axum::Extension<crate::middleware::require_auth::AuthenticatedUser>,
+    api_token_id: Option<axum::Extension<AuthenticatedApiTokenId>>,
+    Path((surface_id, interaction_id)): Path<(String, String)>,
+    body: Option<Json<InvokeSurfaceInteractionRequest>>,
+) -> Response {
+    dispatch_surface_interaction(
+        InteractionCallCtx {
+            state,
+            tenant_ctx,
+            auth_user,
+            api_token_id: api_token_id.map(|axum::Extension(id)| id),
+        },
+        surfaces::InteractionHttpMethod::Delete,
+        surface_id,
+        interaction_id,
+        None,
+        InteractionInput::Body(body.map(|Json(b)| b).unwrap_or_default()),
+    )
+    .await
+}
 
-    let response = match result {
-        Ok(response) => response,
-        Err(error) => {
-            let (outcome, reason_code) = classify_surface_proxy_error_for_audit(&error);
-            emit_surface_action_invoke_audit(
-                &audit_ctx,
-                Some(&resolved),
-                &surface_id,
-                &interaction_id,
-                body.target_provider_id.as_deref(),
-                outcome,
-                Some(reason_code),
-            );
-            return map_proxy_error(error);
-        }
-    };
+/// Read a surface interaction targeting a specific item via `GET
+/// .../{item_id}`. Identical semantics to [`read_surface_interaction`]; the
+/// path segment overwrites any `id` carried in the query string.
+#[utoipa::path(
+    get,
+    path = "/api/v1/surfaces/{surface_id}/interactions/{interaction_id}/{item_id}",
+    params(
+        ("surface_id" = String, Path, description = "Surface ID"),
+        ("interaction_id" = String, Path, description = "Interaction ID"),
+        ("item_id" = String, Path, description = "Item ID (overwrites `id` from the query string)"),
+        ReadSurfaceInteractionQuery
+    ),
+    responses(
+        (status = 200, description = "Provider-defined free-form JSON result", body = serde_json::Value),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Missing a permission declared by the descriptor or interaction"),
+        (status = 404, description = "Surface, interaction, or provider not found"),
+        (status = 405, description = "Interaction is not registered under GET (Allow header lists methods)"),
+        (status = 422, description = "Reserved or declared query key failed strict parsing"),
+        (status = 503, description = "Provider unavailable"),
+        (status = 504, description = "Surface action timed out")
+    ),
+    tag = "Surfaces",
+    extensions(("x-required-permission" = json!("dynamic: declared by the surface descriptor / interaction"))),
+    security(("bearer_token" = []))
+)]
+#[tracing::instrument(skip_all)]
+pub async fn read_surface_interaction_item(
+    State(state): State<Arc<AppState>>,
+    tenant_ctx: TenantContext,
+    axum::Extension(auth_user): axum::Extension<crate::middleware::require_auth::AuthenticatedUser>,
+    api_token_id: Option<axum::Extension<AuthenticatedApiTokenId>>,
+    http_method: axum::http::Method,
+    Path((surface_id, interaction_id, item_id)): Path<(String, String, String)>,
+    Query(raw_query): Query<Vec<(String, String)>>,
+) -> Response {
+    dispatch_surface_interaction(
+        InteractionCallCtx {
+            state,
+            tenant_ctx,
+            auth_user,
+            api_token_id: api_token_id.map(|axum::Extension(id)| id),
+        },
+        surfaces::InteractionHttpMethod::Get,
+        surface_id,
+        interaction_id,
+        Some(item_id),
+        InteractionInput::Get {
+            raw_query,
+            is_head: http_method == axum::http::Method::HEAD,
+        },
+    )
+    .await
+}
 
-    let (outcome, reason_code) = classify_surface_action_response_for_audit(&response);
-    emit_surface_action_invoke_audit(
-        &audit_ctx,
-        Some(&resolved),
-        &surface_id,
-        &interaction_id,
-        body.target_provider_id.as_deref(),
-        outcome,
-        reason_code,
-    );
+/// `POST .../{item_id}` is never a valid registration (POST is create/base
+/// only) — always `405`, listing the item-addressable methods.
+#[utoipa::path(
+    post,
+    path = "/api/v1/surfaces/{surface_id}/interactions/{interaction_id}/{item_id}",
+    params(
+        ("surface_id" = String, Path, description = "Surface ID"),
+        ("interaction_id" = String, Path, description = "Interaction ID"),
+        ("item_id" = String, Path, description = "Item ID")
+    ),
+    responses(
+        (status = 405, description = "POST is not valid on an item-addressed interaction (Allow: GET, PUT, DELETE)")
+    ),
+    tag = "Surfaces",
+    extensions(("x-required-permission" = json!("none: always 405"))),
+    security(("bearer_token" = []))
+)]
+#[tracing::instrument(skip_all)]
+pub async fn invoke_surface_interaction_item(
+    Path((_surface_id, _interaction_id, _item_id)): Path<(String, String, String)>,
+) -> Response {
+    method_not_allowed_response(&[
+        surfaces::InteractionHttpMethod::Get,
+        surfaces::InteractionHttpMethod::Put,
+        surfaces::InteractionHttpMethod::Delete,
+    ])
+}
 
-    if response.success {
-        return (StatusCode::OK, Json(response.result.unwrap_or(Value::Null))).into_response();
-    }
+/// Update a specific item via `PUT .../{item_id}`.
+#[utoipa::path(
+    put,
+    path = "/api/v1/surfaces/{surface_id}/interactions/{interaction_id}/{item_id}",
+    params(
+        ("surface_id" = String, Path, description = "Surface ID"),
+        ("interaction_id" = String, Path, description = "Interaction ID"),
+        ("item_id" = String, Path, description = "Item ID (overwrites `id` from the body)")
+    ),
+    request_body = InvokeSurfaceInteractionRequest,
+    responses(
+        (status = 200, description = "Provider-defined free-form JSON result", body = serde_json::Value),
+        (status = 400, description = "Invalid or missing target provider"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Missing a permission declared by the descriptor or interaction"),
+        (status = 404, description = "Surface, interaction, or provider not found"),
+        (status = 405, description = "Interaction is not registered under PUT (Allow header lists methods)"),
+        (status = 409, description = "Duplicate idempotency key or provider-reported conflict"),
+        (status = 422, description = "Schema validation failed or provider-reported failure"),
+        (status = 429, description = "Rate limited"),
+        (status = 503, description = "Provider unavailable"),
+        (status = 504, description = "Surface action timed out")
+    ),
+    tag = "Surfaces",
+    extensions(("x-required-permission" = json!("dynamic: declared by the surface descriptor / interaction"))),
+    security(("bearer_token" = []))
+)]
+#[tracing::instrument(skip_all)]
+pub async fn update_surface_interaction_item(
+    State(state): State<Arc<AppState>>,
+    tenant_ctx: TenantContext,
+    axum::Extension(auth_user): axum::Extension<crate::middleware::require_auth::AuthenticatedUser>,
+    api_token_id: Option<axum::Extension<AuthenticatedApiTokenId>>,
+    Path((surface_id, interaction_id, item_id)): Path<(String, String, String)>,
+    body: Option<Json<InvokeSurfaceInteractionRequest>>,
+) -> Response {
+    dispatch_surface_interaction(
+        InteractionCallCtx {
+            state,
+            tenant_ctx,
+            auth_user,
+            api_token_id: api_token_id.map(|axum::Extension(id)| id),
+        },
+        surfaces::InteractionHttpMethod::Put,
+        surface_id,
+        interaction_id,
+        Some(item_id),
+        InteractionInput::Body(body.map(|Json(b)| b).unwrap_or_default()),
+    )
+    .await
+}
 
-    let (error_message, error_code) = if let Some(error) = response.error {
-        (error.message, action_error_code(&error.code).to_string())
-    } else {
-        (
-            "surface interaction failed".to_string(),
-            "action_failed".to_string(),
-        )
-    };
-    error_response_with_code(StatusCode::UNPROCESSABLE_ENTITY, error_message, error_code)
+/// Delete a specific item via `DELETE .../{item_id}`.
+#[utoipa::path(
+    delete,
+    path = "/api/v1/surfaces/{surface_id}/interactions/{interaction_id}/{item_id}",
+    params(
+        ("surface_id" = String, Path, description = "Surface ID"),
+        ("interaction_id" = String, Path, description = "Interaction ID"),
+        ("item_id" = String, Path, description = "Item ID (overwrites `id` from the body)")
+    ),
+    request_body(content = InvokeSurfaceInteractionRequest, description = "Optional body", content_type = "application/json"),
+    responses(
+        (status = 200, description = "Provider-defined free-form JSON result", body = serde_json::Value),
+        (status = 400, description = "Invalid or missing target provider"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Missing a permission declared by the descriptor or interaction"),
+        (status = 404, description = "Surface, interaction, or provider not found"),
+        (status = 405, description = "Interaction is not registered under DELETE (Allow header lists methods)"),
+        (status = 409, description = "Duplicate idempotency key or provider-reported conflict"),
+        (status = 422, description = "Schema validation failed or provider-reported failure"),
+        (status = 429, description = "Rate limited"),
+        (status = 503, description = "Provider unavailable"),
+        (status = 504, description = "Surface action timed out")
+    ),
+    tag = "Surfaces",
+    extensions(("x-required-permission" = json!("dynamic: declared by the surface descriptor / interaction"))),
+    security(("bearer_token" = []))
+)]
+#[tracing::instrument(skip_all)]
+pub async fn delete_surface_interaction_item(
+    State(state): State<Arc<AppState>>,
+    tenant_ctx: TenantContext,
+    axum::Extension(auth_user): axum::Extension<crate::middleware::require_auth::AuthenticatedUser>,
+    api_token_id: Option<axum::Extension<AuthenticatedApiTokenId>>,
+    Path((surface_id, interaction_id, item_id)): Path<(String, String, String)>,
+    body: Option<Json<InvokeSurfaceInteractionRequest>>,
+) -> Response {
+    dispatch_surface_interaction(
+        InteractionCallCtx {
+            state,
+            tenant_ctx,
+            auth_user,
+            api_token_id: api_token_id.map(|axum::Extension(id)| id),
+        },
+        surfaces::InteractionHttpMethod::Delete,
+        surface_id,
+        interaction_id,
+        Some(item_id),
+        InteractionInput::Body(body.map(|Json(b)| b).unwrap_or_default()),
+    )
+    .await
 }
 
 fn map_lookup_error(error: SurfaceRegistryLookupError) -> Response {
@@ -590,8 +1127,128 @@ fn map_proxy_error(error: SurfaceProxyError) -> Response {
     }
 }
 
-fn surface_action_target_display(surface_id: &str, interaction_id: &str) -> String {
-    format!("{surface_id}/{interaction_id}")
+/// Envelope keys pulled out of a GET query string before the remaining pairs
+/// are coerced into interaction `params` — see [`split_get_envelope`].
+struct GetInvokeEnvelope {
+    target_provider_id: Option<String>,
+    timeout_seconds: Option<u16>,
+}
+
+/// The envelope plus the leftover (non-envelope) query pairs, as split by
+/// [`split_get_envelope`].
+type GetEnvelopeSplit = (GetInvokeEnvelope, Vec<(String, String)>);
+
+/// Splits raw GET query pairs into envelope keys (`target_provider_id`,
+/// `timeout_seconds`) and the remaining pairs destined for `coerce_get_params`.
+/// Duplicate keys: last one wins (fold in encounter order).
+fn split_get_envelope(raw: Vec<(String, String)>) -> Result<GetEnvelopeSplit, Box<Response>> {
+    let mut envelope = GetInvokeEnvelope {
+        target_provider_id: None,
+        timeout_seconds: None,
+    };
+    let mut rest = Vec::with_capacity(raw.len());
+    for (key, value) in raw {
+        match key.as_str() {
+            // Empty value normalizes to None: `?target_provider_id=` must mean
+            // implicit provider resolution, not a lookup for provider id "".
+            "target_provider_id" => {
+                envelope.target_provider_id = Some(value).filter(|v| !v.is_empty());
+            }
+            "timeout_seconds" => match value.parse::<u16>() {
+                Ok(parsed) => envelope.timeout_seconds = Some(parsed),
+                Err(_parse_error) => {
+                    return Err(Box::new(error_response_with_code(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "timeout_seconds must be an unsigned integer",
+                        "schema_validation_failed",
+                    )));
+                }
+            },
+            _ => rest.push((key, value)),
+        }
+    }
+    Ok((envelope, rest))
+}
+
+/// Coerces the non-envelope GET query pairs into a JSON params object using a
+/// deterministic three-tier rule (no inference): reserved typed keys
+/// (`page`/`per_page`) coerce to numbers; declared keys parse strictly per
+/// their `SchemaContract`; undeclared keys pass through as JSON strings.
+/// Duplicate keys: last one wins (fold in encounter order).
+fn coerce_get_params(
+    rest: Vec<(String, String)>,
+    declared: &[surfaces::ParamFieldDescriptor],
+) -> Result<serde_json::Map<String, serde_json::Value>, Box<Response>> {
+    let mut params = serde_json::Map::new();
+    for (key, value) in rest {
+        let coerced = match key.as_str() {
+            // Tier 2: framework-reserved typed keys.
+            "page" | "per_page" => match value.parse::<u64>() {
+                Ok(number) => serde_json::json!(number),
+                Err(_parse_error) => {
+                    return Err(Box::new(error_response_with_code(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        format!("query key `{key}` must be an unsigned integer"),
+                        "schema_validation_failed",
+                    )));
+                }
+            },
+            // Tier 3: declared -> strict parse per SchemaContract; undeclared -> string passthrough.
+            _ => match declared.iter().find(|field| field.key == key) {
+                None => serde_json::Value::String(value),
+                Some(field) => coerce_declared(&key, value, &field.schema)?,
+            },
+        };
+        params.insert(key, coerced);
+    }
+    Ok(params)
+}
+
+/// Strictly parses a single declared query value per its `SchemaContract`.
+/// Non-scalar schemas are unreachable on DataLoads (admission rule, Plan 2);
+/// treated defensively as a string passthrough.
+fn coerce_declared(
+    key: &str,
+    value: String,
+    schema: &surfaces::SchemaContract,
+) -> Result<serde_json::Value, Box<Response>> {
+    let invalid = |expected: &str| {
+        Box::new(error_response_with_code(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("query key `{key}` must be {expected} per its declared schema"),
+            "schema_validation_failed",
+        ))
+    };
+    match schema {
+        surfaces::SchemaContract::String => Ok(serde_json::Value::String(value)),
+        surfaces::SchemaContract::Integer => value
+            .parse::<i64>()
+            .map(|number| serde_json::json!(number))
+            .map_err(|_parse_error| invalid("an integer")),
+        surfaces::SchemaContract::Number => value
+            .parse::<f64>()
+            .ok()
+            .and_then(serde_json::Number::from_f64)
+            .map(serde_json::Value::Number)
+            .ok_or_else(|| invalid("a number")),
+        surfaces::SchemaContract::Boolean => match value.as_str() {
+            "true" => Ok(serde_json::Value::Bool(true)),
+            "false" => Ok(serde_json::Value::Bool(false)),
+            _ => Err(invalid("`true` or `false`")),
+        },
+        _ => Ok(serde_json::Value::String(value)),
+    }
+}
+
+fn surface_action_target_display(
+    method: &surfaces::InteractionHttpMethod,
+    surface_id: &str,
+    interaction_id: &str,
+) -> String {
+    format!(
+        "{} {surface_id}/{interaction_id}",
+        method.as_str().to_ascii_uppercase()
+    )
 }
 
 fn auth_method_name(auth_method: &crate::auth::AuthMethod) -> &'static str {
@@ -607,13 +1264,14 @@ struct SurfaceAuditContext<'a> {
     tenant_id: Uuid,
     auth_user: &'a AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
+    method: &'a surfaces::InteractionHttpMethod,
+    surface_id: &'a str,
+    interaction_id: &'a str,
+    target_provider_id: Option<&'a str>,
 }
 
 fn emit_surface_action_permission_denied_audit(
     ctx: &SurfaceAuditContext<'_>,
-    surface_id: &str,
-    interaction_id: &str,
-    target_provider_id: Option<&str>,
     permission_scope: &'static str,
     required_permission: &str,
 ) {
@@ -626,17 +1284,22 @@ fn emit_surface_action_permission_denied_audit(
     .target_opt(
         Some("surface_action".to_string()),
         None,
-        Some(surface_action_target_display(surface_id, interaction_id)),
+        Some(surface_action_target_display(
+            ctx.method,
+            ctx.surface_id,
+            ctx.interaction_id,
+        )),
     )
     .outcome(uptrakit_audit_log::AuditOutcome::Denied)
     .details(serde_json::json!({
-        "surface_id": surface_id,
-        "interaction_id": interaction_id,
-        "target_provider_id": target_provider_id,
+        "surface_id": ctx.surface_id,
+        "interaction_id": ctx.interaction_id,
+        "target_provider_id": ctx.target_provider_id,
         "permission_scope": permission_scope,
         "required_permission": required_permission,
         "auth_method": auth_method_name(&ctx.auth_user.auth_method),
         "reason_code": "missing_required_permission",
+        "http_method": ctx.method.as_str(),
     }))
     .build();
 
@@ -644,8 +1307,8 @@ fn emit_surface_action_permission_denied_audit(
         Ok(entry) => ctx.state.audit_emitter.emit_event(entry),
         Err(error) => tracing::warn!(
             tenant_id = %ctx.tenant_id,
-            surface_id = %surface_id,
-            interaction_id = %interaction_id,
+            surface_id = %ctx.surface_id,
+            interaction_id = %ctx.interaction_id,
             permission_scope,
             %error,
             "failed to build surface permission denial audit entry"
@@ -656,26 +1319,27 @@ fn emit_surface_action_permission_denied_audit(
 fn emit_surface_action_invoke_audit(
     ctx: &SurfaceAuditContext<'_>,
     resolved: Option<&crate::surface_registry::ResolvedSurfaceAction>,
-    surface_id: &str,
-    interaction_id: &str,
-    target_provider_id: Option<&str>,
     outcome: uptrakit_audit_log::AuditOutcome,
     reason_code: Option<&'static str>,
 ) {
     let (actor_type, actor_id) = ctx.auth_user.audit_actor(ctx.api_token_id);
     let mut details = serde_json::Map::from_iter([
-        ("surface_id".to_string(), serde_json::json!(surface_id)),
+        ("surface_id".to_string(), serde_json::json!(ctx.surface_id)),
         (
             "interaction_id".to_string(),
-            serde_json::json!(interaction_id),
+            serde_json::json!(ctx.interaction_id),
         ),
         (
             "target_provider_id".to_string(),
             serde_json::json!(
                 resolved
                     .map(|value| value.provider_id.as_str())
-                    .or(target_provider_id)
+                    .or(ctx.target_provider_id)
             ),
+        ),
+        (
+            "http_method".to_string(),
+            serde_json::json!(ctx.method.as_str()),
         ),
     ]);
     if let Some(resolved) = resolved {
@@ -706,7 +1370,11 @@ fn emit_surface_action_invoke_audit(
     .target_opt(
         Some("surface_action".to_string()),
         None,
-        Some(surface_action_target_display(surface_id, interaction_id)),
+        Some(surface_action_target_display(
+            ctx.method,
+            ctx.surface_id,
+            ctx.interaction_id,
+        )),
     )
     .outcome(outcome)
     .details(serde_json::Value::Object(details))
@@ -716,8 +1384,8 @@ fn emit_surface_action_invoke_audit(
         Ok(entry) => ctx.state.audit_emitter.emit_event(entry),
         Err(error) => tracing::warn!(
             tenant_id = %ctx.tenant_id,
-            surface_id = %surface_id,
-            interaction_id = %interaction_id,
+            surface_id = %ctx.surface_id,
+            interaction_id = %ctx.interaction_id,
             outcome = %outcome,
             %error,
             "failed to build surface invocation audit entry"
@@ -1407,7 +2075,7 @@ mod tests {
         assert_eq!(row.target_id, None);
         assert_eq!(
             row.target_display.as_deref(),
-            Some("ssh.guest.panel/refresh")
+            Some("POST ssh.guest.panel/refresh")
         );
         let details = row
             .details_json
@@ -1475,7 +2143,7 @@ mod tests {
         assert_eq!(row.target_id, None);
         assert_eq!(
             row.target_display.as_deref(),
-            Some("ssh.guest.panel/refresh")
+            Some("POST ssh.guest.panel/refresh")
         );
         let details = row
             .details_json
@@ -1545,7 +2213,7 @@ mod tests {
         assert_eq!(row.target_id, None);
         assert_eq!(
             row.target_display.as_deref(),
-            Some("ssh.guest.panel/refresh")
+            Some("POST ssh.guest.panel/refresh")
         );
         let details = row
             .details_json
@@ -1637,7 +2305,7 @@ mod tests {
         assert_eq!(row.target_type.as_deref(), Some("surface_action"));
         assert_eq!(
             row.target_display.as_deref(),
-            Some("ssh.guest.panel/refresh")
+            Some("POST ssh.guest.panel/refresh")
         );
         let details = row
             .details_json
@@ -1725,5 +2393,63 @@ mod tests {
         assert_eq!(details["auth_method"], "password");
         assert_eq!(details["reason_code"], "provider_unavailable");
         assert!(details.get("params").is_none());
+    }
+
+    #[test]
+    fn coerce_reserved_page_to_number_and_undeclared_to_string() {
+        let params = coerce_get_params(
+            vec![("page".into(), "2".into()), ("foo".into(), "bar".into())],
+            &[],
+        )
+        .expect("coerces");
+        assert_eq!(params.get("page"), Some(&serde_json::json!(2)));
+        assert_eq!(params.get("foo"), Some(&serde_json::json!("bar")));
+    }
+
+    #[test]
+    fn coerce_unparsable_reserved_key_is_422() {
+        let err = coerce_get_params(vec![("page".into(), "abc".into())], &[]).expect_err("rejects");
+        assert_eq!(err.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[test]
+    fn coerce_declared_field_parses_strictly() {
+        let declared = vec![
+            surfaces::ParamFieldDescriptor::new("count", surfaces::SchemaContract::Integer),
+            surfaces::ParamFieldDescriptor::new("enabled", surfaces::SchemaContract::Boolean),
+        ];
+        let params = coerce_get_params(
+            vec![
+                ("count".into(), "7".into()),
+                ("enabled".into(), "true".into()),
+            ],
+            &declared,
+        )
+        .expect("coerces");
+        assert_eq!(params.get("count"), Some(&serde_json::json!(7)));
+        assert_eq!(params.get("enabled"), Some(&serde_json::json!(true)));
+        let err =
+            coerce_get_params(vec![("count".into(), "x".into())], &declared).expect_err("rejects");
+        assert_eq!(err.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[test]
+    fn envelope_keys_never_reach_params() {
+        let (envelope, rest) = split_get_envelope(vec![
+            ("target_provider_id".into(), "p1".into()),
+            ("timeout_seconds".into(), "30".into()),
+            ("q".into(), "x".into()),
+        ])
+        .expect("splits");
+        assert_eq!(envelope.target_provider_id.as_deref(), Some("p1"));
+        assert_eq!(envelope.timeout_seconds, Some(30));
+        assert_eq!(rest, vec![("q".to_string(), "x".to_string())]);
+    }
+
+    #[test]
+    fn empty_target_provider_id_normalizes_to_none() {
+        let (envelope, _) =
+            split_get_envelope(vec![("target_provider_id".into(), "".into())]).expect("splits");
+        assert_eq!(envelope.target_provider_id, None);
     }
 }

@@ -7050,11 +7050,200 @@
       }
     },
     "/api/v1/surfaces/{surface_id}/interactions/{interaction_id}": {
+      "get": {
+        "tags": [
+          "Surfaces"
+        ],
+        "summary": "Read a surface interaction via `GET`. Query keys: reserved (`page`,\n`per_page`) coerce to numbers; declared keys parse strictly per their\nschema; undeclared keys pass through as strings. `target_provider_id` and\n`timeout_seconds` are envelope keys and never reach provider `params`.\n`HEAD` is auto-derived from this registration and short-circuits before\nthe provider is ever reached.",
+        "operationId": "read_surface_interaction",
+        "parameters": [
+          {
+            "name": "surface_id",
+            "in": "path",
+            "description": "Surface ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "interaction_id",
+            "in": "path",
+            "description": "Interaction ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "target_provider_id",
+            "in": "query",
+            "description": "Explicit provider to target; required for multi-provider surfaces.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "timeout_seconds",
+            "in": "query",
+            "description": "Overrides the provider's default timeout, in seconds.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "Reserved key; coerces to an unsigned integer.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "description": "Reserved key; coerces to an unsigned integer.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Provider-defined free-form JSON result",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated"
+          },
+          "403": {
+            "description": "Missing a permission declared by the descriptor or interaction"
+          },
+          "404": {
+            "description": "Surface, interaction, or provider not found"
+          },
+          "405": {
+            "description": "Interaction is not registered under GET (Allow header lists methods)"
+          },
+          "422": {
+            "description": "Reserved or declared query key failed strict parsing"
+          },
+          "503": {
+            "description": "Provider unavailable"
+          },
+          "504": {
+            "description": "Surface action timed out"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ],
+        "x-required-permission": "dynamic: declared by the surface descriptor / interaction"
+      },
+      "put": {
+        "tags": [
+          "Surfaces"
+        ],
+        "summary": "Invoke a surface interaction via `PUT` (full-replace semantics by REST\nconvention; the provider defines actual behavior).",
+        "operationId": "update_surface_interaction",
+        "parameters": [
+          {
+            "name": "surface_id",
+            "in": "path",
+            "description": "Surface ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "interaction_id",
+            "in": "path",
+            "description": "Interaction ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvokeSurfaceInteractionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Provider-defined free-form JSON result",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or missing target provider"
+          },
+          "401": {
+            "description": "Not authenticated"
+          },
+          "403": {
+            "description": "Missing a permission declared by the descriptor or interaction"
+          },
+          "404": {
+            "description": "Surface, interaction, or provider not found"
+          },
+          "405": {
+            "description": "Interaction is not registered under PUT (Allow header lists methods)"
+          },
+          "409": {
+            "description": "Duplicate idempotency key or provider-reported conflict"
+          },
+          "422": {
+            "description": "Schema validation failed or provider-reported failure"
+          },
+          "429": {
+            "description": "Rate limited"
+          },
+          "503": {
+            "description": "Provider unavailable"
+          },
+          "504": {
+            "description": "Surface action timed out"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ],
+        "x-required-permission": "dynamic: declared by the surface descriptor / interaction"
+      },
       "post": {
         "tags": [
           "Surfaces"
         ],
-        "summary": "Invoke a surface interaction. The success body is a free-form,\nprovider-defined JSON value.",
+        "summary": "Invoke a surface interaction via `POST`. The success body is a free-form,\nprovider-defined JSON value.",
         "operationId": "invoke_surface_interaction",
         "parameters": [
           {
@@ -7106,6 +7295,442 @@
           },
           "404": {
             "description": "Surface, interaction, or provider not found"
+          },
+          "405": {
+            "description": "Interaction is not registered under POST (Allow header lists methods)"
+          },
+          "409": {
+            "description": "Duplicate idempotency key or provider-reported conflict"
+          },
+          "422": {
+            "description": "Schema validation failed or provider-reported failure"
+          },
+          "429": {
+            "description": "Rate limited"
+          },
+          "503": {
+            "description": "Provider unavailable"
+          },
+          "504": {
+            "description": "Surface action timed out"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ],
+        "x-required-permission": "dynamic: declared by the surface descriptor / interaction"
+      },
+      "delete": {
+        "tags": [
+          "Surfaces"
+        ],
+        "summary": "Invoke a surface interaction via `DELETE`.",
+        "operationId": "delete_surface_interaction",
+        "parameters": [
+          {
+            "name": "surface_id",
+            "in": "path",
+            "description": "Surface ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "interaction_id",
+            "in": "path",
+            "description": "Interaction ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Optional body",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvokeSurfaceInteractionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Provider-defined free-form JSON result",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or missing target provider"
+          },
+          "401": {
+            "description": "Not authenticated"
+          },
+          "403": {
+            "description": "Missing a permission declared by the descriptor or interaction"
+          },
+          "404": {
+            "description": "Surface, interaction, or provider not found"
+          },
+          "405": {
+            "description": "Interaction is not registered under DELETE (Allow header lists methods)"
+          },
+          "409": {
+            "description": "Duplicate idempotency key or provider-reported conflict"
+          },
+          "422": {
+            "description": "Schema validation failed or provider-reported failure"
+          },
+          "429": {
+            "description": "Rate limited"
+          },
+          "503": {
+            "description": "Provider unavailable"
+          },
+          "504": {
+            "description": "Surface action timed out"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ],
+        "x-required-permission": "dynamic: declared by the surface descriptor / interaction"
+      }
+    },
+    "/api/v1/surfaces/{surface_id}/interactions/{interaction_id}/{item_id}": {
+      "get": {
+        "tags": [
+          "Surfaces"
+        ],
+        "summary": "Read a surface interaction targeting a specific item via `GET\n.../{item_id}`. Identical semantics to [`read_surface_interaction`]; the\npath segment overwrites any `id` carried in the query string.",
+        "operationId": "read_surface_interaction_item",
+        "parameters": [
+          {
+            "name": "surface_id",
+            "in": "path",
+            "description": "Surface ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "interaction_id",
+            "in": "path",
+            "description": "Interaction ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "item_id",
+            "in": "path",
+            "description": "Item ID (overwrites `id` from the query string)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "target_provider_id",
+            "in": "query",
+            "description": "Explicit provider to target; required for multi-provider surfaces.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "timeout_seconds",
+            "in": "query",
+            "description": "Overrides the provider's default timeout, in seconds.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "Reserved key; coerces to an unsigned integer.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "description": "Reserved key; coerces to an unsigned integer.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Provider-defined free-form JSON result",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated"
+          },
+          "403": {
+            "description": "Missing a permission declared by the descriptor or interaction"
+          },
+          "404": {
+            "description": "Surface, interaction, or provider not found"
+          },
+          "405": {
+            "description": "Interaction is not registered under GET (Allow header lists methods)"
+          },
+          "422": {
+            "description": "Reserved or declared query key failed strict parsing"
+          },
+          "503": {
+            "description": "Provider unavailable"
+          },
+          "504": {
+            "description": "Surface action timed out"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ],
+        "x-required-permission": "dynamic: declared by the surface descriptor / interaction"
+      },
+      "put": {
+        "tags": [
+          "Surfaces"
+        ],
+        "summary": "Update a specific item via `PUT .../{item_id}`.",
+        "operationId": "update_surface_interaction_item",
+        "parameters": [
+          {
+            "name": "surface_id",
+            "in": "path",
+            "description": "Surface ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "interaction_id",
+            "in": "path",
+            "description": "Interaction ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "item_id",
+            "in": "path",
+            "description": "Item ID (overwrites `id` from the body)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvokeSurfaceInteractionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Provider-defined free-form JSON result",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or missing target provider"
+          },
+          "401": {
+            "description": "Not authenticated"
+          },
+          "403": {
+            "description": "Missing a permission declared by the descriptor or interaction"
+          },
+          "404": {
+            "description": "Surface, interaction, or provider not found"
+          },
+          "405": {
+            "description": "Interaction is not registered under PUT (Allow header lists methods)"
+          },
+          "409": {
+            "description": "Duplicate idempotency key or provider-reported conflict"
+          },
+          "422": {
+            "description": "Schema validation failed or provider-reported failure"
+          },
+          "429": {
+            "description": "Rate limited"
+          },
+          "503": {
+            "description": "Provider unavailable"
+          },
+          "504": {
+            "description": "Surface action timed out"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ],
+        "x-required-permission": "dynamic: declared by the surface descriptor / interaction"
+      },
+      "post": {
+        "tags": [
+          "Surfaces"
+        ],
+        "summary": "`POST .../{item_id}` is never a valid registration (POST is create/base\nonly) — always `405`, listing the item-addressable methods.",
+        "operationId": "invoke_surface_interaction_item",
+        "parameters": [
+          {
+            "name": "surface_id",
+            "in": "path",
+            "description": "Surface ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "interaction_id",
+            "in": "path",
+            "description": "Interaction ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "item_id",
+            "in": "path",
+            "description": "Item ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "405": {
+            "description": "POST is not valid on an item-addressed interaction (Allow: GET, PUT, DELETE)"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ],
+        "x-required-permission": "none: always 405"
+      },
+      "delete": {
+        "tags": [
+          "Surfaces"
+        ],
+        "summary": "Delete a specific item via `DELETE .../{item_id}`.",
+        "operationId": "delete_surface_interaction_item",
+        "parameters": [
+          {
+            "name": "surface_id",
+            "in": "path",
+            "description": "Surface ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "interaction_id",
+            "in": "path",
+            "description": "Interaction ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "item_id",
+            "in": "path",
+            "description": "Item ID (overwrites `id` from the body)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Optional body",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvokeSurfaceInteractionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Provider-defined free-form JSON result",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or missing target provider"
+          },
+          "401": {
+            "description": "Not authenticated"
+          },
+          "403": {
+            "description": "Missing a permission declared by the descriptor or interaction"
+          },
+          "404": {
+            "description": "Surface, interaction, or provider not found"
+          },
+          "405": {
+            "description": "Interaction is not registered under DELETE (Allow header lists methods)"
           },
           "409": {
             "description": "Duplicate idempotency key or provider-reported conflict"

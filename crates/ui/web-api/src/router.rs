@@ -773,7 +773,18 @@ pub fn build_router_with_openapi(state: Arc<AppState>) -> (Router, utoipa::opena
         .routes(routes!(crate::routes::surfaces::list_surfaces))
         .routes(routes!(crate::routes::surfaces::get_surface_read))
         .routes(routes!(crate::routes::surfaces::list_surface_providers))
-        .routes(routes!(crate::routes::surfaces::invoke_surface_interaction));
+        .routes(routes!(
+            crate::routes::surfaces::read_surface_interaction,
+            crate::routes::surfaces::invoke_surface_interaction,
+            crate::routes::surfaces::update_surface_interaction,
+            crate::routes::surfaces::delete_surface_interaction
+        ))
+        .routes(routes!(
+            crate::routes::surfaces::read_surface_interaction_item,
+            crate::routes::surfaces::invoke_surface_interaction_item,
+            crate::routes::surfaces::update_surface_interaction_item,
+            crate::routes::surfaces::delete_surface_interaction_item
+        ));
 
     // Reset data
     #[cfg(feature = "reset-data")]
