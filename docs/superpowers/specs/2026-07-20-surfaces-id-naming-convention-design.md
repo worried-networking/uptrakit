@@ -32,13 +32,13 @@ document-only and widely violated — proof that the convention needs an executa
 
 ## Decisions (settled — do not reopen)
 
-| #   | Decision            | Resolution                                                                                                                                                                                                                                                                                                                                             |
-| --- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| C1  | Convention          | See §Convention below. Kebab-case; CRUD = plural noun + HTTP method; singletons = singular noun + GET/PUT; domain operations = verb phrase + POST.                                                                                                                                                                                                     |
-| C2  | Skew policy         | No transitional dual-registration aliases. Renames land atomically per binary (user decision 2026-07-20, overriding the absorbed spec's alias plan). Within a binary, per-provider commits are fine: no cross-provider ID coupling exists — provided the companion spec's executor-table key change lands first and the catalog guard test lands last. |
-| C3  | Enforcement         | Guard tests over first-party registrations only. `validate_surface_identifier` stays permissive — old service binaries must not be rejected at admission.                                                                                                                                                                                              |
-| C4  | Slot IDs            | Out of scope (`settings.tabs`, `host_detail.tabs`, …) — shared contract with a larger blast radius; unchanged.                                                                                                                                                                                                                                         |
-| C5  | Permission literals | Notifications/MQTT raw permission strings switch to the `Permission` enum via `.to_string()`. Retyping descriptor fields `Option<String>` → `Option<Permission>` stays deferred (registered follow-up of the interaction-unification spec).                                                                                                            |
+| #   | Decision            | Resolution                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| --- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C1  | Convention          | See §Convention below. Kebab-case; CRUD = plural noun + HTTP method; singletons = singular noun + GET/PUT; domain operations = verb phrase + POST.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| C2  | Skew policy         | No transitional dual-registration aliases. Renames land atomically per binary (user decision 2026-07-20, overriding the absorbed spec's alias plan). Within a binary, per-provider commits are fine: no cross-provider ID coupling exists — provided the companion spec's executor-table key change lands first and the catalog guard test lands last.                                                                                                                                                                                                                                                                                  |
+| C3  | Enforcement         | Guard tests over first-party registrations only. `validate_surface_identifier` stays permissive — old service binaries must not be rejected at admission.                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| C4  | Slot IDs            | Out of scope (`settings.tabs`, `host_detail.tabs`, …) — shared contract with a larger blast radius; unchanged.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| C5  | Permission literals | **Amended 2026-07-21** (superseding the original "switch literals to the `Permission` enum" resolution): the raw permission strings in notifications/MQTT registrations stay as-is. The access-management refactoring (`.superpowers/authn-and-authz-refactoring/`, Milestone 1) deletes the `Permission` enum and retypes these sites to catalog `Action` constants (string-on-wire, parsed at admission) — typing them to `Permission` first is churn with no surviving value. The interaction-unification deferral (`Option<String>` → `Option<Permission>`) is likewise superseded by that refactoring's `required_action` re-type. |
 
 ## Convention (normative — this text lands in `docs/development/surfaces.md`)
 
@@ -238,10 +238,10 @@ from §Enforcement). Staleness greps split by ID distinctiveness:
 **Code:** renames per the table (registration builders, dispatch match arms, interaction constants, DS
 descriptors, `pre_load_interaction_id` references, `CONTROLLER_LOCAL_EXECUTOR_TABLE` rows,
 `audit_surface.rs` literals); mqtt `handle_list_action` + `handle_get_action` merged into one GET `clients`
-handler branching on `params["id"]` (per the table's merged row); notifications + MQTT permission literals → `Permission` enum (C5) — requires new
-`uptrakit-shared-types = { workspace = true }` dependency edges in `crates/core/mqtt-runtime/Cargo.toml` and
-`crates/plugins/notifications/telegram/Cargo.toml` (email/webhook already depend on it; named deliverable, not
-incidental); CLI help-text example; e2e mock matchers; guard tests (catalog + two service runtimes).
+handler branching on `params["id"]` (per the table's merged row); ~~permission-literal typing~~ — dropped
+per the amended C5 (raw strings stay; the access-management refactoring retypes them, so the
+`uptrakit-shared-types` dependency edges the original C5 required are not added here); CLI help-text
+example; e2e mock matchers; guard tests (catalog + two service runtimes).
 
 **Docs (non-optional):**
 
@@ -256,8 +256,10 @@ incidental); CLI help-text example; e2e mock matchers; guard tests (catalog + tw
 
 ## Deferred (named follow-ups, out of scope)
 
-1. Descriptor/gate permission typing `Option<String>` → `Option<Permission>` (registered deferral of the
-   interaction-unification spec; C5 only fixes the literals).
+1. Descriptor/gate permission typing — superseded (amended C5): the access-management refactoring
+   (`.superpowers/authn-and-authz-refactoring/`) re-types `required_permission` to `required_action`
+   (string on the wire, `Action` at admission), absorbing both the literal cleanup and the
+   interaction-unification deferral.
 2. Slot ID normalization (C4).
 3. Deleting the notifications surface-CRUD duplicate path in favor of the existing
    `/api/v1/notifications/channels` REST family (needs either first-class settings UI or a built-in-API
@@ -268,3 +270,53 @@ incidental); CLI help-text example; e2e mock matchers; guard tests (catalog + tw
 ## Open questions
 
 None.
+
+## Amendment (2026-07-21): plugin type IDs join the convention
+
+Owner decision during the access-management merge (`.superpowers/authn-and-authz-refactoring/`,
+[09 §Sequencing](../../../.superpowers/authn-and-authz-refactoring/09-resolved-questions.md)): plugin
+type IDs (`PluginTypeId`, `crates/shared/types/src/plugin_type_id.rs`) adopt the same identifier grammar
+as surface IDs — **dot-separated kebab-case segments, category as the first segment** — replacing the
+current fused snake_case (`package_manager_apt`) and the unprefixed notification IDs (`email`). One
+grammar then covers surface IDs, interaction/data-source IDs, plugin type IDs, and (downstream) the
+access-model action strings that embed them.
+
+### Rename table (exhaustive; population verified 2026-07-21 by workspace grep of `from_static`)
+
+| Current                                                                                                                            | New                                                                        |
+| ---------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `package_manager_apk` … `package_manager_snap` (12: apk, apt, cargo, dnf, homebrew, mas, npm, pacman, pkg, routeros, skills, snap) | `package-manager.<name>`                                                   |
+| `releases_docker` / `releases_forgejo` / `releases_github` / `releases_gitlab`                                                     | `releases.<name>`                                                          |
+| `hook_shell` / `hook_systemd`                                                                                                      | `hook.shell` / `hook.systemd`                                              |
+| `infrastructure_proxmox`                                                                                                           | `infrastructure.proxmox`                                                   |
+| `generic_shell`                                                                                                                    | `generic.shell`                                                            |
+| `discovery_proxmox_helper_scripts`                                                                                                 | `discovery.proxmox-helper-scripts`                                         |
+| `discovery_uptrakit_self_update`                                                                                                   | `discovery.uptrakit-self-update`                                           |
+| `enhancement_dashboard_icons`                                                                                                      | `enhancement.dashboard-icons`                                              |
+| `email` / `telegram` / `webhook`                                                                                                   | `notifications.email` / `notifications.telegram` / `notifications.webhook` |
+
+`__test_*` fixture IDs rename to `test.<name>` at implementers' discretion (not contract).
+
+### Scope and enforcement
+
+- `declare_plugin!` descriptor constants and every hardcoded reference (dispatch, tests, docs) rename in
+  lockstep — same sweep discipline as the interaction-ID renames above.
+- **Guard test** beside the catalog (`uptrakit-plugin-infrastructure-registry`): every
+  `PluginCatalog` descriptor's type ID matches the surface-ID regex (dot-separated kebab segments) and
+  carries a known category first segment. Same RED-demonstration rule as the other guards.
+- **DB migration**: best-effort value remap (compatibility waived; single `update_many` per table per
+  the batch invariant) over the plugin-type-bearing tables — `plugin_configs`, `plugin_type_settings`,
+  `instance_plugin_settings`, `host_software_item_plugins`, `tenant_discovery_allowlist`,
+  `host_discovery_allowlist` (re-verify the column inventory by grep at plan time). Unmatched values are
+  left as-is (they already match nothing in the catalog).
+- **Wire**: plugin type strings ride wire payloads; satellites are version-locked to the controller per
+  the access-management proposal's rules, so no aliasing — same no-alias skew policy as C2.
+- **Out of scope**: notification `channel_type` strings — a separate runtime-validated concept
+  (channel identity, not plugin type identity); renaming them is not implied by this amendment.
+- **Package-identifier rules, `PluginRole`, capability strings**: untouched.
+
+### Sequencing note
+
+The access-management refactoring's action grammar embeds plugin type IDs verbatim
+(`plugin.package-manager.apt:manage`); its Milestone 1 assumes this amendment has landed. Landing order:
+this spec (including this amendment) → access-management M1.
