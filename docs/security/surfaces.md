@@ -26,14 +26,42 @@ Enforcement points:
   variant exists for surface listing and inventing one is out of scope, so results are visibility-filtered per
   descriptor instead
 - `GET /api/v1/surfaces/{surface_id}` — descriptor permission check
-- `POST /api/v1/surfaces/{surface_id}/interactions/{interaction_id}` — descriptor and interaction permission checks
+- `GET|POST|PUT|DELETE /api/v1/surfaces/{surface_id}/interactions/{interaction_id}` and the
+  `.../{interaction_id}/{item_id}` variants — descriptor and interaction permission checks, on every method
+
+Every method-mapped interaction route resolves in the same order: unknown surface/interaction is `404`; then the
+descriptor permission, then the interaction permission (`403`); only then a method mismatch (`405`, with an `Allow`
+header). Permission is checked **before** the method-mismatch check specifically so an unauthorized caller cannot
+probe an interaction's registered method set by comparing `403` against `405` across methods. See [Shared Surface
+API](../api/surfaces.md#resolution-order-and-405-semantics) for the full resolution order and the two distinct
+`Allow`-header shapes.
 
 Read and invoke enforce the dynamic descriptor/interaction permissions in-handler via `enforce_required_permission` —
-this is the documented exception to the platform's typed-permission-extractor rule, because the required permission is
+this is a documented exception to the platform's typed-permission-extractor rule, because the required permission is
 runtime descriptor data no static extractor can carry; the OpenAPI operations advertise it via a human-readable
-dynamic `x-required-permission` extension.
+dynamic `x-required-permission` extension. See [Authentication and
+Authorization](auth-and-authorization.md#runtime-valued-permission-extension-surfaces) for how this exception class
+is distinguished from the platform's other two documented extractor exceptions.
 
 Frontend filtering is convenience only; server checks are authoritative.
+
+### GET query strings and sensitive data
+
+`DataLoad` interactions are dispatched over `GET`, so their params travel in the URL query string rather than a
+request body. Query strings are visible in server access logs, browser history, and (for cross-origin navigations)
+the `Referer` header — a materially different exposure surface than a JSON body.
+
+This is an accepted trade because `DataLoad` params are never allowed to carry secrets: admission validation rejects
+any `DataLoad` interaction that declares a non-empty `sensitive_fields` list, with the error `data-load interaction
+{id} in surface {surface_id} must not declare sensitive_fields (GET params travel in query strings)`. A provider
+that legitimately needs to pass a sensitive value into a load path must model it as a non-`DataLoad` interaction
+kind instead (which keeps `POST`/`PUT`/`DELETE` semantics and can use `encrypted_sensitive_params`).
+
+**Failure mode for providers that violate this rule** (e.g. an older or out-of-repo provider build predating this
+admission check): registration of the offending surface is rejected outright at admission time. The surface is
+simply absent from `GET /api/v1/surfaces` and every interaction on it is unreachable — there is no partial
+registration and no runtime error path that a caller could trigger by invoking the interaction. The provider's
+connection/registration logs show the rejection reason; end users see no trace of the surface at all.
 
 ### Provider-origin invocation
 

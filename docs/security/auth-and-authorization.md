@@ -335,6 +335,37 @@ The sentinel value `"self"` is distinct from the named `Permission` variants. It
 permission-audit tooling that the endpoint requires only **authentication** (a valid token), not any specific
 RBAC permission. Tools must treat `"self"` as "any authenticated user is authorized".
 
+### Runtime-valued permission extension (surfaces)
+
+Shared-surface interaction routes (`crates/ui/web-api/src/routes/surfaces.rs`) are a second, distinct exception to
+the typed-permission-extractor rule — separate from both the `"self"` sentinel above and the `// APPROVED: custom
+auth path` token-extraction exception used by handlers like the WebSocket upgrade route (see [Coding
+Standards](../development/coding-standards.md)).
+
+Surface descriptors and interactions carry their own `required_permission: Option<Permission>` as **registration
+data** supplied by the provider (plugin or service) at admission time, not a value known at route-definition time.
+No fixed `CanXxx` extractor can express "whatever permission this particular surface/interaction declares", so
+these handlers call `enforce_required_permission()` in the handler body against the resolved descriptor/interaction
+instead of a typed extractor, and the `#[utoipa::path]` annotation carries a literal, non-enum sentinel:
+
+```rust
+extensions(("x-required-permission" = json!("dynamic: declared by the surface descriptor / interaction")))
+```
+
+This is checked at both the descriptor level and the interaction level, and — per [Shared Surface
+Security](surfaces.md#permission-model) — happens for every method (`GET`/`POST`/`PUT`/`DELETE`) on the interaction
+route family, before any `405` method-mismatch response, so a caller cannot fingerprint an interaction's registered
+methods by comparing `403` against `405`.
+
+| Exception class                 | Permission source                                     | OpenAPI marker                          |
+| ------------------------------- | ----------------------------------------------------- | --------------------------------------- |
+| `"self"` sentinel               | None — any authenticated user is authorized           | `x-required-permission: "self"`         |
+| `// APPROVED: custom auth path` | Not RBAC — bespoke auth (token extraction, WebSocket) | handler-specific, documented inline     |
+| Runtime-valued (surfaces)       | Registration data on the surface/interaction          | `x-required-permission: "dynamic: ..."` |
+
+Automated permission-audit tooling must treat the `"dynamic: ..."` prefix the same way it treats `"self"`: a marker
+that a fixed enum value cannot be extracted statically, not a defect in the generated OpenAPI spec.
+
 ### Permission extractor reference
 
 | Extractor                   | Permission checked                   |

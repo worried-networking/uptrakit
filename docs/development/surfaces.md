@@ -193,10 +193,49 @@ REST endpoints:
 - `GET /api/v1/surfaces`
 - `GET /api/v1/surfaces/{surface_id}`
 - `GET /api/v1/surfaces/{surface_id}/providers`
-- `POST /api/v1/surfaces/{surface_id}/interactions/{interaction_id}`
+- `GET|POST|PUT|DELETE /api/v1/surfaces/{surface_id}/interactions/{interaction_id}`
+- `GET|PUT|DELETE /api/v1/surfaces/{surface_id}/interactions/{interaction_id}/{item_id}` (`POST` on this path is a
+  static 405 stub — create always targets the collection, never a specific item)
 
 These endpoints are utoipa-registered; frontend access goes through the generated SDK (the hand-written
-`frontend/src/lib/api/surfaces.ts` is retired).
+`frontend/src/lib/api/surfaces.ts` is retired). Full route family, query contract, and error semantics: [Shared
+Surface API](../api/surfaces.md).
+
+### Declaring an interaction's method
+
+Every `InteractionDescriptor` carries `http_method` (`get` | `post` | `put` | `delete`; wire default `post`).
+Authoring rules:
+
+- `DataLoad` interactions are always `GET`, regardless of the declared value: a declared `put`/`delete` is rejected
+  at admission, while a declared `post` (or an omitted field) silently normalizes to `get` — the two are
+  indistinguishable at admission time. Prefer declaring `get` explicitly for new `DataLoad` interactions so the
+  intent is legible in the descriptor even though it is not enforced.
+- `Workflow` interactions must declare `post`.
+- `FormSubmit`, `MutationAction`, and `ConfirmableAction` declare whichever of `post`/`put`/`delete` matches the
+  operation's semantics (`post` is the default when omitted). There is no `patch` — mutations that replace a
+  resource use `put` (full replace), never a partial-update verb.
+- `DataLoad` interactions must not declare non-empty `sensitive_fields` (GET params travel in the query string —
+  see [Shared Surface Security](../security/surfaces.md) for the failure mode this admission rule prevents).
+
+Optionally declare `params: Vec<ParamFieldDescriptor>` (`key`, `schema`, `required`) for fields that need strict
+typed parsing. This matters most for `GET` interactions: a param not listed in `params` is forwarded to the
+provider as an untyped JSON string parsed from the query string, while a declared param is parsed per its
+`SchemaContract` and rejected with `422 schema_validation_failed` on a bad value. Declared keys must not collide
+with the framework-reserved keys `id`, `page`, `per_page`, `target_provider_id`, `timeout_seconds`. Mutating methods
+(`POST`/`PUT`/`DELETE`) apply the same per-field validation to the JSON body when `params` is declared.
+
+An `interaction_id` may register under more than one `http_method` within the same surface — registration
+uniqueness is `(surface_id, interaction_id, http_method)`, extending ADR-0028's exact-ID dispatch (see
+[ADR-0030](../adr/0030-surfaces-rest-method-model.md)). A content node that references an interaction by bare ID
+resolves only if that ID has exactly one registered method; a bare reference to a multi-method ID is rejected at
+admission rather than silently defaulting to `post`.
+
+### Item addressing
+
+Interactions targeting a specific row in a collection can be invoked via the trailing `/{item_id}` path segment
+instead of (or as well as) an `id` field in the query string or body — the framework injects the path segment's
+value into `params["id"]`, overwriting anything already present under that key. Providers read `params["id"]`
+uniformly regardless of which route carried it in.
 
 ## Migration notes
 

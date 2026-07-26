@@ -614,8 +614,10 @@ The shared surface runtime is the UI integration model for built-in functionalit
   reasons.
 - **Runtime dispatch**: `SurfaceProxy` resolves provider selection (universal vs targeted), enforces idempotency/timeout behavior, and routes
   interactions either locally (`controller_local`) or to services (`provider_proxied`).
-- **Web API**: `/api/v1/surfaces`, `/api/v1/surfaces/{surface_id}`, `/api/v1/surfaces/{surface_id}/providers`,
-  `/api/v1/surfaces/{surface_id}/interactions/{interaction_id}`.
+- **Web API**: `/api/v1/surfaces`, `/api/v1/surfaces/{surface_id}`, `/api/v1/surfaces/{surface_id}/providers`, and
+  the method-mapped interaction family `GET|POST|PUT|DELETE /api/v1/surfaces/{surface_id}/interactions/{interaction_id}`
+  (plus `GET|PUT|DELETE .../{interaction_id}/{item_id}` for item addressing) — see
+  [Shared Surface API](docs/api/surfaces.md).
 - **Frontend unified renderer path**:
   - runtime store/index in `frontend/src/lib/surfaces/registry.svelte.ts`
   - shared components in `frontend/src/lib/components/surfaces/`
