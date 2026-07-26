@@ -77,6 +77,9 @@ bash ci/verify_typed_audit_actions.sh
 echo "[pre-push] Running no-inline-query-params check..."
 bash ci/verify_no_inline_query_params.sh
 
+echo "[pre-push] Running dataload-declares-params check..."
+bash ci/verify_dataload_declares_params.sh
+
 echo "[pre-push] Running no-new-cfg-not-feature check..."
 bash ci/verify_no_new_cfg_not_feature.sh
 

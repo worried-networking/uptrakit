@@ -1,0 +1,58 @@
+# Allowlist for ci/verify_dataload_declares_params.sh.
+#
+# One bare relative path per line (must start with "crates/" and end in
+# ".rs"); "#" starts a comment. Every listed path must exist and must still
+# match the `InteractionKind::DataLoad` pattern the script scans for — a row
+# that no longer matches is treated as stale and fails the check (that is
+# the ratchet: entries can only be removed, not left to rot).
+#
+# Seed commit (see script header for full rationale): every DataLoad
+# interaction registered in the repo today is genuinely param-less —
+# reserved-key coercion at the surface-proxy boundary keeps them working
+# without declared params. Declaring `.with_params(...)` per interaction is
+# an explicitly deferred hard-block follow-up, not required by this seed.
+
+# Runtime-computed `kind` (not a literal at the constructor call) — see the
+# hint->kind match arm this file's grep hit comes from. Real DataLoad
+# registration site; genuinely param-less today.
+crates/core/agent-ssh-runtime/src/surface_runtime.rs
+
+# Registers HA-discovery / summary DataLoad interactions; genuinely
+# param-less today.
+crates/core/mqtt-runtime/src/surface_runtime.rs
+
+# Generic `RegisteredInteraction`/delivery-kind-mapping helper shared by
+# every infrastructure plugin. The `InteractionKind::DataLoad` literal this
+# file's grep hit comes from lives only in its own unit tests exercising the
+# mapping helper — the crate's production code takes `kind` as a caller-
+# supplied parameter, so there is no interaction site here to attach params
+# to.
+crates/plugins/infrastructure/core/src/registration.rs
+
+# Registers multiple Proxmox VE DataLoad interactions (nodes, VMs, storage,
+# etc.) from one file; genuinely param-less today. Per the script's header,
+# file-granularity means a single `.with_params(` here would blind the
+# check to the rest — deferred to the per-interaction hard-block follow-up.
+crates/plugins/infrastructure/proxmox/src/plugin.rs
+
+# Registers the webhook notification channel's DataLoad interactions;
+# genuinely param-less today.
+crates/plugins/notifications/webhook/src/plugin.rs
+
+# Registers the Telegram notification channel's DataLoad interactions;
+# genuinely param-less today.
+crates/plugins/notifications/telegram/src/plugin.rs
+
+# Registers the email notification channel's DataLoad interactions;
+# genuinely param-less today.
+crates/plugins/notifications/email/src/plugin.rs
+
+# Registers the Docker release-source plugin's DataLoad interaction;
+# genuinely param-less today.
+crates/plugins/releases/docker/src/plugin.rs
+
+# CLI interaction-dispatch helper. The `InteractionKind::DataLoad` literal
+# this file's grep hit comes from lives only inside its `#[cfg(test)] mod
+# tests` block (a unit test for the dispatch-verb mapping) — there is no
+# production interaction registration in this file to attach params to.
+crates/ui/cli/src/commands/surfaces.rs
