@@ -72,6 +72,8 @@ pub const SPEC_ONLY: &[&str] = &[
     "get_oauth_settings",
     "get_zeroconf_settings",
     "initiate_email_change",
+    // POST on the item path is a documented 405 stub; no client method
+    "invoke_surface_interaction_item",
     "list_instance_plugins",
     // MFA / 2FA flows are browser-interactive; not in the typed API client
     "mfa_send_email",

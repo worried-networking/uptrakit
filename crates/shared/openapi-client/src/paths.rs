@@ -408,6 +408,14 @@ pub(crate) mod surfaces {
     pub(crate) fn interaction(surface_id: &str, interaction_id: &str) -> String {
         format!("/api/v1/surfaces/{surface_id}/interactions/{interaction_id}")
     }
+    /// `GET|PUT|DELETE /api/v1/surfaces/{surface_id}/interactions/{interaction_id}/{item_id}`
+    pub(crate) fn interaction_item(
+        surface_id: &str,
+        interaction_id: &str,
+        item_id: &str,
+    ) -> String {
+        format!("/api/v1/surfaces/{surface_id}/interactions/{interaction_id}/{item_id}")
+    }
 }
 
 pub(crate) mod users {

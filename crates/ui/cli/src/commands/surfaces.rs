@@ -14,8 +14,9 @@ use uptrakit_openapi_client::types::surfaces::{
     InvokeSurfaceInteractionRequest, SurfaceProviderInfo, SurfaceReadResponse, SurfaceResponse,
 };
 use uptrakit_wire::surfaces::{
-    FormFieldDescriptor, FormSelectSource, InteractionDescriptor, InteractionKind,
-    InteractionTransport, ProviderEncryptionAlgorithm, ProviderEncryptionMetadata, Targeting,
+    FormFieldDescriptor, FormSelectSource, InteractionDescriptor, InteractionHttpMethod,
+    InteractionKind, InteractionTransport, ParamFieldDescriptor, ProviderEncryptionAlgorithm,
+    ProviderEncryptionMetadata, SchemaContract, Targeting,
 };
 
 #[derive(Debug, Subcommand)]
@@ -148,6 +149,14 @@ enum InteractionRenderMode<'a> {
         about: String,
         fields: Vec<&'a FormFieldDescriptor>,
     },
+    /// An interaction with no `form_ui` but opt-in `params` declarations
+    /// (`ParamFieldDescriptor`s) -- rendered as typed clap args derived from
+    /// each field's `SchemaContract`, distinct from the `form_ui`-keyed
+    /// `Typed` variant above.
+    DeclaredParams {
+        about: String,
+        params: Vec<&'a ParamFieldDescriptor>,
+    },
     RawOnly {
         about: String,
     },
@@ -174,6 +183,12 @@ fn render_mode_for_interaction(interaction: &InteractionDescriptor) -> Interacti
     }
 
     let Some(form_ui) = interaction.form_ui.as_ref() else {
+        if !interaction.params.is_empty() {
+            return InteractionRenderMode::DeclaredParams {
+                about: label.to_string(),
+                params: interaction.params.iter().collect(),
+            };
+        }
         return InteractionRenderMode::Typed {
             about: label.to_string(),
             fields: Vec::new(),
@@ -352,10 +367,14 @@ pub async fn invoke(params: InvokeParams<'_>) -> Result<InvokeOutput> {
         params.timeout_seconds,
     )
     .await?;
-    let result = client
-        .invoke_surface_interaction(&params.surface_id, &params.interaction_id, &request)
-        .await
-        .context_to()?;
+    let result = dispatch_interaction(
+        &client,
+        &params.surface_id,
+        &params.interaction_id,
+        interaction,
+        request,
+    )
+    .await?;
     Ok(InvokeOutput(result))
 }
 
@@ -441,10 +460,8 @@ pub async fn dynamic_invoke(
     )
     .await?;
 
-    let result = client
-        .invoke_surface_interaction(&surface_id, interaction_id, &request)
-        .await
-        .context_to()?;
+    let result =
+        dispatch_interaction(&client, &surface_id, interaction_id, interaction, request).await?;
     Ok(InvokeOutput(result))
 }
 
@@ -528,10 +545,18 @@ fn build_surface_command(surface: &SurfaceReadResponse) -> clap::Command {
             .about(render_mode_about(&render_mode))
             .arg(raw_params_arg());
 
-        if let InteractionRenderMode::Typed { fields, .. } = render_mode {
-            for field in fields {
-                subcmd = subcmd.arg(build_field_arg(field));
+        match &render_mode {
+            InteractionRenderMode::Typed { fields, .. } => {
+                for field in fields {
+                    subcmd = subcmd.arg(build_field_arg(field));
+                }
             }
+            InteractionRenderMode::DeclaredParams { params, .. } => {
+                for field in params {
+                    subcmd = subcmd.arg(build_param_arg(field));
+                }
+            }
+            InteractionRenderMode::RawOnly { .. } => {}
         }
 
         cmd = cmd.subcommand(subcmd);
@@ -543,6 +568,7 @@ fn build_surface_command(surface: &SurfaceReadResponse) -> clap::Command {
 fn render_mode_about(render_mode: &InteractionRenderMode<'_>) -> String {
     match render_mode {
         InteractionRenderMode::Typed { about, .. }
+        | InteractionRenderMode::DeclaredParams { about, .. }
         | InteractionRenderMode::RawOnly { about, .. } => about.clone(),
     }
 }
@@ -606,6 +632,28 @@ fn build_field_arg(field: &FormFieldDescriptor) -> clap::Arg {
     }
 }
 
+/// Builds a clap arg for a declared `params` field (opt-in per-field
+/// declaration, distinct from `form_ui` fields). Only `Integer`/`Number`/
+/// `Boolean`/`String` are exercised by `DataLoad` admission (scalar-only,
+/// see `validate_interaction_params`); other schema kinds fall back to a
+/// plain string arg for convenience on non-`DataLoad` interactions.
+fn build_param_arg(field: &ParamFieldDescriptor) -> clap::Arg {
+    let arg = clap::Arg::new(field.key.clone())
+        .long(field.key.clone())
+        .required(field.required);
+
+    match field.schema {
+        SchemaContract::Integer => arg.value_parser(clap::value_parser!(i64)),
+        SchemaContract::Number => arg.value_parser(clap::value_parser!(f64)),
+        SchemaContract::Boolean => arg.value_parser(clap::value_parser!(bool)),
+        SchemaContract::String
+        | SchemaContract::Any
+        | SchemaContract::Object
+        | SchemaContract::Array
+        | SchemaContract::Null => arg.value_parser(clap::value_parser!(String)),
+    }
+}
+
 fn extract_invocation_params(
     interaction: &InteractionDescriptor,
     render_mode: &InteractionRenderMode<'_>,
@@ -618,20 +666,68 @@ fn extract_invocation_params(
             .unwrap_or("{}"),
     )?;
 
-    let InteractionRenderMode::Typed { fields, .. } = render_mode else {
-        return Ok(params);
-    };
-
-    if interaction.form_ui.is_some() {
-        for &field in fields {
-            let value = extract_field_value(field, matches)?;
-            if let Some(value) = value {
-                params.insert(field.key.clone(), value);
+    match render_mode {
+        InteractionRenderMode::Typed { fields, .. } => {
+            if interaction.form_ui.is_some() {
+                for &field in fields {
+                    if let Some(value) = extract_field_value(field, matches)? {
+                        params.insert(field.key.clone(), value);
+                    }
+                }
             }
         }
+        InteractionRenderMode::DeclaredParams {
+            params: declared_params,
+            ..
+        } => {
+            for &field in declared_params {
+                if let Some(value) = extract_param_value(field, matches)? {
+                    params.insert(field.key.clone(), value);
+                }
+            }
+        }
+        InteractionRenderMode::RawOnly { .. } => {}
     }
 
     Ok(params)
+}
+
+/// Extracts a typed value for a declared `params` field, mirroring
+/// [`extract_field_value`] but sourced from `build_param_arg`'s
+/// `SchemaContract`-derived value parsers rather than `FormFieldDescriptor`.
+fn extract_param_value(
+    field: &ParamFieldDescriptor,
+    matches: &clap::ArgMatches,
+) -> Result<Option<serde_json::Value>> {
+    use crate::error::CliError;
+
+    match field.schema {
+        SchemaContract::Integer => Ok(matches
+            .get_one::<i64>(field.key.as_str())
+            .map(|value| serde_json::Value::Number((*value).into()))),
+        SchemaContract::Number => {
+            let Some(value) = matches.get_one::<f64>(field.key.as_str()) else {
+                return Ok(None);
+            };
+            let number = serde_json::Number::from_f64(*value).ok_or_else(|| {
+                report!(CliError::Other(format!(
+                    "invalid number for --{}",
+                    field.key
+                )))
+            })?;
+            Ok(Some(serde_json::Value::Number(number)))
+        }
+        SchemaContract::Boolean => Ok(matches
+            .get_one::<bool>(field.key.as_str())
+            .map(|value| serde_json::Value::Bool(*value))),
+        SchemaContract::String
+        | SchemaContract::Any
+        | SchemaContract::Object
+        | SchemaContract::Array
+        | SchemaContract::Null => Ok(matches
+            .get_one::<String>(field.key.as_str())
+            .map(|value| serde_json::Value::String(value.clone()))),
+    }
 }
 
 fn extract_field_value(
@@ -745,6 +841,92 @@ fn parse_params(params: &str) -> Result<serde_json::Map<String, serde_json::Valu
         )));
     };
     Ok(map.clone())
+}
+
+/// Method-only dispatch decision for a surface interaction, derived from
+/// [`InteractionDescriptor::effective_http_method`]. Kept separate from the
+/// wire-level `InteractionHttpMethod` (which carries a forward-compat
+/// `Other(String)` variant) so the CLI has one closed set of dispatch
+/// outcomes to test against and fold unknown/forward-compat methods into.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DispatchVerb {
+    Get,
+    Put,
+    Delete,
+    Post,
+}
+
+fn dispatch_verb_for(interaction: &InteractionDescriptor) -> DispatchVerb {
+    match interaction.effective_http_method() {
+        InteractionHttpMethod::Get => DispatchVerb::Get,
+        InteractionHttpMethod::Put => DispatchVerb::Put,
+        InteractionHttpMethod::Delete => DispatchVerb::Delete,
+        // Post and any forward-compat `Other(_)` method both invoke.
+        _ => DispatchVerb::Post,
+    }
+}
+
+/// Renders a scalar JSON value as a query-string value: strings pass through
+/// unquoted, other scalars (and, as a fallback, non-scalars) use `Value`'s
+/// own `Display` (`to_string`).
+fn query_value(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// Flattens a built request into `GET` query pairs. Mirrors the envelope the
+/// `read_surface_interaction` handler splits back out server-side
+/// (`target_provider_id` / `timeout_seconds` are envelope keys alongside the
+/// provider `params`, see `split_get_envelope` in
+/// `crates/ui/web-api/src/routes/surfaces.rs`).
+fn build_query_pairs(request: &InvokeSurfaceInteractionRequest) -> Vec<(&str, String)> {
+    let mut pairs: Vec<(&str, String)> = request
+        .params
+        .iter()
+        .map(|(key, value)| (key.as_str(), query_value(value)))
+        .collect();
+    if let Some(target_provider_id) = &request.target_provider_id {
+        pairs.push(("target_provider_id", target_provider_id.clone()));
+    }
+    if let Some(timeout_seconds) = request.timeout_seconds {
+        pairs.push(("timeout_seconds", timeout_seconds.to_string()));
+    }
+    pairs
+}
+
+/// Dispatches a built request to the client method matching the
+/// interaction's declared HTTP method (`DataLoad` interactions always
+/// normalize to `GET` via `effective_http_method`).
+async fn dispatch_interaction(
+    client: &uptrakit_openapi_client::UptrakitClient,
+    surface_id: &str,
+    interaction_id: &str,
+    interaction: &InteractionDescriptor,
+    request: InvokeSurfaceInteractionRequest,
+) -> Result<serde_json::Value> {
+    match dispatch_verb_for(interaction) {
+        DispatchVerb::Get => {
+            let query = build_query_pairs(&request);
+            client
+                .read_surface_interaction(surface_id, interaction_id, &query)
+                .await
+                .context_to()
+        }
+        DispatchVerb::Put => client
+            .update_surface_interaction(surface_id, interaction_id, &request)
+            .await
+            .context_to(),
+        DispatchVerb::Delete => client
+            .delete_surface_interaction(surface_id, interaction_id, &request)
+            .await
+            .context_to(),
+        DispatchVerb::Post => client
+            .invoke_surface_interaction(surface_id, interaction_id, &request)
+            .await
+            .context_to(),
+    }
 }
 
 async fn build_invoke_request(
@@ -957,5 +1139,42 @@ mod tests {
                 .all(|arg| arg.get_id().as_str() != "mystery"),
             "unsupported field type should not produce a typed argument"
         );
+    }
+
+    #[test]
+    fn query_value_strips_quotes_from_strings_but_not_other_scalars() {
+        assert_eq!(query_value(&serde_json::json!("hello")), "hello");
+        assert_eq!(query_value(&serde_json::json!(42)), "42");
+        assert_eq!(query_value(&serde_json::json!(3.5)), "3.5");
+        assert_eq!(query_value(&serde_json::json!(true)), "true");
+        assert_eq!(query_value(&serde_json::json!(null)), "null");
+    }
+
+    #[test]
+    fn data_load_descriptor_dispatches_get() {
+        let interaction = InteractionDescriptor::new(
+            "surface.sample.list".parse().unwrap(),
+            InteractionKind::DataLoad,
+            "List",
+            InteractionTransport::ControllerLocal,
+        );
+
+        // DataLoad interactions normalize to GET regardless of the raw
+        // (default-POST) `http_method` field -- see `effective_http_method`.
+        assert_eq!(interaction.http_method, InteractionHttpMethod::Post);
+        assert_eq!(dispatch_verb_for(&interaction), DispatchVerb::Get);
+    }
+
+    #[test]
+    fn put_declared_descriptor_dispatches_put() {
+        let mut interaction = InteractionDescriptor::new(
+            "surface.sample.update".parse().unwrap(),
+            InteractionKind::MutationAction,
+            "Update",
+            InteractionTransport::ControllerLocal,
+        );
+        interaction.http_method = InteractionHttpMethod::Put;
+
+        assert_eq!(dispatch_verb_for(&interaction), DispatchVerb::Put);
     }
 }

@@ -41,6 +41,21 @@ impl UptrakitClient {
         self.get(&crate::paths::surfaces::read(surface_id)).await
     }
 
+    /// Read a surface interaction via `GET`. `query` pairs are forwarded verbatim
+    /// as query-string parameters (reserved keys included).
+    pub async fn read_surface_interaction(
+        &self,
+        surface_id: &str,
+        interaction_id: &str,
+        query: &[(&str, String)],
+    ) -> Result<serde_json::Value> {
+        self.get_with_query(
+            &crate::paths::surfaces::interaction(surface_id, interaction_id),
+            &query,
+        )
+        .await
+    }
+
     /// Invoke a surface interaction.
     pub async fn invoke_surface_interaction(
         &self,
@@ -50,6 +65,79 @@ impl UptrakitClient {
     ) -> Result<serde_json::Value> {
         self.post_json(
             &crate::paths::surfaces::interaction(surface_id, interaction_id),
+            request,
+        )
+        .await
+    }
+
+    /// Update a surface interaction via `PUT`.
+    pub async fn update_surface_interaction(
+        &self,
+        surface_id: &str,
+        interaction_id: &str,
+        request: &InvokeSurfaceInteractionRequest,
+    ) -> Result<serde_json::Value> {
+        self.put_json(
+            &crate::paths::surfaces::interaction(surface_id, interaction_id),
+            request,
+        )
+        .await
+    }
+
+    /// Delete a surface interaction via `DELETE`.
+    pub async fn delete_surface_interaction(
+        &self,
+        surface_id: &str,
+        interaction_id: &str,
+        request: &InvokeSurfaceInteractionRequest,
+    ) -> Result<serde_json::Value> {
+        self.delete_json_body(
+            &crate::paths::surfaces::interaction(surface_id, interaction_id),
+            request,
+        )
+        .await
+    }
+
+    /// Read a surface interaction targeting a specific item via `GET .../{item_id}`.
+    pub async fn read_surface_interaction_item(
+        &self,
+        surface_id: &str,
+        interaction_id: &str,
+        item_id: &str,
+        query: &[(&str, String)],
+    ) -> Result<serde_json::Value> {
+        self.get_with_query(
+            &crate::paths::surfaces::interaction_item(surface_id, interaction_id, item_id),
+            &query,
+        )
+        .await
+    }
+
+    /// Update a surface interaction targeting a specific item via `PUT .../{item_id}`.
+    pub async fn update_surface_interaction_item(
+        &self,
+        surface_id: &str,
+        interaction_id: &str,
+        item_id: &str,
+        request: &InvokeSurfaceInteractionRequest,
+    ) -> Result<serde_json::Value> {
+        self.put_json(
+            &crate::paths::surfaces::interaction_item(surface_id, interaction_id, item_id),
+            request,
+        )
+        .await
+    }
+
+    /// Delete a surface interaction targeting a specific item via `DELETE .../{item_id}`.
+    pub async fn delete_surface_interaction_item(
+        &self,
+        surface_id: &str,
+        interaction_id: &str,
+        item_id: &str,
+        request: &InvokeSurfaceInteractionRequest,
+    ) -> Result<serde_json::Value> {
+        self.delete_json_body(
+            &crate::paths::surfaces::interaction_item(surface_id, interaction_id, item_id),
             request,
         )
         .await

@@ -434,6 +434,24 @@ impl UptrakitClient {
         self.handle_response(resp).await
     }
 
+    /// DELETE with a JSON body, deserializing the JSON response into `T`.
+    ///
+    /// Distinct from [`delete_json`](Self::delete_json), which sends no body.
+    async fn delete_json_body<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &impl Serialize,
+    ) -> Result<T> {
+        let url = format!("{}{}", self.base_url, path);
+        let req = self
+            .http
+            .delete(&url)
+            .bearer_auth(self.token_or_err()?)
+            .json(body);
+        let resp = self.send_with_retry(req).await?;
+        self.handle_response(resp).await
+    }
+
     async fn delete_with_query(&self, path: &str, query: &impl Serialize) -> Result<()> {
         let url = format!("{}{}", self.base_url, path);
         let req = self

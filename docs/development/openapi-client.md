@@ -283,6 +283,23 @@ directly. `Option::None` fields are automatically skipped by
 - `check_versions_host(&self, item_id: &Uuid, host_id: &Uuid) -> Result<TriggerVersionCheckResponse>`
 - `trigger_update(&self, item_id: &Uuid, host_id: &Uuid, req) -> Result<TriggerUpdateResponse>`
 
+### Surfaces (`surfaces.rs`)
+
+- `list_surfaces(&self, slot: Option<&str>, page: Option<&str>) -> Result<Vec<SurfaceResponse>>`
+- `list_surface_providers(&self, surface_id: &str) -> Result<Vec<SurfaceProviderInfo>>`
+- `read_surface(&self, surface_id: &str) -> Result<SurfaceReadResponse>`
+- `read_surface_interaction(surface_id, interaction_id, query: &[(&str, String)]) -> Result<Value>` -- `GET`
+- `invoke_surface_interaction(surface_id, interaction_id, req) -> Result<Value>` -- `POST`
+- `update_surface_interaction(surface_id, interaction_id, req) -> Result<Value>` -- `PUT`
+- `delete_surface_interaction(surface_id, interaction_id, req) -> Result<Value>` -- `DELETE`
+- `read_surface_interaction_item(surface_id, interaction_id, item_id, query) -> Result<Value>` -- `GET .../{item_id}`
+- `update_surface_interaction_item(surface_id, interaction_id, item_id, req) -> Result<Value>` -- `PUT .../{item_id}`
+- `delete_surface_interaction_item(surface_id, interaction_id, item_id, req) -> Result<Value>` -- `DELETE .../{item_id}`
+
+`POST .../{item_id}` (`invoke_surface_interaction_item` operation ID) is a documented 405 stub (POST is
+create/base-only) and has no client method -- see the `SPEC_ONLY` ledger entry in
+`xtask/src/openapi_client_check/ledgers.rs`.
+
 ### System alerts (`system_alerts.rs`)
 
 - `get_system_alerts(&self) -> Result<SystemAlertsResponse>`
@@ -322,7 +339,8 @@ The `UptrakitClient` provides these internal HTTP methods used by endpoint modul
 | `post_json_no_content(path, body)`      | yes  | POST expecting 204 No Content        |
 | `put_json<T>(path, body)`               | yes  | PUT with JSON body                   |
 | `delete(path)`                          | yes  | DELETE expecting empty response      |
-| `delete_json<T>(path)`                  | yes  | DELETE with JSON response            |
+| `delete_json<T>(path)`                  | yes  | DELETE with JSON response, no body   |
+| `delete_json_body<T>(path, body)`       | yes  | DELETE with JSON body and response   |
 | `delete_with_query(path, query)`        | yes  | DELETE with query params             |
 
 ## Adding a new endpoint
