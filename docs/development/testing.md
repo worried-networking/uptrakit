@@ -17,15 +17,15 @@ break when our code changes (custom parsing, validation, serde annotations
 that define a wire contract, backward compatibility guarantees, custom error
 handling paths, etc.).
 
-| Category                                                                                                                  | Example                                      | Verdict            |
-| ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- | ------------------ |
-| `thiserror` `#[error("...")]` Display output                                                                              | `assert_eq!(err.to_string(), "...")`         | Upstream -- remove |
-| `serde_json::to_string` / `from_str` roundtrip on a plain `#[derive(Serialize, Deserialize)]` struct with no custom logic | `assert_eq!(deserialized, original)`         | Upstream -- remove |
-| `argon2` salt uniqueness                                                                                                  | Two hashes of the same password differ       | Upstream -- remove |
-| Custom `#[serde(with = "...")]` module roundtrip                                                                          | Custom date format serialization             | Internal -- keep   |
-| `skip_serializing_if` annotation                                                                                          | Optional field absent in JSON when `None`    | Internal -- keep   |
-| Backward compatibility (old JSON shape still deserializes)                                                                | Missing field defaults correctly             | Internal -- keep   |
-| Wire protocol spec conformance                                                                                            | Serialized JSON matches asyncapi.yaml schema | Internal -- keep   |
+| Category                                                                                                                  | Example                                               | Verdict            |
+| ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- | ------------------ |
+| `thiserror` `#[error("...")]` Display output                                                                              | `assert_eq!(err.to_string(), "...")`                  | Upstream -- remove |
+| `serde_json::to_string` / `from_str` roundtrip on a plain `#[derive(Serialize, Deserialize)]` struct with no custom logic | `assert_eq!(deserialized, original)`                  | Upstream -- remove |
+| `argon2` salt uniqueness                                                                                                  | Two hashes of the same password differ                | Upstream -- remove |
+| Custom `#[serde(with = "...")]` module roundtrip                                                                          | Custom date format serialization                      | Internal -- keep   |
+| `skip_serializing_if` annotation                                                                                          | Optional field absent in JSON when `None`             | Internal -- keep   |
+| Backward compatibility (old JSON shape still deserializes)                                                                | Missing field defaults correctly                      | Internal -- keep   |
+| Wire spec staleness                                                                                                       | Committed asyncapi.yaml equals the generated document | Internal -- keep   |
 
 **Prohibition: `thiserror` Display format string tests are forbidden.**
 
@@ -71,17 +71,20 @@ fn parse_returns_config_error_on_empty_owner() {
 }
 ```
 
-### Wire protocol tests: asyncapi.yaml is the source of truth
+### Wire protocol tests: asyncapi.yaml is generated, not hand-authored
 
-Spec-conformance tests validate that Rust serialization matches the
-[asyncapi.yaml](../../crates/shared/wire/asyncapi.yaml) schema. Each test
-constructs a sample message, wraps it in an envelope, serializes it, and
-validates required fields, type discriminators, and enum values against the
-schema.
+- [asyncapi.yaml](../../crates/shared/wire/asyncapi.yaml) is generated from
+  the Rust wire types. The golden test `asyncapi_yaml_is_up_to_date` (feature
+  `schema`) asserts the committed file is not stale; regenerate it via
+  `./scripts/regen-asyncapi.sh`.
+- Trust model: wire-shape changes surface as a reviewable yaml diff (the same
+  regime as `openapi.json`), not a hard-red pinned-expectation test.
+  Cross-version wire compatibility remains untested.
+- Manual `JsonSchema` impls for custom-serde enums are first-party logic and
+  carry their own open-string tests.
 
 Behavioral tests (backward compatibility, field omission, custom serde
-modules, exact JSON assertions, envelope/sequence logic) complement spec
-tests and are kept as-is.
+modules, exact JSON assertions, envelope/sequence logic) are kept as-is.
 
 ### Tests must never sleep on real wall-clock time
 
