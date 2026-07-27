@@ -55,7 +55,7 @@ function makeDetail(hostIds: string[] = []): SoftwareItemDetailResponse {
 	return {
 		id: 'software-1',
 		name: 'Demo App',
-		plugins: ['generic_shell'],
+		plugins: ['generic.shell'],
 		featured: true,
 		last_checked_at: null,
 		host_count: hostIds.length,

@@ -94,7 +94,7 @@ function makeSoftwareItem(id: string, name: string): SoftwareItemResponse {
 	return {
 		id,
 		name,
-		plugins: ['generic_shell'],
+		plugins: ['generic.shell'],
 		featured: false,
 		last_checked_at: null,
 		host_count: 2,

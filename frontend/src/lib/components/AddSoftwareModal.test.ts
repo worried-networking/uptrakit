@@ -20,7 +20,7 @@ function makeSoftwareItem(): SoftwareItemResponse {
 	return {
 		id: 'software-1',
 		name: 'Firefox',
-		plugins: ['generic_shell'],
+		plugins: ['generic.shell'],
 		featured: true,
 		last_checked_at: null,
 		host_count: 0,

@@ -78,7 +78,7 @@ function makeDetail(): SoftwareItemDetailResponse {
 	return {
 		id: 'software-1',
 		name: 'Demo App',
-		plugins: ['generic_shell'],
+		plugins: ['generic.shell'],
 		featured: true,
 		last_checked_at: null,
 		host_count: 1,

@@ -105,7 +105,7 @@ function makeSoftwareItem(hosts: SoftwareItemHostSummary[]): SoftwareItemDetailR
 	return {
 		id: 'software-1',
 		name: 'Demo App',
-		plugins: ['generic_shell'],
+		plugins: ['generic.shell'],
 		featured: false,
 		last_checked_at: null,
 		host_count: hosts.length,

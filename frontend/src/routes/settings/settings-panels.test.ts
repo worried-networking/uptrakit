@@ -698,7 +698,7 @@ describe('settings panels design-language alignment', () => {
 		vi.mocked(api.listPluginTypes).mockResolvedValue({
 			data: [
 				{
-					plugin_type: 'releases_github',
+					plugin_type: 'releases.github',
 					display_name: 'GitHub Releases',
 					supports_plugin_configs: true,
 					capabilities: [PluginCapability.DISCOVER_LOCAL_SOFTWARE],
@@ -714,7 +714,7 @@ describe('settings panels design-language alignment', () => {
 					{
 						id: 'cfg-1',
 						name: 'Main GitHub',
-						plugin_type: 'releases_github',
+						plugin_type: 'releases.github',
 						config: {},
 						enabled: true,
 						capabilities: [PluginCapability.DISCOVER_LOCAL_SOFTWARE],
@@ -732,7 +732,7 @@ describe('settings panels design-language alignment', () => {
 			data: [
 				{
 					id: 'allow-1',
-					plugin_type: 'releases_github',
+					plugin_type: 'releases.github',
 					created_at: '2026-04-01T11:00:00Z'
 				} as never
 			]
@@ -760,7 +760,7 @@ describe('settings panels design-language alignment', () => {
 		vi.mocked(api.listPluginTypes).mockResolvedValue({
 			data: [
 				{
-					plugin_type: 'releases_github',
+					plugin_type: 'releases.github',
 					display_name: 'GitHub Releases',
 					supports_plugin_configs: true,
 					capabilities: [PluginCapability.DISCOVER_LOCAL_SOFTWARE],
@@ -813,7 +813,7 @@ describe('settings panels design-language alignment', () => {
 		vi.mocked(api.listPluginTypes).mockResolvedValue({
 			data: [
 				{
-					plugin_type: 'releases_github',
+					plugin_type: 'releases.github',
 					display_name: 'GitHub Releases',
 					supports_plugin_configs: true,
 					capabilities: [],
@@ -832,7 +832,7 @@ describe('settings panels design-language alignment', () => {
 							{
 								id: 'cfg-2',
 								name: 'Config Two',
-								plugin_type: 'releases_github',
+								plugin_type: 'releases.github',
 								config: {},
 								enabled: true,
 								capabilities: [],
@@ -853,7 +853,7 @@ describe('settings panels design-language alignment', () => {
 						{
 							id: 'cfg-1',
 							name: 'Config One',
-							plugin_type: 'releases_github',
+							plugin_type: 'releases.github',
 							config: {},
 							enabled: true,
 							capabilities: [],
@@ -890,7 +890,7 @@ describe('settings panels design-language alignment', () => {
 		vi.mocked(api.listPluginTypes).mockResolvedValue({
 			data: [
 				{
-					plugin_type: 'releases_github',
+					plugin_type: 'releases.github',
 					display_name: 'GitHub Releases',
 					supports_plugin_configs: true,
 					capabilities: [PluginCapability.DISCOVER_LOCAL_SOFTWARE],
@@ -932,7 +932,7 @@ describe('settings panels design-language alignment', () => {
 		expect(modal.querySelectorAll('[data-ui="form-field-row"]').length).toBeGreaterThanOrEqual(4);
 
 		const pluginTypeSelect = screen.getByLabelText('Plugin Type');
-		await fireEvent.change(pluginTypeSelect, { target: { value: 'releases_github' } });
+		await fireEvent.change(pluginTypeSelect, { target: { value: 'releases.github' } });
 		expect(await screen.findByLabelText('API Token')).toBeInTheDocument();
 
 		await fireEvent.click(within(modal).getByRole('button', { name: 'Save' }));
@@ -948,7 +948,7 @@ describe('settings panels design-language alignment', () => {
 		vi.mocked(api.listPluginTypes).mockResolvedValue({
 			data: [
 				{
-					plugin_type: 'releases_github',
+					plugin_type: 'releases.github',
 					display_name: 'GitHub Releases',
 					supports_plugin_configs: true,
 					capabilities: [],
@@ -985,7 +985,7 @@ describe('settings panels design-language alignment', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Add Config' }));
 		await fireEvent.input(screen.getByLabelText('Name'), { target: { value: 'JSON Config' } });
-		await fireEvent.change(screen.getByLabelText('Plugin Type'), { target: { value: 'releases_github' } });
+		await fireEvent.change(screen.getByLabelText('Plugin Type'), { target: { value: 'releases.github' } });
 		expect(await screen.findByLabelText('API Token')).toBeInTheDocument();
 		await fireEvent.click(screen.getByRole('button', { name: 'Advanced: Edit as JSON' }));
 		await fireEvent.input(screen.getByLabelText('Config (JSON)'), { target: { value: '{}' } });
@@ -999,7 +999,7 @@ describe('settings panels design-language alignment', () => {
 		vi.mocked(api.listPluginTypes).mockResolvedValue({
 			data: [
 				{
-					plugin_type: 'releases_github',
+					plugin_type: 'releases.github',
 					display_name: 'GitHub Releases',
 					supports_plugin_configs: false,
 					capabilities: [],
@@ -1089,7 +1089,7 @@ describe('settings panels design-language alignment', () => {
 		vi.mocked(api.listPluginTypes).mockResolvedValue({
 			data: [
 				{
-					plugin_type: 'releases_github',
+					plugin_type: 'releases.github',
 					display_name: 'GitHub Releases',
 					supports_plugin_configs: true,
 					capabilities: [],
@@ -1143,7 +1143,7 @@ describe('settings panels design-language alignment', () => {
 		vi.mocked(api.listPluginTypes).mockResolvedValue({
 			data: [
 				{
-					plugin_type: 'releases_github',
+					plugin_type: 'releases.github',
 					display_name: 'GitHub Releases',
 					supports_plugin_configs: true,
 					capabilities: [PluginCapability.DISCOVER_LOCAL_SOFTWARE],

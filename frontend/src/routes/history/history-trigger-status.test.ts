@@ -68,7 +68,7 @@ function makeSoftwareItem(): SoftwareItemResponse {
 	return {
 		id: 'software-1',
 		name: 'Demo App',
-		plugins: ['generic_shell'],
+		plugins: ['generic.shell'],
 		featured: false,
 		last_checked_at: null,
 		host_count: 1,

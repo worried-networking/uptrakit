@@ -81,7 +81,7 @@ const softwareListItem = {
 	featured: true,
 	icon_url: null,
 	host_count: 1,
-	plugins: ['package_manager_apt'],
+	plugins: ['package-manager.apt'],
 	update_available: true,
 	last_checked_at: '2024-06-01T12:00:00Z',
 	latest_version: '1.27.0',
@@ -97,7 +97,7 @@ function buildSoftwareDetailItem(activeUpdateHistoryId: string | null) {
 		featured: true,
 		icon_url: null,
 		host_count: 1,
-		plugins: ['package_manager_apt'],
+		plugins: ['package-manager.apt'],
 		latest_version: '1.27.0',
 		last_checked_at: '2024-06-01T12:00:00Z',
 		hosts: [
@@ -107,7 +107,7 @@ function buildSoftwareDetailItem(activeUpdateHistoryId: string | null) {
 				hostname: 'prod-server',
 				friendly_name: 'Production Server',
 				qualifier: null,
-				plugins: [{ role: 'detect_version', plugin_type: 'package_manager_apt', plugin_config_name: 'APT Default' }],
+				plugins: [{ role: 'detect_version', plugin_type: 'package-manager.apt', plugin_config_name: 'APT Default' }],
 				installed_version: '1.24.0',
 				installed_display_version: '1.24.0',
 				latest_version: '1.27.0',
@@ -299,7 +299,7 @@ async function mockParityApi(page: Page, scenario: MockScenario = {}) {
 		if (method === 'GET' && path === '/api/v1/plugin-types') {
 			return json([
 				{
-					plugin_type: 'package_manager_apt',
+					plugin_type: 'package-manager.apt',
 					display_name: 'APT',
 					plugin_role: 'detect_version',
 					capabilities: ['discover_local_software']

@@ -12,7 +12,7 @@ function makeItem(id: string, hostCount: number): SoftwareItemResponse {
 	return {
 		id,
 		name: `Item ${id}`,
-		plugins: ['generic_shell'],
+		plugins: ['generic.shell'],
 		featured: false,
 		last_checked_at: null,
 		host_count: hostCount,
