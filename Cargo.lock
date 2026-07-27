@@ -8020,6 +8020,7 @@ dependencies = [
  "uptrakit-shared-db",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
+ "uptrakit-surfaces",
  "uuid",
 ]
 

@@ -147,6 +147,10 @@ Third-party and externally-registered service providers get this convention as n
 wire-level identifier charset validator (`validate_surface_identifier`) stays permissive and does not itself
 reject a non-conforming ID.
 
+First-party registrations are guard-tested: the `crates/plugins/infrastructure/registry` catalog guard
+(`tests/surface_id_naming_guard.rs`) plus its `agent-ssh-runtime`/`mqtt-runtime` sibling tests assert every
+compiled-in surface/interaction/data-source ID against this convention.
+
 ## Plugin integration pattern
 
 Plugin descriptors provide shared surface registrations and the controller-local interaction logic
