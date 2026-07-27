@@ -17,7 +17,7 @@ pub(crate) use notification_settings::{
     emit_notification_settings_audit_event,
 };
 pub(crate) use notifications::{
-    allowlisted_notification_channel_controller_local_action,
+    allowlisted_notification_channel_controller_local_action, channel_op_name,
     emit_notification_channel_audit_event, execute_allowlisted_notification_channel_action,
     notification_channel_type_for_surface_id,
 };
@@ -46,24 +46,27 @@ pub enum ExecutorTier {
     PluginWithAudit,
 }
 
-/// Single source for every allowlisted controller-local executor pair. All
-/// current rows name `MutationAction`/`FormSubmit`/`ConfirmableAction`
-/// interactions (none are `DataLoad`), so every method column is
-/// `InteractionHttpMethod::Post`; verified against each interaction's actual
-/// registration, not guessed from the name. Re-keyed and checked
-/// bidirectionally by `interaction_executor_guard` in web-api (spec D5).
+/// Single source for every allowlisted controller-local executor pair. Rows
+/// name `MutationAction`/`FormSubmit`/`ConfirmableAction` interactions (none
+/// are `DataLoad`), keyed by their declared REST method: CRUD collections
+/// collapse onto one noun with distinct methods (`channels` Post/Put/Delete),
+/// while `test` and the settings writes stay `Post`/`Put`; verified against
+/// each interaction's actual registration, not guessed from the name. Re-keyed
+/// and checked bidirectionally by `interaction_executor_guard` in web-api
+/// (spec D5).
 pub const CONTROLLER_LOCAL_EXECUTOR_TABLE: &[(&str, &str, InteractionHttpMethod, ExecutorTier)] = &[
-    // Tier 1a — notification channel CRUD
+    // Tier 1a — notification channel CRUD (collapsed onto the `channels`
+    // collection noun, disambiguated by REST method; `test` keeps its own id).
     (
         "notifications.webhook",
-        "create",
+        "channels",
         InteractionHttpMethod::Post,
         ExecutorTier::ControllerExecutes,
     ),
     (
         "notifications.webhook",
-        "edit",
-        InteractionHttpMethod::Post,
+        "channels",
+        InteractionHttpMethod::Put,
         ExecutorTier::ControllerExecutes,
     ),
     (
@@ -74,20 +77,20 @@ pub const CONTROLLER_LOCAL_EXECUTOR_TABLE: &[(&str, &str, InteractionHttpMethod,
     ),
     (
         "notifications.webhook",
-        "delete",
+        "channels",
+        InteractionHttpMethod::Delete,
+        ExecutorTier::ControllerExecutes,
+    ),
+    (
+        "notifications.telegram",
+        "channels",
         InteractionHttpMethod::Post,
         ExecutorTier::ControllerExecutes,
     ),
     (
         "notifications.telegram",
-        "create",
-        InteractionHttpMethod::Post,
-        ExecutorTier::ControllerExecutes,
-    ),
-    (
-        "notifications.telegram",
-        "edit",
-        InteractionHttpMethod::Post,
+        "channels",
+        InteractionHttpMethod::Put,
         ExecutorTier::ControllerExecutes,
     ),
     (
@@ -98,20 +101,20 @@ pub const CONTROLLER_LOCAL_EXECUTOR_TABLE: &[(&str, &str, InteractionHttpMethod,
     ),
     (
         "notifications.telegram",
-        "delete",
+        "channels",
+        InteractionHttpMethod::Delete,
+        ExecutorTier::ControllerExecutes,
+    ),
+    (
+        "notifications.email",
+        "channels",
         InteractionHttpMethod::Post,
         ExecutorTier::ControllerExecutes,
     ),
     (
         "notifications.email",
-        "create",
-        InteractionHttpMethod::Post,
-        ExecutorTier::ControllerExecutes,
-    ),
-    (
-        "notifications.email",
-        "edit",
-        InteractionHttpMethod::Post,
+        "channels",
+        InteractionHttpMethod::Put,
         ExecutorTier::ControllerExecutes,
     ),
     (
@@ -122,27 +125,27 @@ pub const CONTROLLER_LOCAL_EXECUTOR_TABLE: &[(&str, &str, InteractionHttpMethod,
     ),
     (
         "notifications.email",
-        "delete",
-        InteractionHttpMethod::Post,
+        "channels",
+        InteractionHttpMethod::Delete,
         ExecutorTier::ControllerExecutes,
     ),
     // Tier 2a — notification settings saves
     (
         "notifications.email",
-        "configure_smtp",
-        InteractionHttpMethod::Post,
+        "smtp",
+        InteractionHttpMethod::Put,
         ExecutorTier::PluginWithAudit,
     ),
     (
-        "notifications.email.global_smtp",
-        "save_global_smtp",
-        InteractionHttpMethod::Post,
+        "notifications.email.global-smtp",
+        "smtp",
+        InteractionHttpMethod::Put,
         ExecutorTier::PluginWithAudit,
     ),
     (
-        "notifications.telegram.global_settings",
-        "save_global_telegram",
-        InteractionHttpMethod::Post,
+        "notifications.telegram.global-settings",
+        "settings",
+        InteractionHttpMethod::Put,
         ExecutorTier::PluginWithAudit,
     ),
     // Tier 2b — docker switch-tag

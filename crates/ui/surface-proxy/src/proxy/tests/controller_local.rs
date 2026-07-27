@@ -9,8 +9,8 @@ use uptrakit_wire::surfaces;
 
 use super::super::{
     PluginSurfaceActionInvoker, PluginSurfaceLocalExecutor, SurfaceCallerOrigin,
-    SurfaceInvokeRequest, SurfaceLocalActionExecutor, SurfaceProxy, SurfaceProxyError,
-    map_surface_action_error,
+    SurfaceInvokeRequest, SurfaceInvokerContext, SurfaceLocalActionExecutor, SurfaceProxy,
+    SurfaceProxyError, map_surface_action_error,
 };
 use super::{TestPluginInvoker, tenant_id, user_id};
 use crate::registry::{SurfaceRegistry, SurfaceRegistryConfig};
@@ -35,7 +35,7 @@ fn plugin_registration(provider_id: &str) -> surfaces::SurfaceRegistration {
         },
         surfaces: vec![surfaces::RegisteredSurface {
             descriptor: surfaces::SurfaceDescriptor::builder()
-                .surface_id(surfaces::SurfaceId::new("notifications.email.global_smtp").unwrap())
+                .surface_id(surfaces::SurfaceId::new("notifications.email.global-smtp").unwrap())
                 .label("SMTP Defaults")
                 .priority(100)
                 .slot(surfaces::SLOT_SETTINGS_BELOW_GLOBAL)
@@ -53,11 +53,12 @@ fn plugin_registration(provider_id: &str) -> surfaces::SurfaceRegistration {
                 .build(),
             interactions: vec![{
                 let mut i = surfaces::InteractionDescriptor::new(
-                    surfaces::InteractionId::new("save_global_smtp").unwrap(),
+                    surfaces::InteractionId::new("smtp").unwrap(),
                     surfaces::InteractionKind::MutationAction,
                     "Action",
                     surfaces::InteractionTransport::ControllerLocal,
                 );
+                i.http_method = surfaces::InteractionHttpMethod::Put;
                 i.input_schema = Some(surfaces::SchemaContract::Object);
                 i.result_schema = Some(surfaces::SchemaContract::Object);
                 i.timeout_seconds = Some(30);
@@ -165,11 +166,10 @@ struct BlockingPluginInvoker {
 impl PluginSurfaceActionInvoker for BlockingPluginInvoker {
     async fn invoke(
         &self,
-        _db: Option<&sea_orm::DatabaseConnection>,
-        _tenant_id: Option<uuid::Uuid>,
-        _caller_user_id: Option<uuid::Uuid>,
+        _ctx: SurfaceInvokerContext<'_>,
         _surface_id: &str,
         _interaction_id: &str,
+        _method: uptrakit_wire::surfaces::InteractionHttpMethod,
         _params: serde_json::Value,
     ) -> Result<serde_json::Value, SurfaceActionError> {
         self.calls
@@ -188,11 +188,10 @@ struct ErrorPluginInvoker {
 impl PluginSurfaceActionInvoker for ErrorPluginInvoker {
     async fn invoke(
         &self,
-        _db: Option<&sea_orm::DatabaseConnection>,
-        _tenant_id: Option<uuid::Uuid>,
-        _caller_user_id: Option<uuid::Uuid>,
+        _ctx: SurfaceInvokerContext<'_>,
         _surface_id: &str,
         _interaction_id: &str,
+        _method: uptrakit_wire::surfaces::InteractionHttpMethod,
         _params: serde_json::Value,
     ) -> Result<serde_json::Value, SurfaceActionError> {
         Err(self.error.clone())
@@ -244,8 +243,8 @@ async fn invoke_executes_plugin_controller_local_interaction() {
             SurfaceInvokeRequest {
                 method: None,
                 tenant_id: tenant_id(),
-                surface_id: "notifications.email.global_smtp".to_string(),
-                interaction_id: "save_global_smtp".to_string(),
+                surface_id: "notifications.email.global-smtp".to_string(),
+                interaction_id: "smtp".to_string(),
                 idempotency_key: "idem-plugin-local".to_string(),
                 target_provider_id: None,
                 caller_origin: SurfaceCallerOrigin::UserSession {
@@ -264,8 +263,8 @@ async fn invoke_executes_plugin_controller_local_interaction() {
     assert_eq!(response.result, Some(serde_json::json!({"ok": true})));
     let seen = seen.lock();
     assert_eq!(seen.len(), 1);
-    assert_eq!(seen[0].0, "notifications.email.global_smtp");
-    assert_eq!(seen[0].1, "save_global_smtp");
+    assert_eq!(seen[0].0, "notifications.email.global-smtp");
+    assert_eq!(seen[0].1, "smtp");
     assert_eq!(seen[0].2, Some(tenant_id()));
     assert_eq!(seen[0].3, Some(user_id()));
 }
@@ -309,8 +308,8 @@ async fn invoke_controller_local_preserves_surface_action_error_categories() {
                 SurfaceInvokeRequest {
                     method: None,
                     tenant_id: tenant_id(),
-                    surface_id: "notifications.email.global_smtp".to_string(),
-                    interaction_id: "save_global_smtp".to_string(),
+                    surface_id: "notifications.email.global-smtp".to_string(),
+                    interaction_id: "smtp".to_string(),
                     idempotency_key: format!("idem-plugin-local-error-{suffix}"),
                     target_provider_id: None,
                     caller_origin: SurfaceCallerOrigin::UserSession {
@@ -358,8 +357,8 @@ async fn invoke_controller_local_rejects_concurrent_duplicate_idempotency() {
                 SurfaceInvokeRequest {
                     method: None,
                     tenant_id: tenant_id(),
-                    surface_id: "notifications.email.global_smtp".to_string(),
-                    interaction_id: "save_global_smtp".to_string(),
+                    surface_id: "notifications.email.global-smtp".to_string(),
+                    interaction_id: "smtp".to_string(),
                     idempotency_key: "idem-local-dup".to_string(),
                     target_provider_id: None,
                     caller_origin: SurfaceCallerOrigin::UserSession {
@@ -383,8 +382,8 @@ async fn invoke_controller_local_rejects_concurrent_duplicate_idempotency() {
             SurfaceInvokeRequest {
                 method: None,
                 tenant_id: tenant_id(),
-                surface_id: "notifications.email.global_smtp".to_string(),
-                interaction_id: "save_global_smtp".to_string(),
+                surface_id: "notifications.email.global-smtp".to_string(),
+                interaction_id: "smtp".to_string(),
                 idempotency_key: "idem-local-dup".to_string(),
                 target_provider_id: None,
                 caller_origin: SurfaceCallerOrigin::UserSession {
@@ -452,8 +451,8 @@ async fn controller_local_client_disconnect_releases_idempotency() {
                 SurfaceInvokeRequest {
                     method: None,
                     tenant_id: tenant_id(),
-                    surface_id: "notifications.email.global_smtp".to_string(),
-                    interaction_id: "save_global_smtp".to_string(),
+                    surface_id: "notifications.email.global-smtp".to_string(),
+                    interaction_id: "smtp".to_string(),
                     idempotency_key: "idem-local-cancel".to_string(),
                     target_provider_id: None,
                     caller_origin: SurfaceCallerOrigin::UserSession {
@@ -513,8 +512,8 @@ async fn invoke_controller_local_allows_cleartext_sensitive_fields() {
             SurfaceInvokeRequest {
                 method: None,
                 tenant_id: tenant_id(),
-                surface_id: "notifications.email.global_smtp".to_string(),
-                interaction_id: "save_global_smtp".to_string(),
+                surface_id: "notifications.email.global-smtp".to_string(),
+                interaction_id: "smtp".to_string(),
                 idempotency_key: "idem-plugin-local-sensitive".to_string(),
                 target_provider_id: None,
                 caller_origin: SurfaceCallerOrigin::UserSession {
@@ -607,8 +606,8 @@ async fn invoke_rejects_body_missing_required_declared_param() {
             SurfaceInvokeRequest {
                 method: None,
                 tenant_id: tenant_id(),
-                surface_id: "notifications.email.global_smtp".to_string(),
-                interaction_id: "save_global_smtp".to_string(),
+                surface_id: "notifications.email.global-smtp".to_string(),
+                interaction_id: "smtp".to_string(),
                 idempotency_key: "idem-missing-required-param".to_string(),
                 target_provider_id: None,
                 caller_origin: SurfaceCallerOrigin::UserSession {
@@ -656,8 +655,8 @@ async fn invoke_allows_undeclared_body_key_to_pass_through() {
             SurfaceInvokeRequest {
                 method: None,
                 tenant_id: tenant_id(),
-                surface_id: "notifications.email.global_smtp".to_string(),
-                interaction_id: "save_global_smtp".to_string(),
+                surface_id: "notifications.email.global-smtp".to_string(),
+                interaction_id: "smtp".to_string(),
                 idempotency_key: "idem-undeclared-key".to_string(),
                 target_provider_id: None,
                 caller_origin: SurfaceCallerOrigin::UserSession {

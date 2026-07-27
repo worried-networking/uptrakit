@@ -113,10 +113,11 @@ impl PluginSurfaceActionOps for ProtectionOverridePluginOps {
         ctx: &SurfaceActionContext<'_>,
         surface_id: &str,
         action_id: &str,
+        method: uptrakit_wire::surfaces::InteractionHttpMethod,
         params: serde_json::Value,
     ) -> std::result::Result<serde_json::Value, SurfaceActionError> {
         self.inner
-            .handle_surface_action(ctx, surface_id, action_id, params)
+            .handle_surface_action(ctx, surface_id, action_id, method, params)
             .await
     }
 }

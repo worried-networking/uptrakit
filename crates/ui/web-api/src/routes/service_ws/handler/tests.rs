@@ -229,7 +229,7 @@ async fn surface_action_scope_violation_emits_denied_tenant_audit_row() {
             request_id,
             tenant_id: requested_tenant_id.to_string(),
             surface_id: surfaces::SurfaceId::new("notifications.email").unwrap(),
-            interaction_id: surfaces::InteractionId::new("configure_smtp").unwrap(),
+            interaction_id: surfaces::InteractionId::new("smtp").unwrap(),
             method: Default::default(),
             idempotency_key: "scope-violation".to_string(),
             target_provider_id: Some("provider-a".to_string()),
@@ -279,7 +279,7 @@ async fn surface_action_scope_violation_emits_denied_tenant_audit_row() {
     assert_eq!(row.target_id, None);
     assert_eq!(
         row.target_display.as_deref(),
-        Some("notifications.email/configure_smtp")
+        Some("notifications.email/smtp")
     );
     let details = row
         .details_json
@@ -287,7 +287,7 @@ async fn surface_action_scope_violation_emits_denied_tenant_audit_row() {
         .expect("scope denial audit should include details");
     assert_eq!(details["service_app_name"], "uptrakit-mqtt");
     assert_eq!(details["surface_id"], "notifications.email");
-    assert_eq!(details["interaction_id"], "configure_smtp");
+    assert_eq!(details["interaction_id"], "smtp");
     assert_eq!(details["target_provider_id"], "provider-a");
     assert_eq!(details["service_tenant_id"], tenant_id.to_string());
     assert_eq!(

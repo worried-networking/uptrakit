@@ -434,13 +434,14 @@ mod tests {
             ctx: &SurfaceActionContext<'_>,
             surface_id: &str,
             action_id: &str,
+            method: uptrakit_wire::surfaces::InteractionHttpMethod,
             params: serde_json::Value,
         ) -> std::result::Result<
             serde_json::Value,
             uptrakit_plugin_infrastructure_registry::SurfaceActionError,
         > {
             self.inner
-                .handle_surface_action(ctx, surface_id, action_id, params)
+                .handle_surface_action(ctx, surface_id, action_id, method, params)
                 .await
         }
     }

@@ -2114,7 +2114,7 @@ mod tests {
             surfaces: vec![surfaces::RegisteredSurface {
                 descriptor: surfaces::SurfaceDescriptor::builder()
                     .surface_id(
-                        surfaces::SurfaceId::new("notifications.telegram.global_settings").unwrap(),
+                        surfaces::SurfaceId::new("notifications.telegram.global-settings").unwrap(),
                     )
                     .label("Telegram")
                     .priority(200)
@@ -2133,7 +2133,7 @@ mod tests {
                     .build(),
                 interactions: vec![{
                     let mut i = surfaces::InteractionDescriptor::new(
-                        surfaces::InteractionId::new("save_global_telegram").unwrap(),
+                        surfaces::InteractionId::new("settings").unwrap(),
                         surfaces::InteractionKind::MutationAction,
                         "Refresh",
                         surfaces::InteractionTransport::ControllerLocal,

@@ -5,7 +5,7 @@ use parking_lot::Mutex;
 use uptrakit_plugin_infrastructure_registry::SurfaceActionError;
 use uuid::Uuid;
 
-use super::PluginSurfaceActionInvoker;
+use super::{PluginSurfaceActionInvoker, SurfaceInvokerContext};
 
 mod bookkeeping;
 mod controller_local;
@@ -31,18 +31,17 @@ pub(super) struct TestPluginInvoker {
 impl PluginSurfaceActionInvoker for TestPluginInvoker {
     async fn invoke(
         &self,
-        _db: Option<&sea_orm::DatabaseConnection>,
-        tenant_id: Option<Uuid>,
-        caller_user_id: Option<Uuid>,
+        ctx: SurfaceInvokerContext<'_>,
         surface_id: &str,
         interaction_id: &str,
+        _method: uptrakit_wire::surfaces::InteractionHttpMethod,
         _params: serde_json::Value,
     ) -> Result<serde_json::Value, SurfaceActionError> {
         self.seen.lock().push((
             surface_id.to_string(),
             interaction_id.to_string(),
-            tenant_id,
-            caller_user_id,
+            ctx.tenant_id,
+            ctx.caller_user_id,
         ));
         Ok(self.response.clone())
     }

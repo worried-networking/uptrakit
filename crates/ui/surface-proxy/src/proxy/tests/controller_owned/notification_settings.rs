@@ -9,7 +9,8 @@ use uptrakit_wire::surfaces;
 
 use super::super::super::{
     PluginSurfaceActionInvoker, PluginSurfaceLocalExecutor, ServiceConnectionRegistry,
-    SurfaceCallerOrigin, SurfaceInvokeRequest, SurfaceProxy, SurfaceProxyError,
+    SurfaceCallerOrigin, SurfaceInvokeRequest, SurfaceInvokerContext, SurfaceProxy,
+    SurfaceProxyError,
 };
 use super::super::{TestPluginInvoker, tenant_id, user_id};
 use super::{ensure_master_key, setup_notification_db};
@@ -23,11 +24,10 @@ struct ErrorPluginInvoker {
 impl PluginSurfaceActionInvoker for ErrorPluginInvoker {
     async fn invoke(
         &self,
-        _db: Option<&sea_orm::DatabaseConnection>,
-        _tenant_id: Option<uuid::Uuid>,
-        _caller_user_id: Option<uuid::Uuid>,
+        _ctx: SurfaceInvokerContext<'_>,
         _surface_id: &str,
         _interaction_id: &str,
+        _method: uptrakit_wire::surfaces::InteractionHttpMethod,
         _params: serde_json::Value,
     ) -> Result<serde_json::Value, SurfaceActionError> {
         Err(SurfaceActionError::InvalidInput(self.error_message.clone()))
@@ -38,6 +38,7 @@ fn notification_settings_registration(
     provider_id: &str,
     surface_id: &str,
     interaction_id: &str,
+    method: surfaces::InteractionHttpMethod,
 ) -> surfaces::SurfaceRegistration {
     surfaces::SurfaceRegistration {
         provider: surfaces::ProviderIdentity {
@@ -81,6 +82,7 @@ fn notification_settings_registration(
                     "Action",
                     surfaces::InteractionTransport::ControllerLocal,
                 );
+                i.http_method = method;
                 i.input_schema = Some(surfaces::SchemaContract::Object);
                 i.result_schema = Some(surfaces::SchemaContract::Any);
                 i.timeout_seconds = Some(30);
@@ -110,8 +112,9 @@ async fn invoke_notifications_email_save_global_smtp_emits_global_setting_update
     registry
         .bootstrap_plugin(notification_settings_registration(
             "plugin.email",
-            "notifications.email.global_smtp",
-            "save_global_smtp",
+            "notifications.email.global-smtp",
+            "smtp",
+            surfaces::InteractionHttpMethod::Put,
         ))
         .expect("plugin registration should succeed");
 
@@ -127,10 +130,10 @@ async fn invoke_notifications_email_save_global_smtp_emits_global_setting_update
             &service_connections,
             &registry,
             SurfaceInvokeRequest {
-                method: None,
+                method: Some(surfaces::InteractionHttpMethod::Put),
                 tenant_id: tenant_id(),
-                surface_id: "notifications.email.global_smtp".to_string(),
-                interaction_id: "save_global_smtp".to_string(),
+                surface_id: "notifications.email.global-smtp".to_string(),
+                interaction_id: "smtp".to_string(),
                 idempotency_key: "idem-global-smtp-audit".to_string(),
                 target_provider_id: None,
                 caller_origin: SurfaceCallerOrigin::UserSession {
@@ -149,8 +152,8 @@ async fn invoke_notifications_email_save_global_smtp_emits_global_setting_update
     {
         let seen = seen.lock();
         assert_eq!(seen.len(), 1);
-        assert_eq!(seen[0].0, "notifications.email.global_smtp");
-        assert_eq!(seen[0].1, "save_global_smtp");
+        assert_eq!(seen[0].0, "notifications.email.global-smtp");
+        assert_eq!(seen[0].1, "smtp");
     }
 
     let row = super::latest_tenant_audit_row_for_action(
@@ -195,8 +198,9 @@ async fn invoke_notifications_telegram_save_global_telegram_failure_emits_failed
     registry
         .bootstrap_plugin(notification_settings_registration(
             "plugin.telegram",
-            "notifications.telegram.global_settings",
-            "save_global_telegram",
+            "notifications.telegram.global-settings",
+            "settings",
+            surfaces::InteractionHttpMethod::Put,
         ))
         .expect("plugin registration should succeed");
 
@@ -211,10 +215,10 @@ async fn invoke_notifications_telegram_save_global_telegram_failure_emits_failed
             &service_connections,
             &registry,
             SurfaceInvokeRequest {
-                method: None,
+                method: Some(surfaces::InteractionHttpMethod::Put),
                 tenant_id: tenant_id(),
-                surface_id: "notifications.telegram.global_settings".to_string(),
-                interaction_id: "save_global_telegram".to_string(),
+                surface_id: "notifications.telegram.global-settings".to_string(),
+                interaction_id: "settings".to_string(),
                 idempotency_key: "idem-global-telegram-audit-failure".to_string(),
                 target_provider_id: None,
                 caller_origin: SurfaceCallerOrigin::UserSession {

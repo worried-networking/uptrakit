@@ -194,7 +194,7 @@ fn create_telegram_transport(
 fn telegram_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
     let channels_surface = {
         let data_source_id =
-            surfaces::DataSourceId::new("data.primary").expect("literal data source id is valid");
+            surfaces::DataSourceId::new("channels").expect("literal data source id is valid");
         PluginSurface {
             descriptor: surfaces::SurfaceDescriptor::builder()
                 .surface_id(
@@ -225,10 +225,11 @@ fn telegram_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                     None::<String>,
                     vec![
                         surfaces::SurfaceNode::ActionBar {
-                            action_ids: vec![surfaces::ActionRef::from(
-                                surfaces::InteractionId::new("create")
+                            action_ids: vec![surfaces::ActionRef::WithMethod {
+                                interaction_id: surfaces::InteractionId::new("channels")
                                     .expect("literal interaction id is valid"),
-                            )],
+                                http_method: Some(surfaces::InteractionHttpMethod::Post),
+                            }],
                         },
                         surfaces::SurfaceNode::Table {
                             data_source_id: data_source_id.clone(),
@@ -240,9 +241,9 @@ fn telegram_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                             ],
                             row_actions: vec![
                                 surfaces::SurfaceTableRowAction {
-                                    interaction_id: surfaces::InteractionId::new("edit")
+                                    interaction_id: surfaces::InteractionId::new("channels")
                                         .expect("literal interaction id is valid"),
-                                    http_method: None,
+                                    http_method: Some(surfaces::InteractionHttpMethod::Put),
                                     visible_when: None,
                                 },
                                 surfaces::SurfaceTableRowAction {
@@ -252,9 +253,9 @@ fn telegram_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                                     visible_when: None,
                                 },
                                 surfaces::SurfaceTableRowAction {
-                                    interaction_id: surfaces::InteractionId::new("delete")
+                                    interaction_id: surfaces::InteractionId::new("channels")
                                         .expect("literal interaction id is valid"),
-                                    http_method: None,
+                                    http_method: Some(surfaces::InteractionHttpMethod::Delete),
                                     visible_when: None,
                                 },
                             ],
@@ -266,7 +267,7 @@ fn telegram_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                 RegisteredInteraction::new(
                     {
                         let mut i = surfaces::InteractionDescriptor::new(
-                            surfaces::InteractionId::new("list")
+                            surfaces::InteractionId::new("channels")
                                 .expect("literal interaction id is valid"),
                             surfaces::InteractionKind::DataLoad,
                             "List",
@@ -280,7 +281,7 @@ fn telegram_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                 RegisteredInteraction::new(
                     {
                         let mut i = surfaces::InteractionDescriptor::new(
-                            surfaces::InteractionId::new("create")
+                            surfaces::InteractionId::new("channels")
                                 .expect("literal interaction id is valid"),
                             surfaces::InteractionKind::FormSubmit,
                             "Add Telegram Channel",
@@ -358,12 +359,13 @@ fn telegram_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                 RegisteredInteraction::new(
                     {
                         let mut i = surfaces::InteractionDescriptor::new(
-                            surfaces::InteractionId::new("edit")
+                            surfaces::InteractionId::new("channels")
                                 .expect("literal interaction id is valid"),
                             surfaces::InteractionKind::FormSubmit,
                             "Edit",
                             surfaces::InteractionTransport::ControllerLocal,
                         );
+                        i.http_method = surfaces::InteractionHttpMethod::Put;
                         i.required_permission = Some("manage_notifications".to_string());
                         i.input_schema = Some(surfaces::SchemaContract::Object);
                         i.result_schema = Some(surfaces::SchemaContract::Any);
@@ -468,12 +470,13 @@ fn telegram_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                 RegisteredInteraction::new(
                     {
                         let mut i = surfaces::InteractionDescriptor::new(
-                            surfaces::InteractionId::new("delete")
+                            surfaces::InteractionId::new("channels")
                                 .expect("literal interaction id is valid"),
                             surfaces::InteractionKind::ConfirmableAction,
                             "Delete",
                             surfaces::InteractionTransport::ControllerLocal,
                         );
+                        i.http_method = surfaces::InteractionHttpMethod::Delete;
                         i.required_permission = Some("manage_notifications".to_string());
                         i.input_schema = Some(surfaces::SchemaContract::Object);
                         i.result_schema = Some(surfaces::SchemaContract::Any);
@@ -492,7 +495,7 @@ fn telegram_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
             data_sources: vec![surfaces::DataSourceDescriptor {
                 data_source_id,
                 kind: surfaces::DataSourceKind::ProviderQuery {
-                    operation_id: "list".to_string(),
+                    operation_id: "channels".to_string(),
                 },
                 result_schema: surfaces::SchemaContract::Array,
                 pagination: Some(surfaces::DataSourcePagination {
@@ -508,12 +511,12 @@ fn telegram_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
     };
 
     let global_settings_surface = {
-        let save_global_interaction = surfaces::InteractionId::new("save_global_telegram")
-            .expect("literal interaction id is valid");
+        let save_global_interaction =
+            surfaces::InteractionId::new("settings").expect("literal interaction id is valid");
         PluginSurface {
             descriptor: surfaces::SurfaceDescriptor::builder()
                 .surface_id(
-                    surfaces::SurfaceId::new("notifications.telegram.global_settings")
+                    surfaces::SurfaceId::new("notifications.telegram.global-settings")
                         .expect("literal surface id is valid"),
                 )
                 .label("Telegram Defaults")
@@ -532,14 +535,14 @@ fn telegram_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                 ]))
                 .root_node(surfaces::SurfaceNode::Form {
                     interaction_id: save_global_interaction.clone(),
-                    http_method: None,
+                    http_method: Some(surfaces::InteractionHttpMethod::Put),
                 })
                 .build(),
             interactions: vec![
                 RegisteredInteraction::new(
                     {
                         let mut i = surfaces::InteractionDescriptor::new(
-                            surfaces::InteractionId::new("get_global_telegram")
+                            surfaces::InteractionId::new("settings")
                                 .expect("literal interaction id is valid"),
                             surfaces::InteractionKind::DataLoad,
                             "Get Global Telegram Settings",
@@ -560,6 +563,7 @@ fn telegram_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                             "Save Global Telegram Settings",
                             surfaces::InteractionTransport::ControllerLocal,
                         );
+                        i.http_method = surfaces::InteractionHttpMethod::Put;
                         i.required_permission = Some("manage_global_settings".to_string());
                         i.result_schema = Some(surfaces::SchemaContract::Any);
                         i.sensitive_fields = vec!["bot_token".to_string()];
@@ -581,7 +585,7 @@ fn telegram_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                             visible_when: None,
                         }],
                         pre_load_interaction_id: Some(
-                            surfaces::InteractionId::new("get_global_telegram")
+                            surfaces::InteractionId::new("settings")
                                 .expect("literal interaction id is valid"),
                         ),
                     });
@@ -654,7 +658,7 @@ mod tests {
     fn unified_registrations_pair_every_interaction_with_expected_delivery() {
         use uptrakit_plugin_infrastructure_core::InteractionDeliveryKind;
         let registrations = telegram_plugin_surfaces();
-        let mut seen: Vec<(String, String, InteractionDeliveryKind)> = Vec::new();
+        let mut seen: Vec<(String, String, String, InteractionDeliveryKind)> = Vec::new();
         for registration in &registrations {
             for surface in &registration.surfaces {
                 for interaction in &surface.interactions {
@@ -665,6 +669,11 @@ mod tests {
                     seen.push((
                         surface.descriptor.surface_id.as_str().to_string(),
                         interaction.descriptor().interaction_id.as_str().to_string(),
+                        interaction
+                            .descriptor()
+                            .effective_http_method()
+                            .as_str()
+                            .to_string(),
                         interaction.delivery().kind(),
                     ));
                 }
@@ -673,48 +682,55 @@ mod tests {
         // Expected (surface, interaction, delivery) table (spec D6); the table's
         // own length is the count source of truth below — no bare literal count
         // is asserted separately.
-        let expected: Vec<(&str, &str, InteractionDeliveryKind)> = vec![
+        let expected: Vec<(&str, &str, &str, InteractionDeliveryKind)> = vec![
             (
                 "notifications.telegram",
-                "list",
+                "channels",
+                "get",
                 InteractionDeliveryKind::PluginHandled,
             ),
             (
                 "notifications.telegram",
-                "create",
+                "channels",
+                "post",
                 InteractionDeliveryKind::ControllerExecutor,
             ),
             (
                 "notifications.telegram",
-                "edit",
+                "channels",
+                "put",
                 InteractionDeliveryKind::ControllerExecutor,
             ),
             (
                 "notifications.telegram",
                 "test",
+                "post",
                 InteractionDeliveryKind::ControllerExecutor,
             ),
             (
                 "notifications.telegram",
+                "channels",
                 "delete",
                 InteractionDeliveryKind::ControllerExecutor,
             ),
             (
-                "notifications.telegram.global_settings",
-                "get_global_telegram",
+                "notifications.telegram.global-settings",
+                "settings",
+                "get",
                 InteractionDeliveryKind::PluginHandled,
             ),
             (
-                "notifications.telegram.global_settings",
-                "save_global_telegram",
+                "notifications.telegram.global-settings",
+                "settings",
+                "put",
                 InteractionDeliveryKind::PluginHandled,
             ),
         ];
-        for (surface, id, kind) in &expected {
+        for (surface, id, method, kind) in &expected {
             assert!(
                 seen.iter()
-                    .any(|(s, i, k)| s == surface && i == id && k == kind),
-                "missing ({surface}, {id}, {kind:?})"
+                    .any(|(s, i, m, k)| s == surface && i == id && m == method && k == kind),
+                "missing ({surface}, {id}, {method}, {kind:?})"
             );
         }
         assert_eq!(
@@ -743,7 +759,7 @@ mod tests {
         assert!(
             all_surface_ids
                 .iter()
-                .any(|id| id == "notifications.telegram.global_settings")
+                .any(|id| id == "notifications.telegram.global-settings")
         );
         assert!(
             all_surface_ids
@@ -772,45 +788,52 @@ mod tests {
         assert_eq!(channel_surface.data_sources.len(), 1);
         assert!(matches!(
             &channel_surface.data_sources[0].kind,
-            surfaces::DataSourceKind::ProviderQuery { operation_id } if operation_id == "list"
+            surfaces::DataSourceKind::ProviderQuery { operation_id } if operation_id == "channels"
         ));
 
-        let find_interaction = |id: &str| {
+        let find_interaction = |id: &str, method: surfaces::InteractionHttpMethod| {
             channel_surface
                 .interactions
                 .iter()
-                .find(|interaction| interaction.interaction_id.as_str() == id)
-                .unwrap_or_else(|| panic!("interaction `{id}` should exist"))
+                .find(|interaction| {
+                    interaction.interaction_id.as_str() == id
+                        && interaction.effective_http_method() == method
+                })
+                .unwrap_or_else(|| panic!("interaction `{id}` ({method}) should exist"))
         };
         assert_eq!(
-            find_interaction("list").kind,
+            find_interaction("channels", surfaces::InteractionHttpMethod::Get).kind,
             surfaces::InteractionKind::DataLoad
         );
         assert_eq!(
-            find_interaction("create").kind,
+            find_interaction("channels", surfaces::InteractionHttpMethod::Post).kind,
             surfaces::InteractionKind::FormSubmit
         );
         assert_eq!(
-            find_interaction("edit").kind,
+            find_interaction("channels", surfaces::InteractionHttpMethod::Put).kind,
             surfaces::InteractionKind::FormSubmit
         );
         assert_eq!(
-            find_interaction("test").kind,
+            find_interaction("test", surfaces::InteractionHttpMethod::Post).kind,
             surfaces::InteractionKind::MutationAction
         );
         assert_eq!(
-            find_interaction("delete").kind,
+            find_interaction("channels", surfaces::InteractionHttpMethod::Delete).kind,
             surfaces::InteractionKind::ConfirmableAction
         );
-        assert!(find_interaction("delete").confirmation.is_some());
         assert!(
-            find_interaction("create")
+            find_interaction("channels", surfaces::InteractionHttpMethod::Delete)
+                .confirmation
+                .is_some()
+        );
+        assert!(
+            find_interaction("channels", surfaces::InteractionHttpMethod::Post)
                 .sensitive_fields
                 .iter()
                 .any(|field| field == "bot_token")
         );
         assert!(
-            find_interaction("edit")
+            find_interaction("channels", surfaces::InteractionHttpMethod::Put)
                 .sensitive_fields
                 .iter()
                 .any(|field| field == "bot_token")
@@ -827,9 +850,9 @@ mod tests {
             .iter()
             .flat_map(|registration| registration.surfaces.iter())
             .find(|surface| {
-                surface.descriptor.surface_id.as_str() == "notifications.telegram.global_settings"
+                surface.descriptor.surface_id.as_str() == "notifications.telegram.global-settings"
             })
-            .expect("notifications.telegram.global_settings surface should be present");
+            .expect("notifications.telegram.global-settings surface should be present");
 
         assert_eq!(
             settings_surface.descriptor.slot,
@@ -838,14 +861,17 @@ mod tests {
         assert!(matches!(
             settings_surface.descriptor.root_node,
             surfaces::SurfaceNode::Form { ref interaction_id, .. }
-                if interaction_id.as_str() == "save_global_telegram"
+                if interaction_id.as_str() == "settings"
         ));
 
         let save = settings_surface
             .interactions
             .iter()
-            .find(|interaction| interaction.interaction_id.as_str() == "save_global_telegram")
-            .expect("save_global_telegram interaction should exist");
+            .find(|interaction| {
+                interaction.interaction_id.as_str() == "settings"
+                    && interaction.effective_http_method() == surfaces::InteractionHttpMethod::Put
+            })
+            .expect("save global telegram (`settings` PUT) interaction should exist");
         assert_eq!(save.kind, surfaces::InteractionKind::MutationAction);
         assert!(
             save.sensitive_fields
@@ -857,10 +883,10 @@ mod tests {
                 .as_ref()
                 .and_then(|form_ui| form_ui.pre_load_interaction_id.as_ref())
                 .map(|interaction_id| interaction_id.as_str()),
-            Some("get_global_telegram")
+            Some("settings")
         );
         assert!(settings_surface.interactions.iter().any(|interaction| {
-            interaction.interaction_id.as_str() == "get_global_telegram"
+            interaction.interaction_id.as_str() == "settings"
                 && interaction.kind == surfaces::InteractionKind::DataLoad
         }));
     }

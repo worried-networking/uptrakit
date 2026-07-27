@@ -10,7 +10,8 @@ use uuid::Uuid;
 
 use super::super::super::{
     PluginSurfaceActionInvoker, PluginSurfaceLocalExecutor, ServiceConnectionRegistry,
-    SurfaceCallerOrigin, SurfaceInvokeRequest, SurfaceProxy, SurfaceProxyError,
+    SurfaceCallerOrigin, SurfaceInvokeRequest, SurfaceInvokerContext, SurfaceProxy,
+    SurfaceProxyError,
 };
 use super::super::{TestPluginInvoker, tenant_id, user_id};
 use super::{ensure_master_key, setup_notification_db};
@@ -24,11 +25,10 @@ struct ErrorPluginInvoker {
 impl PluginSurfaceActionInvoker for ErrorPluginInvoker {
     async fn invoke(
         &self,
-        _db: Option<&sea_orm::DatabaseConnection>,
-        _tenant_id: Option<Uuid>,
-        _caller_user_id: Option<Uuid>,
+        _ctx: SurfaceInvokerContext<'_>,
         _surface_id: &str,
         _interaction_id: &str,
+        _method: uptrakit_wire::surfaces::InteractionHttpMethod,
         _params: serde_json::Value,
     ) -> Result<serde_json::Value, SurfaceActionError> {
         Err(SurfaceActionError::InvalidInput(self.error_message.clone()))

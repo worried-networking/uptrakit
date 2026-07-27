@@ -454,11 +454,11 @@ mod tests {
     #[test]
     fn surface_action_target_display_includes_surface_and_interaction() {
         let surface_id = surfaces::SurfaceId::new("notifications.email").unwrap();
-        let interaction_id = surfaces::InteractionId::new("configure_smtp").unwrap();
+        let interaction_id = surfaces::InteractionId::new("smtp").unwrap();
 
         assert_eq!(
             surface_action_target_display(&surface_id, &interaction_id),
-            "notifications.email/configure_smtp"
+            "notifications.email/smtp"
         );
     }
 

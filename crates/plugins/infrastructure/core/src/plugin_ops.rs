@@ -294,11 +294,17 @@ pub trait PluginConfigOps: PluginMetadataOps {
 #[async_trait]
 pub trait PluginSurfaceActionOps: Send + Sync + 'static {
     /// Handle a surface action invocation.
+    ///
+    /// `method` is the effective HTTP method of the resolved interaction
+    /// (ADR-0030 `(id, effective_http_method)` model). A single interaction ID
+    /// may be registered under several methods (e.g. a GET read and a PUT
+    /// write sharing `smtp`); `method` selects the matching handler.
     async fn handle_surface_action(
         &self,
         ctx: &SurfaceActionContext<'_>,
         surface_id: &str,
         action_id: &str,
+        method: surfaces::InteractionHttpMethod,
         params: serde_json::Value,
     ) -> std::result::Result<serde_json::Value, SurfaceActionError>;
 }

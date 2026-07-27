@@ -12,7 +12,7 @@ use super::controller_local::{
     allowlisted_docker_switch_tag_controller_local_action,
     allowlisted_notification_channel_controller_local_action,
     allowlisted_notification_settings_controller_local_action,
-    allowlisted_proxmox_update_protection_controller_local_action,
+    allowlisted_proxmox_update_protection_controller_local_action, channel_op_name,
     emit_docker_switch_tag_audit_event, emit_notification_channel_audit_event,
     emit_notification_settings_audit_event, emit_proxmox_update_protection_audit_event,
     execute_allowlisted_notification_channel_action, map_surface_action_error,
@@ -29,15 +29,23 @@ pub trait SurfaceLocalActionExecutor: Send + Sync {
     ) -> Result<serde_json::Value, SurfaceProxyError>;
 }
 
+/// Caller and database context for a plugin-surface invocation. Bundled so
+/// [`PluginSurfaceActionInvoker::invoke`] stays within the argument budget
+/// after the method-aware dispatch parameter (ADR-0030) was added.
+pub struct SurfaceInvokerContext<'a> {
+    pub db: Option<&'a DatabaseConnection>,
+    pub tenant_id: Option<Uuid>,
+    pub caller_user_id: Option<Uuid>,
+}
+
 #[async_trait]
 pub trait PluginSurfaceActionInvoker: Send + Sync {
     async fn invoke(
         &self,
-        db: Option<&DatabaseConnection>,
-        tenant_id: Option<Uuid>,
-        caller_user_id: Option<Uuid>,
+        ctx: SurfaceInvokerContext<'_>,
         surface_id: &str,
         interaction_id: &str,
+        method: surfaces::InteractionHttpMethod,
         params: serde_json::Value,
     ) -> Result<serde_json::Value, SurfaceActionError>;
 }
@@ -56,19 +64,18 @@ impl PluginOpsSurfaceActionInvoker {
 impl PluginSurfaceActionInvoker for PluginOpsSurfaceActionInvoker {
     async fn invoke(
         &self,
-        db: Option<&DatabaseConnection>,
-        tenant_id: Option<Uuid>,
-        caller_user_id: Option<Uuid>,
+        ctx: SurfaceInvokerContext<'_>,
         surface_id: &str,
         interaction_id: &str,
+        method: surfaces::InteractionHttpMethod,
         params: serde_json::Value,
     ) -> Result<serde_json::Value, SurfaceActionError> {
-        let tenant_id = tenant_id.ok_or_else(|| {
+        let tenant_id = ctx.tenant_id.ok_or_else(|| {
             SurfaceActionError::InvalidInput(
                 "tenant_id is required for controller-local surface actions".to_string(),
             )
         })?;
-        let db = db.ok_or_else(|| {
+        let db = ctx.db.ok_or_else(|| {
             SurfaceActionError::ControllerIntegration(
                 "internal error: expected DatabaseConnection".to_string(),
             )
@@ -76,13 +83,13 @@ impl PluginSurfaceActionInvoker for PluginOpsSurfaceActionInvoker {
         let controller = AppStateSurfaceActionController::from_database_connection(
             db,
             tenant_id,
-            caller_user_id,
+            ctx.caller_user_id,
         );
         let ctx = SurfaceActionContext {
             controller: &controller,
         };
         self.plugin_ops
-            .handle_surface_action(&ctx, surface_id, interaction_id, params)
+            .handle_surface_action(&ctx, surface_id, interaction_id, method, params)
             .await
     }
 }
@@ -189,6 +196,7 @@ impl SurfaceLocalActionExecutor for PluginSurfaceLocalExecutor {
                 plugin_ops,
                 channel_type,
                 resolved.interaction.interaction_id.as_str(),
+                &request.method,
                 &request.params,
             )
             .await
@@ -197,7 +205,10 @@ impl SurfaceLocalActionExecutor for PluginSurfaceLocalExecutor {
                 self.audit_emitter.as_ref(),
                 caller_user_id,
                 tenant_id,
-                resolved.interaction.interaction_id.as_str(),
+                channel_op_name(
+                    resolved.interaction.interaction_id.as_str(),
+                    &request.method,
+                ),
                 channel_type,
                 &request.params,
                 result.as_ref(),
@@ -215,11 +226,14 @@ impl SurfaceLocalActionExecutor for PluginSurfaceLocalExecutor {
             let result = self
                 .plugin_invoker
                 .invoke(
-                    self.action_context_db.as_deref(),
-                    Some(tenant_id),
-                    caller_user_id,
+                    SurfaceInvokerContext {
+                        db: self.action_context_db.as_deref(),
+                        tenant_id: Some(tenant_id),
+                        caller_user_id,
+                    },
                     request.surface_id.as_str(),
                     request.interaction_id.as_str(),
+                    resolved.interaction.effective_http_method(),
                     serde_json::Value::Object(request.params.clone()),
                 )
                 .await
@@ -245,11 +259,14 @@ impl SurfaceLocalActionExecutor for PluginSurfaceLocalExecutor {
             let result = self
                 .plugin_invoker
                 .invoke(
-                    self.action_context_db.as_deref(),
-                    Some(tenant_id),
-                    caller_user_id,
+                    SurfaceInvokerContext {
+                        db: self.action_context_db.as_deref(),
+                        tenant_id: Some(tenant_id),
+                        caller_user_id,
+                    },
                     request.surface_id.as_str(),
                     request.interaction_id.as_str(),
+                    resolved.interaction.effective_http_method(),
                     serde_json::Value::Object(request.params.clone()),
                 )
                 .await
@@ -273,11 +290,14 @@ impl SurfaceLocalActionExecutor for PluginSurfaceLocalExecutor {
             let result = self
                 .plugin_invoker
                 .invoke(
-                    self.action_context_db.as_deref(),
-                    Some(tenant_id),
-                    caller_user_id,
+                    SurfaceInvokerContext {
+                        db: self.action_context_db.as_deref(),
+                        tenant_id: Some(tenant_id),
+                        caller_user_id,
+                    },
                     request.surface_id.as_str(),
                     request.interaction_id.as_str(),
+                    resolved.interaction.effective_http_method(),
                     serde_json::Value::Object(request.params.clone()),
                 )
                 .await
@@ -296,11 +316,14 @@ impl SurfaceLocalActionExecutor for PluginSurfaceLocalExecutor {
         // --- Tier 3: Generic invoke (no audit) ---
         self.plugin_invoker
             .invoke(
-                self.action_context_db.as_deref(),
-                Some(tenant_id),
-                caller_user_id,
+                SurfaceInvokerContext {
+                    db: self.action_context_db.as_deref(),
+                    tenant_id: Some(tenant_id),
+                    caller_user_id,
+                },
                 request.surface_id.as_str(),
                 request.interaction_id.as_str(),
+                resolved.interaction.effective_http_method(),
                 serde_json::Value::Object(request.params.clone()),
             )
             .await

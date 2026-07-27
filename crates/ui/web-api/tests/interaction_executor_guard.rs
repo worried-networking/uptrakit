@@ -87,8 +87,8 @@ fn every_controller_executor_registration_has_an_executor_table_row() {
     assert!(
         controller_executed
             .iter()
-            .any(|(s, i, _, _)| s == "notifications.webhook" && i == "create"),
-        "known member (notifications.webhook, create) missing — catalog wiring broken"
+            .any(|(s, i, _, _)| s == "notifications.webhook" && i == "channels"),
+        "known member (notifications.webhook, channels) missing — catalog wiring broken"
     );
     // Expression-position cfg!() per coding-standards.md "Additive patterns
     // in tests" — matches the `compiled` idiom in the sibling test above.
@@ -96,16 +96,16 @@ fn every_controller_executor_registration_has_an_executor_table_row() {
         assert!(
             controller_executed
                 .iter()
-                .any(|(s, i, _, _)| s == "notifications.telegram" && i == "create"),
-            "known member (notifications.telegram, create) missing"
+                .any(|(s, i, _, _)| s == "notifications.telegram" && i == "channels"),
+            "known member (notifications.telegram, channels) missing"
         );
     }
     if cfg!(feature = "notifications-email") {
         assert!(
             controller_executed
                 .iter()
-                .any(|(s, i, _, _)| s == "notifications.email" && i == "create"),
-            "known member (notifications.email, create) missing"
+                .any(|(s, i, _, _)| s == "notifications.email" && i == "channels"),
+            "known member (notifications.email, channels) missing"
         );
     }
     for (surface, interaction, method, _) in &controller_executed {

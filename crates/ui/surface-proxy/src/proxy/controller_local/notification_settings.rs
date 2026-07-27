@@ -29,13 +29,11 @@ pub(crate) fn allowlisted_notification_settings_controller_local_action(
         return None;
     }
     match (surface_id, interaction_id) {
-        ("notifications.email", "configure_smtp") => {
-            Some(NotificationSettingsAction::ConfigureSmtp)
-        }
-        ("notifications.email.global_smtp", "save_global_smtp") => {
+        ("notifications.email", "smtp") => Some(NotificationSettingsAction::ConfigureSmtp),
+        ("notifications.email.global-smtp", "smtp") => {
             Some(NotificationSettingsAction::SaveGlobalSmtp)
         }
-        ("notifications.telegram.global_settings", "save_global_telegram") => {
+        ("notifications.telegram.global-settings", "settings") => {
             Some(NotificationSettingsAction::SaveGlobalTelegram)
         }
         _ => None,

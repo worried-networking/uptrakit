@@ -39,16 +39,42 @@ pub(crate) fn allowlisted_notification_channel_controller_local_action<'a>(
     allowlisted_notification_channel_provider(provider_id, channel_type).then_some(channel_type)
 }
 
+/// Maps the collapsed wire ID + method back to the frozen semantic op name
+/// used in audit `create_source` / action-type strings. The wire IDs
+/// collapsed onto REST nouns (`channels` for CRUD, `test` unchanged); the
+/// method disambiguates the CRUD verbs. `InteractionHttpMethod` is a
+/// `wire_safe_enum!` type (non-exhaustive `Other`), hence the wildcard arm.
+pub(crate) fn channel_op_name(
+    interaction_id: &str,
+    method: &InteractionHttpMethod,
+) -> Option<&'static str> {
+    match (interaction_id, method) {
+        ("channels", InteractionHttpMethod::Post) => Some("create"),
+        ("channels", InteractionHttpMethod::Put) => Some("edit"),
+        ("channels", InteractionHttpMethod::Delete) => Some("delete"),
+        ("test", InteractionHttpMethod::Post) => Some("test"),
+        _ => None,
+    }
+}
+
 pub(crate) async fn execute_allowlisted_notification_channel_action(
     tenant_db: &uptrakit_web_api_queries::TenantDb,
     plugin_ops: &dyn PluginOps,
     channel_type: &str,
     interaction_id: &str,
+    method: &InteractionHttpMethod,
     params: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
     use uptrakit_web_api_types::validation::Validate as _;
 
-    match interaction_id {
+    let Some(op) = channel_op_name(interaction_id, method) else {
+        return Err(format!(
+            "action `{interaction_id}` ({method}) is not allowlisted for notification \
+             controller_local execution"
+        ));
+    };
+
+    match op {
         "create" => {
             let req = build_notification_channel_create_request(channel_type, params)?;
             req.validate().map_err(|error| error.to_string())?;
@@ -396,7 +422,7 @@ pub(crate) fn emit_notification_channel_audit_event(
     audit_emitter: Option<&uptrakit_audit_log::AuditEmitter>,
     caller_user_id: Option<Uuid>,
     tenant_id: Uuid,
-    interaction_id: &str,
+    op: Option<&str>,
     channel_type: &str,
     request_params: &serde_json::Map<String, serde_json::Value>,
     result: Result<&serde_json::Value, &SurfaceProxyError>,
@@ -407,7 +433,14 @@ pub(crate) fn emit_notification_channel_audit_event(
     let Some(caller_user_id) = caller_user_id else {
         return;
     };
-    let Some(action_type) = notification_channel_action_type(interaction_id) else {
+    // `op` is the frozen semantic op resolved from the collapsed (id, method)
+    // pair by the caller; the audit action-type and `create_source` strings key
+    // on it, not the wire ID, so they stay byte-identical to the pre-rename
+    // values.
+    let Some(op) = op else {
+        return;
+    };
+    let Some(action_type) = notification_channel_action_type(op) else {
         return;
     };
 
@@ -427,7 +460,7 @@ pub(crate) fn emit_notification_channel_audit_event(
                 .and_then(|v| v.as_str())
                 .map(std::string::ToString::to_string)
                 .or_else(|| requested_id.clone())
-                .or_else(|| (interaction_id == "create").then(|| "pending".to_string()));
+                .or_else(|| (op == "create").then(|| "pending".to_string()));
             let target_display = response
                 .get("name")
                 .and_then(|v| v.as_str())
@@ -441,10 +474,10 @@ pub(crate) fn emit_notification_channel_audit_event(
             )
         }
         Err(error) => {
-            let (outcome, reason_code) = classify_notification_channel_error(interaction_id, error);
+            let (outcome, reason_code) = classify_notification_channel_error(op, error);
             let target_id = requested_id
                 .clone()
-                .or_else(|| (interaction_id == "create").then(|| "pending".to_string()));
+                .or_else(|| (op == "create").then(|| "pending".to_string()));
             (
                 outcome,
                 Some(reason_code),
@@ -456,7 +489,7 @@ pub(crate) fn emit_notification_channel_audit_event(
 
     let mut details = serde_json::json!({
         "channel_type": channel_type,
-        "create_source": format!("surface_proxy.notification_channel.{interaction_id}"),
+        "create_source": format!("surface_proxy.notification_channel.{op}"),
     });
     if let Some(reason_code) = reason_code {
         details["reason_code"] = serde_json::json!(reason_code);

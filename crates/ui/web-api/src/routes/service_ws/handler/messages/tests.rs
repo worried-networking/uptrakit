@@ -166,6 +166,7 @@ impl PluginSurfaceActionOps for TestPluginOps {
         _ctx: &uptrakit_plugin_infrastructure_registry::SurfaceActionContext<'_>,
         _surface_id: &str,
         _action_id: &str,
+        _method: uptrakit_wire::surfaces::InteractionHttpMethod,
         _params: serde_json::Value,
     ) -> std::result::Result<serde_json::Value, SurfaceActionError> {
         Err(SurfaceActionError::PluginInternal(

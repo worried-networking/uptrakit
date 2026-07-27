@@ -444,7 +444,7 @@ fn create_email_transport(
 fn email_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
     let channel_surface = {
         let data_source_id =
-            surfaces::DataSourceId::new("data.primary").expect("literal data source id is valid");
+            surfaces::DataSourceId::new("channels").expect("literal data source id is valid");
         PluginSurface {
             descriptor: surfaces::SurfaceDescriptor::builder()
                 .surface_id(
@@ -476,14 +476,16 @@ fn email_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                     vec![
                         surfaces::SurfaceNode::ActionBar {
                             action_ids: vec![
-                                surfaces::ActionRef::from(
-                                    surfaces::InteractionId::new("create")
+                                surfaces::ActionRef::WithMethod {
+                                    interaction_id: surfaces::InteractionId::new("channels")
                                         .expect("literal interaction id is valid"),
-                                ),
-                                surfaces::ActionRef::from(
-                                    surfaces::InteractionId::new("configure_smtp")
+                                    http_method: Some(surfaces::InteractionHttpMethod::Post),
+                                },
+                                surfaces::ActionRef::WithMethod {
+                                    interaction_id: surfaces::InteractionId::new("smtp")
                                         .expect("literal interaction id is valid"),
-                                ),
+                                    http_method: Some(surfaces::InteractionHttpMethod::Put),
+                                },
                             ],
                         },
                         surfaces::SurfaceNode::Table {
@@ -496,9 +498,9 @@ fn email_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                             ],
                             row_actions: vec![
                                 surfaces::SurfaceTableRowAction {
-                                    interaction_id: surfaces::InteractionId::new("edit")
+                                    interaction_id: surfaces::InteractionId::new("channels")
                                         .expect("literal interaction id is valid"),
-                                    http_method: None,
+                                    http_method: Some(surfaces::InteractionHttpMethod::Put),
                                     visible_when: None,
                                 },
                                 surfaces::SurfaceTableRowAction {
@@ -508,9 +510,9 @@ fn email_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                                     visible_when: None,
                                 },
                                 surfaces::SurfaceTableRowAction {
-                                    interaction_id: surfaces::InteractionId::new("delete")
+                                    interaction_id: surfaces::InteractionId::new("channels")
                                         .expect("literal interaction id is valid"),
-                                    http_method: None,
+                                    http_method: Some(surfaces::InteractionHttpMethod::Delete),
                                     visible_when: None,
                                 },
                             ],
@@ -522,7 +524,7 @@ fn email_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                 RegisteredInteraction::new(
                     {
                         let mut i = surfaces::InteractionDescriptor::new(
-                            surfaces::InteractionId::new("list")
+                            surfaces::InteractionId::new("channels")
                                 .expect("literal interaction id is valid"),
                             surfaces::InteractionKind::DataLoad,
                             "List",
@@ -536,7 +538,7 @@ fn email_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                 RegisteredInteraction::new(
                     {
                         let mut i = surfaces::InteractionDescriptor::new(
-                            surfaces::InteractionId::new("create")
+                            surfaces::InteractionId::new("channels")
                                 .expect("literal interaction id is valid"),
                             surfaces::InteractionKind::FormSubmit,
                             "Add Email Channel",
@@ -601,12 +603,13 @@ fn email_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                 RegisteredInteraction::new(
                     {
                         let mut i = surfaces::InteractionDescriptor::new(
-                            surfaces::InteractionId::new("edit")
+                            surfaces::InteractionId::new("channels")
                                 .expect("literal interaction id is valid"),
                             surfaces::InteractionKind::FormSubmit,
                             "Edit",
                             surfaces::InteractionTransport::ControllerLocal,
                         );
+                        i.http_method = surfaces::InteractionHttpMethod::Put;
                         i.required_permission = Some("manage_notifications".to_string());
                         i.input_schema = Some(surfaces::SchemaContract::Object);
                         i.result_schema = Some(surfaces::SchemaContract::Any);
@@ -696,12 +699,13 @@ fn email_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                 RegisteredInteraction::new(
                     {
                         let mut i = surfaces::InteractionDescriptor::new(
-                            surfaces::InteractionId::new("delete")
+                            surfaces::InteractionId::new("channels")
                                 .expect("literal interaction id is valid"),
                             surfaces::InteractionKind::ConfirmableAction,
                             "Delete",
                             surfaces::InteractionTransport::ControllerLocal,
                         );
+                        i.http_method = surfaces::InteractionHttpMethod::Delete;
                         i.required_permission = Some("manage_notifications".to_string());
                         i.input_schema = Some(surfaces::SchemaContract::Object);
                         i.result_schema = Some(surfaces::SchemaContract::Any);
@@ -719,12 +723,13 @@ fn email_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                 RegisteredInteraction::new(
                     {
                         let mut i = surfaces::InteractionDescriptor::new(
-                            surfaces::InteractionId::new("configure_smtp")
+                            surfaces::InteractionId::new("smtp")
                                 .expect("literal interaction id is valid"),
                             surfaces::InteractionKind::FormSubmit,
                             "Override SMTP",
                             surfaces::InteractionTransport::ControllerLocal,
                         );
+                        i.http_method = surfaces::InteractionHttpMethod::Put;
                         i.required_permission = Some("manage_notifications".to_string());
                         i.input_schema = Some(surfaces::SchemaContract::Object);
                         i.result_schema = Some(surfaces::SchemaContract::Any);
@@ -846,7 +851,7 @@ fn email_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                                 },
                             ],
                             pre_load_interaction_id: Some(
-                                surfaces::InteractionId::new("get_smtp")
+                                surfaces::InteractionId::new("smtp")
                                     .expect("literal interaction id is valid"),
                             ),
                         });
@@ -859,7 +864,7 @@ fn email_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                 RegisteredInteraction::new(
                     {
                         let mut i = surfaces::InteractionDescriptor::new(
-                            surfaces::InteractionId::new("get_smtp")
+                            surfaces::InteractionId::new("smtp")
                                 .expect("literal interaction id is valid"),
                             surfaces::InteractionKind::DataLoad,
                             "Get SMTP Settings",
@@ -874,7 +879,7 @@ fn email_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
             data_sources: vec![surfaces::DataSourceDescriptor {
                 data_source_id,
                 kind: surfaces::DataSourceKind::ProviderQuery {
-                    operation_id: "list".to_string(),
+                    operation_id: "channels".to_string(),
                 },
                 result_schema: surfaces::SchemaContract::Array,
                 pagination: Some(surfaces::DataSourcePagination {
@@ -890,12 +895,12 @@ fn email_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
     };
 
     let global_smtp_surface = {
-        let save_global_smtp_interaction = surfaces::InteractionId::new("save_global_smtp")
-            .expect("literal interaction id is valid");
+        let save_global_smtp_interaction =
+            surfaces::InteractionId::new("smtp").expect("literal interaction id is valid");
         PluginSurface {
             descriptor: surfaces::SurfaceDescriptor::builder()
                 .surface_id(
-                    surfaces::SurfaceId::new("notifications.email.global_smtp")
+                    surfaces::SurfaceId::new("notifications.email.global-smtp")
                         .expect("literal surface id is valid"),
                 )
                 .label("SMTP Defaults")
@@ -919,11 +924,11 @@ fn email_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                     vec![
                         surfaces::SurfaceNode::Form {
                             interaction_id: save_global_smtp_interaction.clone(),
-                            http_method: None,
+                            http_method: Some(surfaces::InteractionHttpMethod::Put),
                         },
                         surfaces::SurfaceNode::ActionBar {
                             action_ids: vec![surfaces::ActionRef::from(
-                                surfaces::InteractionId::new("test_global_smtp_email")
+                                surfaces::InteractionId::new("test")
                                     .expect("literal interaction id is valid"),
                             )],
                         },
@@ -934,7 +939,7 @@ fn email_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                 RegisteredInteraction::new(
                     {
                         let mut i = surfaces::InteractionDescriptor::new(
-                            surfaces::InteractionId::new("get_global_smtp")
+                            surfaces::InteractionId::new("smtp")
                                 .expect("literal interaction id is valid"),
                             surfaces::InteractionKind::DataLoad,
                             "Get Global SMTP Defaults",
@@ -950,7 +955,7 @@ fn email_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                 RegisteredInteraction::new(
                     {
                         let mut i = surfaces::InteractionDescriptor::new(
-                            surfaces::InteractionId::new("test_global_smtp_email")
+                            surfaces::InteractionId::new("test")
                                 .expect("literal interaction id is valid"),
                             surfaces::InteractionKind::MutationAction,
                             "Send Test Email",
@@ -972,6 +977,7 @@ fn email_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                             "Save Global SMTP Defaults",
                             surfaces::InteractionTransport::ControllerLocal,
                         );
+                        i.http_method = surfaces::InteractionHttpMethod::Put;
                         i.required_permission = Some("manage_global_settings".to_string());
                         i.result_schema = Some(surfaces::SchemaContract::Any);
                         i.sensitive_fields = vec!["password".to_string()];
@@ -1106,7 +1112,7 @@ fn email_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                             },
                         ],
                         pre_load_interaction_id: Some(
-                            surfaces::InteractionId::new("get_global_smtp")
+                            surfaces::InteractionId::new("smtp")
                                 .expect("literal interaction id is valid"),
                         ),
                     });
@@ -1208,7 +1214,7 @@ mod tests {
     fn unified_registrations_pair_every_interaction_with_expected_delivery() {
         use uptrakit_plugin_infrastructure_core::InteractionDeliveryKind;
         let registrations = email_plugin_surfaces();
-        let mut seen: Vec<(String, String, InteractionDeliveryKind)> = Vec::new();
+        let mut seen: Vec<(String, String, String, InteractionDeliveryKind)> = Vec::new();
         for registration in &registrations {
             for surface in &registration.surfaces {
                 for interaction in &surface.interactions {
@@ -1219,71 +1225,87 @@ mod tests {
                     seen.push((
                         surface.descriptor.surface_id.as_str().to_string(),
                         interaction.descriptor().interaction_id.as_str().to_string(),
+                        interaction
+                            .descriptor()
+                            .effective_http_method()
+                            .as_str()
+                            .to_string(),
                         interaction.delivery().kind(),
                     ));
                 }
             }
         }
-        // Expected (surface, interaction, delivery) table (spec D6); the table's
-        // own length is the count source of truth below — no bare literal count
-        // is asserted separately.
-        let expected: Vec<(&str, &str, InteractionDeliveryKind)> = vec![
+        // Expected (surface, interaction, method, delivery) table (spec D6);
+        // the table's own length is the count source of truth below — no bare
+        // literal count is asserted separately. IDs collapse onto REST nouns
+        // (`channels`, `smtp`) disambiguated by method.
+        let expected: Vec<(&str, &str, &str, InteractionDeliveryKind)> = vec![
             (
                 "notifications.email",
-                "list",
+                "channels",
+                "get",
                 InteractionDeliveryKind::PluginHandled,
             ),
             (
                 "notifications.email",
-                "create",
+                "channels",
+                "post",
                 InteractionDeliveryKind::ControllerExecutor,
             ),
             (
                 "notifications.email",
-                "edit",
+                "channels",
+                "put",
                 InteractionDeliveryKind::ControllerExecutor,
             ),
             (
                 "notifications.email",
                 "test",
+                "post",
                 InteractionDeliveryKind::ControllerExecutor,
             ),
             (
                 "notifications.email",
+                "channels",
                 "delete",
                 InteractionDeliveryKind::ControllerExecutor,
             ),
             (
                 "notifications.email",
-                "configure_smtp",
+                "smtp",
+                "put",
                 InteractionDeliveryKind::PluginHandled,
             ),
             (
                 "notifications.email",
-                "get_smtp",
+                "smtp",
+                "get",
                 InteractionDeliveryKind::PluginHandled,
             ),
             (
-                "notifications.email.global_smtp",
-                "get_global_smtp",
+                "notifications.email.global-smtp",
+                "smtp",
+                "get",
                 InteractionDeliveryKind::PluginHandled,
             ),
             (
-                "notifications.email.global_smtp",
-                "test_global_smtp_email",
+                "notifications.email.global-smtp",
+                "test",
+                "post",
                 InteractionDeliveryKind::PluginHandled,
             ),
             (
-                "notifications.email.global_smtp",
-                "save_global_smtp",
+                "notifications.email.global-smtp",
+                "smtp",
+                "put",
                 InteractionDeliveryKind::PluginHandled,
             ),
         ];
-        for (surface, id, kind) in &expected {
+        for (surface, id, method, kind) in &expected {
             assert!(
                 seen.iter()
-                    .any(|(s, i, k)| s == surface && i == id && k == kind),
-                "missing ({surface}, {id}, {kind:?})"
+                    .any(|(s, i, m, k)| s == surface && i == id && m == method && k == kind),
+                "missing ({surface}, {id}, {method}, {kind:?})"
             );
         }
         assert_eq!(
@@ -1312,7 +1334,7 @@ mod tests {
         assert!(
             all_surface_ids
                 .iter()
-                .any(|id| id == "notifications.email.global_smtp")
+                .any(|id| id == "notifications.email.global-smtp")
         );
         assert!(
             all_surface_ids.iter().any(|id| id == "notifications.email"),
@@ -1339,7 +1361,7 @@ mod tests {
         assert_eq!(channel_surface.data_sources.len(), 1);
         assert!(matches!(
             &channel_surface.data_sources[0].kind,
-            surfaces::DataSourceKind::ProviderQuery { operation_id } if operation_id == "list"
+            surfaces::DataSourceKind::ProviderQuery { operation_id } if operation_id == "channels"
         ));
 
         match &channel_surface.descriptor.root_node {
@@ -1349,62 +1371,66 @@ mod tests {
                     Some(surfaces::SurfaceNode::ActionBar { action_ids })
                         if action_ids
                             .iter()
-                            .map(|action_ref| action_ref.interaction_id().as_str())
+                            .map(|action_ref| (
+                                action_ref.interaction_id().as_str(),
+                                action_ref.http_method().map(surfaces::InteractionHttpMethod::as_str),
+                            ))
                             .collect::<Vec<_>>()
-                            == vec!["create", "configure_smtp"]
+                            == vec![("channels", Some("post")), ("smtp", Some("put"))]
                 ));
                 assert!(matches!(
                     children.get(1),
                     Some(surfaces::SurfaceNode::Table { row_actions, .. })
                         if row_actions
                             .iter()
-                            .map(|action| action.interaction_id.as_str())
+                            .map(|action| (
+                                action.interaction_id.as_str(),
+                                action.http_method.as_ref().map(surfaces::InteractionHttpMethod::as_str),
+                            ))
                             .collect::<Vec<_>>()
-                            == vec!["edit", "test", "delete"]
+                            == vec![("channels", Some("put")), ("test", None), ("channels", Some("delete"))]
                 ));
             }
             other => panic!("expected section root node, got {other:?}"),
         }
 
-        let find_interaction = |id: &str| {
+        let find_interaction = |id: &str, method: surfaces::InteractionHttpMethod| {
             channel_surface
                 .interactions
                 .iter()
-                .find(|interaction| interaction.interaction_id.as_str() == id)
-                .unwrap_or_else(|| panic!("interaction `{id}` should exist"))
+                .find(|interaction| {
+                    interaction.interaction_id.as_str() == id
+                        && interaction.effective_http_method() == method
+                })
+                .unwrap_or_else(|| panic!("interaction `{id}` ({method}) should exist"))
         };
 
         assert_eq!(
-            find_interaction("list").kind,
+            find_interaction("channels", surfaces::InteractionHttpMethod::Get).kind,
             surfaces::InteractionKind::DataLoad
         );
         assert_eq!(
-            find_interaction("create").kind,
+            find_interaction("channels", surfaces::InteractionHttpMethod::Post).kind,
             surfaces::InteractionKind::FormSubmit
         );
         assert_eq!(
-            find_interaction("edit").kind,
+            find_interaction("channels", surfaces::InteractionHttpMethod::Put).kind,
             surfaces::InteractionKind::FormSubmit
         );
+        let configure_smtp = find_interaction("smtp", surfaces::InteractionHttpMethod::Put);
+        assert_eq!(configure_smtp.kind, surfaces::InteractionKind::FormSubmit);
         assert_eq!(
-            find_interaction("configure_smtp").kind,
-            surfaces::InteractionKind::FormSubmit
-        );
-        assert_eq!(
-            find_interaction("test").kind,
+            find_interaction("test", surfaces::InteractionHttpMethod::Post).kind,
             surfaces::InteractionKind::MutationAction
         );
+        let delete = find_interaction("channels", surfaces::InteractionHttpMethod::Delete);
+        assert_eq!(delete.kind, surfaces::InteractionKind::ConfirmableAction);
         assert_eq!(
-            find_interaction("delete").kind,
-            surfaces::InteractionKind::ConfirmableAction
-        );
-        assert_eq!(
-            find_interaction("get_smtp").kind,
+            find_interaction("smtp", surfaces::InteractionHttpMethod::Get).kind,
             surfaces::InteractionKind::DataLoad
         );
 
-        assert!(find_interaction("delete").confirmation.is_some());
-        let configure_smtp = find_interaction("configure_smtp");
+        assert!(delete.confirmation.is_some());
         assert!(
             configure_smtp
                 .sensitive_fields
@@ -1417,7 +1443,7 @@ mod tests {
                 .as_ref()
                 .and_then(|form_ui| form_ui.pre_load_interaction_id.as_ref())
                 .map(|interaction_id| interaction_id.as_str()),
-            Some("get_smtp")
+            Some("smtp")
         );
     }
 
@@ -1431,9 +1457,9 @@ mod tests {
             .iter()
             .flat_map(|registration| registration.surfaces.iter())
             .find(|surface| {
-                surface.descriptor.surface_id.as_str() == "notifications.email.global_smtp"
+                surface.descriptor.surface_id.as_str() == "notifications.email.global-smtp"
             })
-            .expect("notifications.email.global_smtp surface should be present");
+            .expect("notifications.email.global-smtp surface should be present");
 
         assert_eq!(
             smtp_surface.descriptor.slot,
@@ -1443,8 +1469,9 @@ mod tests {
             surfaces::SurfaceNode::Section { children, .. } => {
                 assert!(matches!(
                     children.first(),
-                    Some(surfaces::SurfaceNode::Form { interaction_id, .. })
-                        if interaction_id.as_str() == "save_global_smtp"
+                    Some(surfaces::SurfaceNode::Form { interaction_id, http_method })
+                        if interaction_id.as_str() == "smtp"
+                            && *http_method == Some(surfaces::InteractionHttpMethod::Put)
                 ));
                 assert!(matches!(
                     children.get(1),
@@ -1453,7 +1480,7 @@ mod tests {
                             .iter()
                             .map(|action_ref| action_ref.interaction_id().as_str())
                             .collect::<Vec<_>>()
-                            == vec!["test_global_smtp_email"]
+                            == vec!["test"]
                 ));
             }
             other => panic!("expected section root node, got {other:?}"),
@@ -1462,8 +1489,11 @@ mod tests {
         let save = smtp_surface
             .interactions
             .iter()
-            .find(|interaction| interaction.interaction_id.as_str() == "save_global_smtp")
-            .expect("save_global_smtp interaction should exist");
+            .find(|interaction| {
+                interaction.interaction_id.as_str() == "smtp"
+                    && interaction.effective_http_method() == surfaces::InteractionHttpMethod::Put
+            })
+            .expect("save global smtp (`smtp` PUT) interaction should exist");
         assert_eq!(save.kind, surfaces::InteractionKind::MutationAction);
         assert!(
             save.sensitive_fields
@@ -1475,14 +1505,14 @@ mod tests {
                 .as_ref()
                 .and_then(|form_ui| form_ui.pre_load_interaction_id.as_ref())
                 .map(|interaction_id| interaction_id.as_str()),
-            Some("get_global_smtp")
+            Some("smtp")
         );
         assert!(smtp_surface.interactions.iter().any(|interaction| {
-            interaction.interaction_id.as_str() == "get_global_smtp"
+            interaction.interaction_id.as_str() == "smtp"
                 && interaction.kind == surfaces::InteractionKind::DataLoad
         }));
         assert!(smtp_surface.interactions.iter().any(|interaction| {
-            interaction.interaction_id.as_str() == "test_global_smtp_email"
+            interaction.interaction_id.as_str() == "test"
                 && interaction.kind == surfaces::InteractionKind::MutationAction
         }));
     }

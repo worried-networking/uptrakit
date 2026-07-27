@@ -21,6 +21,7 @@ fn notification_channel_registration(
     provider_id: &str,
     surface_id: &str,
     interaction_id: &str,
+    method: surfaces::InteractionHttpMethod,
 ) -> surfaces::SurfaceRegistration {
     surfaces::SurfaceRegistration {
         provider: surfaces::ProviderIdentity {
@@ -64,6 +65,7 @@ fn notification_channel_registration(
                     "Action",
                     surfaces::InteractionTransport::ControllerLocal,
                 );
+                i.http_method = method;
                 i.input_schema = Some(surfaces::SchemaContract::Object);
                 i.result_schema = Some(surfaces::SchemaContract::Any);
                 i.timeout_seconds = Some(30);
@@ -92,7 +94,8 @@ async fn invoke_allowlisted_notification_create_executes_controller_owned_path()
         .bootstrap_plugin(notification_channel_registration(
             "plugin.webhook",
             "notifications.webhook",
-            "create",
+            "channels",
+            surfaces::InteractionHttpMethod::Post,
         ))
         .expect("plugin registration should succeed");
 
@@ -118,10 +121,10 @@ async fn invoke_allowlisted_notification_create_executes_controller_owned_path()
             &service_connections,
             &registry,
             SurfaceInvokeRequest {
-                method: None,
+                method: Some(surfaces::InteractionHttpMethod::Post),
                 tenant_id: tenant_id(),
                 surface_id: "notifications.webhook".to_string(),
-                interaction_id: "create".to_string(),
+                interaction_id: "channels".to_string(),
                 idempotency_key: "idem-notification-create".to_string(),
                 target_provider_id: None,
                 caller_origin: SurfaceCallerOrigin::UserSession {
@@ -162,7 +165,8 @@ async fn invoke_notifications_email_configure_smtp_executes_controller_local_pat
         .bootstrap_plugin(notification_channel_registration(
             "plugin.notifications_email",
             "notifications.email",
-            "configure_smtp",
+            "smtp",
+            surfaces::InteractionHttpMethod::Put,
         ))
         .expect("plugin registration should succeed");
 
@@ -183,10 +187,10 @@ async fn invoke_notifications_email_configure_smtp_executes_controller_local_pat
             &service_connections,
             &registry,
             SurfaceInvokeRequest {
-                method: None,
+                method: Some(surfaces::InteractionHttpMethod::Put),
                 tenant_id: tenant_id(),
                 surface_id: "notifications.email".to_string(),
-                interaction_id: "configure_smtp".to_string(),
+                interaction_id: "smtp".to_string(),
                 idempotency_key: "idem-email-configure-smtp".to_string(),
                 target_provider_id: None,
                 caller_origin: SurfaceCallerOrigin::UserSession {
@@ -208,6 +212,116 @@ async fn invoke_notifications_email_configure_smtp_executes_controller_local_pat
     assert_eq!(result["host"], "smtp.tenant.example");
     assert_eq!(result["port"], 2525);
     assert_eq!(result["from_address"], "alerts@example.com");
+}
+
+/// Companion to the PUT test: invoking the SAME `smtp` id with GET must route
+/// to the DataLoad read handler (not the write/configure path). Together with
+/// `invoke_notifications_email_configure_smtp_executes_controller_local_path`
+/// (PUT), this proves the catalog dispatch key is `(surface, id, method)`-aware
+/// — a method-blind key could not register both `smtp` GET and `smtp` PUT.
+#[cfg(feature = "notifications-email")]
+#[tokio::test]
+async fn invoke_notifications_email_smtp_get_routes_read() {
+    ensure_master_key();
+    let db = setup_notification_db().await;
+    let plugin_ops: Arc<dyn PluginOps> = Arc::new(
+        uptrakit_plugin_infrastructure_registry::build_catalog(
+            &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
+        )
+        .expect("catalog should build"),
+    );
+
+    // A DataLoad `smtp` interaction (effective GET) on the same surface as the
+    // PUT write — resolvable so the proxy routes to the generic plugin path.
+    let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+    let read_registration = surfaces::SurfaceRegistration {
+        provider: surfaces::ProviderIdentity {
+            provider_id: "plugin.notifications_email".to_string(),
+            provider_kind: surfaces::ProviderKind::Plugin,
+            provider_namespace: "plugin".to_string(),
+        },
+        framework_generation: surfaces::FrameworkGeneration::new(1, 0),
+        capabilities: surfaces::CapabilitySet::from_capabilities([
+            surfaces::Capability::TextBlockNode,
+            surfaces::Capability::UniversalTargeting,
+            surfaces::Capability::DataLoad,
+        ]),
+        effective_tenant_binding: surfaces::EffectiveTenantBinding {
+            scope: surfaces::Scope::Global,
+            tenant_id: None,
+        },
+        surfaces: vec![surfaces::RegisteredSurface {
+            descriptor: surfaces::SurfaceDescriptor::builder()
+                .surface_id(surfaces::SurfaceId::new("notifications.email").unwrap())
+                .label("Email")
+                .priority(100)
+                .slot(surfaces::SLOT_SETTINGS_TABS)
+                .scope(surfaces::Scope::Global)
+                .targeting(surfaces::Targeting::Universal)
+                .provider_kind(surfaces::ProviderKind::Plugin)
+                .required_capabilities(surfaces::CapabilitySet::from_capabilities([
+                    surfaces::Capability::TextBlockNode,
+                    surfaces::Capability::DataLoad,
+                    surfaces::Capability::UniversalTargeting,
+                ]))
+                .root_node(surfaces::SurfaceNode::TextBlock {
+                    text: "ok".to_string(),
+                })
+                .build(),
+            interactions: vec![{
+                let mut i = surfaces::InteractionDescriptor::new(
+                    surfaces::InteractionId::new("smtp").unwrap(),
+                    surfaces::InteractionKind::DataLoad,
+                    "Get SMTP Settings",
+                    surfaces::InteractionTransport::ControllerLocal,
+                );
+                i.result_schema = Some(surfaces::SchemaContract::Any);
+                i
+            }],
+            data_sources: vec![],
+        }],
+        encryption_metadata: None,
+    };
+    registry
+        .bootstrap_plugin(read_registration)
+        .expect("plugin registration should succeed");
+
+    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new(
+        Arc::new(db),
+        Arc::clone(&plugin_ops),
+    )));
+    let service_connections = ServiceConnectionRegistry::new();
+
+    let response = proxy
+        .invoke(
+            &service_connections,
+            &registry,
+            SurfaceInvokeRequest {
+                method: Some(surfaces::InteractionHttpMethod::Get),
+                tenant_id: tenant_id(),
+                surface_id: "notifications.email".to_string(),
+                interaction_id: "smtp".to_string(),
+                idempotency_key: "idem-email-smtp-get".to_string(),
+                target_provider_id: None,
+                caller_origin: SurfaceCallerOrigin::UserSession {
+                    user_id: user_id(),
+                    session_id: "session-1".to_string(),
+                },
+                params: Map::new(),
+                encrypted_sensitive_params: None,
+            },
+            Some(Duration::from_secs(5)),
+        )
+        .await
+        .expect("GET smtp dispatches the read handler");
+
+    assert!(response.success);
+    let result = response.result.expect("smtp read should return a payload");
+    assert!(
+        result.is_object(),
+        "the read handler returns the current SMTP config object, got: {result}"
+    );
 }
 
 #[test]
@@ -309,13 +423,21 @@ async fn invoke_allowlisted_notification_row_actions_use_controller_owned_path()
         Arc::clone(&plugin_ops),
     )));
 
-    for interaction_id in ["edit", "test", "delete"] {
+    // Post-rename: edit/delete collapse onto the `channels` noun (method
+    // disambiguates); `test` keeps its own id. Each pair must resolve to the
+    // controller-owned "Channel not found" path against a missing channel.
+    for (interaction_id, method) in [
+        ("channels", surfaces::InteractionHttpMethod::Put),
+        ("test", surfaces::InteractionHttpMethod::Post),
+        ("channels", surfaces::InteractionHttpMethod::Delete),
+    ] {
         let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
         registry
             .bootstrap_plugin(notification_channel_registration(
                 "plugin.webhook",
                 "notifications.webhook",
                 interaction_id,
+                method.clone(),
             ))
             .expect("plugin registration should succeed");
 
@@ -325,16 +447,17 @@ async fn invoke_allowlisted_notification_row_actions_use_controller_owned_path()
         params.insert("url".to_string(), json!("https://example.invalid/updated"));
         params.insert("enabled".to_string(), json!(true));
 
+        let method_label = method.as_str().to_string();
         let err = proxy
             .invoke(
                 &service_connections,
                 &registry,
                 SurfaceInvokeRequest {
-                    method: None,
+                    method: Some(method),
                     tenant_id: tenant_id(),
                     surface_id: "notifications.webhook".to_string(),
                     interaction_id: interaction_id.to_string(),
-                    idempotency_key: format!("idem-notification-{interaction_id}"),
+                    idempotency_key: format!("idem-notification-{interaction_id}-{method_label}"),
                     target_provider_id: None,
                     caller_origin: SurfaceCallerOrigin::UserSession {
                         user_id: user_id(),
@@ -349,11 +472,11 @@ async fn invoke_allowlisted_notification_row_actions_use_controller_owned_path()
             .expect_err("row action on missing channel should fail");
 
         let SurfaceProxyError::SchemaValidationFailed(message) = err else {
-            panic!("unexpected error type for {interaction_id}: {err:?}");
+            panic!("unexpected error type for {interaction_id} {method_label}: {err:?}");
         };
         assert!(
             message.contains("Channel not found"),
-            "expected controller-owned not-found for {interaction_id}, got: {message}"
+            "expected controller-owned not-found for {interaction_id} {method_label}, got: {message}"
         );
     }
 }
@@ -375,7 +498,8 @@ async fn invoke_allowlisted_notification_create_emits_audit_row() {
         .bootstrap_plugin(notification_channel_registration(
             "plugin.webhook",
             "notifications.webhook",
-            "create",
+            "channels",
+            surfaces::InteractionHttpMethod::Post,
         ))
         .expect("plugin registration should succeed");
 
@@ -399,10 +523,10 @@ async fn invoke_allowlisted_notification_create_emits_audit_row() {
             &service_connections,
             &registry,
             SurfaceInvokeRequest {
-                method: None,
+                method: Some(surfaces::InteractionHttpMethod::Post),
                 tenant_id: tenant_id(),
                 surface_id: "notifications.webhook".to_string(),
-                interaction_id: "create".to_string(),
+                interaction_id: "channels".to_string(),
                 idempotency_key: "idem-notification-create-audit".to_string(),
                 target_provider_id: None,
                 caller_origin: SurfaceCallerOrigin::UserSession {
@@ -487,5 +611,137 @@ fn build_notification_channel_requests_pass_config_through() {
             .expect("valid JsonObjectInput")
         ),
         "config JSON object must be passed through unchanged for update"
+    );
+}
+
+/// CRUD-family invocation guard (spec Task 2 Step 6): a PUT on the collapsed
+/// `channels` id must route to the edit path and update the row, and the
+/// emitted audit event must carry the FROZEN resolved-op source
+/// `surface_proxy.notification_channel.edit`. If the catalog dispatch key were
+/// method-blind, the GET read and this PUT write could not both register; if
+/// the method were not threaded into the audit emitter, the edit event would
+/// silently drop.
+#[cfg(feature = "notifications-email")]
+#[tokio::test]
+async fn invoke_notifications_email_channels_put_routes_edit() {
+    ensure_master_key();
+    let db = setup_notification_db().await;
+    let plugin_ops: Arc<dyn PluginOps> = Arc::new(
+        uptrakit_plugin_infrastructure_registry::build_catalog(
+            &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
+        )
+        .expect("catalog should build"),
+    );
+
+    let service_connections = ServiceConnectionRegistry::new();
+    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
+        PluginSurfaceLocalExecutor::new(Arc::new(db.clone()), Arc::clone(&plugin_ops))
+            .with_audit_emitter(super::test_audit_emitter(db.clone())),
+    ));
+
+    // 1. Create an email channel (POST channels) to obtain a real id.
+    let create_registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+    create_registry
+        .bootstrap_plugin(notification_channel_registration(
+            "plugin.notifications_email",
+            "notifications.email",
+            "channels",
+            surfaces::InteractionHttpMethod::Post,
+        ))
+        .expect("plugin registration should succeed");
+    let mut create_params = Map::new();
+    create_params.insert("name".to_string(), json!("original"));
+    create_params.insert("channel_type".to_string(), json!("email"));
+    create_params.insert(
+        "config".to_string(),
+        json!({ "to_addresses": "alerts@example.com" }),
+    );
+    create_params.insert("enabled".to_string(), json!(true));
+    let create_response = proxy
+        .invoke(
+            &service_connections,
+            &create_registry,
+            SurfaceInvokeRequest {
+                method: Some(surfaces::InteractionHttpMethod::Post),
+                tenant_id: tenant_id(),
+                surface_id: "notifications.email".to_string(),
+                interaction_id: "channels".to_string(),
+                idempotency_key: "idem-email-create-for-edit".to_string(),
+                target_provider_id: None,
+                caller_origin: SurfaceCallerOrigin::UserSession {
+                    user_id: user_id(),
+                    session_id: "session-1".to_string(),
+                },
+                params: create_params,
+                encrypted_sensitive_params: None,
+            },
+            Some(Duration::from_secs(5)),
+        )
+        .await
+        .expect("create should succeed");
+    let channel_id = create_response.result.expect("create payload")["id"]
+        .as_str()
+        .expect("created channel id")
+        .to_string();
+
+    // 2. Edit via PUT channels — the (id, method) dispatch must select the edit path.
+    let edit_registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+    edit_registry
+        .bootstrap_plugin(notification_channel_registration(
+            "plugin.notifications_email",
+            "notifications.email",
+            "channels",
+            surfaces::InteractionHttpMethod::Put,
+        ))
+        .expect("plugin registration should succeed");
+    let mut edit_params = Map::new();
+    edit_params.insert("id".to_string(), json!(channel_id));
+    edit_params.insert("name".to_string(), json!("renamed"));
+    edit_params.insert(
+        "config".to_string(),
+        json!({ "to_addresses": "alerts@example.com" }),
+    );
+    let edit_response = proxy
+        .invoke(
+            &service_connections,
+            &edit_registry,
+            SurfaceInvokeRequest {
+                method: Some(surfaces::InteractionHttpMethod::Put),
+                tenant_id: tenant_id(),
+                surface_id: "notifications.email".to_string(),
+                interaction_id: "channels".to_string(),
+                idempotency_key: "idem-channels-put".to_string(),
+                target_provider_id: None,
+                caller_origin: SurfaceCallerOrigin::UserSession {
+                    user_id: user_id(),
+                    session_id: "session-1".to_string(),
+                },
+                params: edit_params,
+                encrypted_sensitive_params: None,
+            },
+            Some(Duration::from_secs(5)),
+        )
+        .await
+        .expect("PUT channels dispatches the edit path");
+
+    assert!(edit_response.success);
+    let updated = edit_response.result.expect("edit payload");
+    assert_eq!(
+        updated["name"], "renamed",
+        "PUT channels must update the row"
+    );
+
+    // 3. The edit audit event uses the FROZEN resolved-op source.
+    let row = super::latest_tenant_audit_row_for_action(
+        &db,
+        uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_UPDATE,
+    )
+    .await;
+    let details = row.details_json.expect("audit details");
+    assert_eq!(
+        details["create_source"],
+        json!("surface_proxy.notification_channel.edit"),
+        "resolved-op audit source must stay byte-identical to the pre-rename value"
     );
 }

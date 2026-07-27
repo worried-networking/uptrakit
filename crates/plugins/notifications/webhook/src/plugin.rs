@@ -197,7 +197,7 @@ fn create_webhook_transport(
 
 fn webhook_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
     let data_source_id =
-        surfaces::DataSourceId::new("data.primary").expect("literal data source id is valid");
+        surfaces::DataSourceId::new("channels").expect("literal data source id is valid");
     let webhook_surface = PluginSurface {
         descriptor: surfaces::SurfaceDescriptor::builder()
             .surface_id(
@@ -228,10 +228,11 @@ fn webhook_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                 None::<String>,
                 vec![
                     surfaces::SurfaceNode::ActionBar {
-                        action_ids: vec![surfaces::ActionRef::from(
-                            surfaces::InteractionId::new("create")
+                        action_ids: vec![surfaces::ActionRef::WithMethod {
+                            interaction_id: surfaces::InteractionId::new("channels")
                                 .expect("literal interaction id is valid"),
-                        )],
+                            http_method: Some(surfaces::InteractionHttpMethod::Post),
+                        }],
                     },
                     surfaces::SurfaceNode::Table {
                         data_source_id: data_source_id.clone(),
@@ -243,9 +244,9 @@ fn webhook_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                         ],
                         row_actions: vec![
                             surfaces::SurfaceTableRowAction {
-                                interaction_id: surfaces::InteractionId::new("edit")
+                                interaction_id: surfaces::InteractionId::new("channels")
                                     .expect("literal interaction id is valid"),
-                                http_method: None,
+                                http_method: Some(surfaces::InteractionHttpMethod::Put),
                                 visible_when: None,
                             },
                             surfaces::SurfaceTableRowAction {
@@ -255,9 +256,9 @@ fn webhook_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                                 visible_when: None,
                             },
                             surfaces::SurfaceTableRowAction {
-                                interaction_id: surfaces::InteractionId::new("delete")
+                                interaction_id: surfaces::InteractionId::new("channels")
                                     .expect("literal interaction id is valid"),
-                                http_method: None,
+                                http_method: Some(surfaces::InteractionHttpMethod::Delete),
                                 visible_when: None,
                             },
                         ],
@@ -269,7 +270,7 @@ fn webhook_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
             RegisteredInteraction::new(
                 {
                     let mut i = surfaces::InteractionDescriptor::new(
-                        surfaces::InteractionId::new("list")
+                        surfaces::InteractionId::new("channels")
                             .expect("literal interaction id is valid"),
                         surfaces::InteractionKind::DataLoad,
                         "List",
@@ -283,7 +284,7 @@ fn webhook_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
             RegisteredInteraction::new(
                 {
                     let mut i = surfaces::InteractionDescriptor::new(
-                        surfaces::InteractionId::new("create")
+                        surfaces::InteractionId::new("channels")
                             .expect("literal interaction id is valid"),
                         surfaces::InteractionKind::FormSubmit,
                         "Add Webhook",
@@ -363,12 +364,13 @@ fn webhook_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
             RegisteredInteraction::new(
                 {
                     let mut i = surfaces::InteractionDescriptor::new(
-                        surfaces::InteractionId::new("edit")
+                        surfaces::InteractionId::new("channels")
                             .expect("literal interaction id is valid"),
                         surfaces::InteractionKind::FormSubmit,
                         "Edit",
                         surfaces::InteractionTransport::ControllerLocal,
                     );
+                    i.http_method = surfaces::InteractionHttpMethod::Put;
                     i.required_permission = Some("manage_notifications".to_string());
                     i.input_schema = Some(surfaces::SchemaContract::Object);
                     i.result_schema = Some(surfaces::SchemaContract::Any);
@@ -473,12 +475,13 @@ fn webhook_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
             RegisteredInteraction::new(
                 {
                     let mut i = surfaces::InteractionDescriptor::new(
-                        surfaces::InteractionId::new("delete")
+                        surfaces::InteractionId::new("channels")
                             .expect("literal interaction id is valid"),
                         surfaces::InteractionKind::ConfirmableAction,
                         "Delete",
                         surfaces::InteractionTransport::ControllerLocal,
                     );
+                    i.http_method = surfaces::InteractionHttpMethod::Delete;
                     i.required_permission = Some("manage_notifications".to_string());
                     i.input_schema = Some(surfaces::SchemaContract::Object);
                     i.result_schema = Some(surfaces::SchemaContract::Any);
@@ -497,7 +500,7 @@ fn webhook_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
         data_sources: vec![surfaces::DataSourceDescriptor {
             data_source_id,
             kind: surfaces::DataSourceKind::ProviderQuery {
-                operation_id: "list".to_string(),
+                operation_id: "channels".to_string(),
             },
             result_schema: surfaces::SchemaContract::Array,
             pagination: Some(surfaces::DataSourcePagination {
@@ -607,7 +610,7 @@ mod tests {
     fn unified_registrations_pair_every_interaction_with_expected_delivery() {
         use uptrakit_plugin_infrastructure_core::InteractionDeliveryKind;
         let registrations = webhook_plugin_surfaces();
-        let mut seen: Vec<(String, String, InteractionDeliveryKind)> = Vec::new();
+        let mut seen: Vec<(String, String, String, InteractionDeliveryKind)> = Vec::new();
         for registration in &registrations {
             for surface in &registration.surfaces {
                 for interaction in &surface.interactions {
@@ -618,6 +621,11 @@ mod tests {
                     seen.push((
                         surface.descriptor.surface_id.as_str().to_string(),
                         interaction.descriptor().interaction_id.as_str().to_string(),
+                        interaction
+                            .descriptor()
+                            .effective_http_method()
+                            .as_str()
+                            .to_string(),
                         interaction.delivery().kind(),
                     ));
                 }
@@ -626,38 +634,43 @@ mod tests {
         // Expected (surface, interaction, delivery) table (spec D6); the table's
         // own length is the count source of truth below — no bare literal count
         // is asserted separately.
-        let expected: Vec<(&str, &str, InteractionDeliveryKind)> = vec![
+        let expected: Vec<(&str, &str, &str, InteractionDeliveryKind)> = vec![
             (
                 "notifications.webhook",
-                "list",
+                "channels",
+                "get",
                 InteractionDeliveryKind::PluginHandled,
             ),
             (
                 "notifications.webhook",
-                "create",
+                "channels",
+                "post",
                 InteractionDeliveryKind::ControllerExecutor,
             ),
             (
                 "notifications.webhook",
-                "edit",
+                "channels",
+                "put",
                 InteractionDeliveryKind::ControllerExecutor,
             ),
             (
                 "notifications.webhook",
                 "test",
+                "post",
                 InteractionDeliveryKind::ControllerExecutor,
             ),
             (
                 "notifications.webhook",
+                "channels",
                 "delete",
                 InteractionDeliveryKind::ControllerExecutor,
             ),
         ];
-        for (surface, id, kind) in &expected {
+        for (surface, id, method, kind) in &expected {
             assert!(
                 seen.iter()
-                    .any(|(s, i, k)| s == surface && i == id && k == kind),
-                "missing ({surface}, {id}, {kind:?})"
+                    .any(|(s, i, m, k)| s == surface && i == id && m == method && k == kind),
+                "missing ({surface}, {id}, {method}, {kind:?})"
             );
         }
         assert_eq!(
@@ -713,45 +726,52 @@ mod tests {
         assert_eq!(webhook_surface.data_sources.len(), 1);
         assert!(matches!(
             &webhook_surface.data_sources[0].kind,
-            surfaces::DataSourceKind::ProviderQuery { operation_id } if operation_id == "list"
+            surfaces::DataSourceKind::ProviderQuery { operation_id } if operation_id == "channels"
         ));
 
-        let find_interaction = |id: &str| {
+        let find_interaction = |id: &str, method: surfaces::InteractionHttpMethod| {
             webhook_surface
                 .interactions
                 .iter()
-                .find(|interaction| interaction.interaction_id.as_str() == id)
-                .unwrap_or_else(|| panic!("interaction `{id}` should exist"))
+                .find(|interaction| {
+                    interaction.interaction_id.as_str() == id
+                        && interaction.effective_http_method() == method
+                })
+                .unwrap_or_else(|| panic!("interaction `{id}` ({method}) should exist"))
         };
         assert_eq!(
-            find_interaction("list").kind,
+            find_interaction("channels", surfaces::InteractionHttpMethod::Get).kind,
             surfaces::InteractionKind::DataLoad
         );
         assert_eq!(
-            find_interaction("create").kind,
+            find_interaction("channels", surfaces::InteractionHttpMethod::Post).kind,
             surfaces::InteractionKind::FormSubmit
         );
         assert_eq!(
-            find_interaction("edit").kind,
+            find_interaction("channels", surfaces::InteractionHttpMethod::Put).kind,
             surfaces::InteractionKind::FormSubmit
         );
         assert_eq!(
-            find_interaction("test").kind,
+            find_interaction("test", surfaces::InteractionHttpMethod::Post).kind,
             surfaces::InteractionKind::MutationAction
         );
         assert_eq!(
-            find_interaction("delete").kind,
+            find_interaction("channels", surfaces::InteractionHttpMethod::Delete).kind,
             surfaces::InteractionKind::ConfirmableAction
         );
-        assert!(find_interaction("delete").confirmation.is_some());
         assert!(
-            find_interaction("create")
+            find_interaction("channels", surfaces::InteractionHttpMethod::Delete)
+                .confirmation
+                .is_some()
+        );
+        assert!(
+            find_interaction("channels", surfaces::InteractionHttpMethod::Post)
                 .sensitive_fields
                 .iter()
                 .any(|field| field == "secret")
         );
         assert!(
-            find_interaction("edit")
+            find_interaction("channels", surfaces::InteractionHttpMethod::Put)
                 .sensitive_fields
                 .iter()
                 .any(|field| field == "secret")

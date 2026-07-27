@@ -90,7 +90,12 @@ pub struct PluginCatalog {
         expect(dead_code, reason = "field is read only in the plugin-ops impl block")
     )]
     controller_update_hook: ControllerUpdateHookValue,
-    surface_dispatch: BTreeMap<(String, String), InteractionHandler>,
+    // Keyed on `(surface_id, interaction_id, effective_http_method_wire_string)`
+    // (ADR-0030 `(id, effective_http_method)` model). The method component is the
+    // wire string (`InteractionHttpMethod::as_str`), not the enum: the wire-safe
+    // enum derives neither `Ord` nor `Hash`, so it cannot be a `BTreeMap` key
+    // directly — the executor-table dedup guard uses the same string convention.
+    surface_dispatch: BTreeMap<(String, String, String), InteractionHandler>,
     instance_states: InstancePluginStates,
 }
 
@@ -123,7 +128,8 @@ impl PluginCatalog {
         > = None;
         #[cfg(not(feature = "plugin-ops"))]
         let controller_update_hook = ();
-        let mut surface_dispatch: BTreeMap<(String, String), InteractionHandler> = BTreeMap::new();
+        let mut surface_dispatch: BTreeMap<(String, String, String), InteractionHandler> =
+            BTreeMap::new();
         // surface_id -> owner_type_id, for exact-id duplicate detection
         let mut seen_surface_ids: BTreeMap<String, &'static str> = BTreeMap::new();
 
@@ -281,12 +287,20 @@ impl PluginCatalog {
                             {
                                 let interaction_id =
                                     interaction.descriptor().interaction_id.as_str();
-                                let key = (surface_id.clone(), interaction_id.to_string());
+                                // Method-aware key (ADR-0030): a DataLoad read and a
+                                // PUT write may share one interaction ID (e.g. `smtp`
+                                // GET+PUT) — the effective method disambiguates them.
+                                let method = interaction.descriptor().effective_http_method();
+                                let key = (
+                                    surface_id.clone(),
+                                    interaction_id.to_string(),
+                                    method.as_str().to_string(),
+                                );
                                 if surface_dispatch.contains_key(&key) {
                                     return Err(rootcause::report!(
                                         PluginError::UnsupportedOperation(format!(
-                                            "duplicate interaction '{interaction_id}' on surface \
-                                             '{surface_id}'"
+                                            "duplicate interaction '{interaction_id}' \
+                                             ({method}) on surface '{surface_id}'"
                                         ))
                                     ));
                                 }
@@ -403,12 +417,19 @@ impl PluginSurfaceActionOps for PluginCatalog {
         ctx: &SurfaceActionContext<'_>,
         surface_id: &str,
         action_id: &str,
+        method: surfaces::InteractionHttpMethod,
         params: serde_json::Value,
     ) -> std::result::Result<serde_json::Value, SurfaceActionError> {
-        let key = (surface_id.to_string(), action_id.to_string());
+        // `method` is already the effective method resolved by the registry, so it
+        // matches the registration key built via `effective_http_method()`.
+        let key = (
+            surface_id.to_string(),
+            action_id.to_string(),
+            method.as_str().to_string(),
+        );
         let handler = self.surface_dispatch.get(&key).ok_or_else(|| {
             SurfaceActionError::InvalidInput(format!(
-                "no registered interaction '{action_id}' on surface '{surface_id}'"
+                "no registered interaction '{action_id}' ({method}) on surface '{surface_id}'"
             ))
         })?;
         handler(ctx, params).await
@@ -1030,7 +1051,13 @@ mod tests {
         };
 
         let value = catalog
-            .handle_surface_action(&ctx, "demo.surface", "ping", serde_json::json!({}))
+            .handle_surface_action(
+                &ctx,
+                "demo.surface",
+                "ping",
+                surfaces::InteractionHttpMethod::Post,
+                serde_json::json!({}),
+            )
             .await
             .expect("plugin-handled interaction should resolve");
 
@@ -1055,7 +1082,13 @@ mod tests {
         };
 
         let err = catalog
-            .handle_surface_action(&ctx, "demo.surface", "missing", serde_json::json!({}))
+            .handle_surface_action(
+                &ctx,
+                "demo.surface",
+                "missing",
+                surfaces::InteractionHttpMethod::Post,
+                serde_json::json!({}),
+            )
             .await
             .expect_err("unknown interaction id must not resolve");
 
