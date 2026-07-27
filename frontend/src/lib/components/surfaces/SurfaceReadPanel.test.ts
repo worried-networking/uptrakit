@@ -200,7 +200,7 @@ describe('SurfaceReadPanel', () => {
 			},
 			interactions: [
 				{
-					interaction_id: 'get-info',
+					interaction_id: 'info',
 					kind: 'data_load',
 					http_method: 'get',
 					label: 'Get Info',
@@ -210,7 +210,7 @@ describe('SurfaceReadPanel', () => {
 			data_sources: [
 				{
 					data_source_id: 'data.remote',
-					kind: { kind: 'provider_query', operation_id: 'get-info' },
+					kind: { kind: 'provider_query', operation_id: 'info' },
 					result_schema: 'object',
 					refresh_policy: { type: 'manual' }
 				}
@@ -265,7 +265,7 @@ describe('SurfaceReadPanel', () => {
 			},
 			interactions: [
 				{
-					interaction_id: 'get-info',
+					interaction_id: 'info',
 					kind: 'data_load',
 					http_method: 'get',
 					label: 'Get Info',
@@ -275,7 +275,7 @@ describe('SurfaceReadPanel', () => {
 			data_sources: [
 				{
 					data_source_id: 'data.remote',
-					kind: { kind: 'provider_query', operation_id: 'get-info' },
+					kind: { kind: 'provider_query', operation_id: 'info' },
 					result_schema: 'object',
 					refresh_policy: { type: 'manual' }
 				}
@@ -328,7 +328,7 @@ describe('SurfaceReadPanel', () => {
 			},
 			interactions: [
 				{
-					interaction_id: 'get-info',
+					interaction_id: 'info',
 					kind: 'data_load',
 					http_method: 'get',
 					label: 'Get Info',
@@ -338,7 +338,7 @@ describe('SurfaceReadPanel', () => {
 			data_sources: [
 				{
 					data_source_id: 'data.remote',
-					kind: { kind: 'provider_query', operation_id: 'get-info' },
+					kind: { kind: 'provider_query', operation_id: 'info' },
 					result_schema: 'object',
 					refresh_policy: { type: 'manual' }
 				}
@@ -381,7 +381,7 @@ describe('SurfaceReadPanel', () => {
 			},
 			interactions: [
 				{
-					interaction_id: 'get-info',
+					interaction_id: 'info',
 					kind: 'data_load',
 					http_method: 'get',
 					label: 'Get Info',
@@ -391,7 +391,7 @@ describe('SurfaceReadPanel', () => {
 			data_sources: [
 				{
 					data_source_id: 'data.remote',
-					kind: { kind: 'provider_query', operation_id: 'get-info' },
+					kind: { kind: 'provider_query', operation_id: 'info' },
 					result_schema: 'object',
 					refresh_policy: { type: 'manual' }
 				}
@@ -408,7 +408,7 @@ describe('SurfaceReadPanel', () => {
 		await screen.findByText('region');
 		expect(screen.getByText('eu-west-1')).toBeInTheDocument();
 		expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledWith({
-			path: { surface_id: 'surface.one', interaction_id: 'get-info' },
+			path: { surface_id: 'surface.one', interaction_id: 'info' },
 			query: expect.objectContaining({ host_id: 'host-001' })
 		});
 	});
@@ -434,7 +434,7 @@ describe('SurfaceReadPanel', () => {
 			},
 			interactions: [
 				{
-					interaction_id: 'get-info',
+					interaction_id: 'info',
 					kind: 'data_load',
 					http_method: 'get',
 					label: 'Get Info',
@@ -444,7 +444,7 @@ describe('SurfaceReadPanel', () => {
 			data_sources: [
 				{
 					data_source_id: 'data.remote',
-					kind: { kind: 'provider_query', operation_id: 'get-info' },
+					kind: { kind: 'provider_query', operation_id: 'info' },
 					result_schema: 'object',
 					refresh_policy: { type: 'manual' }
 				}
@@ -492,7 +492,7 @@ describe('SurfaceReadPanel', () => {
 			},
 			interactions: [
 				{
-					interaction_id: 'get-info',
+					interaction_id: 'info',
 					kind: 'data_load',
 					http_method: 'get',
 					label: 'Get Info',
@@ -502,7 +502,7 @@ describe('SurfaceReadPanel', () => {
 			data_sources: [
 				{
 					data_source_id: 'data.remote',
-					kind: { kind: 'provider_query', operation_id: 'get-info' },
+					kind: { kind: 'provider_query', operation_id: 'info' },
 					result_schema: 'object',
 					refresh_policy: { type: 'manual' }
 				}
@@ -517,7 +517,7 @@ describe('SurfaceReadPanel', () => {
 		});
 		await screen.findByText('region');
 		expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledWith({
-			path: { surface_id: 'surface.one', interaction_id: 'get-info' },
+			path: { surface_id: 'surface.one', interaction_id: 'info' },
 			query: expect.objectContaining({ host_id: 'host-001' })
 		});
 		expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledTimes(1);
@@ -551,7 +551,7 @@ describe('SurfaceReadPanel', () => {
 			},
 			interactions: [
 				{
-					interaction_id: 'get-info',
+					interaction_id: 'info',
 					kind: 'data_load',
 					http_method: 'get',
 					label: 'Get Info',
@@ -561,7 +561,7 @@ describe('SurfaceReadPanel', () => {
 			data_sources: [
 				{
 					data_source_id: 'data.remote',
-					kind: { kind: 'provider_query', operation_id: 'get-info' },
+					kind: { kind: 'provider_query', operation_id: 'info' },
 					result_schema: 'object',
 					refresh_policy: { type: 'manual' }
 				}
@@ -604,7 +604,7 @@ describe('SurfaceReadPanel', () => {
 			},
 			interactions: [
 				{
-					interaction_id: 'get-info',
+					interaction_id: 'info',
 					kind: 'data_load',
 					http_method: 'get',
 					label: 'Get Info',
@@ -614,7 +614,7 @@ describe('SurfaceReadPanel', () => {
 			data_sources: [
 				{
 					data_source_id: 'data.remote',
-					kind: { kind: 'provider_query', operation_id: 'get-info' },
+					kind: { kind: 'provider_query', operation_id: 'info' },
 					result_schema: 'object',
 					refresh_policy: { type: 'manual' }
 				}
@@ -664,7 +664,7 @@ describe('SurfaceReadPanel', () => {
 			},
 			interactions: [
 				{
-					interaction_id: 'get-info',
+					interaction_id: 'info',
 					kind: 'data_load',
 					http_method: 'get',
 					label: 'Get Info',
@@ -674,7 +674,7 @@ describe('SurfaceReadPanel', () => {
 			data_sources: [
 				{
 					data_source_id: 'data.remote',
-					kind: { kind: 'provider_query', operation_id: 'get-info' },
+					kind: { kind: 'provider_query', operation_id: 'info' },
 					result_schema: 'object',
 					refresh_policy: { type: 'manual' }
 				}
@@ -745,7 +745,7 @@ describe('SurfaceReadPanel', () => {
 			},
 			interactions: [
 				{
-					interaction_id: 'get-info',
+					interaction_id: 'info',
 					kind: 'data_load',
 					http_method: 'get',
 					label: 'Get Info',
@@ -755,7 +755,7 @@ describe('SurfaceReadPanel', () => {
 			data_sources: [
 				{
 					data_source_id: 'data.remote',
-					kind: { kind: 'provider_query', operation_id: 'get-info' },
+					kind: { kind: 'provider_query', operation_id: 'info' },
 					result_schema: 'object',
 					refresh_policy: { type: 'manual' }
 				}
@@ -816,7 +816,7 @@ describe('SurfaceReadPanel', () => {
 			},
 			interactions: [
 				{
-					interaction_id: 'get-info',
+					interaction_id: 'info',
 					kind: 'data_load',
 					http_method: 'get',
 					label: 'Get Info',
@@ -826,7 +826,7 @@ describe('SurfaceReadPanel', () => {
 			data_sources: [
 				{
 					data_source_id: 'data.remote',
-					kind: { kind: 'provider_query', operation_id: 'get-info' },
+					kind: { kind: 'provider_query', operation_id: 'info' },
 					result_schema: 'object',
 					refresh_policy: { type: 'manual' }
 				}
@@ -878,7 +878,7 @@ describe('SurfaceReadPanel', () => {
 			},
 			interactions: [
 				{
-					interaction_id: 'get-info',
+					interaction_id: 'info',
 					kind: 'data_load',
 					http_method: 'get',
 					label: 'Get Info',
@@ -888,7 +888,7 @@ describe('SurfaceReadPanel', () => {
 			data_sources: [
 				{
 					data_source_id: 'data.remote',
-					kind: { kind: 'provider_query', operation_id: 'get-info' },
+					kind: { kind: 'provider_query', operation_id: 'info' },
 					result_schema: 'object',
 					refresh_policy: { type: 'manual' }
 				}
@@ -922,7 +922,7 @@ describe('SurfaceReadPanel', () => {
 			},
 			interactions: [
 				{
-					interaction_id: 'get-info',
+					interaction_id: 'info',
 					kind: 'data_load',
 					http_method: 'get',
 					label: 'Get Info',
@@ -932,7 +932,7 @@ describe('SurfaceReadPanel', () => {
 			data_sources: [
 				{
 					data_source_id: 'data.remote',
-					kind: { kind: 'provider_query', operation_id: 'get-info' },
+					kind: { kind: 'provider_query', operation_id: 'info' },
 					result_schema: 'object',
 					refresh_policy: { type: 'manual' }
 				}

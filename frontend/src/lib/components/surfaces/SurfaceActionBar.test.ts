@@ -31,7 +31,7 @@ describe('SurfaceActionBar', () => {
 
 	it('dispatches a reload event after a form action completes', async () => {
 		const interaction: InteractionDescriptor = {
-			interaction_id: 'create',
+			interaction_id: 'channels',
 			kind: 'form_submit',
 			label: 'Create Channel',
 			transport: { mode: 'controller_local' },
@@ -52,7 +52,7 @@ describe('SurfaceActionBar', () => {
 
 		render(SurfaceActionBar, {
 			surfaceId: 'notifications.email',
-			actionIds: ['create'],
+			actionIds: ['channels'],
 			interactions: [interaction]
 		});
 
@@ -82,16 +82,16 @@ describe('SurfaceActionBar', () => {
 
 	it('renders action buttons in the shared right-aligned action-row layout', () => {
 		const interaction: InteractionDescriptor = {
-			interaction_id: 'delete',
+			interaction_id: 'channels',
 			kind: 'mutation_action',
 			label: 'Delete',
 			transport: { mode: 'controller_local' },
-			http_method: 'post'
+			http_method: 'delete'
 		};
 
 		const { container } = render(SurfaceActionBar, {
 			surfaceId: 'notifications.email',
-			actionIds: ['delete'],
+			actionIds: ['channels'],
 			interactions: [interaction]
 		});
 

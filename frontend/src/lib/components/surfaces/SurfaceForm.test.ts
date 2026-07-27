@@ -61,11 +61,11 @@ describe('SurfaceForm', () => {
 						required: true
 					}
 				],
-				pre_load_interaction_id: 'get-current-tag'
+				pre_load_interaction_id: 'current-tag'
 			}
 		};
 		const preLoadInteraction: InteractionDescriptor = {
-			interaction_id: 'get-current-tag',
+			interaction_id: 'current-tag',
 			kind: 'data_load',
 			http_method: 'get',
 			label: 'Get Current Tag',
@@ -96,7 +96,7 @@ describe('SurfaceForm', () => {
 
 		await waitFor(() => {
 			expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledWith({
-				path: { surface_id: 'docker.item-host-actions', interaction_id: 'get-current-tag' },
+				path: { surface_id: 'docker.item-host-actions', interaction_id: 'current-tag' },
 				query: {
 					target_provider_id: undefined,
 					timeout_seconds: undefined,

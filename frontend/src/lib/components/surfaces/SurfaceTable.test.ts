@@ -6,6 +6,7 @@ import type { DataSourceDescriptor, InteractionDescriptor, SurfaceNode } from '$
 vi.mock('$lib/api', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/api')>()),
 	invokeSurfaceInteraction: vi.fn(),
+	deleteSurfaceInteractionItem: vi.fn(),
 	readSurfaceInteraction: vi.fn(),
 	sealedBoxEncrypt: vi.fn()
 }));
@@ -15,7 +16,12 @@ vi.mock('$lib/notifications.svelte', () => ({
 	showSuccess: vi.fn()
 }));
 
-import { invokeSurfaceInteraction, readSurfaceInteraction, sealedBoxEncrypt } from '$lib/api';
+import {
+	deleteSurfaceInteractionItem,
+	invokeSurfaceInteraction,
+	readSurfaceInteraction,
+	sealedBoxEncrypt
+} from '$lib/api';
 
 function deferred<T>() {
 	let resolve!: (value: T | PromiseLike<T>) => void;
@@ -52,6 +58,9 @@ describe('SurfaceTable', () => {
 		vi.mocked(invokeSurfaceInteraction).mockResolvedValueOnce({ data: {} } as unknown as Awaited<
 			ReturnType<typeof invokeSurfaceInteraction>
 		>);
+		vi.mocked(deleteSurfaceInteractionItem).mockResolvedValueOnce({ data: {} } as unknown as Awaited<
+			ReturnType<typeof deleteSurfaceInteractionItem>
+		>);
 	});
 
 	afterEach(() => {
@@ -62,13 +71,13 @@ describe('SurfaceTable', () => {
 	it('hydrates provider-query rows and invokes row actions with merged row params', async () => {
 		const node: Extract<SurfaceNode, { kind: 'table' }> = {
 			kind: 'table',
-			data_source_id: 'data.primary',
+			data_source_id: 'channels',
 			columns: [{ key: 'name', label: 'Name' }],
-			row_actions: [{ interaction_id: 'delete' }]
+			row_actions: [{ interaction_id: 'channels', http_method: 'delete' }]
 		};
 		const dataSource: DataSourceDescriptor = {
-			data_source_id: 'data.primary',
-			kind: { kind: 'provider_query', operation_id: 'list' },
+			data_source_id: 'channels',
+			kind: { kind: 'provider_query', operation_id: 'channels' },
 			result_schema: 'array',
 			pagination: {
 				default_page_size: 20,
@@ -78,18 +87,18 @@ describe('SurfaceTable', () => {
 		};
 		const interactions: InteractionDescriptor[] = [
 			{
-				interaction_id: 'list',
+				interaction_id: 'channels',
 				kind: 'data_load',
 				label: 'List',
 				transport: { mode: 'controller_local' },
 				http_method: 'get'
 			},
 			{
-				interaction_id: 'delete',
+				interaction_id: 'channels',
 				kind: 'mutation_action',
 				label: 'Delete',
 				transport: { mode: 'controller_local' },
-				http_method: 'post'
+				http_method: 'delete'
 			}
 		];
 
@@ -105,7 +114,7 @@ describe('SurfaceTable', () => {
 		expect(await screen.findByText('Alpha')).toBeInTheDocument();
 		expect(container.querySelector('[data-ui="data-table"]')).toBeInTheDocument();
 		expect(vi.mocked(readSurfaceInteraction)).toHaveBeenNthCalledWith(1, {
-			path: { surface_id: 'notifications.email', interaction_id: 'list' },
+			path: { surface_id: 'notifications.email', interaction_id: 'channels' },
 			query: {
 				target_provider_id: undefined,
 				timeout_seconds: undefined,
@@ -118,8 +127,8 @@ describe('SurfaceTable', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
 
 		await waitFor(() => {
-			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenNthCalledWith(1, {
-				path: { surface_id: 'notifications.email', interaction_id: 'delete' },
+			expect(vi.mocked(deleteSurfaceInteractionItem)).toHaveBeenNthCalledWith(1, {
+				path: { surface_id: 'notifications.email', interaction_id: 'channels', item_id: 'chan-1' },
 				body: {
 					params: {
 						channel_type: 'email',
@@ -136,12 +145,12 @@ describe('SurfaceTable', () => {
 	it('uses shared empty-state copy from the data source when no rows are available', async () => {
 		const node: Extract<SurfaceNode, { kind: 'table' }> = {
 			kind: 'table',
-			data_source_id: 'data.primary',
+			data_source_id: 'channels',
 			columns: [{ key: 'name', label: 'Name' }],
 			row_actions: []
 		};
 		const dataSource: DataSourceDescriptor = {
-			data_source_id: 'data.primary',
+			data_source_id: 'channels',
 			kind: { kind: 'static', data: [] },
 			result_schema: 'array',
 			refresh_policy: { type: 'manual' },
@@ -167,12 +176,12 @@ describe('SurfaceTable', () => {
 	it('omits row-action treatment when configured actions are not resolvable from interactions', () => {
 		const node: Extract<SurfaceNode, { kind: 'table' }> = {
 			kind: 'table',
-			data_source_id: 'data.primary',
+			data_source_id: 'channels',
 			columns: [{ key: 'name', label: 'Name' }],
 			row_actions: [{ interaction_id: 'missing-action' }]
 		};
 		const dataSource: DataSourceDescriptor = {
-			data_source_id: 'data.primary',
+			data_source_id: 'channels',
 			kind: { kind: 'static', data: [{ id: 'chan-1', name: 'Alpha' }] },
 			result_schema: 'array',
 			refresh_policy: { type: 'manual' }
@@ -192,12 +201,12 @@ describe('SurfaceTable', () => {
 	it('omits the shared table footer for static table data', () => {
 		const node: Extract<SurfaceNode, { kind: 'table' }> = {
 			kind: 'table',
-			data_source_id: 'data.primary',
+			data_source_id: 'channels',
 			columns: [{ key: 'name', label: 'Name' }],
 			row_actions: []
 		};
 		const dataSource: DataSourceDescriptor = {
-			data_source_id: 'data.primary',
+			data_source_id: 'channels',
 			kind: { kind: 'static', data: [{ id: 'chan-1', name: 'Alpha' }] },
 			result_schema: 'array',
 			refresh_policy: { type: 'manual' }
@@ -237,13 +246,13 @@ describe('SurfaceTable', () => {
 
 		const node: Extract<SurfaceNode, { kind: 'table' }> = {
 			kind: 'table',
-			data_source_id: 'data.primary',
+			data_source_id: 'channels',
 			columns: [{ key: 'name', label: 'Name' }],
 			row_actions: []
 		};
 		const dataSource: DataSourceDescriptor = {
-			data_source_id: 'data.primary',
-			kind: { kind: 'provider_query', operation_id: 'list' },
+			data_source_id: 'channels',
+			kind: { kind: 'provider_query', operation_id: 'channels' },
 			result_schema: 'array',
 			pagination: {
 				default_page_size: 20,
@@ -253,7 +262,7 @@ describe('SurfaceTable', () => {
 		};
 		const interactions: InteractionDescriptor[] = [
 			{
-				interaction_id: 'list',
+				interaction_id: 'channels',
 				kind: 'data_load',
 				label: 'List',
 				transport: { mode: 'controller_local' },
@@ -275,7 +284,7 @@ describe('SurfaceTable', () => {
 		expect(await screen.findByText('Beta')).toBeInTheDocument();
 		expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledTimes(2);
 		expect(vi.mocked(readSurfaceInteraction)).toHaveBeenNthCalledWith(2, {
-			path: { surface_id: 'notifications.email', interaction_id: 'list' },
+			path: { surface_id: 'notifications.email', interaction_id: 'channels' },
 			query: {
 				target_provider_id: undefined,
 				timeout_seconds: undefined,
@@ -309,13 +318,13 @@ describe('SurfaceTable', () => {
 
 		const node: Extract<SurfaceNode, { kind: 'table' }> = {
 			kind: 'table',
-			data_source_id: 'data.primary',
+			data_source_id: 'channels',
 			columns: [{ key: 'name', label: 'Name' }],
 			row_actions: []
 		};
 		const dataSource: DataSourceDescriptor = {
-			data_source_id: 'data.primary',
-			kind: { kind: 'provider_query', operation_id: 'list' },
+			data_source_id: 'channels',
+			kind: { kind: 'provider_query', operation_id: 'channels' },
 			result_schema: 'array',
 			pagination: {
 				default_page_size: 20,
@@ -325,7 +334,7 @@ describe('SurfaceTable', () => {
 		};
 		const interactions: InteractionDescriptor[] = [
 			{
-				interaction_id: 'list',
+				interaction_id: 'channels',
 				kind: 'data_load',
 				label: 'List',
 				transport: { mode: 'controller_local' },
@@ -374,13 +383,13 @@ describe('SurfaceTable', () => {
 
 		const node: Extract<SurfaceNode, { kind: 'table' }> = {
 			kind: 'table',
-			data_source_id: 'data.primary',
+			data_source_id: 'channels',
 			columns: [{ key: 'name', label: 'Name' }],
 			row_actions: []
 		};
 		const dataSource: DataSourceDescriptor = {
-			data_source_id: 'data.primary',
-			kind: { kind: 'provider_query', operation_id: 'list' },
+			data_source_id: 'channels',
+			kind: { kind: 'provider_query', operation_id: 'channels' },
 			result_schema: 'array',
 			pagination: {
 				default_page_size: 20,
@@ -390,7 +399,7 @@ describe('SurfaceTable', () => {
 		};
 		const interactions: InteractionDescriptor[] = [
 			{
-				interaction_id: 'list',
+				interaction_id: 'channels',
 				kind: 'data_load',
 				label: 'List',
 				transport: { mode: 'controller_local' },
@@ -462,13 +471,13 @@ describe('SurfaceTable', () => {
 
 		const node: Extract<SurfaceNode, { kind: 'table' }> = {
 			kind: 'table',
-			data_source_id: 'data.primary',
+			data_source_id: 'channels',
 			columns: [{ key: 'name', label: 'Name' }],
 			row_actions: []
 		};
 		const providerQueryDataSource: DataSourceDescriptor = {
-			data_source_id: 'data.primary',
-			kind: { kind: 'provider_query', operation_id: 'list' },
+			data_source_id: 'channels',
+			kind: { kind: 'provider_query', operation_id: 'channels' },
 			result_schema: 'array',
 			pagination: {
 				default_page_size: 20,
@@ -477,14 +486,14 @@ describe('SurfaceTable', () => {
 			refresh_policy: { type: 'manual' }
 		};
 		const staticDataSource: DataSourceDescriptor = {
-			data_source_id: 'data.primary',
+			data_source_id: 'channels',
 			kind: { kind: 'static', data: [{ id: 'chan-static', name: 'Static Row' }] },
 			result_schema: 'array',
 			refresh_policy: { type: 'manual' }
 		};
 		const interactions: InteractionDescriptor[] = [
 			{
-				interaction_id: 'list',
+				interaction_id: 'channels',
 				kind: 'data_load',
 				label: 'List',
 				transport: { mode: 'controller_local' },
@@ -544,20 +553,20 @@ describe('SurfaceTable', () => {
 
 		const node: Extract<SurfaceNode, { kind: 'table' }> = {
 			kind: 'table',
-			data_source_id: 'data.primary',
+			data_source_id: 'channels',
 			columns: [{ key: 'name', label: 'Name' }],
 			row_actions: []
 		};
 		const dataSource: DataSourceDescriptor = {
-			data_source_id: 'data.primary',
-			kind: { kind: 'provider_query', operation_id: 'list' },
+			data_source_id: 'channels',
+			kind: { kind: 'provider_query', operation_id: 'channels' },
 			result_schema: 'array',
 			pagination: { default_page_size: 20, max_page_size: 200 },
 			refresh_policy: { type: 'manual' }
 		};
 		const interactions: InteractionDescriptor[] = [
 			{
-				interaction_id: 'list',
+				interaction_id: 'channels',
 				kind: 'data_load',
 				label: 'List',
 				transport: { mode: 'controller_local' },
@@ -577,7 +586,7 @@ describe('SurfaceTable', () => {
 		expect(await screen.findByText('Alpha')).toBeInTheDocument();
 		expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledOnce();
 		expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledWith({
-			path: { surface_id: 'notifications.email', interaction_id: 'list' },
+			path: { surface_id: 'notifications.email', interaction_id: 'channels' },
 			query: {
 				target_provider_id: undefined,
 				timeout_seconds: undefined,
@@ -612,20 +621,20 @@ describe('SurfaceTable', () => {
 		const onPageChange = vi.fn();
 		const node: Extract<SurfaceNode, { kind: 'table' }> = {
 			kind: 'table',
-			data_source_id: 'data.primary',
+			data_source_id: 'channels',
 			columns: [{ key: 'name', label: 'Name' }],
 			row_actions: []
 		};
 		const dataSource: DataSourceDescriptor = {
-			data_source_id: 'data.primary',
-			kind: { kind: 'provider_query', operation_id: 'list' },
+			data_source_id: 'channels',
+			kind: { kind: 'provider_query', operation_id: 'channels' },
 			result_schema: 'array',
 			pagination: { default_page_size: 20, max_page_size: 200 },
 			refresh_policy: { type: 'manual' }
 		};
 		const interactions: InteractionDescriptor[] = [
 			{
-				interaction_id: 'list',
+				interaction_id: 'channels',
 				kind: 'data_load',
 				label: 'List',
 				transport: { mode: 'controller_local' },
@@ -647,7 +656,7 @@ describe('SurfaceTable', () => {
 
 		await waitFor(() => {
 			expect(onPageChange).toHaveBeenCalledOnce();
-			expect(onPageChange).toHaveBeenCalledWith('data.primary', 2);
+			expect(onPageChange).toHaveBeenCalledWith('channels', 2);
 		});
 	});
 
@@ -666,20 +675,20 @@ describe('SurfaceTable', () => {
 
 		const node: Extract<SurfaceNode, { kind: 'table' }> = {
 			kind: 'table',
-			data_source_id: 'data.primary',
+			data_source_id: 'channels',
 			columns: [{ key: 'name', label: 'Name' }],
 			row_actions: []
 		};
 		const dataSource: DataSourceDescriptor = {
-			data_source_id: 'data.primary',
-			kind: { kind: 'provider_query', operation_id: 'list' },
+			data_source_id: 'channels',
+			kind: { kind: 'provider_query', operation_id: 'channels' },
 			result_schema: 'array',
 			pagination: { default_page_size: 20, max_page_size: 200 },
 			refresh_policy: { type: 'manual' }
 		};
 		const interactions: InteractionDescriptor[] = [
 			{
-				interaction_id: 'list',
+				interaction_id: 'channels',
 				kind: 'data_load',
 				label: 'List',
 				transport: { mode: 'controller_local' },
@@ -698,7 +707,7 @@ describe('SurfaceTable', () => {
 
 		await waitFor(() => {
 			expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledWith({
-				path: { surface_id: 'notifications.email', interaction_id: 'list' },
+				path: { surface_id: 'notifications.email', interaction_id: 'channels' },
 				query: expect.objectContaining({ page: '2' })
 			});
 		});
@@ -716,7 +725,7 @@ describe('SurfaceTable', () => {
 
 		await waitFor(() => {
 			expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledWith({
-				path: { surface_id: 'notifications.email', interaction_id: 'list' },
+				path: { surface_id: 'notifications.email', interaction_id: 'channels' },
 				query: expect.objectContaining({ page: '1' })
 			});
 			expect(vi.mocked(readSurfaceInteraction)).toHaveBeenCalledTimes(1);
@@ -902,13 +911,13 @@ describe('SurfaceTable', () => {
 
 		const node: Extract<SurfaceNode, { kind: 'table' }> = {
 			kind: 'table',
-			data_source_id: 'data.primary',
+			data_source_id: 'channels',
 			columns: [{ key: 'name', label: 'Name' }],
 			row_actions: []
 		};
 		const dataSource: DataSourceDescriptor = {
-			data_source_id: 'data.primary',
-			kind: { kind: 'provider_query', operation_id: 'list' },
+			data_source_id: 'channels',
+			kind: { kind: 'provider_query', operation_id: 'channels' },
 			result_schema: 'array',
 			pagination: {
 				default_page_size: 20,
@@ -918,7 +927,7 @@ describe('SurfaceTable', () => {
 		};
 		const interactions: InteractionDescriptor[] = [
 			{
-				interaction_id: 'list',
+				interaction_id: 'channels',
 				kind: 'data_load',
 				label: 'List',
 				transport: { mode: 'controller_local' },

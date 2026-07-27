@@ -80,7 +80,7 @@ function makeProviderQueryRead(options: {
 		interactions: options.includeDataLoadInteraction
 			? [
 					{
-						interaction_id: 'get-info',
+						interaction_id: 'info',
 						kind: 'data_load',
 						label: 'Get Info',
 						transport: { mode: 'controller_local' },
@@ -91,7 +91,7 @@ function makeProviderQueryRead(options: {
 		data_sources: [
 			{
 				data_source_id: 'data.remote',
-				kind: { kind: 'provider_query', operation_id: 'get-info' },
+				kind: { kind: 'provider_query', operation_id: 'info' },
 				result_schema: 'object',
 				refresh_policy: { type: 'manual' }
 			}

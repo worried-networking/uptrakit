@@ -31,7 +31,7 @@ describe('SurfaceInteractionButton', () => {
 
 	it('opens form interactions with their label and submits merged params', async () => {
 		const interaction: InteractionDescriptor = {
-			interaction_id: 'create',
+			interaction_id: 'channels',
 			kind: 'form_submit',
 			label: 'Create Channel',
 			transport: { mode: 'controller_local' },
@@ -64,7 +64,7 @@ describe('SurfaceInteractionButton', () => {
 
 		await waitFor(() => {
 			expect(invokeSurfaceInteraction).toHaveBeenCalledWith({
-				path: { surface_id: 'notifications.email', interaction_id: 'create' },
+				path: { surface_id: 'notifications.email', interaction_id: 'channels' },
 				body: {
 					params: {
 						channel_type: 'email',
@@ -379,7 +379,7 @@ describe('SurfaceInteractionButton', () => {
 
 	it('passes labelDisplay and icon down to SurfaceActionButton', async () => {
 		const interaction: InteractionDescriptor = {
-			interaction_id: 'sync-host',
+			interaction_id: 'sync',
 			kind: 'mutation_action',
 			label: 'Sync',
 			transport: { mode: 'controller_local' },
@@ -401,7 +401,7 @@ describe('SurfaceInteractionButton', () => {
 
 	it('keeps the context-gated outer span and disables the inner button', () => {
 		const interaction: InteractionDescriptor = {
-			interaction_id: 'sync-host',
+			interaction_id: 'sync',
 			kind: 'mutation_action',
 			label: 'Sync',
 			transport: { mode: 'controller_local' },
