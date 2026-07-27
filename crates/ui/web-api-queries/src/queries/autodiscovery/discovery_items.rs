@@ -1963,7 +1963,7 @@ mod tests {
             "expected exactly one host_software_items link"
         );
 
-        // Exactly two plugin_configs: releases.github + generic_shell.
+        // Exactly two plugin_configs: releases.github + generic.shell.
         let configs = PluginConfig::find()
             .filter(plugin_config::Column::TenantId.eq(tenant_id))
             .all(&db)

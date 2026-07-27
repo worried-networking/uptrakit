@@ -70,7 +70,7 @@ pub enum PluginConfigsCommands {
     },
     /// Test a plugin configuration (dry-run)
     Test {
-        /// Plugin type (e.g. generic_shell, releases.github, homebrew)
+        /// Plugin type (e.g. generic.shell, releases.github, package-manager.homebrew)
         #[arg(long)]
         plugin_type: String,
         /// Plugin-specific config as JSON string

@@ -1827,7 +1827,7 @@ mod interactive_lifecycle_tests {
     /// `plugin-infrastructure-core/src/traits.rs`) and therefore can never
     /// itself trigger PTY promotion. This test pins that behavior end-to-end
     /// through `execute_update_interactive`: a pre-hook (1 output line) runs
-    /// before a `generic_shell` update command, and the recording executor
+    /// before a `generic.shell` update command, and the recording executor
     /// installed as the base runtime's executor must observe exactly one
     /// `execute_interactive` call, carrying the UPDATE command's spec.
     #[tokio::test]
