@@ -1,10 +1,10 @@
 ---
-title: npm Plugin (`package_manager_npm`)
+title: npm Plugin (`package-manager.npm`)
 weight: 180
 description: The npm plugin tracks globally installed Node.js packages managed via `npm install -g`, supporting version detection, release fetching, autodiscovery, and privileged updates.
 ---
 
-# npm Plugin (`package_manager_npm`)
+# npm Plugin (`package-manager.npm`)
 
 The npm plugin tracks globally installed Node.js packages that are managed via
 `npm install -g`. It supports version detection, controller-side release fetching from
@@ -21,8 +21,8 @@ Use the npm plugin for software installed via `npm install -g`, such as:
 Do **not** use the npm plugin for:
 
 - Packages installed locally (non-global) — they are not tracked by this plugin.
-- Applications distributed as Docker containers or GitHub releases — use `releases_docker`
-  or `releases_github` instead.
+- Applications distributed as Docker containers or GitHub releases — use `releases.docker`
+  or `releases.github` instead.
 
 ## Package Identifier Format
 
@@ -136,16 +136,16 @@ uptrakit ALL=(root) NOPASSWD: /usr/bin/npm
 
 ## Proxmox Helper Scripts Integration
 
-The PHS discovery plugin (`discovery_proxmox_helper_scripts`) detects npm-managed containers
+The PHS discovery plugin (`discovery.proxmox-helper-scripts`) detects npm-managed containers
 by scanning CT scripts for `npm install -g <pkg>` lines. When a match is found (and the
 package is globally installed), the PHS plugin emits a `PackageManagerNpm` discovery target
 with the auto-detected package name.
 
 Detection priority:
 
-1. GitHub release management → `releases_github` + `generic_shell` targets
-2. **npm global install → `package_manager_npm` target** ← this plugin
-3. APT direct install → `package_manager_apt` target
+1. GitHub release management → `releases.github` + `generic.shell` targets
+2. **npm global install → `package-manager.npm` target** ← this plugin
+3. APT direct install → `package-manager.apt` target
 
 For each npm-managed PHS container, a single `NPM (auto)` plugin config is created covering
 all three roles (`detect_version`, `fetch_releases`, `execute_update`).

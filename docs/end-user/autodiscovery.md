@@ -94,20 +94,20 @@ upstream source and emits **discovery targets** that tell the controller which p
 create:
 
 - **GitHub-managed apps** (e.g. Booklore, Radarr, Sonarr, Pangolin, Uptime Kuma): The PHS
-  plugin emits a target for the `releases_github` plugin type, pre-configured with the
+  plugin emits a target for the `releases.github` plugin type, pre-configured with the
   repository owner and name, the installed version detection command, and the unattended update
   script (`sudo /usr/local/bin/uptrakit-phs-update`). The controller auto-creates the GitHub
   Releases plugin config from the target. The software item's plugin config will be the
   auto-created GitHub config, not the PHS config.
 
 - **npm-managed apps** (e.g. n8n, Zigbee2MQTT): The PHS plugin emits two targets -- one for
-  the `package_manager_npm` plugin type (version detection and release fetching) and one for
-  the `generic_shell` plugin type (updates via `/usr/bin/update`). Version information comes
+  the `package-manager.npm` plugin type (version detection and release fetching) and one for
+  the `generic.shell` plugin type (updates via `/usr/bin/update`). Version information comes
   from npm, but updates always use the PHS update script.
 
 - **APT-managed apps** (e.g. Grafana, Plex): The PHS plugin emits two targets -- one for the
-  `package_manager_apt` plugin type (version detection and release fetching) and one for the
-  `generic_shell` plugin type (updates via `/usr/bin/update`). The software item's
+  `package-manager.apt` plugin type (version detection and release fetching) and one for the
+  `generic.shell` plugin type (updates via `/usr/bin/update`). The software item's
   `package_identifier` is the Debian package name. Version information comes from APT, but
   updates always use the PHS update script.
 
@@ -115,7 +115,7 @@ create:
   specific `apt install` line are skipped. A warning is logged on the agent. Check agent logs
   (`journalctl -u uptrakit-agent`) if you expect to see an app but it does not appear.
 
-After discovery, version checking is handled by the target plugin configs (`releases_github`,
+After discovery, version checking is handled by the target plugin configs (`releases.github`,
 `NPM`, or `APT`), while updates are always handled by the PHS Shell config (which runs
 `/usr/bin/update`). The PHS plugin config itself is not linked directly to software items.
 
@@ -182,12 +182,12 @@ be used during discovery for the applicable scope.
 ### Tenant-wide allowlist
 
 The tenant-wide allowlist sets a default for all hosts. For example, if you add
-`package_manager_apt` to the tenant-wide allowlist, only APT discovery runs on every host
+`package-manager.apt` to the tenant-wide allowlist, only APT discovery runs on every host
 unless a host has its own allowlist that overrides this.
 
 ```sh
 # Allow only APT discovery across all hosts by default
-uptrakit discovery-allowlist add package_manager_apt
+uptrakit discovery-allowlist add package-manager.apt
 
 # View the current tenant-wide allowlist
 uptrakit discovery-allowlist list
@@ -204,7 +204,7 @@ that host at all.
 
 ```sh
 # Allow only Homebrew discovery on a specific host
-uptrakit hosts discovery-allowlist add <HOST_ID> package_manager_homebrew
+uptrakit hosts discovery-allowlist add <HOST_ID> package-manager.homebrew
 
 # View the allowlist for a specific host
 uptrakit hosts discovery-allowlist list <HOST_ID>

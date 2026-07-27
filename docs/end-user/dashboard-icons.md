@@ -46,12 +46,12 @@ Until an instance owner enables Dashboard Icons, the plugin is invisible to tena
 ### Layer 2 — Tenant opt-out (optional)
 
 Once Dashboard Icons is enabled at the instance level, individual tenants may still opt out for their own scope. This is done in the web UI under
-**Settings → Plugin Configs → Type Defaults**: look for the `enhancement_dashboard_icons` row and toggle `enabled` off.
+**Settings → Plugin Configs → Type Defaults**: look for the `enhancement.dashboard-icons` row and toggle `enabled` off.
 
 You can also manage the per-tenant override through the generic plugin type settings API:
 
 ```sh
-curl -X PUT /api/v1/plugin-type-settings/enhancement_dashboard_icons \
+curl -X PUT /api/v1/plugin-type-settings/enhancement.dashboard-icons \
   -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{"config":{"enabled":true}}'
@@ -60,7 +60,7 @@ curl -X PUT /api/v1/plugin-type-settings/enhancement_dashboard_icons \
 To inspect the current tenant override:
 
 ```sh
-curl /api/v1/plugin-type-settings/enhancement_dashboard_icons \
+curl /api/v1/plugin-type-settings/enhancement.dashboard-icons \
   -H "Authorization: Bearer <TOKEN>"
 ```
 
@@ -68,7 +68,7 @@ Response:
 
 ```json
 {
-  "plugin_type": "enhancement_dashboard_icons",
+  "plugin_type": "enhancement.dashboard-icons",
   "config": {
     "enabled": true
   }
@@ -79,7 +79,7 @@ If no row exists for this plugin type, Dashboard Icons falls back to the instanc
 override:
 
 ```sh
-curl -X DELETE /api/v1/plugin-type-settings/enhancement_dashboard_icons \
+curl -X DELETE /api/v1/plugin-type-settings/enhancement.dashboard-icons \
   -H "Authorization: Bearer <TOKEN>"
 ```
 

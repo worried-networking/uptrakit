@@ -26,6 +26,12 @@ Uptrakit currently supports three channel types:
 Channels can be enabled or disabled independently. A disabled channel suppresses all deliveries
 without deleting the channel or its rules.
 
+Each channel type is backed by a plugin registered under the `notifications.` namespace
+(`notifications.webhook`, `notifications.telegram`, `notifications.email`) — this is the plugin
+type ID you'll see in plugin listings and logs. The channel `type` field you set on the CLI/API
+(`webhook`/`telegram`/`email`) stays a separate, bare value; the namespace prefix is applied
+internally.
+
 ### Rules
 
 A rule binds an **event type** to a **channel**. When an event fires and a matching enabled rule
@@ -226,7 +232,7 @@ entire tenant. You can narrow the scope using one or more filters when creating 
 | ------------------------------ | ---------------------------------------------------------------------------------------- |
 | `--host-id <HOST_ID>`          | Only match events for that specific host.                                                |
 | `--software-item-id <ITEM_ID>` | Only match events for that specific software item.                                       |
-| `--plugin-type <TYPE>`         | Only match events from that plugin type (e.g. `releases_github`, `package_manager_apt`). |
+| `--plugin-type <TYPE>`         | Only match events from that plugin type (e.g. `releases.github`, `package-manager.apt`). |
 
 Filters can be combined for narrow targeting. For example, to receive Telegram alerts only when
 updates are available for a specific software item on a specific host:

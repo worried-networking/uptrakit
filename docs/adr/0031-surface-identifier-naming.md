@@ -91,6 +91,84 @@ duplicating it would drift.
   permissive wire validator (this ADR's enforcement-scope decision) still admits their old-style IDs, and the
   data-driven frontend invokes whatever is registered.
 
+## Amendment: plugin type IDs
+
+**Date:** 2026-07-27
+
+Plugin type IDs (`PluginTypeId`, `crates/shared/types/src/plugin_type_id.rs`) join this convention. They were
+previously fused `snake_case` (`package_manager_apt`, `infrastructure_proxmox`) or, for the three notification
+channels, bare channel names (`email`, `telegram`, `webhook`) with no namespace at all.
+
+### Grammar
+
+Plugin type IDs are dot-separated kebab-case segments; the first segment must be one of a known category. The
+category list is enforced by `KNOWN_TYPE_ID_CATEGORIES` in the guard test
+`crates/plugins/infrastructure/registry/tests/surface_id_naming_guard.rs`
+(`all_descriptor_type_ids_follow_dotted_kebab_grammar`), which asserts every registered descriptor's `type_id`
+against it: `package-manager`, `releases`, `hook`, `infrastructure`, `generic`, `discovery`, `enhancement`,
+`notifications`, `test`. This mirrors the surface/interaction/data-source grammar above but keeps its own guard
+because plugin type IDs are a distinct identifier space (catalog registration, not surface routing).
+
+### Category mapping
+
+Every first-party plugin type ID was renamed 1:1 (26 pairs, no additions or removals):
+
+| Category          | Old ID                             | New ID                             |
+| ----------------- | ---------------------------------- | ---------------------------------- |
+| `package-manager` | `package_manager_apt`              | `package-manager.apt`              |
+| `package-manager` | `package_manager_homebrew`         | `package-manager.homebrew`         |
+| `package-manager` | `package_manager_dnf`              | `package-manager.dnf`              |
+| `package-manager` | `package_manager_npm`              | `package-manager.npm`              |
+| `package-manager` | `package_manager_mas`              | `package-manager.mas`              |
+| `package-manager` | `package_manager_pacman`           | `package-manager.pacman`           |
+| `package-manager` | `package_manager_pkg`              | `package-manager.pkg`              |
+| `package-manager` | `package_manager_apk`              | `package-manager.apk`              |
+| `package-manager` | `package_manager_snap`             | `package-manager.snap`             |
+| `package-manager` | `package_manager_cargo`            | `package-manager.cargo`            |
+| `package-manager` | `package_manager_routeros`         | `package-manager.routeros`         |
+| `package-manager` | `package_manager_skills`           | `package-manager.skills`           |
+| `releases`        | `releases_github`                  | `releases.github`                  |
+| `releases`        | `releases_gitlab`                  | `releases.gitlab`                  |
+| `releases`        | `releases_forgejo`                 | `releases.forgejo`                 |
+| `releases`        | `releases_docker`                  | `releases.docker`                  |
+| `discovery`       | `discovery_proxmox_helper_scripts` | `discovery.proxmox-helper-scripts` |
+| `discovery`       | `discovery_uptrakit_self_update`   | `discovery.uptrakit-self-update`   |
+| `generic`         | `generic_shell`                    | `generic.shell`                    |
+| `hook`            | `hook_shell`                       | `hook.shell`                       |
+| `hook`            | `hook_systemd`                     | `hook.systemd`                     |
+| `infrastructure`  | `infrastructure_proxmox`           | `infrastructure.proxmox`           |
+| `notifications`   | `email`                            | `notifications.email`              |
+| `notifications`   | `telegram`                         | `notifications.telegram`           |
+| `notifications`   | `webhook`                          | `notifications.webhook`            |
+| `enhancement`     | `enhancement_dashboard_icons`      | `enhancement.dashboard-icons`      |
+
+The three notification rows are the only ones gaining a namespace rather than just reformatting one:
+`email`/`telegram`/`webhook` had no category prefix at all before this amendment. This is a distinct concept
+from `channel_type`, which stays the bare runtime-validated string (`"email"`/`"telegram"`/`"webhook"`) used by
+the notification-dispatch subsystem (see [Notifications](../development/notifications.md)) — `channel_type` is
+not renamed. The helper `notification_plugin_type(channel_type: &str) -> PluginTypeId`
+(`crates/shared/types/src/plugin_type_id.rs`, re-exported from `uptrakit_shared_types`) derives the namespaced
+plugin type ID from a bare `channel_type` at every conversion site, so the two concepts stay related but
+distinguishable in code.
+
+### No wire aliasing
+
+Consistent with this ADR's "no transitional aliases" decision above: the wire `plugin_type` value is renamed
+with no dual-registration compatibility shim. Satellite services (agent-ssh, MQTT) are version-locked to the
+controller they connect to — an old satellite talking to a new controller is not a supported combination this
+project maintains dual-name support for, matching the same posture already established for surface/interaction
+IDs.
+
+### DB value remap is best-effort, not schema validation
+
+Unlike interaction/data-source IDs (never persisted), plugin type IDs are persisted as free-text columns across
+several tables (`plugin_configs`, `plugin_type_settings`, `instance_plugin_setting`, `host_software_item_plugins`,
+`tenant_discovery_allowlist`, `host_discovery_allowlist`, `notification_rules.plugin_type`). Migration
+`m20260727_000001_plugin_type_id_grammar` (`crates/shared/db/src/migration/`) remaps all 26 legacy values to
+their new form with one setwise `UPDATE` per (table, value-pair) — no per-row loop, no raw SQL. Any value not in
+the 26-pair table (e.g. a third-party or since-removed plugin's ID) is left untouched by design: the migration
+targets known first-party legacy values, not general schema validation.
+
 ## Deferred (named follow-ups, out of scope here)
 
 - Tightening `validate_surface_identifier` for newly-registered contracts once a deprecation window can be

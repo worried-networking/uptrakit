@@ -146,8 +146,8 @@ Settings persist in the `settings` table and are reconciled with CLI arguments f
 declared by the plugin type (e.g. `["discover_local_software"]`). Clients should use this field to determine
 which actions are valid for a given config — for example, only showing a **Discover** button
 when `"discover_local_software"` is present, or a **Test** button when `"config_test"` is present.
-Discovery-capable plugin types are `releases_docker`, `package_manager_homebrew`, `package_manager_apt`, and
-`discovery_proxmox_helper_scripts`; all 17 built-in plugin types declare the `config_test` capability.
+Discovery-capable plugin types are `releases.docker`, `package-manager.homebrew`, `package-manager.apt`, and
+`discovery.proxmox-helper-scripts`; all 17 built-in plugin types declare the `config_test` capability.
 
 - `/api/v1/software-ignores`: CRUD for permanent suppression rules. See [Autodiscovery API](autodiscovery.md) for full details.
 - `/api/v1/discovery-allowlist`: tenant-wide list of plugin types permitted to run during host
@@ -537,7 +537,7 @@ specified host, waits for the `test_plugin_config_result` response, and returns 
 
 ```json
 {
-  "plugin_type": "generic_shell",
+  "plugin_type": "generic.shell",
   "config": { "version_command": "nginx -v" },
   "host_id": "770e8400-e29b-41d4-a716-446655440001",
   "test_kind": "version_detection",
@@ -548,7 +548,7 @@ specified host, waits for the `test_plugin_config_result` response, and returns 
 
 | Field                | Type   | Required | Description                                                                                                                                                                                   |
 | -------------------- | ------ | :------: | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `plugin_type`        | string |   Yes    | Plugin type to test (e.g. `"generic_shell"`, `"releases_github"`).                                                                                                                            |
+| `plugin_type`        | string |   Yes    | Plugin type to test (e.g. `"generic.shell"`, `"releases.github"`).                                                                                                                            |
 | `config`             | object |   Yes    | Plugin configuration JSON to test.                                                                                                                                                            |
 | `plugin_config_id`   | UUID   |    No    | Existing config ID. When provided, the saved config is loaded and `config` is shallow-merged on top (same merge semantics as the three-layer config model).                                   |
 | `host_id`            | UUID   |    No    | Target host for agent-side tests. Required for plugins that run on the agent (Shell, APT, Homebrew, etc.). Not required for controller-side plugins (GitHub, GitLab, Forgejo, Docker, npm).   |

@@ -24,7 +24,7 @@ This plugin is `PluginScope::Instance`. The spec's leakage checklist (see
 
 ### Known acceptable limitations
 
-- **Audit log historical rows:** pre-existing `enhancement_dashboard_icons` audit rows written before the conversion
+- **Audit log historical rows:** pre-existing `enhancement.dashboard-icons` audit rows written before the conversion
   remain visible to tenants viewing audit logs. Accepted limitation.
 - **Persisted side effects on `software_item.icon_url`:** URLs of the form
   `https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/...` set by prior enrichment remain on existing

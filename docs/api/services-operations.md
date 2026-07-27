@@ -229,7 +229,7 @@ output in real time. See [Interactive Updates API](interactive-updates.md) for t
 
 ## Update Lifecycle Hooks
 
-Update lifecycle hook plugins (`hook_systemd`, `hook_shell`) are standalone plugin assignments
+Update lifecycle hook plugins (`hook.systemd`, `hook.shell`) are standalone plugin assignments
 that run before and after software updates. They inject output into `update_output` with
 `[pre-hook]` and `[post-hook]` phase markers. See
 [Update Lifecycle Plugins](../development/update-hooks.md).

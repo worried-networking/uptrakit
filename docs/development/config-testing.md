@@ -142,7 +142,7 @@ Plugins declare config test support in the `declare_plugin!` macro:
 
 ```rust
 declare_plugin! {
-    id: PluginTypeId::from_static("generic_shell"),
+    id: PluginTypeId::from_static("generic.shell"),
     name: "Generic Shell",
     family: PluginFamily::Software,
     config_model: ConfigModel::PluginConfig,
@@ -178,7 +178,7 @@ POST /api/v1/plugin-configs/test
 
 | Field                | Type     | Required | Description                                                                                                                                                              |
 | :------------------- | :------- | :------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `plugin_type`        | `string` | Yes      | Plugin type identifier (e.g. `"generic_shell"`).                                                                                                                         |
+| `plugin_type`        | `string` | Yes      | Plugin type identifier (e.g. `"generic.shell"`).                                                                                                                         |
 | `config`             | `object` | Yes      | Plugin configuration JSON to test.                                                                                                                                       |
 | `plugin_config_id`   | `uuid`   | No       | Saved config ID; incoming `config` is shallow-merged on top.                                                                                                             |
 | `host_id`            | `uuid`   | No       | Target host for agent-side tests (required for non-controller-side plugins).                                                                                             |

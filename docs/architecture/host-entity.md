@@ -28,7 +28,7 @@ Five wire payload fields use typed enums instead of raw strings — invalid valu
 
 - `pre_update_hook_plugins: Vec<PluginAssignment>` — hook plugins to execute before the update
 - `post_update_hook_plugins: Vec<PluginAssignment>` — hook plugins to execute after the update
-- Hook plugins (`hook_systemd`, `hook_shell`) implement the `LifecycleHook` role trait and are
+- Hook plugins (`hook.systemd`, `hook.shell`) implement the `LifecycleHook` role trait and are
   instantiated from `PluginAssignment` entries via the descriptor's `roles.lifecycle_hook` creation function.
 
 - `HostInfo` struct: `machine_id`, `os_type?`, `os_version?`, `architecture?`, `hostname?`, `ip_address?`
@@ -190,7 +190,7 @@ The controller can request installed version detection from agents:
 
 **PluginAssignment fields:**
 
-- `plugin_type`: Plugin discriminator (`releases_github`, `releases_docker`, `package_manager_apt`, `package_manager_homebrew`, etc.)
+- `plugin_type`: Plugin discriminator (`releases.github`, `releases.docker`, `package-manager.apt`, `package-manager.homebrew`, etc.)
 - `package_identifier`: Plugin-specific identifier
 - `config`: Merged plugin configuration as JSON (base config + override)
 

@@ -1,12 +1,12 @@
 ---
 title: Snap Package Manager Plugin
 weight: 200
-description: The `package_manager_snap` plugin tracks and updates Snap packages on Linux systems managed by `snapd`, supporting version detection, release fetching, autodiscovery, and updates.
+description: The `package-manager.snap` plugin tracks and updates Snap packages on Linux systems managed by `snapd`, supporting version detection, release fetching, autodiscovery, and updates.
 ---
 
 # Snap Package Manager Plugin
 
-The `package_manager_snap` plugin tracks and updates [Snap](https://snapcraft.io/) packages on
+The `package-manager.snap` plugin tracks and updates [Snap](https://snapcraft.io/) packages on
 Linux systems managed by `snapd`. Snap is a universal Linux package format developed by Canonical
 and widely used on Ubuntu and other distributions.
 
@@ -70,7 +70,7 @@ installed, it calls `snap list` and reports all installed user snaps. For each d
 Uptrakit can automatically create:
 
 - A software item named after the Snap package.
-- A `package_manager_snap` plugin config (`channel: null`, effective channel `latest/stable`).
+- A `package-manager.snap` plugin config (`channel: null`, effective channel `latest/stable`).
 - Role assignments for `detect_version`, `fetch_releases`, and `execute_update`.
 
 ### System snaps excluded from discovery

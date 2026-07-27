@@ -248,7 +248,7 @@ Create a notification rule that links an event type to a channel. Optional scope
 | `event_type`       | string | Yes      | --      | One of the [event types](#event-types).                                                      |
 | `host_id`          | UUID   | No       | `null`  | Scope to a specific host. `null` matches all hosts.                                          |
 | `software_item_id` | UUID   | No       | `null`  | Scope to a specific software item. `null` matches all items.                                 |
-| `plugin_type`      | string | No       | `null`  | Scope to a specific plugin type (e.g. `"releases_github"`). `null` matches all plugin types. |
+| `plugin_type`      | string | No       | `null`  | Scope to a specific plugin type (e.g. `"releases.github"`). `null` matches all plugin types. |
 | `enabled`          | bool   | No       | `true`  | Whether the rule is active.                                                                  |
 
 **Response** (`201`): `NotificationRuleResponse`

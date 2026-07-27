@@ -69,7 +69,7 @@ Each host assignment has **plugin assignments** (`host_software_item_plugins`), 
 
 Each plugin assignment row carries:
 
-- `plugin_type` -- the plugin type string (e.g. `package_manager_apt`).
+- `plugin_type` -- the plugin type string (e.g. `package-manager.apt`).
 - `plugin_config_id` -- optional; which plugin config to use for this role (nullable since type
   settings may suffice).
 - `package_identifier` -- the package name or image reference within that plugin.
@@ -188,8 +188,8 @@ When a host registers (or discovery is manually triggered), the controller sends
   "type": "discover_software",
   "host_machine_id": "...",
   "plugins": [
-    { "plugin_config_id": "...", "plugin_type": "package_manager_homebrew", "config": {...} },
-    { "plugin_config_id": null, "plugin_type": "package_manager_apt", "config": {} }
+    { "plugin_config_id": "...", "plugin_type": "package-manager.homebrew", "config": {...} },
+    { "plugin_config_id": null, "plugin_type": "package-manager.apt", "config": {} }
   ]
 }
 ```
@@ -224,7 +224,7 @@ centralized dispatch code generation, each plugin declares itself independently 
 assembles them via `all_descriptors()`.
 
 ```rust
-declare_plugin!(AptPlugin, AptConfig, "package_manager_apt", {
+declare_plugin!(AptPlugin, AptConfig, "package-manager.apt", {
     display_name: "APT Package Manager",
     family: PluginFamily::Software,
     config_model: ConfigModel::PluginConfig,
@@ -528,7 +528,7 @@ execution. They use the same `declare_plugin!` macro as all other plugins, with 
 section specifying an `InfraSlot`:
 
 ```rust
-declare_plugin!(ProxmoxPlugin, ProxmoxConfig, "infrastructure_proxmox", {
+declare_plugin!(ProxmoxPlugin, ProxmoxConfig, "infrastructure.proxmox", {
     display_name: "Proxmox VE",
     family: PluginFamily::Infrastructure,
     config_model: ConfigModel::PluginConfig,
@@ -561,14 +561,14 @@ software plugins. They declare a `notification_transport` creation function and 
 `NotificationTransport` role:
 
 ```rust
-declare_plugin!(WebhookPlugin, WebhookConfig, "webhook", {
+declare_plugin!(WebhookPlugin, WebhookConfig, "notifications.webhook", {
     display_name: "Webhook",
     family: PluginFamily::Notification,
     config_model: ConfigModel::NotificationChannel,
     roles: [NotificationTransport],
     notification_transport: create_webhook_transport,
     surfaces: {
-        provider_id: "plugin.webhook",
+        provider_id: "plugin.notifications.webhook",
         registrations: webhook_plugin_surfaces,
     },
 });
@@ -598,7 +598,7 @@ Enhancement plugins react to software item lifecycle events on the controller si
 `SoftwareItemLifecycle` role to enrich items after creation (e.g., fetching dashboard icons).
 
 ```rust
-declare_plugin!(DashboardIconsPlugin, DashboardIconsConfig, "enhancement_dashboard_icons", {
+declare_plugin!(DashboardIconsPlugin, DashboardIconsConfig, "enhancement.dashboard-icons", {
     display_name: "Dashboard Icons",
     family: PluginFamily::Enhancement,
     config_model: ConfigModel::None,
@@ -629,29 +629,29 @@ only exist when the `catalog` feature is active (controller builds).
 
 | Plugin type                        | Crate                                              | Family         | Discovery | Controller-side fetch | Host compat | Lifecycle hooks |
 | :--------------------------------- | :------------------------------------------------- | :------------- | :-------: | :-------------------: | :---------: | :-------------: |
-| `releases_github`                  | `uptrakit-plugin-releases-github`                  | Software       |    No     |          Yes          |     No      |       No        |
-| `releases_gitlab`                  | `uptrakit-plugin-releases-gitlab`                  | Software       |    No     |          Yes          |     No      |       No        |
-| `releases_forgejo`                 | `uptrakit-plugin-releases-forgejo`                 | Software       |    No     |          Yes          |     No      |       No        |
-| `releases_docker`                  | `uptrakit-plugin-releases-docker`                  | Software       |    Yes    |          Yes          |     No      |       No        |
-| `discovery_proxmox_helper_scripts` | `uptrakit-plugin-discovery-proxmox-helper-scripts` | Software       |    Yes    |          No           |     No      |       No        |
-| `package_manager_apt`              | `uptrakit-plugin-package-manager-apt`              | Software       |    Yes    |          No           |     Yes     |       No        |
-| `package_manager_homebrew`         | `uptrakit-plugin-package-manager-homebrew`         | Software       |    Yes    |          No           |     Yes     |       No        |
-| `package_manager_dnf`              | `uptrakit-plugin-package-manager-dnf`              | Software       |    Yes    |          No           |     Yes     |       No        |
-| `package_manager_npm`              | `uptrakit-plugin-package-manager-npm`              | Software       |    Yes    |          No           |     Yes     |       No        |
-| `package_manager_mas`              | `uptrakit-plugin-package-manager-mas`              | Software       |    Yes    |          No           |     Yes     |       No        |
-| `package_manager_pacman`           | `uptrakit-plugin-package-manager-pacman`           | Software       |    Yes    |          No           |     Yes     |       No        |
-| `package_manager_pkg`              | `uptrakit-plugin-package-manager-pkg`              | Software       |    Yes    |          No           |     Yes     |       No        |
-| `package_manager_apk`              | `uptrakit-plugin-package-manager-apk`              | Software       |    Yes    |          No           |     Yes     |       No        |
-| `package_manager_snap`             | `uptrakit-plugin-package-manager-snap`             | Software       |    Yes    |          No           |     Yes     |       No        |
-| `package_manager_cargo`            | `uptrakit-plugin-package-manager-cargo`            | Software       |    Yes    |          No           |     Yes     |       No        |
-| `generic_shell`                    | `uptrakit-plugin-generic-shell`                    | Software       |    No     |          No           |     No      |       No        |
-| `hook_systemd`                     | `uptrakit-plugin-hook-systemd`                     | Hook           |    No     |          No           |     No      |       Yes       |
-| `hook_shell`                       | `uptrakit-plugin-hook-shell`                       | Hook           |    No     |          No           |     No      |       Yes       |
-| `infrastructure_proxmox`           | `uptrakit-plugin-infrastructure-proxmox`           | Infrastructure |    No     |          No           |     No      |       No        |
+| `releases.github`                  | `uptrakit-plugin-releases-github`                  | Software       |    No     |          Yes          |     No      |       No        |
+| `releases.gitlab`                  | `uptrakit-plugin-releases-gitlab`                  | Software       |    No     |          Yes          |     No      |       No        |
+| `releases.forgejo`                 | `uptrakit-plugin-releases-forgejo`                 | Software       |    No     |          Yes          |     No      |       No        |
+| `releases.docker`                  | `uptrakit-plugin-releases-docker`                  | Software       |    Yes    |          Yes          |     No      |       No        |
+| `discovery.proxmox-helper-scripts` | `uptrakit-plugin-discovery-proxmox-helper-scripts` | Software       |    Yes    |          No           |     No      |       No        |
+| `package-manager.apt`              | `uptrakit-plugin-package-manager-apt`              | Software       |    Yes    |          No           |     Yes     |       No        |
+| `package-manager.homebrew`         | `uptrakit-plugin-package-manager-homebrew`         | Software       |    Yes    |          No           |     Yes     |       No        |
+| `package-manager.dnf`              | `uptrakit-plugin-package-manager-dnf`              | Software       |    Yes    |          No           |     Yes     |       No        |
+| `package-manager.npm`              | `uptrakit-plugin-package-manager-npm`              | Software       |    Yes    |          No           |     Yes     |       No        |
+| `package-manager.mas`              | `uptrakit-plugin-package-manager-mas`              | Software       |    Yes    |          No           |     Yes     |       No        |
+| `package-manager.pacman`           | `uptrakit-plugin-package-manager-pacman`           | Software       |    Yes    |          No           |     Yes     |       No        |
+| `package-manager.pkg`              | `uptrakit-plugin-package-manager-pkg`              | Software       |    Yes    |          No           |     Yes     |       No        |
+| `package-manager.apk`              | `uptrakit-plugin-package-manager-apk`              | Software       |    Yes    |          No           |     Yes     |       No        |
+| `package-manager.snap`             | `uptrakit-plugin-package-manager-snap`             | Software       |    Yes    |          No           |     Yes     |       No        |
+| `package-manager.cargo`            | `uptrakit-plugin-package-manager-cargo`            | Software       |    Yes    |          No           |     Yes     |       No        |
+| `generic.shell`                    | `uptrakit-plugin-generic-shell`                    | Software       |    No     |          No           |     No      |       No        |
+| `hook.systemd`                     | `uptrakit-plugin-hook-systemd`                     | Hook           |    No     |          No           |     No      |       Yes       |
+| `hook.shell`                       | `uptrakit-plugin-hook-shell`                       | Hook           |    No     |          No           |     No      |       Yes       |
+| `infrastructure.proxmox`           | `uptrakit-plugin-infrastructure-proxmox`           | Infrastructure |    No     |          No           |     No      |       No        |
 | `webhook`                          | `uptrakit-notification-plugin-webhook`             | Notification   |    No     |          No           |     No      |       No        |
 | `telegram`                         | `uptrakit-notification-plugin-telegram`            | Notification   |    No     |          No           |     No      |       No        |
 | `email`                            | `uptrakit-notification-plugin-email`               | Notification   |    No     |          No           |     No      |       No        |
-| `enhancement_dashboard_icons`      | `uptrakit-plugin-enhancement-dashboard-icons`      | Enhancement    |    No     |          No           |     No      |       No        |
+| `enhancement.dashboard-icons`      | `uptrakit-plugin-enhancement-dashboard-icons`      | Enhancement    |    No     |          No           |     No      |       No        |
 
 **Shell plugin** (`uptrakit-plugin-generic-shell`): agent-side plugin with two independently-optional
 shell commands. `version_command` detects the installed version (first non-empty trimmed stdout
@@ -670,12 +670,12 @@ agent-side.
 - **Non-POSIX host runtimes** -- `construct_host_runtime()` dispatches on `OsFamily` to create
   runtime implementations for non-POSIX platforms (e.g., RouterOS).
 - **Pre-update hook abort propagation** -- surface abort reasons in the update history UI.
-- ~~**"Run arbitrary commands" plugin type**~~ -- completed. The `generic_shell` plugin provides
+- ~~**"Run arbitrary commands" plugin type**~~ -- completed. The `generic.shell` plugin provides
   agent-side version detection and update execution via user-supplied shell commands.
 - ~~**Formal multi-plugin-config-synthesis protocol**~~ -- completed. Plugins emit structured
   `DiscoveryTarget` values via `DiscoveredSoftware.targets`.
-- ~~**Update lifecycle hooks as standalone plugins**~~ -- completed. The `hook_systemd` and
-  `hook_shell` plugins replace the old embedded hook system.
+- ~~**Update lifecycle hooks as standalone plugins**~~ -- completed. The `hook.systemd` and
+  `hook.shell` plugins replace the old embedded hook system.
 - ~~**Unified descriptor model**~~ -- completed. All plugin families (software, hook, notification,
   infrastructure, enhancement) use the same `declare_plugin!` macro and `PluginDescriptor` struct.
 - ~~**Focused PluginOps traits**~~ -- completed. The monolithic `PluginOps` god trait is split into

@@ -6,7 +6,7 @@ description: Tracks and updates DNF packages on Fedora, RHEL, and other RPM-base
 
 # DNF Plugin
 
-The `package_manager_dnf` plugin tracks and updates packages managed by **DNF**
+The `package-manager.dnf` plugin tracks and updates packages managed by **DNF**
 (Dandified YUM) on Fedora, RHEL, CentOS Stream, Rocky Linux, AlmaLinux, and other
 RPM-based distributions. It integrates with the local `rpm` and `dnf` toolchain to
 detect installed versions, resolve the latest available versions, and perform updates.
@@ -43,7 +43,7 @@ system that does not use DNF.
 ## Reboot Detection
 
 DNF does not use `/var/run/reboot-required`. To detect whether a reboot is required after a
-DNF update, assign a `hook_shell` lifecycle plugin to the `post_update_hook` role with a
+DNF update, assign a `hook.shell` lifecycle plugin to the `post_update_hook` role with a
 command like `needs-restarting -r`. See [Update Lifecycle Plugins](https://github.com/worried-networking/uptrakit/tree/main/docs/development/)
 for details.
 
@@ -121,13 +121,13 @@ makecache` and `dnf install` only. See
 # Create a plugin config with the default filter (discovers all packages)
 uptrakit plugin-configs create \
   --name "DNF" \
-  --type package_manager_dnf \
+  --type package-manager.dnf \
   --config '{}'
 
 # Create a plugin config that discovers only user-installed packages
 uptrakit plugin-configs create \
   --name "DNF (User-installed)" \
-  --type package_manager_dnf \
+  --type package-manager.dnf \
   --config '{"discovery_filter": "user_installed"}'
 ```
 

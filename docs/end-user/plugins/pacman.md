@@ -6,7 +6,7 @@ description: Tracks and updates Pacman packages on Arch Linux and derivatives.
 
 # Pacman Plugin
 
-The `package_manager_pacman` plugin tracks and updates packages managed by **Pacman** on
+The `package-manager.pacman` plugin tracks and updates packages managed by **Pacman** on
 Arch Linux and derivatives (Manjaro, EndeavourOS, etc.). It integrates with the local
 `pacman` toolchain to detect installed versions, resolve the latest available versions, and
 perform updates.
@@ -119,13 +119,13 @@ variables need to be preserved.
 # Create a plugin config with the default filter (discovers all packages)
 uptrakit plugin-configs create \
   --name "Pacman" \
-  --type package_manager_pacman \
+  --type package-manager.pacman \
   --config '{}'
 
 # Create a plugin config that discovers only explicitly installed packages
 uptrakit plugin-configs create \
   --name "Pacman (Explicit)" \
-  --type package_manager_pacman \
+  --type package-manager.pacman \
   --config '{"discovery_filter": "explicit"}'
 ```
 

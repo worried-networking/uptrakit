@@ -398,13 +398,13 @@ uptrakit plugin-configs list --page 1 --per-page 20
 uptrakit plugin-configs show <PLUGIN_CONFIG_ID>
 
 # Create a new plugin config
-uptrakit plugin-configs create --name "My App Releases" --type releases_github \
+uptrakit plugin-configs create --name "My App Releases" --type releases.github \
   --config '{"owner":"example","repo":"my-app"}'
 
-uptrakit plugin-configs create --name "My Docker Image" --type releases_docker \
+uptrakit plugin-configs create --name "My Docker Image" --type releases.docker \
   --config '{"tracking_mode":"semver_tags"}'
 
-uptrakit plugin-configs create --name "My Formula" --type package_manager_homebrew \
+uptrakit plugin-configs create --name "My Formula" --type package-manager.homebrew \
   --config '{"package_type":"formula","formula":"my-formula"}'
 
 # Update a plugin config
@@ -419,19 +419,19 @@ uptrakit plugin-configs discover <PLUGIN_CONFIG_ID>
 
 # Test a plugin config without saving (dry-run)
 uptrakit plugin-configs test \
-  --plugin-type releases_github \
+  --plugin-type releases.github \
   --config '{"auth_token":"ghp_yourtoken"}'
 
 # Test an agent-side plugin against a specific host
 uptrakit plugin-configs test \
-  --plugin-type generic_shell \
+  --plugin-type generic.shell \
   --config '{"version_command":"nginx -v"}' \
   --host-id <HOST_ID> \
   --package-identifier nginx
 
 # Test with a specific test kind
 uptrakit plugin-configs test \
-  --plugin-type package_manager_apt \
+  --plugin-type package-manager.apt \
   --config '{}' \
   --host-id <HOST_ID> \
   --test-kind version_detection \
@@ -439,7 +439,7 @@ uptrakit plugin-configs test \
 
 # Test against an existing saved config (merges changes on top)
 uptrakit plugin-configs test \
-  --plugin-type releases_github \
+  --plugin-type releases.github \
   --config '{"include_prereleases":true}' \
   --plugin-config-id <PLUGIN_CONFIG_ID>
 ```
@@ -448,7 +448,7 @@ uptrakit plugin-configs test \
 
 | Flag                         | Required | Description                                                                                                                                                |
 | ---------------------------- | :------: | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--plugin-type <TYPE>`       |   Yes    | Plugin type to test (e.g. `releases_github`, `generic_shell`, `package_manager_apt`).                                                                      |
+| `--plugin-type <TYPE>`       |   Yes    | Plugin type to test (e.g. `releases.github`, `generic.shell`, `package-manager.apt`).                                                                      |
 | `--config <JSON>`            |   Yes    | Plugin configuration JSON to test.                                                                                                                         |
 | `--host-id <UUID>`           |    No    | Target host for agent-side tests. Required for plugins that run on the agent.                                                                              |
 | `--test-kind <KIND>`         |    No    | What to test. Auto-detected when omitted. Values: `version_detection`, `update_command_validation`, `pre_update_hook`, `post_update_hook`, `connectivity`. |
@@ -468,13 +468,13 @@ page limits.
 uptrakit plugin-type-settings list
 
 # Show settings for a specific plugin type
-uptrakit plugin-type-settings show releases_github
+uptrakit plugin-type-settings show releases.github
 
 # Create or update settings for a plugin type
-uptrakit plugin-type-settings set releases_github --config '{"poll_interval_secs":300}'
+uptrakit plugin-type-settings set releases.github --config '{"poll_interval_secs":300}'
 
 # Delete (reset) settings for a plugin type
-uptrakit plugin-type-settings reset releases_github
+uptrakit plugin-type-settings reset releases.github
 ```
 
 See also: [Plugin Configurations](plugin-configs.md).
@@ -500,8 +500,8 @@ uptrakit discovery-allowlist add <PLUGIN_TYPE>
 uptrakit discovery-allowlist remove <ENTRY_ID>
 ```
 
-`<PLUGIN_TYPE>` must be one of the discovery-capable plugin types: `package_manager_apt`,
-`package_manager_homebrew`, `releases_docker`, or `discovery_proxmox_helper_scripts`. Supplying
+`<PLUGIN_TYPE>` must be one of the discovery-capable plugin types: `package-manager.apt`,
+`package-manager.homebrew`, `releases.docker`, or `discovery.proxmox-helper-scripts`. Supplying
 an unknown type or a type without the `DiscoverLocalSoftware` capability returns an error.
 
 Adding an entry that already exists returns the existing entry without creating a duplicate.

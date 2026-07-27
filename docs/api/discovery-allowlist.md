@@ -50,12 +50,12 @@ List all tenant-wide discovery allowlist entries.
 [
   {
     "id": "019...",
-    "plugin_type": "package_manager_homebrew",
+    "plugin_type": "package-manager.homebrew",
     "created_at": "2026-02-27T10:00:00Z"
   },
   {
     "id": "019...",
-    "plugin_type": "package_manager_apt",
+    "plugin_type": "package-manager.apt",
     "created_at": "2026-02-27T10:01:00Z"
   }
 ]
@@ -66,7 +66,7 @@ List all tenant-wide discovery allowlist entries.
 | Field         | Type              | Description                                                   |
 | ------------- | ----------------- | ------------------------------------------------------------- |
 | `id`          | UUID              | Entry UUID                                                    |
-| `plugin_type` | string            | Plugin type restricted to (e.g. `"package_manager_homebrew"`) |
+| `plugin_type` | string            | Plugin type restricted to (e.g. `"package-manager.homebrew"`) |
 | `created_at`  | ISO 8601 datetime | When the entry was created                                    |
 
 ---
@@ -81,7 +81,7 @@ Add a plugin type to the tenant-wide discovery allowlist.
 
 ```json
 {
-  "plugin_type": "package_manager_homebrew"
+  "plugin_type": "package-manager.homebrew"
 }
 ```
 
@@ -94,7 +94,7 @@ Add a plugin type to the tenant-wide discovery allowlist.
 ```json
 {
   "id": "019...",
-  "plugin_type": "package_manager_homebrew",
+  "plugin_type": "package-manager.homebrew",
   "created_at": "2026-02-27T10:00:00Z"
 }
 ```
@@ -155,7 +155,7 @@ List all discovery allowlist entries for a specific host.
   {
     "id": "019...",
     "host_id": "019...",
-    "plugin_type": "package_manager_apt",
+    "plugin_type": "package-manager.apt",
     "created_at": "2026-02-27T11:00:00Z"
   }
 ]
@@ -194,7 +194,7 @@ Add a plugin type to the allowlist for a specific host.
 
 ```json
 {
-  "plugin_type": "package_manager_apt"
+  "plugin_type": "package-manager.apt"
 }
 ```
 
@@ -208,7 +208,7 @@ Add a plugin type to the allowlist for a specific host.
 {
   "id": "019...",
   "host_id": "019...",
-  "plugin_type": "package_manager_apt",
+  "plugin_type": "package-manager.apt",
   "created_at": "2026-02-27T11:00:00Z"
 }
 ```
@@ -257,10 +257,10 @@ allowlist. Attempting to add a non-discovery plugin type returns a `400` error.
 
 | Plugin type                        | Description                               |
 | ---------------------------------- | ----------------------------------------- |
-| `package_manager_apt`              | APT package manager (Debian/Ubuntu)       |
-| `package_manager_homebrew`         | Homebrew formulae and casks (macOS/Linux) |
-| `releases_docker`                  | Docker container discovery                |
-| `discovery_proxmox_helper_scripts` | Proxmox VE helper script applications     |
+| `package-manager.apt`              | APT package manager (Debian/Ubuntu)       |
+| `package-manager.homebrew`         | Homebrew formulae and casks (macOS/Linux) |
+| `releases.docker`                  | Docker container discovery                |
+| `discovery.proxmox-helper-scripts` | Proxmox VE helper script applications     |
 
 ---
 

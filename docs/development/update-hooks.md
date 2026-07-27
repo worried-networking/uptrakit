@@ -9,8 +9,8 @@ Two plugin types handle update lifecycle hooks:
 
 | Plugin type   | Wire value     | Purpose                                            |
 | :------------ | :------------- | :------------------------------------------------- |
-| `HookSystemd` | `hook_systemd` | Stops/starts a systemd service around updates      |
-| `HookShell`   | `hook_shell`   | Runs arbitrary shell commands before/after updates |
+| `HookSystemd` | `hook.systemd` | Stops/starts a systemd service around updates      |
+| `HookShell`   | `hook.shell`   | Runs arbitrary shell commands before/after updates |
 
 These plugins are assigned to host software items via the `PreUpdateHook` (`pre_update_hook`)
 and `PostUpdateHook` (`post_update_hook`) plugin roles. Multiple hooks can be assigned per
@@ -23,7 +23,7 @@ role; the `ordinal` column on `host_software_item_plugins` controls execution or
 | `PreUpdateHook`  | `pre_update_hook`  | Before `execute_update` | First failure aborts the update      |
 | `PostUpdateHook` | `post_update_hook` | After `execute_update`  | Errors logged as warnings, non-fatal |
 
-## Systemd hook plugin (`hook_systemd`)
+## Systemd hook plugin (`hook.systemd`)
 
 Manages a systemd service around updates.
 
@@ -57,7 +57,7 @@ The systemd hook plugin declares two sudo commands:
 - `systemctl stop *`
 - `systemctl start *`
 
-## Shell hook plugin (`hook_shell`)
+## Shell hook plugin (`hook.shell`)
 
 Runs arbitrary shell commands before and/or after an update.
 
@@ -149,14 +149,14 @@ Hook plugins are sent as `PluginAssignment` entries in `ExecuteUpdatePayload`:
 {
   "pre_update_hook_plugins": [
     {
-      "plugin_type": "hook_systemd",
+      "plugin_type": "hook.systemd",
       "package_identifier": "",
       "config": { "service_name": "nginx" }
     }
   ],
   "post_update_hook_plugins": [
     {
-      "plugin_type": "hook_systemd",
+      "plugin_type": "hook.systemd",
       "package_identifier": "",
       "config": { "service_name": "nginx" }
     }
@@ -179,7 +179,7 @@ modal both include `Pre-Update Hook` and `Post-Update Hook` role sections.
 The plugin config dropdown is filtered per role:
 
 - Hook roles only show plugin configs whose plugin type has `pre_update_hook` or
-  `post_update_hook` capability (i.e. `hook_systemd` and `hook_shell` configs).
+  `post_update_hook` capability (i.e. `hook.systemd` and `hook.shell` configs).
 - Core roles exclude hook-type plugin configs.
 
 Hook roles do not show the **Package ID** or **Execution Site** fields, since hooks do not
@@ -194,7 +194,7 @@ commands:
 # Create a systemd hook config
 HOOK_ID=$(uptrakit plugin-configs create \
   --name "My Service Hook" \
-  --type hook_systemd \
+  --type hook.systemd \
   --config '{"service_name":"myapp"}' \
   --output json | jq -r '.id')
 

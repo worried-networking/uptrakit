@@ -65,11 +65,11 @@ The background refresh loop uses `CancellationToken` for graceful shutdown and l
 
 `crates/plugins/enhancements/dashboard-icons/src/plugin.rs`
 
-Declared via `declare_plugin!` with `PluginDescriptor` (`plugin_type_id = "enhancement_dashboard_icons"`,
+Declared via `declare_plugin!` with `PluginDescriptor` (`plugin_type_id = "enhancement.dashboard-icons"`,
 `family: PluginFamily::Enhancement`) and implements the `SoftwareItemLifecycle` role:
 
 ```rust
-declare_plugin!(DashboardIconsPlugin, DashboardIconsConfig, "enhancement_dashboard_icons", {
+declare_plugin!(DashboardIconsPlugin, DashboardIconsConfig, "enhancement.dashboard-icons", {
     family: PluginFamily::Enhancement,
     // ...
     roles: [SoftwareItemLifecycle],
@@ -137,7 +137,7 @@ The plugin exposes a type-settings model in `crates/plugins/enhancements/dashboa
 | `enabled`    | `DashboardIconsConfig` | `true` when no tenant override exists |
 
 The tenant override is stored in the shared `plugin_type_settings` table under plugin type
-`enhancement_dashboard_icons`.
+`enhancement.dashboard-icons`.
 
 ### Settings API
 
@@ -145,9 +145,9 @@ Dashboard Icons uses the generic plugin type settings endpoints:
 
 | Method   | Path                                                       | Permission                                  | Description                                                     |
 | -------- | ---------------------------------------------------------- | ------------------------------------------- | --------------------------------------------------------------- |
-| `GET`    | `/api/v1/plugin-type-settings/enhancement_dashboard_icons` | `view_settings` or `manage_global_settings` | Returns the current tenant override for Dashboard Icons         |
-| `PUT`    | `/api/v1/plugin-type-settings/enhancement_dashboard_icons` | `manage_global_settings`                    | Upserts `{ "config": { "enabled": bool } }`                     |
-| `DELETE` | `/api/v1/plugin-type-settings/enhancement_dashboard_icons` | `manage_global_settings`                    | Deletes the tenant override and reverts to the built-in default |
+| `GET`    | `/api/v1/plugin-type-settings/enhancement.dashboard-icons` | `view_settings` or `manage_global_settings` | Returns the current tenant override for Dashboard Icons         |
+| `PUT`    | `/api/v1/plugin-type-settings/enhancement.dashboard-icons` | `manage_global_settings`                    | Upserts `{ "config": { "enabled": bool } }`                     |
+| `DELETE` | `/api/v1/plugin-type-settings/enhancement.dashboard-icons` | `manage_global_settings`                    | Deletes the tenant override and reverts to the built-in default |
 
 The generic request/response types live under `crates/shared/web-api-types/src/plugin_type_settings.rs`.
 

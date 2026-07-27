@@ -46,7 +46,7 @@ cannot determine whether an update is available. Omitting `execute_update` means
 detect version drift but you must update the software manually outside Uptrakit.
 
 The hook roles (`pre_update_hook`, `post_update_hook`) are optional and only accept hook-type
-plugin configs (`hook_systemd`, `hook_shell`). See [Plugin Configurations](plugin-configs.md)
+plugin configs (`hook.systemd`, `hook.shell`). See [Plugin Configurations](plugin-configs.md)
 for details on hook plugin types.
 
 See [Plugin Configurations](plugin-configs.md) for the full reference on plugin types and their
@@ -61,9 +61,9 @@ exposes a `--version`-style command.
 
 | Role             | Plugin type       | What it does                                                     |
 | ---------------- | ----------------- | ---------------------------------------------------------------- |
-| `detect_version` | `generic_shell`   | Runs a shell command on the agent to read the installed version. |
-| `fetch_releases` | `releases_github` | Fetches release tags from the GitHub API (controller-side).      |
-| `execute_update` | `releases_github` | Downloads a release asset to the agent and installs it.          |
+| `detect_version` | `generic.shell`   | Runs a shell command on the agent to read the installed version. |
+| `fetch_releases` | `releases.github` | Fetches release tags from the GitHub API (controller-side).      |
+| `execute_update` | `releases.github` | Downloads a release asset to the agent and installs it.          |
 
 #### Example: Pocket ID
 
@@ -72,7 +72,7 @@ service named `pocketid`, and published on GitHub at `pocket-id/pocket-id`.
 
 Plugin configs needed:
 
-1. **`generic_shell` config** — for version detection:
+1. **`generic.shell` config** — for version detection:
 
    ```json
    {
@@ -80,7 +80,7 @@ Plugin configs needed:
    }
    ```
 
-2. **`releases_github` config** — for fetching releases and installing assets. A single shared
+2. **`releases.github` config** — for fetching releases and installing assets. A single shared
    GitHub Releases config (with no `owner`/`repo` in the config itself) works for all
    GitHub-tracked items, since the repository is specified per software item as the
    `package_identifier`:
@@ -110,11 +110,11 @@ The `execute_update` config override specifies:
 - `install_path` — the absolute path where the binary is written.
 - `make_executable` — sets the executable bit after installation.
 
-The `pre_update_hook` and `post_update_hook` roles use the `hook_systemd` plugin to stop and
+The `pre_update_hook` and `post_update_hook` roles use the `hook.systemd` plugin to stop and
 restart the systemd service around the binary replacement. See
 [Update Lifecycle Plugins](https://github.com/worried-networking/uptrakit/tree/main/docs/development/) for details on hook plugins.
 
-Per-host config overrides let you reuse the same `releases_github` plugin config across multiple
+Per-host config overrides let you reuse the same `releases.github` plugin config across multiple
 hosts or items while supplying host-specific asset patterns (e.g. `amd64` on one host, `arm64`
 on another).
 
@@ -132,11 +132,11 @@ GitHub API) and you can write a shell command to perform the update.
 
 | Role             | Plugin type     | What it does                                                         |
 | ---------------- | --------------- | -------------------------------------------------------------------- |
-| `detect_version` | `generic_shell` | Reads the installed version via a shell command.                     |
-| `fetch_releases` | `generic_shell` | _(not supported — leave unconfigured or use another release plugin)_ |
-| `execute_update` | `generic_shell` | Runs a custom shell command to perform the update.                   |
+| `detect_version` | `generic.shell` | Reads the installed version via a shell command.                     |
+| `fetch_releases` | `generic.shell` | _(not supported — leave unconfigured or use another release plugin)_ |
+| `execute_update` | `generic.shell` | Runs a custom shell command to perform the update.                   |
 
-A single `generic_shell` plugin config can cover both `detect_version` and `execute_update`
+A single `generic.shell` plugin config can cover both `detect_version` and `execute_update`
 if you set both `version_command` and `update_command`:
 
 ```json
@@ -148,10 +148,10 @@ if you set both `version_command` and `update_command`:
 
 The `{version}` placeholder is shell-escaped and substituted at update time.
 
-When using `generic_shell` for `execute_update` without a `fetch_releases` plugin,
+When using `generic.shell` for `execute_update` without a `fetch_releases` plugin,
 Uptrakit cannot determine whether an update is available — you must trigger updates manually
-and supply the target version. Pairing it with a `releases_github`, `releases_gitlab`, or
-`releases_forgejo` plugin config for the `fetch_releases` role gives you upstream version
+and supply the target version. Pairing it with a `releases.github`, `releases.gitlab`, or
+`releases.forgejo` plugin config for the `fetch_releases` role gives you upstream version
 awareness while keeping updates under full custom control.
 
 ### Pattern C: Detect-only tracking (no update support)
@@ -162,8 +162,8 @@ proprietary tool).
 
 | Role             | Plugin type                    | What it does                                                              |
 | ---------------- | ------------------------------ | ------------------------------------------------------------------------- |
-| `detect_version` | `generic_shell`                | Reads the installed version.                                              |
-| `fetch_releases` | `releases_github` (or similar) | Fetches upstream releases so you can see when a new version is available. |
+| `detect_version` | `generic.shell`                | Reads the installed version.                                              |
+| `fetch_releases` | `releases.github` (or similar) | Fetches upstream releases so you can see when a new version is available. |
 | `execute_update` | _(unconfigured)_               | Uptrakit shows an update is available but cannot install it.              |
 
 Leave `execute_update` unconfigured. Uptrakit will detect version drift and display it in the
@@ -175,14 +175,14 @@ UI, but the **Update** button will be absent for that host assignment.
 
 Go to **Plugin Configs → New Plugin Config**.
 
-**For version detection (`generic_shell`):**
+**For version detection (`generic.shell`):**
 
 - Plugin type: `Shell`
 - Name: something descriptive, e.g. `Pocket ID (shell)`
 - `version_command`: the shell command that prints the version string. The first non-empty
   trimmed line of stdout is used. See [Writing a version command](#writing-a-version-command).
 
-**For upstream release tracking (`releases_github`):**
+**For upstream release tracking (`releases.github`):**
 
 You can reuse an existing GitHub Releases config — one config serves all GitHub-tracked
 repositories, since the `owner/repo` is specified per software item. If a `GitHub Releases`
@@ -209,12 +209,12 @@ where the software is installed.
 
 The **Role assignments for new hosts** table appears. Configure:
 
-- **Detect Version** — select the `generic_shell` config, set the package identifier to whatever
+- **Detect Version** — select the `generic.shell` config, set the package identifier to whatever
   the `{package_identifier}` placeholder in your version command refers to (or any stable string
   if your command doesn't use the placeholder).
-- **Fetch Releases** — select the `releases_github` config, set the package identifier to
+- **Fetch Releases** — select the `releases.github` config, set the package identifier to
   `owner/repo` (e.g. `pocket-id/pocket-id`).
-- **Execute Update** — select the `releases_github` config, set the same `owner/repo` identifier.
+- **Execute Update** — select the `releases.github` config, set the same `owner/repo` identifier.
 
 Click **Save**.
 
@@ -250,18 +250,18 @@ the check completes, the **Installed** and **Latest** columns will populate.
 # 1. Create the shell plugin config (version detection)
 SHELL_CONFIG_ID=$(uptrakit plugin-configs create \
   --name "Pocket ID (shell)" \
-  --type generic_shell \
+  --type generic.shell \
   --config '{"version_command":"/opt/pocket-id/pocket-id version | awk '"'"'{print $2}'"'"'"}' \
   --output json | jq -r '.id')
 
 # 2. Find or create a shared GitHub Releases config
 GH_CONFIG_ID=$(uptrakit plugin-configs list --output json \
-  | jq -r '.[] | select(.plugin_type == "releases_github") | .id' | head -1)
+  | jq -r '.[] | select(.plugin_type == "releases.github") | .id' | head -1)
 
 # If none exists yet:
 GH_CONFIG_ID=$(uptrakit plugin-configs create \
   --name "GitHub Releases" \
-  --type releases_github \
+  --type releases.github \
   --config '{"tag_strip_prefix":"v","include_prereleases":false,"asset_patterns":[]}' \
   --output json | jq -r '.id')
 
@@ -306,7 +306,7 @@ uptrakit software-items update-assignment "$ITEM_ID" \
 # 7. Create a systemd hook config for the service lifecycle
 HOOK_CONFIG_ID=$(uptrakit plugin-configs create \
   --name "Pocket ID (systemd hook)" \
-  --type hook_systemd \
+  --type hook.systemd \
   --config '{"service_name":"pocketid"}' \
   --output json | jq -r '.id')
 
@@ -349,7 +349,7 @@ Tips:
 ## Sudoers Considerations
 
 The GitHub Releases plugin automatically declares `install` as a required sudo command when
-`install_path` is configured. Hook plugins (e.g. `hook_systemd`) declare their own sudo
+`install_path` is configured. Hook plugins (e.g. `hook.systemd`) declare their own sudo
 requirements — the systemd hook declares `systemctl stop *` and `systemctl start *`.
 
 After adding or changing plugin configurations that affect sudoers, regenerate the sudoers file
@@ -365,7 +365,7 @@ declarations. See [Sudoers Management](../security/sudoers-management.md) for th
 ## Related Documentation
 
 - [Plugin Configurations](plugin-configs.md) — full reference for all plugin types and their
-  config fields, including `generic_shell` and `releases_github`.
+  config fields, including `generic.shell` and `releases.github`.
 - [Autodiscovery](autodiscovery.md) — if the software can be discovered automatically, prefer
   that workflow.
 - [Update Workflow](update-workflow.md) — how version checks and updates are scheduled and

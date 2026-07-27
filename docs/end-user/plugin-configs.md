@@ -22,32 +22,32 @@ Uptrakit ships with seventeen built-in plugin types:
 
 | Plugin type                        | Description                                                                                                                                                                                                                                       | Autodiscovery |
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
-| `releases_github`                  | Fetches releases published on GitHub. Controller-side only — does not detect installed versions or execute updates directly.                                                                                                                      | No            |
-| `releases_gitlab`                  | Fetches releases published on GitLab (or a self-hosted GitLab instance). Controller-side only. Supports nested namespaces (`group/subgroup/project`).                                                                                             | No            |
-| `releases_forgejo`                 | Fetches releases from any Forgejo or Gitea instance (Codeberg, self-hosted, etc.). Controller-side only. Auto-detected by the PHS discovery plugin for Codeberg-hosted apps.                                                                      | No            |
-| `generic_shell`                    | Generic agent-side plugin: detects the installed version via a configurable shell command and/or executes updates via a configurable shell command.                                                                                               | No            |
-| `releases_docker`                  | Tracks image tags or SHA digests in a Docker/OCI registry. Can pull images via the local or remote Docker daemon, and discovers running/stopped containers.                                                                                       | Yes           |
-| `package_manager_homebrew`         | Tracks Homebrew formulae and casks. Installed version is read from the local Homebrew installation on the agent host.                                                                                                                             | Yes           |
-| `discovery_proxmox_helper_scripts` | Discovery-only. Scans the container's update script, fetches each CT script, and synthesizes downstream plugin configs automatically. Does not perform version detection or updates directly.                                                     | Yes           |
-| `package_manager_apt`              | Tracks Debian/Ubuntu packages managed by APT. Installed and latest versions are resolved locally by the agent using `dpkg` and `apt-cache`. Requires `sudo` access for updates and index refresh.                                                 | Yes           |
-| `package_manager_dnf`              | Tracks RPM packages managed by DNF on Fedora/RHEL/Rocky/AlmaLinux and other RPM-based distributions. Installed and latest versions are resolved locally by the agent using `rpm` and `dnf`. Requires `sudo` access for updates and index refresh. | Yes           |
-| `package_manager_npm`              | Tracks globally installed npm packages. Fetches upstream versions from the npm registry (controller-side). Discovers globally installed packages and executes updates via `npm install -g`. Requires `sudo` access for updates.                   | Yes           |
-| `package_manager_mas`              | Tracks Mac App Store apps via the `mas` CLI tool. Agent-side only. Discovers installed apps and checks for updates via `mas list` and `mas outdated`. No `sudo` required. Requires `brew install mas`.                                            | Yes           |
-| `package_manager_pacman`           | Tracks Arch Linux packages managed by Pacman. Installed versions are resolved locally by the agent using `pacman -Q`; latest versions are fetched from repositories using `pacman -Si`. Requires `sudo` access for updates and database sync.     | Yes           |
-| `package_manager_pkg`              | Tracks packages managed by the BSD `pkg` tool (FreeBSD, TrueNAS SCALE, OPNsense, pfSense, DragonFly BSD). Installed and available versions are resolved locally by the agent. Requires `sudo` access for updates and index refresh.               | Yes           |
-| `package_manager_apk`              | Tracks Alpine Linux packages managed by APK. Installed and latest versions are resolved locally by the agent using `apk`. Requires `sudo` access for updates and index refresh.                                                                   | Yes           |
-| `package_manager_snap`             | Tracks Snap packages managed by `snapd` on Linux. Agent-side only. Discovers installed snaps, resolves upstream versions via `snap info`, and executes updates via `snap refresh`. Requires `sudo` access for updates.                            | Yes           |
-| `package_manager_cargo`            | Tracks Rust binaries installed via `cargo install`. Discovery and version detection run on the agent via `cargo install --list`; upstream versions are fetched controller-side from the crates.io sparse index. No `sudo` required.               | Yes           |
-| `hook_systemd`                     | Update lifecycle hook: stops/starts a systemd service around software updates. Assign to `pre_update_hook` and/or `post_update_hook` roles.                                                                                                       | No            |
-| `hook_shell`                       | Update lifecycle hook: runs arbitrary shell commands before/after software updates. Assign to `pre_update_hook` and/or `post_update_hook` roles.                                                                                                  | No            |
+| `releases.github`                  | Fetches releases published on GitHub. Controller-side only — does not detect installed versions or execute updates directly.                                                                                                                      | No            |
+| `releases.gitlab`                  | Fetches releases published on GitLab (or a self-hosted GitLab instance). Controller-side only. Supports nested namespaces (`group/subgroup/project`).                                                                                             | No            |
+| `releases.forgejo`                 | Fetches releases from any Forgejo or Gitea instance (Codeberg, self-hosted, etc.). Controller-side only. Auto-detected by the PHS discovery plugin for Codeberg-hosted apps.                                                                      | No            |
+| `generic.shell`                    | Generic agent-side plugin: detects the installed version via a configurable shell command and/or executes updates via a configurable shell command.                                                                                               | No            |
+| `releases.docker`                  | Tracks image tags or SHA digests in a Docker/OCI registry. Can pull images via the local or remote Docker daemon, and discovers running/stopped containers.                                                                                       | Yes           |
+| `package-manager.homebrew`         | Tracks Homebrew formulae and casks. Installed version is read from the local Homebrew installation on the agent host.                                                                                                                             | Yes           |
+| `discovery.proxmox-helper-scripts` | Discovery-only. Scans the container's update script, fetches each CT script, and synthesizes downstream plugin configs automatically. Does not perform version detection or updates directly.                                                     | Yes           |
+| `package-manager.apt`              | Tracks Debian/Ubuntu packages managed by APT. Installed and latest versions are resolved locally by the agent using `dpkg` and `apt-cache`. Requires `sudo` access for updates and index refresh.                                                 | Yes           |
+| `package-manager.dnf`              | Tracks RPM packages managed by DNF on Fedora/RHEL/Rocky/AlmaLinux and other RPM-based distributions. Installed and latest versions are resolved locally by the agent using `rpm` and `dnf`. Requires `sudo` access for updates and index refresh. | Yes           |
+| `package-manager.npm`              | Tracks globally installed npm packages. Fetches upstream versions from the npm registry (controller-side). Discovers globally installed packages and executes updates via `npm install -g`. Requires `sudo` access for updates.                   | Yes           |
+| `package-manager.mas`              | Tracks Mac App Store apps via the `mas` CLI tool. Agent-side only. Discovers installed apps and checks for updates via `mas list` and `mas outdated`. No `sudo` required. Requires `brew install mas`.                                            | Yes           |
+| `package-manager.pacman`           | Tracks Arch Linux packages managed by Pacman. Installed versions are resolved locally by the agent using `pacman -Q`; latest versions are fetched from repositories using `pacman -Si`. Requires `sudo` access for updates and database sync.     | Yes           |
+| `package-manager.pkg`              | Tracks packages managed by the BSD `pkg` tool (FreeBSD, TrueNAS SCALE, OPNsense, pfSense, DragonFly BSD). Installed and available versions are resolved locally by the agent. Requires `sudo` access for updates and index refresh.               | Yes           |
+| `package-manager.apk`              | Tracks Alpine Linux packages managed by APK. Installed and latest versions are resolved locally by the agent using `apk`. Requires `sudo` access for updates and index refresh.                                                                   | Yes           |
+| `package-manager.snap`             | Tracks Snap packages managed by `snapd` on Linux. Agent-side only. Discovers installed snaps, resolves upstream versions via `snap info`, and executes updates via `snap refresh`. Requires `sudo` access for updates.                            | Yes           |
+| `package-manager.cargo`            | Tracks Rust binaries installed via `cargo install`. Discovery and version detection run on the agent via `cargo install --list`; upstream versions are fetched controller-side from the crates.io sparse index. No `sudo` required.               | Yes           |
+| `hook.systemd`                     | Update lifecycle hook: stops/starts a systemd service around software updates. Assign to `pre_update_hook` and/or `post_update_hook` roles.                                                                                                       | No            |
+| `hook.shell`                       | Update lifecycle hook: runs arbitrary shell commands before/after software updates. Assign to `pre_update_hook` and/or `post_update_hook` roles.                                                                                                  | No            |
 
-### `releases_github` configuration fields
+### `releases.github` configuration fields
 
 The GitHub Releases plugin fetches upstream release metadata via the GitHub REST API
 (controller-side) and can download release assets directly to managed hosts (agent-side).
 The `owner` and `repo` are **not** configuration fields — they are expressed as the
 `package_identifier` of the software item (format: `"owner/repo"`). A single
-`releases_github` config can therefore serve any number of tracked GitHub repositories.
+`releases.github` config can therefore serve any number of tracked GitHub repositories.
 
 | Field                 | Required | Description                                                                                                                                                                                                                                                                                                                                                   |
 | --------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -73,14 +73,14 @@ field selects which asset to download -- exactly one must match per host (use pe
 OS/architecture).
 
 **Sudoers entries:** When `install_path` is configured, the plugin declares `install` as a
-required sudo command. For systemd service management around updates, use a `hook_systemd`
+required sudo command. For systemd service management around updates, use a `hook.systemd`
 lifecycle plugin assignment instead (see below).
 
-### `releases_gitlab` configuration fields
+### `releases.gitlab` configuration fields
 
 The GitLab Releases plugin is **controller-side only**. It fetches upstream release metadata via
 the GitLab Projects API. The project path is **not** a configuration field — it is expressed as
-the `package_identifier` of the software item. A single `releases_gitlab` config can therefore
+the `package_identifier` of the software item. A single `releases.gitlab` config can therefore
 serve any number of tracked GitLab projects, including projects in nested namespaces.
 
 | Field                 | Required | Description                                                                                                                                                                                                                                     |
@@ -99,12 +99,12 @@ serve any number of tracked GitLab projects, including projects in nested namesp
 **Self-hosted GitLab:** Set `api_base_url` to your instance root (e.g.
 `https://gitlab.corp.com`). The plugin appends `/api/v4/projects/...` automatically.
 
-### `releases_forgejo` configuration fields
+### `releases.forgejo` configuration fields
 
 The Forgejo Releases plugin is **controller-side only**. It fetches upstream release metadata via
 the Forgejo/Gitea API. The `owner` and `repo` are **not** configuration fields — they are expressed
 as the `package_identifier` of the software item (format: `"owner/repo"`). A single
-`releases_forgejo` config can therefore serve any number of tracked repositories on the same instance.
+`releases.forgejo` config can therefore serve any number of tracked repositories on the same instance.
 
 | Field                 | Required | Description                                                                                                                                          |
 | --------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -118,11 +118,11 @@ as the `package_identifier` of the software item (format: `"owner/repo"`). A sin
 validated when a software item is saved.
 
 **PHS auto-discovery:** Proxmox Helper Scripts containers managed via `check_for_codeberg_release`
-or `CODEBERG_REPO=` are automatically detected by the `discovery_proxmox_helper_scripts` plugin,
-which synthesizes a `releases_forgejo` target (with `api_base_url` set to `https://codeberg.org`)
+or `CODEBERG_REPO=` are automatically detected by the `discovery.proxmox-helper-scripts` plugin,
+which synthesizes a `releases.forgejo` target (with `api_base_url` set to `https://codeberg.org`)
 and the corresponding Shell target automatically.
 
-### `generic_shell` configuration fields
+### `generic.shell` configuration fields
 
 The Shell plugin provides generic agent-side operations using user-supplied shell commands.
 Both fields are independently optional, but at least one must be set.
@@ -141,9 +141,9 @@ Both fields are independently optional, but at least one must be set.
 | `{version}`            | The target version string (shell-escaped).                                                    |
 | `{tag}`                | The release tag (e.g. `v1.2.3`). Falls back to `{version}` when no release info is available. |
 
-### `releases_docker` configuration fields
+### `releases.docker` configuration fields
 
-The `releases_docker` plugin requires no mandatory fields — an empty config `{}` is valid. For the full
+The `releases.docker` plugin requires no mandatory fields — an empty config `{}` is valid. For the full
 field reference, see [Docker Plugin](plugins/docker.md).
 
 | Field               | Required | Description                                       |
@@ -156,7 +156,7 @@ field reference, see [Docker Plugin](plugins/docker.md).
 | `compose_restart`   | No       | Run `docker compose up -d` after pulling          |
 | `post_pull_command` | No       | Custom shell command after pulling                |
 
-### `package_manager_homebrew` configuration fields
+### `package-manager.homebrew` configuration fields
 
 | Field          | Required | Description                                                       |
 | -------------- | -------- | ----------------------------------------------------------------- |
@@ -164,9 +164,9 @@ field reference, see [Docker Plugin](plugins/docker.md).
 | `formula`      | No       | Homebrew formula name (required when `package_type` is `formula`) |
 | `cask`         | No       | Homebrew cask token (required when `package_type` is `cask`)      |
 
-### `discovery_proxmox_helper_scripts` configuration fields
+### `discovery.proxmox-helper-scripts` configuration fields
 
-The `discovery_proxmox_helper_scripts` plugin requires no configuration fields — its config is always an
+The `discovery.proxmox-helper-scripts` plugin requires no configuration fields — its config is always an
 empty object `{}`. Uptrakit auto-creates a config named `"Proxmox Helper Scripts"` when the first
 supporting agent connects.
 
@@ -176,10 +176,10 @@ the plugin emits structured `DiscoveryTarget` values that the controller process
 plugin configs automatically:
 
 - For **GitHub-managed containers** (CT script sources a GitHub release), two configs are created:
-  - A `releases_github` config for `FetchReleases` — keyed on the GitHub settings only
+  - A `releases.github` config for `FetchReleases` — keyed on the GitHub settings only
     (no `owner`/`repo` in the config); the `owner/repo` is expressed as the software item's
     `package_identifier`.
-  - A `generic_shell` config for `DetectVersion` and `ExecuteUpdate` — pre-configured with the
+  - A `generic.shell` config for `DetectVersion` and `ExecuteUpdate` — pre-configured with the
     PHS-standard version-file read command and the unattended update command.
 - For **npm-managed containers** (CT script runs `npm install -g <pkg>`), a shared `NPM (auto)` config
   is created for all three roles. The npm package name is carried as the software item's
@@ -189,7 +189,7 @@ plugin configs automatically:
 You may rename or adjust these synthesized configs as needed. Re-running discovery will reuse
 existing configs if they already exist.
 
-### `package_manager_apt` configuration fields
+### `package-manager.apt` configuration fields
 
 | Field              | Required | Description                                                                                                                                                                                                               |
 | ------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -201,7 +201,7 @@ connects and no matching plugin config exists.
 For full details and `sudoers` configuration requirements, see
 [APT Plugin](plugins/apt.md).
 
-### `package_manager_dnf` configuration fields
+### `package-manager.dnf` configuration fields
 
 | Field              | Required | Description                                                                                                                                                                                                                                             |
 | ------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -213,7 +213,7 @@ connects and no matching plugin config exists.
 For full details and `sudoers` configuration requirements, see
 [DNF Plugin](plugins/dnf.md).
 
-### `package_manager_npm` configuration fields
+### `package-manager.npm` configuration fields
 
 | Field                 | Required | Description                                                                                                                 |
 | --------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------- |
@@ -235,7 +235,7 @@ Upstream release versions are fetched from the npm registry by the controller (n
 package index needed). Updates are executed on the agent via `npm install -g <pkg>@<version>`
 and require `sudo` access. See [npm Plugin](npm-plugin.md) for details.
 
-### `package_manager_mas` configuration fields
+### `package-manager.mas` configuration fields
 
 The `mas` plugin has no configuration fields. All Mac App Store apps use the same config (`{}`).
 
@@ -265,7 +265,7 @@ Installed and upstream versions are resolved entirely on the agent via `mas list
 `mas outdated`. No controller-side network access is required. Updates run via `mas upgrade <id>`
 and do **not** require `sudo`.
 
-### `package_manager_pacman` configuration fields
+### `package-manager.pacman` configuration fields
 
 | Field              | Required | Description                                                                                                                                                                                                                        |
 | ------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -308,7 +308,7 @@ preserved).
 For full details and `sudoers` configuration requirements, see
 [Pacman Plugin](plugins/pacman.md).
 
-### `package_manager_pkg` configuration fields
+### `package-manager.pkg` configuration fields
 
 The BSD `pkg` plugin tracks packages managed by FreeBSD's `pkgng` package manager. It works
 on FreeBSD, TrueNAS SCALE, OPNsense, pfSense, and DragonFly BSD.
@@ -334,7 +334,7 @@ are read from the local repository database via `pkg rquery "%v" <name>` (no add
 network access required beyond the repository index, which is refreshed by `pkg update -q`).
 Updates are executed via `pkg install -y <name>` with `sudo`.
 
-### `package_manager_apk` configuration fields
+### `package-manager.apk` configuration fields
 
 | Field              | Required | Description                                                                                                                                                                                                                   |
 | ------------------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -358,7 +358,7 @@ and emits one `DiscoveryTarget` per package pointing to a shared `"APK"` config.
 
 See [APK Plugin](plugins/apk.md) for full details.
 
-### `package_manager_snap` configuration fields
+### `package-manager.snap` configuration fields
 
 The Snap plugin tracks packages installed via `snapd`. Version detection and updates run on the
 agent host; no controller-side network access is required.
@@ -383,7 +383,7 @@ snap automatically installs the latest revision on the channel.
 **Requires `sudo`.** Snap refresh requires root. Uptrakit configures passwordless sudo for the
 `snap` command via `uptrakit-agent bootstrap`. See [Snap Plugin](snap-plugin.md) for full details.
 
-### `package_manager_cargo` configuration fields
+### `package-manager.cargo` configuration fields
 
 The Cargo install plugin tracks Rust binaries installed via `cargo install` on an agent host.
 Discovery and installed version detection run on the agent; upstream versions are fetched
@@ -422,7 +422,7 @@ versions (`version` containing `-`) are filtered out unless `include_prereleases
 SSRF protection to allow private/LAN addresses. Only set this if you operate a private Cargo
 registry (e.g. [Cloudsmith](https://cloudsmith.io/), [Gitea](https://gitea.com/), Artifactory).
 
-### `hook_systemd` configuration fields
+### `hook.systemd` configuration fields
 
 The systemd hook plugin stops and starts a systemd service around software updates. Assign it
 to the `pre_update_hook` and/or `post_update_hook` roles on a host software item assignment.
@@ -438,7 +438,7 @@ failed update, to restore service state.
 
 **Sudoers entries:** `systemctl stop *` and `systemctl start *`.
 
-### `hook_shell` configuration fields
+### `hook.shell` configuration fields
 
 The shell hook plugin runs arbitrary shell commands before and/or after software updates.
 Assign it to the `pre_update_hook` and/or `post_update_hook` roles on a host software item
@@ -482,26 +482,26 @@ The result shows whether the test passed, the command output (if any), the detec
 ```bash
 # Test a GitHub Releases config (controller-side connectivity check)
 uptrakit plugin-configs test \
-  --plugin-type releases_github \
+  --plugin-type releases.github \
   --config '{"auth_token":"ghp_yourtoken"}'
 
 # Test a Shell config against a specific host (version detection)
 uptrakit plugin-configs test \
-  --plugin-type generic_shell \
+  --plugin-type generic.shell \
   --config '{"version_command":"nginx -v"}' \
   --host-id <HOST_ID> \
   --package-identifier nginx
 
 # Test with a specific test kind
 uptrakit plugin-configs test \
-  --plugin-type generic_shell \
+  --plugin-type generic.shell \
   --config '{"update_command":"apt-get install -y nginx={version}"}' \
   --host-id <HOST_ID> \
   --test-kind update_command_validation
 
 # Test against an existing saved config (merges your changes on top)
 uptrakit plugin-configs test \
-  --plugin-type releases_github \
+  --plugin-type releases.github \
   --config '{"include_prereleases":true}' \
   --plugin-config-id <PLUGIN_CONFIG_ID>
 ```
@@ -518,12 +518,12 @@ Examples of type settings:
 
 | Plugin type                | Setting            | Description                                                            |
 | -------------------------- | ------------------ | ---------------------------------------------------------------------- |
-| `package_manager_apt`      | `discovery_filter` | `manual` (default) or `all` -- which packages autodiscovery surfaces   |
-| `package_manager_homebrew` | `package_type`     | `formula` or `cask` -- default package type for discovery              |
-| `package_manager_pacman`   | `discovery_filter` | `all` (default) or `explicit` -- which packages autodiscovery surfaces |
-| `package_manager_dnf`      | `discovery_filter` | `all` (default) or `user_installed`                                    |
-| `package_manager_pkg`      | `discovery_filter` | `all` (default) or `manual`                                            |
-| `package_manager_apk`      | `discovery_filter` | `all` (default) or `world`                                             |
+| `package-manager.apt`      | `discovery_filter` | `manual` (default) or `all` -- which packages autodiscovery surfaces   |
+| `package-manager.homebrew` | `package_type`     | `formula` or `cask` -- default package type for discovery              |
+| `package-manager.pacman`   | `discovery_filter` | `all` (default) or `explicit` -- which packages autodiscovery surfaces |
+| `package-manager.dnf`      | `discovery_filter` | `all` (default) or `user_installed`                                    |
+| `package-manager.pkg`      | `discovery_filter` | `all` (default) or `manual`                                            |
+| `package-manager.apk`      | `discovery_filter` | `all` (default) or `world`                                             |
 
 Type settings are managed via the **Settings → Plugin Configs → Type Defaults** section in the
 web UI, or directly via the REST API (`/api/v1/plugin-type-settings`). When no type settings are
@@ -727,31 +727,31 @@ uptrakit plugin-configs show <PLUGIN_CONFIG_ID>
 # package_identifier, not here; this config covers all your GitHub-tracked repos)
 uptrakit plugin-configs create \
   --name "GitHub Releases" \
-  --type releases_github \
+  --type releases.github \
   --config '{}'
 
 # Create a GitHub Releases config with an auth token (for higher rate limits)
 uptrakit plugin-configs create \
   --name "GitHub Releases (authenticated)" \
-  --type releases_github \
+  --type releases.github \
   --config '{"auth_token":"ghp_yourtoken"}'
 
 # Create a Shell plugin config for version detection and updates
 uptrakit plugin-configs create \
   --name "My App Shell" \
-  --type generic_shell \
+  --type generic.shell \
   --config '{"version_command":"my-app --version","update_command":"apt-get install -y my-app={version}"}'
 
 # Create a Docker plugin config (semver tags)
 uptrakit plugin-configs create \
   --name "my-image Docker" \
-  --type releases_docker \
+  --type releases.docker \
   --config '{"tracking_mode":"semver_tags","tag_patterns":["^[0-9]+\\.[0-9]+\\.[0-9]+$"]}'
 
 # Create a Homebrew formula plugin config
 uptrakit plugin-configs create \
   --name "git Homebrew" \
-  --type package_manager_homebrew \
+  --type package-manager.homebrew \
   --config '{"package_type":"formula","formula":"git"}'
 
 # Update a plugin config's name
@@ -767,9 +767,9 @@ uptrakit plugin-configs delete <PLUGIN_CONFIG_ID>
 
 ## Autodiscovery
 
-The `releases_docker`, `package_manager_homebrew`, `discovery_proxmox_helper_scripts`,
-`package_manager_apt`, `package_manager_dnf`, `package_manager_npm`, and
-`package_manager_pacman` plugin types support **autodiscovery**: the
+The `releases.docker`, `package-manager.homebrew`, `discovery.proxmox-helper-scripts`,
+`package-manager.apt`, `package-manager.dnf`, `package-manager.npm`, and
+`package-manager.pacman` plugin types support **autodiscovery**: the
 agent queries the local runtime (Docker daemon or package manager) and reports installed
 packages back to the controller, which creates pending software items for your review.
 
@@ -786,7 +786,7 @@ automatically creates one. Auto-created configs are named:
 - `Pacman`
 
 **PHS auto-created configs:** In addition to the `"Proxmox Helper Scripts"` config used as a
-discovery anchor, the PHS plugin triggers creation of downstream `releases_github`, `generic_shell`, and
+discovery anchor, the PHS plugin triggers creation of downstream `releases.github`, `generic.shell`, and
 `APT (auto)` configs during discovery (see
 [PHS configuration](#discovery-proxmox-helper-scripts-configuration-fields) for details). These synthesized
 configs are what appear as parent configs on PHS-discovered software items.

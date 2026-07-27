@@ -88,7 +88,7 @@ script from `raw.githubusercontent.com` and analyzes it. The PHS shell constants
 
 1. `plugin_type: ReleasesGithub`, roles `[FetchReleases]`, config without `owner`/`repo` (only
    `tag_strip_prefix`, `include_prereleases`, `asset_patterns`), and `package_identifier:
-   Some("owner/repo")` override.
+Some("owner/repo")` override.
 2. `plugin_type: GenericShell`, roles `[DetectVersion, ExecuteUpdate]`, config with
    `version_command` (`sudo /usr/local/bin/uptrakit-phs-version {package_identifier}`),
    `update_command` (`sudo PHS_SILENT=1 TERM=xterm /usr/bin/update`), and
@@ -105,9 +105,9 @@ script from `raw.githubusercontent.com` and analyzes it. The PHS shell constants
 **two** `DiscoveryTarget` values:
 
 1. `plugin_type: ReleasesForgejo`, roles `[FetchReleases]`, config with `api_base_url:
-   "https://codeberg.org"` (Codeberg runs the Forgejo platform), `tag_strip_prefix: "v"`, and
+"https://codeberg.org"` (Codeberg runs the Forgejo platform), `tag_strip_prefix: "v"`, and
    `package_identifier: Some("owner/repo")` override. The plugin config name is `"Codeberg
-   Releases"` to distinguish it from generic Forgejo instances.
+Releases"` to distinguish it from generic Forgejo instances.
 2. `plugin_type: GenericShell`, roles `[DetectVersion, ExecuteUpdate]` — same PHS Shell target as
    for GitHub-managed items.
 
@@ -127,7 +127,7 @@ script from `raw.githubusercontent.com` and analyzes it. The PHS shell constants
    always go through `/usr/bin/update`, not `apt-get install`.
 
 Apps whose scripts contain neither GitHub nor Codeberg patterns nor a specific `apt install` line
-are skipped. The PHS plugin config itself (`discovery_proxmox_helper_scripts`, always `{}`) is
+are skipped. The PHS plugin config itself (`discovery.proxmox-helper-scripts`, always `{}`) is
 retained as an anchor for discovery runs but never linked directly to `SoftwareItem` host
 assignments.
 
@@ -260,7 +260,7 @@ via `GET /api/v1/plugin-types`:
 
 - `VersionDetection` — the plugin implements `detect_installed_version()` and can be assigned to
   the `detect_version` role on a host software assignment. Serializes as `"version_detection"`.
-  Implemented by all package-manager plugins and `ShellPlugin` (`generic_shell`).
+  Implemented by all package-manager plugins and `ShellPlugin` (`generic.shell`).
 - `ReleaseFetching` — the plugin implements `fetch_releases()` and can be assigned to the
   `fetch_releases` role. Serializes as `"release_fetching"`. Implemented by all package-manager
   plugins and all releases plugins (`github`, `gitlab`, `forgejo`, `docker`). Note: `gitlab` and
@@ -310,7 +310,7 @@ via `GET /api/v1/plugin-types`:
 - `ServiceMigrations` — the plugin contributes service-side database migrations.
 - `ControllerMigrations` — the plugin contributes controller-side database migrations.
 - `ConfigTest` — the plugin supports dry-run configuration testing via `POST
-  /api/v1/plugin-configs/test`. Declared by all 17 plugins (10 package managers, 4 release
+/api/v1/plugin-configs/test`. Declared by all 17 plugins (10 package managers, 4 release
   plugins, 2 hook plugins, generic shell). Controller-side plugins
   (`ControllerSideFetchReleases`) test connectivity without a host; agent-side plugins require a
   `host_id` and run tests on the target host. The proxy pattern (`ConfigTestProxy` in
@@ -335,7 +335,7 @@ checking:
 - `batch_detect_installed_version(&[BatchDetectItem]) -> Result<Vec<BatchDetectResult>>` —
   detect installed versions for multiple packages. Default calls `detect_installed_version` per
   item. Override when the package manager accepts a list in one command (APT: `dpkg-query pkg1
-  pkg2`; Homebrew: `brew info --json=v2 pkg1 pkg2`; npm: `npm list -g --depth=0 --json` + memory
+pkg2`; Homebrew: `brew info --json=v2 pkg1 pkg2`; npm: `npm list -g --depth=0 --json` + memory
   filter).
 - `batch_fetch_releases(&[BatchFetchItem]) -> Result<Vec<BatchFetchResult>>` — fetch upstream
   releases for multiple packages. Default calls `fetch_releases` per item. Override when the

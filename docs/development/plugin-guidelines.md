@@ -19,8 +19,8 @@ The plugin registry crate (`uptrakit-plugin-infrastructure-registry`) centralize
 instances based on `PluginTypeId`. Document plugin behavior so the registry can continue to validate configs and mask secrets correctly.
 
 `PluginTypeId` is a newtype wrapper around a string identifier. Plugin crates declare their ID with `PluginTypeId::from_static("my_plugin_id")`. The
-string representations are: `releases_github`, `releases_gitlab`, `releases_forgejo`, `releases_docker`, `discovery_proxmox_helper_scripts`,
-`package_manager_homebrew`, `package_manager_apt`, `package_manager_npm`, `package_manager_mas`, `generic_shell`, `infrastructure_proxmox`.
+string representations are: `releases.github`, `releases.gitlab`, `releases.forgejo`, `releases.docker`, `discovery.proxmox-helper-scripts`,
+`package-manager.homebrew`, `package-manager.apt`, `package-manager.npm`, `package-manager.mas`, `generic.shell`, `infrastructure.proxmox`.
 
 ## Plugin Families
 
@@ -189,7 +189,7 @@ If a pre-update hook returns abort, no further pre-hooks or the update itself ar
 `execute_post_hook()` is called after the update completes. It is non-fatal: any error is logged as a warning but does not mark the update as failed.
 The `update_succeeded` field indicates whether the update succeeded.
 
-For full details on the built-in hook plugins (`hook_systemd`, `hook_shell`), see [Update Lifecycle Plugins](update-hooks.md).
+For full details on the built-in hook plugins (`hook.systemd`, `hook.shell`), see [Update Lifecycle Plugins](update-hooks.md).
 
 ## Declaring `ControllerSideFetchReleases`
 
@@ -234,8 +234,8 @@ capabilities:
 | :------------------------ | :----------------------------------------------------------------------------------- | :------------------------------------------------------------------------------ |
 | `VersionDetection`        | Runs `detect_installed_version()` against the host and returns the detected version. | Agent-side plugins that support version detection (Shell, APT, Homebrew, etc.). |
 | `UpdateCommandValidation` | Validates the update command syntax (e.g. `sh -n` check) without executing it.       | Agent-side plugins with an update command (Shell).                              |
-| `PreUpdateHook`           | Executes the pre-update hook with a mock `UpdateLifecycleContext`.                   | Hook plugins (hook_systemd, hook_shell) assigned to `pre_update_hook`.          |
-| `PostUpdateHook`          | Executes the post-update hook with a mock `UpdateLifecycleContext`.                  | Hook plugins (hook_systemd, hook_shell) assigned to `post_update_hook`.         |
+| `PreUpdateHook`           | Executes the pre-update hook with a mock `UpdateLifecycleContext`.                   | Hook plugins (hook.systemd, hook.shell) assigned to `pre_update_hook`.          |
+| `PostUpdateHook`          | Executes the post-update hook with a mock `UpdateLifecycleContext`.                  | Hook plugins (hook.systemd, hook.shell) assigned to `post_update_hook`.         |
 | `Connectivity`            | Tests upstream API connectivity by performing a lightweight `fetch_releases()` call. | Controller-side plugins (GitHub, GitLab, Forgejo, Docker, npm, Cargo).          |
 
 ### Two execution paths
@@ -550,7 +550,7 @@ APT has mixed privilege requirements: detection is unprivileged, updates require
 use uptrakit_plugin_infrastructure_core::prelude::*;
 
 declare_plugin! {
-    id: PluginTypeId::from_static("package_manager_apt"),
+    id: PluginTypeId::from_static("package-manager.apt"),
     name: "APT",
     family: PluginFamily::Software,
     config_model: ConfigModel::PluginConfig,
@@ -585,7 +585,7 @@ GitHub Releases runs entirely on the controller. It gets a shared HTTP client fr
 use uptrakit_plugin_infrastructure_core::prelude::*;
 
 declare_plugin! {
-    id: PluginTypeId::from_static("releases_github"),
+    id: PluginTypeId::from_static("releases.github"),
     name: "GitHub Releases",
     family: PluginFamily::Software,
     config_model: ConfigModel::PluginConfig,
@@ -626,7 +626,7 @@ Hook plugins implement the `UpdateLifecyclePlugin` role.
 use uptrakit_plugin_infrastructure_core::prelude::*;
 
 declare_plugin! {
-    id: PluginTypeId::from_static("hook_shell"),
+    id: PluginTypeId::from_static("hook.shell"),
     name: "Shell Hook",
     family: PluginFamily::Hook,
     config_model: ConfigModel::PluginConfig,
@@ -659,7 +659,7 @@ Notification plugins use `PluginFamily::Notification`, `ConfigModel::Notificatio
 use uptrakit_plugin_infrastructure_core::prelude::*;
 
 declare_plugin! {
-    id: PluginTypeId::from_static("notification_webhook"),
+    id: PluginTypeId::from_static("notifications.webhook"),
     name: "Webhook",
     family: PluginFamily::Notification,
     config_model: ConfigModel::NotificationChannel,
@@ -688,7 +688,7 @@ Enhancement plugins implement the `SoftwareItemLifecycle` role.
 use uptrakit_plugin_infrastructure_core::prelude::*;
 
 declare_plugin! {
-    id: PluginTypeId::from_static("enhancement_dashboard_icons"),
+    id: PluginTypeId::from_static("enhancement.dashboard-icons"),
     name: "Dashboard Icons",
     family: PluginFamily::Enhancement,
     config_model: ConfigModel::PluginConfig,
@@ -736,7 +736,7 @@ See [Dependency Policy](dependency-policy.md) for the full re-export strategy.
 
 `ReleaseFetcher` factory functions receive a third argument — `&ReleaseFetchContext` — alongside
 the config JSON and `HostRuntime`. Existing plugins ignore this context via
-`_ctx: &ReleaseFetchContext`. The `package_manager_skills` plugin is the reference implementation
+`_ctx: &ReleaseFetchContext`. The `package-manager.skills` plugin is the reference implementation
 for reading from it.
 
 To access the global GitHub provider in a controller-side `ReleaseFetcher`:
@@ -1011,7 +1011,7 @@ Plugin-specific identifier validation is exposed through two APIs:
 
 ```rust
 PluginRegistry::validate_package_identifier(
-    &PluginTypeId::from_static("package_manager_homebrew"),
+    &PluginTypeId::from_static("package-manager.homebrew"),
     value,
 )?;
 ```
@@ -1220,7 +1220,7 @@ DiscoveredSoftware {
     name: "BookLore".to_string(),
     installed_version: "1.18.5".to_string(),
     targets: vec![DiscoveryTarget {
-        plugin_type: PluginTypeId::from_static("releases_github"),
+        plugin_type: PluginTypeId::from_static("releases.github"),
         plugin_config: serde_json::json!({
             "owner": "BookLore",
             "repo": "BookLore",
@@ -1697,10 +1697,10 @@ in a container and emit `DiscoveryTarget` values that tell the controller which 
 
 **Discovery targets emitted:**
 
-- GitHub-managed apps: `DiscoveryTarget { plugin_type: PluginTypeId::from_static("releases_github"), ... }` with owner, repo,
+- GitHub-managed apps: `DiscoveryTarget { plugin_type: PluginTypeId::from_static("releases.github"), ... }` with owner, repo,
   `detect_installed_version_command`, and `install_command` pre-configured. Constants `PHS_DETECT_VERSION_CMD` and `PHS_INSTALL_CMD` are defined in
   `crates/plugins/discovery/proxmox-helper-scripts/src/discovery.rs`.
-- APT-managed apps: `DiscoveryTarget { plugin_type: PluginTypeId::from_static("package_manager_apt"), config: {}, name: "APT (auto)" }`.
+- APT-managed apps: `DiscoveryTarget { plugin_type: PluginTypeId::from_static("package-manager.apt"), config: {}, name: "APT (auto)" }`.
 
 Cross-reference: [PHS end-user guide](../end-user/autodiscovery.md#proxmox-helper-scripts-discovery),
 

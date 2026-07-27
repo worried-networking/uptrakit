@@ -14,7 +14,7 @@ code execution on managed hosts via plugin configuration manipulation.
 
 ### Path 1: Shell plugin
 
-1. The attacker creates a plugin config with `plugin_type = "generic_shell"`:
+1. The attacker creates a plugin config with `plugin_type = "generic.shell"`:
 
    ```json
    {

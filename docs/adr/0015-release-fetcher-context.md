@@ -5,7 +5,7 @@ Status: Accepted
 
 ## Context
 
-The `package_manager_skills` plugin requires controller-side access to the global GitHub Provider
+The `package-manager.skills` plugin requires controller-side access to the global GitHub Provider
 (for fetching git tree SHAs). Prior to this change, `ReleaseFetcher` factories received only
 `(config_json, runtime: Arc<dyn HostRuntime>)`. The GitHub Provider is an instance-level singleton
 that lives in `GlobalProviders`, not in `HostRuntime`.

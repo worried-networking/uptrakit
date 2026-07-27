@@ -48,7 +48,7 @@ Create a plugin configuration via the API or CLI:
 ```bash
 uptrakit plugin-configs create \
   --name "My PVE Cluster" \
-  --plugin-type infrastructure_proxmox \
+  --plugin-type infrastructure.proxmox \
   --config '{
     "api_url": "https://pve.local:8006",
     "api_token": "root@pam!uptrakit=your-secret-here",

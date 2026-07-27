@@ -6,7 +6,7 @@ description: Tracks container image updates in Docker/OCI registries and manages
 
 # Docker Plugin
 
-The `releases_docker` plugin tracks container image updates in Docker/OCI-compatible registries.
+The `releases.docker` plugin tracks container image updates in Docker/OCI-compatible registries.
 It monitors the SHA-256 manifest digest of a specific tag (e.g. `latest`) and reports an update
 when the remote digest changes — regardless of whether the tag name itself changes. It can also
 discover running and stopped containers on the agent host and auto-populate your software catalog.

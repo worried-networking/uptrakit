@@ -268,13 +268,13 @@ The controller routes each discovered item through one of two paths:
 
 ### PHS discovery targets
 
-The PHS plugin (`discovery_proxmox_helper_scripts`) always emits `DiscoveryTarget` values. It analyzes
+The PHS plugin (`discovery.proxmox-helper-scripts`) always emits `DiscoveryTarget` values. It analyzes
 each container's CT script and builds targets:
 
 | Script analysis result     | `DiscoveryTarget` emitted                                                                                                                     |
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| GitHub repository detected | `plugin_type: releases_github`, config with `owner`, `repo`, `detect_installed_version_command`, `install_command`. Name: `"{owner}/{repo}"`. |
-| APT package detected       | `plugin_type: package_manager_apt`, config: `{}`. Name: `"APT (auto)"`.                                                                       |
+| GitHub repository detected | `plugin_type: releases.github`, config with `owner`, `repo`, `detect_installed_version_command`, `install_command`. Name: `"{owner}/{repo}"`. |
+| APT package detected       | `plugin_type: package-manager.apt`, config: `{}`. Name: `"APT (auto)"`.                                                                       |
 | Neither detected           | Item skipped (warning logged on agent).                                                                                                       |
 
 The PHS plugin config itself is never directly linked to `host_software_item_plugins` — it is used
@@ -287,8 +287,8 @@ The Homebrew plugin always emits per-item discovery targets:
 
 | Package type | `DiscoveryTarget` emitted                                                                                      |
 | ------------ | -------------------------------------------------------------------------------------------------------------- |
-| Formula      | `plugin_type: package_manager_homebrew`, config: `{"package_type": "formula"}`. Name: `"Homebrew (Formulae)"`. |
-| Cask         | `plugin_type: package_manager_homebrew`, config: `{"package_type": "cask"}`. Name: `"Homebrew (Casks)"`.       |
+| Formula      | `plugin_type: package-manager.homebrew`, config: `{"package_type": "formula"}`. Name: `"Homebrew (Formulae)"`. |
+| Cask         | `plugin_type: package-manager.homebrew`, config: `{"package_type": "cask"}`. Name: `"Homebrew (Casks)"`.       |
 
 When running with an existing config (pre-created with a specific `package_type`), targets are
 empty and the controller uses the config-ID path.
@@ -300,11 +300,11 @@ listed in `target.roles` (typically all three):
 
 | Role             | Plugin config                                                   | Description                                     |
 | ---------------- | --------------------------------------------------------------- | ----------------------------------------------- |
-| `detect_version` | Target config (e.g. `releases_github` or `package_manager_apt`) | Detects the installed version on the agent host |
+| `detect_version` | Target config (e.g. `releases.github` or `package-manager.apt`) | Detects the installed version on the agent host |
 | `fetch_releases` | Target config (same as above)                                   | Fetches the latest available upstream version   |
 | `execute_update` | Target config (same as above)                                   | Executes the actual software update             |
 
-For PHS discoveries with a `releases_github` target config, the `fetch_releases` role
+For PHS discoveries with a `releases.github` target config, the `fetch_releases` role
 typically runs controller-side (via the scheduler) because the GitHub Releases plugin has the
 `ControllerSideFetchReleases` capability. The `execution_site` column defaults to `"auto"`, which
 lets the system decide based on plugin capabilities.

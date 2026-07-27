@@ -75,7 +75,7 @@ pub trait PluginMeta: Send + Sync + 'static {
 ```
 
 The `plugin_type_id()` replaces the old `name()` and `channel_type()` methods. It returns
-a typed `PluginTypeId` (e.g. `PluginTypeId::new("webhook")`).
+a typed `PluginTypeId` (e.g. `PluginTypeId::new("notifications.webhook")`).
 
 ### `NotificationTransport` role trait
 
@@ -99,8 +99,12 @@ The `settings` parameter is a generic JSON bag with the structure
 what it needs internally (e.g. the email plugin performs SMTP merge, the telegram plugin
 extracts `bot_token` from tenant settings, the webhook plugin ignores it).
 
-There is no `channel_type()` method on the trait. The channel type is the plugin's `type_id`
-from its `PluginDescriptor`, which is also the value returned by `plugin_type_id()`.
+There is no `channel_type()` method on the trait. The channel type (`"webhook"`/`"telegram"`/`"email"`,
+a separate, runtime-validated concept used by the notification-dispatch subsystem) is namespaced into the
+plugin's `type_id` from its `PluginDescriptor` (`"notifications.webhook"`, etc.), which is also the value
+returned by `plugin_type_id()`. Code deriving one from the other uses
+`uptrakit_shared_types::notification_plugin_type(channel_type)`
+(`crates/shared/types/src/plugin_type_id.rs`) rather than assuming equality.
 
 There is no `supports_actions()` method. Each plugin decides independently whether to render `DeliveryMessage.actions`.
 Plugins that do not support interactive elements silently ignore the `actions` field.
@@ -136,7 +140,7 @@ Every notification plugin uses `declare_plugin!` to generate its `PluginDescript
 `PluginMeta` implementation:
 
 ```rust
-declare_plugin!(WebhookPlugin, WebhookChannelConfig, "webhook", {
+declare_plugin!(WebhookPlugin, WebhookChannelConfig, "notifications.webhook", {
     display_name: "Webhook",
     family: PluginFamily::Notification,
     config_model: ConfigModel::NotificationChannel,
@@ -144,7 +148,7 @@ declare_plugin!(WebhookPlugin, WebhookChannelConfig, "webhook", {
     notification_transport: create_webhook_transport,
     raw_settings_keys: &[],
     surfaces: {
-        provider_id: "plugin.webhook",
+        provider_id: "plugin.notifications.webhook",
         registrations: webhook_plugin_surfaces,
     },
 });
@@ -159,7 +163,7 @@ The macro generates:
 
 - A `pub static DESCRIPTOR: PluginDescriptor` with all metadata, config ops, role creators,
   and surface registrations.
-- An `impl PluginMeta for WebhookPlugin` that returns `PluginTypeId::from_static("webhook")`.
+- An `impl PluginMeta for WebhookPlugin` that returns `PluginTypeId::from_static("notifications.webhook")`.
 - Compile-time assertions that the plugin struct implements all declared role traits.
 
 ### Transport creation and lookup
@@ -178,7 +182,7 @@ At startup, the `PluginCatalog` calls each notification plugin's `CreateTranspor
 construct a singleton `Arc<dyn NotificationTransport>`. The dispatcher looks up transports via:
 
 ```rust
-catalog.transport(&PluginTypeId::new(channel_type))
+catalog.transport(&uptrakit_shared_types::notification_plugin_type(channel_type))
 ```
 
 This replaces the old `notification_ops.transport(channel_type)` pattern.

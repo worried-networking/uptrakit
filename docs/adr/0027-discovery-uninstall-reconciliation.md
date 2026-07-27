@@ -29,7 +29,7 @@ Two nullable columns on `host_software_items` — `last_discovered_at` and `disc
 for every discovery create and every discovery re-match, when a link was last seen and which discovering
 plugin (`DiscoveryPluginResult.plugin_type`) reported it. This is recorded independently of the link's
 management-plugin role rows, since a discovery source and a target's execution plugin can differ (PVE
-Helper Scripts discovery creates links whose role assignments target `releases_github`/`generic_shell`
+Helper Scripts discovery creates links whose role assignments target `releases.github`/`generic.shell`
 plugins, for example).
 
 Reconciliation only ever touches a link where both columns are non-`NULL`. A link created through the

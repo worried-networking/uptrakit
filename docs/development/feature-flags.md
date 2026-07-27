@@ -122,7 +122,7 @@ module. Uses the `mdns-sd` crate. See [Zeroconf Discovery](zeroconf-discovery.md
 Dashboard Icons enhancement plugin. Automatically assigns icon URLs to software items from the
 [Dashboard Icons](https://github.com/homarr-labs/dashboard-icons) project. Propagates to
 `uptrakit-web-api/dashboard-icons` + `uptrakit-plugin-infrastructure-registry/dashboard-icons`.
-Uses tenant-scoped plugin type settings on `enhancement_dashboard_icons`; `enabled` defaults to
+Uses tenant-scoped plugin type settings on `enhancement.dashboard-icons`; `enabled` defaults to
 `true` when unset. See [Dashboard Icons](dashboard-icons.md).
 
 ### `reset-data` (controller)

@@ -124,12 +124,12 @@ that role on this host-software pair.
       "software_item_id": "550e8400-...",
       "name": "Nginx",
       "detect_version": {
-        "plugin_type": "package_manager_apt",
+        "plugin_type": "package-manager.apt",
         "package_identifier": "nginx",
         "config": {}
       },
       "fetch_releases": {
-        "plugin_type": "package_manager_apt",
+        "plugin_type": "package-manager.apt",
         "package_identifier": "nginx",
         "config": {}
       }
@@ -138,7 +138,7 @@ that role on this host-software pair.
       "software_item_id": "660e8400-...",
       "name": "1Password",
       "detect_version": {
-        "plugin_type": "package_manager_homebrew",
+        "plugin_type": "package-manager.homebrew",
         "package_identifier": "1password-cli",
         "config": { "package_type": "cask" }
       }
@@ -151,7 +151,7 @@ that role on this host-software pair.
 
 | Field                | Type   | Description                                                            |
 | -------------------- | ------ | ---------------------------------------------------------------------- |
-| `plugin_type`        | string | Plugin discriminator (e.g. `"apt"`, `"homebrew"`, `"releases_github"`) |
+| `plugin_type`        | string | Plugin discriminator (e.g. `"apt"`, `"homebrew"`, `"releases.github"`) |
 | `package_identifier` | string | Plugin-specific package identifier                                     |
 | `config`             | object | Merged plugin configuration (base config + override)                   |
 
@@ -178,12 +178,12 @@ and is not sent to the agent.
   "software_item_name": "Nginx",
   "to_version": "1.24.0",
   "detect_version_plugin": {
-    "plugin_type": "package_manager_apt",
+    "plugin_type": "package-manager.apt",
     "package_identifier": "nginx",
     "config": {}
   },
   "execute_update_plugin": {
-    "plugin_type": "package_manager_apt",
+    "plugin_type": "package-manager.apt",
     "package_identifier": "nginx",
     "config": {}
   },
@@ -294,7 +294,7 @@ two-stage verification flow.
   "plugins": [
     {
       "plugin_config_id": "550e8400-...",
-      "plugin_type": "package_manager_homebrew",
+      "plugin_type": "package-manager.homebrew",
       "config": { "package_type": "formula" }
     }
   ]
@@ -306,7 +306,7 @@ type. In that case the agent uses the default/empty config and plugins emit `Dis
 each `DiscoveredSoftware` item's `targets` array. The controller creates the appropriate `PluginConfig` records
 from these structured targets.
 
-Known `plugin_type` values for discovery: `package_manager_homebrew`, `discovery_proxmox_helper_scripts`, `package_manager_apt`.
+Known `plugin_type` values for discovery: `package-manager.homebrew`, `discovery.proxmox-helper-scripts`, `package-manager.apt`.
 
 #### `discovery_results` payload
 
@@ -319,7 +319,7 @@ Known `plugin_type` values for discovery: `package_manager_homebrew`, `discovery
   "results": [
     {
       "plugin_config_id": null,
-      "plugin_type": "discovery_proxmox_helper_scripts",
+      "plugin_type": "discovery.proxmox-helper-scripts",
       "discoveries": [
         {
           "package_identifier": "booklore",
@@ -327,7 +327,7 @@ Known `plugin_type` values for discovery: `package_manager_homebrew`, `discovery
           "installed_version": "1.18.5",
           "targets": [
             {
-              "plugin_type": "releases_github",
+              "plugin_type": "releases.github",
               "plugin_config": { "owner": "BookLore", "repo": "BookLore" },
               "plugin_config_name": "BookLore/BookLore",
               "roles": ["detect_version", "fetch_releases", "execute_update"]
@@ -339,7 +339,7 @@ Known `plugin_type` values for discovery: `package_manager_homebrew`, `discovery
     },
     {
       "plugin_config_id": "550e8400-...",
-      "plugin_type": "package_manager_homebrew",
+      "plugin_type": "package-manager.homebrew",
       "discoveries": [
         {
           "package_identifier": "wget",
@@ -486,7 +486,7 @@ sent over the direct WebSocket connection between the controller and the agent.
   "request_id": "019...",
   "host_machine_id": "abc-123",
   "test_kind": "version_detection",
-  "plugin_type": "generic_shell",
+  "plugin_type": "generic.shell",
   "config": { "version_command": "nginx -v" },
   "package_identifier": "nginx"
 }
@@ -497,7 +497,7 @@ sent over the direct WebSocket connection between the controller and the agent.
 | `request_id`         | string           |   Yes    | Unique correlation ID (UUID v7) for matching the `test_plugin_config_result` response. |
 | `host_machine_id`    | string           |   Yes    | Target host's machine ID on the agent.                                                 |
 | `test_kind`          | `ConfigTestKind` |   Yes    | What to test. See `ConfigTestKind` values below.                                       |
-| `plugin_type`        | string           |   Yes    | Plugin type to test (e.g. `"generic_shell"`, `"package_manager_apt"`).                 |
+| `plugin_type`        | string           |   Yes    | Plugin type to test (e.g. `"generic.shell"`, `"package-manager.apt"`).                 |
 | `config`             | object           |   Yes    | Merged plugin configuration JSON.                                                      |
 | `package_identifier` | string           |    No    | Package identifier for testing (required for version detection).                       |
 
@@ -1700,7 +1700,7 @@ Triggers a batch update for software items grouped by plugin type. The agent cal
   "type": "execute_batch_update",
   "host_machine_id": "abc-123",
   "batch_id": "550e8400-...",
-  "plugin_type": "package_manager_apt",
+  "plugin_type": "package-manager.apt",
   "plugin_config": { "...merged config..." },
   "updates": [
     {

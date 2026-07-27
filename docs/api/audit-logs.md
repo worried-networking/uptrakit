@@ -59,7 +59,7 @@ Lists tenant-scoped semantic audit entries.
         "api_endpoint": "https://apt.example.com"
       },
       "correlation_id": null,
-      "details_json": { "plugin_type": "package_manager_apt" },
+      "details_json": { "plugin_type": "package-manager.apt" },
       "request_id": "req-01J9...",
       "occurred_at": "2026-03-03T12:00:00Z"
     }
