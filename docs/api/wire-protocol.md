@@ -544,8 +544,9 @@ with the original request.
 `service_config_updated`
 
 MQTT clients are now configured through shared surfaces. The MQTT service registers the
-`uptrakit-mqtt.clients` shared surface with actions `list-clients`, `create-client`,
-`update-client`, `delete-client`, and `test-connection`. Client configuration is stored and
+`uptrakit-mqtt.clients` shared surface with the `clients` interaction registered under GET
+(list/get), POST (create), PUT (edit), and DELETE (delete), plus `test-connection`. Client
+configuration is stored and
 delivered via the generic service config store messages above. See
 [Service Config Store](../development/service-config-store.md) for the full mechanism.
 

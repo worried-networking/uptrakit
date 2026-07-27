@@ -106,7 +106,7 @@ iterates all entries, deserializes each value as `ParsedMqttClientConfig`, and s
 updates the corresponding `MqttClientHandle`. This is equivalent to the old
 `TenantAssignments` handshake but driven by the generic mechanism.
 
-### 2. Extension action: `create-client`
+### 2. Extension action: `clients` (POST)
 
 When a user submits the Create Client form in the MQTT Clients extension tab:
 
@@ -116,7 +116,7 @@ When a user submits the Create Client form in the MQTT Clients extension tab:
 3. It awaits `pending.wait(...)` to confirm the controller persisted the entry.
 4. On success, it calls `start_client(config)` to establish the MQTT connection.
 
-### 3. Extension action: `delete-client`
+### 3. Extension action: `clients` (DELETE)
 
 When a user deletes a client:
 

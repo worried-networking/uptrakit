@@ -114,7 +114,7 @@ uptrakit surfaces invoke proxmox.hosts unmatch \
 ### Viewing Proxmox Info for a Host
 
 ```bash
-uptrakit surfaces invoke proxmox.host-info get-info \
+uptrakit surfaces invoke proxmox.host-info info \
   --params '{"host_id": "HOST_ID"}'
 ```
 
@@ -189,7 +189,7 @@ Proxmox plugin to PVE hosts using the stored **PVE node name** and
 matching will fail.
 
 If matching fails, use the **Sync Host** row action in the web UI (or run
-`uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> sync-host <host-id>`)
+`uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> sync <host-id>`)
 to populate the node name, then retry.
 
 ## Security Considerations

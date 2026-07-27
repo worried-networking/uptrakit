@@ -246,7 +246,7 @@ installed), this step is silently skipped and has no effect.
 
 This means you do **not** need to manually run `usermod -aG docker <user>` -- it is handled
 as part of the [bootstrap](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/) and every subsequent
-[sync-host](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/) operation.
+[sync](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/) operation.
 
 > [!NOTE]
 > Group membership changes take effect at the next login. If the agent was already

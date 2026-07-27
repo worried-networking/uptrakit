@@ -1832,7 +1832,7 @@ required — the field is `Option<String>`.
 ### Authoring example
 
 ```rust
-AgentInteraction::new("sync-host", "Sync")
+AgentInteraction::new("sync", "Sync")
     .with_icon("refresh-cw")
     .with_permission(Permission::UpdateHosts.to_string())
     .placement(AgentInteractionPlacement::Row)

@@ -928,7 +928,7 @@ uptrakit surfaces providers <SURFACE_ID>
 uptrakit surfaces invoke <SURFACE_ID> <ACTION_ID> --params '{"key":"value"}'
 
 # Targeted surfaces require --target-provider-id.
-uptrakit surfaces invoke ssh-agent.hosts list-hosts --target-provider-id <PROVIDER_ID>
+uptrakit surfaces invoke ssh-agent.hosts hosts --method get --target-provider-id <PROVIDER_ID>
 ```
 
 ### Dynamic (manifest-driven) invocation
@@ -952,7 +952,7 @@ uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> bootstrap \
   --target root@192.168.1.100
 
 # Example: sync host configuration.
-uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> sync-host <host-id>
+uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> sync <host-id>
 
 # Example: preview the bootstrap plan without executing.
 uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> bootstrap \

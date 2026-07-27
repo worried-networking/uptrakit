@@ -96,13 +96,13 @@ Shows all connected service instances that provide the specified surface.
 ### Invoke an action (raw JSON)
 
 ```sh
-uptrakit surfaces invoke ssh-agent.hosts list-hosts
+uptrakit surfaces invoke ssh-agent.hosts hosts --method get
 ```
 
 For targeted surfaces, specify which service instance to use:
 
 ```sh
-uptrakit surfaces invoke ssh-agent.hosts list-hosts \
+uptrakit surfaces invoke ssh-agent.hosts hosts --method get \
   --target-provider-id 019585f4-1234-7000-8000-000000000001
 ```
 
@@ -120,7 +120,7 @@ manifest. This provides `--help`, type validation, and tab completion:
 
 ```sh
 # List SSH hosts from an agent
-uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> list-hosts
+uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> hosts --method get
 
 # Bootstrap a new host with typed arguments
 uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> bootstrap \
@@ -129,7 +129,7 @@ uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> bootstrap \
   --auth-method password
 
 # Remove a host by ID
-uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> remove-host <host-id>
+uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> hosts --method delete <host-id>
 
 # Show available actions and arguments for a surface
 uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> --help

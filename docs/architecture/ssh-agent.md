@@ -19,7 +19,7 @@ The SSH agent is feature-complete for version checks and updates. The implementa
 - Ed25519 keypair generation for automated key deployment
 - A `bootstrap` wizard action (via web UI or CLI) that automates remote host setup
   with a multi-step review flow: Connect (gather plan) -> Review (approve actions) -> Execute
-- A `sync-host` wizard action (via web UI or CLI) that regenerates sudoers entries,
+- A `sync` wizard action (via web UI or CLI) that regenerates sudoers entries,
   detects PVE node name, and verifies PVE privileges
 - A `bootstrap-proxmox-guest` surface interaction that bootstraps discovered Proxmox VE guests
   (LXC/QEMU) via `pct exec`/`qm guest exec` through an already-bootstrapped PVE node
@@ -111,13 +111,13 @@ The SSH agent uses a local SQLite database (`agent-ssh.db` in the state director
 | `sudo_policy`          | TEXT        | `"auto"` / `"force_with"` / `"force_without"` — runtime sudo execution policy                             |
 | `is_pve_node`          | BOOLEAN     | Whether this host is a Proxmox VE node (default: false)                                                   |
 | `pve_plugin_config_id` | TEXT        | Plugin config ID for PVE credentials, nullable                                                            |
-| `pve_node_name`        | TEXT        | Short Proxmox VE node name (e.g. `"optiplex2"`), nullable; detected by `sync-host` and `bootstrap`        |
+| `pve_node_name`        | TEXT        | Short Proxmox VE node name (e.g. `"optiplex2"`), nullable; detected by `sync` and `bootstrap`             |
 | `created_at`           | INTEGER     | Unix timestamp                                                                                            |
 | `updated_at`           | INTEGER     | Unix timestamp                                                                                            |
 
 The `name` column has a UNIQUE index to prevent duplicate host names.
 
-The three sudo columns are populated by the `bootstrap` and `sync-host` operations. When `NULL`,
+The three sudo columns are populated by the `bootstrap` and `sync` operations. When `NULL`,
 `Model::resolved_sudo_context()` applies backward-compatible defaults (`sudo_available = true`,
 `is_root = false`, `policy = auto`) so hosts enrolled before the sudo tracking migration continue to work.
 
@@ -347,12 +347,12 @@ CommandSpec { Exec { program: "sudo", args: ["apt-get", "install", ...] } }
 ### Updating sudo state
 
 - **`bootstrap`** — detects and stores `is_root` and `sudo_available` during the bootstrap workflow.
-- **`sync-host`** — re-detects `is_root` and `sudo_available` on every run (always
+- **`sync`** — re-detects `is_root` and `sudo_available` on every run (always
   refreshes), writes or refreshes the sudoers drop-in file, detects PVE node name, and
   verifies PVE privileges.
 - **Regular operations** (`CheckVersions`, `ExecuteUpdate`) — read from the database without any SSH detection round-trip.
 
-### `sync-host` workflow
+### `sync` workflow
 
 ```text
 1. Load SSH host from DB by name or UUID
@@ -724,7 +724,7 @@ crates/core/agent-ssh-runtime/         # Library — uptrakit-agent-ssh-runtime
     │                    # build_reload_host_infos(), report_hosts_after_config_change() —
     │                    # all accept &mut dyn ServiceTransport
     ├── surface_runtime.rs # Shared-surface registration builder and action dispatch
-    │                    # (list-hosts, bootstrap, sync-host, remove-host,
+    │                    # (hosts GET/DELETE, bootstrap, sync,
     │                    # discovered-guests, bootstrap-proxmox-guest); ECIES
     │                    # decryption of sensitive params; ServiceSurfaceProxy invocation
     │                    # helpers — accepts &mut dyn ServiceTransport
@@ -879,14 +879,17 @@ handler's `on_surface_action_response` method calls `proxy.complete()` to delive
 
 ### Actions
 
-| Action                    | Type                     | Timeout | Description                                                                                                          |
+| Action (method)           | Type                     | Timeout | Description                                                                                                          |
 | ------------------------- | ------------------------ | ------- | -------------------------------------------------------------------------------------------------------------------- |
-| `list-hosts`              | data_action              | 30s     | Query local DB for all SSH hosts                                                                                     |
+| `hosts` (GET)             | data_action              | 30s     | Query local DB for all SSH hosts                                                                                     |
 | `bootstrap`               | primary_action (wizard)  | 120s    | Bootstrap a new remote host via multi-step wizard: Connect -> Review -> Execute                                      |
-| `sync-host`               | row_action (wizard)      | 120s    | Sync host via multi-step wizard: update sudoers, detect PVE node name, verify PVE privileges; optional auth override |
-| `remove-host`             | row_action (destructive) | 30s     | Remove a host from local DB                                                                                          |
+| `sync`                    | row_action (wizard)      | 120s    | Sync host via multi-step wizard: update sudoers, detect PVE node name, verify PVE privileges; optional auth override |
+| `hosts` (DELETE)          | row_action (destructive) | 30s     | Remove a host from local DB                                                                                          |
 | `discovered-guests`       | select_source (action)   | 15s     | List unmatched Proxmox guests (via ServiceSurfaceProxy)                                                              |
 | `bootstrap-proxmox-guest` | primary_action (form)    | 120s    | Bootstrap a discovered Proxmox guest with auto-matching                                                              |
+
+`hosts` is a single interaction ID registered under both GET and DELETE methods; callers pass
+`--method` (CLI) or the corresponding HTTP verb to select the variant.
 
 All six of the runtime's own actions, plus the two Proxmox agent-module actions it merges in under
 `agent-infra`, are authored through the `AgentInteraction` builder (ADR-0028;
@@ -899,7 +902,7 @@ reproduces it exactly, catching silent metadata loss the wire type itself cannot
 
 ### E2E encryption for sensitive parameters
 
-The bootstrap and sync-host actions accept sensitive credentials (SSH password, private key) that
+The bootstrap and sync actions accept sensitive credentials (SSH password, private key) that
 must not be visible to the controller. The SSH agent uses ECIES sealed-box encryption:
 
 1. On connect, the agent base64-encodes its mTLS P-256 public key and includes it in
@@ -916,9 +919,9 @@ See [shared surface security](../security/surfaces.md) for the trust model and
 
 ### Execution model
 
-- **`list-hosts`** and **`remove-host`**: Handled inline — fast DB operations, response sent
+- **`hosts` (GET)** and **`hosts` (DELETE)**: Handled inline — fast DB operations, response sent
   immediately from `on_surface_action_request`.
-- **`sync-host`**: Spawned as a background task. By default connects using the stored
+- **`sync`**: Spawned as a background task. By default connects using the stored
   agent key. Optionally accepts custom auth credentials (password or private key, ECIES
   encrypted) to connect as a different user (e.g. `root`) — necessary when the stored
   agent user lacks privileges to write sudoers. Updates sudoers, detects the PVE node
@@ -937,7 +940,7 @@ See [shared surface security](../security/surfaces.md) for the trust model and
   hostname from the guest's Proxmox hostname (with user override), bootstraps the guest
   via `pct exec` (LXC) or `qm guest exec` (QEMU), then defers the Proxmox host mapping
   match via the `proxmox_pending_matches` table (resolved on the next `ReportHosts`).
-  Hosts must have been synced (via `sync-host` or bootstrap) to populate `pve_node_name`
+  Hosts must have been synced (via `sync` or bootstrap) to populate `pve_node_name`
   for matching to succeed.
 
 ### CLI usage
@@ -949,14 +952,14 @@ With dynamic surface subcommands, the SSH host surface can be invoked as:
 uptrakit surfaces providers ssh-agent.hosts
 
 # List hosts
-uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> list-hosts
+uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> hosts --method get
 
 # Bootstrap a new host (workflow interactions are raw JSON only)
 uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> bootstrap \
   --params '{"target":"root@192.168.1.100","name":"my-server","auth_method":"password"}'
 
 # Remove a host
-uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> remove-host \
+uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> hosts --method delete \
   --params '{"id":"<host-id>"}'
 
 # Show available actions and their arguments

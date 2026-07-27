@@ -290,7 +290,7 @@ registered plugin command. For example, if only the APT plugin is active:
 
 ```text
 # Managed by Uptrakit - DO NOT EDIT MANUALLY
-# Regenerate: uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> sync-host
+# Regenerate: uptrakit surfaces ssh-agent.hosts sync
 # /usr/bin/apt-get: Package installation and index refresh require root privileges
 uptrakit ALL=(root) NOPASSWD: /usr/bin/apt-get
 ```
@@ -306,7 +306,7 @@ To refresh the sudoers file (and PVE configuration) after adding new plugins,
 use the **Sync Host** action in the web UI or run:
 
 ```bash
-uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> sync-host <host-id>
+uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> sync <host-id>
 ```
 
 For the full security rationale, see [Sudoers Management](../security/sudoers-management.md).
@@ -435,7 +435,7 @@ plugin manually afterwards.
 ## Related documentation
 
 - [SSH Agent Host Management](ssh-agent-host-management.md) -- managing existing
-  host entries, including sync-host
+  host entries, including sync
 - [SSH Agent Architecture](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/) -- architecture and
   database schema
 - [SSH Agent Secrets](../security/ssh-agent-secrets.md) -- encryption model and

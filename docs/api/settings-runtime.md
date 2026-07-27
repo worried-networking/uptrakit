@@ -324,8 +324,8 @@ email delivery. Per-channel config stores only recipient addresses
 
 #### Global SMTP defaults
 
-Stored in the `global_settings` table. Managed via the `get_global_smtp` / `save_global_smtp`
-shared surface actions on the "SMTP Defaults" panel in Global Settings.
+Stored in the `global_settings` table. Managed via the `smtp` shared surface interaction (GET to read,
+PUT to save) on the `notifications.email.global-smtp` surface's "SMTP Defaults" panel in Global Settings.
 
 | DB key                     | Type    | Default                         | Description                                                               |
 | -------------------------- | ------- | ------------------------------- | ------------------------------------------------------------------------- |
@@ -340,8 +340,8 @@ shared surface actions on the "SMTP Defaults" panel in Global Settings.
 
 #### Per-tenant SMTP overrides
 
-Stored in the `settings` table (keyed by `tenant_id`). Managed via the `get_smtp` / `save_smtp`
-shared surface actions on the email channel surface.
+Stored in the `settings` table (keyed by `tenant_id`). Managed via the `smtp` shared surface interaction
+(GET to read, PUT to save) on the `notifications.email` channel surface.
 
 | DB key              | Type    | Default            | Description                             |
 | ------------------- | ------- | ------------------ | --------------------------------------- |
@@ -362,9 +362,9 @@ skipped with a warning) until both `host` and `from_address` are configured in a
 
 #### Shared surface action responses
 
-The `get_smtp` shared surface action returns per-tenant values plus `effective_*` fields showing
-the merged result and `has_global_defaults: bool`. The `get_global_smtp` shared surface action
-returns only global defaults.
+The `smtp` shared surface interaction's GET, on the `notifications.email` surface, returns per-tenant
+values plus `effective_*` fields showing the merged result and `has_global_defaults: bool`. The `smtp`
+interaction's GET on the `notifications.email.global-smtp` surface returns only global defaults.
 
 **Security:** Passwords are encrypted with `uptrakit_crypto::encrypt_str` (AES-256-GCM) before
 storage. See [Notifications Security — Email Channel Security](../security/notifications-security.md#email-channel-security).

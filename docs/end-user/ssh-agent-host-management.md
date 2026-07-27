@@ -126,7 +126,7 @@ For detailed options and troubleshooting, see
 
 ### Sync host configuration
 
-The sync-host operation synchronizes the host configuration with the remote
+The sync operation synchronizes the host configuration with the remote
 host. In addition to regenerating the sudoers drop-in file, it also detects the
 PVE node name (for Proxmox VE hosts) and verifies PVE privileges. Use this
 after enabling new plugins, when installed command paths on the remote host have
@@ -137,7 +137,7 @@ changed, or when Proxmox VE configuration needs to be refreshed.
 **CLI:**
 
 ```bash
-uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> sync-host <host-id>
+uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> sync <host-id>
 ```
 
 The operation:
@@ -164,7 +164,7 @@ never stored.
 **CLI:** Supply auth credentials via CLI flags:
 
 ```bash
-uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> sync-host <host-id> \
+uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> sync <host-id> \
   --auth-method password \
   --auth-username root
 ```

@@ -727,7 +727,7 @@ Server-wide SMTP defaults are stored in the `global_settings` table and managed 
 ### Per-tenant SMTP overrides
 
 Per-tenant SMTP settings override the global defaults on a field-by-field basis. Empty fields
-inherit from global defaults. Configured via the email channel surface's `configure_smtp` action.
+inherit from global defaults. Configured via the `notifications.email` surface's `smtp` interaction (PUT).
 
 | Setting key   | DB key              | Description                                        |
 | ------------- | ------------------- | -------------------------------------------------- |
@@ -769,9 +769,9 @@ different from the `from_address` domain.
 
 ### Test email
 
-The "Send Test Email" action (`test_global_smtp_email`) sends a test message directly to the
-**calling user's profile email address** (looked up from the database). No recipient address
-input is required.
+The "Send Test Email" action (the `test` interaction on the `notifications.email.global-smtp` surface)
+sends a test message directly to the **calling user's profile email address** (looked up from the
+database). No recipient address input is required.
 
 ### Message format
 
@@ -915,7 +915,7 @@ Surface IDs follow the convention `notifications.<channel_type>`:
 | `notifications.webhook`           | Webhook Channels  | 500        | Tab (group: "Notification Channels") |
 | `notifications.telegram`          | Telegram Channels | 501        | Tab (group: "Notification Channels") |
 | `notifications.email`             | Email Channels    | 502        | Tab (group: "Notification Channels") |
-| `notifications.email.global_smtp` | SMTP Defaults     | 600        | Below (target: "global-settings")    |
+| `notifications.email.global-smtp` | SMTP Defaults     | 600        | Below (target: "global-settings")    |
 
 Channel surfaces share the `tab_group` value `"Notification Channels"`, so they render as
 sections within a single "Notification Channels" tab on the Settings page rather than as separate
@@ -928,17 +928,19 @@ Each notification plugin handles its own surface actions. Common patterns:
 **Channel listing** (all plugins): delegates to the shared `list_channels` helper.
 
 **Settings management** (email plugin): the email plugin handles SMTP settings CRUD
-via surface actions rather than dedicated REST endpoints:
+via the `smtp` surface interaction rather than dedicated REST endpoints:
 
-- `get_smtp` -- returns current per-tenant SMTP settings plus `effective_*` fields showing the
-  resolved value after global/tenant merge, and `has_global_defaults: bool`
-- `save_smtp` -- receives flat params via surface invoke, performs patch-semantic updates on
-  per-tenant settings using raw-key settings store functions (`upsert_setting_raw`)
+- `smtp` GET (on the `notifications.email` surface) -- returns current per-tenant SMTP settings
+  plus `effective_*` fields showing the resolved value after global/tenant merge, and
+  `has_global_defaults: bool`
+- `smtp` PUT (on the `notifications.email` surface) -- receives flat params via surface invoke,
+  performs patch-semantic updates on per-tenant settings using raw-key settings store functions
+  (`upsert_setting_raw`)
 
-**Global SMTP defaults** (via the `notifications.email.global_smtp` surface):
+**Global SMTP defaults** (via the `notifications.email.global-smtp` surface):
 
-- `get_global_smtp` -- returns the server-wide SMTP default settings
-- `save_global_smtp` -- saves global SMTP defaults to the `global_settings` table using
+- `smtp` GET -- returns the server-wide SMTP default settings
+- `smtp` PUT -- saves global SMTP defaults to the `global_settings` table using
   `upsert_global_setting_raw`
 
 **Callback handling** (telegram plugin): `handle_callback` is a `NotificationTransport` trait method
@@ -965,8 +967,8 @@ settings key namespaces (e.g. `smtp.*`, `global_smtp.*`, `telegram.*`).
 
 When set on a form, the frontend invokes this action when the form modal opens and uses the
 response to populate field values. This avoids separate REST endpoints for read-before-edit
-flows. The `configure_smtp` action uses `FormDef.pre_load_action = "get_smtp"` so the frontend
-pre-populates the form with current SMTP values on open.
+flows. The `smtp` PUT interaction's form sets `FormDef.pre_load_action = "smtp"` (its own GET
+variant) so the frontend pre-populates the form with current SMTP values on open.
 
 ### `SchemaForm` pre-population
 

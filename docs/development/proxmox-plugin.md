@@ -35,12 +35,12 @@ Controller
  │    └── proxmox.hosts (Page), proxmox.host-info (Panel)
  └── Surface action dispatch
       └── proxmox::surfaces::handle_surface_action()
-           ├── list      → DB query
+           ├── mappings  → DB query
            ├── discover  → ProxmoxClient → persist_discovered_guests()
            ├── test-connection → ProxmoxClient::test_connection()
            ├── match     → matching::manual_match()
            ├── unmatch   → matching::unmatch()
-           └── get-info  → DB query
+           └── info      → DB query
 ```
 
 ## Module Structure
@@ -132,14 +132,14 @@ commands or REST routes exist.
 
 | Surface             | Action             | Parameters                                  | Description                                                          |
 | ------------------- | ------------------ | ------------------------------------------- | -------------------------------------------------------------------- |
-| `proxmox.hosts`     | `list`             | `plugin_config_id`                          | List discovered guests with inline match suggestions                 |
+| `proxmox.hosts`     | `mappings` (GET)   | `plugin_config_id`                          | List discovered guests with inline match suggestions                 |
 | `proxmox.hosts`     | `discover`         | `plugin_config_id`                          | Trigger discovery                                                    |
 | `proxmox.hosts`     | `test-connection`  | `plugin_config_id`                          | Test API connectivity                                                |
 | `proxmox.hosts`     | `match`            | `mapping_id`, `host_id`                     | Manual match                                                         |
 | `proxmox.hosts`     | `approve-match`    | `mapping_id`, `host_id`/`suggested_host_id` | Approve a suggested match (accepts `suggested_host_id` as fallback)  |
 | `proxmox.hosts`     | `unmatch`          | `mapping_id`                                | Remove match (destructive, confirmation dialog shows `proxmox_name`) |
 | `proxmox.hosts`     | `unmatched-guests` | (none)                                      | List unmatched guests sorted by name across all configs              |
-| `proxmox.host-info` | `get-info`         | `host_id`                                   | Get Proxmox info for host                                            |
+| `proxmox.host-info` | `info` (GET)       | `host_id`                                   | Get Proxmox info for host                                            |
 
 In the current shared-surface slice, `proxmox.hosts` is intentionally **not**
 rendered as the old selector-driven data table. The page currently exposes only
