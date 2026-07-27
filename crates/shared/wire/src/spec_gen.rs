@@ -15,6 +15,9 @@
 //! brief.
 
 #[cfg(feature = "schema")]
+use std::collections::BTreeMap;
+
+#[cfg(feature = "schema")]
 use serde_json::{Map, Value, json};
 
 /// Envelope fields injected into every message payload schema — the wire
@@ -161,10 +164,65 @@ fn merge_variant(
     variant
 }
 
+/// Strip the two fields that legitimately differ between the
+/// `ServiceMessage` and `ControllerMessage` renderings of the *same*
+/// discriminant (`surface_action_request`/`surface_action_response` are
+/// declared in both enums — see messages.rs): `description` (each enum
+/// documents the variant from its own side, different doc comment text) and
+/// `properties.pagination` (injected only for `service_side`, mirroring the
+/// real `ServiceEnvelope`/`ControllerEnvelope` asymmetry in envelope.rs — not
+/// a property of the message itself). Anything else that differs after this
+/// normalization is a genuine divergence.
+#[cfg(feature = "schema")]
+fn normalize_for_direction_comparison(value: &Value) -> Value {
+    let mut value = value.clone();
+    if let Some(obj) = value.as_object_mut() {
+        obj.remove("description");
+        if let Some(Value::Object(props)) = obj.get_mut("properties") {
+            props.remove("pagination");
+        }
+    }
+    value
+}
+
+/// Insert `(key, value)` into `map`, tolerating a re-insert of the *same*
+/// key when the two values are equal up to the known, by-design
+/// service/controller asymmetry (see `normalize_for_direction_comparison`).
+/// When both carry `pagination`-bearing content, the entry that documents it
+/// wins — the field is always optional, so documenting it on the direction
+/// that never sends it is harmless and strictly more informative. Panics
+/// loudly on any other divergence — that would be a real bug, not a
+/// legitimate duplicate.
+#[cfg(feature = "schema")]
+fn insert_or_assert_same(map: &mut Map<String, Value>, key: String, value: Value) {
+    if let Some(existing) = map.get(&key) {
+        assert_eq!(
+            normalize_for_direction_comparison(existing),
+            normalize_for_direction_comparison(&value),
+            "key {key:?} inserted twice with incompatible schemas (beyond the expected \
+             description/pagination direction asymmetry) — ServiceMessage/ControllerMessage \
+             discriminant collision has diverged: existing={existing:?} new={value:?}"
+        );
+        let existing_has_pagination = existing
+            .get("properties")
+            .and_then(|p| p.get("pagination"))
+            .is_some();
+        if !existing_has_pagination {
+            map.insert(key, value);
+        }
+        return;
+    }
+    map.insert(key, value);
+}
+
 /// Assemble the complete AsyncAPI 3.0.0 document from the schemars output of
 /// the wire message enums and envelope helper types. Deterministic: two
-/// successive calls produce byte-identical output (`serde_json::Map` is
-/// `BTreeMap`-backed, so key order is stable regardless of insertion order).
+/// successive calls produce byte-identical output. `serde_json::Map` is
+/// `IndexMap`-backed here (the workspace enables schemars' `preserve_order`
+/// feature, which also turns on serde_json's), i.e. **insertion order**, not
+/// alphabetical — so `schemas`/`messages` are sorted into `BTreeMap`s before
+/// being handed to `json!` below, keeping output byte-stable independent of
+/// iteration order over the two schemars calls.
 #[cfg(feature = "schema")]
 pub(crate) fn generate_asyncapi_yaml() -> String {
     let mut schemas: Map<String, Value> = Map::new();
@@ -177,10 +235,10 @@ pub(crate) fn generate_asyncapi_yaml() -> String {
         (schemars::schema_for!(crate::ControllerMessage), false),
     ] {
         let mut root = serde_json::to_value(&enum_schema).expect("schema to JSON");
-        rewrite_refs(&mut root);
 
-        // Hoist shared definitions first, so merge_variant can look payload
-        // structs up by name.
+        // Hoist shared definitions first (RAW, pre-rewrite — merge_variant
+        // below matches `$ref`s in their original `#/$defs/Foo` form), so
+        // merge_variant can look payload structs up by name.
         let mut defs = Map::new();
         if let Some(Value::Object(d)) = root
             .as_object_mut()
@@ -224,9 +282,16 @@ pub(crate) fn generate_asyncapi_yaml() -> String {
                 required.push(json!(r));
             }
 
+            // Now that the payload struct's own fields (which may themselves
+            // reference other `$defs` entries, e.g. `Capability`) are folded
+            // in, rewrite every `#/$defs/Foo` ref in the merged object to
+            // `#/components/schemas/Foo`.
+            rewrite_refs(&mut merged);
+
             let payload_schema_key = format!("{discriminant}Payload");
-            schemas.insert(payload_schema_key.clone(), merged);
-            messages.insert(
+            insert_or_assert_same(&mut schemas, payload_schema_key.clone(), merged);
+            insert_or_assert_same(
+                &mut messages,
                 discriminant.clone(),
                 json!({
                     "name": discriminant,
@@ -248,7 +313,7 @@ pub(crate) fn generate_asyncapi_yaml() -> String {
                 continue;
             }
             rewrite_refs(&mut def);
-            schemas.insert(name, def);
+            insert_or_assert_same(&mut schemas, name, def);
         }
     }
 
@@ -271,6 +336,13 @@ pub(crate) fn generate_asyncapi_yaml() -> String {
         obj.remove("$schema");
         schemas.insert(name.to_string(), s);
     }
+
+    // `schemas`/`messages` are `IndexMap`-backed (insertion order, see the
+    // doc comment above); sort them into `BTreeMap`s so the golden document
+    // is byte-stable independent of the order the two schemars calls (and
+    // their internal $defs ordering) happen to produce.
+    let schemas: BTreeMap<String, Value> = schemas.into_iter().collect();
+    let messages: BTreeMap<String, Value> = messages.into_iter().collect();
 
     service_message_names.sort();
     controller_message_names.sort();
@@ -354,6 +426,51 @@ fn generated_doc_has_no_dangling_refs() {
             panic!("ref outside known namespaces: {r}");
         }
     }
+}
+
+#[cfg(feature = "schema")]
+#[test]
+fn enroll_payload_is_complete_after_merge() {
+    // Regression guard: `merge_variant` must actually fold the referenced
+    // `$defs` payload struct's fields into the message schema. `EnrollPayload`
+    // (message "enroll") has real named fields — if the merge silently
+    // no-ops (e.g. because refs were already rewritten to
+    // `#/components/schemas/...` before the merge ran its `#/$defs/` prefix
+    // match), the payload schema below would contain only the envelope
+    // fields plus a leftover `$ref`, and the raw `EnrollPayload` `$defs`
+    // entry would survive unreferenced under its own name.
+    let yaml = generate_asyncapi_yaml();
+    let doc: Value = serde_yaml_ng::from_str(&yaml).expect("parse");
+    let schemas = doc["components"]["schemas"].as_object().expect("schemas");
+
+    let enroll_payload = schemas
+        .get("enrollPayload")
+        .expect("enrollPayload schema present");
+    assert!(
+        enroll_payload.get("$ref").is_none(),
+        "enrollPayload still carries a raw $ref — merge did not run: {enroll_payload:?}"
+    );
+    let props = enroll_payload["properties"]
+        .as_object()
+        .expect("properties");
+    for field in [
+        "hostname",
+        "friendly_name",
+        "capabilities",
+        "service_app_name",
+    ] {
+        assert!(
+            props.contains_key(field),
+            "enrollPayload missing real field {field:?} — merge did not fold payload fields in: {props:?}"
+        );
+    }
+
+    // The raw `$defs`-named twin must not survive as an orphaned,
+    // unreferenced schema after the merge.
+    assert!(
+        !schemas.contains_key("EnrollPayload"),
+        "orphaned EnrollPayload $defs entry was not dropped after merge"
+    );
 }
 
 #[cfg(feature = "schema")]
