@@ -54,13 +54,7 @@ impl From<String> for AttestationStatus {
 
 impl Serialize for AttestationStatus {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let s = match self {
-            Self::Verified => "Verified",
-            Self::NotFound => "NotFound",
-            Self::Unverified => "Unverified",
-            Self::Other(s) => s.as_str(),
-        };
-        serializer.serialize_str(s)
+        serializer.serialize_str(self.as_str())
     }
 }
 

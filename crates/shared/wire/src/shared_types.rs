@@ -200,34 +200,37 @@ impl schemars::JsonSchema for DisconnectReason {
     }
 }
 
-#[cfg(all(test, feature = "schema"))]
-mod schema_tests {
-    use super::*;
+#[cfg(test)]
+mod tests {
+    #[cfg(feature = "schema")]
+    mod schema_tests {
+        use super::super::*;
 
-    fn assert_open_string_schema<T: schemars::JsonSchema>(known: &[&str]) {
-        let schema = schemars::schema_for!(T);
-        let value = serde_json::to_value(&schema).expect("schema to JSON");
-        assert_eq!(value["type"], "string");
-        assert!(
-            value.get("enum").is_none(),
-            "must be an open string schema, found closed enum list: {value}"
-        );
-        let desc = value["description"].as_str().expect("description present");
-        for k in known {
+        fn assert_open_string_schema<T: schemars::JsonSchema>(known: &[&str]) {
+            let schema = schemars::schema_for!(T);
+            let value = serde_json::to_value(&schema).expect("schema to JSON");
+            assert_eq!(value["type"], "string");
             assert!(
-                desc.contains(k),
-                "known value {k} missing from description: {desc}"
+                value.get("enum").is_none(),
+                "must be an open string schema, found closed enum list: {value}"
             );
+            let desc = value["description"].as_str().expect("description present");
+            for k in known {
+                assert!(
+                    desc.contains(k),
+                    "known value {k} missing from description: {desc}"
+                );
+            }
         }
-    }
 
-    #[test]
-    fn update_final_status_schema_is_open_string_with_known_values() {
-        assert_open_string_schema::<UpdateFinalStatus>(&["completed", "failed"]);
-    }
+        #[test]
+        fn update_final_status_schema_is_open_string_with_known_values() {
+            assert_open_string_schema::<UpdateFinalStatus>(&["completed", "failed"]);
+        }
 
-    #[test]
-    fn disconnect_reason_schema_is_open_string_with_known_values() {
-        assert_open_string_schema::<DisconnectReason>(&["shutdown", "restart"]);
+        #[test]
+        fn disconnect_reason_schema_is_open_string_with_known_values() {
+            assert_open_string_schema::<DisconnectReason>(&["shutdown", "restart"]);
+        }
     }
 }

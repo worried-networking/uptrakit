@@ -452,45 +452,48 @@ impl schemars::JsonSchema for ErrorCode {
     }
 }
 
-#[cfg(all(test, feature = "schema"))]
-mod schema_tests {
-    use super::*;
+#[cfg(test)]
+mod tests {
+    #[cfg(feature = "schema")]
+    mod schema_tests {
+        use super::super::*;
 
-    // Spec §6: manual impls must emit an OPEN string schema — never a closed
-    // enum list (the Other(String) catch-all makes the value space open).
-    fn assert_open_string_schema<T: schemars::JsonSchema>(known: &[&str]) {
-        let schema = schemars::schema_for!(T);
-        let value = serde_json::to_value(&schema).expect("schema to JSON");
-        assert_eq!(value["type"], "string");
-        assert!(
-            value.get("enum").is_none(),
-            "must be an open string schema, found closed enum list: {value}"
-        );
-        let desc = value["description"].as_str().expect("description present");
-        for k in known {
+        // Spec §6: manual impls must emit an OPEN string schema — never a closed
+        // enum list (the Other(String) catch-all makes the value space open).
+        fn assert_open_string_schema<T: schemars::JsonSchema>(known: &[&str]) {
+            let schema = schemars::schema_for!(T);
+            let value = serde_json::to_value(&schema).expect("schema to JSON");
+            assert_eq!(value["type"], "string");
             assert!(
-                desc.contains(k),
-                "known value {k} missing from description: {desc}"
+                value.get("enum").is_none(),
+                "must be an open string schema, found closed enum list: {value}"
             );
+            let desc = value["description"].as_str().expect("description present");
+            for k in known {
+                assert!(
+                    desc.contains(k),
+                    "known value {k} missing from description: {desc}"
+                );
+            }
         }
-    }
 
-    #[test]
-    fn capability_schema_is_open_string_with_known_values() {
-        assert_open_string_schema::<Capability>(&[
-            "graceful_shutdown",
-            "workload_claims",
-            "ui_surfaces",
-        ]);
-    }
+        #[test]
+        fn capability_schema_is_open_string_with_known_values() {
+            assert_open_string_schema::<Capability>(&[
+                "graceful_shutdown",
+                "workload_claims",
+                "ui_surfaces",
+            ]);
+        }
 
-    #[test]
-    fn enrollment_status_schema_is_open_string_with_known_values() {
-        assert_open_string_schema::<EnrollmentStatus>(&["pending", "approved"]);
-    }
+        #[test]
+        fn enrollment_status_schema_is_open_string_with_known_values() {
+            assert_open_string_schema::<EnrollmentStatus>(&["pending", "approved"]);
+        }
 
-    #[test]
-    fn error_code_schema_is_open_string_with_known_values() {
-        assert_open_string_schema::<ErrorCode>(&["bad_request", "forbidden", "internal_error"]);
+        #[test]
+        fn error_code_schema_is_open_string_with_known_values() {
+            assert_open_string_schema::<ErrorCode>(&["bad_request", "forbidden", "internal_error"]);
+        }
     }
 }
