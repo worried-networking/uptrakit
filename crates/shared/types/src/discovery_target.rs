@@ -52,7 +52,6 @@ pub struct DiscoveryTarget {
     /// Which roles this target covers.
     ///
     /// Typically all three: `DetectVersion`, `FetchReleases`, `ExecuteUpdate`.
-    #[cfg_attr(feature = "schema", schemars(with = "Vec<String>"))]
     pub roles: Vec<PluginRole>,
 
     /// Package identifier override (None = same as parent `DiscoveredSoftware`).

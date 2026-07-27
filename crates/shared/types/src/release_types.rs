@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 /// allowing older agents and web-API clients to survive rolling upgrades.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "schema", derive(strum::EnumIter))]
 #[non_exhaustive]
 pub enum AttestationStatus {
     /// At least one release asset was verified via the GitHub Attestations API.
@@ -23,6 +24,21 @@ pub enum AttestationStatus {
     Unverified,
     /// An unknown attestation status received from a newer peer.
     Other(String),
+}
+
+impl AttestationStatus {
+    /// Returns the wire-format string for this status (PascalCase, matching the
+    /// hand-written `Serialize` impl).
+    ///
+    /// For [`AttestationStatus::Other`], returns the inner string as-is.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Verified => "Verified",
+            Self::NotFound => "NotFound",
+            Self::Unverified => "Unverified",
+            Self::Other(s) => s.as_str(),
+        }
+    }
 }
 
 impl From<String> for AttestationStatus {
@@ -51,6 +67,70 @@ impl Serialize for AttestationStatus {
 impl<'de> Deserialize<'de> for AttestationStatus {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         String::deserialize(deserializer).map(AttestationStatus::from)
+    }
+}
+
+// ── JSON Schema impl ──────────────────────────────────────────────────────────
+//
+// `derive(schemars::JsonSchema)` would document Rust variant identifiers rather
+// than the wire strings — a silent semantic bug (spec §1). Open string schema:
+// no `"enum"` array (the `Other(String)` catch-all makes the value space open).
+// Known-value list derived via `strum::EnumIter` from the same `as_str()` arm
+// in the hand-written `Serialize` impl uses — a hardcoded list would drift.
+//
+// Note: this type uses PascalCase wire strings ("Verified", "NotFound") —
+// derived from the match arms in `Serialize`, not snake_case.
+
+#[cfg(feature = "schema")]
+impl schemars::JsonSchema for AttestationStatus {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("AttestationStatus")
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        use strum::IntoEnumIterator;
+        // `as_str()` mirrors the Serialize arm (PascalCase: "Verified", etc.).
+        let known: Vec<String> = AttestationStatus::iter()
+            .filter(|v| !matches!(v, Self::Other(_)))
+            .map(|v| v.as_str().to_string())
+            .collect();
+        schemars::json_schema!({
+            "type": "string",
+            "description": format!(
+                "Open wire string (unknown values are forward-compatible). Known values: {}.",
+                known.join(", ")
+            ),
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(feature = "schema")]
+    mod schema_tests {
+        use super::super::*;
+
+        fn assert_open_string_schema<T: schemars::JsonSchema>(known: &[&str]) {
+            let schema = schemars::schema_for!(T);
+            let value = serde_json::to_value(&schema).expect("schema to JSON");
+            assert_eq!(value["type"], "string");
+            assert!(
+                value.get("enum").is_none(),
+                "must be an open string schema, found closed enum list: {value}"
+            );
+            let desc = value["description"].as_str().expect("description present");
+            for k in known {
+                assert!(
+                    desc.contains(k),
+                    "known value {k} missing from description: {desc}"
+                );
+            }
+        }
+
+        #[test]
+        fn attestation_status_schema_is_open_string_with_known_values() {
+            assert_open_string_schema::<AttestationStatus>(&["Verified", "NotFound", "Unverified"]);
+        }
     }
 }
 
@@ -88,7 +168,6 @@ pub struct ReleaseInfo {
     /// Set by the controller from the most recent `fetch_releases` run.
     /// `None` means the check was never performed or the source is not GitHub.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
     pub attestation_status: Option<AttestationStatus>,
     /// When `true`, the agent must abort the update if attestation is not `Verified`.
     ///

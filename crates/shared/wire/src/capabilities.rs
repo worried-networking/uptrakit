@@ -14,6 +14,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// Capabilities are serialized as plain strings (snake_case). Unknown strings from
 /// a newer peer become `Other(String)` for forward compatibility.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "schema", derive(strum::EnumIter))]
 #[non_exhaustive]
 pub enum Capability {
     /// Service participates in the graceful-shutdown protocol: sends
@@ -219,6 +220,7 @@ impl<'de> Deserialize<'de> for Capability {
 /// the enclosing `Enrolled` message.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(strum::EnumIter))]
 pub enum EnrollmentStatus {
     Pending,
     Approved,
@@ -286,6 +288,7 @@ impl<'de> Deserialize<'de> for EnrollmentStatus {
 /// the enclosing `Error` message.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(strum::EnumIter))]
 pub enum ErrorCode {
     /// Malformed or unexpected message from the service.
     BadRequest,
@@ -368,7 +371,126 @@ impl<'de> Deserialize<'de> for ErrorCode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ErrorPayload {
-    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub code: ErrorCode,
     pub message: String,
+}
+
+// ── JSON Schema impls for custom-serde enums ──────────────────────────────────
+//
+// `derive(schemars::JsonSchema)` would document the Rust variant identifiers
+// (PascalCase) rather than the wire strings — a silent semantic bug (spec §1).
+// These hand-written impls emit an OPEN string schema instead: `"type": "string"`
+// with known wire strings in the description and NO `"enum"` array, because the
+// `Other(String)` catch-all makes the value space open-ended.
+//
+// Known-value lists are derived via `strum::EnumIter` from the same `as_str()`
+// the `Serialize` impl uses — a hardcoded list here would drift silently.
+
+#[cfg(feature = "schema")]
+impl schemars::JsonSchema for Capability {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("Capability")
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        use strum::IntoEnumIterator;
+        let known: Vec<String> = Capability::iter()
+            .filter(Capability::is_known)
+            .map(|c| c.as_str().to_string())
+            .collect();
+        schemars::json_schema!({
+            "type": "string",
+            "description": format!(
+                "Open wire string (unknown values are forward-compatible). Known values: {}.",
+                known.join(", ")
+            ),
+        })
+    }
+}
+
+#[cfg(feature = "schema")]
+impl schemars::JsonSchema for EnrollmentStatus {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("EnrollmentStatus")
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        use strum::IntoEnumIterator;
+        let known: Vec<String> = EnrollmentStatus::iter()
+            .filter(|v| !matches!(v, Self::Other(_)))
+            .map(|v| v.as_str().to_string())
+            .collect();
+        schemars::json_schema!({
+            "type": "string",
+            "description": format!(
+                "Open wire string (unknown values are forward-compatible). Known values: {}.",
+                known.join(", ")
+            ),
+        })
+    }
+}
+
+#[cfg(feature = "schema")]
+impl schemars::JsonSchema for ErrorCode {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("ErrorCode")
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        use strum::IntoEnumIterator;
+        let known: Vec<String> = ErrorCode::iter()
+            .filter(|v| !matches!(v, Self::Other(_)))
+            .map(|v| v.as_str().to_string())
+            .collect();
+        schemars::json_schema!({
+            "type": "string",
+            "description": format!(
+                "Open wire string (unknown values are forward-compatible). Known values: {}.",
+                known.join(", ")
+            ),
+        })
+    }
+}
+
+#[cfg(all(test, feature = "schema"))]
+mod schema_tests {
+    use super::*;
+
+    // Spec §6: manual impls must emit an OPEN string schema — never a closed
+    // enum list (the Other(String) catch-all makes the value space open).
+    fn assert_open_string_schema<T: schemars::JsonSchema>(known: &[&str]) {
+        let schema = schemars::schema_for!(T);
+        let value = serde_json::to_value(&schema).expect("schema to JSON");
+        assert_eq!(value["type"], "string");
+        assert!(
+            value.get("enum").is_none(),
+            "must be an open string schema, found closed enum list: {value}"
+        );
+        let desc = value["description"].as_str().expect("description present");
+        for k in known {
+            assert!(
+                desc.contains(k),
+                "known value {k} missing from description: {desc}"
+            );
+        }
+    }
+
+    #[test]
+    fn capability_schema_is_open_string_with_known_values() {
+        assert_open_string_schema::<Capability>(&[
+            "graceful_shutdown",
+            "workload_claims",
+            "ui_surfaces",
+        ]);
+    }
+
+    #[test]
+    fn enrollment_status_schema_is_open_string_with_known_values() {
+        assert_open_string_schema::<EnrollmentStatus>(&["pending", "approved"]);
+    }
+
+    #[test]
+    fn error_code_schema_is_open_string_with_known_values() {
+        assert_open_string_schema::<ErrorCode>(&["bad_request", "forbidden", "internal_error"]);
+    }
 }

@@ -24,6 +24,7 @@ use thiserror::Error;
 /// explicitly needs to distinguish known variants from unknown ones.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
+#[cfg_attr(feature = "schema", derive(strum::EnumIter))]
 pub enum PluginRole {
     /// Detects the installed version on the agent host.
     DetectVersion,
@@ -142,6 +143,36 @@ impl<'de> Deserialize<'de> for PluginRole {
         // Deserialize as a plain string, then convert via From<String>.
         // Unknown strings become Other(s) — this conversion is infallible.
         String::deserialize(deserializer).map(PluginRole::from)
+    }
+}
+
+// ── JSON Schema impl ──────────────────────────────────────────────────────────
+//
+// `derive(schemars::JsonSchema)` would document Rust variant identifiers rather
+// than the wire strings — a silent semantic bug (spec §1). Open string schema:
+// no `"enum"` array (the `Other(String)` catch-all makes the value space open).
+// Known-value list derived via `strum::EnumIter` from the same `as_str()` the
+// `Serialize` impl uses — a hardcoded list here would drift silently.
+
+#[cfg(feature = "schema")]
+impl schemars::JsonSchema for PluginRole {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("PluginRole")
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        use strum::IntoEnumIterator;
+        let known: Vec<String> = PluginRole::iter()
+            .filter(|v| !matches!(v, Self::Other(_)))
+            .map(|v| v.as_str().to_string())
+            .collect();
+        schemars::json_schema!({
+            "type": "string",
+            "description": format!(
+                "Open wire string (unknown values are forward-compatible). Known values: {}.",
+                known.join(", ")
+            ),
+        })
     }
 }
 
@@ -380,6 +411,39 @@ mod tests {
     /// catch-all, so it cannot derive `strum::EnumIter`; the known variants are listed
     /// explicitly here (same pattern as the other wire-safe enums). If the schema array
     /// is edited inconsistently with `as_str`, this fails.
+    #[cfg(feature = "schema")]
+    mod schema_tests {
+        use super::*;
+
+        fn assert_open_string_schema<T: schemars::JsonSchema>(known: &[&str]) {
+            let schema = schemars::schema_for!(T);
+            let value = serde_json::to_value(&schema).expect("schema to JSON");
+            assert_eq!(value["type"], "string");
+            assert!(
+                value.get("enum").is_none(),
+                "must be an open string schema, found closed enum list: {value}"
+            );
+            let desc = value["description"].as_str().expect("description present");
+            for k in known {
+                assert!(
+                    desc.contains(k),
+                    "known value {k} missing from description: {desc}"
+                );
+            }
+        }
+
+        #[test]
+        fn plugin_role_schema_is_open_string_with_known_values() {
+            assert_open_string_schema::<PluginRole>(&[
+                "detect_version",
+                "fetch_releases",
+                "execute_update",
+                "pre_update_hook",
+                "post_update_hook",
+            ]);
+        }
+    }
+
     #[cfg(feature = "openapi")]
     #[test]
     fn plugin_role_schema_enum_values_match_wire_strings() {

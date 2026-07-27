@@ -192,6 +192,11 @@ macro_rules! impl_report_conversion {
 ///    — emits a `{ "type": "string", "enum": [...wire strings...] }` schema (the
 ///    `=> "..."` RHS values, excluding `Other`). Only compiled when the invoking
 ///    crate enables an `openapi` feature; inert (and `utoipa`-free) otherwise.
+/// 10. `#[cfg(feature = "schema")] impl schemars::JsonSchema for MyEnum` — emits
+///     an OPEN string schema `{ "type": "string", "description": "... Known values:
+///     ..." }` with no `"enum"` array (the `Other` catch-all makes the value space
+///     open). Wire strings are derived from the macro's `=> "..."` inputs, not
+///     hardcoded. Only compiled when the invoking crate enables a `schema` feature.
 ///
 /// # Constraints
 ///
@@ -320,6 +325,27 @@ macro_rules! wire_safe_enum {
         impl ::utoipa::ToSchema for $name {
             fn name() -> ::std::borrow::Cow<'static, str> {
                 ::std::borrow::Cow::Borrowed(::std::stringify!($name))
+            }
+        }
+
+        // JSON Schema (schemars) describing the *serde wire format* — the
+        // schemars mirror of the utoipa impl above. Open string schema: the
+        // Other catch-all makes the value space open, so no closed enum list.
+        // `cfg(feature = "schema")` is evaluated in the *invoking* crate.
+        #[cfg(feature = "schema")]
+        impl ::schemars::JsonSchema for $name {
+            fn schema_name() -> ::std::borrow::Cow<'static, str> {
+                ::std::borrow::Cow::Borrowed(::std::stringify!($name))
+            }
+
+            fn json_schema(_: &mut ::schemars::SchemaGenerator) -> ::schemars::Schema {
+                ::schemars::json_schema!({
+                    "type": "string",
+                    "description": ::std::format!(
+                        "Open wire string (unknown values are forward-compatible). Known values: {}.",
+                        [$($wire),+].join(", ")
+                    ),
+                })
             }
         }
     };

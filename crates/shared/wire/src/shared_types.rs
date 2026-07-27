@@ -23,6 +23,7 @@ pub fn now_millis() -> Timestamp {
 /// dropping the enclosing `UpdateResult` message.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(strum::EnumIter))]
 pub enum UpdateFinalStatus {
     Completed,
     Failed,
@@ -91,6 +92,7 @@ pub(crate) fn default_update_timeout() -> std::time::Duration {
 /// error, allowing rolling upgrades without dropping the `Disconnecting` message.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(strum::EnumIter))]
 pub enum DisconnectReason {
     /// SIGTERM/SIGINT - clean exit.
     Shutdown,
@@ -140,5 +142,92 @@ impl Serialize for DisconnectReason {
 impl<'de> Deserialize<'de> for DisconnectReason {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         String::deserialize(deserializer).map(DisconnectReason::from)
+    }
+}
+
+// ── JSON Schema impls for custom-serde enums ──────────────────────────────────
+//
+// `derive(schemars::JsonSchema)` would document the Rust variant identifiers
+// rather than the wire strings — a silent semantic bug (spec §1). These
+// hand-written impls emit an OPEN string schema: `"type": "string"` with known
+// wire strings in the description and NO `"enum"` array, because the
+// `Other(String)` catch-all makes the value space open-ended.
+//
+// Known-value lists are derived via `strum::EnumIter` from the same `as_str()`
+// the `Serialize` impl uses — a hardcoded list here would drift silently.
+
+#[cfg(feature = "schema")]
+impl schemars::JsonSchema for UpdateFinalStatus {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("UpdateFinalStatus")
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        use strum::IntoEnumIterator;
+        let known: Vec<String> = UpdateFinalStatus::iter()
+            .filter(|v| !matches!(v, Self::Other(_)))
+            .map(|v| v.as_str().to_string())
+            .collect();
+        schemars::json_schema!({
+            "type": "string",
+            "description": format!(
+                "Open wire string (unknown values are forward-compatible). Known values: {}.",
+                known.join(", ")
+            ),
+        })
+    }
+}
+
+#[cfg(feature = "schema")]
+impl schemars::JsonSchema for DisconnectReason {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("DisconnectReason")
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        use strum::IntoEnumIterator;
+        let known: Vec<String> = DisconnectReason::iter()
+            .filter(|v| !matches!(v, Self::Other(_)))
+            .map(|v| v.as_str().to_string())
+            .collect();
+        schemars::json_schema!({
+            "type": "string",
+            "description": format!(
+                "Open wire string (unknown values are forward-compatible). Known values: {}.",
+                known.join(", ")
+            ),
+        })
+    }
+}
+
+#[cfg(all(test, feature = "schema"))]
+mod schema_tests {
+    use super::*;
+
+    fn assert_open_string_schema<T: schemars::JsonSchema>(known: &[&str]) {
+        let schema = schemars::schema_for!(T);
+        let value = serde_json::to_value(&schema).expect("schema to JSON");
+        assert_eq!(value["type"], "string");
+        assert!(
+            value.get("enum").is_none(),
+            "must be an open string schema, found closed enum list: {value}"
+        );
+        let desc = value["description"].as_str().expect("description present");
+        for k in known {
+            assert!(
+                desc.contains(k),
+                "known value {k} missing from description: {desc}"
+            );
+        }
+    }
+
+    #[test]
+    fn update_final_status_schema_is_open_string_with_known_values() {
+        assert_open_string_schema::<UpdateFinalStatus>(&["completed", "failed"]);
+    }
+
+    #[test]
+    fn disconnect_reason_schema_is_open_string_with_known_values() {
+        assert_open_string_schema::<DisconnectReason>(&["shutdown", "restart"]);
     }
 }

@@ -500,6 +500,35 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "schema")]
+    mod schema_tests {
+        use super::*;
+
+        fn assert_open_string_schema<T: schemars::JsonSchema>(known: &[&str]) {
+            let schema = schemars::schema_for!(T);
+            let value = serde_json::to_value(&schema).expect("schema to JSON");
+            assert_eq!(value["type"], "string");
+            assert!(
+                value.get("enum").is_none(),
+                "must be an open string schema, found closed enum list: {value}"
+            );
+            let desc = value["description"].as_str().expect("description present");
+            for k in known {
+                assert!(
+                    desc.contains(k),
+                    "known value {k} missing from description: {desc}"
+                );
+            }
+        }
+
+        /// Covers the `wire_safe_enum!` schemars arm: verifies that macro-generated
+        /// `JsonSchema` impls produce open string schemas, not closed enum lists.
+        #[test]
+        fn interaction_http_method_schema_is_open_string_with_known_values() {
+            assert_open_string_schema::<InteractionHttpMethod>(&["get", "post"]);
+        }
+    }
+
     #[test]
     fn http_method_round_trips_wire_string() {
         assert_eq!(

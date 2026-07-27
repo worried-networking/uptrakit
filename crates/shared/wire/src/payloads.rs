@@ -106,10 +106,6 @@ pub struct EnrollPayload {
     ///
     /// The controller persists these in the `services.capabilities` column and
     /// derives behavioral defaults from the resulting [`ServiceProfile`](crate::ServiceProfile).
-    #[cfg_attr(
-        feature = "schema",
-        schemars(with = "std::collections::BTreeSet<String>")
-    )]
     pub capabilities: BTreeSet<Capability>,
     /// The binary/crate name of the enrolling service (e.g., `"uptrakit-agent-ssh"`).
     ///
@@ -150,10 +146,6 @@ pub struct ReportHostsPayload {
     /// The controller computes the agreed set as the intersection of this set
     /// with its own capabilities, considering only typed (known) variants.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
-    #[cfg_attr(
-        feature = "schema",
-        schemars(with = "std::collections::BTreeSet<String>")
-    )]
     pub capabilities: BTreeSet<Capability>,
 }
 
@@ -164,7 +156,6 @@ pub struct EnrolledPayload {
     pub service_id: Uuid,
     #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub enrollment_secret: SecretString,
-    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub status: EnrollmentStatus,
 }
 
@@ -209,10 +200,6 @@ pub struct ServiceSettingsPayload {
     /// The service computes the agreed set as the intersection of this set
     /// with its own capabilities, considering only typed (known) variants.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
-    #[cfg_attr(
-        feature = "schema",
-        schemars(with = "std::collections::BTreeSet<String>")
-    )]
     pub capabilities: BTreeSet<Capability>,
     /// Per-page item-count limits for paginated service-to-controller reports.
     ///
@@ -462,7 +449,6 @@ pub struct VersionCheckResult {
     /// Classification of the available update (e.g. security, bugfix).
     /// Defaults to `Unknown` when the plugin cannot classify the update.
     #[serde(default)]
-    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub update_category: UpdateCategory,
     /// Host software item ID for routing results to the host_software_items table.
     /// Mirrors the value from the corresponding [`VersionCheckAssignment`].
@@ -569,7 +555,6 @@ pub struct UpdateOutputPayload {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UpdateResultPayload {
     pub update_history_id: Uuid,
-    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub status: UpdateFinalStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub from_version: Option<String>,
@@ -668,7 +653,6 @@ pub struct BatchUpdateItemResult {
     /// Update history record ID.
     pub update_history_id: Uuid,
     /// Final status of this item's update.
-    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub status: UpdateFinalStatus,
     /// Accumulated output from the update.
     pub output: String,
@@ -706,7 +690,6 @@ pub struct SetUpdateFreezePayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DisconnectingPayload {
-    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub reason: DisconnectReason,
 }
 
@@ -732,10 +715,6 @@ impl DisconnectingPayload {
 pub struct RegisterPayload {
     /// Capabilities declared by this service instance.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
-    #[cfg_attr(
-        feature = "schema",
-        schemars(with = "std::collections::BTreeSet<String>")
-    )]
     pub capabilities: BTreeSet<Capability>,
     /// Runtime instance identity for restart-vs-reconnect detection.
     ///
