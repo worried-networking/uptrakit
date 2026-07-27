@@ -210,7 +210,7 @@ fn docker_item_host_actions_surface_keeps_form_preload_contract() {
             .pre_load_interaction_id
             .as_ref()
             .map(|interaction| interaction.as_str()),
-        Some("get-current-tag")
+        Some("current-tag")
     );
     assert_eq!(
         switch_tag_form
@@ -224,8 +224,8 @@ fn docker_item_host_actions_surface_keeps_form_preload_contract() {
     let get_current_tag = docker_surface
         .interactions
         .iter()
-        .find(|interaction| interaction.interaction_id.as_str() == "get-current-tag")
-        .expect("get-current-tag interaction should exist");
+        .find(|interaction| interaction.interaction_id.as_str() == "current-tag")
+        .expect("current-tag interaction should exist");
     assert_eq!(get_current_tag.kind, surfaces::InteractionKind::DataLoad);
     assert_eq!(
         get_current_tag.required_permission.as_deref(),

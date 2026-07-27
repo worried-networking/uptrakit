@@ -370,7 +370,7 @@ pub(crate) fn docker_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                             },
                         ],
                         pre_load_interaction_id: Some(
-                            surfaces::InteractionId::new("get-current-tag")
+                            surfaces::InteractionId::new("current-tag")
                                 .expect("literal interaction id is valid"),
                         ),
                     });
@@ -381,7 +381,7 @@ pub(crate) fn docker_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
             RegisteredInteraction::new(
                 {
                     let mut i = surfaces::InteractionDescriptor::new(
-                        surfaces::InteractionId::new("get-current-tag")
+                        surfaces::InteractionId::new("current-tag")
                             .expect("literal interaction id is valid"),
                         surfaces::InteractionKind::DataLoad,
                         "Load current tag",

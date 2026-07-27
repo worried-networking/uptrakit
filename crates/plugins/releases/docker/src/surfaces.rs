@@ -5,7 +5,7 @@
 //! 1. The frontend opens the context menu on a host row that has a Docker
 //!    plugin assignment.
 //! 2. The user clicks **Switch Tag** — the form pre-loads the current image
-//!    reference (without `#container` suffix) via `get-current-tag`.
+//!    reference (without `#container` suffix) via `current-tag`.
 //! 3. The user edits the tag and submits — `switch-tag` updates all
 //!    `host_software_item_plugin` rows and the `host_software_item` row,
 //!    then clears stale version data so the next check reflects the new tag.
@@ -24,7 +24,7 @@ use crate::image_ref::{ImageRef, validate_identifier};
 
 // ── Docker surface-action request types ─────────────────────────────────────
 
-/// Typed host/software-item request for the `get-current-tag` surface action.
+/// Typed host/software-item request for the `current-tag` surface action.
 #[derive(Debug, serde::Deserialize)]
 struct DockerItemHostRequest {
     pub host_id: uuid::Uuid,
@@ -74,7 +74,7 @@ pub(crate) fn docker_switch_tag_handler<'a>(
     })
 }
 
-/// Dispatch shim for the `get-current-tag` interaction (exact-id dispatch map entry).
+/// Dispatch shim for the `current-tag` interaction (exact-id dispatch map entry).
 pub(crate) fn docker_get_current_tag_handler<'a>(
     ctx: &'a SurfaceActionContext<'a>,
     params: serde_json::Value,
@@ -84,7 +84,7 @@ pub(crate) fn docker_get_current_tag_handler<'a>(
     >,
 > {
     Box::pin(async move {
-        let request = parse_action_params::<DockerItemHostRequest>(params, "get-current-tag")?;
+        let request = parse_action_params::<DockerItemHostRequest>(params, "current-tag")?;
         handle_get_current_tag(ctx, request).await
     })
 }
@@ -299,7 +299,7 @@ mod tests {
             ),
             (
                 "docker.item-host-actions",
-                "get-current-tag",
+                "current-tag",
                 InteractionDeliveryKind::PluginHandled,
             ),
         ];
@@ -334,12 +334,12 @@ mod tests {
         let params = serde_json::json!({
             "software_item_id": "01944c3c-6a3a-7000-8000-000000000002",
         });
-        let error = parse_action_params::<DockerItemHostRequest>(params, "get-current-tag")
+        let error = parse_action_params::<DockerItemHostRequest>(params, "current-tag")
             .expect_err("request must fail");
         assert!(
             error
                 .to_string()
-                .contains("invalid params for action 'get-current-tag'"),
+                .contains("invalid params for action 'current-tag'"),
             "unexpected error: {error}"
         );
     }
