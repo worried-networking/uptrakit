@@ -42,3 +42,6 @@ pub use uptrakit_shared_types::SecretString;
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod spec_gen;
