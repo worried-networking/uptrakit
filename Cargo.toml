@@ -95,7 +95,7 @@ tempfile = "3"
 cargo_metadata = "0.23.1"
 # tokio-tungstenite stays at 0.29 — axum 0.8 (latest) pins tokio-tungstenite ^0.29;
 # bumping to 0.30 would fork the graph into two incompatible tungstenite stacks
-tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect"] }
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect"] }
 zeroize = { version = "1", features = ["derive"] }
 async-nats = { version = "0.49", default-features = false, features = ["server_2_10", "server_2_11", "server_2_12", "aws-lc-rs", "jetstream"] }
 base64 = "0.22"
