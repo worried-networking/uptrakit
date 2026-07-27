@@ -15,6 +15,9 @@ description = "Shared surface contracts for built-in and provider UI integration
 # `cfg(feature = "openapi")` a known cfg and stays consistent with the other
 # shared crates.
 openapi = ["dep:utoipa"]
+# Emit `schemars::JsonSchema` impls for surface contract types used in AsyncAPI
+# schema generation. Off by default.
+schema = ["dep:schemars"]
 
 [dependencies]
 serde = { workspace = true }
@@ -23,6 +26,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 utoipa = { workspace = true, optional = true }
+schemars = { workspace = true, features = ["uuid1"], optional = true }
 uuid = { workspace = true, features = ["serde", "v4"] }
 
 [dev-dependencies]

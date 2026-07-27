@@ -14,6 +14,7 @@ use uptrakit_shared_types::{
 /// Payload for ping messages.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PingPayload {
     /// Timestamp when the service sent the ping.
     pub service_ts: super::shared_types::Timestamp,
@@ -29,6 +30,7 @@ impl PingPayload {
 /// Payload for pong messages.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PongPayload {
     /// Original timestamp from the service's ping.
     pub service_ts: super::shared_types::Timestamp,
@@ -51,6 +53,7 @@ impl PongPayload {
 
 /// Information about the host machine running the agent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HostInfo {
     /// Persistent machine identifier (e.g. `/etc/machine-id` on Linux, `IOPlatformUUID` on macOS).
     pub machine_id: String,
@@ -92,15 +95,21 @@ pub struct HostInfo {
 /// Used by both agents and MQTT services. Host information is reported
 /// separately via [`ReportHostsPayload`] after authentication.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct EnrollPayload {
     pub hostname: String,
     pub friendly_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
     pub enrollment_token: Option<SecretString>,
     /// Capabilities this service supports.
     ///
     /// The controller persists these in the `services.capabilities` column and
     /// derives behavioral defaults from the resulting [`ServiceProfile`](crate::ServiceProfile).
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "std::collections::BTreeSet<String>")
+    )]
     pub capabilities: BTreeSet<Capability>,
     /// The binary/crate name of the enrolling service (e.g., `"uptrakit-agent-ssh"`).
     ///
@@ -111,6 +120,7 @@ pub struct EnrollPayload {
 
 /// Payload for requesting a client certificate after approval.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RequestCertificatePayload {
     /// PEM-encoded Certificate Signing Request.
     pub csr_pem: String,
@@ -118,6 +128,7 @@ pub struct RequestCertificatePayload {
 
 /// Payload for requesting certificate renewal (mTLS-authenticated services).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RenewCertificatePayload {
     /// PEM-encoded Certificate Signing Request with CN=service_id.
     pub csr_pem: String,
@@ -128,6 +139,7 @@ pub struct RenewCertificatePayload {
 /// Supports multiple hosts per message, enabling a single service instance
 /// (e.g. a future SSH-backed agent) to manage several remote hosts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ReportHostsPayload {
     /// One or more host machines managed by this service.
     pub hosts: Vec<HostInfo>,
@@ -138,35 +150,46 @@ pub struct ReportHostsPayload {
     /// The controller computes the agreed set as the intersection of this set
     /// with its own capabilities, considering only typed (known) variants.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "std::collections::BTreeSet<String>")
+    )]
     pub capabilities: BTreeSet<Capability>,
 }
 
 /// Payload for enrollment confirmation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct EnrolledPayload {
     pub service_id: Uuid,
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub enrollment_secret: SecretString,
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub status: EnrollmentStatus,
 }
 
 /// Payload for approval notification.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ApprovedPayload {
     pub service_id: Uuid,
 }
 
 /// Payload for rejection notification.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RejectedPayload {
     pub service_id: Uuid,
 }
 
 /// Payload for issued certificate.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CertificatePayload {
     pub cert_pem: String,
     /// Certificate "not valid after" timestamp.
     #[serde(with = "utc_datetime_millis")]
+    #[cfg_attr(feature = "schema", schemars(with = "i64"))]
     pub not_after: UtcDateTime,
 }
 
@@ -176,6 +199,7 @@ pub struct CertificatePayload {
 /// present for agents and `None` for MQTT services.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ServiceSettingsPayload {
     pub renewal_window_hours: u16,
     #[serde(default)]
@@ -185,6 +209,10 @@ pub struct ServiceSettingsPayload {
     /// The service computes the agreed set as the intersection of this set
     /// with its own capabilities, considering only typed (known) variants.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "std::collections::BTreeSet<String>")
+    )]
     pub capabilities: BTreeSet<Capability>,
     /// Per-page item-count limits for paginated service-to-controller reports.
     ///
@@ -203,10 +231,12 @@ pub struct ServiceSettingsPayload {
         with = "option_duration_seconds",
         rename = "shutdown_timeout_seconds"
     )]
+    #[cfg_attr(feature = "schema", schemars(with = "Option<u32>"))]
     pub shutdown_timeout: Option<std::time::Duration>,
     /// How often the service should send ping messages.
     /// Controller-managed; derived from per-service DB override or service-type default.
     #[serde(with = "duration_seconds")]
+    #[cfg_attr(feature = "schema", schemars(with = "u32"))]
     pub ping_interval: std::time::Duration,
     /// Tenant UUID that this service belongs to.
     ///
@@ -288,6 +318,7 @@ impl ServiceSettingsPayload {
 
 /// Per-page item-count limits for paginated report payloads.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ReportPageLimits {
     /// Maximum `hosts` items per `report_hosts` page.
     pub report_hosts: u32,
@@ -319,6 +350,7 @@ impl Default for ReportPageLimits {
 
 /// Payload for CA bundle update notification.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CaBundleUpdatedPayload {
     pub ca_bundle_pem: String,
 }
@@ -328,6 +360,7 @@ pub struct CaBundleUpdatedPayload {
 /// Sent by the controller after CA rotation or backend URL change to prompt
 /// all connected services to renew their certificates with the new CA.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RequestCertRenewalPayload {
     /// Human-readable reason for the renewal request.
     pub reason: String,
@@ -339,6 +372,7 @@ pub struct RequestCertRenewalPayload {
 /// that the server is restarting. Services should expect the connection to close
 /// and reconnect automatically.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ServerRestartingPayload {
     /// Human-readable reason for the restart.
     pub reason: String,
@@ -346,6 +380,7 @@ pub struct ServerRestartingPayload {
 
 /// Payload for requesting version checks from the agent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CheckVersionsPayload {
     /// The machine_id of the host to check versions on.
     ///
@@ -361,6 +396,7 @@ pub struct CheckVersionsPayload {
 
 /// A plugin assignment for a specific role in a version check or update.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PluginAssignment {
     /// The plugin type (e.g. github_releases, apt, homebrew).
     pub plugin_type: PluginTypeId,
@@ -372,6 +408,7 @@ pub struct PluginAssignment {
 
 /// A single software item to check for installed version and/or latest version.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct VersionCheckAssignment {
     /// Software item ID.
     pub software_item_id: Uuid,
@@ -399,6 +436,7 @@ pub struct VersionCheckAssignment {
 
 /// Payload for version check results from the agent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct VersionCheckResultsPayload {
     /// Results for each checked software item.
     pub results: Vec<VersionCheckResult>,
@@ -406,6 +444,7 @@ pub struct VersionCheckResultsPayload {
 
 /// Result of a single version check.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct VersionCheckResult {
     /// Software item ID.
     pub software_item_id: Uuid,
@@ -423,6 +462,7 @@ pub struct VersionCheckResult {
     /// Classification of the available update (e.g. security, bugfix).
     /// Defaults to `Unknown` when the plugin cannot classify the update.
     #[serde(default)]
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub update_category: UpdateCategory,
     /// Host software item ID for routing results to the host_software_items table.
     /// Mirrors the value from the corresponding [`VersionCheckAssignment`].
@@ -452,6 +492,7 @@ pub struct VersionCheckResult {
 
 /// Controller -> Agent: Trigger an update.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ExecuteUpdatePayload {
     /// The machine_id of the host to run the update on.
     ///
@@ -487,6 +528,7 @@ pub struct ExecuteUpdatePayload {
         rename = "timeout_seconds",
         default = "super::shared_types::default_update_timeout"
     )]
+    #[cfg_attr(feature = "schema", schemars(with = "u32"))]
     pub timeout: std::time::Duration,
     /// When `true`, the agent allocates a PTY and keeps stdin open for forwarding.
     ///
@@ -498,6 +540,7 @@ pub struct ExecuteUpdatePayload {
 
 /// Agent -> Controller: Update is starting.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UpdateStartedPayload {
     pub update_history_id: Uuid,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -513,6 +556,7 @@ pub struct UpdateStartedPayload {
 
 /// Agent -> Controller: Streaming output line.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UpdateOutputPayload {
     pub update_history_id: Uuid,
     pub output: String,
@@ -522,8 +566,10 @@ pub struct UpdateOutputPayload {
 
 /// Agent -> Controller: Final result of update execution.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UpdateResultPayload {
     pub update_history_id: Uuid,
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub status: UpdateFinalStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub from_version: Option<String>,
@@ -548,6 +594,7 @@ pub struct UpdateResultPayload {
 /// Groups multiple items under a single plugin type so the agent can
 /// run a single bulk command (e.g., `apt-get upgrade`, `brew upgrade`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ExecuteBatchUpdatePayload {
     /// The machine_id of the host to run the update on.
     pub host_machine_id: String,
@@ -573,6 +620,7 @@ pub struct ExecuteBatchUpdatePayload {
         rename = "timeout_seconds",
         default = "super::shared_types::default_update_timeout"
     )]
+    #[cfg_attr(feature = "schema", schemars(with = "u32"))]
     pub timeout: std::time::Duration,
     /// When `true`, the agent allocates a PTY and keeps stdin open for forwarding.
     ///
@@ -584,6 +632,7 @@ pub struct ExecuteBatchUpdatePayload {
 
 /// A single software item within a batch update request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BatchUpdateItem {
     /// Host software item entity ID.
     #[serde(alias = "host_package_id")]
@@ -601,6 +650,7 @@ pub struct BatchUpdateItem {
 
 /// Agent → Controller: result of a batch update.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BatchUpdateResultPayload {
     /// Batch ID matching the request.
     pub batch_id: Uuid,
@@ -610,6 +660,7 @@ pub struct BatchUpdateResultPayload {
 
 /// Result of updating a single item within a batch operation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BatchUpdateItemResult {
     /// Host software item entity ID.
     #[serde(alias = "host_package_id")]
@@ -617,6 +668,7 @@ pub struct BatchUpdateItemResult {
     /// Update history record ID.
     pub update_history_id: Uuid,
     /// Final status of this item's update.
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub status: UpdateFinalStatus,
     /// Accumulated output from the update.
     pub output: String,
@@ -639,6 +691,7 @@ pub struct BatchUpdateItemResult {
 ///
 /// This message is safe for NATS publication — it contains no credentials.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SetUpdateFreezePayload {
     /// Whether to enable (`true`) or disable (`false`) the freeze.
     pub enabled: bool,
@@ -651,7 +704,9 @@ pub struct SetUpdateFreezePayload {
 
 /// Service -> Controller: Notification before disconnecting.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DisconnectingPayload {
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub reason: DisconnectReason,
 }
 
@@ -673,9 +728,14 @@ impl DisconnectingPayload {
 /// session and persists the capability set to the DB.
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RegisterPayload {
     /// Capabilities declared by this service instance.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "std::collections::BTreeSet<String>")
+    )]
     pub capabilities: BTreeSet<Capability>,
     /// Runtime instance identity for restart-vs-reconnect detection.
     ///
@@ -721,6 +781,7 @@ impl RegisterPayload {
 /// Sensitive values are already decrypted by the controller before delivery.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ServiceConfigEntry {
     /// Tenant this entry belongs to, or `None` for global entries.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -745,6 +806,7 @@ impl ServiceConfigEntry {
 /// Identifies a service config entry by scope and key (used in delete notifications).
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ServiceConfigKey {
     /// Tenant this entry belongs to, or `None` for global entries.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -769,6 +831,7 @@ impl ServiceConfigKey {
 /// `service_app_name`.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct StoreServiceConfigPayload {
     /// Correlation ID for the `ServiceConfigAck` response.
     pub request_id: String,
@@ -809,6 +872,7 @@ impl StoreServiceConfigPayload {
 /// to all other connected instances of the same `service_app_name`.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DeleteServiceConfigPayload {
     /// Correlation ID for the `ServiceConfigAck` response.
     pub request_id: String,
@@ -834,6 +898,7 @@ impl DeleteServiceConfigPayload {
 /// `DeleteServiceConfig` operation.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ServiceConfigAckPayload {
     /// Correlation ID matching the request.
     pub request_id: String,
@@ -870,6 +935,7 @@ impl ServiceConfigAckPayload {
 /// The service should use this as its authoritative in-memory state.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ServiceConfigDeliveryPayload {
     /// All config entries stored for this `service_app_name`.
     pub entries: Vec<ServiceConfigEntry>,
@@ -889,6 +955,7 @@ impl ServiceConfigDeliveryPayload {
 /// these changes to their in-memory state atomically.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ServiceConfigUpdatedPayload {
     /// Entries that were inserted or updated (with decrypted values).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -920,13 +987,16 @@ impl ServiceConfigUpdatedPayload {
 /// NEVER be published to NATS or any external transport. It is delivered
 /// exclusively over the authenticated WebSocket connection.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ServiceCredentialsPayload {
     /// Database connection URL. Present when the service has `database_access`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
     pub db_url: Option<SecretString>,
     /// Master encryption key as 64-char hex. Present when the service has
     /// `master_key_access` and encryption is enabled on the controller.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
     pub master_key_hex: Option<SecretString>,
     /// NATS server URL. Present when the service has `nats_access` and
     /// NATS is configured on the controller.
@@ -940,6 +1010,7 @@ pub struct ServiceCredentialsPayload {
 /// Published via NATS to `uptrakit.events.controller` subject. Handled by
 /// triggering `ca_rotation_trigger.notify_one()` on the receiving controller.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RequestCaRotationPayload {
     /// Human-readable reason for the rotation request.
     pub reason: String,
@@ -952,6 +1023,7 @@ pub struct RequestCaRotationPayload {
 /// task.  Receiving controllers fire `revocation_notify.notify_one()`.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RequestCrlRenewalPayload {}
 
 /// Signal that software states have changed for a tenant and need to be
@@ -965,6 +1037,7 @@ pub struct RequestCrlRenewalPayload {}
 /// data itself. This decouples the scheduler from the state-loading logic.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SoftwareStatesChangedPayload {
     pub tenant_id: uuid::Uuid,
 }
@@ -985,6 +1058,7 @@ impl SoftwareStatesChangedPayload {
 /// A message may carry a JTI-level revocation, a user-level revocation, or
 /// both. Fields not relevant to the revocation type are `None`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TokenRevokedPayload {
     /// JWT ID to deny (`exp` must also be set for JTI-level revocations).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1012,6 +1086,7 @@ pub struct TokenRevokedPayload {
 /// (must come from the event-driven [`HostConnectivityUpdatedPayload`]).
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HostStateMetadata {
     /// Host UUID.
     pub host_id: Uuid,
@@ -1064,6 +1139,7 @@ impl HostStateMetadata {
 /// Connectivity status for a single host, used in [`HostConnectivityUpdatedPayload`].
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HostConnectivityUpdate {
     /// Host UUID.
     pub host_id: Uuid,
@@ -1115,6 +1191,7 @@ impl HostConnectivityUpdate {
 /// controllers receive this via NATS and update their caches.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HostConnectivityUpdatedPayload {
     /// Tenant this update belongs to.
     pub tenant_id: Uuid,
@@ -1135,6 +1212,7 @@ impl HostConnectivityUpdatedPayload {
 /// `{ page_index: 0, total_pages: 1 }`. Multi-page delivery uses
 /// `page_index` 0…N-1; the last page satisfies `page_index + 1 == total_pages`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SoftwareStatesPage {
     /// Zero-based index of this page.
     pub page_index: u32,
@@ -1162,6 +1240,7 @@ impl SoftwareStatesPage {
 /// applying the full state update (see `page_index + 1 == total_pages` for
 /// the last-page signal).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SoftwareStatesPayload {
     /// Tenant this state belongs to.
     pub tenant_id: Uuid,
@@ -1187,6 +1266,7 @@ pub struct SoftwareStatesPayload {
 
 /// A single software item entry in [`SoftwareStatesPayload`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SoftwareStateItem {
     /// Software item UUID.
     pub software_item_id: Uuid,
@@ -1201,6 +1281,7 @@ pub struct SoftwareStateItem {
 
 /// Per-host version data for a software item.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SoftwareStateHostEntry {
     /// Host UUID.
     pub host_id: Uuid,
@@ -1251,6 +1332,7 @@ pub struct SoftwareStateHostEntry {
 /// Sent when a Home Assistant user presses "Install" on an update entity.
 /// The controller validates and dispatches the update to the appropriate agent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ServiceUpdateTriggerPayload {
     /// Tenant UUID (for validation).
     pub tenant_id: Uuid,
@@ -1269,6 +1351,7 @@ pub struct ServiceUpdateTriggerPayload {
 /// Included in [`SoftwareStatesPayload`] to surface overall update
 /// status per host to Home Assistant via a single `update` entity per host.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HostPackageSummary {
     /// Host UUID.
     pub host_id: Uuid,
@@ -1303,6 +1386,7 @@ pub struct HostPackageSummary {
 /// entity. The controller resolves the latest versions for all outdated items
 /// at trigger time and dispatches a `ExecuteBatchUpdate` to the agent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ServiceHostBatchUpdateTriggerPayload {
     /// Tenant UUID (for validation).
     pub tenant_id: Uuid,
@@ -1321,6 +1405,7 @@ pub struct ServiceHostBatchUpdateTriggerPayload {
 /// controller can re-validate them against its canonical audit contract before
 /// persisting or exporting the event.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AuditEventPayload {
     /// Semantic action identifier, such as `service.certificate.issue`.
     pub action_type: String,
@@ -1360,6 +1445,7 @@ pub struct AuditEventPayload {
 /// config — the controller will auto-create a `PluginConfig` record once
 /// results arrive.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DiscoverSoftwarePayload {
     /// Machine ID of the host to discover software on.
     ///
@@ -1372,6 +1458,7 @@ pub struct DiscoverSoftwarePayload {
 
 /// A single plugin assignment inside a [`DiscoverSoftwarePayload`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DiscoveryPluginAssignment {
     /// Pre-existing plugin config ID, or `None` for a default/auto run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1384,6 +1471,7 @@ pub struct DiscoveryPluginAssignment {
 
 /// Agent -> Controller: Results of a software discovery run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DiscoveryResultsPayload {
     /// Machine ID of the host that was scanned (echoed from the assignment).
     pub host_machine_id: String,
@@ -1393,6 +1481,7 @@ pub struct DiscoveryResultsPayload {
 
 /// Result for a single plugin inside a [`DiscoveryResultsPayload`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DiscoveryPluginResult {
     /// Echoed from [`DiscoveryPluginAssignment`] so the controller can route
     /// results to the correct `PluginConfig` row.
@@ -1418,6 +1507,7 @@ pub struct DiscoveryPluginResult {
 /// and want the controller to create or retrieve a plugin configuration.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ReportPluginConfigPayload {
     /// Unique request identifier for correlating the response.
     pub request_id: String,
@@ -1436,6 +1526,7 @@ pub struct ReportPluginConfigPayload {
 /// the existing ID is returned without creating a duplicate.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ReportPluginConfigResponsePayload {
     /// The request ID from the original `ReportPluginConfig` message.
     pub request_id: String,
@@ -1460,6 +1551,7 @@ pub struct ReportPluginConfigResponsePayload {
 /// agent delivers the signal to the process group instead of writing stdin.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UpdateStdinDataPayload {
     /// The update history record this stdin data belongs to.
     pub update_history_id: Uuid,
@@ -1498,6 +1590,7 @@ impl UpdateStdinDataPayload {
 /// session subscribers and may trigger notifications.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct StdinAttentionPayload {
     /// The update history record that needs attention.
     pub update_history_id: Uuid,
@@ -1538,6 +1631,7 @@ impl StdinAttentionPayload {
 ///
 /// **Safe to publish via NATS** — contains no credential material.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BroadcastAdminEventPayload {
     /// Target tenant, or `None` for system-wide events.
     pub tenant_id: Option<Uuid>,
@@ -1560,6 +1654,7 @@ pub struct BroadcastAdminEventPayload {
 /// grants to determine what to claim/release.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct WorkloadClaimPayload {
     /// Map of `config_key → tenant_id` representing the full desired set.
     pub claims: BTreeMap<String, Uuid>,
@@ -1580,6 +1675,7 @@ impl WorkloadClaimPayload {
 /// to cross-controller conflict resolution.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct WorkloadClaimResultPayload {
     /// Config keys that were granted (exclusive ownership).
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
@@ -1603,6 +1699,7 @@ impl WorkloadClaimResultPayload {
 /// available for other services.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct WorkloadReleasePayload {
     /// Config keys to release.
     pub keys: BTreeSet<String>,
@@ -1623,6 +1720,7 @@ impl WorkloadReleasePayload {
 /// **Safe to publish via NATS** — contains no credential material.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct WorkloadClaimAnnouncementPayload {
     /// The service that owns these claims.
     pub service_id: Uuid,
@@ -1665,6 +1763,7 @@ impl WorkloadClaimAnnouncementPayload {
 /// **NATS-only** (controller-to-controller), not service-facing.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct WorkloadClaimSyncRequestPayload {
     /// The requesting controller's ID.
     pub controller_id: Uuid,
@@ -1686,6 +1785,7 @@ impl WorkloadClaimSyncRequestPayload {
 /// **NATS-only** (controller-to-controller), not service-facing.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct WorkloadClaimSyncResponsePayload {
     /// The responding controller's ID.
     pub controller_id: Uuid,
@@ -1706,6 +1806,7 @@ impl WorkloadClaimSyncResponsePayload {
 /// A single entry in a `WorkloadClaimSyncResponse`.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct WorkloadClaimSyncEntry {
     /// The service that owns this claim.
     pub service_id: Uuid,
@@ -1736,6 +1837,7 @@ pub use uptrakit_shared_types::ConfigTestKind;
 /// Payload for a plugin configuration test request (controller -> agent).
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TestPluginConfigPayload {
     /// Unique request ID for correlation (UUID v7).
     pub request_id: String,
@@ -1775,6 +1877,7 @@ impl TestPluginConfigPayload {
 /// Payload for a plugin configuration test result (agent -> controller).
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TestPluginConfigResultPayload {
     /// Correlation ID matching the original request.
     pub request_id: String,

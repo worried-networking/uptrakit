@@ -23,6 +23,7 @@ pub const CURRENT_PROTOCOL_VERSION: u32 = 1;
 /// defers only lightweight finalization (e.g. notification emission) until the
 /// final page arrives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ReportPagination {
     /// Unique identifier grouping all pages of the same logical report.
     pub report_id: Uuid,

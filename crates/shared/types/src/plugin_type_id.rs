@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 /// the `PluginTypeId` in the `PluginCatalog` to get a `PluginDescriptor`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(transparent)]
 pub struct PluginTypeId(Cow<'static, str>);
 

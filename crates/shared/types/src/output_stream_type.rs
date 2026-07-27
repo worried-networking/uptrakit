@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 )]
 #[cfg_attr(feature = "sea-orm", sea_orm(rs_type = "String", db_type = "Text"))]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum OutputStreamType {
     #[default]

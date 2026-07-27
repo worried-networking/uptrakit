@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 /// The kind of configuration test to perform on the agent.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ConfigTestKind {
     /// Execute `detect_installed_version()` and return output + detected version.

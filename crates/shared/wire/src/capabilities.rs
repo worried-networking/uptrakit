@@ -366,7 +366,9 @@ impl<'de> Deserialize<'de> for ErrorCode {
 
 /// Payload for error responses.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ErrorPayload {
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub code: ErrorCode,
     pub message: String,
 }

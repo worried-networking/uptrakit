@@ -56,6 +56,7 @@ impl<'de> Deserialize<'de> for AttestationStatus {
 
 /// A downloadable asset attached to a release.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ReleaseAsset {
     /// Asset filename.
     pub name: String,
@@ -76,6 +77,7 @@ pub struct ReleaseAsset {
 ///
 /// Contains the minimal release metadata needed by plugins to execute updates.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ReleaseInfo {
     pub tag: String,
     pub release_url: String,
@@ -86,6 +88,7 @@ pub struct ReleaseInfo {
     /// Set by the controller from the most recent `fetch_releases` run.
     /// `None` means the check was never performed or the source is not GitHub.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
     pub attestation_status: Option<AttestationStatus>,
     /// When `true`, the agent must abort the update if attestation is not `Verified`.
     ///

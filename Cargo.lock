@@ -5221,6 +5221,7 @@ dependencies = [
  "schemars_derive",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -8489,6 +8490,7 @@ dependencies = [
  "husky-rs",
  "reqwest",
  "rustls",
+ "schemars 1.2.1",
  "sea-orm",
  "serde",
  "serde_json",
@@ -8535,6 +8537,7 @@ dependencies = [
 name = "uptrakit-surfaces"
 version = "0.0.2"
 dependencies = [
+ "schemars 1.2.1",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -8738,6 +8741,7 @@ name = "uptrakit-wire"
 version = "0.0.2"
 dependencies = [
  "async-trait",
+ "schemars 1.2.1",
  "serde",
  "serde_json",
  "serde_yaml_ng",

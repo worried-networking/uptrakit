@@ -25,6 +25,7 @@ use crate::limits::{
 /// - `trace_id`: 32 lowercase hex characters (128-bit identifier)
 /// - `span_id`: 16 lowercase hex characters (64-bit identifier), omitted when absent
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TraceContext {
     /// 128-bit trace identifier encoded as 32 lowercase hex characters.
     pub trace_id: String,

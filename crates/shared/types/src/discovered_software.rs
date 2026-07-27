@@ -44,6 +44,7 @@ use crate::discovery_target::DiscoveryTarget;
 /// not override a user's manual feature/unfeature choice.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DiscoveredSoftware {
     /// Plugin-specific identifier for this software (e.g., package name, app slug).
     pub package_identifier: String,

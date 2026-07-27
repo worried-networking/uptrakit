@@ -8,6 +8,15 @@ repository.workspace = true
 version = "0.0.2"
 publish = true
 
+[features]
+# Emit `schemars::JsonSchema` derives across wire protocol types, shared types,
+# and surface types for AsyncAPI schema generation. Off by default.
+schema = [
+    "dep:schemars",
+    "uptrakit-shared-types/schema",
+    "uptrakit-surfaces/schema",
+]
+
 [dependencies]
 async-trait = { workspace = true }
 serde = { workspace = true }
@@ -20,6 +29,7 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["serde", "v4"] }
 uptrakit-shared-types = { workspace = true }
 uptrakit-surfaces = { workspace = true }
+schemars = { workspace = true, features = ["uuid1", "preserve_order"], optional = true }
 
 [dev-dependencies]
 serde_yaml_ng = { workspace = true }

@@ -32,6 +32,7 @@ use crate::plugin_type_id::PluginTypeId;
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DiscoveryTarget {
     /// Target plugin type (may differ from the discovering plugin).
     ///
@@ -51,6 +52,7 @@ pub struct DiscoveryTarget {
     /// Which roles this target covers.
     ///
     /// Typically all three: `DetectVersion`, `FetchReleases`, `ExecuteUpdate`.
+    #[cfg_attr(feature = "schema", schemars(with = "Vec<String>"))]
     pub roles: Vec<PluginRole>,
 
     /// Package identifier override (None = same as parent `DiscoveredSoftware`).

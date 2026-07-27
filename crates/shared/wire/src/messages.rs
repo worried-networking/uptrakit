@@ -30,6 +30,7 @@ use super::surfaces;
 /// connection, allowing rolling upgrades where services and controllers are not
 /// updated simultaneously.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[non_exhaustive]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServiceMessage {
@@ -80,16 +81,19 @@ pub enum ServiceMessage {
     ///
     /// Sent once after connection setup by services that participate in the
     /// surface contract.
+    #[cfg_attr(feature = "schema", schemars(with = "serde_json::Value"))]
     SurfaceRegistration(surfaces::SurfaceRegistration),
     /// Response to a proxied surface action invocation.
     ///
     /// Sent by the service after processing a `SurfaceActionRequest` from the
     /// controller.
+    #[cfg_attr(feature = "schema", schemars(with = "serde_json::Value"))]
     SurfaceActionResponse(surfaces::SurfaceActionResponse),
     /// Service requests a surface action invocation from the controller.
     ///
     /// Enables services to call surface actions via the wire protocol and
     /// receive the correlated `ControllerMessage::SurfaceActionResponse`.
+    #[cfg_attr(feature = "schema", schemars(with = "serde_json::Value"))]
     SurfaceActionRequest(surfaces::SurfaceActionRequest),
     // -- Service config store --
     /// Service → Controller: upsert a config entry in the controller DB.
@@ -129,6 +133,7 @@ pub enum ServiceMessage {
     /// The payload is discarded. The receiver should log a warning and
     /// continue processing other messages.
     #[serde(other)]
+    #[cfg_attr(feature = "schema", schemars(skip))]
     Unknown,
 }
 
@@ -142,6 +147,7 @@ pub enum ServiceMessage {
 /// connection, allowing rolling upgrades where services and controllers are not
 /// updated simultaneously.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[non_exhaustive]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ControllerMessage {
@@ -191,15 +197,18 @@ pub enum ControllerMessage {
     ///
     /// Sent to services participating in the surface contract. The service
     /// should process the action and respond with `SurfaceActionResponse`.
+    #[cfg_attr(feature = "schema", schemars(with = "serde_json::Value"))]
     SurfaceActionRequest(surfaces::SurfaceActionRequest),
     /// Cancellation of an in-flight proxied surface action request.
     ///
     /// Session-targeted and never published to NATS.
+    #[cfg_attr(feature = "schema", schemars(with = "serde_json::Value"))]
     SurfaceActionCancel(surfaces::SurfaceActionCancel),
     /// Response to a service-initiated surface action invocation.
     ///
     /// Sent by the controller after processing a
     /// `ServiceMessage::SurfaceActionRequest`.
+    #[cfg_attr(feature = "schema", schemars(with = "serde_json::Value"))]
     SurfaceActionResponse(surfaces::SurfaceActionResponse),
     // -- Plugin config reporting --
     /// Response to a `ReportPluginConfig` request from a service.
@@ -317,6 +326,7 @@ pub enum ControllerMessage {
     /// **Security**: Never published to NATS — we cannot re-publish a message
     /// whose payload has been discarded.
     #[serde(other)]
+    #[cfg_attr(feature = "schema", schemars(skip))]
     Unknown,
 }
 
