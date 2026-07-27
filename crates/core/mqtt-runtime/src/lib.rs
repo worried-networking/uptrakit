@@ -59,7 +59,9 @@ use uptrakit_wire::{
     ServiceMessage, TransportError,
     payloads::ServiceConfigEntry,
     payloads::ServiceConfigUpdatedPayload,
-    surfaces::{SurfaceActionErrorCode, SurfaceActionRequest, SurfaceActionResponse},
+    surfaces::{
+        InteractionHttpMethod, SurfaceActionErrorCode, SurfaceActionRequest, SurfaceActionResponse,
+    },
 };
 
 use crate::client_manager::ParsedMqttClientConfig;
@@ -547,40 +549,34 @@ impl MqttRuntime {
             }
         };
 
-        if let Some(response) =
-            surface_runtime::handle_list_action(&request, request_tenant_id, &self.configs)
-        {
-            return transport
-                .transport_send(ServiceMessage::SurfaceActionResponse(response))
+        match (request.interaction_id.as_str(), &request.method) {
+            (surface_runtime::ACTION_CLIENTS, InteractionHttpMethod::Get) => {
+                if let Some(response) = surface_runtime::handle_clients_action(
+                    &request,
+                    request_tenant_id,
+                    &self.configs,
+                ) {
+                    return transport
+                        .transport_send(ServiceMessage::SurfaceActionResponse(response))
+                        .await;
+                }
+                return surface_runtime::send_error_response(
+                    transport,
+                    request_id,
+                    SurfaceActionErrorCode::InvalidRequest,
+                    "missing or invalid MQTT client id",
+                )
                 .await;
-        }
-        if request.interaction_id.as_str() == surface_runtime::ACTION_GET {
-            if let Some(response) =
-                surface_runtime::handle_get_action(&request, request_tenant_id, &self.configs)
-            {
-                return transport
-                    .transport_send(ServiceMessage::SurfaceActionResponse(response))
-                    .await;
             }
-            return surface_runtime::send_error_response(
-                transport,
-                request_id,
-                SurfaceActionErrorCode::InvalidRequest,
-                "missing or invalid MQTT client id",
-            )
-            .await;
-        }
-
-        match request.interaction_id.as_str() {
-            surface_runtime::ACTION_CREATE => {
+            (surface_runtime::ACTION_CLIENTS, InteractionHttpMethod::Post) => {
                 self.handle_create_client(request, request_tenant_id, transport)
                     .await?;
             }
-            surface_runtime::ACTION_EDIT => {
+            (surface_runtime::ACTION_CLIENTS, InteractionHttpMethod::Put) => {
                 self.handle_edit_client(request, request_tenant_id, transport)
                     .await?;
             }
-            surface_runtime::ACTION_DELETE => {
+            (surface_runtime::ACTION_CLIENTS, InteractionHttpMethod::Delete) => {
                 self.handle_delete_client(request, request_tenant_id, transport)
                     .await?;
             }
@@ -589,7 +585,10 @@ impl MqttRuntime {
                     transport,
                     request_id,
                     SurfaceActionErrorCode::UnsupportedCapability,
-                    format!("unknown action: {}", request.interaction_id),
+                    format!(
+                        "unknown action: {} ({})",
+                        request.interaction_id, request.method
+                    ),
                 )
                 .await?;
             }
@@ -1042,10 +1041,10 @@ mod tests {
             surface_id: uptrakit_wire::surfaces::SurfaceId::new(surface_runtime::EXT_ID)
                 .expect("surface id"),
             interaction_id: uptrakit_wire::surfaces::InteractionId::new(
-                surface_runtime::ACTION_EDIT,
+                surface_runtime::ACTION_CLIENTS,
             )
             .expect("interaction id"),
-            method: Default::default(),
+            method: InteractionHttpMethod::Put,
             idempotency_key: "req-1".to_string(),
             target_provider_id: Some("service.uptrakit-mqtt".to_string()),
             caller_origin: CallerOrigin::BuiltInSystem {
@@ -1114,6 +1113,7 @@ mod tests {
 
     fn action_request(
         interaction_id: &str,
+        method: InteractionHttpMethod,
         tenant_id: Uuid,
         target_provider_id: Option<&str>,
         params: serde_json::Map<String, serde_json::Value>,
@@ -1125,7 +1125,7 @@ mod tests {
                 .expect("surface id"),
             interaction_id: uptrakit_wire::surfaces::InteractionId::new(interaction_id)
                 .expect("interaction id"),
-            method: Default::default(),
+            method,
             idempotency_key: "req-1".to_string(),
             target_provider_id: target_provider_id.map(ToString::to_string),
             caller_origin: CallerOrigin::BuiltInSystem {
@@ -1356,7 +1356,8 @@ mod tests {
         let mut runtime = MqttRuntime::new();
         let mut transport = MockTransport::new();
         let request = action_request(
-            surface_runtime::ACTION_LIST,
+            surface_runtime::ACTION_CLIENTS,
+            InteractionHttpMethod::Get,
             Uuid::now_v7(),
             Some("service.uptrakit-mqtt"),
             serde_json::Map::new(),
@@ -1387,7 +1388,8 @@ mod tests {
         runtime.service_tenant_id = Some(bound_tenant);
 
         let wrong_target = action_request(
-            surface_runtime::ACTION_LIST,
+            surface_runtime::ACTION_CLIENTS,
+            InteractionHttpMethod::Get,
             bound_tenant,
             Some("service.other"),
             serde_json::Map::new(),
@@ -1412,7 +1414,8 @@ mod tests {
         );
 
         let mismatched_tenant = action_request(
-            surface_runtime::ACTION_LIST,
+            surface_runtime::ACTION_CLIENTS,
+            InteractionHttpMethod::Get,
             Uuid::now_v7(),
             Some("service.uptrakit-mqtt"),
             serde_json::Map::new(),
@@ -1446,7 +1449,8 @@ mod tests {
             parse_client_configs(vec![config_entry(config_tenant_id, mqtt_client_id)]);
 
         let request = action_request(
-            surface_runtime::ACTION_EDIT,
+            surface_runtime::ACTION_CLIENTS,
+            InteractionHttpMethod::Put,
             request_tenant_id,
             Some("service.uptrakit-mqtt"),
             serde_json::Map::from_iter([(
@@ -1491,7 +1495,8 @@ mod tests {
             parse_client_configs(vec![config_entry(config_tenant_id, mqtt_client_id)]);
 
         let request = action_request(
-            surface_runtime::ACTION_DELETE,
+            surface_runtime::ACTION_CLIENTS,
+            InteractionHttpMethod::Delete,
             request_tenant_id,
             Some("service.uptrakit-mqtt"),
             serde_json::Map::from_iter([(
@@ -1609,7 +1614,8 @@ mod tests {
         runtime.configs = vec![existing.clone()];
 
         let request = action_request(
-            surface_runtime::ACTION_EDIT,
+            surface_runtime::ACTION_CLIENTS,
+            InteractionHttpMethod::Put,
             tenant_id,
             Some(&runtime.expected_provider_id()),
             serde_json::Map::from_iter([

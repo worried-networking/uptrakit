@@ -21,12 +21,11 @@ use uptrakit_wire::{
 
 /// Surface and interaction IDs — kept as constants to avoid magic strings.
 pub(crate) const EXT_ID: &str = "mqtt.clients";
-pub(crate) const ACTION_LIST: &str = "mqtt.list-clients";
-pub(crate) const ACTION_CREATE: &str = "mqtt.create-client";
-pub(crate) const ACTION_EDIT: &str = "mqtt.edit-client";
-pub(crate) const ACTION_GET: &str = "mqtt.get-client";
-pub(crate) const ACTION_DELETE: &str = "mqtt.delete-client";
-const DATA_SOURCE_PRIMARY: &str = "mqtt.clients.primary";
+/// REST-noun id shared across all four HTTP methods (GET merged list/get,
+/// POST create, PUT edit, DELETE delete); each registration is disambiguated
+/// by its `http_method`.
+pub(crate) const ACTION_CLIENTS: &str = "clients";
+const DATA_SOURCE_CLIENTS: &str = "clients";
 const LIST_DEFAULT_PAGE: u64 = 1;
 const LIST_DEFAULT_PER_PAGE: u64 = 50;
 const LIST_MAX_PER_PAGE: u64 = 200;
@@ -72,7 +71,7 @@ pub(crate) fn build_surface_registration_with_ids(
         },
     ]);
 
-    let data_source_id = DataSourceId::new(DATA_SOURCE_PRIMARY).expect("data source id is valid");
+    let data_source_id = DataSourceId::new(DATA_SOURCE_CLIENTS).expect("data source id is valid");
     let registered_surface = surfaces::RegisteredSurface {
         descriptor: SurfaceDescriptor::builder()
             .surface_id(SurfaceId::new(EXT_ID).expect("surface id is valid"))
@@ -88,9 +87,11 @@ pub(crate) fn build_surface_registration_with_ids(
                 None::<String>,
                 vec![
                     SurfaceNode::ActionBar {
-                        action_ids: vec![ActionRef::from(
-                            InteractionId::new(ACTION_CREATE).expect("interaction id is valid"),
-                        )],
+                        action_ids: vec![ActionRef::WithMethod {
+                            interaction_id: InteractionId::new(ACTION_CLIENTS)
+                                .expect("interaction id is valid"),
+                            http_method: Some(surfaces::InteractionHttpMethod::Post),
+                        }],
                     },
                     SurfaceNode::Table {
                         data_source_id: data_source_id.clone(),
@@ -103,15 +104,15 @@ pub(crate) fn build_surface_registration_with_ids(
                         ],
                         row_actions: vec![
                             SurfaceTableRowAction {
-                                interaction_id: InteractionId::new(ACTION_EDIT)
+                                interaction_id: InteractionId::new(ACTION_CLIENTS)
                                     .expect("interaction id is valid"),
-                                http_method: None,
+                                http_method: Some(surfaces::InteractionHttpMethod::Put),
                                 visible_when: None,
                             },
                             SurfaceTableRowAction {
-                                interaction_id: InteractionId::new(ACTION_DELETE)
+                                interaction_id: InteractionId::new(ACTION_CLIENTS)
                                     .expect("interaction id is valid"),
-                                http_method: None,
+                                http_method: Some(surfaces::InteractionHttpMethod::Delete),
                                 visible_when: Some(SurfaceRowVisibleWhen {
                                     field: "client_id".to_string(),
                                     condition: SurfaceRowCondition::Present,
@@ -126,7 +127,7 @@ pub(crate) fn build_surface_registration_with_ids(
         data_sources: vec![DataSourceDescriptor {
             data_source_id,
             kind: DataSourceKind::ProviderQuery {
-                operation_id: ACTION_LIST.to_string(),
+                operation_id: ACTION_CLIENTS.to_string(),
             },
             result_schema: surfaces::SchemaContract::Object,
             pagination: Some(DataSourcePagination {
@@ -163,19 +164,64 @@ pub(crate) fn build_surface_registration_with_ids(
     })
 }
 
-/// Handle a list action request.
+/// Handle a `clients` GET request: merged list/item read (REST method model).
 ///
-/// Builds a JSON summary of all current MQTT client configurations and returns
-/// a success response. Returns `None` if the action ID does not match.
-pub(crate) fn handle_list_action(
+/// Absent `params["id"]` returns the paginated table shape (list of all
+/// configs for the request tenant); a present `id` returns the single-client
+/// shape (non-sensitive fields for the matching config, cross-tenant lookups
+/// rejected). Returns `None` for a present-but-unresolvable `id`.
+pub(crate) fn handle_clients_action(
     request: &SurfaceActionRequest,
     tenant_id: uuid::Uuid,
     configs: &[crate::client_manager::ParsedMqttClientConfig],
 ) -> Option<SurfaceActionResponse> {
-    if request.interaction_id.as_str() != ACTION_LIST {
-        return None;
+    if let Some(id) = request.params.get("id").and_then(|v| v.as_str()) {
+        return handle_get_item(request, tenant_id, configs, id);
     }
+    Some(handle_list_items(request, tenant_id, configs))
+}
 
+/// Single-client shape: non-sensitive fields for the matching config.
+///
+/// Returns `None` if no config with the given `id` exists for the request
+/// tenant (rejects cross-tenant lookups byte-for-byte with the pre-merge
+/// behavior).
+fn handle_get_item(
+    request: &SurfaceActionRequest,
+    tenant_id: uuid::Uuid,
+    configs: &[crate::client_manager::ParsedMqttClientConfig],
+    id: &str,
+) -> Option<SurfaceActionResponse> {
+    let config = configs
+        .iter()
+        .find(|cfg| cfg.mqtt_client_id.to_string() == id && cfg.tenant_id == tenant_id)?;
+
+    Some(SurfaceActionResponse {
+        request_id: request.request_id,
+        success: true,
+        result: Some(serde_json::json!({
+            "id": config.mqtt_client_id.to_string(),
+            "client_id": config.client_id,
+            "host": config.host,
+            "port": config.port,
+            "transport": config.transport.as_str(),
+            "topic_prefix": config.topic_prefix,
+            "username": config.username.as_ref().map(|value| value.expose_secret()),
+            "ha_discovery": config.ha_discovery,
+            "ha_discovery_prefix": config.ha_discovery_prefix,
+            "enabled": config.enabled,
+        })),
+        error: None,
+    })
+}
+
+/// Paginated table shape: a JSON summary of all current MQTT client
+/// configurations for the request tenant.
+fn handle_list_items(
+    request: &SurfaceActionRequest,
+    tenant_id: uuid::Uuid,
+    configs: &[crate::client_manager::ParsedMqttClientConfig],
+) -> SurfaceActionResponse {
     let page = request
         .params
         .get("page")
@@ -215,7 +261,7 @@ pub(crate) fn handle_list_action(
         .take(per_page_usize)
         .collect();
 
-    Some(SurfaceActionResponse {
+    SurfaceActionResponse {
         request_id: request.request_id,
         success: true,
         result: Some(serde_json::json!({
@@ -226,43 +272,7 @@ pub(crate) fn handle_list_action(
             "total_pages": total_pages,
         })),
         error: None,
-    })
-}
-
-/// Handle the edit-form preload action.
-///
-/// Returns the non-sensitive MQTT client config for the requested entry.
-pub(crate) fn handle_get_action(
-    request: &SurfaceActionRequest,
-    tenant_id: uuid::Uuid,
-    configs: &[crate::client_manager::ParsedMqttClientConfig],
-) -> Option<SurfaceActionResponse> {
-    if request.interaction_id.as_str() != ACTION_GET {
-        return None;
     }
-
-    let id = request.params.get("id")?.as_str()?;
-    let config = configs
-        .iter()
-        .find(|cfg| cfg.mqtt_client_id.to_string() == id && cfg.tenant_id == tenant_id)?;
-
-    Some(SurfaceActionResponse {
-        request_id: request.request_id,
-        success: true,
-        result: Some(serde_json::json!({
-            "id": config.mqtt_client_id.to_string(),
-            "client_id": config.client_id,
-            "host": config.host,
-            "port": config.port,
-            "transport": config.transport.as_str(),
-            "topic_prefix": config.topic_prefix,
-            "username": config.username.as_ref().map(|value| value.expose_secret()),
-            "ha_discovery": config.ha_discovery,
-            "ha_discovery_prefix": config.ha_discovery_prefix,
-            "enabled": config.enabled,
-        })),
-        error: None,
-    })
 }
 
 /// Send an error response back to the controller for an unhandled or failed action.
@@ -330,7 +340,10 @@ mod tests {
         let interactions = &registration.surfaces[0].interactions;
         let edit = interactions
             .iter()
-            .find(|interaction| interaction.interaction_id.as_str() == ACTION_EDIT)
+            .find(|interaction| {
+                interaction.interaction_id.as_str() == ACTION_CLIENTS
+                    && interaction.http_method == surfaces::InteractionHttpMethod::Put
+            })
             .expect("edit interaction");
 
         assert_eq!(edit.kind, InteractionKind::FormSubmit);
@@ -339,7 +352,7 @@ mod tests {
                 .as_ref()
                 .and_then(|ui| ui.pre_load_interaction_id.as_ref())
                 .map(InteractionId::as_str),
-            Some(ACTION_GET)
+            Some(ACTION_CLIENTS)
         );
     }
 
@@ -350,15 +363,25 @@ mod tests {
         let interactions = &registration.surfaces[0].interactions;
         let create = interactions
             .iter()
-            .find(|interaction| interaction.interaction_id.as_str() == ACTION_CREATE)
+            .find(|interaction| {
+                interaction.interaction_id.as_str() == ACTION_CLIENTS
+                    && interaction.kind == InteractionKind::FormSubmit
+                    && interaction.http_method == surfaces::InteractionHttpMethod::Post
+            })
             .expect("create interaction");
         let edit = interactions
             .iter()
-            .find(|interaction| interaction.interaction_id.as_str() == ACTION_EDIT)
+            .find(|interaction| {
+                interaction.interaction_id.as_str() == ACTION_CLIENTS
+                    && interaction.http_method == surfaces::InteractionHttpMethod::Put
+            })
             .expect("edit interaction");
         let delete = interactions
             .iter()
-            .find(|interaction| interaction.interaction_id.as_str() == ACTION_DELETE)
+            .find(|interaction| {
+                interaction.interaction_id.as_str() == ACTION_CLIENTS
+                    && interaction.http_method == surfaces::InteractionHttpMethod::Delete
+            })
             .expect("delete interaction");
 
         assert_eq!(create.result_schema, Some(surfaces::SchemaContract::Object));
@@ -372,14 +395,14 @@ mod tests {
     }
 
     #[test]
-    fn get_action_omits_sensitive_fields() {
+    fn clients_action_with_id_present_returns_single_client_shape_and_omits_sensitive_fields() {
         let tenant_id = Uuid::now_v7();
         let request = SurfaceActionRequest {
             request_id: Uuid::now_v7(),
             tenant_id: tenant_id.to_string(),
             surface_id: SurfaceId::new(EXT_ID).expect("surface id"),
-            interaction_id: InteractionId::new(ACTION_GET).expect("interaction id"),
-            method: Default::default(),
+            interaction_id: InteractionId::new(ACTION_CLIENTS).expect("interaction id"),
+            method: surfaces::InteractionHttpMethod::Get,
             idempotency_key: "req-1".to_string(),
             target_provider_id: None,
             caller_origin: surfaces::CallerOrigin::BuiltInSystem {
@@ -407,7 +430,7 @@ mod tests {
             ha_discovery_prefix: "homeassistant".to_string(),
         }];
 
-        let response = handle_get_action(&request, tenant_id, &configs).expect("response");
+        let response = handle_clients_action(&request, tenant_id, &configs).expect("response");
         let data = response
             .result
             .as_ref()
@@ -420,18 +443,21 @@ mod tests {
         assert_eq!(data.get("username"), Some(&serde_json::json!("user")));
         assert!(!data.contains_key("password"));
         assert!(!data.contains_key("ca_pem"));
+        // single-client shape has no `items`/`total` list envelope
+        assert!(!data.contains_key("items"));
+        assert!(!data.contains_key("total"));
     }
 
     #[test]
-    fn list_action_filters_to_request_tenant() {
+    fn clients_action_with_id_absent_returns_list_shape_filtered_to_request_tenant() {
         let tenant_a = Uuid::now_v7();
         let tenant_b = Uuid::now_v7();
         let request = SurfaceActionRequest {
             request_id: Uuid::now_v7(),
             tenant_id: tenant_a.to_string(),
             surface_id: SurfaceId::new(EXT_ID).expect("surface id"),
-            interaction_id: InteractionId::new(ACTION_LIST).expect("interaction id"),
-            method: Default::default(),
+            interaction_id: InteractionId::new(ACTION_CLIENTS).expect("interaction id"),
+            method: surfaces::InteractionHttpMethod::Get,
             idempotency_key: "req-1".to_string(),
             target_provider_id: None,
             caller_origin: surfaces::CallerOrigin::BuiltInSystem {
@@ -475,7 +501,7 @@ mod tests {
             },
         ];
 
-        let response = handle_list_action(&request, tenant_a, &configs).expect("response");
+        let response = handle_clients_action(&request, tenant_a, &configs).expect("response");
         let result = response.result.as_ref().expect("result payload");
         let items = result
             .get("items")
@@ -493,14 +519,14 @@ mod tests {
     }
 
     #[test]
-    fn list_action_returns_paginated_table_shape() {
+    fn clients_action_with_id_absent_returns_paginated_table_shape() {
         let tenant_id = Uuid::now_v7();
         let request = SurfaceActionRequest {
             request_id: Uuid::now_v7(),
             tenant_id: tenant_id.to_string(),
             surface_id: SurfaceId::new(EXT_ID).expect("surface id"),
-            interaction_id: InteractionId::new(ACTION_LIST).expect("interaction id"),
-            method: Default::default(),
+            interaction_id: InteractionId::new(ACTION_CLIENTS).expect("interaction id"),
+            method: surfaces::InteractionHttpMethod::Get,
             idempotency_key: "req-1".to_string(),
             target_provider_id: None,
             caller_origin: surfaces::CallerOrigin::BuiltInSystem {
@@ -563,7 +589,7 @@ mod tests {
             },
         ];
 
-        let response = handle_list_action(&request, tenant_id, &configs).expect("response");
+        let response = handle_clients_action(&request, tenant_id, &configs).expect("response");
         let result = response.result.as_ref().expect("result payload");
         let items = result
             .get("items")
@@ -581,14 +607,14 @@ mod tests {
     }
 
     #[test]
-    fn list_action_handles_huge_page_without_overflow() {
+    fn clients_action_with_id_absent_handles_huge_page_without_overflow() {
         let tenant_id = Uuid::now_v7();
         let request = SurfaceActionRequest {
             request_id: Uuid::now_v7(),
             tenant_id: tenant_id.to_string(),
             surface_id: SurfaceId::new(EXT_ID).expect("surface id"),
-            interaction_id: InteractionId::new(ACTION_LIST).expect("interaction id"),
-            method: Default::default(),
+            interaction_id: InteractionId::new(ACTION_CLIENTS).expect("interaction id"),
+            method: surfaces::InteractionHttpMethod::Get,
             idempotency_key: "req-1".to_string(),
             target_provider_id: None,
             caller_origin: surfaces::CallerOrigin::BuiltInSystem {
@@ -617,7 +643,7 @@ mod tests {
             ha_discovery_prefix: "homeassistant".to_string(),
         }];
 
-        let response = handle_list_action(&request, tenant_id, &configs).expect("response");
+        let response = handle_clients_action(&request, tenant_id, &configs).expect("response");
         let result = response.result.as_ref().expect("result payload");
         let items = result
             .get("items")
@@ -634,7 +660,7 @@ mod tests {
     }
 
     #[test]
-    fn get_action_rejects_cross_tenant_lookup() {
+    fn clients_action_with_id_present_rejects_cross_tenant_lookup() {
         let tenant_a = Uuid::now_v7();
         let tenant_b = Uuid::now_v7();
         let target_id = Uuid::parse_str("019471a0-0000-7000-8000-000000000001").unwrap();
@@ -642,8 +668,8 @@ mod tests {
             request_id: Uuid::now_v7(),
             tenant_id: tenant_a.to_string(),
             surface_id: SurfaceId::new(EXT_ID).expect("surface id"),
-            interaction_id: InteractionId::new(ACTION_GET).expect("interaction id"),
-            method: Default::default(),
+            interaction_id: InteractionId::new(ACTION_CLIENTS).expect("interaction id"),
+            method: surfaces::InteractionHttpMethod::Get,
             idempotency_key: "req-1".to_string(),
             target_provider_id: None,
             caller_origin: surfaces::CallerOrigin::BuiltInSystem {
@@ -671,7 +697,83 @@ mod tests {
             ha_discovery_prefix: "homeassistant".to_string(),
         }];
 
-        assert!(handle_get_action(&request, tenant_a, &configs).is_none());
+        assert!(handle_clients_action(&request, tenant_a, &configs).is_none());
+    }
+
+    /// REST-noun convention guard: surface/interaction/data-source ids stay
+    /// kebab-case, and every `ProviderQuery` data source's `operation_id`
+    /// resolves to a GET interaction sharing the data source's id.
+    #[test]
+    fn mqtt_surface_ids_follow_kebab_convention() {
+        fn is_kebab(s: &str) -> bool {
+            let bytes = s.as_bytes();
+            if bytes.is_empty() || !bytes[0].is_ascii_lowercase() {
+                return false;
+            }
+            let mut prev_dash = false;
+            for (i, &b) in bytes.iter().enumerate() {
+                match b {
+                    b'a'..=b'z' | b'0'..=b'9' => prev_dash = false,
+                    b'-' => {
+                        if i == 0 || prev_dash || i == bytes.len() - 1 {
+                            return false;
+                        }
+                        prev_dash = true;
+                    }
+                    _ => return false,
+                }
+            }
+            true
+        }
+
+        let registration = build_surface_registration_with_ids(None, None, Some(Uuid::now_v7()))
+            .expect("registration");
+        let surface = &registration.surfaces[0];
+
+        for segment in surface.descriptor.surface_id.as_str().split('.') {
+            assert!(
+                is_kebab(segment),
+                "surface id segment `{segment}` is not kebab-case"
+            );
+        }
+        assert!(
+            !surface.descriptor.surface_id.as_str().starts_with("mqtt-"),
+            "surface id must not carry an `mqtt-` prefix on its segments"
+        );
+
+        for interaction in &surface.interactions {
+            let id = interaction.interaction_id.as_str();
+            assert!(is_kebab(id), "interaction id `{id}` is not kebab-case");
+            assert!(
+                !id.starts_with("mqtt."),
+                "interaction id `{id}` must not carry the `mqtt.` prefix"
+            );
+        }
+
+        for data_source in &surface.data_sources {
+            let id = data_source.data_source_id.as_str();
+            assert!(is_kebab(id), "data source id `{id}` is not kebab-case");
+            assert!(
+                !id.starts_with("mqtt."),
+                "data source id `{id}` must not carry the `mqtt.` prefix"
+            );
+
+            if let DataSourceKind::ProviderQuery { operation_id } = &data_source.kind {
+                let matching = surface.interactions.iter().find(|interaction| {
+                    interaction.interaction_id.as_str() == operation_id
+                        && interaction.effective_http_method()
+                            == surfaces::InteractionHttpMethod::Get
+                });
+                assert!(
+                    matching.is_some(),
+                    "data source `{id}` operation_id `{operation_id}` must resolve to a GET interaction"
+                );
+                assert_eq!(
+                    id, operation_id,
+                    "data source id must equal its GET interaction's operation_id"
+                );
+            }
+        }
     }
 }
 
@@ -683,20 +785,22 @@ fn build_interactions() -> Vec<InteractionDescriptor> {
     vec![
         {
             let mut i = InteractionDescriptor::new(
-                InteractionId::new(ACTION_LIST).expect("interaction id is valid"),
+                InteractionId::new(ACTION_CLIENTS).expect("interaction id is valid"),
                 InteractionKind::DataLoad,
                 "List MQTT Clients",
                 InteractionTransport::ProviderProxied,
             );
             i.required_permission = Some("update_system_services".to_string());
             i.input_schema = Some(surfaces::SchemaContract::Object);
-            i.result_schema = Some(surfaces::SchemaContract::Object);
+            // merged list/item read — two result shapes (`SchemaContract` has
+            // no union/oneOf variant).
+            i.result_schema = Some(surfaces::SchemaContract::Any);
             i.timeout_seconds = Some(30);
             i
         },
         {
             let mut i = InteractionDescriptor::new(
-                InteractionId::new(ACTION_CREATE).expect("interaction id is valid"),
+                InteractionId::new(ACTION_CLIENTS).expect("interaction id is valid"),
                 InteractionKind::FormSubmit,
                 "Add MQTT Client",
                 InteractionTransport::ProviderProxied,
@@ -711,11 +815,12 @@ fn build_interactions() -> Vec<InteractionDescriptor> {
         },
         {
             let mut i = InteractionDescriptor::new(
-                InteractionId::new(ACTION_EDIT).expect("interaction id is valid"),
+                InteractionId::new(ACTION_CLIENTS).expect("interaction id is valid"),
                 InteractionKind::FormSubmit,
                 "Edit MQTT Client",
                 InteractionTransport::ProviderProxied,
             );
+            i.http_method = surfaces::InteractionHttpMethod::Put;
             i.required_permission = Some("update_system_services".to_string());
             i.input_schema = Some(surfaces::SchemaContract::Object);
             i.result_schema = Some(surfaces::SchemaContract::Null);
@@ -726,24 +831,12 @@ fn build_interactions() -> Vec<InteractionDescriptor> {
         },
         {
             let mut i = InteractionDescriptor::new(
-                InteractionId::new(ACTION_GET).expect("interaction id is valid"),
-                InteractionKind::DataLoad,
-                "Get MQTT Client",
-                InteractionTransport::ProviderProxied,
-            );
-            i.required_permission = Some("update_system_services".to_string());
-            i.input_schema = Some(surfaces::SchemaContract::Object);
-            i.result_schema = Some(surfaces::SchemaContract::Object);
-            i.timeout_seconds = Some(30);
-            i
-        },
-        {
-            let mut i = InteractionDescriptor::new(
-                InteractionId::new(ACTION_DELETE).expect("interaction id is valid"),
+                InteractionId::new(ACTION_CLIENTS).expect("interaction id is valid"),
                 InteractionKind::ConfirmableAction,
                 "Delete MQTT Client",
                 InteractionTransport::ProviderProxied,
             );
+            i.http_method = surfaces::InteractionHttpMethod::Delete;
             i.required_permission = Some("update_system_services".to_string());
             i.input_schema = Some(surfaces::SchemaContract::Object);
             i.result_schema = Some(surfaces::SchemaContract::Null);
@@ -952,7 +1045,7 @@ fn build_client_form_ui(pre_load: bool) -> surfaces::FormUiDescriptor {
 
     if pre_load {
         form_ui.pre_load_interaction_id =
-            Some(InteractionId::new(ACTION_GET).expect("interaction id is valid"));
+            Some(InteractionId::new(ACTION_CLIENTS).expect("interaction id is valid"));
     }
     form_ui
 }
