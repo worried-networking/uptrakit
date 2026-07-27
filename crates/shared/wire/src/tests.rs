@@ -1699,6 +1699,168 @@ fn utc_datetime_millis_roundtrip_negative_timestamp() {
 }
 
 // =========================================================================
+// Autodiscovery wire message tests
+// =========================================================================
+
+#[test]
+fn discover_software_payload_roundtrip() {
+    let msg = ControllerMessage::DiscoverSoftware(DiscoverSoftwarePayload {
+        host_machine_id: "machine-abc".to_string(),
+        plugins: vec![
+            DiscoveryPluginAssignment {
+                plugin_config_id: Some(TEST_UUID_1),
+                plugin_type: plugin_ids::PACKAGE_MANAGER_HOMEBREW.clone(),
+                config: serde_json::json!({"package_type": "formula"}),
+            },
+            DiscoveryPluginAssignment {
+                plugin_config_id: None,
+                plugin_type: plugin_ids::DISCOVERY_PROXMOX_HELPER_SCRIPTS.clone(),
+                config: serde_json::Value::Object(Default::default()),
+            },
+        ],
+    });
+    let json = serde_json::to_string(&msg).unwrap();
+    let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
+    assert_eq!(deserialized, msg);
+}
+
+#[test]
+fn discover_software_payload_type_tag() {
+    let msg = ControllerMessage::DiscoverSoftware(DiscoverSoftwarePayload {
+        host_machine_id: "machine-abc".to_string(),
+        plugins: vec![],
+    });
+    let json = serde_json::to_string(&msg).unwrap();
+    assert!(json.contains(r#""type":"discover_software""#));
+}
+
+#[test]
+fn discovery_results_payload_roundtrip() {
+    let msg = ServiceMessage::DiscoveryResults(DiscoveryResultsPayload {
+        host_machine_id: "machine-abc".to_string(),
+        results: vec![
+            DiscoveryPluginResult {
+                plugin_config_id: Some(TEST_UUID_1),
+                plugin_type: plugin_ids::PACKAGE_MANAGER_HOMEBREW.clone(),
+                discoveries: vec![DiscoveredSoftware {
+                    package_identifier: "wget".to_string(),
+                    name: "Wget".to_string(),
+                    installed_version: "1.21.4".to_string(),
+                    targets: vec![],
+                    extra: Some(serde_json::json!({"package_type": "formula"})),
+                    featured: false,
+                    qualifier: None,
+                    plugin_package_identifier: None,
+                    installed_display_version: None,
+                }],
+                error: None,
+            },
+            DiscoveryPluginResult {
+                plugin_config_id: None,
+                plugin_type: plugin_ids::DISCOVERY_PROXMOX_HELPER_SCRIPTS.clone(),
+                discoveries: vec![],
+                error: Some("no update script found".to_string()),
+            },
+        ],
+    });
+    let json = serde_json::to_string(&msg).unwrap();
+    let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
+    assert_eq!(deserialized, msg);
+}
+
+#[test]
+fn discovery_results_payload_type_tag() {
+    let msg = ServiceMessage::DiscoveryResults(DiscoveryResultsPayload {
+        host_machine_id: "machine-abc".to_string(),
+        results: vec![],
+    });
+    let json = serde_json::to_string(&msg).unwrap();
+    assert!(json.contains(r#""type":"discovery_results""#));
+}
+
+#[test]
+fn discovery_plugin_assignment_none_config_id_omitted() {
+    let assignment = DiscoveryPluginAssignment {
+        plugin_config_id: None,
+        plugin_type: plugin_ids::PACKAGE_MANAGER_HOMEBREW.clone(),
+        config: serde_json::Value::Object(Default::default()),
+    };
+    let json = serde_json::to_value(&assignment).unwrap();
+    assert!(!json.as_object().unwrap().contains_key("plugin_config_id"));
+}
+
+#[test]
+fn execute_batch_update_serialization_roundtrip() {
+    let msg = ControllerMessage::ExecuteBatchUpdate(Box::new(ExecuteBatchUpdatePayload {
+        host_machine_id: "test-machine-id".to_string(),
+        batch_id: TEST_UUID_1,
+        plugin_type: plugin_ids::PACKAGE_MANAGER_APT.clone(),
+        plugin_config: serde_json::json!({}),
+        updates: vec![BatchUpdateItem {
+            host_software_item_id: TEST_UUID_1,
+            update_history_id: TEST_UUID_2,
+            package_identifier: "nginx".to_string(),
+            to_version: "1.24.0-2".to_string(),
+            release_info: None,
+        }],
+        pre_update_hook_plugins: vec![],
+        post_update_hook_plugins: vec![],
+        timeout: std::time::Duration::from_secs(7200),
+        interactive: false,
+    }));
+    let json = serde_json::to_string(&msg).unwrap();
+    assert!(json.contains(r#""type":"execute_batch_update"#));
+    assert!(json.contains(r#""plugin_type":"package-manager.apt"#));
+    assert!(json.contains(r#""package_identifier":"nginx"#));
+    let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
+    assert_eq!(deserialized, msg);
+}
+
+#[test]
+fn execute_batch_update_backward_compat_old_type_tag() {
+    // Old wire messages with the old type tag must still deserialize.
+    let json = r#"{"type":"execute_batch_host_package_update","host_machine_id":"test","batch_id":"550e8400-e29b-41d4-a716-446655440000","plugin_type":"package-manager.apt","plugin_config":{},"updates":[{"host_package_id":"550e8400-e29b-41d4-a716-446655440000","update_history_id":"550e8400-e29b-41d4-a716-446655440001","package_identifier":"nginx","to_version":"1.24.0-2"}],"timeout_seconds":7200}"#;
+    let msg: ControllerMessage = serde_json::from_str(json).unwrap();
+    if let ControllerMessage::ExecuteBatchUpdate(payload) = msg {
+        assert_eq!(payload.updates[0].host_software_item_id, TEST_UUID_1);
+    } else {
+        panic!("expected ExecuteBatchUpdate");
+    }
+}
+
+#[test]
+fn batch_update_result_serialization_roundtrip() {
+    let msg = ServiceMessage::BatchUpdateResult(BatchUpdateResultPayload {
+        batch_id: TEST_UUID_1,
+        results: vec![BatchUpdateItemResult {
+            host_software_item_id: TEST_UUID_1,
+            update_history_id: TEST_UUID_2,
+            status: UpdateFinalStatus::Completed,
+            output: "Unpacking nginx 1.24.0-2 ...\n".to_string(),
+            installed_version: Some("1.24.0-2".to_string()),
+            error: None,
+        }],
+    });
+    let json = serde_json::to_string(&msg).unwrap();
+    assert!(json.contains(r#""type":"batch_update_result"#));
+    assert!(json.contains(r#""status":"completed"#));
+    let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
+    assert_eq!(deserialized, msg);
+}
+
+#[test]
+fn batch_update_result_backward_compat_old_type_tag() {
+    // Old wire messages with the old type tag must still deserialize.
+    let json = r#"{"type":"batch_host_package_update_result","batch_id":"550e8400-e29b-41d4-a716-446655440000","results":[{"host_package_id":"550e8400-e29b-41d4-a716-446655440000","update_history_id":"550e8400-e29b-41d4-a716-446655440001","status":"completed","output":"done\n"}]}"#;
+    let msg: ServiceMessage = serde_json::from_str(json).unwrap();
+    if let ServiceMessage::BatchUpdateResult(payload) = msg {
+        assert_eq!(payload.results[0].host_software_item_id, TEST_UUID_1);
+    } else {
+        panic!("expected BatchUpdateResult");
+    }
+}
+
+// =========================================================================
 // Host summary MQTT types tests
 // =========================================================================
 
