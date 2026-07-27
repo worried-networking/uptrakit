@@ -12,6 +12,9 @@ use uptrakit_shared_types::{
 };
 
 /// Payload for ping messages.
+///
+/// Heartbeat sent by the service; the controller responds with [`PongPayload`],
+/// echoing `service_ts` back so the service can calculate round-trip time.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -28,6 +31,10 @@ impl PingPayload {
 }
 
 /// Payload for pong messages.
+///
+/// Heartbeat response sent by the controller. Echoes back the ping's
+/// `service_ts` alongside `controller_ts`, letting the service compute
+/// round-trip time as `now - service_ts` on receipt.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -56,6 +63,8 @@ impl PongPayload {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HostInfo {
     /// Persistent machine identifier (e.g. `/etc/machine-id` on Linux, `IOPlatformUUID` on macOS).
+    ///
+    /// Falls back to `"unknown"` if the identifier cannot be read.
     pub machine_id: String,
     /// Operating system type (e.g. "linux", "macos").
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -115,6 +124,11 @@ pub struct EnrollPayload {
 }
 
 /// Payload for requesting a client certificate after approval.
+///
+/// Sent after receiving `approved`. The service generates a fresh ECDSA P-256
+/// keypair, creates a CSR with CN=service_id, and submits it here; the controller
+/// responds with [`CertificatePayload`] (cert PEM only — the private key stays on
+/// the service).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RequestCertificatePayload {
@@ -123,6 +137,10 @@ pub struct RequestCertificatePayload {
 }
 
 /// Payload for requesting certificate renewal (mTLS-authenticated services).
+///
+/// Generated with a fresh ECDSA P-256 keypair, sent either proactively before the
+/// current certificate expires or in response to a [`RequestCertRenewalPayload`]
+/// push (e.g. after CA rotation). The controller responds with [`CertificatePayload`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RenewCertificatePayload {
@@ -150,6 +168,12 @@ pub struct ReportHostsPayload {
 }
 
 /// Payload for enrollment confirmation.
+///
+/// Sent once by the controller in response to `enroll`. `enrollment_secret` must be
+/// persisted by the service: it is presented as an `Authorization: Bearer` header to
+/// reconnect and resume the enrollment session (e.g. after a restart) if the service
+/// has not yet obtained a client certificate. `status` reflects whether the service
+/// requires manual admin approval or was auto-approved.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct EnrolledPayload {
@@ -160,6 +184,11 @@ pub struct EnrolledPayload {
 }
 
 /// Payload for approval notification.
+///
+/// Pushed by the controller as soon as an admin approves the service — the service
+/// does not poll for this; it simply waits on the still-open enrollment connection
+/// (or a reconnect made with the `enrollment_secret` bearer token). On receipt, the
+/// service proceeds to generate a keypair and send `request_certificate`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ApprovedPayload {
@@ -167,6 +196,9 @@ pub struct ApprovedPayload {
 }
 
 /// Payload for rejection notification.
+///
+/// Pushed by the controller when an admin rejects a pending enrollment. The service
+/// should disconnect and exit; it must not retry the enrollment flow automatically.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RejectedPayload {
@@ -174,6 +206,10 @@ pub struct RejectedPayload {
 }
 
 /// Payload for issued certificate.
+///
+/// Sent in response to [`RequestCertificatePayload`] or `RenewCertificatePayload`.
+/// The private key is never included — the service already holds it locally. The
+/// service should persist the certificate and reconnect using mTLS.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CertificatePayload {
@@ -336,6 +372,10 @@ impl Default for ReportPageLimits {
 }
 
 /// Payload for CA bundle update notification.
+///
+/// Pushed by the controller when the CA certificate bundle changes (e.g. after CA
+/// rotation). The service should update its trust store with the new bundle PEM
+/// and prepare for certificate renewal (see [`RequestCertRenewalPayload`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CaBundleUpdatedPayload {
@@ -581,7 +621,10 @@ pub struct UpdateResultPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ExecuteBatchUpdatePayload {
-    /// The machine_id of the host to run the update on.
+    /// The machine_id of the host to run the batch update on.
+    ///
+    /// For the regular agent (one service = one host) this is validated against
+    /// its own machine_id. For the SSH agent this routes to the correct remote host.
     pub host_machine_id: String,
     /// Unique identifier for this batch operation.
     pub batch_id: Uuid,
@@ -1252,6 +1295,10 @@ pub struct SoftwareStateItem {
     /// Human-readable software item name.
     pub name: String,
     /// Optional HTTPS URL to an icon/logo image.
+    ///
+    /// When present, the MQTT service includes this as `entity_picture` in the
+    /// Home Assistant discovery config so HA displays it as the entity thumbnail.
+    /// Limited to [`crate::limits::MAX_ICON_URL_LEN`] characters.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon_url: Option<String>,
     /// Per-host version data for this software item.
@@ -1342,6 +1389,8 @@ pub struct HostPackageSummary {
     /// Count of items where `installed_version != latest_version` (both known).
     pub pending_count: u32,
     /// Count of items where `update_category = "security"` AND versions differ.
+    ///
+    /// Used to drive the per-host security updates entity in Home Assistant.
     pub security_pending_count: u32,
     /// Total count of enabled, non-deactivated unfeatured items for this host.
     pub total_count: u32,

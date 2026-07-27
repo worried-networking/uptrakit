@@ -14,6 +14,35 @@ services share the same `ServiceMessage`/`ControllerMessage` enums, with variant
 Agents and SSH agents initiate outbound-only connections and never accept inbound traffic. MQTT services and SSH agents
 use the same enrollment model (shared service abstraction).
 
+## Authentication
+
+Before the first WebSocket connection, services fetch and pin the controller's internal CA certificate via
+`HTTP GET /api/v1/pki/ca.crt` (Trust On First Use) — the only HTTP endpoint any service uses.
+
+The controller supports mutual TLS (mTLS) for authenticated service connections. After enrollment approval,
+services request a short-lived client certificate signed by the internal CA; the certificate `CN` contains the
+service UUID (`service_id`). For reconnection during enrollment (before certificate issuance), services present
+the `enrollment_secret` via an `Authorization: Bearer` header during the WebSocket upgrade handshake.
+
+### CSR-Based Certificate Issuance
+
+The service always generates its own ECDSA P-256 keypair locally; the private key never leaves the service. A
+fresh keypair is generated for each CSR — both the initial enrollment CSR and every subsequent renewal CSR. The
+controller validates the CSR signature, verifies the CN matches the service identity, and signs the certificate
+with controller-controlled parameters (DN, EKU, validity period).
+
+### Reconnection Before Certificate Issuance
+
+If a service restarts after enrollment but before it has obtained a certificate:
+
+1. Reconnect to `WSS /api/v1/ws/service` with `Authorization: Bearer <enrollment_secret>`.
+1. The controller validates the header during the WebSocket upgrade and identifies the service.
+1. If the service is already approved, the controller sends `approved` immediately.
+1. If still pending, the controller waits for admin action and pushes `approved`/`rejected` when decided.
+1. The service generates a new keypair and CSR, then sends `request_certificate` with `csr_pem`.
+1. The service receives `certificate` (cert PEM only — the private key is never transmitted).
+1. The service disconnects and reconnects using mTLS.
+
 ## Service Activity Tracking
 
 For Agent, SSH agent, and MQTT services, the controller updates `services.last_seen_at` on every successful WebSocket connect
@@ -25,6 +54,8 @@ Accurate client IP tracking depends on trusted-proxy configuration; see
 
 ## Agent Lifecycle
 
+1. Fetches and pins the controller's CA certificate via `HTTP GET /api/v1/pki/ca.crt` (Trust On First Use);
+   see [Authentication](#authentication).
 1. Connect anonymously and send `enroll` with hostname, capabilities, and optional enrollment token.
    The `enrollment_token` field carries a single plaintext string; the controller resolves it
    against multiple stored tokens server-side (see [Enrollment Tokens API](enrollment-tokens.md)).
@@ -733,9 +764,10 @@ or deletes a config entry. Allows multi-instance deployments to stay in sync wit
 
 ## `host_machine_id` Field
 
-`CheckVersionsPayload` and `ExecuteUpdatePayload` both carry a required `host_machine_id: String` field as their first
-field. The controller groups role-based plugin assignments by `(service_id, host_machine_id)` and sends one message per
-host so that each agent instance receives only the checks and updates relevant to its managed hosts.
+`CheckVersionsPayload`, `ExecuteUpdatePayload`, `DiscoverSoftwarePayload`, and `ExecuteBatchUpdatePayload` all carry a
+required `host_machine_id: String` field as their first field. The controller groups role-based plugin assignments by
+`(service_id, host_machine_id)` and sends one message per host so that each agent instance receives only the checks,
+updates, and discovery runs relevant to its managed hosts.
 
 ### Regular agent behavior
 
@@ -1025,6 +1057,11 @@ The `ping_interval` field is serialized as a `u32` number of seconds on the wire
 using the `duration_seconds` serde module. The controller reads `ping_interval_seconds` from the `services` table
 for each service and falls back to `ServiceProfile` defaults when no override is set.
 
+`renewal_window_hours` is computed as `min(14 days, cert_lifetime / 5)`, or the admin-configured override when one
+is set. `ca_bundle_hash` is the SHA-256 hash of the current CA bundle PEM; the service compares it against its
+local CA bundle to detect staleness. If `ca_bundle_hash` is missing or empty, the service skips the staleness
+check (backwards compatibility with controllers that predate this field).
+
 `report_page_limits` lets the controller define the current per-page item caps that services must apply when
 splitting paginated reports. The current fields are:
 
@@ -1084,6 +1121,9 @@ support at the start of each authenticated connection; neither requires a hard c
 The HTTP path `/api/v1/ws/service` provides the hard-break slot for truly incompatible format changes.
 
 ### Defined Capabilities
+
+Canonical source: the `Capability` enum in `crates/shared/wire/src/capabilities.rs`. No capability list is
+hand-maintained anywhere else; the table below mirrors that enum for reference and must be kept in sync with it.
 
 | Capability           | Wire String            | Description                                                                                                                                                                                                                                                                           |
 | -------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
