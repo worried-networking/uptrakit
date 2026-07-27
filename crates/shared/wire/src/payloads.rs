@@ -453,11 +453,7 @@ pub struct VersionCheckAssignment {
     /// Host software item ID for routing results to the host_software_items table.
     /// When set, this assignment is for a host-managed software item rather than
     /// a targeted software item.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        alias = "host_package_id"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host_software_item_id: Option<Uuid>,
 }
 
@@ -492,11 +488,7 @@ pub struct VersionCheckResult {
     pub update_category: UpdateCategory,
     /// Host software item ID for routing results to the host_software_items table.
     /// Mirrors the value from the corresponding [`VersionCheckAssignment`].
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        alias = "host_package_id"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host_software_item_id: Option<Uuid>,
     /// Human-readable installed version for display when `installed_version`
     /// is opaque (e.g. a Docker SHA256 digest → the image publish date).
@@ -663,7 +655,6 @@ pub struct ExecuteBatchUpdatePayload {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BatchUpdateItem {
     /// Host software item entity ID.
-    #[serde(alias = "host_package_id")]
     pub host_software_item_id: Uuid,
     /// Update history record ID (pre-created by the controller).
     pub update_history_id: Uuid,
@@ -691,7 +682,6 @@ pub struct BatchUpdateResultPayload {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BatchUpdateItemResult {
     /// Host software item entity ID.
-    #[serde(alias = "host_package_id")]
     pub host_software_item_id: Uuid,
     /// Update history record ID.
     pub update_history_id: Uuid,
@@ -1274,7 +1264,7 @@ pub struct SoftwareStatesPayload {
     /// one host. Only hosts with at least one such item are included.
     /// Defaults to an empty list on deserialization for backward compatibility
     /// with older MQTT services.
-    #[serde(default, alias = "host_package_hosts")]
+    #[serde(default)]
     pub host_summaries: Vec<HostPackageSummary>,
     /// Per-host metadata for all hosts referenced in `items` or `host_summaries`.
     ///

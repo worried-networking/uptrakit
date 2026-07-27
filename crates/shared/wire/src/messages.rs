@@ -46,7 +46,6 @@ pub enum ServiceMessage {
     UpdateStarted(UpdateStartedPayload),
     UpdateOutput(UpdateOutputPayload),
     UpdateResult(UpdateResultPayload),
-    #[serde(alias = "batch_host_package_update_result")]
     BatchUpdateResult(BatchUpdateResultPayload),
     DiscoveryResults(DiscoveryResultsPayload),
     /// Agent → Controller: the update process appears to be waiting for stdin input.
@@ -165,7 +164,6 @@ pub enum ControllerMessage {
     // -- Agent-specific --
     CheckVersions(CheckVersionsPayload),
     ExecuteUpdate(Box<ExecuteUpdatePayload>),
-    #[serde(alias = "execute_batch_host_package_update")]
     ExecuteBatchUpdate(Box<ExecuteBatchUpdatePayload>),
     DiscoverSoftware(DiscoverSoftwarePayload),
     SetUpdateFreeze(SetUpdateFreezePayload),

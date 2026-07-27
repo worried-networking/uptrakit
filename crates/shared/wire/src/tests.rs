@@ -1817,18 +1817,6 @@ fn execute_batch_update_serialization_roundtrip() {
 }
 
 #[test]
-fn execute_batch_update_backward_compat_old_type_tag() {
-    // Old wire messages with the old type tag must still deserialize.
-    let json = r#"{"type":"execute_batch_host_package_update","host_machine_id":"test","batch_id":"550e8400-e29b-41d4-a716-446655440000","plugin_type":"package-manager.apt","plugin_config":{},"updates":[{"host_package_id":"550e8400-e29b-41d4-a716-446655440000","update_history_id":"550e8400-e29b-41d4-a716-446655440001","package_identifier":"nginx","to_version":"1.24.0-2"}],"timeout_seconds":7200}"#;
-    let msg: ControllerMessage = serde_json::from_str(json).unwrap();
-    if let ControllerMessage::ExecuteBatchUpdate(payload) = msg {
-        assert_eq!(payload.updates[0].host_software_item_id, TEST_UUID_1);
-    } else {
-        panic!("expected ExecuteBatchUpdate");
-    }
-}
-
-#[test]
 fn batch_update_result_serialization_roundtrip() {
     let msg = ServiceMessage::BatchUpdateResult(BatchUpdateResultPayload {
         batch_id: TEST_UUID_1,
@@ -1846,18 +1834,6 @@ fn batch_update_result_serialization_roundtrip() {
     assert!(json.contains(r#""status":"completed"#));
     let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
     assert_eq!(deserialized, msg);
-}
-
-#[test]
-fn batch_update_result_backward_compat_old_type_tag() {
-    // Old wire messages with the old type tag must still deserialize.
-    let json = r#"{"type":"batch_host_package_update_result","batch_id":"550e8400-e29b-41d4-a716-446655440000","results":[{"host_package_id":"550e8400-e29b-41d4-a716-446655440000","update_history_id":"550e8400-e29b-41d4-a716-446655440001","status":"completed","output":"done\n"}]}"#;
-    let msg: ServiceMessage = serde_json::from_str(json).unwrap();
-    if let ServiceMessage::BatchUpdateResult(payload) = msg {
-        assert_eq!(payload.results[0].host_software_item_id, TEST_UUID_1);
-    } else {
-        panic!("expected BatchUpdateResult");
-    }
 }
 
 // =========================================================================
@@ -1888,15 +1864,6 @@ fn mqtt_software_states_payload_default_host_summaries() {
     let json = r#"{"tenant_id":"11111111-1111-1111-1111-111111111111","items":[],"page":{"page_index":0,"total_pages":1}}"#;
     let payload: SoftwareStatesPayload = serde_json::from_str(json).unwrap();
     assert!(payload.host_summaries.is_empty());
-}
-
-#[test]
-fn mqtt_software_states_payload_backward_compat_host_package_hosts() {
-    // Old wire messages with "host_package_hosts" should deserialize via alias.
-    let json = r#"{"tenant_id":"11111111-1111-1111-1111-111111111111","items":[],"host_package_hosts":[{"host_id":"550e8400-e29b-41d4-a716-446655440001","hostname":"host1","pending_count":5,"security_pending_count":2,"total_count":100,"update_in_progress":true}],"page":{"page_index":0,"total_pages":1}}"#;
-    let payload: SoftwareStatesPayload = serde_json::from_str(json).unwrap();
-    assert_eq!(payload.host_summaries.len(), 1);
-    assert_eq!(payload.host_summaries[0].pending_count, 5);
 }
 
 #[test]
