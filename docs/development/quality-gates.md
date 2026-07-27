@@ -164,6 +164,16 @@ Run both in one command from the repo root:
 
 Then commit `crates/ui/web-api/openapi.json` and `frontend/src/lib/api/generated/`.
 
+### Wire protocol (AsyncAPI) staleness gate
+
+After any wire-type change (`crates/shared/wire/`), `crates/shared/wire/asyncapi.yaml` must be
+regenerated and committed. CI's `--all-features` run gates on staleness via the
+`asyncapi_yaml_is_up_to_date` golden test.
+
+```sh
+./scripts/regen-asyncapi.sh
+```
+
 ## Frontend (SvelteKit)
 
 ```sh

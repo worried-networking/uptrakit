@@ -1111,9 +1111,10 @@ support at the start of each authenticated connection; neither requires a hard c
 ### How It Works
 
 1. After mTLS authentication succeeds, the controller sends `service_settings` containing `capabilities: [...]`.
-2. Every service sends `register` containing its own `capabilities: [...]` immediately on connect (before
-   processing `service_settings`). Services with the `update_tracking` capability also include MQTT-specific
-   fields (`instance_id`, `max_tenants`, `active_mqtt_clients`) in the same message.
+2. Every service sends `register` containing its own `capabilities: [...]` (and optional `runtime_instance_id`)
+   immediately on connect (before processing `service_settings`). MQTT client/tenant lease ownership is negotiated
+   separately via the `WorkloadClaim*` message family (see [Workload
+   Claims](../development/workload-claims.md)), not carried on `register`.
 3. Each side independently computes the **agreed set**: the intersection of the two capability sets, excluding `Other`
    values (unrecognized capabilities from a newer peer).
 4. The agreed set is stored on the connection and can be used to gate feature-specific flows.

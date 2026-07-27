@@ -66,14 +66,14 @@ Five wire payload fields use typed enums instead of raw strings — invalid valu
   (stdout, stderr, pre/post-hook, system). Controller validates ownership before appending output.
 - `UpdateResult(UpdateResultPayload)` variant in `ServiceMessage` (agent-specific) — agent reports final update status
   with accumulated output. Controller validates ownership before updating status.
-- `Register(MqttRegisterPayload)` variant in `ServiceMessage` (MQTT-specific) — MQTT service registers with the
-  controller (includes `active_mqtt_clients: Vec<Uuid>`)
-- `ReleaseTenants(MqttReleaseTenantsPayload)` variant in `ServiceMessage` (MQTT-specific) — MQTT service releases MQTT
-  client leases (by `mqtt_client_ids`)
+- `Register(RegisterPayload)` variant in `ServiceMessage` — every service registers its `capabilities` (and optional
+  `runtime_instance_id`) with the controller immediately on connect. MQTT client/tenant lease ownership is no longer
+  carried on this message; it is managed via the `WorkloadClaim*` message family — see
+  [Workload Claims](../development/workload-claims.md).
 - `ServerRestarting(ServerRestartingPayload)` variant in `ControllerMessage` — sent during graceful restart to notify
   services; includes a human-readable `reason` field
 - `Disconnecting(DisconnectingPayload)` variant in `ServiceMessage` — service notifies controller before graceful
-  disconnect (includes `DisconnectReason`: `shutdown` or `restart`; optional `active_mqtt_clients: Vec<Uuid>` for MQTT)
+  disconnect (includes `DisconnectReason`: `shutdown` or `restart`)
 
 ## Replay protection (message sequence numbers)
 

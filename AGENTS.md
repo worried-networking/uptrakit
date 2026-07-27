@@ -73,7 +73,8 @@ cargo test -p uptrakit-integration-tests -- --ignored                   # Enroll
 
 Run integration tests only when changes touch the triggering areas. After any backend route or REST-contract change,
 run `./scripts/regen-api.sh` and commit `crates/ui/web-api/openapi.json` + `frontend/src/lib/api/generated/` — CI gates
-on staleness of both.
+on staleness of both. After any wire-type change, run `./scripts/regen-asyncapi.sh` and commit
+`crates/shared/wire/asyncapi.yaml` — CI gates on staleness via the `asyncapi_yaml_is_up_to_date` golden test.
 
 ## Codebase layout
 
@@ -119,7 +120,7 @@ uptrakit/
 │   │   ├── audit-log/                 # uptrakit-audit-log        (lib) — semantic audit domain, emitters, dispatcher, backends
 │   │   ├── update-hooks/             # uptrakit-config-merge     (lib) — resolve_effective_config(), merge_config()
 │   │   ├── backoff/                   # uptrakit-backoff          (lib) — exponential backoff (reconnect_backoff_builder)
-│   │   └── wire/                       # uptrakit-internal-wire    (lib) — service↔controller wire protocol, Capability, ServiceProfile
+│   │   └── wire/                       # uptrakit-wire             (lib) — service↔controller wire protocol, Capability, ServiceProfile
 │   └── ui/                             # See crates/ui/web-api/AGENTS.md for web-api handler conventions
 │       ├── cli/                        # uptrakit-cli             (bin+lib) — CLI over openapi-client; SSE for --follow
 │       ├── web-api/                    # uptrakit-web-api         (lib) — HTTP API: routes, middleware, AppState + sub-states, service WS
