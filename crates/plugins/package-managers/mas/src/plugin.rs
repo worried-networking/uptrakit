@@ -210,7 +210,7 @@ impl MasPlugin {
 
 // ── Plugin descriptor ─────────────────────────────────────────────────────
 
-declare_plugin!(MasPlugin, MasConfig, "package_manager_mas", {
+declare_plugin!(MasPlugin, MasConfig, "package-manager.mas", {
     display_name: "Mac App Store",
     family: PluginFamily::Software,
     config_model: ConfigModel::PluginConfig,

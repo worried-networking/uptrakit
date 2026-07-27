@@ -14,7 +14,7 @@ use crate::validation::{Validate, ValidationError};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TestPluginConfigRequest {
-    /// The plugin type to test (e.g. `"generic_shell"`, `"releases_github"`).
+    /// The plugin type to test (e.g. `"generic.shell"`, `"releases.github"`).
     pub plugin_type: String,
     /// The plugin configuration JSON to test.
     pub config: serde_json::Value,
@@ -175,7 +175,7 @@ mod tests {
     #[test]
     fn validate_valid_request() {
         let req = TestPluginConfigRequest {
-            plugin_type: "generic_shell".to_string(),
+            plugin_type: "generic.shell".to_string(),
             config: serde_json::json!({"version_command": "nginx -v"}),
             plugin_config_id: None,
             host_id: None,
@@ -206,7 +206,7 @@ mod tests {
     #[test]
     fn request_serialization_roundtrip() {
         let req = TestPluginConfigRequest {
-            plugin_type: "releases_github".to_string(),
+            plugin_type: "releases.github".to_string(),
             config: serde_json::json!({"api_url": "https://api.github.com"}),
             plugin_config_id: None,
             host_id: Some(uuid::Uuid::nil()),
@@ -215,7 +215,7 @@ mod tests {
         };
         let json = serde_json::to_string(&req).unwrap();
         let de: TestPluginConfigRequest = serde_json::from_str(&json).unwrap();
-        assert_eq!(de.plugin_type, "releases_github");
+        assert_eq!(de.plugin_type, "releases.github");
         assert_eq!(de.host_id, Some(uuid::Uuid::nil()));
         assert_eq!(de.test_kind.as_deref(), Some("connectivity"));
     }

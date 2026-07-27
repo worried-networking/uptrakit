@@ -43,7 +43,7 @@ struct PluginAssignmentRow {
 /// the wire does not carry it (it lives on `host_software_item_plugin`).
 #[non_exhaustive]
 pub struct PluginAssignment {
-    /// The plugin type discriminator (e.g. `"package_manager_skills"`).
+    /// The plugin type discriminator (e.g. `"package-manager.skills"`).
     pub plugin_type: String,
     /// The package identifier recorded on the assignment row.
     pub package_identifier: String,

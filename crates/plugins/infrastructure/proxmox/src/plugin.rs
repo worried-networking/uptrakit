@@ -177,7 +177,7 @@ fn proxmox_hosts_surface() -> PluginSurface {
                 "plugin_config_id",
                 "Configuration",
                 "All Configurations",
-                "/api/v1/plugin-configs?plugin_type=infrastructure_proxmox",
+                "/api/v1/plugin-configs?plugin_type=infrastructure.proxmox",
                 "id",
                 "name",
                 vec![
@@ -529,7 +529,7 @@ fn proxmox_settings_update_protection_surface() -> PluginSurface {
                             default_value: None,
                             options: vec![],
                             select_source: Some(surfaces::FormSelectSource::RestApi {
-                                path: "/api/v1/plugin-configs?plugin_type=infrastructure_proxmox"
+                                path: "/api/v1/plugin-configs?plugin_type=infrastructure.proxmox"
                                     .to_string(),
                                 value_field: "id".to_string(),
                                 label_field: "name".to_string(),
@@ -718,7 +718,7 @@ fn proxmox_settings_resource_scaling_surface() -> PluginSurface {
                             default_value: None,
                             options: vec![],
                             select_source: Some(surfaces::FormSelectSource::RestApi {
-                                path: "/api/v1/plugin-configs?plugin_type=infrastructure_proxmox"
+                                path: "/api/v1/plugin-configs?plugin_type=infrastructure.proxmox"
                                     .to_string(),
                                 value_field: "id".to_string(),
                                 label_field: "name".to_string(),
@@ -954,7 +954,7 @@ fn proxmox_software_item_update_protection_surface() -> PluginSurface {
                             default_value: None,
                             options: vec![],
                             select_source: Some(surfaces::FormSelectSource::RestApi {
-                                path: "/api/v1/plugin-configs?plugin_type=infrastructure_proxmox".to_string(),
+                                path: "/api/v1/plugin-configs?plugin_type=infrastructure.proxmox".to_string(),
                                 value_field: "id".to_string(),
                                 label_field: "name".to_string(),
                             }),
@@ -1165,7 +1165,7 @@ fn proxmox_software_item_resource_scaling_surface() -> PluginSurface {
                             default_value: None,
                             options: vec![],
                             select_source: Some(surfaces::FormSelectSource::RestApi {
-                                path: "/api/v1/plugin-configs?plugin_type=infrastructure_proxmox"
+                                path: "/api/v1/plugin-configs?plugin_type=infrastructure.proxmox"
                                     .to_string(),
                                 value_field: "id".to_string(),
                                 label_field: "name".to_string(),
@@ -1378,7 +1378,7 @@ fn __proxmox_create_infra(
     })
 }
 
-declare_plugin!(ProxmoxPlugin, ProxmoxConfig, "infrastructure_proxmox", {
+declare_plugin!(ProxmoxPlugin, ProxmoxConfig, "infrastructure.proxmox", {
     display_name: "Proxmox VE",
     family: PluginFamily::Infrastructure,
     config_model: ConfigModel::PluginConfig,
@@ -1400,7 +1400,7 @@ declare_plugin!(ProxmoxPlugin, ProxmoxConfig, "infrastructure_proxmox", {
         ],
     },
     surfaces: {
-        provider_id: "plugin.infrastructure_proxmox",
+        provider_id: "plugin.infrastructure.proxmox",
         registrations: descriptor_plugin_surfaces,
     },
     migrations: __proxmox_migrations,
@@ -1463,19 +1463,19 @@ mod tests {
             ..ProxmoxConfig::default()
         };
         let plugin = ProxmoxPlugin::new(config, test_runtime()).expect("create");
-        assert_eq!(plugin.plugin_type_id().as_str(), "infrastructure_proxmox");
+        assert_eq!(plugin.plugin_type_id().as_str(), "infrastructure.proxmox");
     }
 
     #[test]
     fn agent_plugin_type_is_infrastructure_proxmox() {
         let plugin = ProxmoxPlugin::new_agent();
-        assert_eq!(plugin.plugin_type_id().as_str(), "infrastructure_proxmox");
+        assert_eq!(plugin.plugin_type_id().as_str(), "infrastructure.proxmox");
     }
 
     #[test]
     fn default_creates_agent_variant() {
         let plugin = ProxmoxPlugin::default();
-        assert_eq!(plugin.plugin_type_id().as_str(), "infrastructure_proxmox");
+        assert_eq!(plugin.plugin_type_id().as_str(), "infrastructure.proxmox");
         assert!(plugin.config.is_none());
     }
 
@@ -1523,7 +1523,7 @@ mod tests {
         // for that behavior).
         let registrations: Vec<_> = proxmox_plugin_surfaces()
             .iter()
-            .map(|r| r.to_wire("plugin.infrastructure_proxmox"))
+            .map(|r| r.to_wire("plugin.infrastructure.proxmox"))
             .collect();
         assert!(
             !registrations.is_empty(),
@@ -1618,7 +1618,7 @@ mod tests {
     fn proxmox_host_info_surface_uses_explicit_data_source_contract() {
         let registrations: Vec<_> = proxmox_plugin_surfaces()
             .iter()
-            .map(|r| r.to_wire("plugin.infrastructure_proxmox"))
+            .map(|r| r.to_wire("plugin.infrastructure.proxmox"))
             .collect();
         let host_info = registrations
             .iter()
@@ -1647,7 +1647,7 @@ mod tests {
     fn proxmox_hosts_surface_has_full_table_layout() {
         let registrations: Vec<_> = proxmox_plugin_surfaces()
             .iter()
-            .map(|r| r.to_wire("plugin.infrastructure_proxmox"))
+            .map(|r| r.to_wire("plugin.infrastructure.proxmox"))
             .collect();
         let reg = &registrations[0];
         let hosts = reg
@@ -1741,7 +1741,7 @@ mod tests {
     fn proxmox_hosts_registers_unmatched_guests_and_provider_invocable_match() {
         let registrations: Vec<_> = proxmox_plugin_surfaces()
             .iter()
-            .map(|r| r.to_wire("plugin.infrastructure_proxmox"))
+            .map(|r| r.to_wire("plugin.infrastructure.proxmox"))
             .collect();
         let reg = &registrations[0];
         let hosts = reg
@@ -1779,7 +1779,7 @@ mod tests {
     fn policy_surfaces_keep_preload_and_backup_options_contract() {
         let registrations: Vec<_> = proxmox_plugin_surfaces()
             .iter()
-            .map(|r| r.to_wire("plugin.infrastructure_proxmox"))
+            .map(|r| r.to_wire("plugin.infrastructure.proxmox"))
             .collect();
         let settings_policy = registrations
             .iter()
@@ -1908,7 +1908,7 @@ mod tests {
     fn proxmox_hosts_surface_interactions_carry_icons() {
         let registrations: Vec<_> = proxmox_plugin_surfaces()
             .iter()
-            .map(|r| r.to_wire("plugin.infrastructure_proxmox"))
+            .map(|r| r.to_wire("plugin.infrastructure.proxmox"))
             .collect();
         let proxmox = registrations
             .first()

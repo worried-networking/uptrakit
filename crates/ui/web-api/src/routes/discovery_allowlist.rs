@@ -828,7 +828,7 @@ mod tests {
             .post_json(
                 "/api/v1/discovery-allowlist",
                 &serde_json::json!({
-                    "plugin_type": "package_manager_apt",
+                    "plugin_type": "package-manager.apt",
                 }),
             )
             .bearer(&token)
@@ -850,12 +850,12 @@ mod tests {
             Some("discovery_allowlist_entry")
         );
         assert_eq!(row.target_id.as_deref(), body["id"].as_str());
-        assert_eq!(row.target_display.as_deref(), Some("package_manager_apt"));
+        assert_eq!(row.target_display.as_deref(), Some("package-manager.apt"));
         let details = row.details_json.expect("details");
         assert_eq!(details["scope"], serde_json::json!("tenant"));
         assert_eq!(
             details["plugin_type"],
-            serde_json::json!("package_manager_apt")
+            serde_json::json!("package-manager.apt")
         );
         assert_eq!(details["host_id"], Value::Null);
         assert_eq!(details["was_created"], serde_json::json!(true));
@@ -872,7 +872,7 @@ mod tests {
             .post_json(
                 "/api/v1/discovery-allowlist",
                 &serde_json::json!({
-                    "plugin_type": "releases_github",
+                    "plugin_type": "releases.github",
                 }),
             )
             .bearer(&token)
@@ -892,7 +892,7 @@ mod tests {
         assert_eq!(row.target_type, None);
         let details = row.details_json.expect("details");
         assert_eq!(details["scope"], serde_json::json!("tenant"));
-        assert_eq!(details["plugin_type"], serde_json::json!("releases_github"));
+        assert_eq!(details["plugin_type"], serde_json::json!("releases.github"));
         assert_eq!(
             details["reason_code"],
             serde_json::json!("invalid_plugin_type")
@@ -911,7 +911,7 @@ mod tests {
             .post_json(
                 &format!("/api/v1/hosts/{}/discovery-allowlist", host.id),
                 &serde_json::json!({
-                    "plugin_type": "package_manager_homebrew",
+                    "plugin_type": "package-manager.homebrew",
                 }),
             )
             .bearer(&token)
@@ -935,13 +935,13 @@ mod tests {
         assert_eq!(row.target_id.as_deref(), body["id"].as_str());
         assert_eq!(
             row.target_display.as_deref(),
-            Some("package_manager_homebrew")
+            Some("package-manager.homebrew")
         );
         let details = row.details_json.expect("details");
         assert_eq!(details["scope"], serde_json::json!("host"));
         assert_eq!(
             details["plugin_type"],
-            serde_json::json!("package_manager_homebrew")
+            serde_json::json!("package-manager.homebrew")
         );
         assert_eq!(details["host_id"], serde_json::json!(host.id));
         assert_eq!(details["was_created"], serde_json::json!(true));
@@ -959,7 +959,7 @@ mod tests {
             .post_json(
                 &format!("/api/v1/hosts/{}/discovery-allowlist", host.id),
                 &serde_json::json!({
-                    "plugin_type": "package_manager_apt",
+                    "plugin_type": "package-manager.apt",
                 }),
             )
             .bearer(&token)
@@ -993,7 +993,7 @@ mod tests {
         assert_eq!(details["host_id"], serde_json::json!(host.id));
         assert_eq!(
             details["plugin_type"],
-            serde_json::json!("package_manager_apt")
+            serde_json::json!("package-manager.apt")
         );
     }
 

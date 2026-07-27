@@ -727,7 +727,7 @@ export type HostDiscoveryAllowlistEntry = {
      */
     id: string;
     /**
-     * Plugin type string (e.g. `"package_manager_apt"`).
+     * Plugin type string (e.g. `"package-manager.apt"`).
      */
     plugin_type: string;
 };
@@ -2073,7 +2073,7 @@ export type PluginTypeInfo = {
      */
     display_name: string;
     /**
-     * Wire identifier for the plugin type (e.g. `"releases_github"`).
+     * Wire identifier for the plugin type (e.g. `"releases.github"`).
      */
     plugin_type: PluginTypeId;
     /**
@@ -2736,7 +2736,7 @@ export type TenantDiscoveryAllowlistEntry = {
      */
     id: string;
     /**
-     * Plugin type string (e.g. `"package_manager_homebrew"`).
+     * Plugin type string (e.g. `"package-manager.homebrew"`).
      */
     plugin_type: string;
 };
@@ -2774,7 +2774,7 @@ export type TestPluginConfigRequest = {
      */
     plugin_config_id?: string | null;
     /**
-     * The plugin type to test (e.g. `"generic_shell"`, `"releases_github"`).
+     * The plugin type to test (e.g. `"generic.shell"`, `"releases.github"`).
      */
     plugin_type: string;
     /**
@@ -6284,7 +6284,7 @@ export type ListPluginConfigsData = {
          */
         per_page?: number | null;
         /**
-         * Filter by plugin type (e.g. `infrastructure_proxmox`). Returns all types when absent.
+         * Filter by plugin type (e.g. `infrastructure.proxmox`). Returns all types when absent.
          */
         plugin_type?: string | null;
     };
@@ -7612,7 +7612,7 @@ export type ListSoftwareItemsData = {
         updatable?: boolean | null;
         /**
          * Filter by plugin type — only return items that have at least one host
-         * assignment using this plugin type (e.g. `"releases_docker"`).
+         * assignment using this plugin type (e.g. `"releases.docker"`).
          * Omit to return items for any plugin type.
          */
         plugin_type?: string | null;

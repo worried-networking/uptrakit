@@ -270,7 +270,7 @@ impl ApkPlugin {
 
 // ── Plugin descriptor ─────────────────────────────────────────────────────
 
-declare_plugin!(ApkPlugin, ApkConfig, "package_manager_apk", {
+declare_plugin!(ApkPlugin, ApkConfig, "package-manager.apk", {
     display_name: "APK",
     family: PluginFamily::Software,
     config_model: ConfigModel::PluginConfig,

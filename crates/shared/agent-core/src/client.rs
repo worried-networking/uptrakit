@@ -1119,7 +1119,7 @@ mod tests {
     async fn discover_skips_posix_plugin_on_routeros_host() {
         let (runtime, counter) = CountingHostRuntime::new(runtime_with_caps(routeros_caps()));
         let response =
-            super::run_discover_software(discover_payload("package_manager_apt"), runtime, &ctx())
+            super::run_discover_software(discover_payload("package-manager.apt"), runtime, &ctx())
                 .await;
 
         match response {
@@ -1145,7 +1145,7 @@ mod tests {
     async fn discover_runs_compatible_plugin_on_linux_host() {
         let (runtime, counter) = CountingHostRuntime::new(runtime_with_caps(linux_caps()));
         let _ =
-            super::run_discover_software(discover_payload("package_manager_apt"), runtime, &ctx())
+            super::run_discover_software(discover_payload("package-manager.apt"), runtime, &ctx())
                 .await;
 
         assert!(
@@ -1161,7 +1161,7 @@ mod tests {
         let (runtime, counter) =
             CountingHostRuntime::new(runtime_with_caps(legacy_caps_no_os_family()));
         let _ =
-            super::run_discover_software(discover_payload("package_manager_apt"), runtime, &ctx())
+            super::run_discover_software(discover_payload("package-manager.apt"), runtime, &ctx())
                 .await;
 
         assert!(
@@ -1174,7 +1174,7 @@ mod tests {
     async fn batch_update_skips_posix_plugin_on_routeros_host() {
         let (runtime, counter) = CountingHostRuntime::new(runtime_with_caps(routeros_caps()));
         let payload = make_batch_payload(
-            PluginTypeId::new("package_manager_apt"),
+            PluginTypeId::new("package-manager.apt"),
             std::time::Duration::from_secs(30),
         );
         let results = super::batch_update_inner(&payload, runtime, &ctx()).await;

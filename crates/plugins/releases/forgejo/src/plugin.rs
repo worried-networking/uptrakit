@@ -246,7 +246,7 @@ fn parse_link_next(headers: &reqwest::header::HeaderMap) -> Option<String> {
 
 // ── declare_plugin! ──────────────────────────────────────────────────────
 
-declare_plugin!(ForgejoPlugin, ForgejoConfig, "releases_forgejo", {
+declare_plugin!(ForgejoPlugin, ForgejoConfig, "releases.forgejo", {
     display_name: "Forgejo Releases",
     family: PluginFamily::Software,
     config_model: ConfigModel::PluginConfig,
@@ -624,7 +624,7 @@ mod tests {
     #[test]
     fn plugin_type_id() {
         let plugin = test_plugin();
-        assert_eq!(plugin.plugin_type_id().as_str(), "releases_forgejo");
+        assert_eq!(plugin.plugin_type_id().as_str(), "releases.forgejo");
     }
 
     // ── descriptor capabilities ─────────────────────────────────────────

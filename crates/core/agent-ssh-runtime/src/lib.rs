@@ -1523,7 +1523,7 @@ mod tests {
             to_version: "1.2.3".to_string(),
             detect_version_plugin: None,
             execute_update_plugin: uptrakit_wire::PluginAssignment {
-                plugin_type: PluginTypeId::new("generic_shell"),
+                plugin_type: PluginTypeId::new("generic.shell"),
                 package_identifier: "demo".to_string(),
                 config: serde_json::json!({}),
             },
@@ -2064,7 +2064,7 @@ mod tests {
                 ControllerMessage::ExecuteBatchUpdate(Box::new(ExecuteBatchUpdatePayload {
                     host_machine_id: "host-1".to_string(),
                     batch_id: uuid::Uuid::now_v7(),
-                    plugin_type: PluginTypeId::new("generic_shell"),
+                    plugin_type: PluginTypeId::new("generic.shell"),
                     plugin_config: serde_json::json!({}),
                     updates: Vec::new(),
                     pre_update_hook_plugins: Vec::new(),

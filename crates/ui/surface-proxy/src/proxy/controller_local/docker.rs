@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use super::SurfaceProxyError;
 
-const PLUGIN_TYPE_RELEASES_DOCKER: &str = "releases_docker";
+const PLUGIN_TYPE_RELEASES_DOCKER: &str = "releases.docker";
 
 pub(crate) fn allowlisted_docker_switch_tag_controller_local_action(
     provider_id: &str,
@@ -11,7 +11,7 @@ pub(crate) fn allowlisted_docker_switch_tag_controller_local_action(
     interaction_id: &str,
     method: &InteractionHttpMethod,
 ) -> bool {
-    matches!(provider_id, "plugin.releases_docker" | "releases_docker")
+    matches!(provider_id, "plugin.releases.docker" | "releases.docker")
         && super::table_tier(surface_id, interaction_id, method)
             == Some(super::ExecutorTier::PluginWithAudit)
         && surface_id == "docker.item-host-actions"

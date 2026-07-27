@@ -213,7 +213,7 @@ pub use crate::surface_form_authoring::{
 
 /// Single-source surface registration ops (ADR-0028).
 pub struct PluginSurfaceRegistrationOps {
-    /// Wire provider id, e.g. `"plugin.webhook"`.
+    /// Wire provider id, e.g. `"plugin.notifications.webhook"`.
     pub provider_id: &'static str,
     /// Returns the plugin's surface registrations with paired deliveries.
     pub registrations: fn() -> Vec<crate::registration::PluginSurfaceRegistration>,

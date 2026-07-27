@@ -73,7 +73,7 @@ impl FetchReleasesExecutor {
     /// Set the global provider lookup for controller-side fetch contexts.
     ///
     /// When `Some`, passes the lookup through to [`ReleaseFetchContext`] so that
-    /// plugins such as `package_manager_skills` can reach the global GitHub
+    /// plugins such as `package-manager.skills` can reach the global GitHub
     /// provider. `None` (the default) produces a standalone/test context with no
     /// provider lookup.
     pub fn with_global_provider_lookup(
@@ -834,8 +834,8 @@ mod tests {
     fn same_config_id_same_assignment_same_group() {
         let id = Uuid::now_v7();
         let cfg = serde_json::json!({"platform": "linux/arm/v7"});
-        let k1 = phase_a_group_key(Some(id), "releases_docker", Some(&cfg));
-        let k2 = phase_a_group_key(Some(id), "releases_docker", Some(&cfg));
+        let k1 = phase_a_group_key(Some(id), "releases.docker", Some(&cfg));
+        let k2 = phase_a_group_key(Some(id), "releases.docker", Some(&cfg));
         assert_eq!(k1, k2);
     }
 
@@ -848,8 +848,8 @@ mod tests {
         let id = Uuid::now_v7();
         let arm = serde_json::json!({"platform": "linux/arm/v7"});
         let x64 = serde_json::json!({"platform": "linux/amd64"});
-        let k_arm = phase_a_group_key(Some(id), "releases_docker", Some(&arm));
-        let k_x64 = phase_a_group_key(Some(id), "releases_docker", Some(&x64));
+        let k_arm = phase_a_group_key(Some(id), "releases.docker", Some(&arm));
+        let k_x64 = phase_a_group_key(Some(id), "releases.docker", Some(&x64));
         assert_ne!(k_arm, k_x64);
     }
 
@@ -859,8 +859,8 @@ mod tests {
         // not be silently conflated — an empty object may grow new keys in a
         // later migration and should stay in its own group.
         let id = Uuid::now_v7();
-        let k_none = phase_a_group_key(Some(id), "releases_docker", None);
-        let k_empty = phase_a_group_key(Some(id), "releases_docker", Some(&serde_json::json!({})));
+        let k_none = phase_a_group_key(Some(id), "releases.docker", None);
+        let k_empty = phase_a_group_key(Some(id), "releases.docker", Some(&serde_json::json!({})));
         // `None` → suffix = "", `Some({})` → suffix = "{}" → keys differ.
         assert_ne!(k_none, k_empty);
     }
@@ -870,23 +870,23 @@ mod tests {
         let id_a = Uuid::now_v7();
         let id_b = Uuid::now_v7();
         let cfg = serde_json::json!({"platform": "linux/amd64"});
-        let k_a = phase_a_group_key(Some(id_a), "releases_docker", Some(&cfg));
-        let k_b = phase_a_group_key(Some(id_b), "releases_docker", Some(&cfg));
+        let k_a = phase_a_group_key(Some(id_a), "releases.docker", Some(&cfg));
+        let k_b = phase_a_group_key(Some(id_b), "releases.docker", Some(&cfg));
         assert_ne!(k_a, k_b);
     }
 
     #[test]
     fn null_plugin_config_id_keyed_by_type() {
-        let k = phase_a_group_key(None, "package_manager_npm", None);
-        assert!(k.starts_with("__type__package_manager_npm::"));
+        let k = phase_a_group_key(None, "package-manager.npm", None);
+        assert!(k.starts_with("__type__package-manager.npm::"));
     }
 
     #[test]
     fn null_plugin_config_id_different_assignments_different_group() {
         let cfg_a = serde_json::json!({"registry_url": "https://a.example.com"});
         let cfg_b = serde_json::json!({"registry_url": "https://b.example.com"});
-        let k_a = phase_a_group_key(None, "package_manager_cargo", Some(&cfg_a));
-        let k_b = phase_a_group_key(None, "package_manager_cargo", Some(&cfg_b));
+        let k_a = phase_a_group_key(None, "package-manager.cargo", Some(&cfg_a));
+        let k_b = phase_a_group_key(None, "package-manager.cargo", Some(&cfg_b));
         assert_ne!(k_a, k_b);
     }
 
@@ -905,8 +905,8 @@ mod tests {
 
     #[test]
     fn test_mock_descriptor_declares_controller_side_capability() {
-        let descriptor = get_descriptor("__test_fetch_fail")
-            .expect("expected __test_fetch_fail descriptor with test-support");
+        let descriptor = get_descriptor("test.fetch-fail")
+            .expect("expected test.fetch-fail descriptor with test-support");
         assert!(
             descriptor
                 .capabilities
@@ -914,8 +914,8 @@ mod tests {
         );
         assert!(descriptor.roles.release_fetcher.is_some());
 
-        let per_item_descriptor = get_descriptor("__test_per_item_fail")
-            .expect("expected __test_per_item_fail descriptor with test-support");
+        let per_item_descriptor = get_descriptor("test.per-item-fail")
+            .expect("expected test.per-item-fail descriptor with test-support");
         assert!(
             per_item_descriptor
                 .capabilities
@@ -928,7 +928,7 @@ mod tests {
     async fn test_batch_fetch_err_preserves_latest_version() {
         let db = setup_db().await;
         let (tenant_id, host_software_item_id) =
-            insert_controller_fetch_fixture(&db, "__test_fetch_fail").await;
+            insert_controller_fetch_fixture(&db, "test.fetch-fail").await;
 
         let notifier = Arc::new(NoopSchedulerNotifier);
         let executor = FetchReleasesExecutor::new(db.clone(), notifier);
@@ -964,7 +964,7 @@ mod tests {
         reset_ctx_capture_had_lookup();
 
         let db = setup_db().await;
-        let (tenant_id, _) = insert_controller_fetch_fixture(&db, "__test_ctx_capture").await;
+        let (tenant_id, _) = insert_controller_fetch_fixture(&db, "test.ctx-capture").await;
         let notifier = Arc::new(NoopSchedulerNotifier);
         let lookup: Arc<dyn GlobalProviderLookup> = Arc::new(DummyLookup);
         let executor = FetchReleasesExecutor::new(db.clone(), notifier)
@@ -985,7 +985,7 @@ mod tests {
     async fn test_per_item_fetch_error_preserves_latest_version() {
         let db = setup_db().await;
         let (tenant_id, host_software_item_id) =
-            insert_controller_fetch_fixture(&db, "__test_per_item_fail").await;
+            insert_controller_fetch_fixture(&db, "test.per-item-fail").await;
 
         let notifier = Arc::new(NoopSchedulerNotifier);
         let executor = FetchReleasesExecutor::new(db.clone(), notifier);

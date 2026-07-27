@@ -117,7 +117,7 @@ fn sample_software_item() -> SoftwareItemResponse {
     SoftwareItemResponse {
         id: software_item_id(),
         name: "Node.js".to_string(),
-        plugins: vec!["releases_github".to_string()],
+        plugins: vec!["releases.github".to_string()],
         featured: true,
         last_checked_at: None,
         host_count: 2,

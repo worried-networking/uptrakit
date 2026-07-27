@@ -165,7 +165,7 @@ async fn create_config_returns_201() {
             "/api/v1/plugin-configs",
             &serde_json::json!({
                 "name": "My GitHub Config",
-                "plugin_type": "releases_github",
+                "plugin_type": "releases.github",
                 "config": {}
             }),
         )
@@ -194,7 +194,7 @@ async fn create_config_returns_201() {
     assert_eq!(row.target_type.as_deref(), Some("plugin_config"));
     assert_eq!(row.target_display.as_deref(), Some("My GitHub Config"));
     let details = row.details_json.expect("details");
-    assert_eq!(details["plugin_type"], serde_json::json!("releases_github"));
+    assert_eq!(details["plugin_type"], serde_json::json!("releases.github"));
     assert_eq!(
         details["config_name"],
         serde_json::json!("My GitHub Config")
@@ -214,7 +214,7 @@ async fn update_config_returns_200_and_writes_audit_event() {
             "/api/v1/plugin-configs",
             &serde_json::json!({
                 "name": "Mutable Config",
-                "plugin_type": "releases_github",
+                "plugin_type": "releases.github",
                 "config": {}
             }),
         )
@@ -261,7 +261,7 @@ async fn update_config_returns_200_and_writes_audit_event() {
         Some("Mutable Config Updated")
     );
     let details = row.details_json.expect("details");
-    assert_eq!(details["plugin_type"], serde_json::json!("releases_github"));
+    assert_eq!(details["plugin_type"], serde_json::json!("releases.github"));
     assert_eq!(
         details["config_name"],
         serde_json::json!("Mutable Config Updated")
@@ -281,7 +281,7 @@ async fn delete_config_returns_204() {
             "/api/v1/plugin-configs",
             &serde_json::json!({
                 "name": "To Delete Config",
-                "plugin_type": "releases_github",
+                "plugin_type": "releases.github",
                 "config": {}
             }),
         )
@@ -318,7 +318,7 @@ async fn delete_config_returns_204() {
     assert_eq!(row.target_id.as_deref(), Some(id));
     assert_eq!(row.target_display.as_deref(), Some("To Delete Config"));
     let details = row.details_json.expect("details");
-    assert_eq!(details["plugin_type"], serde_json::json!("releases_github"));
+    assert_eq!(details["plugin_type"], serde_json::json!("releases.github"));
     assert_eq!(
         details["config_name"],
         serde_json::json!("To Delete Config")
@@ -405,7 +405,7 @@ async fn test_plugin_config_prefers_active_agent_when_stale_link_exists() {
         .post_json(
             "/api/v1/plugin-configs/test",
             &serde_json::json!({
-                "plugin_type": "generic_shell",
+                "plugin_type": "generic.shell",
                 "config": { "version_command": "echo 1.0.0" },
                 "host_id": host.id,
                 "test_kind": "version_detection"
@@ -436,7 +436,7 @@ async fn list_plugin_types_includes_dashboard_icons_type_settings() {
     let entries = body.as_array().expect("plugin types should be an array");
     let dashboard_icons = entries
         .iter()
-        .find(|entry| entry["plugin_type"] == "enhancement_dashboard_icons")
+        .find(|entry| entry["plugin_type"] == "enhancement.dashboard-icons")
         .expect("dashboard icons plugin type should be present");
 
     assert_eq!(dashboard_icons["display_name"], "Dashboard Icons");
@@ -471,7 +471,7 @@ async fn create_config_rejects_config_model_none_plugin_type() {
             "/api/v1/plugin-configs",
             &serde_json::json!({
                 "name": "Should Be Rejected",
-                "plugin_type": "enhancement_dashboard_icons",
+                "plugin_type": "enhancement.dashboard-icons",
                 "config": {}
             }),
         )
@@ -528,7 +528,7 @@ async fn test_config_rejects_config_model_none_plugin_type() {
         .post_json(
             "/api/v1/plugin-configs/test",
             &serde_json::json!({
-                "plugin_type": "enhancement_dashboard_icons",
+                "plugin_type": "enhancement.dashboard-icons",
                 "config": {}
             }),
         )
@@ -553,7 +553,7 @@ async fn upsert_type_settings_rejects_invalid_dashboard_icons_enabled_type() {
 
     let (status, body): (_, serde_json::Value) = client
         .put_json(
-            "/api/v1/plugin-type-settings/enhancement_dashboard_icons",
+            "/api/v1/plugin-type-settings/enhancement.dashboard-icons",
             &serde_json::json!({
                 "config": {
                     "enabled": "false"
@@ -572,7 +572,7 @@ async fn upsert_type_settings_rejects_invalid_dashboard_icons_enabled_type() {
     );
 
     let missing_status = client
-        .get("/api/v1/plugin-type-settings/enhancement_dashboard_icons")
+        .get("/api/v1/plugin-type-settings/enhancement.dashboard-icons")
         .bearer(&token)
         .send_status()
         .await;
@@ -627,7 +627,7 @@ async fn register_admin_and_tenant_user(app: &TestApp) -> (String, String) {
 /// A tenant user (ViewSettings, no ManageGlobalSettings) must not see a
 /// disabled Instance-scoped plugin in the `GET /api/v1/plugin-types` list.
 ///
-/// `enhancement_dashboard_icons` is Instance-scoped and the snapshot defaults
+/// `enhancement.dashboard-icons` is Instance-scoped and the snapshot defaults
 /// to `all_disabled()` at TestApp boot, so it must be absent from the response.
 #[cfg(feature = "dashboard-icons")]
 #[tokio::test]
@@ -647,7 +647,7 @@ async fn tenant_user_does_not_see_disabled_instance_plugin_in_plugin_types_list(
     assert!(
         !entries
             .iter()
-            .any(|e| e["plugin_type"] == "enhancement_dashboard_icons"),
+            .any(|e| e["plugin_type"] == "enhancement.dashboard-icons"),
         "tenant user must not see disabled instance-scoped plugin; entries: {entries:?}"
     );
 }
@@ -672,7 +672,7 @@ async fn admin_sees_disabled_instance_plugin_in_plugin_types_list() {
     assert!(
         entries
             .iter()
-            .any(|e| e["plugin_type"] == "enhancement_dashboard_icons"),
+            .any(|e| e["plugin_type"] == "enhancement.dashboard-icons"),
         "admin must see disabled instance-scoped plugin; entries: {entries:?}"
     );
 }
@@ -686,7 +686,7 @@ async fn insert_plugin_config_for_dashboard_icons(app: &TestApp) -> Uuid {
         id: Set(id),
         tenant_id: Set(app.tenant_id),
         name: Set("Existing Dashboard Icons Config".to_string()),
-        plugin_type: Set("enhancement_dashboard_icons".to_string()),
+        plugin_type: Set("enhancement.dashboard-icons".to_string()),
         config: Set(serde_json::json!({})),
         enabled: Set(true),
         created_at: Set(now),

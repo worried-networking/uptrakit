@@ -4,7 +4,7 @@
 //! # Usage
 //!
 //! ```rust,ignore
-//! declare_plugin!(AptPlugin, AptConfig, "package_manager_apt", {
+//! declare_plugin!(AptPlugin, AptConfig, "package-manager.apt", {
 //!     display_name: "APT Package Manager",
 //!     family: PluginFamily::Software,
 //!     config_model: ConfigModel::PluginConfig,

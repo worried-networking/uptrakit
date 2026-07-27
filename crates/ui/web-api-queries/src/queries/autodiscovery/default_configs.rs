@@ -137,7 +137,7 @@ mod tests {
         let first_id = find_or_create_default_plugin_config(
             &db,
             tenant_id,
-            "generic_shell",
+            "generic.shell",
             &old_config,
             "PHS Shell",
         )
@@ -148,7 +148,7 @@ mod tests {
         let second_id = find_or_create_default_plugin_config(
             &db,
             tenant_id,
-            "generic_shell",
+            "generic.shell",
             &new_config,
             "PHS Shell",
         )
@@ -197,7 +197,7 @@ mod tests {
         let id1 = find_or_create_default_plugin_config(
             &db,
             tenant_id,
-            "releases_github",
+            "releases.github",
             &config,
             "GitHub Releases",
         )
@@ -207,7 +207,7 @@ mod tests {
         let id2 = find_or_create_default_plugin_config(
             &db,
             tenant_id,
-            "releases_github",
+            "releases.github",
             &config,
             "GitHub Releases",
         )

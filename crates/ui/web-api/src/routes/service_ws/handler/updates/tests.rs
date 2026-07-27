@@ -522,7 +522,7 @@ async fn insert_replayable_queued_update(
         software_item_id: Set(software_item_id),
         host_software_item_id: Set(host_software_item_id),
         plugin_config_id: Set(None),
-        plugin_type: Set("generic_shell".to_string()),
+        plugin_type: Set("generic.shell".to_string()),
         role: Set("execute_update".to_string()),
         ordinal: Set(0),
         package_identifier: Set("demo".to_string()),

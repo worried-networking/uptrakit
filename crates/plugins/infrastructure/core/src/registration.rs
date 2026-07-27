@@ -168,7 +168,7 @@ impl PluginSurfaceRegistration {
     /// identical across every plugin registration today, producing the wire
     /// [`surfaces::SurfaceRegistration`].
     ///
-    /// `provider_id` is genuinely per-plugin (e.g. `"plugin.releases_docker"`)
+    /// `provider_id` is genuinely per-plugin (e.g. `"plugin.releases.docker"`)
     /// and is threaded through as a parameter rather than a hand-authored
     /// field on this type.
     #[must_use]

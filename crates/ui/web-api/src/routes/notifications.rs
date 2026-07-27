@@ -788,7 +788,8 @@ pub async fn test_channel(
         };
 
     // Look up channel implementation
-    let channel_type_id = uptrakit_shared_types::PluginTypeId::new(&channel_model.channel_type);
+    let channel_type_id =
+        uptrakit_shared_types::notification_plugin_type(&channel_model.channel_type);
     let channel_transport = match state.plugin.plugin_ops.transport(&channel_type_id) {
         Some(c) => c,
         None => {
@@ -1460,7 +1461,7 @@ pub async fn notification_callback(
         controller: &controller,
     };
 
-    let channel_type_id = uptrakit_shared_types::PluginTypeId::new(&channel_type);
+    let channel_type_id = uptrakit_shared_types::notification_plugin_type(&channel_type);
     let callback_result = match state.plugin.plugin_ops.transport(&channel_type_id) {
         Some(transport) => transport.handle_callback(&ctx, &params).await,
         None => Err(

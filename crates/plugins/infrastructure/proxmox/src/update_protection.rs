@@ -192,7 +192,7 @@ impl ControllerUpdateProtection for ControllerUpdateProtectionPlugin {
 
 impl PluginMeta for ControllerUpdateProtectionPlugin {
     fn plugin_type_id(&self) -> PluginTypeId {
-        PluginTypeId::from_static("infrastructure_proxmox")
+        PluginTypeId::from_static("infrastructure.proxmox")
     }
 }
 

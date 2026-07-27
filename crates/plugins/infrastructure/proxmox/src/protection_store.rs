@@ -24,7 +24,7 @@ use uptrakit_plugin_infrastructure_core::error::{PluginError, Result};
 use uptrakit_shared_db::entity::{plugin_config, prelude::*};
 use uuid::Uuid;
 
-const PROXMOX_INFRA_CONFIG_TYPE: &str = "infrastructure_proxmox";
+const PROXMOX_INFRA_CONFIG_TYPE: &str = "infrastructure.proxmox";
 
 // ── Data types (moved from plugin-infrastructure-core) ────────────────────────
 

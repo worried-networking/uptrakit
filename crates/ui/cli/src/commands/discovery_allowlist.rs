@@ -15,7 +15,7 @@ pub enum DiscoveryAllowlistCommands {
     List,
     /// Add a plugin type to the tenant-wide discovery allowlist
     Add {
-        /// Plugin type (e.g. package_manager_homebrew)
+        /// Plugin type (e.g. package-manager.homebrew)
         plugin_type: PluginTypeId,
     },
     /// Remove a tenant-wide discovery allowlist entry
@@ -290,7 +290,7 @@ mod tests {
             id: "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6"
                 .parse::<Uuid>()
                 .unwrap(),
-            plugin_type: "package_manager_homebrew".to_string(),
+            plugin_type: "package-manager.homebrew".to_string(),
             created_at: datetime!(2025-01-01 00:00:00 UTC),
         }
     }
@@ -303,7 +303,7 @@ mod tests {
             host_id: "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6"
                 .parse::<Uuid>()
                 .unwrap(),
-            plugin_type: "package_manager_apt".to_string(),
+            plugin_type: "package-manager.apt".to_string(),
             created_at: datetime!(2025-01-01 00:00:00 UTC),
         }
     }
@@ -312,7 +312,7 @@ mod tests {
     fn tenant_entry_human_output() {
         let e = sample_tenant_entry();
         let s = e.to_human_string();
-        assert!(s.contains("package_manager_homebrew"));
+        assert!(s.contains("package-manager.homebrew"));
         assert!(s.contains("Plugin Type:"));
     }
 
@@ -327,7 +327,7 @@ mod tests {
     fn tenant_list_non_empty_human_output() {
         let entries = vec![sample_tenant_entry()];
         let s = entries.to_human_string();
-        assert!(s.contains("package_manager_homebrew"));
+        assert!(s.contains("package-manager.homebrew"));
         assert!(s.contains("PLUGIN TYPE"));
     }
 
@@ -335,7 +335,7 @@ mod tests {
     fn host_entry_human_output() {
         let e = sample_host_entry();
         let s = e.to_human_string();
-        assert!(s.contains("package_manager_apt"));
+        assert!(s.contains("package-manager.apt"));
         assert!(s.contains("Host:"));
     }
 
@@ -350,6 +350,6 @@ mod tests {
     fn host_list_non_empty_human_output() {
         let entries = vec![sample_host_entry()];
         let s = entries.to_human_string();
-        assert!(s.contains("package_manager_apt"));
+        assert!(s.contains("package-manager.apt"));
     }
 }

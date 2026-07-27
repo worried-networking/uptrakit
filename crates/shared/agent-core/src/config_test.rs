@@ -246,7 +246,7 @@ mod tests {
         let payload = make_payload(
             "test-001",
             ConfigTestKind::Connectivity,
-            "generic_shell",
+            "generic.shell",
             serde_json::json!({}),
             None,
         );
@@ -289,7 +289,7 @@ mod tests {
         let payload = make_payload(
             "test-003",
             ConfigTestKind::UpdateCommandValidation,
-            "generic_shell",
+            "generic.shell",
             serde_json::json!({"version_command": "echo 1"}),
             None,
         );
@@ -310,7 +310,7 @@ mod tests {
         let payload = make_payload(
             "test-004",
             ConfigTestKind::Connectivity,
-            "generic_shell",
+            "generic.shell",
             serde_json::json!({}),
             None,
         );
@@ -330,7 +330,7 @@ mod tests {
         let payload = make_payload(
             "test-005",
             ConfigTestKind::PreUpdateHook,
-            "hook_shell",
+            "hook.shell",
             serde_json::json!({}),
             None,
         );
@@ -350,7 +350,7 @@ mod tests {
         let payload = make_payload(
             "test-006",
             ConfigTestKind::PostUpdateHook,
-            "hook_shell",
+            "hook.shell",
             serde_json::json!({}),
             None,
         );
@@ -370,7 +370,7 @@ mod tests {
         let payload = make_payload(
             "test-007",
             ConfigTestKind::UpdateCommandValidation,
-            "generic_shell",
+            "generic.shell",
             serde_json::json!({"update_command": ""}),
             None,
         );

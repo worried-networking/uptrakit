@@ -846,7 +846,7 @@ async fn handle_report_plugin_config_emits_success_tenant_audit_row() {
 
     let payload = report_plugin_config_payload(
         "req-plugin-config-success",
-        "generic_shell",
+        "generic.shell",
         "Discovered Generic Shell",
         serde_json::json!({
             "version_command": "echo 1.2.3"
@@ -875,7 +875,7 @@ async fn handle_report_plugin_config_emits_success_tenant_audit_row() {
     assert_eq!(row.target_type.as_deref(), Some("plugin_config"));
     assert_eq!(row.target_id, Some(config_id.to_string()));
     let details = row.details_json.expect("plugin_config.create details");
-    assert_eq!(details["plugin_type"], serde_json::json!("generic_shell"));
+    assert_eq!(details["plugin_type"], serde_json::json!("generic.shell"));
     assert_eq!(
         details["config_name"],
         serde_json::json!("Discovered Generic Shell")
@@ -899,7 +899,7 @@ async fn handle_report_plugin_config_emits_validation_failed_tenant_audit_row_fo
 
     let payload = report_plugin_config_payload(
         "req-plugin-config-invalid",
-        "generic_shell",
+        "generic.shell",
         "Invalid Generic Shell",
         serde_json::json!({}),
     );
@@ -933,7 +933,7 @@ async fn handle_report_plugin_config_missing_service_emits_denied_system_audit_r
 
     let payload = report_plugin_config_payload(
         "req-plugin-config-missing-service",
-        "generic_shell",
+        "generic.shell",
         "Missing Service Config",
         serde_json::json!({
             "version_command": "echo 1.2.3"
@@ -978,7 +978,7 @@ async fn handle_report_plugin_config_db_failure_emits_failed_tenant_audit_row() 
 
     let payload = report_plugin_config_payload(
         "req-plugin-config-db-failure",
-        "generic_shell",
+        "generic.shell",
         "Broken Storage Config",
         serde_json::json!({
             "version_command": "echo 1.2.3"
@@ -2202,11 +2202,11 @@ async fn handle_discovery_results_emits_host_discover_audit_summary_for_unknown_
 // from `handle_version_check_results`) against the test-only descriptors
 // registered by `uptrakit_plugin_infrastructure_registry::test_support`:
 //
-//   * `__test_enricher_echo` — capable; returns
+//   * `test.enricher-echo` — capable; returns
 //     `display_version = Some(format!("date_for_{sha}"))`.
-//   * `__test_enricher_miss` — capable; always returns
+//   * `test.enricher-miss` — capable; always returns
 //     `display_version = None`.
-//   * `__test_fetch_fail`   — NOT capable (no `EnrichInstalledVersion`).
+//   * `test.fetch-fail`   — NOT capable (no `EnrichInstalledVersion`).
 //
 // Per-test fixtures seed a `host_software_item_plugin` row with role
 // `detect_version` so `plugin_types_for_role` resolves the plugin type.
@@ -2252,7 +2252,7 @@ async fn handle_version_check_results_invokes_enricher_for_capable_plugin() {
         host.id,
         sw.id,
         hsi.id,
-        "__test_enricher_echo",
+        "test.enricher-echo",
         "pkg/foo",
     )
     .await;
@@ -2287,14 +2287,14 @@ async fn handle_version_check_results_invokes_enricher_for_capable_plugin() {
 #[tokio::test]
 async fn handle_version_check_results_does_not_invoke_enricher_without_capability() {
     let (db, state, svc, host, sw, hsi) = setup_single_host_sw_fixture().await;
-    // `__test_fetch_fail` declares ReleaseFetching but NOT
+    // `test.fetch-fail` declares ReleaseFetching but NOT
     // EnrichInstalledVersion — dispatcher must skip the enricher path.
     insert_detect_version_plugin_assignment(
         &db,
         host.id,
         sw.id,
         hsi.id,
-        "__test_fetch_fail",
+        "test.fetch-fail",
         "pkg/foo",
     )
     .await;
@@ -2343,7 +2343,7 @@ async fn handle_version_check_results_writes_none_when_enricher_misses() {
         host.id,
         sw.id,
         hsi.id,
-        "__test_enricher_miss",
+        "test.enricher-miss",
         "pkg/foo",
     )
     .await;
@@ -2395,7 +2395,7 @@ async fn handle_version_check_results_keeps_distinct_display_per_host_for_same_s
         host_a.id,
         sw.id,
         hsi_a.id,
-        "__test_enricher_echo",
+        "test.enricher-echo",
         "pkg/shared",
     )
     .await;
@@ -2404,7 +2404,7 @@ async fn handle_version_check_results_keeps_distinct_display_per_host_for_same_s
         host_b.id,
         sw.id,
         hsi_b.id,
-        "__test_enricher_echo",
+        "test.enricher-echo",
         "pkg/shared",
     )
     .await;

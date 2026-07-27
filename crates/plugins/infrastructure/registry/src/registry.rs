@@ -324,7 +324,7 @@ mod tests {
             plugin_ids::PACKAGE_MANAGER_CARGO,
             plugin_ids::PACKAGE_MANAGER_ROUTEROS,
         ];
-        let github = PluginTypeId::from_static("releases_github");
+        let github = PluginTypeId::from_static("releases.github");
 
         for plugin_type in package_managers {
             assert!(
@@ -338,9 +338,9 @@ mod tests {
 
     #[test]
     fn interactive_dispatch_lookup_covers_generic_shell_only() {
-        let generic_shell = PluginTypeId::from_static("generic_shell");
-        let apt = PluginTypeId::from_static("package_manager_apt");
-        let github = PluginTypeId::from_static("releases_github");
+        let generic_shell = PluginTypeId::from_static("generic.shell");
+        let apt = PluginTypeId::from_static("package-manager.apt");
+        let github = PluginTypeId::from_static("releases.github");
         let missing = PluginTypeId::new("missing_plugin");
 
         assert!(is_interactive_dispatch_plugin(&generic_shell));
@@ -354,7 +354,7 @@ mod tests {
         let expected: BTreeSet<&str> = all_descriptors()
             .into_iter()
             .map(|d| d.type_id)
-            .filter(|id| id.starts_with("package_manager_"))
+            .filter(|id| id.starts_with("package-manager."))
             .collect();
         let actual: BTreeSet<&str> = all_descriptors()
             .into_iter()
@@ -409,8 +409,8 @@ mod tests {
 
     #[test]
     fn plugin_family_lookup_returns_descriptor_family() {
-        let apt = PluginTypeId::from_static("package_manager_apt");
-        let proxmox = PluginTypeId::from_static("infrastructure_proxmox");
+        let apt = PluginTypeId::from_static("package-manager.apt");
+        let proxmox = PluginTypeId::from_static("infrastructure.proxmox");
         let missing = PluginTypeId::new("missing_plugin");
 
         assert_eq!(plugin_family(&apt), Some(PluginFamily::Software));

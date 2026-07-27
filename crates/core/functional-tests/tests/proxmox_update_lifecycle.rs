@@ -425,7 +425,7 @@ async fn dispatch_payload_has_correct_plugin_assignments() {
     assert_eq!(payload.software_item_id, fixtures.software_item_id);
 
     let exec = &payload.execute_update_plugin;
-    assert_eq!(exec.plugin_type, "generic_shell");
+    assert_eq!(exec.plugin_type, "generic.shell");
     assert_eq!(
         exec.config.get("update_command").and_then(|v| v.as_str()),
         Some("echo ok"),
@@ -436,7 +436,7 @@ async fn dispatch_payload_has_correct_plugin_assignments() {
         .detect_version_plugin
         .as_ref()
         .expect("detect_version present");
-    assert_eq!(detect.plugin_type, "generic_shell");
+    assert_eq!(detect.plugin_type, "generic.shell");
     assert_eq!(
         detect
             .config

@@ -267,7 +267,7 @@ mod tests {
         let lookup: Arc<dyn GlobalProviderLookup> = Arc::new(DummyLookup);
 
         let job = ControllerFetchJob {
-            plugin_type: PluginTypeId::from_static("__test_ctx_capture"),
+            plugin_type: PluginTypeId::from_static("test.ctx-capture"),
             package_identifier: "irrelevant".to_string(),
             merged_config: serde_json::json!({}),
             targets: vec![],

@@ -131,7 +131,7 @@ fn descriptor_capabilities_includes_detect_host_compatibility() {
 fn descriptor_has_plugin_surface_registrations() {
     let registrations = crate::plugin::docker_plugin_surfaces()
         .iter()
-        .map(|r| r.to_wire("plugin.releases_docker"))
+        .map(|r| r.to_wire("plugin.releases.docker"))
         .collect::<Vec<_>>();
     assert!(!registrations.is_empty());
     assert!(registrations.iter().all(|registration| {
@@ -154,7 +154,7 @@ fn descriptor_has_plugin_surface_registrations() {
 fn docker_item_host_actions_surface_keeps_form_preload_contract() {
     let registrations = crate::plugin::docker_plugin_surfaces()
         .iter()
-        .map(|r| r.to_wire("plugin.releases_docker"))
+        .map(|r| r.to_wire("plugin.releases.docker"))
         .collect::<Vec<_>>();
     let docker_surface = registrations
         .iter()
@@ -242,7 +242,7 @@ fn docker_item_host_actions_surface_keeps_form_preload_contract() {
 fn docker_surface_registration_capabilities_cover_contract() {
     let registrations = crate::plugin::docker_plugin_surfaces()
         .iter()
-        .map(|r| r.to_wire("plugin.releases_docker"))
+        .map(|r| r.to_wire("plugin.releases.docker"))
         .collect::<Vec<_>>();
     let registration = registrations
         .iter()
@@ -254,7 +254,7 @@ fn docker_surface_registration_capabilities_cover_contract() {
         })
         .expect("docker surface registration should exist");
 
-    assert_eq!(registration.provider.provider_id, "plugin.releases_docker");
+    assert_eq!(registration.provider.provider_id, "plugin.releases.docker");
     assert_eq!(
         registration.provider.provider_kind,
         surfaces::ProviderKind::Plugin

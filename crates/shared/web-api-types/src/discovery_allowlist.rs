@@ -9,7 +9,7 @@ use uuid::Uuid;
 pub struct TenantDiscoveryAllowlistEntry {
     /// Entry UUID.
     pub id: Uuid,
-    /// Plugin type string (e.g. `"package_manager_homebrew"`).
+    /// Plugin type string (e.g. `"package-manager.homebrew"`).
     pub plugin_type: String,
     #[serde(with = "time::serde::rfc3339")]
     #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
@@ -24,7 +24,7 @@ pub struct HostDiscoveryAllowlistEntry {
     pub id: Uuid,
     /// Host UUID this entry applies to.
     pub host_id: Uuid,
-    /// Plugin type string (e.g. `"package_manager_apt"`).
+    /// Plugin type string (e.g. `"package-manager.apt"`).
     pub plugin_type: String,
     #[serde(with = "time::serde::rfc3339")]
     #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]

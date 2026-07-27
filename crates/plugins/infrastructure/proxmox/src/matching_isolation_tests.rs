@@ -80,7 +80,7 @@ async fn insert_plugin_config(db: &DatabaseConnection, tenant_id: Uuid) -> Uuid 
         id: Set(id),
         tenant_id: Set(tenant_id),
         name: Set(format!("pve-{id}")),
-        plugin_type: Set("infrastructure_proxmox".to_string()),
+        plugin_type: Set("infrastructure.proxmox".to_string()),
         config: Set(serde_json::json!({})),
         enabled: Set(true),
         created_at: Set(now),

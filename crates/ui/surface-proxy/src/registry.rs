@@ -2096,7 +2096,7 @@ mod tests {
         let registry = registry();
         let registration = surfaces::SurfaceRegistration {
             provider: surfaces::ProviderIdentity {
-                provider_id: "plugin.notifications_telegram".to_string(),
+                provider_id: "plugin.notifications.telegram".to_string(),
                 provider_kind: surfaces::ProviderKind::Plugin,
                 provider_namespace: "plugin".to_string(),
             },
@@ -2282,7 +2282,7 @@ mod tests {
         let registry = registry();
         let plugin_registration = surfaces::SurfaceRegistration {
             provider: surfaces::ProviderIdentity {
-                provider_id: "plugin.releases_docker".to_string(),
+                provider_id: "plugin.releases.docker".to_string(),
                 provider_kind: surfaces::ProviderKind::Plugin,
                 provider_namespace: "plugin".to_string(),
             },
@@ -2353,10 +2353,10 @@ mod tests {
                 registry
                     .bootstrap_plugin(registration)
                     .expect("catalog plugin registration should be admitted");
-                if provider_id == "plugin.infrastructure_proxmox" {
+                if provider_id == "plugin.infrastructure.proxmox" {
                     saw_proxmox_provider = true;
                 }
-                if provider_id == "plugin.webhook" {
+                if provider_id == "plugin.notifications.webhook" {
                     saw_webhook_provider = true;
                 }
             }

@@ -76,7 +76,7 @@ impl SystemdHookPlugin {
 static REQUIRED_FEATURES: [uptrakit_plugin_infrastructure_core::HostFeature; 2] =
     [host_features::POSIX_SHELL, host_features::SYSTEMD];
 
-declare_plugin!(SystemdHookPlugin, SystemdHookConfig, "hook_systemd", {
+declare_plugin!(SystemdHookPlugin, SystemdHookConfig, "hook.systemd", {
     display_name: "Systemd Hook",
     family: PluginFamily::Hook,
     config_model: ConfigModel::PluginConfig,
@@ -166,7 +166,7 @@ mod tests {
         let plugin = test_plugin(SystemdHookConfig {
             service_name: "nginx".to_string(),
         });
-        assert_eq!(plugin.plugin_type_id().as_str(), "hook_systemd");
+        assert_eq!(plugin.plugin_type_id().as_str(), "hook.systemd");
     }
 
     #[test]

@@ -256,7 +256,7 @@ pub(crate) mod tests_common {
             id: Set(id),
             tenant_id: Set(tenant_id),
             name: Set(format!("Test Plugin Config {id}")),
-            plugin_type: Set("package_manager_homebrew".to_string()),
+            plugin_type: Set("package-manager.homebrew".to_string()),
             config: Set(serde_json::json!({})),
             enabled: Set(true),
             created_at: Set(now),
@@ -339,7 +339,7 @@ pub(crate) mod tests_common {
                 software_item_id: Set(software_item_id),
                 host_software_item_id: Set(hsi_id),
                 plugin_config_id: Set(Some(plugin_config_id)),
-                plugin_type: Set("package_manager_homebrew".to_string()),
+                plugin_type: Set("package-manager.homebrew".to_string()),
                 role: Set(role.to_string()),
                 ordinal: Set(0),
                 package_identifier: Set(package_identifier.to_string()),
@@ -746,7 +746,7 @@ mod tests {
         // No plugin_config should be created for package manager types.
         let configs = PluginConfig::find()
             .filter(plugin_config::Column::TenantId.eq(tenant_id))
-            .filter(plugin_config::Column::PluginType.eq("package_manager_homebrew"))
+            .filter(plugin_config::Column::PluginType.eq("package-manager.homebrew"))
             .all(&db)
             .await
             .expect("query plugin configs");
@@ -842,7 +842,7 @@ mod tests {
         // No plugin_config should be created for package manager types.
         let config_count = PluginConfig::find()
             .filter(plugin_config::Column::TenantId.eq(tenant_id))
-            .filter(plugin_config::Column::PluginType.eq("package_manager_homebrew"))
+            .filter(plugin_config::Column::PluginType.eq("package-manager.homebrew"))
             .count(&db)
             .await
             .expect("count configs");

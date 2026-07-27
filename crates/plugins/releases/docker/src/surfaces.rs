@@ -42,7 +42,7 @@ struct DockerSwitchTagRequest {
 // ── String helpers ───────────────────────────────────────────────────────────
 
 /// Docker releases plugin type identifier used as a DB filter value.
-const DOCKER_RELEASES_CONFIG_TYPE: &str = "releases_docker";
+const DOCKER_RELEASES_CONFIG_TYPE: &str = "releases.docker";
 
 /// Return the image reference without the `#container_name` suffix.
 fn strip_container_suffix(id: &str) -> String {

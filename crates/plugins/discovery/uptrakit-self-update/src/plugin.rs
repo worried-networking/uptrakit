@@ -43,7 +43,7 @@ impl UptrakitSelfUpdatePlugin {
 
 // ── declare_plugin! ──────────────────────────────────────────────────────
 
-declare_plugin!(UptrakitSelfUpdatePlugin, UptrakitSelfUpdateConfig, "discovery_uptrakit_self_update", {
+declare_plugin!(UptrakitSelfUpdatePlugin, UptrakitSelfUpdateConfig, "discovery.uptrakit-self-update", {
     display_name: "Uptrakit Self-Update",
     family: PluginFamily::Software,
     config_model: ConfigModel::PluginConfig,
@@ -132,7 +132,7 @@ mod tests {
         let plugin = test_plugin();
         assert_eq!(
             plugin.plugin_type_id().as_str(),
-            "discovery_uptrakit_self_update"
+            "discovery.uptrakit-self-update"
         );
     }
 
@@ -300,8 +300,8 @@ mod tests {
         let github_target = item
             .targets
             .iter()
-            .find(|t| t.plugin_type.as_str() == "releases_github");
-        let github_target = github_target.expect("releases_github target must be present");
+            .find(|t| t.plugin_type.as_str() == "releases.github");
+        let github_target = github_target.expect("releases.github target must be present");
         let strip_prefix = github_target
             .plugin_config
             .get("tag_strip_prefix")

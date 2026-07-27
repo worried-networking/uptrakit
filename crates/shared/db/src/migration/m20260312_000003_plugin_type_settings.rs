@@ -26,15 +26,15 @@ pub(super) struct Migration;
 
 /// Package manager plugin types whose auto-created configs should be migrated.
 const PACKAGE_MANAGER_TYPES: &[&str] = &[
-    "package_manager_apt",
-    "package_manager_homebrew",
-    "package_manager_pacman",
-    "package_manager_apk",
-    "package_manager_pkg",
-    "package_manager_snap",
-    "package_manager_dnf",
-    "package_manager_mas",
-    "package_manager_cargo",
+    "package-manager.apt",
+    "package-manager.homebrew",
+    "package-manager.pacman",
+    "package-manager.apk",
+    "package-manager.pkg",
+    "package-manager.snap",
+    "package-manager.dnf",
+    "package-manager.mas",
+    "package-manager.cargo",
 ];
 
 #[async_trait::async_trait]

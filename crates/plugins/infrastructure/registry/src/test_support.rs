@@ -55,7 +55,7 @@ impl ReleaseFetcher for TestFetchFailPlugin {
 
 impl PluginMeta for TestFetchFailPlugin {
     fn plugin_type_id(&self) -> PluginTypeId {
-        PluginTypeId::from_static("__test_fetch_fail")
+        PluginTypeId::from_static("test.fetch-fail")
     }
 }
 
@@ -70,7 +70,7 @@ impl ReleaseFetcher for TestPerItemFailPlugin {
 
 impl PluginMeta for TestPerItemFailPlugin {
     fn plugin_type_id(&self) -> PluginTypeId {
-        PluginTypeId::from_static("__test_per_item_fail")
+        PluginTypeId::from_static("test.per-item-fail")
     }
 }
 
@@ -113,7 +113,7 @@ fn validate_identifier(_value: &str) -> std::result::Result<(), PluginConfigVali
 }
 
 pub static DESCRIPTOR: PluginDescriptor = PluginDescriptor {
-    type_id: "__test_fetch_fail",
+    type_id: "test.fetch-fail",
     display_name: "Test Fetch Fail (test-only)",
     family: PluginFamily::Software,
     config_model: ConfigModel::None,
@@ -159,7 +159,7 @@ pub static DESCRIPTOR: PluginDescriptor = PluginDescriptor {
 };
 
 pub static PER_ITEM_FAIL_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
-    type_id: "__test_per_item_fail",
+    type_id: "test.per-item-fail",
     display_name: "Test Per-Item Fail (test-only)",
     family: PluginFamily::Software,
     config_model: ConfigModel::None,
@@ -210,7 +210,7 @@ pub struct TestCtxCapturePlugin;
 
 impl PluginMeta for TestCtxCapturePlugin {
     fn plugin_type_id(&self) -> PluginTypeId {
-        PluginTypeId::from_static("__test_ctx_capture")
+        PluginTypeId::from_static("test.ctx-capture")
     }
 }
 
@@ -242,7 +242,7 @@ pub struct TestEnricherEchoPlugin;
 
 impl PluginMeta for TestEnricherEchoPlugin {
     fn plugin_type_id(&self) -> PluginTypeId {
-        PluginTypeId::from_static("__test_enricher_echo")
+        PluginTypeId::from_static("test.enricher-echo")
     }
 }
 
@@ -276,7 +276,7 @@ fn create_test_enricher_echo(
 }
 
 pub static ENRICHER_ECHO_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
-    type_id: "__test_enricher_echo",
+    type_id: "test.enricher-echo",
     display_name: "Test Enricher Echo (test-only)",
     family: PluginFamily::Software,
     config_model: ConfigModel::None,
@@ -326,7 +326,7 @@ pub struct TestEnricherMissPlugin;
 
 impl PluginMeta for TestEnricherMissPlugin {
     fn plugin_type_id(&self) -> PluginTypeId {
-        PluginTypeId::from_static("__test_enricher_miss")
+        PluginTypeId::from_static("test.enricher-miss")
     }
 }
 
@@ -358,7 +358,7 @@ fn create_test_enricher_miss(
 }
 
 pub static ENRICHER_MISS_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
-    type_id: "__test_enricher_miss",
+    type_id: "test.enricher-miss",
     display_name: "Test Enricher Miss (test-only)",
     family: PluginFamily::Software,
     config_model: ConfigModel::None,
@@ -430,7 +430,7 @@ pub struct TestLifecycleHookPlugin {
 
 impl PluginMeta for TestLifecycleHookPlugin {
     fn plugin_type_id(&self) -> PluginTypeId {
-        PluginTypeId::from_static("__test_lifecycle_hook")
+        PluginTypeId::from_static("test.lifecycle-hook")
     }
 }
 
@@ -473,7 +473,7 @@ fn create_test_lifecycle_hook(
 }
 
 pub static TEST_LIFECYCLE_HOOK_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
-    type_id: "__test_lifecycle_hook",
+    type_id: "test.lifecycle-hook",
     display_name: "Test Lifecycle Hook (test-only)",
     family: PluginFamily::Hook,
     config_model: ConfigModel::None,
@@ -519,7 +519,7 @@ pub static TEST_LIFECYCLE_HOOK_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
 };
 
 pub static CTX_CAPTURE_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
-    type_id: "__test_ctx_capture",
+    type_id: "test.ctx-capture",
     display_name: "Test Context Capture (test-only)",
     family: PluginFamily::Software,
     config_model: ConfigModel::None,

@@ -191,7 +191,7 @@ impl PacmanPlugin {
 
 // ── Plugin descriptor ─────────────────────────────────────────────────────
 
-declare_plugin!(PacmanPlugin, PacmanConfig, "package_manager_pacman", {
+declare_plugin!(PacmanPlugin, PacmanConfig, "package-manager.pacman", {
     display_name: "Pacman",
     family: PluginFamily::Software,
     config_model: ConfigModel::PluginConfig,

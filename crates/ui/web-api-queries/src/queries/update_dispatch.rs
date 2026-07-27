@@ -2115,7 +2115,7 @@ mod tests {
             software_item_id: Set(f.item_id),
             host_software_item_id: Set(hsi_b_id),
             plugin_config_id: Set(None),
-            plugin_type: Set("releases_github".to_string()),
+            plugin_type: Set("releases.github".to_string()),
             role: Set("execute_update".to_string()),
             ordinal: Set(0),
             package_identifier: Set("org/repo".to_string()),

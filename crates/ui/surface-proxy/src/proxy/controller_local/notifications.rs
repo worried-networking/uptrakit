@@ -15,13 +15,11 @@ pub(crate) fn notification_channel_type_for_surface_id(surface_id: &str) -> Opti
 }
 
 fn allowlisted_notification_channel_provider(provider_id: &str, channel_type: &str) -> bool {
-    // Canonical notification plugin provider IDs follow two naming conventions:
-    // - "plugin.{channel_type}" (legacy short form, e.g. "plugin.email")
-    // - "plugin.notifications_{channel_type}" (current long form, e.g. "plugin.notifications_email")
-    // Deriving them at runtime from `channel_type` avoids hardcoding individual plugin-type
-    // identifiers and handles any future notification plugins automatically.
-    provider_id == format!("plugin.{channel_type}")
-        || provider_id == format!("plugin.notifications_{channel_type}")
+    // Canonical notification plugin provider ID: "plugin.notifications.{channel_type}"
+    // (e.g. "plugin.notifications.email"). Deriving it at runtime from `channel_type`
+    // avoids hardcoding individual plugin-type identifiers and handles any future
+    // notification plugins automatically.
+    provider_id == format!("plugin.notifications.{channel_type}")
 }
 
 pub(crate) fn allowlisted_notification_channel_controller_local_action<'a>(
@@ -141,7 +139,7 @@ async fn execute_notification_channel_test_action(
         require_notification_channel_type(tenant_db, channel_id, expected_channel_type).await?;
     let config_json: serde_json::Value = serde_json::from_str(channel.config.expose_secret())
         .map_err(|error| format!("Failed to parse channel config: {error}"))?;
-    let channel_type_id = uptrakit_shared_types::PluginTypeId::new(&channel.channel_type);
+    let channel_type_id = uptrakit_shared_types::notification_plugin_type(&channel.channel_type);
     let channel_transport = plugin_ops
         .transport(&channel_type_id)
         .ok_or_else(|| format!("Unsupported channel type: {}", channel.channel_type))?;

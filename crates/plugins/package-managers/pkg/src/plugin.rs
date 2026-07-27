@@ -139,7 +139,7 @@ impl PkgPlugin {
 
 // ── Plugin descriptor ─────────────────────────────────────────────────────
 
-declare_plugin!(PkgPlugin, PkgConfig, "package_manager_pkg", {
+declare_plugin!(PkgPlugin, PkgConfig, "package-manager.pkg", {
     display_name: "BSD pkg",
     family: PluginFamily::Software,
     config_model: ConfigModel::PluginConfig,

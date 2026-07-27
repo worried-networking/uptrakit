@@ -75,60 +75,72 @@ impl std::str::FromStr for PluginTypeId {
     }
 }
 
+/// Derives the notification plugin's type ID from its `channel_type`
+/// string (channel identity stays `"email"`/`"telegram"`/`"webhook"` —
+/// a separate, runtime-validated concept; plugin type IDs are namespaced).
+///
+/// Deliberately defined outside the [`plugin_ids`] module: consumer code
+/// (web-api, controller-core, surface-proxy, …) must not reference
+/// `plugin_ids::` directly (enforced by `ci/check_plugin_semantic_boundary.py`),
+/// but deriving a notification plugin's identity from its channel type is a
+/// cross-cutting concern those crates legitimately need.
+pub fn notification_plugin_type(channel_type: &str) -> PluginTypeId {
+    PluginTypeId::new(format!("notifications.{channel_type}"))
+}
+
 /// Well-known plugin type identifiers as typed constants.
 /// Use these directly in catalog lookups — no wrapping needed.
 pub mod plugin_ids {
     use super::PluginTypeId;
 
-    pub const RELEASES_GITHUB: PluginTypeId = PluginTypeId::from_static("releases_github");
-    pub const RELEASES_GITLAB: PluginTypeId = PluginTypeId::from_static("releases_gitlab");
-    pub const RELEASES_FORGEJO: PluginTypeId = PluginTypeId::from_static("releases_forgejo");
-    pub const RELEASES_DOCKER: PluginTypeId = PluginTypeId::from_static("releases_docker");
+    pub const RELEASES_GITHUB: PluginTypeId = PluginTypeId::from_static("releases.github");
+    pub const RELEASES_GITLAB: PluginTypeId = PluginTypeId::from_static("releases.gitlab");
+    pub const RELEASES_FORGEJO: PluginTypeId = PluginTypeId::from_static("releases.forgejo");
+    pub const RELEASES_DOCKER: PluginTypeId = PluginTypeId::from_static("releases.docker");
     pub const DISCOVERY_PROXMOX_HELPER_SCRIPTS: PluginTypeId =
-        PluginTypeId::from_static("discovery_proxmox_helper_scripts");
+        PluginTypeId::from_static("discovery.proxmox-helper-scripts");
     pub const DISCOVERY_UPTRAKIT_SELF_UPDATE: PluginTypeId =
-        PluginTypeId::from_static("discovery_uptrakit_self_update");
-    pub const PACKAGE_MANAGER_APT: PluginTypeId = PluginTypeId::from_static("package_manager_apt");
+        PluginTypeId::from_static("discovery.uptrakit-self-update");
+    pub const PACKAGE_MANAGER_APT: PluginTypeId = PluginTypeId::from_static("package-manager.apt");
     pub const PACKAGE_MANAGER_HOMEBREW: PluginTypeId =
-        PluginTypeId::from_static("package_manager_homebrew");
-    pub const PACKAGE_MANAGER_DNF: PluginTypeId = PluginTypeId::from_static("package_manager_dnf");
-    pub const PACKAGE_MANAGER_NPM: PluginTypeId = PluginTypeId::from_static("package_manager_npm");
-    pub const PACKAGE_MANAGER_MAS: PluginTypeId = PluginTypeId::from_static("package_manager_mas");
+        PluginTypeId::from_static("package-manager.homebrew");
+    pub const PACKAGE_MANAGER_DNF: PluginTypeId = PluginTypeId::from_static("package-manager.dnf");
+    pub const PACKAGE_MANAGER_NPM: PluginTypeId = PluginTypeId::from_static("package-manager.npm");
+    pub const PACKAGE_MANAGER_MAS: PluginTypeId = PluginTypeId::from_static("package-manager.mas");
     pub const PACKAGE_MANAGER_PACMAN: PluginTypeId =
-        PluginTypeId::from_static("package_manager_pacman");
-    pub const PACKAGE_MANAGER_PKG: PluginTypeId = PluginTypeId::from_static("package_manager_pkg");
-    pub const PACKAGE_MANAGER_APK: PluginTypeId = PluginTypeId::from_static("package_manager_apk");
+        PluginTypeId::from_static("package-manager.pacman");
+    pub const PACKAGE_MANAGER_PKG: PluginTypeId = PluginTypeId::from_static("package-manager.pkg");
+    pub const PACKAGE_MANAGER_APK: PluginTypeId = PluginTypeId::from_static("package-manager.apk");
     pub const PACKAGE_MANAGER_SNAP: PluginTypeId =
-        PluginTypeId::from_static("package_manager_snap");
+        PluginTypeId::from_static("package-manager.snap");
     pub const PACKAGE_MANAGER_CARGO: PluginTypeId =
-        PluginTypeId::from_static("package_manager_cargo");
+        PluginTypeId::from_static("package-manager.cargo");
     pub const PACKAGE_MANAGER_ROUTEROS: PluginTypeId =
-        PluginTypeId::from_static("package_manager_routeros");
+        PluginTypeId::from_static("package-manager.routeros");
     pub const PACKAGE_MANAGER_SKILLS: PluginTypeId =
-        PluginTypeId::from_static("package_manager_skills");
-    pub const GENERIC_SHELL: PluginTypeId = PluginTypeId::from_static("generic_shell");
-    pub const HOOK_SHELL: PluginTypeId = PluginTypeId::from_static("hook_shell");
-    pub const HOOK_SYSTEMD: PluginTypeId = PluginTypeId::from_static("hook_systemd");
+        PluginTypeId::from_static("package-manager.skills");
+    pub const GENERIC_SHELL: PluginTypeId = PluginTypeId::from_static("generic.shell");
+    pub const HOOK_SHELL: PluginTypeId = PluginTypeId::from_static("hook.shell");
+    pub const HOOK_SYSTEMD: PluginTypeId = PluginTypeId::from_static("hook.systemd");
     pub const INFRASTRUCTURE_PROXMOX: PluginTypeId =
-        PluginTypeId::from_static("infrastructure_proxmox");
-    pub const WEBHOOK: PluginTypeId = PluginTypeId::from_static("webhook");
-    pub const TELEGRAM: PluginTypeId = PluginTypeId::from_static("telegram");
-    pub const EMAIL: PluginTypeId = PluginTypeId::from_static("email");
+        PluginTypeId::from_static("infrastructure.proxmox");
+    pub const WEBHOOK: PluginTypeId = PluginTypeId::from_static("notifications.webhook");
+    pub const TELEGRAM: PluginTypeId = PluginTypeId::from_static("notifications.telegram");
+    pub const EMAIL: PluginTypeId = PluginTypeId::from_static("notifications.email");
     pub const ENHANCEMENT_DASHBOARD_ICONS: PluginTypeId =
-        PluginTypeId::from_static("enhancement_dashboard_icons");
+        PluginTypeId::from_static("enhancement.dashboard-icons");
     #[cfg(feature = "test-support")]
-    pub const TEST_FETCH_FAIL: PluginTypeId = PluginTypeId::from_static("__test_fetch_fail");
+    pub const TEST_FETCH_FAIL: PluginTypeId = PluginTypeId::from_static("test.fetch-fail");
     #[cfg(feature = "test-support")]
-    pub const TEST_PER_ITEM_FAIL: PluginTypeId = PluginTypeId::from_static("__test_per_item_fail");
+    pub const TEST_PER_ITEM_FAIL: PluginTypeId = PluginTypeId::from_static("test.per-item-fail");
     #[cfg(feature = "test-support")]
-    pub const TEST_CTX_CAPTURE: PluginTypeId = PluginTypeId::from_static("__test_ctx_capture");
+    pub const TEST_CTX_CAPTURE: PluginTypeId = PluginTypeId::from_static("test.ctx-capture");
     #[cfg(feature = "test-support")]
-    pub const TEST_ENRICHER_ECHO: PluginTypeId = PluginTypeId::from_static("__test_enricher_echo");
+    pub const TEST_ENRICHER_ECHO: PluginTypeId = PluginTypeId::from_static("test.enricher-echo");
     #[cfg(feature = "test-support")]
-    pub const TEST_ENRICHER_MISS: PluginTypeId = PluginTypeId::from_static("__test_enricher_miss");
+    pub const TEST_ENRICHER_MISS: PluginTypeId = PluginTypeId::from_static("test.enricher-miss");
     #[cfg(feature = "test-support")]
-    pub const TEST_LIFECYCLE_HOOK: PluginTypeId =
-        PluginTypeId::from_static("__test_lifecycle_hook");
+    pub const TEST_LIFECYCLE_HOOK: PluginTypeId = PluginTypeId::from_static("test.lifecycle-hook");
 
     /// All well-known plugin type IDs. Must include every constant above.
     /// Tests verify bidirectional consistency with `all_descriptors()`.
@@ -168,8 +180,8 @@ mod tests {
 
     #[test]
     fn from_static_is_zero_alloc() {
-        let id = PluginTypeId::from_static("package_manager_apt");
-        assert_eq!(id.as_str(), "package_manager_apt");
+        let id = PluginTypeId::from_static("package-manager.apt");
+        assert_eq!(id.as_str(), "package-manager.apt");
         // Cow::Borrowed — no heap allocation
         assert!(matches!(id.0, Cow::Borrowed(_)));
     }
@@ -189,15 +201,15 @@ mod tests {
 
     #[test]
     fn display() {
-        let id = PluginTypeId::from_static("releases_github");
-        assert_eq!(id.to_string(), "releases_github");
+        let id = PluginTypeId::from_static("releases.github");
+        assert_eq!(id.to_string(), "releases.github");
     }
 
     #[test]
     fn serde_roundtrip() {
-        let id = PluginTypeId::from_static("package_manager_apt");
+        let id = PluginTypeId::from_static("package-manager.apt");
         let json = serde_json::to_string(&id).expect("serialize");
-        assert_eq!(json, r#""package_manager_apt""#);
+        assert_eq!(json, r#""package-manager.apt""#);
         let de: PluginTypeId = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(de, id);
     }
@@ -210,16 +222,16 @@ mod tests {
 
     #[test]
     fn equality_static_vs_owned() {
-        let static_id = PluginTypeId::from_static("releases_github");
-        let owned_id = PluginTypeId::new("releases_github");
+        let static_id = PluginTypeId::from_static("releases.github");
+        let owned_id = PluginTypeId::new("releases.github");
         assert_eq!(static_id, owned_id);
     }
 
     #[test]
     fn equality_with_str() {
-        let id = PluginTypeId::from_static("releases_github");
-        assert_eq!(id, "releases_github");
-        assert_eq!(id, *"releases_github");
+        let id = PluginTypeId::from_static("releases.github");
+        assert_eq!(id, "releases.github");
+        assert_eq!(id, *"releases.github");
     }
 
     #[test]
@@ -238,7 +250,7 @@ mod tests {
     fn package_manager_skills_constant_is_correct() {
         assert_eq!(
             plugin_ids::PACKAGE_MANAGER_SKILLS.as_str(),
-            "package_manager_skills"
+            "package-manager.skills"
         );
     }
 
@@ -252,11 +264,18 @@ mod tests {
     fn hash_equality() {
         use std::collections::HashMap;
         let mut map = HashMap::new();
-        map.insert(PluginTypeId::from_static("releases_github"), "found");
+        map.insert(PluginTypeId::from_static("releases.github"), "found");
         // Lookup with an owned key matches the static key.
         assert_eq!(
-            map.get(&PluginTypeId::new("releases_github")),
+            map.get(&PluginTypeId::new("releases.github")),
             Some(&"found")
         );
+    }
+
+    #[test]
+    fn notification_plugin_type_derives_namespaced_id() {
+        assert_eq!(notification_plugin_type("email"), plugin_ids::EMAIL);
+        assert_eq!(notification_plugin_type("telegram"), plugin_ids::TELEGRAM);
+        assert_eq!(notification_plugin_type("webhook"), plugin_ids::WEBHOOK);
     }
 }

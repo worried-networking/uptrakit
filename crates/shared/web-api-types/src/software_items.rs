@@ -528,7 +528,7 @@ pub struct ListSoftwareItemsParams {
     /// - Omit: no filter.
     pub updatable: Option<bool>,
     /// Filter by plugin type — only return items that have at least one host
-    /// assignment using this plugin type (e.g. `"releases_docker"`).
+    /// assignment using this plugin type (e.g. `"releases.docker"`).
     /// Omit to return items for any plugin type.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin_type: Option<String>,
@@ -953,8 +953,8 @@ mod tests {
             id: sample_uuid(),
             name: "1Password".to_string(),
             plugins: vec![
-                "package_manager_homebrew".to_string(),
-                "releases_github".to_string(),
+                "package-manager.homebrew".to_string(),
+                "releases.github".to_string(),
             ],
             featured: true,
             last_checked_at: Some(datetime!(2025-06-01 12:00:00 UTC)),
@@ -987,7 +987,7 @@ mod tests {
         let resp = SoftwareItemResponse {
             id: sample_uuid(),
             name: "MyApp".to_string(),
-            plugins: vec!["releases_github".to_string()],
+            plugins: vec!["releases.github".to_string()],
             featured: true,
             last_checked_at: None,
             host_count: 1,
@@ -1216,19 +1216,19 @@ mod tests {
 
     #[test]
     fn list_software_items_params_plugin_type_filter() {
-        let json = serde_json::json!({ "plugin_type": "releases_docker" });
+        let json = serde_json::json!({ "plugin_type": "releases.docker" });
         let params: ListSoftwareItemsParams =
             serde_json::from_value(json).expect("deserialization should succeed");
-        assert_eq!(params.plugin_type.as_deref(), Some("releases_docker"));
+        assert_eq!(params.plugin_type.as_deref(), Some("releases.docker"));
     }
 
     #[test]
     fn list_software_items_params_query_filter() {
         let params: ListSoftwareItemsParams =
-            serde_json::from_str(r#"{"query":"node","plugin_type":"releases_docker"}"#)
+            serde_json::from_str(r#"{"query":"node","plugin_type":"releases.docker"}"#)
                 .expect("deserialize");
         assert_eq!(params.query.as_deref(), Some("node"));
-        assert_eq!(params.plugin_type.as_deref(), Some("releases_docker"));
+        assert_eq!(params.plugin_type.as_deref(), Some("releases.docker"));
     }
 
     #[test]
@@ -1252,13 +1252,13 @@ mod tests {
                 id: Uuid::nil(),
                 name: "Node.js".to_string(),
                 host_count: 2,
-                plugins: vec!["releases_github".to_string()],
+                plugins: vec!["releases.github".to_string()],
             }],
             survivor: MergeSoftwareItemSummary {
                 id: Uuid::new_v4(),
                 name: "Node.js LTS".to_string(),
                 host_count: 4,
-                plugins: vec!["releases_github".to_string()],
+                plugins: vec!["releases.github".to_string()],
             },
             losers: vec![MergeSoftwareItemSummary {
                 id: Uuid::new_v4(),

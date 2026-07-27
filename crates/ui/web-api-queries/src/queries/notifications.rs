@@ -105,8 +105,7 @@ pub async fn create_channel_in_tx(
     req: &uptrakit_web_api_types::notifications::CreateNotificationChannelRequest,
     plugin_ops: &dyn PluginOps,
 ) -> ChannelResult<notification_channel::Model> {
-    use uptrakit_shared_types::PluginTypeId;
-    let channel_type_id = PluginTypeId::new(&req.channel_type);
+    let channel_type_id = uptrakit_shared_types::notification_plugin_type(&req.channel_type);
     let config = req
         .config
         .to_object_map()
@@ -187,7 +186,7 @@ pub async fn update_channel_in_tx(
             .map_err(|e| report!(ChannelQueryError::InvalidConfig(e.to_string())))?;
         let config_value = json_object_map_to_value(&config);
 
-        let channel_type_id = uptrakit_shared_types::PluginTypeId::new(&before.channel_type);
+        let channel_type_id = uptrakit_shared_types::notification_plugin_type(&before.channel_type);
         plugin_ops
             .validate_config(&channel_type_id, &config_value)
             .map_err(|e| report!(ChannelQueryError::InvalidConfig(e.to_string())))?;
@@ -248,8 +247,7 @@ pub async fn create_channel(
     req: &uptrakit_web_api_types::notifications::CreateNotificationChannelRequest,
     plugin_ops: &dyn PluginOps,
 ) -> ChannelResult<NotificationChannelResponse> {
-    use uptrakit_shared_types::PluginTypeId;
-    let channel_type_id = PluginTypeId::new(&req.channel_type);
+    let channel_type_id = uptrakit_shared_types::notification_plugin_type(&req.channel_type);
     let config = req
         .config
         .to_object_map()
@@ -381,7 +379,8 @@ pub async fn update_channel(
         let config_value = json_object_map_to_value(&config);
 
         // Validate with channel impl
-        let channel_type_id = uptrakit_shared_types::PluginTypeId::new(&existing.channel_type);
+        let channel_type_id =
+            uptrakit_shared_types::notification_plugin_type(&existing.channel_type);
         plugin_ops
             .validate_config(&channel_type_id, &config_value)
             .map_err(|e| report!(ChannelQueryError::InvalidConfig(e.to_string())))?;
@@ -904,7 +903,7 @@ pub fn mask_channel_config(
         }
     };
 
-    let channel_type_id = uptrakit_shared_types::PluginTypeId::new(&channel.channel_type);
+    let channel_type_id = uptrakit_shared_types::notification_plugin_type(&channel.channel_type);
     if plugin_ops.transport(&channel_type_id).is_some() {
         json_object_map_from_value_or_empty(
             plugin_ops.mask_config_secrets(&channel_type_id, &config),

@@ -221,7 +221,7 @@ impl SnapPlugin {
 
 // ── Plugin descriptor ─────────────────────────────────────────────────────
 
-declare_plugin!(SnapPlugin, SnapConfig, "package_manager_snap", {
+declare_plugin!(SnapPlugin, SnapConfig, "package-manager.snap", {
     display_name: "Snap",
     family: PluginFamily::Software,
     config_model: ConfigModel::PluginConfig,

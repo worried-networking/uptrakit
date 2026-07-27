@@ -157,7 +157,7 @@ impl CargoPlugin {
 
 // ── Plugin descriptor ─────────────────────────────────────────────────────
 
-declare_plugin!(CargoPlugin, CargoConfig, "package_manager_cargo", {
+declare_plugin!(CargoPlugin, CargoConfig, "package-manager.cargo", {
     display_name: "Cargo Install",
     family: PluginFamily::Software,
     config_model: ConfigModel::PluginConfig,

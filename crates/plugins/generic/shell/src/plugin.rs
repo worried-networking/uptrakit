@@ -42,7 +42,7 @@ impl ShellPlugin {
 
 // ── PluginMeta + PluginDescriptor ─────────────────────────────────────────
 
-declare_plugin!(ShellPlugin, ShellConfig, "generic_shell", {
+declare_plugin!(ShellPlugin, ShellConfig, "generic.shell", {
     display_name: "Generic Shell",
     family: PluginFamily::Software,
     config_model: ConfigModel::PluginConfig,
@@ -169,7 +169,7 @@ mod tests {
     #[test]
     fn plugin_type_id() {
         let plugin = make_plugin(Some("echo 1"), None);
-        assert_eq!(plugin.plugin_type_id().as_str(), "generic_shell");
+        assert_eq!(plugin.plugin_type_id().as_str(), "generic.shell");
     }
 
     #[test]

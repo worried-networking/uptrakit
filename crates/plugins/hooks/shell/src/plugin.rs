@@ -35,7 +35,7 @@ impl ShellHookPlugin {
     }
 }
 
-declare_plugin!(ShellHookPlugin, ShellHookConfig, "hook_shell", {
+declare_plugin!(ShellHookPlugin, ShellHookConfig, "hook.shell", {
     display_name: "Shell Hook",
     family: PluginFamily::Hook,
     config_model: ConfigModel::PluginConfig,
@@ -178,7 +178,7 @@ mod tests {
             shell: HookShell::Bash,
         });
 
-        assert_eq!(plugin.plugin_type_id().as_str(), "hook_shell");
+        assert_eq!(plugin.plugin_type_id().as_str(), "hook.shell");
     }
 
     #[test]

@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use super::SurfaceProxyError;
 
-const PLUGIN_TYPE_INFRASTRUCTURE_PROXMOX: &str = "infrastructure_proxmox";
+const PLUGIN_TYPE_INFRASTRUCTURE_PROXMOX: &str = "infrastructure.proxmox";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[expect(

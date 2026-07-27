@@ -70,7 +70,7 @@ pub enum HostDiscoveryAllowlistCommands {
     List,
     /// Add a plugin type to the host's discovery allowlist
     Add {
-        /// Plugin type (e.g. package_manager_apt)
+        /// Plugin type (e.g. package-manager.apt)
         plugin_type: PluginTypeId,
     },
     /// Remove a host-specific discovery allowlist entry

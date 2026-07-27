@@ -26,7 +26,7 @@ impl ControllerUpdateHookPlugin {
 
 impl PluginMeta for ControllerUpdateHookPlugin {
     fn plugin_type_id(&self) -> PluginTypeId {
-        PluginTypeId::from_static("infrastructure_proxmox")
+        PluginTypeId::from_static("infrastructure.proxmox")
     }
 }
 
@@ -795,7 +795,7 @@ mod tests {
             id: plugin_config_id,
             tenant_id,
             name: "test".to_string(),
-            plugin_type: "infrastructure_proxmox".to_string(),
+            plugin_type: "infrastructure.proxmox".to_string(),
             config: serde_json::json!({
                 "api_url": api_url,
                 "api_token": "root@pam!tok=secret",
@@ -865,7 +865,7 @@ mod tests {
     #[test]
     fn controller_update_hook_plugin_implements_plugin_meta() {
         let plugin = ControllerUpdateHookPlugin;
-        assert_eq!(plugin.plugin_type_id().as_str(), "infrastructure_proxmox");
+        assert_eq!(plugin.plugin_type_id().as_str(), "infrastructure.proxmox");
     }
 
     #[tokio::test]

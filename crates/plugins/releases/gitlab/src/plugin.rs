@@ -246,7 +246,7 @@ fn parse_link_next(headers: &reqwest::header::HeaderMap) -> Option<String> {
 
 // ── declare_plugin! ──────────────────────────────────────────────────────
 
-declare_plugin!(GitLabPlugin, GitLabConfig, "releases_gitlab", {
+declare_plugin!(GitLabPlugin, GitLabConfig, "releases.gitlab", {
     display_name: "GitLab Releases",
     family: PluginFamily::Software,
     config_model: ConfigModel::PluginConfig,
@@ -613,7 +613,7 @@ mod tests {
     #[test]
     fn plugin_type_id() {
         let plugin = test_plugin();
-        assert_eq!(plugin.plugin_type_id().as_str(), "releases_gitlab");
+        assert_eq!(plugin.plugin_type_id().as_str(), "releases.gitlab");
     }
 
     // ── descriptor capabilities ─────────────────────────────────────────

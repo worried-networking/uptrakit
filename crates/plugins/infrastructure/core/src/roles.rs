@@ -106,7 +106,7 @@ pub trait VersionDetector: PluginMeta {
 ///
 /// Passed as the third argument alongside the config JSON and `HostRuntime`
 /// when the scheduler creates a fetcher instance. Existing plugins ignore this
-/// context; the `package_manager_skills` plugin reads `global_provider_lookup`
+/// context; the `package-manager.skills` plugin reads `global_provider_lookup`
 /// to reach the GitHub provider.
 #[non_exhaustive]
 pub struct ReleaseFetchContext {

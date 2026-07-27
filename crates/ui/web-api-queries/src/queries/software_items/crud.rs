@@ -1017,7 +1017,7 @@ mod tests {
 
         let resp = build_list_response(
             &item,
-            vec!["releases_github".to_string()],
+            vec!["releases.github".to_string()],
             3,
             None,
             None,
@@ -1027,7 +1027,7 @@ mod tests {
         );
 
         assert_eq!(resp.name, "Node.js");
-        assert_eq!(resp.plugins, vec!["releases_github"]);
+        assert_eq!(resp.plugins, vec!["releases.github"]);
         assert_eq!(resp.host_count, 3);
         assert!(resp.last_checked_at.is_some());
         assert!(resp.installed_version.is_none());
@@ -1076,7 +1076,7 @@ mod tests {
 
         let resp = build_list_response(
             &item,
-            vec!["package_manager_apt".to_string()],
+            vec!["package-manager.apt".to_string()],
             1,
             Some("1.24.0".to_string()),
             None,
@@ -1125,7 +1125,7 @@ mod tests {
                 ordinal: 0,
                 plugin_config_id: Some(uuid::Uuid::now_v7()),
                 plugin_config_name: Some("GitHub Releases".to_string()),
-                plugin_type: "releases_github".to_string(),
+                plugin_type: "releases.github".to_string(),
                 package_identifier: "redis/redis".to_string(),
                 config_override: Some(
                     uptrakit_web_api_types::software_items::JsonObjectMap::try_from(
@@ -1150,7 +1150,7 @@ mod tests {
 
         let resp = build_detail_response(
             item,
-            vec!["releases_github".to_string()],
+            vec!["releases.github".to_string()],
             1,
             Some("7.4.0".to_string()),
             true,
@@ -1158,7 +1158,7 @@ mod tests {
         );
 
         assert_eq!(resp.name, "Redis");
-        assert_eq!(resp.plugins, vec!["releases_github"]);
+        assert_eq!(resp.plugins, vec!["releases.github"]);
         assert_eq!(resp.hosts.len(), 1);
         assert_eq!(resp.hosts[0].hostname, "web-01");
         assert_eq!(resp.hosts[0].plugins.len(), 1);
@@ -1270,7 +1270,7 @@ mod tests {
         let ops = MockPluginOps;
         let base = serde_json::json!({});
         let override_val = serde_json::json!({"tag_strip_prefix": "release-"});
-        assert!(validate_config_override(&ops, "releases_github", &base, &override_val).is_ok());
+        assert!(validate_config_override(&ops, "releases.github", &base, &override_val).is_ok());
     }
 
     #[test]
@@ -1279,7 +1279,7 @@ mod tests {
         let ops = MockPluginOps;
         let base = serde_json::json!({});
         let override_val = serde_json::json!({"api_base_url": "http://api.github.com"});
-        assert!(validate_config_override(&ops, "releases_github", &base, &override_val).is_err());
+        assert!(validate_config_override(&ops, "releases.github", &base, &override_val).is_err());
     }
 
     #[test]
@@ -1288,7 +1288,7 @@ mod tests {
         let ops = MockPluginOps;
         let base = serde_json::json!({});
         let override_val = serde_json::json!("not an object");
-        let result = validate_config_override(&ops, "releases_github", &base, &override_val);
+        let result = validate_config_override(&ops, "releases.github", &base, &override_val);
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),

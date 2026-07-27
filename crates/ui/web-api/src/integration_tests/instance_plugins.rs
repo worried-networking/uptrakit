@@ -92,7 +92,7 @@ async fn list_returns_all_instance_scoped_plugins_with_state() {
     let token = register_and_get_token(&client).await;
 
     // Seed the setting so the snapshot sees it enabled.
-    upsert_instance_plugin_setting(&app, "enhancement_dashboard_icons", true).await;
+    upsert_instance_plugin_setting(&app, "enhancement.dashboard-icons", true).await;
 
     let (status, body): (_, serde_json::Value) = client
         .get("/api/v1/instance-plugins")
@@ -105,8 +105,8 @@ async fn list_returns_all_instance_scoped_plugins_with_state() {
 
     let dashboard_icons = entries
         .iter()
-        .find(|e| e["plugin_type"] == "enhancement_dashboard_icons")
-        .expect("enhancement_dashboard_icons should appear in list");
+        .find(|e| e["plugin_type"] == "enhancement.dashboard-icons")
+        .expect("enhancement.dashboard-icons should appear in list");
 
     assert_eq!(
         dashboard_icons["enabled"], true,
@@ -129,7 +129,7 @@ async fn set_enabled_persists_and_audits() {
 
     let (status, body): (_, serde_json::Value) = client
         .put_json(
-            "/api/v1/instance-plugins/enhancement_dashboard_icons/enabled",
+            "/api/v1/instance-plugins/enhancement.dashboard-icons/enabled",
             &serde_json::json!({ "enabled": true }),
         )
         .bearer(&token)
@@ -158,7 +158,7 @@ async fn set_enabled_persists_and_audits() {
     assert_eq!(row.target_type.as_deref(), Some("instance_plugin"));
     assert_eq!(
         row.target_id.as_deref(),
-        Some("enhancement_dashboard_icons")
+        Some("enhancement.dashboard-icons")
     );
 
     // V2 stateful: before snapshot is {} (AbsentView — no prior row existed).
@@ -177,7 +177,7 @@ async fn set_enabled_persists_and_audits() {
         .expect("stateful entry must have after_snapshot");
     assert_eq!(
         after["plugin_type_id"],
-        serde_json::json!("enhancement_dashboard_icons")
+        serde_json::json!("enhancement.dashboard-icons")
     );
     assert_eq!(after["enabled"], serde_json::json!(true));
 }
@@ -210,10 +210,10 @@ async fn set_enabled_for_tenant_scoped_plugin_returns_404() {
     let client = app.client();
     let token = register_and_get_token(&client).await;
 
-    // `package_manager_apt` is a Tenant-scoped plugin in the default catalog.
+    // `package-manager.apt` is a Tenant-scoped plugin in the default catalog.
     let status = client
         .put_json(
-            "/api/v1/instance-plugins/package_manager_apt/enabled",
+            "/api/v1/instance-plugins/package-manager.apt/enabled",
             &serde_json::json!({ "enabled": true }),
         )
         .bearer(&token)
@@ -234,7 +234,7 @@ async fn upsert_config_for_kill_switch_only_plugin_returns_400() {
 
     let (status, body): (_, serde_json::Value) = client
         .put_json(
-            "/api/v1/instance-plugins/enhancement_dashboard_icons/config",
+            "/api/v1/instance-plugins/enhancement.dashboard-icons/config",
             &serde_json::json!({ "config": {} }),
         )
         .bearer(&token)
@@ -260,7 +260,7 @@ async fn upsert_config_validates_against_validate_trait() {
 
     let (status, _body): (_, serde_json::Value) = client
         .put_json(
-            "/api/v1/instance-plugins/enhancement_dashboard_icons/config",
+            "/api/v1/instance-plugins/enhancement.dashboard-icons/config",
             &serde_json::json!({ "config": "not-an-object" }),
         )
         .bearer(&token)
@@ -272,7 +272,7 @@ async fn upsert_config_validates_against_validate_trait() {
 
 // TODO: upsert_config_validates_against_instance_config_schema_and_persists
 //
-// This test is deferred because `enhancement_dashboard_icons` has no
+// This test is deferred because `enhancement.dashboard-icons` has no
 // `instance_config` descriptor (it is a kill-switch-only plugin), so covering
 // schema validation and persistence would require introducing a synthetic test
 // descriptor into the catalog — a significant harness change that is out of

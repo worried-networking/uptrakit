@@ -404,7 +404,7 @@ mod tests {
             id: Set(pc2_id),
             tenant_id: Set(f.tenant_id),
             name: Set("test-plugin-2".to_string()),
-            plugin_type: Set("releases_github".to_string()),
+            plugin_type: Set("releases.github".to_string()),
             config: Set(serde_json::json!({})),
             enabled: Set(true),
             created_at: Set(now),
@@ -445,7 +445,7 @@ mod tests {
             software_item_id: Set(item2_id),
             host_software_item_id: Set(hsi2_id),
             plugin_config_id: Set(Some(pc2_id)),
-            plugin_type: Set("releases_github".to_string()),
+            plugin_type: Set("releases.github".to_string()),
             role: Set("execute_update".to_string()),
             ordinal: Set(0),
             package_identifier: Set("org/repo2".to_string()),
@@ -606,7 +606,7 @@ mod tests {
             id: Set(pc2_id),
             tenant_id: Set(f.tenant_id),
             name: Set("feat-plugin".to_string()),
-            plugin_type: Set("releases_github".to_string()),
+            plugin_type: Set("releases.github".to_string()),
             config: Set(serde_json::json!({})),
             enabled: Set(true),
             created_at: Set(now),
@@ -647,7 +647,7 @@ mod tests {
             software_item_id: Set(item2_id),
             host_software_item_id: Set(hsi2_id),
             plugin_config_id: Set(Some(pc2_id)),
-            plugin_type: Set("releases_github".to_string()),
+            plugin_type: Set("releases.github".to_string()),
             role: Set("execute_update".to_string()),
             ordinal: Set(0),
             package_identifier: Set("org/feat".to_string()),
@@ -680,7 +680,7 @@ mod tests {
     async fn find_outdated_items_plugin_type_ids_matches() {
         let db = setup_db().await;
         let f = insert_base_fixture(&db).await;
-        let ptids = [PluginTypeId::from_static("releases_github")];
+        let ptids = [PluginTypeId::from_static("releases.github")];
         let candidates =
             find_outdated_items_for_host(&db, f.tenant_id, f.host_id, None, Some(&ptids), None)
                 .await
@@ -692,7 +692,7 @@ mod tests {
     async fn find_outdated_items_plugin_type_ids_excludes_unmatched() {
         let db = setup_db().await;
         let f = insert_base_fixture(&db).await;
-        let ptids = [PluginTypeId::from_static("releases_gitlab")];
+        let ptids = [PluginTypeId::from_static("releases.gitlab")];
         let candidates =
             find_outdated_items_for_host(&db, f.tenant_id, f.host_id, None, Some(&ptids), None)
                 .await
@@ -755,7 +755,7 @@ mod tests {
     async fn find_outdated_hosts_plugin_type_ids_matches() {
         let db = setup_db().await;
         let f = insert_base_fixture(&db).await;
-        let ptids = [PluginTypeId::from_static("releases_github")];
+        let ptids = [PluginTypeId::from_static("releases.github")];
         let candidates =
             find_outdated_hosts_for_item(&db, f.tenant_id, f.item_id, None, None, Some(&ptids))
                 .await
@@ -768,7 +768,7 @@ mod tests {
     async fn find_outdated_hosts_plugin_type_ids_excludes_unmatched() {
         let db = setup_db().await;
         let f = insert_base_fixture(&db).await;
-        let ptids = [PluginTypeId::from_static("releases_gitlab")];
+        let ptids = [PluginTypeId::from_static("releases.gitlab")];
         let candidates =
             find_outdated_hosts_for_item(&db, f.tenant_id, f.item_id, None, None, Some(&ptids))
                 .await

@@ -190,7 +190,7 @@ fn lookup_github_provider_from_enrichment_ctx(
 // and `SkillsPlugin: ReleaseFetcher` is compile-checked. The auto-generated factory is
 // replaced by `create_release_fetcher_skills`, which injects the GitHub provider.
 // `InstalledVersionEnricher` is handled the same way via `create_installed_version_enricher_skills`.
-declare_plugin!(SkillsPlugin, SkillsConfig, "package_manager_skills", {
+declare_plugin!(SkillsPlugin, SkillsConfig, "package-manager.skills", {
     display_name: "Agent Skills",
     family: PluginFamily::Software,
     config_model: ConfigModel::PluginConfig,
@@ -231,7 +231,7 @@ mod tests {
     #[test]
     fn descriptor_type_id() {
         let plugin = SkillsPlugin::new(SkillsConfig::default(), test_runtime()).expect("create");
-        assert_eq!(plugin.plugin_type_id().as_str(), "package_manager_skills");
+        assert_eq!(plugin.plugin_type_id().as_str(), "package-manager.skills");
     }
 
     #[test]

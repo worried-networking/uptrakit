@@ -519,7 +519,7 @@ mod tests {
         let client = app.client();
         let access_token = fixtures::register_and_get_token(&client).await;
 
-        let plugin_type = "package_manager_cargo";
+        let plugin_type = "package-manager.cargo";
         let plugin_type_id = PluginTypeId::new(plugin_type);
         let config = app
             .state
@@ -606,7 +606,7 @@ mod tests {
         let app = TestApp::new().await;
         let client = app.client();
         let access_token = fixtures::register_and_get_token(&client).await;
-        let plugin_type = "package_manager_cargo";
+        let plugin_type = "package-manager.cargo";
 
         let status = client
             .delete(&format!("/api/v1/plugin-type-settings/{plugin_type}"))
@@ -638,7 +638,7 @@ mod tests {
         let client = app.client();
         let access_token = fixtures::register_and_get_token(&client).await;
 
-        let plugin_type = "package_manager_cargo";
+        let plugin_type = "package-manager.cargo";
         let plugin_type_id = PluginTypeId::new(plugin_type);
         let config = app
             .state

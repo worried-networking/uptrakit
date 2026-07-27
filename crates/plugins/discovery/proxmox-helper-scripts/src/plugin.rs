@@ -398,7 +398,7 @@ impl ProxmoxHelperScriptsPlugin {
 
 // ── declare_plugin! ──────────────────────────────────────────────────────
 
-declare_plugin!(ProxmoxHelperScriptsPlugin, ProxmoxHelperScriptsConfig, "discovery_proxmox_helper_scripts", {
+declare_plugin!(ProxmoxHelperScriptsPlugin, ProxmoxHelperScriptsConfig, "discovery.proxmox-helper-scripts", {
     display_name: "Proxmox Helper Scripts",
     family: PluginFamily::Software,
     config_model: ConfigModel::PluginConfig,
@@ -770,7 +770,7 @@ mod tests {
         let plugin = test_plugin();
         assert_eq!(
             plugin.plugin_type_id().as_str(),
-            "discovery_proxmox_helper_scripts"
+            "discovery.proxmox-helper-scripts"
         );
     }
 

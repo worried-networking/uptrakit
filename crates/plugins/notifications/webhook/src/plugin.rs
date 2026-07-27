@@ -520,7 +520,7 @@ fn webhook_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
 
 // ── declare_plugin! ──────────────────────────────────────────────────────
 
-declare_plugin!(WebhookPlugin, WebhookChannelConfig, "webhook", {
+declare_plugin!(WebhookPlugin, WebhookChannelConfig, "notifications.webhook", {
     display_name: "Webhook",
     family: PluginFamily::Notification,
     config_model: ConfigModel::NotificationChannel,
@@ -528,7 +528,7 @@ declare_plugin!(WebhookPlugin, WebhookChannelConfig, "webhook", {
     notification_transport: create_webhook_transport,
     raw_settings_keys: &[],
     surfaces: {
-        provider_id: "plugin.webhook",
+        provider_id: "plugin.notifications.webhook",
         registrations: webhook_plugin_surfaces,
     },
 });
@@ -547,7 +547,7 @@ mod tests {
     #[test]
     fn plugin_type_id() {
         let plugin = WebhookPlugin::new(false).expect("client builds");
-        assert_eq!(plugin.plugin_type_id().as_str(), "webhook");
+        assert_eq!(plugin.plugin_type_id().as_str(), "notifications.webhook");
     }
 
     #[test]
@@ -572,7 +572,7 @@ mod tests {
 
     #[test]
     fn descriptor_type_id() {
-        assert_eq!(DESCRIPTOR.type_id, "webhook");
+        assert_eq!(DESCRIPTOR.type_id, "notifications.webhook");
         assert_eq!(DESCRIPTOR.display_name, "Webhook");
     }
 
@@ -684,7 +684,7 @@ mod tests {
     fn descriptor_has_plugin_surface_registrations() {
         let registrations = webhook_plugin_surfaces()
             .iter()
-            .map(|r| r.to_wire("plugin.webhook"))
+            .map(|r| r.to_wire("plugin.notifications.webhook"))
             .collect::<Vec<_>>();
         assert!(
             !registrations.is_empty(),
@@ -711,7 +711,7 @@ mod tests {
     fn webhook_surface_keeps_table_data_source_and_action_shapes() {
         let registrations = webhook_plugin_surfaces()
             .iter()
-            .map(|r| r.to_wire("plugin.webhook"))
+            .map(|r| r.to_wire("plugin.notifications.webhook"))
             .collect::<Vec<_>>();
         let webhook_surface = registrations
             .iter()

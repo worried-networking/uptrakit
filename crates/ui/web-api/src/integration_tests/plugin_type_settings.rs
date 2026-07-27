@@ -77,10 +77,10 @@ async fn tenant_user_get_plugin_type_settings_for_disabled_instance_plugin_retur
     let (_admin_token, tenant_token) = register_admin_and_tenant_user(&app).await;
 
     // The snapshot defaults to all_disabled() at TestApp boot, so
-    // enhancement_dashboard_icons is disabled → predicate rejects for tenant users.
+    // enhancement.dashboard-icons is disabled → predicate rejects for tenant users.
     let status = app
         .client()
-        .get("/api/v1/plugin-type-settings/enhancement_dashboard_icons")
+        .get("/api/v1/plugin-type-settings/enhancement.dashboard-icons")
         .bearer(&tenant_token)
         .send_status()
         .await;
@@ -109,7 +109,7 @@ async fn admin_get_plugin_type_settings_for_disabled_instance_plugin_returns_200
     uptrakit_web_api_queries::queries::plugin_type_settings::upsert_type_settings(
         app.state.db(),
         app.tenant_id,
-        "enhancement_dashboard_icons",
+        "enhancement.dashboard-icons",
         serde_json::json!({ "enabled": false }),
     )
     .await
@@ -117,7 +117,7 @@ async fn admin_get_plugin_type_settings_for_disabled_instance_plugin_returns_200
 
     let (status, body): (_, serde_json::Value) = app
         .client()
-        .get("/api/v1/plugin-type-settings/enhancement_dashboard_icons")
+        .get("/api/v1/plugin-type-settings/enhancement.dashboard-icons")
         .bearer(&admin_token)
         .send_json()
         .await;
@@ -128,7 +128,7 @@ async fn admin_get_plugin_type_settings_for_disabled_instance_plugin_returns_200
         "admin must reach the settings row for a disabled instance-scoped plugin"
     );
     assert_eq!(
-        body["plugin_type"], "enhancement_dashboard_icons",
+        body["plugin_type"], "enhancement.dashboard-icons",
         "response must identify the correct plugin type"
     );
 }
@@ -147,7 +147,7 @@ async fn admin_list_plugin_type_settings_includes_disabled_instance_plugin_after
     uptrakit_web_api_queries::queries::plugin_type_settings::upsert_type_settings(
         app.state.db(),
         app.tenant_id,
-        "enhancement_dashboard_icons",
+        "enhancement.dashboard-icons",
         serde_json::json!({ "enabled": false }),
     )
     .await
@@ -163,7 +163,7 @@ async fn admin_list_plugin_type_settings_includes_disabled_instance_plugin_after
     assert_eq!(status, http::StatusCode::OK, "admin list must return 200");
     assert!(
         body.iter()
-            .any(|row| row["plugin_type"] == "enhancement_dashboard_icons"),
+            .any(|row| row["plugin_type"] == "enhancement.dashboard-icons"),
         "admin list must include the disabled instance-scoped plugin's settings row"
     );
 }

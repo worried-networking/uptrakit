@@ -1441,7 +1441,7 @@ fn plugin_configs_create_parses() {
         "--name",
         "My GitHub",
         "--plugin-type",
-        "releases_github",
+        "releases.github",
         "--config",
         r#"{"tag_strip_prefix":"v"}"#,
     ])
@@ -1454,7 +1454,7 @@ fn plugin_configs_create_parses() {
                 },
         }) => {
             assert_eq!(name, "My GitHub");
-            assert_eq!(plugin_type, "releases_github");
+            assert_eq!(plugin_type, "releases.github");
         }
         _ => panic!("expected PluginConfigs Create"),
     }
@@ -1506,14 +1506,14 @@ fn parse_plugin_type_settings_show() {
         "uptrakit",
         "plugin-type-settings",
         "show",
-        "releases_github",
+        "releases.github",
     ])
     .expect("should parse");
     match args.command {
         Some(Commands::PluginTypeSettings {
             command: PluginTypeSettingsCommands::Show { plugin_type },
         }) => {
-            assert_eq!(plugin_type, "releases_github");
+            assert_eq!(plugin_type, "releases.github");
         }
         _ => panic!("expected PluginTypeSettings Show"),
     }
@@ -1525,7 +1525,7 @@ fn parse_plugin_type_settings_set() {
         "uptrakit",
         "plugin-type-settings",
         "set",
-        "releases_github",
+        "releases.github",
         "--config",
         r#"{"poll_interval_secs":300}"#,
     ])
@@ -1538,7 +1538,7 @@ fn parse_plugin_type_settings_set() {
                     config,
                 },
         }) => {
-            assert_eq!(plugin_type, "releases_github");
+            assert_eq!(plugin_type, "releases.github");
             assert_eq!(config, r#"{"poll_interval_secs":300}"#);
         }
         _ => panic!("expected PluginTypeSettings Set"),
@@ -1551,14 +1551,14 @@ fn parse_plugin_type_settings_reset() {
         "uptrakit",
         "plugin-type-settings",
         "reset",
-        "releases_github",
+        "releases.github",
     ])
     .expect("should parse");
     match args.command {
         Some(Commands::PluginTypeSettings {
             command: PluginTypeSettingsCommands::Reset { plugin_type },
         }) => {
-            assert_eq!(plugin_type, "releases_github");
+            assert_eq!(plugin_type, "releases.github");
         }
         _ => panic!("expected PluginTypeSettings Reset"),
     }

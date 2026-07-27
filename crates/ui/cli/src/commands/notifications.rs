@@ -961,14 +961,14 @@ mod tests {
         let mut r = sample_rule();
         r.host_id = Some(sample_uuid());
         r.software_item_id = Some(sample_uuid());
-        r.plugin_type = Some("releases_github".to_string());
+        r.plugin_type = Some("releases.github".to_string());
         let s = r.to_human_string();
         assert!(s.contains("Host ID:"), "host id label missing");
         assert!(
             s.contains("Software Item ID:"),
             "software item id label missing"
         );
-        assert!(s.contains("releases_github"), "plugin type missing");
+        assert!(s.contains("releases.github"), "plugin type missing");
     }
 
     #[test]

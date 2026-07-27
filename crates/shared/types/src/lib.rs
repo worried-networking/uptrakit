@@ -45,7 +45,7 @@ pub use output_stream_type::{OutputStreamType, ParseOutputStreamTypeError};
 pub use permissions::Permission;
 pub use plugin_capability::PluginCapability;
 pub use plugin_role::{ParsePluginRoleError, PluginRole};
-pub use plugin_type_id::{PluginTypeId, plugin_ids};
+pub use plugin_type_id::{PluginTypeId, notification_plugin_type, plugin_ids};
 pub use provider_validation::{ProviderValidationError, validate_provider_api_base_url};
 pub use release_types::{AttestationStatus, ReleaseAsset, ReleaseInfo};
 pub use secret_string::SecretString;

@@ -147,7 +147,7 @@ impl TestFixtures {
             id: Set(shell_config_id),
             tenant_id: Set(tenant_id),
             name: Set("test-shell-config".to_string()),
-            plugin_type: Set("generic_shell".to_string()),
+            plugin_type: Set("generic.shell".to_string()),
             config: Set(json!({
                 "update_command": "echo ok",
                 "version_command": "echo 1.0.0"
@@ -166,7 +166,7 @@ impl TestFixtures {
             id: Set(proxmox_config_id),
             tenant_id: Set(tenant_id),
             name: Set("test-proxmox-config".to_string()),
-            plugin_type: Set("infrastructure_proxmox".to_string()),
+            plugin_type: Set("infrastructure.proxmox".to_string()),
             config: Set(json!({
                 "api_url": proxmox_api_url,
                 "api_token": "root@pam!tok=secret",
@@ -188,7 +188,7 @@ impl TestFixtures {
             software_item_id: Set(software_item_id),
             host_software_item_id: Set(host_software_item_id),
             plugin_config_id: Set(Some(shell_config_id)),
-            plugin_type: Set("generic_shell".to_string()),
+            plugin_type: Set("generic.shell".to_string()),
             role: Set("execute_update".to_string()),
             ordinal: Set(0),
             package_identifier: Set("test-shell-pkg".to_string()),
@@ -208,7 +208,7 @@ impl TestFixtures {
             software_item_id: Set(software_item_id),
             host_software_item_id: Set(host_software_item_id),
             plugin_config_id: Set(Some(shell_config_id)),
-            plugin_type: Set("generic_shell".to_string()),
+            plugin_type: Set("generic.shell".to_string()),
             role: Set("detect_version".to_string()),
             ordinal: Set(0),
             package_identifier: Set("test-shell-pkg".to_string()),

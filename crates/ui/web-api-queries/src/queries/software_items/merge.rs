@@ -1164,7 +1164,7 @@ mod tests {
             survivor_host,
             survivor_id,
             survivor_link,
-            "releases_github",
+            "releases.github",
         )
         .await;
         insert_plugin_row(
@@ -1173,7 +1173,7 @@ mod tests {
             loser_active_host,
             loser_id,
             loser_active_link,
-            "package_manager_apt",
+            "package-manager.apt",
         )
         .await;
         insert_plugin_row(
@@ -1182,7 +1182,7 @@ mod tests {
             loser_inactive_link_host,
             loser_id,
             loser_inactive_link,
-            "releases_gitlab",
+            "releases.gitlab",
         )
         .await;
         insert_plugin_row(
@@ -1191,7 +1191,7 @@ mod tests {
             loser_inactive_host,
             loser_id,
             loser_inactive_host_link,
-            "package_manager_dnf",
+            "package-manager.dnf",
         )
         .await;
 
@@ -1218,7 +1218,7 @@ mod tests {
             .find(|item| item.id == loser_id)
             .unwrap();
 
-        assert_eq!(survivor.plugins, vec!["releases_github"]);
-        assert_eq!(loser.plugins, vec!["package_manager_apt"]);
+        assert_eq!(survivor.plugins, vec!["releases.github"]);
+        assert_eq!(loser.plugins, vec!["package-manager.apt"]);
     }
 }

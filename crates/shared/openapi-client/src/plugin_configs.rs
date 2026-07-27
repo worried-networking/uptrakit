@@ -111,7 +111,7 @@ mod tests {
         };
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["name"], "GitHub Releases");
-        assert_eq!(json["plugin_type"], "releases_github");
+        assert_eq!(json["plugin_type"], "releases.github");
         assert_eq!(json["config"]["tag_strip_prefix"], "v");
         assert_eq!(json["enabled"], true);
     }

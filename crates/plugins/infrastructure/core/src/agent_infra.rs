@@ -252,7 +252,7 @@ pub struct InfraPluginContext<'a> {
 /// Data needed to send a `ReportPluginConfig` wire message.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginConfigReport {
-    /// Plugin type string (e.g. `"infrastructure_proxmox"`).
+    /// Plugin type string (e.g. `"infrastructure.proxmox"`).
     pub plugin_type: String,
     /// Human-readable config name (e.g. `"pve-<host_id>"`).
     pub name: String,

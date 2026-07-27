@@ -82,7 +82,7 @@ impl<'a> DiscoveredItemInfo<'a> {
 /// Groups the fields common to every write site so that downstream helper
 /// functions stay within the workspace's argument-count lint. `discovery_source`
 /// is the *discovering* plugin type (`result.plugin_type`) -- for PHS targets
-/// this remains `discovery_proxmox_helper_scripts`, never the target's own
+/// this remains `discovery.proxmox-helper-scripts`, never the target's own
 /// management plugin type.
 struct DiscoveryContext<'a> {
     tenant_id: Uuid,
@@ -916,10 +916,10 @@ mod tests {
             tenant_id,
             host_id,
             now,
-            discovery_source: "package_manager_homebrew",
+            discovery_source: "package-manager.homebrew",
             audit: &audit,
         };
-        process_one_discovery(&db, &ctx, pc_id, "package_manager_homebrew", args)
+        process_one_discovery(&db, &ctx, pc_id, "package-manager.homebrew", args)
             .await
             .expect("process_one_discovery");
 
@@ -1017,7 +1017,7 @@ mod tests {
             pc_id,
             "jq",
             None,
-            "package_manager_homebrew",
+            "package-manager.homebrew",
             Some(now),
             None,
             Some(now),
@@ -1039,10 +1039,10 @@ mod tests {
             tenant_id,
             host_id,
             now,
-            discovery_source: "package_manager_homebrew",
+            discovery_source: "package-manager.homebrew",
             audit: &audit,
         };
-        process_one_discovery(&db, &ctx, pc_id, "package_manager_homebrew", args)
+        process_one_discovery(&db, &ctx, pc_id, "package-manager.homebrew", args)
             .await
             .expect("process_one_discovery");
 
@@ -1102,10 +1102,10 @@ mod tests {
             tenant_id,
             host_id,
             now,
-            discovery_source: "package_manager_homebrew",
+            discovery_source: "package-manager.homebrew",
             audit: &audit,
         };
-        process_one_discovery(&db, &ctx, pc_id, "package_manager_homebrew", args)
+        process_one_discovery(&db, &ctx, pc_id, "package-manager.homebrew", args)
             .await
             .expect("process_one_discovery");
 
@@ -1185,10 +1185,10 @@ mod tests {
             tenant_id,
             host_id,
             now,
-            discovery_source: "package_manager_homebrew",
+            discovery_source: "package-manager.homebrew",
             audit: &audit,
         };
-        process_one_discovery(&db, &ctx, pc_id, "package_manager_homebrew", args)
+        process_one_discovery(&db, &ctx, pc_id, "package-manager.homebrew", args)
             .await
             .expect("process_one_discovery");
 
@@ -1218,7 +1218,7 @@ mod tests {
         );
         assert_eq!(
             link.discovery_source.as_deref(),
-            Some("package_manager_homebrew"),
+            Some("package-manager.homebrew"),
             "discovery_source must be stamped for featured items"
         );
     }
@@ -1273,10 +1273,10 @@ mod tests {
             tenant_id,
             host_id,
             now,
-            discovery_source: "package_manager_homebrew",
+            discovery_source: "package-manager.homebrew",
             audit: &audit,
         };
-        process_one_discovery(&db, &ctx, pc_id, "package_manager_homebrew", args)
+        process_one_discovery(&db, &ctx, pc_id, "package-manager.homebrew", args)
             .await
             .expect("process_one_discovery");
 
@@ -1328,7 +1328,7 @@ mod tests {
 
         let configs = PluginConfig::find()
             .filter(plugin_config::Column::TenantId.eq(tenant_id))
-            .filter(plugin_config::Column::PluginType.eq("releases_github"))
+            .filter(plugin_config::Column::PluginType.eq("releases.github"))
             .all(&db)
             .await
             .expect("query configs");
@@ -1457,7 +1457,7 @@ mod tests {
         // No plugin_config should be created for package manager types.
         let configs = PluginConfig::find()
             .filter(plugin_config::Column::TenantId.eq(tenant_id))
-            .filter(plugin_config::Column::PluginType.eq("package_manager_apt"))
+            .filter(plugin_config::Column::PluginType.eq("package-manager.apt"))
             .all(&db)
             .await
             .expect("query configs");
@@ -1484,7 +1484,7 @@ mod tests {
                 "package manager HSIP rows must have plugin_config_id = NULL"
             );
             assert_eq!(
-                link.plugin_type, "package_manager_apt",
+                link.plugin_type, "package-manager.apt",
                 "plugin_type must be set on the HSIP row"
             );
         }
@@ -1525,7 +1525,7 @@ mod tests {
 
         let configs = PluginConfig::find()
             .filter(plugin_config::Column::TenantId.eq(tenant_id))
-            .filter(plugin_config::Column::PluginType.eq("package_manager_npm"))
+            .filter(plugin_config::Column::PluginType.eq("package-manager.npm"))
             .all(&db)
             .await
             .expect("query configs");
@@ -1549,7 +1549,7 @@ mod tests {
                 link.plugin_config_id.is_none(),
                 "package manager HSIP rows must have plugin_config_id = NULL"
             );
-            assert_eq!(link.plugin_type, "package_manager_npm");
+            assert_eq!(link.plugin_type, "package-manager.npm");
         }
     }
 
@@ -1638,7 +1638,7 @@ mod tests {
 
         let config_count = PluginConfig::find()
             .filter(plugin_config::Column::TenantId.eq(tenant_id))
-            .filter(plugin_config::Column::PluginType.eq("releases_github"))
+            .filter(plugin_config::Column::PluginType.eq("releases.github"))
             .count(&db)
             .await
             .expect("count configs");
@@ -1963,7 +1963,7 @@ mod tests {
             "expected exactly one host_software_items link"
         );
 
-        // Exactly two plugin_configs: releases_github + generic_shell.
+        // Exactly two plugin_configs: releases.github + generic_shell.
         let configs = PluginConfig::find()
             .filter(plugin_config::Column::TenantId.eq(tenant_id))
             .all(&db)
@@ -1973,12 +1973,12 @@ mod tests {
         let config_types: std::collections::HashSet<String> =
             configs.iter().map(|c| c.plugin_type.clone()).collect();
         assert!(
-            config_types.contains("releases_github"),
-            "expected a releases_github config"
+            config_types.contains("releases.github"),
+            "expected a releases.github config"
         );
         assert!(
-            config_types.contains("generic_shell"),
-            "expected a generic_shell config"
+            config_types.contains("generic.shell"),
+            "expected a generic.shell config"
         );
 
         // Exactly three host_software_item_plugins rows.
@@ -1996,12 +1996,12 @@ mod tests {
         // Validate individual role assignments.
         let github_config_id = configs
             .iter()
-            .find(|c| c.plugin_type == "releases_github")
+            .find(|c| c.plugin_type == "releases.github")
             .unwrap()
             .id;
         let shell_config_id = configs
             .iter()
-            .find(|c| c.plugin_type == "generic_shell")
+            .find(|c| c.plugin_type == "generic.shell")
             .unwrap()
             .id;
 
@@ -2029,8 +2029,8 @@ mod tests {
 
     /// Every discovery create/match must stamp provenance columns:
     /// `last_discovered_at`, `discovery_source` (the *discovering* plugin
-    /// type -- for PHS targets this is `discovery_proxmox_helper_scripts`,
-    /// not the target's `releases_github`), and clear `missing_since`.
+    /// type -- for PHS targets this is `discovery.proxmox-helper-scripts`,
+    /// not the target's `releases.github`), and clear `missing_since`.
     ///
     /// Runs `process_plugin_result` twice: the first pass exercises Phase 3
     /// (create), the second exercises Phase 1 (in-place update / re-match).
@@ -2173,10 +2173,10 @@ mod tests {
             tenant_id,
             host_id,
             now,
-            discovery_source: "package_manager_homebrew",
+            discovery_source: "package-manager.homebrew",
             audit: &audit,
         };
-        process_one_discovery(&db, &ctx, pc_id, "package_manager_homebrew", args)
+        process_one_discovery(&db, &ctx, pc_id, "package-manager.homebrew", args)
             .await
             .expect("process_one_discovery");
 
@@ -2290,10 +2290,10 @@ mod tests {
             tenant_id,
             host_id,
             now,
-            discovery_source: "package_manager_homebrew",
+            discovery_source: "package-manager.homebrew",
             audit: &audit,
         };
-        process_one_discovery(&db, &ctx, pc_id, "package_manager_homebrew", args)
+        process_one_discovery(&db, &ctx, pc_id, "package-manager.homebrew", args)
             .await
             .expect("process_one_discovery");
 
@@ -2398,10 +2398,10 @@ mod tests {
             tenant_id,
             host_id,
             now,
-            discovery_source: "package_manager_homebrew",
+            discovery_source: "package-manager.homebrew",
             audit: &audit,
         };
-        process_one_discovery(&db, &ctx, pc_id, "package_manager_homebrew", args)
+        process_one_discovery(&db, &ctx, pc_id, "package-manager.homebrew", args)
             .await
             .expect("process_one_discovery");
 
@@ -2556,10 +2556,10 @@ mod tests {
             tenant_id,
             host_id,
             now,
-            discovery_source: "package_manager_homebrew",
+            discovery_source: "package-manager.homebrew",
             audit: &audit,
         };
-        process_one_discovery(&db, &ctx, pc_id, "package_manager_homebrew", args)
+        process_one_discovery(&db, &ctx, pc_id, "package-manager.homebrew", args)
             .await
             .expect("process_one_discovery");
 

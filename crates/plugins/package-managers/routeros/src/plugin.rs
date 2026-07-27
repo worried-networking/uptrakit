@@ -73,7 +73,7 @@ impl RouterOsPlugin {
 
 // ── declare_plugin! ──────────────────────────────────────────────────────────
 
-declare_plugin!(RouterOsPlugin, RouterOsConfig, "package_manager_routeros", {
+declare_plugin!(RouterOsPlugin, RouterOsConfig, "package-manager.routeros", {
     display_name: "RouterOS Package Manager",
     family: PluginFamily::Software,
     config_model: ConfigModel::PluginConfig,
@@ -442,7 +442,7 @@ mod tests {
     #[test]
     fn plugin_type_id_is_correct() {
         let plugin = make_plugin("", "", false, false);
-        assert_eq!(plugin.plugin_type_id().as_str(), "package_manager_routeros");
+        assert_eq!(plugin.plugin_type_id().as_str(), "package-manager.routeros");
     }
 
     // ── descriptor ───────────────────────────────────────────────────────────

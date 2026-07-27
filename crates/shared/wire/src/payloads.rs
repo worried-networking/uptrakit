@@ -1421,7 +1421,7 @@ pub struct DiscoveryPluginResult {
 pub struct ReportPluginConfigPayload {
     /// Unique request identifier for correlating the response.
     pub request_id: String,
-    /// Plugin type string (e.g. `"infrastructure_proxmox"`).
+    /// Plugin type string (e.g. `"infrastructure.proxmox"`).
     pub plugin_type: String,
     /// Human-readable name for the config (e.g. `"pve.local"`).
     pub name: String,

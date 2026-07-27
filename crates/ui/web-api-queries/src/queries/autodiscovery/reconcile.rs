@@ -342,7 +342,7 @@ mod tests {
     use super::super::tests_common::*;
     use super::{UNINSTALLED_UPDATE_OUTPUT, reconcile_plugin_result};
 
-    const SOURCE: &str = "package_manager_apt";
+    const SOURCE: &str = "package-manager.apt";
 
     fn empty_result() -> DiscoveryPluginResult {
         DiscoveryPluginResult {

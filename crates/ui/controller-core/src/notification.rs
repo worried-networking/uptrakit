@@ -752,7 +752,7 @@ async fn dispatch_loop(
 
             // Look up channel implementation
             let channel_type_id =
-                uptrakit_shared_types::PluginTypeId::new(&channel_model.channel_type);
+                uptrakit_shared_types::notification_plugin_type(&channel_model.channel_type);
             let channel_transport = match notification_ops.transport(&channel_type_id) {
                 Some(c) => c,
                 None => {

@@ -100,7 +100,7 @@ async fn test_plugin_config_message_produces_background_result_event() {
         "request-1".to_string(),
         runtime.machine_id().expect("machine id").to_string(),
         ConfigTestKind::Connectivity,
-        "generic_shell".to_string(),
+        "generic.shell".to_string(),
         serde_json::json!({}),
     );
 

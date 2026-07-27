@@ -923,7 +923,7 @@ fn check_versions_serialization_roundtrip() {
     let json = serde_json::to_string(&msg).unwrap();
     assert!(json.contains(r#""type":"check_versions"#));
     assert!(json.contains(r#""software_item_id":"550e8400-e29b-41d4-a716-446655440000"#));
-    assert!(json.contains(r#""plugin_type":"releases_github"#));
+    assert!(json.contains(r#""plugin_type":"releases.github"#));
     let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
     assert_eq!(deserialized, msg);
 }
@@ -974,8 +974,8 @@ fn execute_update_serialization_roundtrip() {
     }));
     let json = serde_json::to_string(&msg).unwrap();
     assert!(json.contains(r#""type":"execute_update"#));
-    assert!(json.contains(r#""plugin_type":"releases_github"#));
-    assert!(json.contains(r#""hook_systemd"#));
+    assert!(json.contains(r#""plugin_type":"releases.github"#));
+    assert!(json.contains(r#""hook.systemd"#));
     let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
     assert_eq!(deserialized, msg);
 }
@@ -1021,7 +1021,7 @@ fn execute_update_default_timeout() {
         "software_item_name": "Test",
         "to_version": "1.0.0",
         "execute_update_plugin": {
-            "plugin_type": "releases_github",
+            "plugin_type": "releases.github",
             "package_identifier": "test",
             "config": {}
         }
@@ -1061,7 +1061,7 @@ fn execute_update_with_shell_hook_plugin() {
         interactive: false,
     }));
     let json = serde_json::to_string(&msg).unwrap();
-    assert!(json.contains(r#""hook_shell"#));
+    assert!(json.contains(r#""hook.shell"#));
     let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
     assert_eq!(deserialized, msg);
 }
@@ -1076,7 +1076,7 @@ fn execute_update_backward_compat_extra_fields() {
         "software_item_name": "Test",
         "to_version": "1.0.0",
         "execute_update_plugin": {
-            "plugin_type": "releases_github",
+            "plugin_type": "releases.github",
             "package_identifier": "test",
             "config": {}
         },
@@ -1310,7 +1310,7 @@ fn version_check_assignment_serialization() {
         host_software_item_id: None,
     };
     let json = serde_json::to_string(&assignment).unwrap();
-    assert!(json.contains(r#""plugin_type":"releases_docker""#));
+    assert!(json.contains(r#""plugin_type":"releases.docker""#));
     let deserialized: VersionCheckAssignment = serde_json::from_str(&json).unwrap();
     assert_eq!(deserialized, assignment);
 }
@@ -1318,12 +1318,12 @@ fn version_check_assignment_serialization() {
 #[test]
 fn plugin_type_all_variants() {
     for (plugin, expected) in [
-        (plugin_ids::RELEASES_GITHUB.clone(), "releases_github"),
+        (plugin_ids::RELEASES_GITHUB.clone(), "releases.github"),
         (
             plugin_ids::DISCOVERY_PROXMOX_HELPER_SCRIPTS.clone(),
-            "discovery_proxmox_helper_scripts",
+            "discovery.proxmox-helper-scripts",
         ),
-        (plugin_ids::RELEASES_DOCKER.clone(), "releases_docker"),
+        (plugin_ids::RELEASES_DOCKER.clone(), "releases.docker"),
     ] {
         let json = serde_json::to_string(&plugin).unwrap();
         assert_eq!(json, format!(r#""{expected}""#));
@@ -1354,14 +1354,14 @@ fn version_check_assignment_with_unknown_plugin_type_deserializes() {
     );
 }
 
-/// `"package_manager_apt"` deserializes to the known `PackageManagerApt` variant in `VersionCheckAssignment`.
+/// `"package-manager.apt"` deserializes to the known `PackageManagerApt` variant in `VersionCheckAssignment`.
 #[test]
 fn version_check_assignment_apt_plugin_type_deserializes() {
     let json = serde_json::json!({
         "software_item_id": "00000000-0000-0000-0000-000000000001",
         "name": "nginx",
         "detect_version": {
-            "plugin_type": "package_manager_apt",
+            "plugin_type": "package-manager.apt",
             "package_identifier": "nginx",
             "config": {}
         }
@@ -2271,7 +2271,7 @@ fn execute_batch_update_serialization_roundtrip() {
     }));
     let json = serde_json::to_string(&msg).unwrap();
     assert!(json.contains(r#""type":"execute_batch_update"#));
-    assert!(json.contains(r#""plugin_type":"package_manager_apt"#));
+    assert!(json.contains(r#""plugin_type":"package-manager.apt"#));
     assert!(json.contains(r#""package_identifier":"nginx"#));
     let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
     assert_eq!(deserialized, msg);
@@ -2280,7 +2280,7 @@ fn execute_batch_update_serialization_roundtrip() {
 #[test]
 fn execute_batch_update_backward_compat_old_type_tag() {
     // Old wire messages with the old type tag must still deserialize.
-    let json = r#"{"type":"execute_batch_host_package_update","host_machine_id":"test","batch_id":"550e8400-e29b-41d4-a716-446655440000","plugin_type":"package_manager_apt","plugin_config":{},"updates":[{"host_package_id":"550e8400-e29b-41d4-a716-446655440000","update_history_id":"550e8400-e29b-41d4-a716-446655440001","package_identifier":"nginx","to_version":"1.24.0-2"}],"timeout_seconds":7200}"#;
+    let json = r#"{"type":"execute_batch_host_package_update","host_machine_id":"test","batch_id":"550e8400-e29b-41d4-a716-446655440000","plugin_type":"package-manager.apt","plugin_config":{},"updates":[{"host_package_id":"550e8400-e29b-41d4-a716-446655440000","update_history_id":"550e8400-e29b-41d4-a716-446655440001","package_identifier":"nginx","to_version":"1.24.0-2"}],"timeout_seconds":7200}"#;
     let msg: ControllerMessage = serde_json::from_str(json).unwrap();
     if let ControllerMessage::ExecuteBatchUpdate(payload) = msg {
         assert_eq!(payload.updates[0].host_software_item_id, TEST_UUID_1);
@@ -2846,7 +2846,7 @@ fn reset_data_is_not_nats_publishable() {
 fn report_plugin_config_roundtrip() {
     let msg = ServiceMessage::ReportPluginConfig(ReportPluginConfigPayload {
         request_id: "req-42".to_string(),
-        plugin_type: "infrastructure_proxmox".to_string(),
+        plugin_type: "infrastructure.proxmox".to_string(),
         name: "pve.local".to_string(),
         config: serde_json::json!({"api_url": "https://pve:8006", "api_token": "test"}),
     });
@@ -3227,7 +3227,7 @@ fn test_plugin_config_payload_roundtrip() {
         request_id: "req-001".to_string(),
         host_machine_id: "host-abc".to_string(),
         test_kind: ConfigTestKind::VersionDetection,
-        plugin_type: "releases_github".to_string(),
+        plugin_type: "releases.github".to_string(),
         config: serde_json::json!({"repo": "owner/repo"}),
         package_identifier: Some("my-pkg".to_string()),
     };
@@ -3246,7 +3246,7 @@ fn test_plugin_config_payload_minimal() {
         "req-002".to_string(),
         "host-xyz".to_string(),
         ConfigTestKind::Connectivity,
-        "releases_docker".to_string(),
+        "releases.docker".to_string(),
         serde_json::json!({}),
     );
     let msg = ControllerMessage::TestPluginConfig(payload);

@@ -120,7 +120,7 @@ impl HostLifecycle for crate::ProxmoxPlugin {
 
         // Build the report config if new credentials were created.
         let report = pve_credentials.map(|creds| PluginConfigReport {
-            plugin_type: "infrastructure_proxmox".to_string(),
+            plugin_type: "infrastructure.proxmox".to_string(),
             name: format!("pve-{host_id}"),
             config: json!({
                 "api_url": creds.api_url,
@@ -207,7 +207,7 @@ impl HostLifecycle for crate::ProxmoxPlugin {
                                             .to_string(),
                                     );
                                     report_plugin_config = Some(PluginConfigReport {
-                                        plugin_type: "infrastructure_proxmox".to_string(),
+                                        plugin_type: "infrastructure.proxmox".to_string(),
                                         name: format!("pve-{host_id}"),
                                         config: serde_json::json!({
                                             "api_url": creds.api_url,

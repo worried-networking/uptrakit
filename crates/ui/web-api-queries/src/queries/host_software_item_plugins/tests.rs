@@ -125,14 +125,14 @@ async fn bootstrap() -> Fixture {
     .await
     .expect("insert host_software_item");
 
-    // host_software_item_plugin: role=detect_version, plugin_type=package_manager_skills.
+    // host_software_item_plugin: role=detect_version, plugin_type=package-manager.skills.
     host_software_item_plugin::ActiveModel {
         id: Set(Uuid::now_v7()),
         host_id: Set(host_a),
         software_item_id: Set(item_a),
         host_software_item_id: Set(hsi_a_id),
         plugin_config_id: Set(None),
-        plugin_type: Set("package_manager_skills".to_string()),
+        plugin_type: Set("package-manager.skills".to_string()),
         role: Set("detect_version".to_string()),
         ordinal: Set(0),
         package_identifier: Set(SKILL_PACKAGE.to_string()),
@@ -163,7 +163,7 @@ async fn plugin_types_for_role_returns_assignment_for_detect_version() {
         .expect("ok");
 
     let assignment = out.get(&fx.hsi_a_id).expect("present");
-    assert_eq!(assignment.plugin_type, "package_manager_skills");
+    assert_eq!(assignment.plugin_type, "package-manager.skills");
     assert_eq!(assignment.package_identifier, SKILL_PACKAGE);
 }
 

@@ -503,7 +503,7 @@ mod tests {
             software_item_id: Set(software_item_id),
             host_software_item_id: Set(host_software_item_id),
             plugin_config_id: Set(None),
-            plugin_type: Set("package_manager_apt".to_string()),
+            plugin_type: Set("package-manager.apt".to_string()),
             role: Set("detect_version".to_string()),
             ordinal: Set(0),
             package_identifier: Set("test-pkg".to_string()),

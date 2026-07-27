@@ -1086,7 +1086,7 @@ async fn surface_registration_rejection_does_not_broadcast() {
 // `.superpowers/sdd/task-10-brief.md`.
 // ---------------------------------------------------------------------------
 
-/// Seed a `plugin_configs` row (`plugin_type = "infrastructure_proxmox"`) —
+/// Seed a `plugin_configs` row (`plugin_type = "infrastructure.proxmox"`) —
 /// the FK parent required by `proxmox_host_mapping.plugin_config_id`.
 #[cfg(feature = "db-sqlite")]
 async fn insert_test_proxmox_plugin_config(
@@ -1102,7 +1102,7 @@ async fn insert_test_proxmox_plugin_config(
         id: Set(id),
         tenant_id: Set(tenant_id),
         name: Set("Test Proxmox Config".to_string()),
-        plugin_type: Set("infrastructure_proxmox".to_string()),
+        plugin_type: Set("infrastructure.proxmox".to_string()),
         config: Set(serde_json::json!({})),
         enabled: Set(true),
         created_at: Set(now),
@@ -1203,7 +1203,7 @@ async fn provider_origin_denied_for_unflagged_permissioned_interaction() {
             interaction_id: surfaces::InteractionId::new("discover").unwrap(),
             method: Default::default(),
             idempotency_key: "provider-origin-discover-denied".to_string(),
-            target_provider_id: Some("plugin.infrastructure_proxmox".to_string()),
+            target_provider_id: Some("plugin.infrastructure.proxmox".to_string()),
             caller_origin: surfaces::CallerOrigin::Provider {
                 provider_id: "provider-a".to_string(),
             },
@@ -1298,7 +1298,7 @@ async fn provider_origin_unmatched_guests_executes_and_audits_service_actor() {
             interaction_id: surfaces::InteractionId::new("unmatched-guests").unwrap(),
             method: Default::default(),
             idempotency_key: "provider-origin-unmatched-guests".to_string(),
-            target_provider_id: Some("plugin.infrastructure_proxmox".to_string()),
+            target_provider_id: Some("plugin.infrastructure.proxmox".to_string()),
             caller_origin: surfaces::CallerOrigin::Provider {
                 provider_id: "provider-a".to_string(),
             },
@@ -1354,7 +1354,7 @@ async fn provider_origin_unmatched_guests_executes_and_audits_service_actor() {
 /// `target_provider_id: None` (the agent cannot know the controller-side plugin's
 /// provider id). Same as `provider_origin_unmatched_guests_executes_and_audits_service_actor`
 /// but with `target_provider_id: None`, so implicit resolution — not a hardcoded
-/// target — routes to `plugin.infrastructure_proxmox`.
+/// target — routes to `plugin.infrastructure.proxmox`.
 #[cfg(feature = "db-sqlite")]
 #[tokio::test]
 async fn provider_origin_unmatched_guests_resolves_target_from_surface() {
@@ -1511,7 +1511,7 @@ async fn provider_origin_match_completes_handler() {
             interaction_id: surfaces::InteractionId::new("match").unwrap(),
             method: Default::default(),
             idempotency_key: "provider-origin-match".to_string(),
-            target_provider_id: Some("plugin.infrastructure_proxmox".to_string()),
+            target_provider_id: Some("plugin.infrastructure.proxmox".to_string()),
             caller_origin: surfaces::CallerOrigin::Provider {
                 provider_id: "provider-a".to_string(),
             },

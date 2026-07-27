@@ -12,12 +12,12 @@ pub enum PluginTypeSettingsCommands {
     List,
     /// Show plugin-type-level settings for a specific plugin type
     Show {
-        /// Plugin type (e.g. releases_github)
+        /// Plugin type (e.g. releases.github)
         plugin_type: String,
     },
     /// Create or update plugin-type-level settings for a specific plugin type
     Set {
-        /// Plugin type (e.g. releases_github)
+        /// Plugin type (e.g. releases.github)
         plugin_type: String,
         /// Settings as a JSON object string
         #[arg(long)]
@@ -25,7 +25,7 @@ pub enum PluginTypeSettingsCommands {
     },
     /// Delete plugin-type-level settings for a specific plugin type
     Reset {
-        /// Plugin type (e.g. releases_github)
+        /// Plugin type (e.g. releases.github)
         plugin_type: String,
     },
 }
@@ -242,7 +242,7 @@ mod tests {
         let e = sample_entry();
         let s = e.to_human_string();
         assert!(s.contains("Plugin Type:"));
-        assert!(s.contains("releases_github"));
+        assert!(s.contains("releases.github"));
         assert!(s.contains("Config:"));
         assert!(s.contains("Created:"));
         assert!(s.contains("Updated:"));
@@ -261,6 +261,6 @@ mod tests {
         let s = entries.to_human_string();
         assert!(s.contains("PLUGIN TYPE"));
         assert!(s.contains("CONFIG"));
-        assert!(s.contains("releases_github"));
+        assert!(s.contains("releases.github"));
     }
 }

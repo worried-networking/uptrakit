@@ -447,7 +447,7 @@ fn parse_link_next(headers: &reqwest::header::HeaderMap) -> Option<String> {
 
 // ── declare_plugin! ──────────────────────────────────────────────────────
 
-declare_plugin!(GitHubPlugin, GitHubConfig, "releases_github", {
+declare_plugin!(GitHubPlugin, GitHubConfig, "releases.github", {
     display_name: "GitHub Releases",
     family: PluginFamily::Software,
     config_model: ConfigModel::PluginConfig,
@@ -1407,7 +1407,7 @@ mod tests {
 
     #[test]
     fn descriptor_plugin_type_id() {
-        assert_eq!(DESCRIPTOR.type_id, "releases_github");
+        assert_eq!(DESCRIPTOR.type_id, "releases.github");
     }
 
     #[test]

@@ -159,7 +159,7 @@ IDENTITY_SPECIFIC_HELPER_RE = re.compile(
 )
 
 CONST_DEF_RE = re.compile(
-    r"pub\s+const\s+([A-Z0-9_]+)\s*:\s*PluginTypeId\s*=\s*PluginTypeId::from_static\(\"([a-z0-9_]+)\"\)\s*;",
+    r"pub\s+const\s+([A-Z0-9_]+)\s*:\s*PluginTypeId\s*=\s*PluginTypeId::from_static\(\"([a-z0-9_.-]+)\"\)\s*;",
     re.DOTALL,
 )
 ALL_LIST_RE = re.compile(
@@ -227,7 +227,7 @@ IDENTITY_LITERAL_KEY_VALUE_PATTERN = "|".join(
     re.escape(hint) for hint in IDENTITY_LITERAL_KEY_VALUE_HINTS
 )
 IDENTITY_LITERAL_KEY_VALUE_RE = re.compile(
-    rf"(?is)(?<![a-z0-9_])[\"']?(?:{IDENTITY_LITERAL_KEY_VALUE_PATTERN})[\"']?\s*(?::|=)\s*[\"']?(?P<value>[a-z0-9_]+)(?![a-z0-9_])"
+    rf"(?is)(?<![a-z0-9_])[\"']?(?:{IDENTITY_LITERAL_KEY_VALUE_PATTERN})[\"']?\s*(?::|=)\s*[\"']?(?P<value>[a-z0-9_.-]+)(?![a-z0-9_])"
 )
 PLUGIN_TYPES_ROUTE_RE = re.compile(r"\bplugin[-_]types\b")
 

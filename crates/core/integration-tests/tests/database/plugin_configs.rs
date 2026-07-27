@@ -38,7 +38,7 @@ async fn test_create_plugin_config(harness: &TestHarness) {
             "/api/v1/plugin-configs",
             &serde_json::json!({
                 "name": "My GitHub Config",
-                "plugin_type": "releases_github",
+                "plugin_type": "releases.github",
                 "config": {}
             }),
         )
@@ -64,7 +64,7 @@ async fn test_delete_plugin_config(harness: &TestHarness) {
             "/api/v1/plugin-configs",
             &serde_json::json!({
                 "name": "To Delete Config",
-                "plugin_type": "releases_github",
+                "plugin_type": "releases.github",
                 "config": {}
             }),
         )

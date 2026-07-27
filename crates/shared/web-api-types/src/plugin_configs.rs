@@ -193,7 +193,7 @@ pub struct FormField {
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct PluginTypeInfo {
-    /// Wire identifier for the plugin type (e.g. `"releases_github"`).
+    /// Wire identifier for the plugin type (e.g. `"releases.github"`).
     pub plugin_type: PluginTypeId,
     /// Human-readable display name (e.g. `"GitHub Releases"`).
     pub display_name: String,
@@ -278,7 +278,7 @@ mod tests {
 
     #[test]
     fn create_request_enabled_defaults_to_true() {
-        let json = r#"{"name":"test","plugin_type":"releases_github","config":{}}"#;
+        let json = r#"{"name":"test","plugin_type":"releases.github","config":{}}"#;
         let de: CreatePluginConfigRequest =
             serde_json::from_str(json).expect("deserialization should succeed");
         assert!(de.enabled, "enabled should default to true");

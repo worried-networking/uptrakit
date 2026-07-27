@@ -196,7 +196,7 @@ mod tests {
             event_type: NotificationEventType::UpdateFailed,
             host_id: Some(sample_uuid()),
             software_item_id: None,
-            plugin_type: Some("releases_github".to_string()),
+            plugin_type: Some("releases.github".to_string()),
             enabled: true,
         };
         assert!(req.validate().is_ok());
@@ -285,7 +285,7 @@ mod tests {
             event_type: None,
             host_id: Some(serde_json::Value::String(uuid_str.clone())),
             software_item_id: Some(serde_json::Value::String(uuid_str)),
-            plugin_type: Some(serde_json::Value::String("releases_github".to_string())),
+            plugin_type: Some(serde_json::Value::String("releases.github".to_string())),
             enabled: None,
         };
         assert!(req.validate().is_ok());
@@ -355,7 +355,7 @@ mod tests {
             event_type: NotificationEventType::NewSoftwareDiscovered,
             host_id: None,
             software_item_id: Some(sample_uuid()),
-            plugin_type: Some("releases_github".to_string()),
+            plugin_type: Some("releases.github".to_string()),
             enabled: true,
             created_at: datetime!(2025-01-01 0:00:00 UTC),
         };
@@ -369,7 +369,7 @@ mod tests {
         );
         assert!(deserialized.host_id.is_none());
         assert_eq!(deserialized.software_item_id, Some(sample_uuid()));
-        assert_eq!(deserialized.plugin_type.as_deref(), Some("releases_github"));
+        assert_eq!(deserialized.plugin_type.as_deref(), Some("releases.github"));
         assert!(deserialized.enabled);
     }
 }

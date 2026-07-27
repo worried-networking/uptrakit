@@ -237,7 +237,7 @@ impl DnfPlugin {
 
 // ── declare_plugin! ───────────────────────────────────────────────────────
 
-declare_plugin!(DnfPlugin, DnfConfig, "package_manager_dnf", {
+declare_plugin!(DnfPlugin, DnfConfig, "package-manager.dnf", {
     display_name: "DNF Package Manager",
     family: PluginFamily::Software,
     config_model: ConfigModel::PluginConfig,

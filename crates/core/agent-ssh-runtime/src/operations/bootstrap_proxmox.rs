@@ -251,7 +251,7 @@ async fn connect_and_create_executors(
         .find_map(|g| g.guest_exec_provider())
         .ok_or_else(|| {
             report!(Error::InvalidInput(
-                "no GuestExecProvider found for infrastructure_proxmox".to_string()
+                "no GuestExecProvider found for infrastructure.proxmox".to_string()
             ))
         })?;
 
@@ -694,7 +694,7 @@ pub(crate) async fn proxmox_bootstrap_execute(
         .find_map(|g| g.guest_exec_provider())
         .ok_or_else(|| {
             report!(Error::InvalidInput(
-                "no GuestExecProvider found for infrastructure_proxmox".to_string()
+                "no GuestExecProvider found for infrastructure.proxmox".to_string()
             ))
         })?;
 

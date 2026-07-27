@@ -334,7 +334,7 @@ mod tests {
     fn create_plugin_config_request_default_enabled() {
         let json = serde_json::json!({
             "name": "GitHub Releases",
-            "plugin_type": "releases_github",
+            "plugin_type": "releases.github",
             "config": {}
         });
         let req: CreatePluginConfigRequest = serde_json::from_value(json).unwrap();
@@ -345,7 +345,7 @@ mod tests {
     fn create_plugin_config_request_explicit_enabled_false() {
         let json = serde_json::json!({
             "name": "GitHub Releases",
-            "plugin_type": "releases_github",
+            "plugin_type": "releases.github",
             "config": {},
             "enabled": false
         });

@@ -361,7 +361,7 @@ pub struct ListPluginConfigsParams {
     pub page: Option<u64>,
     /// Items per page (default 20, max 1000).
     pub per_page: Option<u64>,
-    /// Filter by plugin type (e.g. `infrastructure_proxmox`). Returns all types when absent.
+    /// Filter by plugin type (e.g. `infrastructure.proxmox`). Returns all types when absent.
     pub plugin_type: Option<String>,
 }
 

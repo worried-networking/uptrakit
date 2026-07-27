@@ -96,7 +96,7 @@ fn create_dashboard_icons_lifecycle(
 
 // ── declare_plugin! ──────────────────────────────────────────────────────
 
-declare_plugin!(DashboardIconsPlugin, DashboardIconsConfig, "enhancement_dashboard_icons", {
+declare_plugin!(DashboardIconsPlugin, DashboardIconsConfig, "enhancement.dashboard-icons", {
     display_name: "Dashboard Icons",
     family: PluginFamily::Enhancement,
     config_model: ConfigModel::None,
@@ -177,13 +177,13 @@ mod tests {
         let plugin = make_plugin(&[]);
         assert_eq!(
             plugin.plugin_type_id().as_str(),
-            "enhancement_dashboard_icons"
+            "enhancement.dashboard-icons"
         );
     }
 
     #[test]
     fn descriptor_has_correct_metadata() {
-        assert_eq!(DESCRIPTOR.type_id, "enhancement_dashboard_icons");
+        assert_eq!(DESCRIPTOR.type_id, "enhancement.dashboard-icons");
         assert_eq!(DESCRIPTOR.display_name, "Dashboard Icons");
         assert_eq!(DESCRIPTOR.family, PluginFamily::Enhancement);
         assert_eq!(DESCRIPTOR.config_model, ConfigModel::None);

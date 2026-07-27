@@ -223,7 +223,7 @@ async fn map_surface_action_error_preserves_invalid_vs_internal_categories() {
 async fn invoke_executes_plugin_controller_local_interaction() {
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     registry
-        .bootstrap_plugin(plugin_registration("plugin.notifications_email"))
+        .bootstrap_plugin(plugin_registration("plugin.notifications.email"))
         .expect("plugin registration should succeed");
 
     let seen = StdArc::new(Mutex::new(Vec::new()));
@@ -273,7 +273,7 @@ async fn invoke_executes_plugin_controller_local_interaction() {
 async fn invoke_controller_local_preserves_surface_action_error_categories() {
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     registry
-        .bootstrap_plugin(plugin_registration("plugin.notifications_email"))
+        .bootstrap_plugin(plugin_registration("plugin.notifications.email"))
         .expect("plugin registration should succeed");
     let service_connections = ServiceConnectionRegistry::new();
 
@@ -331,7 +331,7 @@ async fn invoke_controller_local_preserves_surface_action_error_categories() {
 async fn invoke_controller_local_rejects_concurrent_duplicate_idempotency() {
     let registry = Arc::new(SurfaceRegistry::new(SurfaceRegistryConfig::default()));
     registry
-        .bootstrap_plugin(plugin_registration("plugin.notifications_email"))
+        .bootstrap_plugin(plugin_registration("plugin.notifications.email"))
         .expect("plugin registration should succeed");
 
     let started = StdArc::new(tokio::sync::Notify::new());
@@ -415,7 +415,7 @@ async fn invoke_controller_local_rejects_concurrent_duplicate_idempotency() {
 async fn controller_local_client_disconnect_releases_idempotency() {
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     registry
-        .bootstrap_plugin(plugin_registration("plugin.notifications_email"))
+        .bootstrap_plugin(plugin_registration("plugin.notifications.email"))
         .expect("plugin registration should succeed");
 
     let started = StdArc::new(tokio::sync::Notify::new());
@@ -490,7 +490,7 @@ async fn invoke_controller_local_allows_cleartext_sensitive_fields() {
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     registry
         .bootstrap_plugin(plugin_registration_with_local_sensitive(
-            "plugin.notifications_email",
+            "plugin.notifications.email",
         ))
         .expect("plugin registration should succeed");
 
@@ -537,7 +537,7 @@ async fn invoke_stamps_effective_get_method_for_data_load_controller_local() {
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     registry
         .bootstrap_plugin(plugin_registration_data_load(
-            "plugin.notifications_email_load",
+            "plugin.notifications.email-load",
         ))
         .expect("plugin registration should succeed");
 
@@ -586,7 +586,7 @@ async fn invoke_rejects_body_missing_required_declared_param() {
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     registry
         .bootstrap_plugin(plugin_registration_with_declared_params(
-            "plugin.notifications_email_params",
+            "plugin.notifications.email-params",
         ))
         .expect("plugin registration should succeed");
 
@@ -630,7 +630,7 @@ async fn invoke_allows_undeclared_body_key_to_pass_through() {
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     registry
         .bootstrap_plugin(plugin_registration_with_declared_params(
-            "plugin.notifications_email_params",
+            "plugin.notifications.email-params",
         ))
         .expect("plugin registration should succeed");
 

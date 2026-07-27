@@ -722,9 +722,9 @@ mod tests {
 
         fn capabilities(&self, id: &PluginTypeId) -> Vec<PluginCapability> {
             let discovery = [
-                "package_manager_homebrew",
-                "package_manager_apt",
-                "discovery_proxmox_helper_scripts",
+                "package-manager.homebrew",
+                "package-manager.apt",
+                "discovery.proxmox-helper-scripts",
             ];
             if discovery.contains(&id.as_ref()) {
                 vec![PluginCapability::DiscoverLocalSoftware]

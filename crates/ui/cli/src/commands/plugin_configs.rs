@@ -70,7 +70,7 @@ pub enum PluginConfigsCommands {
     },
     /// Test a plugin configuration (dry-run)
     Test {
-        /// Plugin type (e.g. generic_shell, releases_github, homebrew)
+        /// Plugin type (e.g. generic_shell, releases.github, homebrew)
         #[arg(long)]
         plugin_type: String,
         /// Plugin-specific config as JSON string
@@ -518,7 +518,7 @@ mod tests {
         let c = sample_config();
         let s = c.to_human_string();
         assert!(s.contains("GitHub Releases"), "name missing");
-        assert!(s.contains("releases_github"), "type missing");
+        assert!(s.contains("releases.github"), "type missing");
     }
 
     #[test]

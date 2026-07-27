@@ -2209,7 +2209,7 @@ mod tests {
     fn report_plugin_config_validates() {
         let msg = ServiceMessage::ReportPluginConfig(ReportPluginConfigPayload {
             request_id: "req-1".to_string(),
-            plugin_type: "infrastructure_proxmox".to_string(),
+            plugin_type: "infrastructure.proxmox".to_string(),
             name: "pve.local".to_string(),
             config: serde_json::json!({"api_url": "https://pve:8006"}),
         });
@@ -2232,7 +2232,7 @@ mod tests {
     fn report_plugin_config_rejects_oversized_config() {
         let msg = ServiceMessage::ReportPluginConfig(ReportPluginConfigPayload {
             request_id: "req-1".to_string(),
-            plugin_type: "infrastructure_proxmox".to_string(),
+            plugin_type: "infrastructure.proxmox".to_string(),
             name: "pve.local".to_string(),
             config: serde_json::Value::String("x".repeat(MAX_PLUGIN_CONFIG_JSON_LEN + 1)),
         });

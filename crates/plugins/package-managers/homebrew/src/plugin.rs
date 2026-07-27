@@ -142,7 +142,7 @@ impl HomebrewPlugin {
 
 // ── Plugin descriptor ─────────────────────────────────────────────────────
 
-declare_plugin!(HomebrewPlugin, HomebrewConfig, "package_manager_homebrew", {
+declare_plugin!(HomebrewPlugin, HomebrewConfig, "package-manager.homebrew", {
     display_name: "Homebrew",
     family: PluginFamily::Software,
     config_model: ConfigModel::PluginConfig,
@@ -175,7 +175,7 @@ mod tests {
     #[test]
     fn plugin_type_id() {
         let plugin = test_plugin(HomebrewConfig::default());
-        assert_eq!(plugin.plugin_type_id().as_str(), "package_manager_homebrew");
+        assert_eq!(plugin.plugin_type_id().as_str(), "package-manager.homebrew");
     }
 
     #[test]

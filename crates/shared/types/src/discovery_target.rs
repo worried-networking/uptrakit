@@ -36,7 +36,7 @@ pub struct DiscoveryTarget {
     /// Target plugin type (may differ from the discovering plugin).
     ///
     /// For example, the PHS plugin discovers software but targets
-    /// `releases_github` or `package_manager_apt` for tracking.
+    /// `releases.github` or `package-manager.apt` for tracking.
     pub plugin_type: PluginTypeId,
 
     /// Config JSON for find-or-create of the target plugin config.
@@ -158,7 +158,7 @@ mod tests {
     #[test]
     fn deserialize_with_missing_optional_fields() {
         let json = r#"{
-            "plugin_type": "package_manager_apt",
+            "plugin_type": "package-manager.apt",
             "plugin_config": {},
             "plugin_config_name": "APT",
             "roles": ["detect_version", "fetch_releases", "execute_update"]

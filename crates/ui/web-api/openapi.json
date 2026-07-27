@@ -4126,7 +4126,7 @@
           {
             "name": "plugin_type",
             "in": "query",
-            "description": "Filter by plugin type (e.g. `infrastructure_proxmox`). Returns all types when absent.",
+            "description": "Filter by plugin type (e.g. `infrastructure.proxmox`). Returns all types when absent.",
             "required": false,
             "schema": {
               "type": [
@@ -6083,7 +6083,7 @@
           {
             "name": "plugin_type",
             "in": "query",
-            "description": "Filter by plugin type — only return items that have at least one host\nassignment using this plugin type (e.g. `\"releases_docker\"`).\nOmit to return items for any plugin type.",
+            "description": "Filter by plugin type — only return items that have at least one host\nassignment using this plugin type (e.g. `\"releases.docker\"`).\nOmit to return items for any plugin type.",
             "required": false,
             "schema": {
               "type": [
@@ -10935,7 +10935,7 @@
           },
           "plugin_type": {
             "type": "string",
-            "description": "Plugin type string (e.g. `\"package_manager_apt\"`)."
+            "description": "Plugin type string (e.g. `\"package-manager.apt\"`)."
           }
         }
       },
@@ -14314,7 +14314,7 @@
           },
           "plugin_type": {
             "$ref": "#/components/schemas/PluginTypeId",
-            "description": "Wire identifier for the plugin type (e.g. `\"releases_github\"`)."
+            "description": "Wire identifier for the plugin type (e.g. `\"releases.github\"`)."
           },
           "sample_config": {
             "description": "A sample/default configuration JSON for this plugin type.\n\nClients may pre-fill the config textarea with this value when creating\na new plugin config, so end-users see all available fields with their\ndefaults rather than a blank `{}`."
@@ -15643,7 +15643,7 @@
           },
           "plugin_type": {
             "type": "string",
-            "description": "Plugin type string (e.g. `\"package_manager_homebrew\"`)."
+            "description": "Plugin type string (e.g. `\"package-manager.homebrew\"`)."
           }
         }
       },
@@ -15698,7 +15698,7 @@
           },
           "plugin_type": {
             "type": "string",
-            "description": "The plugin type to test (e.g. `\"generic_shell\"`, `\"releases_github\"`)."
+            "description": "The plugin type to test (e.g. `\"generic.shell\"`, `\"releases.github\"`)."
           },
           "test_kind": {
             "type": [

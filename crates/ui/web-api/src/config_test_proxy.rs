@@ -176,7 +176,7 @@ mod tests {
             Uuid::now_v7().to_string(),
             "machine-1".to_string(),
             uptrakit_wire::ConfigTestKind::VersionDetection,
-            "generic_shell".to_string(),
+            "generic.shell".to_string(),
             serde_json::json!({"version_command": "echo 1.0"}),
         );
 

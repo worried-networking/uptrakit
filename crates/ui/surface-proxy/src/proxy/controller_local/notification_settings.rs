@@ -25,7 +25,10 @@ pub(crate) fn allowlisted_notification_settings_controller_local_action(
     let channel_type = surface_id
         .strip_prefix("notifications.")
         .and_then(|rest| rest.split('.').next())?;
-    if provider_id.strip_prefix("plugin.") != Some(channel_type) {
+    let stripped = provider_id
+        .strip_prefix("plugin.")
+        .and_then(|s| s.strip_prefix("notifications."));
+    if stripped != Some(channel_type) {
         return None;
     }
     match (surface_id, interaction_id) {

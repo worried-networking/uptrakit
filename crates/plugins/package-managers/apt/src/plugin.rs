@@ -140,7 +140,7 @@ impl AptPlugin {
 
 // ── declare_plugin! ──────────────────────────────────────────────────────
 
-declare_plugin!(AptPlugin, AptConfig, "package_manager_apt", {
+declare_plugin!(AptPlugin, AptConfig, "package-manager.apt", {
     display_name: "APT Package Manager",
     family: PluginFamily::Software,
     config_model: ConfigModel::PluginConfig,
@@ -318,7 +318,7 @@ mod tests {
     #[test]
     fn plugin_type_id() {
         let plugin = test_plugin(AptConfig::default());
-        assert_eq!(plugin.plugin_type_id().as_str(), "package_manager_apt");
+        assert_eq!(plugin.plugin_type_id().as_str(), "package-manager.apt");
     }
 
     // ── descriptor capabilities ─────────────────────────────────────────

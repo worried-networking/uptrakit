@@ -1570,7 +1570,7 @@ async fn ensure_proxmox_plugin_config_exists(
 
     let config = tenant_db
         .find_by_id::<plugin_config::Entity, _>(plugin_config_id)
-        .filter(plugin_config::Column::PluginType.eq("infrastructure_proxmox"))
+        .filter(plugin_config::Column::PluginType.eq("infrastructure.proxmox"))
         .filter(plugin_config::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
@@ -1628,7 +1628,7 @@ async fn list_all_proxmox_plugin_configs(
 
     let rows = plugin_config::Entity::find()
         .filter(plugin_config::Column::TenantId.eq(tenant_id))
-        .filter(plugin_config::Column::PluginType.eq("infrastructure_proxmox"))
+        .filter(plugin_config::Column::PluginType.eq("infrastructure.proxmox"))
         .filter(plugin_config::Column::DeactivatedAt.is_null())
         .order_by(
             sea_orm::sea_query::Func::lower(sea_orm::sea_query::Expr::col(
@@ -1661,7 +1661,7 @@ async fn list_proxmox_plugin_configs_by_ids(
     use uptrakit_shared_db::entity::plugin_config;
     let rows = plugin_config::Entity::find()
         .filter(plugin_config::Column::TenantId.eq(tenant_id))
-        .filter(plugin_config::Column::PluginType.eq("infrastructure_proxmox"))
+        .filter(plugin_config::Column::PluginType.eq("infrastructure.proxmox"))
         .filter(plugin_config::Column::DeactivatedAt.is_null())
         .filter(plugin_config::Column::Id.is_in(ids.iter().copied()))
         .order_by(
@@ -1692,7 +1692,7 @@ async fn list_proxmox_plugin_configs_for_software_item(
 
     let assignments = host_software_item_plugin::Entity::find()
         .filter(host_software_item_plugin::Column::SoftwareItemId.eq(software_item_id))
-        .filter(host_software_item_plugin::Column::PluginType.eq("infrastructure_proxmox"))
+        .filter(host_software_item_plugin::Column::PluginType.eq("infrastructure.proxmox"))
         .all(db)
         .await
         .map_err(|e| format!("database error loading software-item plugin assignments: {e}"))?;
@@ -1783,9 +1783,9 @@ async fn load_proxmox_config(
         .map_err(|e| format!("database error: {e}"))?
         .ok_or_else(|| format!("plugin config {plugin_config_id} not found"))?;
 
-    if pc.plugin_type != "infrastructure_proxmox" {
+    if pc.plugin_type != "infrastructure.proxmox" {
         return Err(format!(
-            "plugin config {plugin_config_id} is type '{}', expected 'infrastructure_proxmox'",
+            "plugin config {plugin_config_id} is type '{}', expected 'infrastructure.proxmox'",
             pc.plugin_type
         ));
     }
@@ -2027,7 +2027,7 @@ mod tests {
             id: plugin_config_id,
             tenant_id,
             name: "PVE Main".to_string(),
-            plugin_type: "infrastructure_proxmox".to_string(),
+            plugin_type: "infrastructure.proxmox".to_string(),
             config: serde_json::json!({}),
             enabled: true,
             created_at: OffsetDateTime::now_utc(),
@@ -2534,7 +2534,7 @@ mod tests {
             id: Set(id),
             tenant_id: Set(tenant_id),
             name: Set(format!("pve-{id}")),
-            plugin_type: Set("infrastructure_proxmox".to_string()),
+            plugin_type: Set("infrastructure.proxmox".to_string()),
             config: Set(serde_json::json!({})),
             enabled: Set(true),
             created_at: Set(now),

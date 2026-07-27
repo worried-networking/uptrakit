@@ -376,7 +376,7 @@ impl NpmPlugin {
     }
 }
 
-declare_plugin!(NpmPlugin, NpmConfig, "package_manager_npm", {
+declare_plugin!(NpmPlugin, NpmConfig, "package-manager.npm", {
     display_name: "npm",
     family: PluginFamily::Software,
     config_model: ConfigModel::PluginConfig,
@@ -680,7 +680,7 @@ mod tests {
     #[test]
     fn npm_plugin_type_id() {
         let plugin = NpmPlugin::new(NpmConfig::default(), test_runtime()).expect("create");
-        assert_eq!(plugin.plugin_type_id().as_str(), "package_manager_npm");
+        assert_eq!(plugin.plugin_type_id().as_str(), "package-manager.npm");
     }
 
     // ── validate_version ────────────────────────────────────────────────────

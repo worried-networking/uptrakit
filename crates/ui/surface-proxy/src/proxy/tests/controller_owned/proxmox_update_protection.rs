@@ -97,7 +97,7 @@ async fn insert_active_proxmox_plugin_config(db: &sea_orm::DatabaseConnection) -
         id: Set(id),
         tenant_id: Set(tenant_id()),
         name: Set("test-proxmox".to_string()),
-        plugin_type: Set("infrastructure_proxmox".to_string()),
+        plugin_type: Set("infrastructure.proxmox".to_string()),
         config: Set(serde_json::json!({
             "api_url": "https://pve.test:8006",
             "api_token": "tok",
@@ -142,7 +142,7 @@ async fn invoke_proxmox_save_global_defaults_emits_success_audit_row() {
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     registry
         .bootstrap_plugin(proxmox_update_protection_registration(
-            "plugin.infrastructure_proxmox",
+            "plugin.infrastructure.proxmox",
             "proxmox.settings.update-hooks",
             "global-defaults",
         ))
@@ -207,7 +207,7 @@ async fn invoke_proxmox_save_global_defaults_emits_success_audit_row() {
     );
     assert_eq!(
         details["plugin_type"],
-        serde_json::json!("infrastructure_proxmox")
+        serde_json::json!("infrastructure.proxmox")
     );
 }
 
@@ -239,7 +239,7 @@ async fn invoke_proxmox_save_item_overrides_emits_software_item_update_audit_row
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     registry
         .bootstrap_plugin(proxmox_update_protection_registration(
-            "plugin.infrastructure_proxmox",
+            "plugin.infrastructure.proxmox",
             "proxmox.software-item.update-hooks",
             "overrides",
         ))
@@ -299,7 +299,7 @@ async fn invoke_proxmox_save_item_overrides_emits_software_item_update_audit_row
     );
     assert_eq!(
         details["plugin_type"],
-        serde_json::json!("infrastructure_proxmox")
+        serde_json::json!("infrastructure.proxmox")
     );
 }
 
@@ -330,7 +330,7 @@ async fn invoke_proxmox_save_scaling_global_defaults_emits_tenant_setting_update
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     registry
         .bootstrap_plugin(proxmox_update_protection_registration(
-            "plugin.infrastructure_proxmox",
+            "plugin.infrastructure.proxmox",
             "proxmox.settings.resource-scaling",
             "global-defaults",
         ))
@@ -391,7 +391,7 @@ async fn invoke_proxmox_save_scaling_global_defaults_emits_tenant_setting_update
     );
     assert_eq!(
         details["plugin_type"],
-        serde_json::json!("infrastructure_proxmox")
+        serde_json::json!("infrastructure.proxmox")
     );
 }
 
@@ -423,7 +423,7 @@ async fn invoke_proxmox_save_scaling_item_overrides_emits_software_item_update_a
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     registry
         .bootstrap_plugin(proxmox_update_protection_registration(
-            "plugin.infrastructure_proxmox",
+            "plugin.infrastructure.proxmox",
             "proxmox.software-item.resource-scaling",
             "overrides",
         ))
@@ -483,6 +483,6 @@ async fn invoke_proxmox_save_scaling_item_overrides_emits_software_item_update_a
     );
     assert_eq!(
         details["plugin_type"],
-        serde_json::json!("infrastructure_proxmox")
+        serde_json::json!("infrastructure.proxmox")
     );
 }
