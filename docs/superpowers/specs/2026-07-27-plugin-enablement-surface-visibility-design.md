@@ -5,8 +5,10 @@
 **Depends on:** interaction registration model (ADR-0028), REST method model (ADR-0030). Identity
 grammar (ADR-0031 series) improves — but is not required for — provider-id resolution (see §4).
 **Non-goals:** hot-reload of plugin singletons; plugin identity-string redesign; feature-flag
-unification (ADR-0032 spec); surface interaction protocol changes; `proxy/prepared.rs` +
-`proxy/validation.rs` orphan removal (separate pending spec).
+unification (ADR-0032 spec); surface interaction protocol changes; removal of the unwired orphan
+files under `proxy/` — `prepared.rs`, `validation.rs`, `bookkeeping.rs`, `dispatch.rs`,
+`idempotency.rs` are all undeclared in any `mod` statement (separate pending spec; note
+`validation.rs` carries its own stale `NoTenantCompatibleProvider` mapping — a re-wiring trap).
 
 ## 1. Problem
 
@@ -53,15 +55,15 @@ the surface-visibility invariant of ADR-0006 Decision 4 is enforced on none of t
 
 ## 2. Decisions (locked)
 
-| #   | Decision               | Choice                                                                                                                                                                                                                                                                                                                 |
-| --- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D1  | Enablement model       | **Effective = boot ∧ live.** A plugin is tenant-effective only when the boot catalog constructed it AND the live snapshot says enabled. Disable takes effect immediately; enable stays pending-restart (existing badge). ADR-0006 Decision 2 (no hot-reload) stands.                                                   |
-| D2  | Enforcement placement  | **Registry takes a required visibility filter parameter.** Tenant-facing `SurfaceRegistry` enumeration/resolution methods gain a caller-supplied filter applied during provider enumeration; every leg inherits it structurally. Dependency direction unchanged (web-api → surface-proxy).                             |
-| D3  | Fail posture           | **Fail-closed.** A Plugin-kind provider whose `provider_id` resolves to no descriptor is not visible. No `.unwrap_or(true)` anywhere on the surfaces path (snapshot rule: never `unwrap_or` in security paths).                                                                                                        |
-| D4  | Absent-row default     | **Absent = disabled, no seeding.** Documented as deliberate; no boot write, no migration. Admin UI lists Instance plugins from descriptors regardless of row.                                                                                                                                                          |
-| D5  | `delete_channel`       | **Stays unguarded, documented.** Deletion is cleanup and must work for channels whose plugin type is no longer compiled in. The dispatch-leg gate (D2) covers the disabled-plugin path upstream.                                                                                                                       |
-| D6  | Admin tier on surfaces | **No admin override on surfaces legs.** Surface availability is `effective_enabled` for every tier. The `ManageGlobalSettings` override remains only on plugin-listing/config endpoints (predicate call sites). Admin management story = instance-plugins routes + pending-restart badge, never a broken surface page. |
-| D7  | ADR handling           | **New ADR-0033** records the effective-enablement model and structural enforcement; **ADR-0006 is amended** (status note pointing at 0033; Decisions 1–3 unchanged, Decision 4's "single predicate gates … the surfaces registry" superseded by the two-gate model below).                                             |
+| #   | Decision               | Choice                                                                                                                                                                                                                                                                                                                                                                                            |
+| --- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1  | Enablement model       | **Effective = boot ∧ live.** A plugin is tenant-effective only when the boot catalog constructed it AND the live snapshot says enabled. Disable takes effect immediately; enable stays pending-restart (existing badge). ADR-0006 Decision 2 (no hot-reload) stands.                                                                                                                              |
+| D2  | Enforcement placement  | **Registry takes a required visibility filter parameter.** Tenant-facing `SurfaceRegistry` enumeration/resolution methods gain a caller-supplied filter applied during provider enumeration; every leg inherits it structurally. `SurfaceProxy` stores the same filter at construction (its own builder idiom, deny-by-default — §3.4). Dependency direction unchanged (web-api → surface-proxy). |
+| D3  | Fail posture           | **Fail-closed.** A Plugin-kind provider whose `provider_id` resolves to no descriptor is not visible. No `.unwrap_or(true)` anywhere on the surfaces path (snapshot rule: never `unwrap_or` in security paths).                                                                                                                                                                                   |
+| D4  | Absent-row default     | **Absent = disabled, no seeding.** Documented as deliberate; no boot write, no migration. Admin UI lists Instance plugins from descriptors regardless of row.                                                                                                                                                                                                                                     |
+| D5  | `delete_channel`       | **Stays unguarded, documented.** Deletion is cleanup and must work for channels whose plugin type is no longer compiled in. The dispatch-leg gate (D2) covers the disabled-plugin path upstream.                                                                                                                                                                                                  |
+| D6  | Admin tier on surfaces | **No admin override on surfaces legs.** Surface availability is `effective_enabled` for every tier. The `ManageGlobalSettings` override remains only on plugin-listing/config endpoints (predicate call sites). Admin management story = instance-plugins routes + pending-restart badge, never a broken surface page.                                                                            |
+| D7  | ADR handling           | **New ADR-0033** records the effective-enablement model and structural enforcement; **ADR-0006 is amended** (status note pointing at 0033; Decisions 1–3 unchanged, Decision 4's "single predicate gates … the surfaces registry" superseded by the two-gate model below).                                                                                                                        |
 
 ## 3. Design
 
@@ -113,6 +115,13 @@ Instance-scoped surface-bearing descriptor in both boot states and assert
 the plugin contributes zero registrations. Import `PluginSurfaceOps` explicitly (trait method, not
 inherent — prior snippet lesson).
 
+Coordination note (ADR-0032 contribution-monotonicity): the boot-enablement filter lives **only**
+on the catalog's runtime `surface_registrations()`; monotonicity guards read descriptor-level
+builders (`(ops.registrations)()` / `all_descriptors()`) and must keep doing so — pointing a
+presence guard at the catalog's filtered output would let the boot gate silently defeat it. The
+synthetic test descriptor stays test-local and never enters `all_descriptors()`. Record this in
+ADR-0033.
+
 ### 3.4 Registry: required visibility filter
 
 In `uptrakit-surface-proxy`:
@@ -134,19 +143,54 @@ pub trait SurfaceProviderVisibility: Send + Sync {
   unknown surface; never the distinct `NoTenantCompatibleProvider` message). The empty-check in
   `resolve_surface_read` that today reads raw `surface_to_providers` before filtering must be
   re-derived from the post-filter set.
-- `resolve_surface_read`, `resolve_surface_action_for_method`, and `SurfaceProxy::invoke` /
-  `invoke_inner` thread the same parameter. A required parameter (not a default) makes it
-  impossible to resolve without deciding visibility — the drift-proofing D2 exists for.
-- web-api implements the trait once (`PluginEffectiveEnablement`, backed by §3.2) and passes it
+- `resolve_surface_read` and `resolve_surface_action_for_method` thread the same parameter. A
+  required parameter (not a default) makes it impossible to resolve without deciding visibility —
+  the drift-proofing D2 exists for.
+- `SurfaceProxy` follows its own existing composition idiom instead of a per-call parameter: the
+  filter is stored at construction via a builder step
+  (`with_provider_visibility(Arc<dyn SurfaceProviderVisibility>)`, mirroring the existing
+  `with_local_executor`), and `invoke`/`invoke_inner` use the stored filter for their internal
+  resolution. **The stored filter is the only gate on the provider-origin leg** (`invoke_inner`
+  re-resolves internally with no `AppState` in scope), so `PluginEffectiveEnablement` must hold
+  the **live handles** — `Arc<dyn PluginOps>` plus the `Arc<ArcSwap<InstancePluginSnapshot>>`
+  itself — and `.load()` the snapshot on every `plugin_provider_visible` call. Capturing a loaded
+  `Arc<InstancePluginSnapshot>` at construction would freeze the filter at boot state and break
+  D1's disable-is-immediate on exactly this leg (boot ordering is favorable: the ArcSwap exists
+  before the proxy is built in `boot/components.rs`). Deliberate divergence from the
+  `local_executor` precedent: the **default is deny-all-plugin-providers** (fail-closed), not a
+  permissive no-op — a proxy constructed without the production wiring must hide plugin surfaces,
+  never serve them ungated; the `AppStateBuilder` fallback (`app_state.rs`
+  `.unwrap_or_else(|| Arc::new(SurfaceProxy::new()))`) then hides rather than leaks, and the plan
+  must confirm that fallback is unreachable in the real controller boot. Service/BuiltIn
+  providers are unaffected by the default. Test blast radius: the deny default is a
+  **behavioral** change on the type, not just a signature change — the plan must grep and triage
+  **all** `SurfaceProxy::new()` sites in `crates/ui/web-api` **and** `crates/ui/surface-proxy`
+  (surface-proxy's own `proxy/tests/controller_local.rs` + `controller_owned/*` suites construct
+  Plugin-kind ControllerLocal fixtures that flip RED under deny-all), routing surface-exercising
+  ones through `AllProvidersVisible`.
+- web-api implements the trait once (`PluginEffectiveEnablement`, backed by §3.2) and supplies it
   at every call site: `list_surfaces`, `list_surface_providers`, `read_surface`, the invoke
-  handler, and the service-WS provider-origin path. Ledger discipline: the plan must enumerate
+  handler, and the proxy construction in boot wiring. The service-WS provider-origin path
+  (`routes/service_ws/handler/message_processor.rs` — resolves via
+  `resolve_surface_action_for_method`, then invokes through `surface_proxy_deps`) supplies the
+  filter for its own pre-resolution call, but its enforcement backstop is the proxy's **stored**
+  live-handle filter, not `AppState` availability. Ledger discipline: the plan must enumerate
   **every** production caller of the changed registry methods and of `SurfaceProxy::invoke`
-  workspace-wide (including `agent-ssh-runtime` if it constructs a registry) — an inventory step,
-  not a memory list. `proxy/prepared.rs` / `proxy/validation.rs` are unwired orphans; do not cite
-  or edit them.
+  workspace-wide (a reviewer pass found all current callers inside `crates/ui/web-api`;
+  `uptrakit_service_sdk::ServiceSurfaceProxy` is an unrelated same-named type) — re-run the
+  inventory grep at plan time, not a memory list. The orphan `proxy/` files (see Non-goals) must
+  not be cited or edited.
 - A permissive impl for tests lives in `surface-proxy`'s existing test support
   (`AllProvidersVisible`, `#[cfg(test)]` or the crate's testing feature) so unrelated registry
   tests stay focused; production callers all pass the real filter.
+- `enforce_required_permission` (`routes/surfaces.rs`) keeps its dynamic
+  `has_permission()` call: descriptor-declared permission strings are runtime data, so the typed
+  `permission_extractor!` cannot express them. This is the already-documented **"Runtime-valued
+  (surfaces)"** exception class in `docs/security/auth-and-authorization.md` (a class distinct
+  from `// APPROVED: custom auth path`, which is reserved for bespoke token-extraction handlers)
+  — its sanctioned marker is the `x-required-permission: "dynamic: …"` OpenAPI extension the
+  surfaces route family already carries. No code marker is added; re-typing the gate to a typed
+  permission value is deferred to the access-management refactoring (already tracked there).
 
 ### 3.5 Per-tier outcome matrix (the contract the tests pin)
 
@@ -162,6 +206,12 @@ For an Instance-scoped surface-bearing plugin:
 `delete_channel` remains reachable for existing rows regardless of plugin state via its own
 permission-gated route path — but the surface-dispatch route to it 404s when the owning plugin is
 not effective, like every other interaction.
+
+`running_enabled` on the admin summary (boot state via `instance_enabled`) is **intentionally
+unchanged** by a live-disable — only the surface/transport gate closes; the boot-constructed
+singleton stays loaded (ADR-0006 Decision 2). Do not "fix" `running_enabled` to track live state:
+that would break the pending-restart badge and mask a genuine restart-needed condition. The UI
+renders primary state from `enabled` (desired).
 
 ### 3.6 `delete_channel` divergence (D5)
 
@@ -190,20 +240,35 @@ is gated on it — the new synthetic-plugin fixtures live outside that gate).
    `PluginDescriptor` (OnceLock-leaked, mirroring `visibility.rs` test fixtures) with one
    `PluginHandled` interaction, in `infrastructure-core`'s testing support so both the catalog
    guard test (§3.3) and web-api tests consume one fixture.
-2. **Harness wiring (named deliverables, not assumed).** `TestApp` today neither injects extra
-   descriptors into the catalog nor bootstraps plugin registrations into its `SurfaceRegistry`
-   (three known production/harness divergences recorded in the mistakes ledger). This spec adds:
-   a `TestApp` construction option taking extra descriptors + `InstancePluginStates`, and a
-   fixture that runs the production bootstrap loop (`surface_registrations()` →
-   `bootstrap_plugin`) against the harness registry. Route-level tests use `TestApp`/`TestClient`
-   per the harness rule.
+2. **Harness wiring (reuse first, then the real gaps).** The production bootstrap loop already
+   exists in the harness: `test_harness/mod.rs::build_test_state_with_plugin_surfaces` mirrors
+   the boot wiring (bootstraps every `surface_registrations()` entry + real
+   `PluginSurfaceLocalExecutor`), and `build_test_state_with_plugin_ops` accepts a `plugin_ops`
+   override — do **not** rewrite these. The actual new deliverables are: (a) a `TestApp`
+   construction path that reaches `build_test_state_with_plugin_surfaces` (today only
+   `build_test_state` is reachable from `TestApp::new()`), (b) an override parameter **added to**
+   `build_test_state_with_plugin_surfaces` and forwarded into its internal
+   `build_test_state_with_plugin_ops` call — today it hardcodes `None`, so the existing override
+   (`Option<Arc<dyn PluginOps>>`, which a synthetic `PluginCatalog::new` with the §5.1 fixture +
+   chosen `InstancePluginStates` satisfies) is unreachable from the surfaces-wired builder — and
+   (c) the proxy's `with_provider_visibility` wiring in that path. Route-level tests use
+   `TestApp`/`TestClient` per the harness rule.
 3. **Per-leg matrix tests** (route level, success + failure): each row of §3.5 against
    `list_surfaces`, `list_surface_providers`, `read_surface`, invoke — asserting both presence
-   and the exact 404 shape (same body as unknown surface), for a non-admin and an admin user.
-   The live-toggle rows flip via the instance-plugins route (not by poking the ArcSwap) so the
-   test drives the production write path.
-4. **Provider-origin test**: service-WS-shaped invocation against a live-disabled plugin is
-   denied without any `AuthenticatedUser` involved.
+   and the exact 404 shape, for a non-admin and an admin user. The 404 assertion is
+   **byte-identical body** to the unknown-surface response on `list_surface_providers`, the
+   invoke path, **and `read_surface`** (read maps through the non-collapsing `map_lookup_error`
+   and its empty-check is being re-derived per §3.4 — the leg most exposed to a filter-ordering
+   slip) — this pins the requirement that the visibility drop precedes the tenant-compat
+   classification, so an all-invisible surface can never surface the distinct
+   `NoTenantCompatibleProvider` message. The live-toggle rows flip via the
+   instance-plugins route (not by poking the ArcSwap) so the test drives the production write
+   path.
+4. **Provider-origin tests**: service-WS-shaped invocation against a live-disabled plugin is
+   denied without any `AuthenticatedUser` involved — two cases: (a) statically disabled at
+   harness build, and (b) **toggle-then-invoke without restart**: disable via the
+   instance-plugins route, then fire the provider-origin invocation and assert denial — this
+   RED-catches a filter frozen at construction (§3.4 live-handle requirement).
 5. **Catalog guard test** (§3.3) including the RED case: a registration whose dispatch key is
    absent must fail the guard (perturb a value, not delete a symbol — dead-code deny would mask
    the RED).
@@ -214,16 +279,16 @@ is gated on it — the new synthetic-plugin fixtures live outside that gate).
 
 ## 6. Documentation deliverables
 
-| Artifact                                                              | Change                                                                                                                                                                                        |
-| --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `docs/adr/0033-effective-plugin-enablement-and-surface-visibility.md` | new ADR: D1–D7, two-gate model, per-tier matrix                                                                                                                                               |
-| `docs/adr/0006-instance-scoped-plugins.md`                            | status note: Decision 4 superseded by ADR-0033; Decision 2 refined (effective = boot ∧ live)                                                                                                  |
-| `docs/security/surfaces.md`                                           | surfaces read/list/invoke/provider-origin are gated on effective enablement; fail-closed posture; 404 shape                                                                                   |
-| `docs/development/surfaces.md`                                        | `SurfaceProviderVisibility` parameter contract for registry consumers                                                                                                                         |
-| `docs/development/plugin-system.md`                                   | effective-enablement semantics; absent-row default is deliberate (D4)                                                                                                                         |
-| `docs/development/notifications.md`                                   | `delete_channel` divergence rationale (D5)                                                                                                                                                    |
-| `CONTEXT.md`                                                          | glossary: "Effective Enablement"                                                                                                                                                              |
-| `crates/ui/web-api/openapi.json` + generated SDK                      | regen only if route annotations change (`list_surface_providers` extension text becomes true rather than aspirational; run `./scripts/regen-api.sh` if any `#[utoipa::path]` text is touched) |
+| Artifact                                                              | Change                                                                                                                                                                                                                      |
+| --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `docs/adr/0033-effective-plugin-enablement-and-surface-visibility.md` | new ADR: D1–D7, two-gate model, per-tier matrix; scope note: D1's disable-is-immediate is per-process (in-memory ArcSwap, single-controller assumption — no cross-replica propagation); §3.3 monotonicity coordination note |
+| `docs/adr/0006-instance-scoped-plugins.md`                            | status note: Decision 4 superseded by ADR-0033; Decision 2 refined (effective = boot ∧ live)                                                                                                                                |
+| `docs/security/surfaces.md`                                           | surfaces read/list/invoke/provider-origin are gated on effective enablement; fail-closed posture; 404 shape                                                                                                                 |
+| `docs/development/surfaces.md`                                        | `SurfaceProviderVisibility` parameter contract for registry consumers                                                                                                                                                       |
+| `docs/development/plugin-system.md`                                   | effective-enablement semantics; absent-row default is deliberate (D4)                                                                                                                                                       |
+| `docs/development/notifications.md`                                   | `delete_channel` divergence rationale (D5)                                                                                                                                                                                  |
+| `CONTEXT.md`                                                          | glossary: "Effective Enablement"                                                                                                                                                                                            |
+| `crates/ui/web-api/openapi.json` + generated SDK                      | regen only if route annotations change (`list_surface_providers` extension text becomes true rather than aspirational; run `./scripts/regen-api.sh` if any `#[utoipa::path]` text is touched)                               |
 
 No wire-protocol change (no new payloads; provider-origin gating is a controller-side decision),
 so `asyncapi.yaml` is untouched.
@@ -234,7 +299,9 @@ so `asyncapi.yaml` is untouched.
   teardown + in-flight safety + background-task cancel compose non-trivially; not forced by the
   use case.
 - **Strict restart-required** (both legs read boot only): disabling a misbehaving plugin would
-  have zero runtime effect until restart — wrong fail direction.
+  have zero runtime effect until restart — wrong fail direction. (Scope honesty: live-disable
+  closes the surface-dispatch and transport gates only; it is not a kill switch — a
+  boot-constructed singleton's background tasks run until restart, per the hot-reload non-goal.)
 - **Registry learns auth types**: inverts the dependency direction (surface-proxy ← web-api auth
   types); cycle or duplication.
 - **Per-leg call sites + CI grep gate**: keeps the drift class that produced this bug; the prior
@@ -245,11 +312,16 @@ so `asyncapi.yaml` is untouched.
 
 ## 8. Verification (implementation gates)
 
-- `cargo check/clippy --all-targets --no-default-features --features db-sqlite` (workspace) and
-  `cargo test --all-features` (needs `frontend/build`); full-workspace test run required for the
-  registry signature change (crate-scoped `-p` runs cannot see cross-crate golden/fixture
-  breakage).
+- Canonical gate set, both feature worlds: `cargo check --no-default-features --features
+db-sqlite`, `cargo check --all-features`, `cargo clippy --all-targets --no-default-features
+--features db-sqlite`, `cargo clippy --all-targets --all-features`, `cargo test --all-features`
+  (the `--all-features` forms need `frontend/build` first). The `--all-features` world is
+  load-bearing here, not optional: the changed registry/proxy signatures have feature-gated call
+  sites (`notifications-*`, `dashboard-icons`, `embed-frontend`) invisible to the minimal world.
+  Full-workspace test run required for the signature change (crate-scoped `-p` runs cannot see
+  cross-crate golden/fixture breakage).
 - `python3 ci/verify_db_access_policy.py`, `bash ci/verify_handler_state_contract.sh` (surfaces
   handlers change), `cargo xtask audit-coverage-check` if any audit-emitting handler moves.
 - Grep gates: zero `.unwrap_or(true)` in `routes/surfaces.rs` visibility paths; zero references
-  to `proxy/prepared.rs` in the diff.
+  to the orphan `proxy/` files (`prepared.rs`, `validation.rs`, `bookkeeping.rs`, `dispatch.rs`,
+  `idempotency.rs`) in the diff.
