@@ -97,11 +97,14 @@ New guard test `crates/plugins/infrastructure/registry/tests/contribution_monoto
   mandatory (non-optional, non-cfg-gated) registry dependency, so the assertion is valid in every
   feature configuration. This single assertion catches **both** historical shapes: the 2026-04
   whole-descriptor suppression (`surfaces: None`) and the 2026-07 empty-registrations suppression
-  both manifest as "`proxmox.hosts` absent".
-- Strengthen `surface_id_naming_guard.rs`: replace the "checked only when populated" punt comment
-  and add the same unconditional proxmox presence expectation, mirroring its existing
-  `saw_notifications_email` pattern (feature-scoped assertions stay for genuinely optional
-  plugins).
+  both manifest as "`proxmox.hosts` absent". Same load-bearing-lane note as Layer A: the assertion
+  is _valid_ in every lane, but it only _catches the bug_ in an `agent-infra`-ON build — in the
+  default lane nothing is suppressed. The catching lane is `cargo test --all-features`.
+- Update `surface_id_naming_guard.rs`: replace the "checked only when populated" punt comment with
+  a pointer to the new guard. The unconditional presence assertion lives **only** in
+  `contribution_monotonicity_guard.rs` — one assertion site, not two files restating the same fact
+  (the same drift argument that killed the manifest alternative). Feature-scoped `saw_*`
+  assertions for genuinely optional plugins stay where they are.
 
 ### Layer A — declaring ⇒ non-empty (list-free class check for the populated-but-empty shape)
 
@@ -115,7 +118,9 @@ surfaces omits the block).
 load-bearing lane is the existing canonical workspace gate `cargo test --all-features`
 (quality-gates.md), which unifies `agent-infra` ON — the exact shape where the bug lives.
 
-**RED command (fails on current `main`, passes after the exemplar fix):**
+**RED command** (TDD sequencing: the guard file is itself a deliverable of this spec — write it
+first, run against the still-buggy proxmox code to observe the assertion failure, then apply the
+exemplar fix and observe green):
 
 ```sh
 cargo test -p uptrakit-plugin-infrastructure-registry --features agent-infra \
@@ -124,37 +129,80 @@ cargo test -p uptrakit-plugin-infrastructure-registry --features agent-infra \
 
 ### Layer B — cross-build superset diff (class closure: content thinning, future plugins, any axis)
 
-New gate `cargo xtask contribution-monotonicity-check` (xtask precedent:
-`audit-coverage-check`, `openapi-client-check`):
+New gate `cargo xtask contribution-monotonicity-check`. The xtask umbrella and CI/pre-push wiring
+follow the `audit-coverage-check`/`openapi-client-check` pattern, but the execution model is
+genuinely new plumbing: the existing xtask gates are static analyses over checked-in artifacts,
+while this gate must **execute compiled code** (the catalog is runtime-computed by
+`declare_plugin!`) and therefore orchestrates two nested cargo builds itself — no in-tree
+precedent, and the build cost is owned explicitly below.
+
+**Sequencing: Layer B is severable insurance, not part of the merge-blocking bar.** Layers A + C
+plus the exemplar fix and docs fully cover both twice-shipped bug shapes; Layer B's marginal
+coverage is future plugins with no dedicated assertion and content thinning — neither has yet
+occurred. Layer B stays a committed deliverable of this spec (per the scoping decision), but it is
+planned as its own phase/plan that can land after A + C, and may be downgraded (e.g. CI-only, or
+nightly) if its build cost lands badly — without touching the A + C bar.
 
 1. **Dump entry point (new plumbing, named deliverable):** an example binary in the registry crate
    (`crates/plugins/infrastructure/registry/examples/dump_contributions.rs`) that walks
    `all_descriptors()` and prints one JSON document to stdout: per `type_id` — surface IDs, per
    surface interaction `(id, effective_http_method)` pairs and data-source IDs; agent-interaction
    IDs from `agent_surfaces`; migration names from `migrations`/`agent_migrations` (via
-   `MigrationName::name()`). Plus a metadata header with the build's feature fingerprint, at
-   minimum `{"agent_infra": cfg!(feature = "agent-infra"), "migrations": cfg!(feature = "migrations")}`.
+   `MigrationName::name()`). Plus a metadata header: the build's **feature fingerprint** — a map
+   over every feature the registry crate declares, each entry a literal
+   `cfg!(feature = "...")` bool. Target choice: an _example_ (first in the workspace) rather than
+   a `[[bin]]` (would need `required-features` or break bare `cargo build -p`) or a `#[test]`
+   (libtest harness noise interleaves with the JSON payload); examples are not built by default
+   `cargo build`, so the target is inert outside the gate.
 2. **Two builds, the two shipped controller shapes:**
-   - baseline ≈ lean controller: `cargo run -p uptrakit-plugin-infrastructure-registry
---example dump_contributions --features plugin-ops,migrations` (exact baseline feature set
-     pinned at plan time to mirror the lean `uptrakit-controller` registry shape; registry
-     `[dev-dependencies]` were checked at spec time and pull no `agent-infra`, so the example
-     target builds in the true baseline shape);
+   - baseline = lean controller: `cargo run -p uptrakit-plugin-infrastructure-registry
+--example dump_contributions --no-default-features --features <baseline list>`. **Derivation
+     mechanism is pinned here, not deferred — it is the correctness pivot of the whole layer.**
+     The list is derived from **package-scoped** resolution:
+     `cargo tree -p uptrakit-controller -e features`, which correctly omits `agent-infra`.
+     Deriving it from unscoped `cargo metadata` is **forbidden**: `cargo metadata` reports the
+     workspace-unified resolve, where `agent-infra` is ON — that baseline would silently equal the
+     union and make the diff vacuous forever (verified against this workspace; the two tools give
+     opposite answers). The list is derived **once and pinned** in the xtask (deterministic; avoids
+     parsing `cargo tree`'s indent-tree text on every run), with staleness guarded twice: the
+     fingerprint-key exhaustiveness diff (step 4) fails loud when the registry gains a feature,
+     forcing a conscious re-pin decision, and the pinned expected fingerprint map is hand-authored,
+     independent of any derivation tooling. Current derived set includes at least `plugin-ops`,
+     `migrations`, the `notifications` family, and `dashboard-icons` — and not `agent-infra`.
+     `--no-default-features` is always passed so registry's `default` cannot drift in unnoticed.
+     Note the deliberate asymmetry: the derivation describes registry-inside-lean-controller, but
+     the build applies it to registry-as-root (the example target); residual dev-dep unification
+     differences between those two shapes are exactly what the fingerprint exact-match catches.
+     Registry `[dev-dependencies]` were checked at spec time and pull no `agent-infra`;
    - union: same command with `--all-features`.
 3. **Compare in xtask:** for every plugin and every contribution field present in the baseline,
    the union set must be a **superset**. Any feature that subtracts _anything_ — a whole
    descriptor, a surface, a single interaction, a migration — fails the gate, for every plugin
    including ones added later with no dedicated assertion. Plugins present only in the union
    (optionally compiled, e.g. notification plugins) are additive and pass by construction.
-4. **Self-verifying lanes:** xtask asserts the baseline dump's fingerprint has
-   `agent_infra: false` and the union's has `agent_infra: true`. If dev-dep or example-target
-   feature unification ever silently turns the baseline into the union shape, the gate fails loud
-   instead of self-punting — closing the "guarantee scope quietly narrows to the compiled feature
-   set" trap that got the last two guards.
+4. **Self-verifying lanes:** xtask compares the baseline dump's feature fingerprint for **exact
+   equality** against the pinned expected map (not just `agent_infra: false` — a future registry
+   dev-dependency silently widening the baseline with any enumerated feature trips the gate), and
+   asserts the union fingerprint is all-`true`. If dev-dep or example-target feature unification
+   ever shifts either lane, the gate fails loud instead of self-punting — closing the "guarantee
+   scope quietly narrows to the compiled feature set" trap that got the last two guards. The
+   fingerprint map itself is **not** allowed to become an unenforced `Cargo.toml` mirror: the xtask
+   diffs the map's keys against the registry package's `features` table from `cargo metadata` and
+   fails loud on any missing or extra key, so adding a registry feature without extending the
+   fingerprint is itself a gate failure. Additionally, a **non-vacuity canary**: the xtask asserts
+   the baseline dump is a _proper_ subset of the union (at least one known union-only contribution
+   present — e.g. the `agent-infra`-gated proxmox agent interactions). This closes the residual
+   axis the fingerprint cannot see: inflation of the baseline via a transitive/dev-dep feature
+   that is not a registry-declared feature could otherwise silently collapse baseline == union and
+   make the diff pass vacuously forever.
 
-CI wiring: new step in `ci.yml` (reuses the `rust-all-features` cache for the union build) and a
-`docs/development/quality-gates.md` entry. Pre-push inclusion decided at plan time (two extra
-builds; acceptable if the baseline build is cheap enough, otherwise CI-only).
+CI wiring: new step in `ci.yml` and a `docs/development/quality-gates.md` entry. Honest cost
+accounting: these are two **full** dependency-graph builds, and because Cargo's build cache is
+feature-fingerprint-keyed, alternating the two feature sets against a target dir shared with other
+gates thrashes rather than reuses the cache — the plan must place the step where the union build
+can reuse the `rust-all-features` cache and give the baseline build its own cache key (or a
+dedicated `--target-dir`) instead of assuming "two quick builds". Pre-push inclusion decided at
+plan time against that real cost; default expectation is CI-only.
 
 Error handling: xtask check follows the existing xtask error conventions; the example binary
 returns `Result` and reports via stderr + non-zero exit (workspace lints deny
@@ -167,8 +215,10 @@ returns `Result` and reports via stderr + non-zero exit (workspace lints deny
 2. **Fix the codifying test:** `unified_registrations_pair_every_interaction_with_plugin_handled_delivery`
    loses its `if cfg!(feature = "agent-infra") { assert empty; return; }` head and asserts the real
    pairing content unconditionally; sibling content tests keep calling the raw builder.
-3. **Workspace sweep (one-time audit task):** grep every plugin crate's descriptor/registration
-   builder paths for `cfg!` and `#[cfg]` use; classify each site as
+3. **Workspace sweep (one-time audit task):** grep every plugin crate's **and**
+   `crates/plugins/infrastructure/core`'s (the framework crate's alias/placeholder stubs are
+   in scope, not just crates that are themselves plugins) descriptor/registration builder paths
+   for `cfg!` and `#[cfg]` use; classify each site as
    (a) subtractive — fix like proxmox, or (b) monotone additive-chain/paired-stub — keep, ensure
    the inline comment naming the reason exists. Known classifications from spec-time reading:
    `descriptor_plugin_surfaces` (a); the `plugin.rs:1941` test head (a);
@@ -190,17 +240,17 @@ returns `Result` and reports via stderr + non-zero exit (workspace lints deny
 
 ## Documentation deliverables
 
-| File                                                           | Change                                                                                                                                                         |
-| -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `docs/adr/0032-plugin-contribution-monotonicity.md`            | new ADR: invariant, model decision, enforcement layers, permitted/banned shapes                                                                                |
-| `docs/development/coding-standards.md` (Feature Flags section) | contribution-monotonicity rule, the legitimate/banned line, both permitted shapes with the proxmox examples                                                    |
-| `AGENTS.md` (root)                                             | extend the "**Feature flags are additive only.**" rule by one clause: descriptor contributions are feature-monotonic; link ADR-0032 (stays within size budget) |
-| `crates/plugins/AGENTS.md`                                     | authoring rule: registration builders are predicate-free; how to express feature-gated contributions; where presence is tested                                 |
-| `docs/development/feature-flags.md`                            | cross-reference from the additive-only note to ADR-0032                                                                                                        |
-| `docs/development/plugin-system.md`                            | note on descriptor contribution fields and consumer-side selection                                                                                             |
-| `docs/development/surfaces.md`                                 | update the catalog-guard paragraph (new guard file, removed punt)                                                                                              |
-| `docs/development/quality-gates.md`                            | add `cargo xtask contribution-monotonicity-check` (canonical command home)                                                                                     |
-| `CONTEXT.md`                                                   | glossary entry: **Contribution Monotonicity**                                                                                                                  |
+| File                                                           | Change                                                                                                                                                                                                         |
+| -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `docs/adr/0032-plugin-contribution-monotonicity.md`            | new ADR: invariant, model decision, enforcement layers, permitted/banned shapes                                                                                                                                |
+| `docs/development/coding-standards.md` (Feature Flags section) | contribution-monotonicity rule, the legitimate/banned line, both permitted shapes with the proxmox examples                                                                                                    |
+| `AGENTS.md` (root)                                             | extend the "**Feature flags are additive only.**" rule by one clause: descriptor contributions are feature-monotonic; link ADR-0032 (stays within size budget)                                                 |
+| `crates/plugins/AGENTS.md`                                     | authoring rule: registration builders are predicate-free; how to express feature-gated contributions; where presence is tested                                                                                 |
+| `docs/development/feature-flags.md`                            | cross-reference from the additive-only note to ADR-0032                                                                                                                                                        |
+| `docs/development/plugin-system.md`                            | note on descriptor contribution fields and consumer-side selection                                                                                                                                             |
+| `docs/development/surfaces.md`                                 | update the catalog-guard paragraph (new guard file, removed punt)                                                                                                                                              |
+| `docs/development/quality-gates.md`                            | add `cargo xtask contribution-monotonicity-check` (note: the file lists no xtask gate today — this is its first xtask row; backfilling the two existing xtask gates there is a nice-to-have, not a dependency) |
+| `CONTEXT.md`                                                   | glossary entry: **Contribution Monotonicity**                                                                                                                                                                  |
 
 No new external dependencies (JSON via existing workspace `serde_json`; xtask uses existing
 utilities), so no version pins are introduced.
@@ -232,7 +282,12 @@ utilities), so no version pins are introduced.
 
 ## Success criteria
 
-1. The RED command above fails on current `main` and passes after the exemplar fix.
+Phase boundary (mirrors Decision 3's severability): criteria 1, 4, 5 define the **merge-blocking
+phase** (Layers A + C, exemplar fix, sweep, docs, ADR); criteria 2, 3 belong to the **Layer B
+phase**, planned separately.
+
+1. The RED command above, run with the new guard file in place against the still-unfixed proxmox
+   code, fails on the assertions; it passes after the exemplar fix.
 2. `cargo xtask contribution-monotonicity-check` fails if any plugin's contribution set under
    `--all-features` is not a superset of its baseline set — including plugins and features that do
    not exist yet (class-level, not instance-level).
