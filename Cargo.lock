@@ -8719,6 +8719,7 @@ version = "0.0.2"
 dependencies = [
  "jsonwebtoken",
  "rootcause",
+ "schemars 1.2.1",
  "sea-orm",
  "serde",
  "serde_json",

@@ -11,6 +11,7 @@ description = "Shared HTTP request/response types for the Uptrakit web API"
 [features]
 default = []
 openapi = ["dep:utoipa", "uptrakit-shared-types/openapi"]
+schema = ["dep:schemars", "uptrakit-shared-types/schema"]
 
 [dependencies]
 jsonwebtoken = { workspace = true, features = ["aws_lc_rs"] }
@@ -28,6 +29,7 @@ uptrakit-shared-macros = { workspace = true }
 uptrakit-shared-types = { workspace = true }
 uuid = { workspace = true, features = ["serde"] }
 utoipa = { workspace = true, optional = true }
+schemars = { workspace = true, optional = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]
