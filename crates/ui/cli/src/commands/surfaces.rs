@@ -391,7 +391,7 @@ pub async fn dynamic_invoke(
 
     let Some(first_arg) = args.first() else {
         return Err(report!(CliError::Other(
-            "surface ID is required (e.g. `surfaces ssh-agent.hosts list-hosts`)".to_string()
+            "surface ID is required (e.g. `surfaces ssh-agent.hosts sync`)".to_string()
         )));
     };
 

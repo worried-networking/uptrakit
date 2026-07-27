@@ -61,6 +61,9 @@ pub struct AgentInteraction {
     /// dispatch inline and leave this `None`).
     #[cfg(feature = "agent-infra")]
     pub agent_handler: Option<AgentInteractionHandler>,
+    /// HTTP method for the derived wire descriptor. `None` keeps the wire
+    /// default (POST; DataLoads normalize to GET at admission).
+    pub http_method: Option<crate::surfaces::InteractionHttpMethod>,
 }
 
 impl AgentInteraction {
@@ -80,6 +83,7 @@ impl AgentInteraction {
             placement: AgentInteractionPlacement::Internal,
             #[cfg(feature = "agent-infra")]
             agent_handler: None,
+            http_method: None,
         }
     }
 
@@ -144,6 +148,13 @@ impl AgentInteraction {
     #[cfg(feature = "agent-infra")]
     pub fn with_agent_handler(mut self, handler: AgentInteractionHandler) -> Self {
         self.agent_handler = Some(handler);
+        self
+    }
+
+    /// Declare the HTTP method the derived wire descriptor dispatches under.
+    #[must_use]
+    pub fn with_http_method(mut self, method: crate::surfaces::InteractionHttpMethod) -> Self {
+        self.http_method = Some(method);
         self
     }
 }

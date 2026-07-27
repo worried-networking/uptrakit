@@ -2,7 +2,7 @@
 //!
 //! Provides:
 //! - Direct `ssh-agent.hosts` surface registration for the shared runtime
-//! - Action library with `list-hosts`, `bootstrap`, `sync-host`, `remove-host` definitions
+//! - Action library with `hosts` (GET list / DELETE remove), `bootstrap`, `sync` definitions
 //! - Action handlers for each action
 //! - ECIES decryption of sensitive parameters (auth password, private key)
 
@@ -52,7 +52,7 @@ pub const SSH_HOSTS_SURFACE_ID: &str = "ssh-agent.hosts";
 
 const SSH_HOSTS_SURFACE_LABEL: &str = "SSH Hosts";
 const SSH_HOSTS_SURFACE_PRIORITY: i32 = 450;
-const SSH_HOSTS_DATA_ACTION_ID: &str = "list-hosts";
+const SSH_HOSTS_DATA_ACTION_ID: &str = "hosts";
 const SSH_HOSTS_DEFAULT_PER_PAGE: u32 = 50;
 const SSH_HOSTS_COLUMNS: [(&str, &str); 5] = [
     ("id", "ID"),
@@ -152,23 +152,26 @@ pub fn build_surface_registration(
 
 /// Build the agent interaction library for runtime registration.
 ///
-/// Row order is wire-visible: sync-host BEFORE remove-host (the legacy
+/// Row order is wire-visible: sync BEFORE hosts/DELETE (the legacy
 /// `SSH_HOSTS_ROW_ACTION_IDS` order); the fixture test pins it.
 fn build_agent_interactions() -> Vec<AgentInteraction> {
     use uptrakit_plugin_infrastructure_registry::all_descriptors;
 
     let mut interactions = vec![
-        // Data-load action: populates the hosts table.
-        AgentInteraction::new("list-hosts", "List Hosts")
+        // Data-load action: populates the hosts table (GET hosts).
+        AgentInteraction::new("hosts", "List Hosts")
             .with_permission(Permission::UpdateHosts)
             .with_timeout(15),
         sync_host_interaction().placement(AgentInteractionPlacement::Row),
-        AgentInteraction::new("remove-host", "Remove Host")
+        // DELETE hosts: shares the `hosts` wire id with the GET data-load
+        // above, disambiguated by http_method (REST-noun convention).
+        AgentInteraction::new("hosts", "Remove Host")
             .with_permission(Permission::UpdateHosts)
             .destructive()
             .with_confirm_entity_field("name")
             .with_timeout(30)
             .with_icon("trash-2")
+            .with_http_method(surfaces::InteractionHttpMethod::Delete)
             .placement(AgentInteractionPlacement::Row),
         bootstrap_interaction().placement(AgentInteractionPlacement::Primary),
         // Internal wizard-step actions (not shown in UI directly).
@@ -208,6 +211,11 @@ struct InteractionRef {
     hint: InteractionHint,
     form_ui: Option<FormUiDescriptor>,
     sensitive_fields: Vec<String>,
+    /// The originating `AgentInteraction`'s declared HTTP method (mirrors
+    /// `AgentInteraction.http_method`). Disambiguates refs that share an
+    /// `action_id` under the REST-noun convention (e.g. `hosts` GET vs
+    /// DELETE) so they merge into separate `InteractionDescriptor`s.
+    http_method: Option<surfaces::InteractionHttpMethod>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -234,7 +242,7 @@ fn build_registered_surface(
         });
     let (root_node, data_sources, refs) =
         build_surface_parts(action_index, primary_actions, agent_interactions)?;
-    let interactions = build_interactions(&refs, action_index);
+    let interactions = build_interactions(&refs, action_index, agent_interactions);
     let targeting = Targeting::Targeted;
     let required_capabilities =
         compute_required_capabilities(&root_node, &targeting, &interactions, &data_sources);
@@ -262,12 +270,13 @@ fn build_surface_parts(
     primary_actions: &[String],
     agent_interactions: &[AgentInteraction],
 ) -> Option<(SurfaceNode, Vec<DataSourceDescriptor>, Vec<InteractionRef>)> {
-    let data_source_id = DataSourceId::new("data.primary").ok()?;
+    let data_source_id = DataSourceId::new("hosts").ok()?;
     let mut refs = vec![InteractionRef {
         action_id: SSH_HOSTS_DATA_ACTION_ID.to_string(),
         hint: InteractionHint::DataLoad,
         form_ui: None,
         sensitive_fields: vec![],
+        http_method: None,
     }];
     let mut primary_ids = Vec::new();
     let mut row_ids = Vec::new();
@@ -291,6 +300,7 @@ fn build_surface_parts(
                     hint: InteractionHint::Action,
                     form_ui: form_ui.clone(),
                     sensitive_fields: sensitive_fields_for_action(action),
+                    http_method: action.http_method.clone(),
                 });
                 collect_select_source_action_refs(form_ui.as_ref(), &mut refs);
                 collect_workflow_step_refs(action, &mut refs);
@@ -313,7 +323,7 @@ fn build_surface_parts(
                 };
                 row_ids.push(SurfaceTableRowAction {
                     interaction_id,
-                    http_method: None,
+                    http_method: interaction.http_method.clone(),
                     visible_when: interaction
                         .row_visible_when
                         .as_ref()
@@ -325,6 +335,7 @@ fn build_surface_parts(
                     hint: InteractionHint::Action,
                     form_ui: form_ui.clone(),
                     sensitive_fields: sensitive_fields_for_action(interaction),
+                    http_method: interaction.http_method.clone(),
                 });
                 collect_select_source_action_refs(form_ui.as_ref(), &mut refs);
                 collect_workflow_step_refs(interaction, &mut refs);
@@ -394,6 +405,7 @@ fn collect_select_source_action_refs(
             hint: InteractionHint::DataLoad,
             form_ui: None,
             sensitive_fields: vec![],
+            http_method: None,
         });
     }
 }
@@ -430,6 +442,7 @@ fn collect_workflow_step_refs(action: &AgentInteraction, refs: &mut Vec<Interact
                 hint: InteractionHint::DataLoad,
                 form_ui: None,
                 sensitive_fields: vec![],
+                http_method: None,
             });
         }
         if let Some(submit_action) = &step.submit_action {
@@ -438,6 +451,7 @@ fn collect_workflow_step_refs(action: &AgentInteraction, refs: &mut Vec<Interact
                 hint: InteractionHint::Action,
                 form_ui: None,
                 sensitive_fields: workflow_sensitive_fields.clone(),
+                http_method: None,
             });
         }
     }
@@ -555,20 +569,28 @@ fn sensitive_fields_for_action(action: &AgentInteraction) -> Vec<String> {
     sensitive.into_iter().collect()
 }
 
+/// Merge key: `(action_id, method_bucket)`. The method bucket disambiguates
+/// REST-noun ids shared across methods (e.g. `hosts` GET list / DELETE
+/// remove) so they merge into distinct entries.
+type MergeKey = (String, Option<String>);
+/// Merge value accumulated across all [`InteractionRef`]s sharing a
+/// [`MergeKey`].
+type MergeValue = (InteractionHint, Option<FormUiDescriptor>, BTreeSet<String>);
+
 fn build_interactions(
     refs: &[InteractionRef],
     action_index: &BTreeMap<&str, &AgentInteraction>,
+    agent_interactions: &[AgentInteraction],
 ) -> Vec<InteractionDescriptor> {
-    let mut merged: BTreeMap<
-        String,
-        (InteractionHint, Option<FormUiDescriptor>, BTreeSet<String>),
-    > = BTreeMap::new();
+    let mut merged: BTreeMap<MergeKey, MergeValue> = BTreeMap::new();
     for reference in refs {
-        let entry = merged.entry(reference.action_id.clone()).or_insert((
-            reference.hint,
-            None,
-            BTreeSet::new(),
-        ));
+        let method_bucket = reference
+            .http_method
+            .as_ref()
+            .map(|m| m.as_str().to_string());
+        let entry = merged
+            .entry((reference.action_id.clone(), method_bucket))
+            .or_insert((reference.hint, None, BTreeSet::new()));
         if reference.hint == InteractionHint::DataLoad {
             entry.0 = InteractionHint::DataLoad;
         }
@@ -578,12 +600,30 @@ fn build_interactions(
         entry.2.extend(reference.sensitive_fields.iter().cloned());
     }
 
+    // Resolves `(action_id, method_bucket)` to the exact `AgentInteraction`
+    // declaration, since `action_index` (keyed by id alone) collides when an
+    // id is shared across methods.
+    let method_index: BTreeMap<(&str, Option<String>), &AgentInteraction> = agent_interactions
+        .iter()
+        .map(|interaction| {
+            let method_bucket = interaction
+                .http_method
+                .as_ref()
+                .map(|m| m.as_str().to_string());
+            ((interaction.action_id.as_str(), method_bucket), interaction)
+        })
+        .collect();
+
     let mut interactions = Vec::new();
-    for (action_id, (hint, form_ui, sensitive_fields)) in merged {
+    for ((action_id, method_bucket), (hint, form_ui, sensitive_fields)) in merged {
         let Ok(interaction_id) = InteractionId::new(action_id.clone()) else {
             continue;
         };
-        let Some(action) = action_index.get(action_id.as_str()).copied() else {
+        let action = method_index
+            .get(&(action_id.as_str(), method_bucket))
+            .copied()
+            .or_else(|| action_index.get(action_id.as_str()).copied());
+        let Some(action) = action else {
             continue;
         };
         let kind = match hint {
@@ -626,6 +666,9 @@ fn build_interactions(
             descriptor.workflow_steps = workflow_steps;
             descriptor.form_ui = form_ui;
             descriptor.icon = action.icon.clone();
+            if let Some(m) = action.http_method.clone() {
+                descriptor.http_method = m;
+            }
             interactions.push(descriptor);
         }
     }
@@ -807,7 +850,7 @@ fn collect_node_caps(node: &SurfaceNode, caps: &mut BTreeSet<surfaces::Capabilit
     }
 }
 
-/// Build the sync-host interaction definition as a 3-step wizard.
+/// Build the sync interaction definition as a 3-step wizard.
 fn sync_host_interaction() -> AgentInteraction {
     let connect_step = PluginSurfaceWorkflowStep::new(
         "connect",
@@ -865,7 +908,7 @@ fn sync_host_interaction() -> AgentInteraction {
     )
     .with_submit_action("sync-execute");
 
-    AgentInteraction::new("sync-host", "Sync Host")
+    AgentInteraction::new("sync", "Sync Host")
         .with_permission(Permission::UpdateHosts)
         .with_timeout(120)
         .with_ui(SurfaceActionUi::Wizard {
@@ -1094,7 +1137,7 @@ fn spawn_infra_plugin_action(request: SurfaceActionRequest, ctx: &SurfaceRuntime
 
 /// Dispatch a surface request to the appropriate handler.
 ///
-/// Actions that complete quickly (`list-hosts`, `remove-host`) respond inline.
+/// Actions that complete quickly (`hosts` GET/DELETE) respond inline.
 /// Long-running actions (`bootstrap`) are spawned as background tasks via `bg_tx`.
 #[tracing::instrument(skip_all, fields(
     request_id = %request.request_id,
@@ -1135,17 +1178,17 @@ async fn handle_surface_request_internal(
         return;
     }
 
-    match request.interaction_id.as_str() {
-        "list-hosts" => {
+    match (request.interaction_id.as_str(), &request.method) {
+        ("hosts", surfaces::InteractionHttpMethod::Get) => {
             let response = handle_list_hosts(request.request_id, &request.params, ctx.db).await;
             send_response(conn, response).await;
         }
-        "remove-host" => {
+        ("hosts", surfaces::InteractionHttpMethod::Delete) => {
             let response = handle_remove_host(request.request_id, &request.params, ctx.db).await;
             emit_surface_mutation_audit(
                 ctx.bg_tx,
                 ctx.tenant_id,
-                "remove-host",
+                "hosts",
                 request.request_id,
                 &serde_json::Value::Object(request.params.clone()),
                 &response,
@@ -1153,30 +1196,30 @@ async fn handle_surface_request_internal(
             .await;
             send_response(conn, response).await;
         }
-        "bootstrap-connect" => {
+        ("bootstrap-connect", _) => {
             spawn_bootstrap_connect(request, ctx);
         }
-        "bootstrap" => {
+        ("bootstrap", _) => {
             let response = make_surface_error_response(
                 request.request_id,
                 "workflow entry interaction cannot be executed directly",
             );
             send_response(conn, response).await;
         }
-        "bootstrap-execute" => {
+        ("bootstrap-execute", _) => {
             spawn_bootstrap_execute(request, ctx);
         }
-        "sync-connect" => {
+        ("sync-connect", _) => {
             spawn_sync_connect(request, ctx);
         }
-        "sync-host" => {
+        ("sync", _) => {
             let response = make_surface_error_response(
                 request.request_id,
                 "workflow entry interaction cannot be executed directly",
             );
             send_response(conn, response).await;
         }
-        "sync-execute" => {
+        ("sync-execute", _) => {
             spawn_sync_execute(request, ctx);
         }
         _ => {
@@ -1892,7 +1935,7 @@ fn classify_surface_mutation_outcome(
         .unwrap_or("surface action failed");
 
     match interaction_id {
-        "remove-host" => {
+        "hosts" => {
             if classify_validation_failure(message) {
                 ("validation_failed", Some("invalid_request"))
             } else if message == "host not found" {
@@ -1934,7 +1977,7 @@ fn surface_mutation_target_id(
     response: &SurfaceActionResponse,
 ) -> Option<String> {
     match interaction_id {
-        "remove-host" | "sync-execute" => params
+        "hosts" | "sync-execute" => params
             .get("id")
             .and_then(|value| value.as_str())
             .map(str::to_string),
@@ -1990,7 +2033,7 @@ fn surface_mutation_target_display(
     }
 
     match interaction_id {
-        "remove-host" => params
+        "hosts" => params
             .get("id")
             .and_then(|value| value.as_str())
             .map(str::to_string),
@@ -2036,7 +2079,7 @@ fn build_surface_mutation_details(
     reason_code: Option<&'static str>,
 ) -> serde_json::Value {
     match interaction_id {
-        "remove-host" => {
+        "hosts" => {
             let mut details = json!({
                 "mutation_source": "ssh_surface.remove_host",
             });
@@ -2121,7 +2164,7 @@ async fn emit_surface_mutation_audit(
     response: &SurfaceActionResponse,
 ) {
     let action_type = match interaction_id {
-        "remove-host" => Some("host.deactivate"),
+        "hosts" => Some("host.deactivate"),
         "bootstrap-execute" | "sync-execute" | "bootstrap-proxmox-guest" => Some("host.update"),
         _ => None,
     };
@@ -2444,7 +2487,7 @@ mod tests {
 
         assert_eq!(surface.data_sources.len(), 1);
         let primary_data_source = &surface.data_sources[0];
-        assert_eq!(primary_data_source.data_source_id.as_str(), "data.primary");
+        assert_eq!(primary_data_source.data_source_id.as_str(), "hosts");
         assert_eq!(
             primary_data_source.kind,
             DataSourceKind::ProviderQuery {
@@ -2488,7 +2531,7 @@ mod tests {
             .iter()
             .map(|action| action.interaction_id.as_str())
             .collect();
-        assert_eq!(row_action_ids, ["sync-host", "remove-host"]);
+        assert_eq!(row_action_ids, ["sync", "hosts"]);
         let interactions = build_agent_interactions();
         let expected_row_action_ids: Vec<&str> = interactions
             .iter()
@@ -2550,8 +2593,7 @@ mod tests {
             .map(|interaction| (interaction.interaction_id.as_str(), interaction))
             .collect();
 
-        assert!(interactions.contains_key("list-hosts"));
-        assert!(interactions.contains_key("remove-host"));
+        assert!(interactions.contains_key("hosts"));
 
         let bootstrap = interactions
             .get("bootstrap")
@@ -2577,9 +2619,9 @@ mod tests {
         );
 
         let sync_host = interactions
-            .get("sync-host")
+            .get("sync")
             .copied()
-            .expect("sync-host workflow interaction is present");
+            .expect("sync workflow interaction is present");
         assert_eq!(sync_host.kind, InteractionKind::Workflow);
         assert_eq!(sync_host.workflow_steps.len(), 3);
         assert_eq!(sync_host.workflow_steps[0].step_id, "connect");
@@ -2780,9 +2822,9 @@ mod tests {
             tenant_id: tenant_id.to_string(),
             surface_id: surfaces::SurfaceId::new(SSH_HOSTS_SURFACE_ID.to_string())
                 .expect("surface id should be valid"),
-            interaction_id: surfaces::InteractionId::new("remove-host".to_string())
+            interaction_id: surfaces::InteractionId::new("hosts".to_string())
                 .expect("interaction id should be valid"),
-            method: Default::default(),
+            method: surfaces::InteractionHttpMethod::Delete,
             idempotency_key: uuid::Uuid::now_v7().to_string(),
             target_provider_id: None,
             caller_origin: surfaces::CallerOrigin::BuiltInSystem {
@@ -2840,9 +2882,9 @@ mod tests {
             tenant_id: tenant_id.to_string(),
             surface_id: surfaces::SurfaceId::new(SSH_HOSTS_SURFACE_ID.to_string())
                 .expect("surface id should be valid"),
-            interaction_id: surfaces::InteractionId::new("remove-host".to_string())
+            interaction_id: surfaces::InteractionId::new("hosts".to_string())
                 .expect("interaction id should be valid"),
-            method: Default::default(),
+            method: surfaces::InteractionHttpMethod::Delete,
             idempotency_key: uuid::Uuid::now_v7().to_string(),
             target_provider_id: None,
             caller_origin: surfaces::CallerOrigin::BuiltInSystem {
@@ -2863,6 +2905,92 @@ mod tests {
         )
         .expect("valid details");
         assert_eq!(details["reason_code"], json!("host_not_found"));
+    }
+
+    /// The `hosts` wire id is shared by two dispatch arms disambiguated by
+    /// HTTP method (REST-noun convention): DELETE removes a host, GET lists
+    /// hosts. This proves both arms dispatch correctly through the same
+    /// `interaction_id` and that a removed host no longer appears in the
+    /// subsequent GET list.
+    #[tokio::test]
+    async fn hosts_interaction_dispatches_by_http_method() {
+        let (state_dir, db) = setup_surface_db().await;
+        let host = insert_test_host(&db, "shared-id-host").await;
+        let (bg_tx, _bg_rx) = tokio::sync::mpsc::channel(4);
+        let surface_proxy = Arc::new(uptrakit_service_sdk::ServiceSurfaceProxy::new());
+        let infra_bundles = Arc::new(Vec::new());
+        let ctx = SurfaceRuntimeContext {
+            db: &db,
+            state_dir: state_dir.path(),
+            private_key_der: None,
+            service_id: None,
+            tenant_id: None,
+            bg_tx: &bg_tx,
+            surface_proxy: &surface_proxy,
+            infra_bundles,
+        };
+
+        let delete_request = SurfaceActionRequest {
+            request_id: uuid::Uuid::now_v7(),
+            tenant_id: uuid::Uuid::now_v7().to_string(),
+            surface_id: surfaces::SurfaceId::new(SSH_HOSTS_SURFACE_ID.to_string())
+                .expect("surface id should be valid"),
+            interaction_id: surfaces::InteractionId::new("hosts".to_string())
+                .expect("interaction id should be valid"),
+            method: surfaces::InteractionHttpMethod::Delete,
+            idempotency_key: uuid::Uuid::now_v7().to_string(),
+            target_provider_id: None,
+            caller_origin: surfaces::CallerOrigin::BuiltInSystem {
+                principal: "test".to_string(),
+            },
+            params: serde_json::Map::from_iter([("id".to_string(), json!(host.id.to_string()))]),
+            encrypted_sensitive_params: None,
+        };
+        let mut conn = RecordingTransport::default();
+        handle_surface_action_request(delete_request, &ctx, &mut conn).await;
+        assert_eq!(conn.sent.len(), 1);
+        let ServiceMessage::SurfaceActionResponse(delete_response) = &conn.sent[0] else {
+            panic!("expected surface action response");
+        };
+        assert!(delete_response.success, "DELETE hosts should succeed");
+        assert_eq!(delete_response.result, Some(json!({ "removed": true })));
+
+        let get_request = SurfaceActionRequest {
+            request_id: uuid::Uuid::now_v7(),
+            tenant_id: uuid::Uuid::now_v7().to_string(),
+            surface_id: surfaces::SurfaceId::new(SSH_HOSTS_SURFACE_ID.to_string())
+                .expect("surface id should be valid"),
+            interaction_id: surfaces::InteractionId::new("hosts".to_string())
+                .expect("interaction id should be valid"),
+            method: surfaces::InteractionHttpMethod::Get,
+            idempotency_key: uuid::Uuid::now_v7().to_string(),
+            target_provider_id: None,
+            caller_origin: surfaces::CallerOrigin::BuiltInSystem {
+                principal: "test".to_string(),
+            },
+            params: serde_json::Map::new(),
+            encrypted_sensitive_params: None,
+        };
+        let mut conn = RecordingTransport::default();
+        handle_surface_action_request(get_request, &ctx, &mut conn).await;
+        assert_eq!(conn.sent.len(), 1);
+        let ServiceMessage::SurfaceActionResponse(list_response) = &conn.sent[0] else {
+            panic!("expected surface action response");
+        };
+        assert!(list_response.success, "GET hosts should succeed");
+        let items = list_response
+            .result
+            .as_ref()
+            .and_then(|value| value.get("items"))
+            .and_then(|value| value.as_array())
+            .expect("items array present");
+        let removed_id = host.id.to_string();
+        assert!(
+            items
+                .iter()
+                .all(|item| item.get("id").and_then(|v| v.as_str()) != Some(removed_id.as_str())),
+            "removed host must not reappear in the GET hosts list"
+        );
     }
 
     #[tokio::test]
@@ -3067,12 +3195,31 @@ mod tests {
     #[test]
     fn ssh_host_actions_carry_their_icons() {
         let actions = build_agent_interactions();
-        let by_id: std::collections::HashMap<&str, &AgentInteraction> =
-            actions.iter().map(|a| (a.action_id.as_str(), a)).collect();
+        // `hosts` is shared by two declarations (GET list / DELETE remove);
+        // disambiguate by `http_method` rather than a plain id-keyed map.
+        let find_by_id = |id: &str| actions.iter().find(|a| a.action_id == id);
+        let find_hosts_delete = || {
+            actions.iter().find(|a| {
+                a.action_id == "hosts"
+                    && a.http_method == Some(surfaces::InteractionHttpMethod::Delete)
+            })
+        };
 
-        assert_eq!(by_id["bootstrap"].icon.as_deref(), Some("server-cog"));
-        assert_eq!(by_id["sync-host"].icon.as_deref(), Some("refresh-cw"));
-        assert_eq!(by_id["remove-host"].icon.as_deref(), Some("trash-2"));
+        assert_eq!(
+            find_by_id("bootstrap").and_then(|a| a.icon.as_deref()),
+            Some("server-cog")
+        );
+        assert_eq!(
+            find_by_id("sync").and_then(|a| a.icon.as_deref()),
+            Some("refresh-cw")
+        );
+        assert_eq!(
+            find_hosts_delete()
+                .expect("DELETE hosts action present")
+                .icon
+                .as_deref(),
+            Some("trash-2")
+        );
     }
 
     #[test]
@@ -3094,15 +3241,18 @@ mod tests {
         let sync = surface
             .interactions
             .iter()
-            .find(|i| i.interaction_id.as_str() == "sync-host")
-            .expect("sync-host interaction present");
+            .find(|i| i.interaction_id.as_str() == "sync")
+            .expect("sync interaction present");
         assert_eq!(sync.icon.as_deref(), Some("refresh-cw"));
 
         let remove = surface
             .interactions
             .iter()
-            .find(|i| i.interaction_id.as_str() == "remove-host")
-            .expect("remove-host interaction present");
+            .find(|i| {
+                i.interaction_id.as_str() == "hosts"
+                    && i.effective_http_method() == surfaces::InteractionHttpMethod::Delete
+            })
+            .expect("DELETE hosts interaction present");
         assert_eq!(remove.icon.as_deref(), Some("trash-2"));
     }
 
@@ -3129,5 +3279,72 @@ mod tests {
         )
         .expect("valid details");
         assert_eq!(details["reason_code"], json!("invalid_request"));
+    }
+
+    /// REST-noun convention guard: surface/interaction/data-source ids stay
+    /// kebab-case, and every `ProviderQuery` data source's `operation_id`
+    /// resolves to a GET interaction sharing the data source's id.
+    #[test]
+    fn ssh_surface_ids_follow_kebab_convention() {
+        fn is_kebab(s: &str) -> bool {
+            let bytes = s.as_bytes();
+            if bytes.is_empty() || !bytes[0].is_ascii_lowercase() {
+                return false;
+            }
+            let mut prev_dash = false;
+            for (i, &b) in bytes.iter().enumerate() {
+                match b {
+                    b'a'..=b'z' | b'0'..=b'9' => prev_dash = false,
+                    b'-' => {
+                        if i == 0 || prev_dash || i == bytes.len() - 1 {
+                            return false;
+                        }
+                        prev_dash = true;
+                    }
+                    _ => return false,
+                }
+            }
+            true
+        }
+
+        let registration = build_surface_registration(None, &test_catalog(), None, None);
+        let surface = registration
+            .surfaces
+            .iter()
+            .find(|surface| surface.descriptor.surface_id.as_str() == SSH_HOSTS_SURFACE_ID)
+            .expect("ssh-agent.hosts surface is registered");
+
+        for segment in surface.descriptor.surface_id.as_str().split('.') {
+            assert!(
+                is_kebab(segment),
+                "surface id segment `{segment}` is not kebab-case"
+            );
+        }
+
+        for interaction in &surface.interactions {
+            let id = interaction.interaction_id.as_str();
+            assert!(is_kebab(id), "interaction id `{id}` is not kebab-case");
+        }
+
+        for data_source in &surface.data_sources {
+            let id = data_source.data_source_id.as_str();
+            assert!(is_kebab(id), "data source id `{id}` is not kebab-case");
+
+            if let DataSourceKind::ProviderQuery { operation_id } = &data_source.kind {
+                let matching = surface.interactions.iter().find(|interaction| {
+                    interaction.interaction_id.as_str() == operation_id
+                        && interaction.effective_http_method()
+                            == surfaces::InteractionHttpMethod::Get
+                });
+                assert!(
+                    matching.is_some(),
+                    "data source `{id}` operation_id `{operation_id}` must resolve to a GET interaction"
+                );
+                assert_eq!(
+                    id, operation_id,
+                    "data source id must equal its GET interaction's operation_id"
+                );
+            }
+        }
     }
 }

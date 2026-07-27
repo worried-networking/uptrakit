@@ -63,7 +63,7 @@
             },
             {
               "kind": "table",
-              "data_source_id": "data.primary",
+              "data_source_id": "hosts",
               "columns": [
                 {
                   "key": "id",
@@ -88,10 +88,11 @@
               ],
               "row_actions": [
                 {
-                  "interaction_id": "sync-host"
+                  "interaction_id": "sync"
                 },
                 {
-                  "interaction_id": "remove-host"
+                  "interaction_id": "hosts",
+                  "http_method": "delete"
                 }
               ]
             }
@@ -383,7 +384,7 @@
           }
         },
         {
-          "interaction_id": "list-hosts",
+          "interaction_id": "hosts",
           "kind": "data_load",
           "http_method": "post",
           "label": "List Hosts",
@@ -400,9 +401,9 @@
           }
         },
         {
-          "interaction_id": "remove-host",
+          "interaction_id": "hosts",
           "kind": "confirmable_action",
-          "http_method": "post",
+          "http_method": "delete",
           "label": "Remove Host",
           "required_permission": "update_hosts",
           "input_schema": {
@@ -423,49 +424,7 @@
           "icon": "trash-2"
         },
         {
-          "interaction_id": "sync-connect",
-          "kind": "mutation_action",
-          "http_method": "post",
-          "label": "Sync Connect",
-          "required_permission": "update_hosts",
-          "input_schema": {
-            "type": "object"
-          },
-          "result_schema": {
-            "type": "any"
-          },
-          "sensitive_fields": [
-            "auth_password",
-            "auth_private_key"
-          ],
-          "timeout_seconds": 60,
-          "transport": {
-            "mode": "provider_proxied"
-          }
-        },
-        {
-          "interaction_id": "sync-execute",
-          "kind": "mutation_action",
-          "http_method": "post",
-          "label": "Sync Execute",
-          "required_permission": "update_hosts",
-          "input_schema": {
-            "type": "object"
-          },
-          "result_schema": {
-            "type": "any"
-          },
-          "sensitive_fields": [
-            "auth_password",
-            "auth_private_key"
-          ],
-          "timeout_seconds": 120,
-          "transport": {
-            "mode": "provider_proxied"
-          }
-        },
-        {
-          "interaction_id": "sync-host",
+          "interaction_id": "sync",
           "kind": "workflow",
           "http_method": "post",
           "label": "Sync Host",
@@ -605,14 +564,56 @@
             }
           ],
           "icon": "refresh-cw"
+        },
+        {
+          "interaction_id": "sync-connect",
+          "kind": "mutation_action",
+          "http_method": "post",
+          "label": "Sync Connect",
+          "required_permission": "update_hosts",
+          "input_schema": {
+            "type": "object"
+          },
+          "result_schema": {
+            "type": "any"
+          },
+          "sensitive_fields": [
+            "auth_password",
+            "auth_private_key"
+          ],
+          "timeout_seconds": 60,
+          "transport": {
+            "mode": "provider_proxied"
+          }
+        },
+        {
+          "interaction_id": "sync-execute",
+          "kind": "mutation_action",
+          "http_method": "post",
+          "label": "Sync Execute",
+          "required_permission": "update_hosts",
+          "input_schema": {
+            "type": "object"
+          },
+          "result_schema": {
+            "type": "any"
+          },
+          "sensitive_fields": [
+            "auth_password",
+            "auth_private_key"
+          ],
+          "timeout_seconds": 120,
+          "transport": {
+            "mode": "provider_proxied"
+          }
         }
       ],
       "data_sources": [
         {
-          "data_source_id": "data.primary",
+          "data_source_id": "hosts",
           "kind": {
             "kind": "provider_query",
-            "operation_id": "list-hosts"
+            "operation_id": "hosts"
           },
           "result_schema": {
             "type": "any"
