@@ -81,8 +81,8 @@ pub(crate) fn proxmox_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
 }
 
 fn proxmox_hosts_surface() -> PluginSurface {
-    let data_source_id = surfaces::DataSourceId::new("proxmox.hosts.mappings")
-        .expect("literal data source id is valid");
+    let data_source_id =
+        surfaces::DataSourceId::new("mappings").expect("literal data source id is valid");
 
     PluginSurface {
         descriptor: surfaces::SurfaceDescriptor::builder()
@@ -190,7 +190,7 @@ fn proxmox_hosts_surface() -> PluginSurface {
             RegisteredInteraction::new(
                 {
                     let mut i = surfaces::InteractionDescriptor::new(
-                        surfaces::InteractionId::new("list").expect("literal"),
+                        surfaces::InteractionId::new("mappings").expect("literal"),
                         surfaces::InteractionKind::DataLoad,
                         "List Hosts",
                         surfaces::InteractionTransport::ControllerLocal,
@@ -347,7 +347,7 @@ fn proxmox_hosts_surface() -> PluginSurface {
         data_sources: vec![surfaces::DataSourceDescriptor {
             data_source_id,
             kind: surfaces::DataSourceKind::ProviderQuery {
-                operation_id: "list".to_string(),
+                operation_id: "mappings".to_string(),
             },
             result_schema: surfaces::SchemaContract::Any,
             pagination: Some(surfaces::DataSourcePagination {
@@ -368,8 +368,8 @@ fn proxmox_hosts_surface() -> PluginSurface {
 }
 
 fn proxmox_host_info_surface() -> PluginSurface {
-    let data_source_id = surfaces::DataSourceId::new("proxmox.host-info.primary")
-        .expect("literal data source id is valid");
+    let data_source_id =
+        surfaces::DataSourceId::new("info").expect("literal data source id is valid");
     PluginSurface {
         descriptor: surfaces::SurfaceDescriptor::builder()
             .surface_id(
@@ -395,8 +395,7 @@ fn proxmox_host_info_surface() -> PluginSurface {
         interactions: vec![RegisteredInteraction::new(
             {
                 let mut i = surfaces::InteractionDescriptor::new(
-                    surfaces::InteractionId::new("get-info")
-                        .expect("literal interaction id is valid"),
+                    surfaces::InteractionId::new("info").expect("literal interaction id is valid"),
                     surfaces::InteractionKind::DataLoad,
                     "Get Info",
                     surfaces::InteractionTransport::ControllerLocal,
@@ -411,7 +410,7 @@ fn proxmox_host_info_surface() -> PluginSurface {
         data_sources: vec![surfaces::DataSourceDescriptor {
             data_source_id,
             kind: surfaces::DataSourceKind::ProviderQuery {
-                operation_id: "get-info".to_string(),
+                operation_id: "info".to_string(),
             },
             result_schema: surfaces::SchemaContract::Object,
             pagination: None,
@@ -458,9 +457,9 @@ fn proxmox_settings_update_protection_surface() -> PluginSurface {
                         text: callout,
                     },
                     surfaces::SurfaceNode::Form {
-                        interaction_id: surfaces::InteractionId::new("save-global-defaults")
+                        interaction_id: surfaces::InteractionId::new("global-defaults")
                             .expect("literal interaction id is valid"),
-                        http_method: None,
+                        http_method: Some(surfaces::InteractionHttpMethod::Put),
                     },
                 ],
             ))
@@ -469,7 +468,7 @@ fn proxmox_settings_update_protection_surface() -> PluginSurface {
             RegisteredInteraction::new(
                 {
                     let mut i = surfaces::InteractionDescriptor::new(
-                        surfaces::InteractionId::new("preload-global-defaults")
+                        surfaces::InteractionId::new("global-defaults")
                             .expect("literal interaction id is valid"),
                         surfaces::InteractionKind::DataLoad,
                         "Preload Global Defaults",
@@ -487,7 +486,7 @@ fn proxmox_settings_update_protection_surface() -> PluginSurface {
             RegisteredInteraction::new(
                 {
                     let mut i = surfaces::InteractionDescriptor::new(
-                        surfaces::InteractionId::new("load-backup-target-options")
+                        surfaces::InteractionId::new("backup-target-options")
                             .expect("literal interaction id is valid"),
                         surfaces::InteractionKind::DataLoad,
                         "Load Backup Target Options",
@@ -505,12 +504,13 @@ fn proxmox_settings_update_protection_surface() -> PluginSurface {
             RegisteredInteraction::new(
                 {
                     let mut i = surfaces::InteractionDescriptor::new(
-                        surfaces::InteractionId::new("save-global-defaults")
+                        surfaces::InteractionId::new("global-defaults")
                             .expect("literal interaction id is valid"),
                         surfaces::InteractionKind::MutationAction,
                         "Save Global Defaults",
                         surfaces::InteractionTransport::ControllerLocal,
                     );
+                    i.http_method = surfaces::InteractionHttpMethod::Put;
                     i.required_permission = Some(Permission::ManageGlobalSettings.to_string());
                     i.input_schema = Some(surfaces::SchemaContract::Object);
                     i.result_schema = Some(surfaces::SchemaContract::Any);
@@ -578,7 +578,7 @@ fn proxmox_settings_update_protection_surface() -> PluginSurface {
                             default_value: None,
                             options: vec![],
                             select_source: Some(surfaces::FormSelectSource::Action {
-                                action_id: "load-backup-target-options".to_string(),
+                                action_id: "backup-target-options".to_string(),
                             }),
                             sensitive: false,
                             list: false,
@@ -627,7 +627,7 @@ fn proxmox_settings_update_protection_surface() -> PluginSurface {
                         },
                     ],
                     pre_load_interaction_id: Some(
-                        surfaces::InteractionId::new("preload-global-defaults")
+                        surfaces::InteractionId::new("global-defaults")
                             .expect("literal interaction id is valid"),
                     ),
                 });
@@ -665,9 +665,9 @@ fn proxmox_settings_resource_scaling_surface() -> PluginSurface {
             .root_node(surfaces::SurfaceNode::section(
                 None::<String>,
                 vec![surfaces::SurfaceNode::Form {
-                    interaction_id: surfaces::InteractionId::new("save-scaling-global-defaults")
+                    interaction_id: surfaces::InteractionId::new("global-defaults")
                         .expect("literal interaction id is valid"),
-                    http_method: None,
+                    http_method: Some(surfaces::InteractionHttpMethod::Put),
                 }],
             ))
             .build(),
@@ -675,7 +675,7 @@ fn proxmox_settings_resource_scaling_surface() -> PluginSurface {
             RegisteredInteraction::new(
                 {
                     let mut i = surfaces::InteractionDescriptor::new(
-                        surfaces::InteractionId::new("preload-scaling-global-defaults")
+                        surfaces::InteractionId::new("global-defaults")
                             .expect("literal interaction id is valid"),
                         surfaces::InteractionKind::DataLoad,
                         "Preload Scaling Global Defaults",
@@ -693,12 +693,13 @@ fn proxmox_settings_resource_scaling_surface() -> PluginSurface {
             RegisteredInteraction::new(
                 {
                     let mut i = surfaces::InteractionDescriptor::new(
-                        surfaces::InteractionId::new("save-scaling-global-defaults")
+                        surfaces::InteractionId::new("global-defaults")
                             .expect("literal interaction id is valid"),
                         surfaces::InteractionKind::MutationAction,
                         "Save Scaling Global Defaults",
                         surfaces::InteractionTransport::ControllerLocal,
                     );
+                    i.http_method = surfaces::InteractionHttpMethod::Put;
                     i.required_permission = Some(Permission::ManageGlobalSettings.to_string());
                     i.input_schema = Some(surfaces::SchemaContract::Object);
                     i.result_schema = Some(surfaces::SchemaContract::Any);
@@ -831,7 +832,7 @@ fn proxmox_settings_resource_scaling_surface() -> PluginSurface {
                         },
                     ],
                         pre_load_interaction_id: Some(
-                            surfaces::InteractionId::new("preload-scaling-global-defaults")
+                            surfaces::InteractionId::new("global-defaults")
                                 .expect("literal interaction id is valid"),
                         ),
                     });
@@ -881,9 +882,9 @@ fn proxmox_software_item_update_protection_surface() -> PluginSurface {
                         text: callout,
                     },
                     surfaces::SurfaceNode::Form {
-                        interaction_id: surfaces::InteractionId::new("save-item-overrides")
+                        interaction_id: surfaces::InteractionId::new("overrides")
                             .expect("literal interaction id is valid"),
-                        http_method: None,
+                        http_method: Some(surfaces::InteractionHttpMethod::Put),
                     },
                 ],
             ))
@@ -892,7 +893,7 @@ fn proxmox_software_item_update_protection_surface() -> PluginSurface {
             RegisteredInteraction::new(
                 {
                     let mut i = surfaces::InteractionDescriptor::new(
-                        surfaces::InteractionId::new("preload-item-overrides")
+                        surfaces::InteractionId::new("overrides")
                             .expect("literal interaction id is valid"),
                         surfaces::InteractionKind::DataLoad,
                         "Preload Per-item Overrides",
@@ -910,7 +911,7 @@ fn proxmox_software_item_update_protection_surface() -> PluginSurface {
             RegisteredInteraction::new(
                 {
                     let mut i = surfaces::InteractionDescriptor::new(
-                        surfaces::InteractionId::new("load-backup-target-options")
+                        surfaces::InteractionId::new("backup-target-options")
                             .expect("literal interaction id is valid"),
                         surfaces::InteractionKind::DataLoad,
                         "Load Backup Target Options",
@@ -928,12 +929,13 @@ fn proxmox_software_item_update_protection_surface() -> PluginSurface {
             RegisteredInteraction::new(
                 {
                     let mut i = surfaces::InteractionDescriptor::new(
-                        surfaces::InteractionId::new("save-item-overrides")
+                        surfaces::InteractionId::new("overrides")
                             .expect("literal interaction id is valid"),
                         surfaces::InteractionKind::MutationAction,
                         "Save Per-item Overrides",
                         surfaces::InteractionTransport::ControllerLocal,
                     );
+                    i.http_method = surfaces::InteractionHttpMethod::Put;
                     i.required_permission = Some(Permission::UpdateSoftware.to_string());
                     i.input_schema = Some(surfaces::SchemaContract::Object);
                     i.result_schema = Some(surfaces::SchemaContract::Any);
@@ -1007,7 +1009,7 @@ fn proxmox_software_item_update_protection_surface() -> PluginSurface {
                             default_value: None,
                             options: vec![],
                             select_source: Some(surfaces::FormSelectSource::Action {
-                                action_id: "load-backup-target-options".to_string(),
+                                action_id: "backup-target-options".to_string(),
                             }),
                             sensitive: false,
                             list: false,
@@ -1058,7 +1060,7 @@ fn proxmox_software_item_update_protection_surface() -> PluginSurface {
                         },
                     ],
                     pre_load_interaction_id: Some(
-                        surfaces::InteractionId::new("preload-item-overrides")
+                        surfaces::InteractionId::new("overrides")
                             .expect("literal interaction id is valid"),
                     ),
                 });
@@ -1096,9 +1098,9 @@ fn proxmox_software_item_resource_scaling_surface() -> PluginSurface {
             .root_node(surfaces::SurfaceNode::section(
                 None::<String>,
                 vec![surfaces::SurfaceNode::Form {
-                    interaction_id: surfaces::InteractionId::new("save-scaling-item-overrides")
+                    interaction_id: surfaces::InteractionId::new("overrides")
                         .expect("literal interaction id is valid"),
-                    http_method: None,
+                    http_method: Some(surfaces::InteractionHttpMethod::Put),
                 }],
             ))
             .build(),
@@ -1106,7 +1108,7 @@ fn proxmox_software_item_resource_scaling_surface() -> PluginSurface {
             RegisteredInteraction::new(
                 {
                     let mut i = surfaces::InteractionDescriptor::new(
-                        surfaces::InteractionId::new("preload-scaling-item-overrides")
+                        surfaces::InteractionId::new("overrides")
                             .expect("literal interaction id is valid"),
                         surfaces::InteractionKind::DataLoad,
                         "Preload Per-item Scaling Overrides",
@@ -1124,12 +1126,13 @@ fn proxmox_software_item_resource_scaling_surface() -> PluginSurface {
             RegisteredInteraction::new(
                 {
                     let mut i = surfaces::InteractionDescriptor::new(
-                        surfaces::InteractionId::new("save-scaling-item-overrides")
+                        surfaces::InteractionId::new("overrides")
                             .expect("literal interaction id is valid"),
                         surfaces::InteractionKind::MutationAction,
                         "Save Per-item Scaling Overrides",
                         surfaces::InteractionTransport::ControllerLocal,
                     );
+                    i.http_method = surfaces::InteractionHttpMethod::Put;
                     i.required_permission = Some(Permission::UpdateSoftware.to_string());
                     i.input_schema = Some(surfaces::SchemaContract::Object);
                     i.result_schema = Some(surfaces::SchemaContract::Any);
@@ -1280,7 +1283,7 @@ fn proxmox_software_item_resource_scaling_surface() -> PluginSurface {
                         },
                     ],
                         pre_load_interaction_id: Some(
-                            surfaces::InteractionId::new("preload-scaling-item-overrides")
+                            surfaces::InteractionId::new("overrides")
                                 .expect("literal interaction id is valid"),
                         ),
                     });
@@ -1568,7 +1571,7 @@ mod tests {
         let get_info = host_info
             .interactions
             .iter()
-            .find(|interaction| interaction.interaction_id.as_str() == "get-info")
+            .find(|interaction| interaction.interaction_id.as_str() == "info")
             .expect("host-info data-load interaction should be present");
         assert_eq!(
             get_info.required_permission.as_deref(),
@@ -1625,19 +1628,16 @@ mod tests {
 
         assert_eq!(host_info.data_sources.len(), 1);
         let data_source = &host_info.data_sources[0];
-        assert_eq!(
-            data_source.data_source_id.as_str(),
-            "proxmox.host-info.primary"
-        );
+        assert_eq!(data_source.data_source_id.as_str(), "info");
         assert!(matches!(
             data_source.kind,
-            surfaces::DataSourceKind::ProviderQuery { ref operation_id } if operation_id == "get-info"
+            surfaces::DataSourceKind::ProviderQuery { ref operation_id } if operation_id == "info"
         ));
         assert_eq!(data_source.result_schema, surfaces::SchemaContract::Object);
 
         match &host_info.descriptor.root_node {
             surfaces::SurfaceNode::KeyValue { data_source_id } => {
-                assert_eq!(data_source_id.as_str(), "proxmox.host-info.primary");
+                assert_eq!(data_source_id.as_str(), "info");
             }
             other => panic!("expected key-value root node, got {other:?}"),
         }
@@ -1717,8 +1717,8 @@ mod tests {
             hosts
                 .interactions
                 .iter()
-                .any(|i| i.interaction_id.as_str() == "list"),
-            "list interaction must be declared"
+                .any(|i| i.interaction_id.as_str() == "mappings"),
+            "mappings interaction must be declared"
         );
 
         assert_eq!(hosts.data_sources.len(), 1);
@@ -1792,20 +1792,23 @@ mod tests {
         let save_global = settings_policy
             .interactions
             .iter()
-            .find(|interaction| interaction.interaction_id.as_str() == "save-global-defaults")
-            .expect("save-global-defaults interaction should exist");
+            .find(|interaction| {
+                interaction.interaction_id.as_str() == "global-defaults"
+                    && interaction.http_method == surfaces::InteractionHttpMethod::Put
+            })
+            .expect("global-defaults (PUT) interaction should exist");
         assert_eq!(
             save_global
                 .form_ui
                 .as_ref()
                 .and_then(|form_ui| form_ui.pre_load_interaction_id.as_ref())
                 .map(|id| id.as_str()),
-            Some("preload-global-defaults")
+            Some("global-defaults")
         );
         let backup_field = save_global
             .form_ui
             .as_ref()
-            .expect("save-global-defaults should expose a form")
+            .expect("global-defaults (PUT) should expose a form")
             .fields
             .iter()
             .find(|field| field.key == "backup_target_option")
@@ -1813,7 +1816,7 @@ mod tests {
         assert!(matches!(
             backup_field.select_source,
             Some(surfaces::FormSelectSource::Action { ref action_id })
-                if action_id == "load-backup-target-options"
+                if action_id == "backup-target-options"
         ));
 
         let software_policy = registrations
@@ -1826,8 +1829,11 @@ mod tests {
         let save_item = software_policy
             .interactions
             .iter()
-            .find(|interaction| interaction.interaction_id.as_str() == "save-item-overrides")
-            .expect("save-item-overrides interaction should exist");
+            .find(|interaction| {
+                interaction.interaction_id.as_str() == "overrides"
+                    && interaction.http_method == surfaces::InteractionHttpMethod::Put
+            })
+            .expect("overrides (PUT) interaction should exist");
         assert_eq!(
             save_item.required_permission.as_deref(),
             Some("update_software")
@@ -1838,13 +1844,13 @@ mod tests {
                 .as_ref()
                 .and_then(|form_ui| form_ui.pre_load_interaction_id.as_ref())
                 .map(|id| id.as_str()),
-            Some("preload-item-overrides")
+            Some("overrides")
         );
 
         let fields = &save_global
             .form_ui
             .as_ref()
-            .expect("save-global-defaults should expose a form")
+            .expect("global-defaults (PUT) should expose a form")
             .fields;
 
         let snapshot_timeout = fields
@@ -1925,7 +1931,7 @@ mod tests {
         assert_eq!(by_id["approve-match"].icon.as_deref(), Some("check"));
         assert_eq!(by_id["match"].icon.as_deref(), Some("link"));
         assert_eq!(by_id["unmatch"].icon.as_deref(), Some("unlink"));
-        assert!(by_id["list"].icon.is_none());
+        assert!(by_id["mappings"].icon.is_none());
     }
 
     #[test]
@@ -1967,7 +1973,7 @@ mod tests {
         let expected: Vec<(&str, &str, InteractionDeliveryKind)> = vec![
             (
                 "proxmox.hosts",
-                "list",
+                "mappings",
                 InteractionDeliveryKind::PluginHandled,
             ),
             (
@@ -2002,57 +2008,57 @@ mod tests {
             ),
             (
                 "proxmox.host-info",
-                "get-info",
+                "info",
                 InteractionDeliveryKind::PluginHandled,
             ),
             (
                 "proxmox.settings.update-hooks",
-                "preload-global-defaults",
+                "global-defaults",
                 InteractionDeliveryKind::PluginHandled,
             ),
             (
                 "proxmox.settings.update-hooks",
-                "save-global-defaults",
+                "global-defaults",
                 InteractionDeliveryKind::PluginHandled,
             ),
             (
                 "proxmox.settings.update-hooks",
-                "load-backup-target-options",
+                "backup-target-options",
                 InteractionDeliveryKind::PluginHandled,
             ),
             (
                 "proxmox.software-item.update-hooks",
-                "load-backup-target-options",
+                "backup-target-options",
                 InteractionDeliveryKind::PluginHandled,
             ),
             (
                 "proxmox.software-item.update-hooks",
-                "preload-item-overrides",
+                "overrides",
                 InteractionDeliveryKind::PluginHandled,
             ),
             (
                 "proxmox.software-item.update-hooks",
-                "save-item-overrides",
+                "overrides",
                 InteractionDeliveryKind::PluginHandled,
             ),
             (
                 "proxmox.settings.resource-scaling",
-                "preload-scaling-global-defaults",
+                "global-defaults",
                 InteractionDeliveryKind::PluginHandled,
             ),
             (
                 "proxmox.settings.resource-scaling",
-                "save-scaling-global-defaults",
+                "global-defaults",
                 InteractionDeliveryKind::PluginHandled,
             ),
             (
                 "proxmox.software-item.resource-scaling",
-                "preload-scaling-item-overrides",
+                "overrides",
                 InteractionDeliveryKind::PluginHandled,
             ),
             (
                 "proxmox.software-item.resource-scaling",
-                "save-scaling-item-overrides",
+                "overrides",
                 InteractionDeliveryKind::PluginHandled,
             ),
         ];

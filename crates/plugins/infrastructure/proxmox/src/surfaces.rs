@@ -248,7 +248,7 @@ pub(crate) fn dispatch_get_host_info<'a>(
     >,
 > {
     Box::pin(async move {
-        let request = parse_action_params::<ProxmoxHostInfoRequest>(params, "get-info")?;
+        let request = parse_action_params::<ProxmoxHostInfoRequest>(params, "info")?;
         execute_controller_get_host_info(ctx.tenant_db(), request)
             .await
             .map_err(map_controller_action_error)
@@ -265,7 +265,7 @@ pub(crate) fn dispatch_preload_global_defaults<'a>(
 > {
     Box::pin(async move {
         let request =
-            parse_action_params::<ProxmoxScopeSelectionRequest>(params, "preload-global-defaults")?;
+            parse_action_params::<ProxmoxScopeSelectionRequest>(params, "global-defaults")?;
         execute_controller_preload_global_defaults(ctx.tenant_db(), request)
             .await
             .map_err(map_controller_action_error)
@@ -281,10 +281,8 @@ pub(crate) fn dispatch_save_global_defaults<'a>(
     >,
 > {
     Box::pin(async move {
-        let request = parse_action_params::<ProxmoxGlobalDefaultsSaveRequest>(
-            params,
-            "save-global-defaults",
-        )?;
+        let request =
+            parse_action_params::<ProxmoxGlobalDefaultsSaveRequest>(params, "global-defaults")?;
         execute_controller_save_global_defaults(ctx.tenant_db(), request)
             .await
             .map_err(map_controller_action_error)
@@ -300,10 +298,8 @@ pub(crate) fn dispatch_load_backup_target_options<'a>(
     >,
 > {
     Box::pin(async move {
-        let request = parse_action_params::<ProxmoxScopeSelectionRequest>(
-            params,
-            "load-backup-target-options",
-        )?;
+        let request =
+            parse_action_params::<ProxmoxScopeSelectionRequest>(params, "backup-target-options")?;
         execute_controller_load_backup_target_options(ctx.tenant_db(), request)
             .await
             .map_err(map_controller_action_error)
@@ -319,10 +315,8 @@ pub(crate) fn dispatch_preload_item_overrides<'a>(
     >,
 > {
     Box::pin(async move {
-        let request = parse_action_params::<ProxmoxItemOverridePreloadRequest>(
-            params,
-            "preload-item-overrides",
-        )?;
+        let request =
+            parse_action_params::<ProxmoxItemOverridePreloadRequest>(params, "overrides")?;
         execute_controller_preload_item_overrides(ctx.tenant_db(), request)
             .await
             .map_err(map_controller_action_error)
@@ -338,8 +332,7 @@ pub(crate) fn dispatch_save_item_overrides<'a>(
     >,
 > {
     Box::pin(async move {
-        let request =
-            parse_action_params::<ProxmoxItemOverrideSaveRequest>(params, "save-item-overrides")?;
+        let request = parse_action_params::<ProxmoxItemOverrideSaveRequest>(params, "overrides")?;
         execute_controller_save_item_overrides(ctx.tenant_db(), request)
             .await
             .map_err(map_controller_action_error)
@@ -355,10 +348,8 @@ pub(crate) fn dispatch_preload_scaling_global_defaults<'a>(
     >,
 > {
     Box::pin(async move {
-        let request = parse_action_params::<ProxmoxScopeSelectionRequest>(
-            params,
-            "preload-scaling-global-defaults",
-        )?;
+        let request =
+            parse_action_params::<ProxmoxScopeSelectionRequest>(params, "global-defaults")?;
         handle_preload_scaling_global_defaults(ctx.tenant_db(), request)
             .await
             .map_err(map_controller_action_error)
@@ -376,7 +367,7 @@ pub(crate) fn dispatch_save_scaling_global_defaults<'a>(
     Box::pin(async move {
         let request = parse_action_params::<ProxmoxScalingGlobalDefaultsSaveRequest>(
             params,
-            "save-scaling-global-defaults",
+            "global-defaults",
         )?;
         handle_save_scaling_global_defaults(ctx.tenant_db(), request)
             .await
@@ -393,10 +384,8 @@ pub(crate) fn dispatch_preload_scaling_item_overrides<'a>(
     >,
 > {
     Box::pin(async move {
-        let request = parse_action_params::<ProxmoxItemOverridePreloadRequest>(
-            params,
-            "preload-scaling-item-overrides",
-        )?;
+        let request =
+            parse_action_params::<ProxmoxItemOverridePreloadRequest>(params, "overrides")?;
         handle_preload_scaling_item_overrides(ctx.tenant_db(), request)
             .await
             .map_err(map_controller_action_error)
@@ -412,10 +401,8 @@ pub(crate) fn dispatch_save_scaling_item_overrides<'a>(
     >,
 > {
     Box::pin(async move {
-        let request = parse_action_params::<ProxmoxScalingItemOverridesSaveRequest>(
-            params,
-            "save-scaling-item-overrides",
-        )?;
+        let request =
+            parse_action_params::<ProxmoxScalingItemOverridesSaveRequest>(params, "overrides")?;
         handle_save_scaling_item_overrides(ctx.tenant_db(), request)
             .await
             .map_err(map_controller_action_error)

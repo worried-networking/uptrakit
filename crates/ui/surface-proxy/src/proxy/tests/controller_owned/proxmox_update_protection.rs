@@ -60,6 +60,7 @@ fn proxmox_update_protection_registration(
                     "Action",
                     surfaces::InteractionTransport::ControllerLocal,
                 );
+                i.http_method = surfaces::InteractionHttpMethod::Put;
                 i.input_schema = Some(surfaces::SchemaContract::Object);
                 i.result_schema = Some(surfaces::SchemaContract::Any);
                 i.timeout_seconds = Some(30);
@@ -143,7 +144,7 @@ async fn invoke_proxmox_save_global_defaults_emits_success_audit_row() {
         .bootstrap_plugin(proxmox_update_protection_registration(
             "plugin.infrastructure_proxmox",
             "proxmox.settings.update-hooks",
-            "save-global-defaults",
+            "global-defaults",
         ))
         .expect("plugin registration should succeed");
 
@@ -165,10 +166,10 @@ async fn invoke_proxmox_save_global_defaults_emits_success_audit_row() {
             &service_connections,
             &registry,
             SurfaceInvokeRequest {
-                method: None,
+                method: Some(surfaces::InteractionHttpMethod::Put),
                 tenant_id: tenant_id(),
                 surface_id: "proxmox.settings.update-hooks".to_string(),
-                interaction_id: "save-global-defaults".to_string(),
+                interaction_id: "global-defaults".to_string(),
                 idempotency_key: "idem-proxmox-save-global-defaults-success".to_string(),
                 target_provider_id: None,
                 caller_origin: SurfaceCallerOrigin::UserSession {
@@ -240,7 +241,7 @@ async fn invoke_proxmox_save_item_overrides_emits_software_item_update_audit_row
         .bootstrap_plugin(proxmox_update_protection_registration(
             "plugin.infrastructure_proxmox",
             "proxmox.software-item.update-hooks",
-            "save-item-overrides",
+            "overrides",
         ))
         .expect("plugin registration should succeed");
 
@@ -267,10 +268,10 @@ async fn invoke_proxmox_save_item_overrides_emits_software_item_update_audit_row
             &service_connections,
             &registry,
             SurfaceInvokeRequest {
-                method: None,
+                method: Some(surfaces::InteractionHttpMethod::Put),
                 tenant_id: tenant_id(),
                 surface_id: "proxmox.software-item.update-hooks".to_string(),
-                interaction_id: "save-item-overrides".to_string(),
+                interaction_id: "overrides".to_string(),
                 idempotency_key: "idem-proxmox-save-item-overrides-audit".to_string(),
                 target_provider_id: None,
                 caller_origin: SurfaceCallerOrigin::UserSession {
@@ -331,7 +332,7 @@ async fn invoke_proxmox_save_scaling_global_defaults_emits_tenant_setting_update
         .bootstrap_plugin(proxmox_update_protection_registration(
             "plugin.infrastructure_proxmox",
             "proxmox.settings.resource-scaling",
-            "save-scaling-global-defaults",
+            "global-defaults",
         ))
         .expect("plugin registration should succeed");
 
@@ -353,10 +354,10 @@ async fn invoke_proxmox_save_scaling_global_defaults_emits_tenant_setting_update
             &service_connections,
             &registry,
             SurfaceInvokeRequest {
-                method: None,
+                method: Some(surfaces::InteractionHttpMethod::Put),
                 tenant_id: tenant_id(),
                 surface_id: "proxmox.settings.resource-scaling".to_string(),
-                interaction_id: "save-scaling-global-defaults".to_string(),
+                interaction_id: "global-defaults".to_string(),
                 idempotency_key: "idem-proxmox-save-scaling-global-success".to_string(),
                 target_provider_id: None,
                 caller_origin: SurfaceCallerOrigin::UserSession {
@@ -424,7 +425,7 @@ async fn invoke_proxmox_save_scaling_item_overrides_emits_software_item_update_a
         .bootstrap_plugin(proxmox_update_protection_registration(
             "plugin.infrastructure_proxmox",
             "proxmox.software-item.resource-scaling",
-            "save-scaling-item-overrides",
+            "overrides",
         ))
         .expect("plugin registration should succeed");
 
@@ -451,10 +452,10 @@ async fn invoke_proxmox_save_scaling_item_overrides_emits_software_item_update_a
             &service_connections,
             &registry,
             SurfaceInvokeRequest {
-                method: None,
+                method: Some(surfaces::InteractionHttpMethod::Put),
                 tenant_id: tenant_id(),
                 surface_id: "proxmox.software-item.resource-scaling".to_string(),
-                interaction_id: "save-scaling-item-overrides".to_string(),
+                interaction_id: "overrides".to_string(),
                 idempotency_key: "idem-proxmox-save-scaling-item-audit".to_string(),
                 target_provider_id: None,
                 caller_origin: SurfaceCallerOrigin::UserSession {

@@ -28,16 +28,16 @@ pub(crate) fn allowlisted_proxmox_update_protection_controller_local_action(
         return None;
     }
     match (surface_id, interaction_id) {
-        ("proxmox.settings.update-hooks", "save-global-defaults") => {
+        ("proxmox.settings.update-hooks", "global-defaults") => {
             Some(ProxmoxUpdateProtectionAction::SaveGlobalDefaults)
         }
-        ("proxmox.software-item.update-hooks", "save-item-overrides") => {
+        ("proxmox.software-item.update-hooks", "overrides") => {
             Some(ProxmoxUpdateProtectionAction::SaveItemOverrides)
         }
-        ("proxmox.settings.resource-scaling", "save-scaling-global-defaults") => {
+        ("proxmox.settings.resource-scaling", "global-defaults") => {
             Some(ProxmoxUpdateProtectionAction::SaveScalingGlobalDefaults)
         }
-        ("proxmox.software-item.resource-scaling", "save-scaling-item-overrides") => {
+        ("proxmox.software-item.resource-scaling", "overrides") => {
             Some(ProxmoxUpdateProtectionAction::SaveScalingItemOverrides)
         }
         _ => None,
