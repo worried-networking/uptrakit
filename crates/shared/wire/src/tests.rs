@@ -3062,3 +3062,24 @@ fn test_variant_catalog_classification() {
             .collect::<Vec<_>>(),
     );
 }
+
+#[cfg(feature = "schema")]
+mod asyncapi_golden {
+    /// Golden-file test: `asyncapi.yaml` must equal the document `spec_gen`
+    /// assembles. Regenerate with `UPDATE_ASYNCAPI=1` (./scripts/regen-asyncapi.sh).
+    #[test]
+    fn asyncapi_yaml_is_up_to_date() {
+        let generated = crate::spec_gen::generate_asyncapi_yaml();
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("asyncapi.yaml");
+        if std::env::var("UPDATE_ASYNCAPI").is_ok() {
+            std::fs::write(&path, &generated).expect("write asyncapi.yaml");
+            return;
+        }
+        let committed = std::fs::read_to_string(&path).expect("read committed asyncapi.yaml");
+        assert_eq!(
+            committed.trim_end(),
+            generated.trim_end(),
+            "asyncapi.yaml is stale; regenerate with ./scripts/regen-asyncapi.sh"
+        );
+    }
+}
