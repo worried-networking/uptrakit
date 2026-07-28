@@ -21,6 +21,9 @@ enum Command {
     /// Ensure every state-changing site has an audit-catalog decision.
     #[command(name = "audit-coverage-check")]
     AuditCoverage,
+    /// Assert plugin catalog contributions are feature-monotonic (ADR-0032).
+    #[command(name = "contribution-monotonicity-check")]
+    ContributionMonotonicity,
 }
 
 fn main() -> ExitCode {
@@ -35,5 +38,6 @@ fn main() -> ExitCode {
     match cli.command {
         Command::OpenapiClient => xtask::openapi_client_check::cli(&root),
         Command::AuditCoverage => xtask::audit_coverage_check::cli(&root),
+        Command::ContributionMonotonicity => xtask::contribution_monotonicity_check::cli(&root),
     }
 }
