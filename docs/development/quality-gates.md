@@ -57,6 +57,7 @@ bash ci/verify_handler_state_contract.sh                             # No handle
 python3 ci/verify_db_access_policy.py                                # db_access_policy.toml consistent with routes/
 bash ci/verify_agents_md_budget.sh                                   # AGENTS.md files within size budgets
 bash ci/verify_no_new_cfg_not_feature.sh                             # Additive-only feature flags: no new negated-feature cfg outside allowlist
+cargo xtask contribution-monotonicity-check                          # Plugin contributions survive feature unification (ADR-0032)
 ```
 
 Workspace lints (`[workspace.lints]` in root `Cargo.toml`) enforce `warnings = "deny"` and

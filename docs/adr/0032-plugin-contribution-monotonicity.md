@@ -86,15 +86,15 @@ therefore the only lane where either assertion can catch a real suppression):
   registration's `surfaces` list is non-empty. A plugin that declares the ops block while yielding
   nothing is always a defect, since a plugin with no surfaces simply omits the block.
 
-The third layer, **Layer B — cross-build superset diff**, is a severable future phase and does not
-exist yet: a planned `cargo xtask contribution-monotonicity-check` that builds the registry twice
-(the lean controller's derived feature baseline, and `--all-features`) and asserts every plugin's
-union-build contributions are a superset of its baseline-build contributions, closing the class for
-plugins and features that do not yet have a dedicated Layer A/C assertion. Its design, including the
-package-scoped baseline derivation and the fingerprint self-verification it needs to avoid a
-vacuous diff, is recorded in
+The third layer, **Layer B — cross-build superset diff**, is `cargo xtask
+contribution-monotonicity-check`: it builds the registry twice (the lean controller's derived
+feature baseline, and `--all-features`) and asserts every plugin's union-build contributions are a
+superset of its baseline-build contributions, closing the class for plugins and features that do
+not have a dedicated Layer A/C assertion. It is wired into the backend lint CI job
+(`.github/workflows/ci.yml`). Its design, including the package-scoped baseline derivation and the
+fingerprint self-verification it needs to avoid a vacuous diff, is recorded in
 `docs/superpowers/specs/2026-07-27-plugin-contribution-monotonicity-design.md` (Decision 3, Layer
-B) and is not part of this ADR's merge-blocking scope.
+B).
 
 ## Consequences
 
@@ -105,14 +105,15 @@ B) and is not part of this ADR's merge-blocking scope.
   <plugin>`; "presence under feature unification" is not, and was never testable that way — the
   plugin cannot observe another workspace member's feature choices, and proxmox's own dev-dependency
   even pins the union shape for its own tests. That guarantee now belongs to the registry-level
-  guards in `contribution_monotonicity_guard.rs`, with the cross-build diff in Layer B eventually
-  covering plugins with no dedicated assertion.
+  guards in `contribution_monotonicity_guard.rs`, with the cross-build diff in Layer B covering
+  plugins with no dedicated assertion.
 - Layers A and C are meaningful only in a build where the guarded feature is enabled; in the default
   feature lane both assertions pass trivially because nothing is being suppressed. `cargo test
   --all-features` is the load-bearing lane, consistent with the rest of the quality-gates catalog.
-- Layer B remains unimplemented pending its own plan; until it lands, plugins and axes without a
-  dedicated Layer A/C assertion have no automated protection against contribution thinning under
-  unification, and rely on the exemplar fix, the workspace sweep, and code review.
+- Layer B (`cargo xtask contribution-monotonicity-check`, CI-enforced in the backend lint job) now
+  provides automated protection against contribution thinning under unification for plugins and axes
+  without a dedicated Layer A/C assertion — closing the gap that previously relied on the exemplar
+  fix, the workspace sweep, and code review alone.
 - The proxmox self dev-dependency restructure that would let `cargo test -p
   uptrakit-plugin-infrastructure-proxmox` exercise the lean feature shape instead of always pinning
   the union remains a separate, deferred design:
