@@ -15,12 +15,14 @@
 mod action;
 pub mod bounds;
 mod catalog;
+mod pattern;
 mod selector;
 mod verb;
 
 pub use action::{Action, ParseActionError};
 pub use catalog::actions;
 pub use catalog::{CATALOG, CatalogEntry, ParseResourceError, Resource, VerbEntry};
+pub use pattern::{ActionPattern, ParsePatternError, ResourcePattern, VerbPattern};
 pub use selector::{Selector, SelectorSupport, SelectorValidationError};
 pub use verb::{ParseVerbError, Verb};
 
