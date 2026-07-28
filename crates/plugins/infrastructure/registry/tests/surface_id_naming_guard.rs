@@ -3,11 +3,11 @@
 //! Full-catalog run:
 //! `cargo test -p uptrakit-plugin-infrastructure-registry --features notifications-email,notifications-telegram,notifications-webhook`
 //!
-//! Guarantee scope (feature-dependent, stated honestly): proxmox rows are
-//! checked only when its registrations are populated in the compiled
-//! feature set — presence is observed from the catalog, never from `cfg!`
-//! on a foreign crate's feature (its `agent-infra` can be enabled by other
-//! workspace crates through feature unification).
+//! Guarantee scope: naming rules are checked for every registration present
+//! in the compiled catalog. Presence itself (including proxmox's, which is
+//! feature-invariant since ADR-0032) is guarded by
+//! `tests/contribution_monotonicity_guard.rs` — the single assertion site;
+//! do not add presence checks here.
 
 use uptrakit_plugin_infrastructure_registry::all_descriptors;
 use uptrakit_surfaces as surfaces;
