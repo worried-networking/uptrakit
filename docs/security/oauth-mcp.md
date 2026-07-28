@@ -1,6 +1,8 @@
-+++
-title = "MCP OAuth 2.1 — Security Guide"
-+++
+---
+title: MCP OAuth 2.1 — Security Guide
+weight: 45
+description: Security guide for reviewers and auditors evaluating the MCP OAuth 2.1 implementation.
+---
 
 # MCP OAuth 2.1 — Security Guide
 

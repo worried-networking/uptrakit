@@ -1,6 +1,8 @@
-+++
-title = "Connecting MCP Clients to the Controller"
-+++
+---
+title: Connecting MCP Clients to the Controller
+weight: 105
+description: How to connect MCP clients to the controller, including the redirect-URI confirmation step.
+---
 
 # Connecting MCP Clients to the Controller
 

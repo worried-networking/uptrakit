@@ -1,6 +1,8 @@
-+++
-title = "Agent Skills Plugin"
-+++
+---
+title: Agent Skills Plugin
+weight: 185
+description: Distribute and manage packaged agent skills via the skills plugin.
+---
 
 # Agent Skills Plugin
 

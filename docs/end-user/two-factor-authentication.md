@@ -1,6 +1,8 @@
-+++
-title = "Setting Up Two-Factor Authentication"
-+++
+---
+title: Setting Up Two-Factor Authentication
+weight: 95
+description: Setting up two-factor authentication for user accounts.
+---
 
 # Setting Up Two-Factor Authentication
 
