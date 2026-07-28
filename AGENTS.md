@@ -214,8 +214,9 @@ These are non-negotiable design constraints. Do not violate them.
    exception (feature-gated dead code with an inline comment): [Lint
    Suppressions](docs/development/coding-standards.md#lint-suppressions-for-feature-gated-items).
 1. **Feature flags are additive only.** `#[cfg(not(feature = "X"))]` is prohibited; use `cfg!(feature = "X")` in expression position.
-   `#[cfg(feature = "X")]` (without `not`) is allowed only on purely additive blocks. See [Feature
-   Flags](docs/development/coding-standards.md#feature-flags).
+   `#[cfg(feature = "X")]` (without `not`) is allowed only on purely additive blocks. Plugin descriptor contributions
+   are additionally feature-monotonic — a feature may only add contributions, never suppress them (ADR-0032). See
+   [Feature Flags](docs/development/coding-standards.md#feature-flags).
 1. **Use `FromStr` for all string-to-type conversions.** No ad-hoc `parse(&str)` methods: define a typed `Parse{TypeName}Error`, `impl FromStr`,
    call `s.parse::<MyType>()`. UUID path params use `Path<Uuid>`. See [Coding Standards](docs/development/coding-standards.md).
 1. **Keep the openapi-client in sync with web-api endpoints.** Any endpoint addition/change/removal must be reflected in `uptrakit-openapi-client`

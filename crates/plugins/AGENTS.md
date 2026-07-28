@@ -49,6 +49,14 @@ separate action-catalogue or routing-table arm to keep in sync. Rules:
   (`crates/plugins/infrastructure/core/src/agent_interaction.rs`) via the `agent_surfaces:`
   `declare_plugin!` arm (`fn() -> Vec<AgentInteraction>`) -- placement (`AgentInteractionPlacement`) and
   the agent handler live there, not on `RegisteredInteraction`.
+- **Registration builders are predicate-free.** The functions wired into `declare_plugin!` (surfaces `registrations`,
+  `agent_surfaces`, migrations) must return the same data in every feature configuration — never branch on `cfg!`.
+  "Controller-only" is expressed by populating only the controller-consumed descriptor field (`surfaces`, `migrations`);
+  the consumer selects the field, the producer never second-guesses it. Code that genuinely cannot compile without a
+  feature uses a positive `#[cfg(feature)]` module plus the additive `std::iter::empty().chain(...)` shape or a
+  commented paired empty stub. Presence under feature unification is tested by the registry catalog guards, never by
+  `cargo test -p <plugin>` (your crate cannot observe other members' feature choices). See
+  [ADR-0032](../../docs/adr/0032-plugin-contribution-monotonicity.md).
 
 See [Unified plugin registration model](../../docs/development/surfaces.md#unified-plugin-registration-model)
 for the full model and [ADR-0028](../../docs/adr/0028-single-source-plugin-interaction-registration.md)

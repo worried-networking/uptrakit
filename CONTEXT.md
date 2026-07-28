@@ -84,6 +84,11 @@ level via `global_settings`, gated by `ManageGlobalSettings`. When disabled, no 
 Surface, or runtime hook exposes its existence to tenant Operators.
 _Avoid_: global plugin (in code), system plugin, root plugin
 
+**Contribution Monotonicity**:
+The invariant that enabling a Cargo feature may only add plugin descriptor contributions
+(Surfaces, migrations, role slots), never remove or alter them. Guarded by the registry
+catalog guard tests (ADR-0032).
+
 **Installed Version Enricher**:
 A controller-only plugin role (trait + slot) that derives a human-friendly
 `installed_display_version` from the raw `installed_version` reported by an Agent. Used when
