@@ -383,6 +383,12 @@ skip = [
     { crate = "sec1@0.7.3", reason = "pulled by elliptic-curve 0.13 / pkcs8 0.10 (openidconnect); newer 0.8 used by russh 0.60" },
     { crate = "sha2@0.10.9", reason = "pulled by digest 0.10 chain (openidconnect/argon2); newer 0.11 used by russh 0.61 crypto" },
     { crate = "spki@0.7.3", reason = "pulled by pkcs8 0.10 / ecdsa (openidconnect ecdsa/rsa chain); newer 0.8 used by russh 0.61 crypto" },
+
+    # sha3: 0.11 via ml-kem (russh 0.62.4 post-quantum KEM), 0.12 via russh 0.62.4 direct
+    { crate = "sha3@0.11.0", reason = "pulled by ml-kem (russh 0.62.4 post-quantum KEM); russh itself uses sha3 0.12 directly — internal russh split, resolves when ml-kem bumps sha3" },
+
+    # syn: 2.x used across the ecosystem, 3.x pulled by async-trait 0.1.91 (build-time proc-macro)
+    { crate = "syn@3.0.3", reason = "pulled by async-trait 0.1.91 proc-macro (build-time only); syn 2.x used across the ecosystem — no runtime binary impact" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive
