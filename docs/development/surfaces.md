@@ -151,6 +151,10 @@ First-party registrations are guard-tested: the `crates/plugins/infrastructure/r
 (`tests/surface_id_naming_guard.rs`) plus its `agent-ssh-runtime`/`mqtt-runtime` sibling tests assert every
 compiled-in surface/interaction/data-source ID against this convention.
 
+Presence of business-critical plugin surfaces under feature unification is guarded separately by
+`contribution_monotonicity_guard.rs` in the same test directory
+([ADR-0032](../adr/0032-plugin-contribution-monotonicity.md)).
+
 ## Plugin integration pattern
 
 Plugin descriptors provide shared surface registrations and the controller-local interaction logic

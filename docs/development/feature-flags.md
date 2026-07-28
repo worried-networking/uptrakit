@@ -182,3 +182,6 @@ logic. No additional dependencies.
 - [Coding Standards § Feature Flags](coding-standards.md#feature-flags) — the additive-only rule:
   feature flags must never subtract functionality via `#[cfg(not(feature = "X"))]`; use `cfg!()`
   in expression position instead.
+- [Coding Standards § Contribution Monotonicity](coding-standards.md#contribution-monotonicity) — descriptor
+  contributions are additionally feature-*monotonic*: a feature may only add plugin contributions, never suppress
+  them. See [ADR-0032](../adr/0032-plugin-contribution-monotonicity.md).

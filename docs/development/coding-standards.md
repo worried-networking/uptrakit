@@ -749,6 +749,21 @@ sees them together). Use `#[expect(dead_code, reason = "...")]` only after confi
 
 No other `#[allow()]` suppressions are permitted without explicit approval.
 
+### Contribution Monotonicity
+
+Enabling a Cargo feature may only **add** plugin descriptor contributions (surfaces, agent surfaces, migrations, role
+slots, capabilities); it must never remove or alter contributions that exist without it
+([ADR-0032](../adr/0032-plugin-contribution-monotonicity.md)). Features unify across workspace members, so a plugin
+crate can never know which binary enabled its features — a "controller-only" contribution is expressed by populating
+only the controller-consumed descriptor field, never by a feature predicate.
+
+Legitimate: positive `#[cfg(feature = "x")]` on modules/items whose code cannot compile without the feature, using the
+additive `std::iter::empty().chain(...)` shape or a paired empty stub (inline comment naming the reason required).
+Banned: any `cfg!`/`#[cfg]` branch that returns _less_ registration data when a feature is ON — in any spelling.
+Enforced behaviorally by the registry catalog guards
+(`crates/plugins/infrastructure/registry/tests/contribution_monotonicity_guard.rs`); ADR-0032 additionally specifies a
+cross-build diff gate (Layer B, separate rollout).
+
 ## Atomic Ordering Requirements
 
 Security-critical `AtomicBool` flags (such as `PLAINTEXT_MODE` in `uptrakit-crypto`) must use `Ordering::Release` for stores and `Ordering::Acquire`

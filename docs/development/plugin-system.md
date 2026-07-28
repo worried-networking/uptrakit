@@ -271,6 +271,11 @@ pub fn all_descriptors() -> Vec<&'static PluginDescriptor> {
 To add a new plugin: create a crate, use `declare_plugin!`, and add one line to
 `all_descriptors()`.
 
+Process scope is data, not a predicate: `surfaces`/`migrations` are read only by the controller,
+`agent_surfaces`/`agent_migrations` only by the agent-ssh runtime. A plugin populates every field its compiled code
+supports; the consuming process selects the field it owns. Never gate a descriptor field's contents on a feature
+predicate — see [ADR-0032](../adr/0032-plugin-contribution-monotonicity.md).
+
 ### Test-Only Feature-Gated Descriptors
 
 For deterministic controller-side failure-path integration tests, the registry includes a
