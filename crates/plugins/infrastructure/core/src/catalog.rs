@@ -60,6 +60,8 @@ use crate::roles::{
 #[cfg(feature = "plugin-ops")]
 type ControllerUpdateHookValue = Option<Arc<dyn crate::roles::ControllerUpdateHook>>;
 
+// Paired stub: the real body only compiles under `plugin-ops`; returns the
+// empty placeholder shape (monotone, ADR-0032).
 #[cfg(not(feature = "plugin-ops"))]
 type ControllerUpdateHookValue = ();
 
@@ -126,6 +128,8 @@ impl PluginCatalog {
         let mut controller_update_hook: Option<
             Arc<dyn crate::roles::ControllerUpdateHook>,
         > = None;
+        // Paired stub: the real body only compiles under `plugin-ops`; returns the
+        // empty placeholder shape (monotone, ADR-0032).
         #[cfg(not(feature = "plugin-ops"))]
         let controller_update_hook = ();
         let mut surface_dispatch: BTreeMap<(String, String, String), InteractionHandler> =
@@ -559,6 +563,8 @@ impl ControllerUpdateHookOps for PluginCatalog {
     }
 }
 
+// Paired stub: the real body only compiles under `plugin-ops`; returns the
+// empty placeholder shape (monotone, ADR-0032).
 #[cfg(not(feature = "plugin-ops"))]
 impl ControllerUpdateHookOps for PluginCatalog {}
 
