@@ -2334,7 +2334,6 @@ mod tests {
     #[test]
     fn bootstrap_plugin_catalog_keeps_proxmox_and_webhook_surfaces_visible() {
         let registry = registry();
-        let mut saw_proxmox_provider = false;
         let mut saw_webhook_provider = false;
 
         for descriptor in uptrakit_plugin_infrastructure_registry::all_descriptors() {
@@ -2353,9 +2352,6 @@ mod tests {
                 registry
                     .bootstrap_plugin(registration)
                     .expect("catalog plugin registration should be admitted");
-                if provider_id == "plugin.infrastructure.proxmox" {
-                    saw_proxmox_provider = true;
-                }
                 if provider_id == "plugin.notifications.webhook" {
                     saw_webhook_provider = true;
                 }
@@ -2376,19 +2372,13 @@ mod tests {
             "notifications.webhook should remain visible after registry admission filtering"
         );
 
-        // Proxmox controller registrations are absent whenever the linked registry
-        // was built with agent-infra (any workspace-wide build unifies it ON via
-        // agent-ssh-runtime, emptying descriptor_plugin_surfaces). Assert proxmox
-        // visibility only when it actually contributed; whole-plugin existence is
-        // covered by the proxmox crate's own smoke test and the D5 guard.
-        if saw_proxmox_provider {
-            assert!(
-                surfaces
-                    .iter()
-                    .any(|surface| surface.surface_id == "proxmox.hosts"),
-                "proxmox.hosts should remain visible after registry admission filtering"
-            );
-        }
+        // Proxmox registrations are feature-invariant (ADR-0032); assert visibility unconditionally.
+        assert!(
+            surfaces
+                .iter()
+                .any(|surface| surface.surface_id == "proxmox.hosts"),
+            "proxmox.hosts should remain visible after registry admission filtering"
+        );
     }
 
     #[test]

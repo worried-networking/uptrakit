@@ -35,15 +35,6 @@ fn every_executor_table_pair_is_registered_with_matching_delivery() {
         !deliveries.is_empty(),
         "green-on-empty: no unified registrations found"
     );
-    // Proxmox controller registrations are legitimately empty whenever the
-    // linked registry was built with agent-infra (any workspace-wide run
-    // unifies it ON via agent-ssh-runtime), and web-api's own cfg! cannot
-    // observe that — so proxmox rows gate on catalog-observed presence, not
-    // a feature flag. Whole-plugin existence is guarded by the proxmox
-    // crate's own smoke test in the bare -p world.
-    let proxmox_present = deliveries
-        .iter()
-        .any(|(s, _, _, _)| s.starts_with("proxmox."));
     for (surface, interaction, method, tier) in CONTROLLER_LOCAL_EXECUTOR_TABLE {
         // Feature-gated plugins: their rows only assert when compiled in.
         let compiled = match *surface {
@@ -51,7 +42,6 @@ fn every_executor_table_pair_is_registered_with_matching_delivery() {
                 cfg!(feature = "notifications-telegram")
             }
             s if s.starts_with("notifications.email") => cfg!(feature = "notifications-email"),
-            s if s.starts_with("proxmox.") => proxmox_present,
             _ => true,
         };
         if !compiled {
@@ -125,15 +115,10 @@ fn every_controller_executor_registration_has_an_executor_table_row() {
 #[test]
 fn known_plugin_handled_members_are_registered() {
     let deliveries = catalog_deliveries().expect("catalog builds");
-    let mut expected = vec![("docker.item-host-actions", "switch-tag")];
-    // Absent by design when the registry is built with agent-infra — see the
-    // `proxmox_present` note in the forward-direction test.
-    if deliveries
-        .iter()
-        .any(|(s, _, _, _)| s.starts_with("proxmox."))
-    {
-        expected.push(("proxmox.hosts", "discover"));
-    }
+    let expected = vec![
+        ("docker.item-host-actions", "switch-tag"),
+        ("proxmox.hosts", "discover"),
+    ];
     for (surface, interaction) in expected {
         assert!(
             deliveries.iter().any(|(s, i, _, k)| s == surface

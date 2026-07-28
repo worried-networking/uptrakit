@@ -61,13 +61,6 @@ impl ProxmoxPlugin {
     }
 }
 
-fn descriptor_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
-    if cfg!(feature = "agent-infra") {
-        return vec![];
-    }
-    proxmox_plugin_surfaces()
-}
-
 pub(crate) fn proxmox_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
     let surfaces = vec![
         proxmox_hosts_surface(),
@@ -1401,7 +1394,7 @@ declare_plugin!(ProxmoxPlugin, ProxmoxConfig, "infrastructure.proxmox", {
     },
     surfaces: {
         provider_id: "plugin.infrastructure.proxmox",
-        registrations: descriptor_plugin_surfaces,
+        registrations: proxmox_plugin_surfaces,
     },
     migrations: __proxmox_migrations,
     agent_migrations: __proxmox_agent_migrations,
@@ -1516,11 +1509,9 @@ mod tests {
             DESCRIPTOR.surfaces.is_some(),
             "proxmox should declare unified surface registrations on the descriptor"
         );
-        // Content assertions below exercise the unguarded builder directly
-        // (not `DESCRIPTOR.surfaces.registrations`, which is gated
-        // empty under `agent-infra` — see
-        // `unified_registrations_pair_every_interaction_with_plugin_handled_delivery`
-        // for that behavior).
+        // Content assertions exercise `proxmox_plugin_surfaces` directly —
+        // the same cfg-free builder wired into `declare_plugin!`, identical
+        // in every feature configuration (ADR-0032).
         let registrations: Vec<_> = proxmox_plugin_surfaces()
             .iter()
             .map(|r| r.to_wire("plugin.infrastructure.proxmox"))
@@ -1937,16 +1928,6 @@ mod tests {
     #[test]
     fn unified_registrations_pair_every_interaction_with_plugin_handled_delivery() {
         use uptrakit_plugin_infrastructure_core::InteractionDeliveryKind;
-
-        if cfg!(feature = "agent-infra") {
-            // `descriptor_plugin_surfaces` is the gated wrapper actually
-            // wired into `declare_plugin!`; `proxmox_plugin_surfaces` itself
-            // is the unguarded raw builder used by the content assertions
-            // below and by other structural tests that must see real data
-            // regardless of feature flags.
-            assert!(descriptor_plugin_surfaces().is_empty());
-            return;
-        }
 
         let registrations = proxmox_plugin_surfaces();
         let mut seen: Vec<(String, String, InteractionDeliveryKind)> = Vec::new();
