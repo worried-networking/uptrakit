@@ -8499,6 +8499,7 @@ dependencies = [
  "tokio",
  "url",
  "utoipa",
+ "uuid",
  "webpki-roots 1.0.8",
  "zeroize",
 ]
