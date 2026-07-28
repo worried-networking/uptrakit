@@ -273,6 +273,34 @@ jobs:
           git commit -m "chore: bump frontend version to $VERSION"
           git push origin "$HEAD_BRANCH"
 
+      - name: Regenerate asyncapi.yaml
+        if: ${{ steps.release-plz.outputs.pr != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_JSON: ${{ steps.release-plz.outputs.pr }}
+        run: |
+          HEAD_BRANCH=$(echo "$PR_JSON" | jq -r '.head_branch')
+          if [ -z "$HEAD_BRANCH" ] || [ "$HEAD_BRANCH" = "null" ]; then
+            echo "no release PR, skipping asyncapi regeneration"
+            exit 0
+          fi
+          git fetch origin "$HEAD_BRANCH"
+          git checkout "$HEAD_BRANCH"
+          # asyncapi.yaml's info.version tracks the uptrakit-wire crate version
+          # (env!("CARGO_PKG_VERSION") in spec_gen.rs), so a release bump makes the
+          # committed document stale. Regenerate on the release PR so the golden
+          # test (asyncapi_yaml_is_up_to_date) stays green. The `schema` feature
+          # alone yields byte-identical output to the --all-features regen-asyncapi.sh
+          # script, without a whole-workspace build.
+          UPDATE_ASYNCAPI=1 cargo test -p uptrakit-wire --features schema asyncapi_yaml_is_up_to_date
+          if git diff --quiet crates/shared/wire/asyncapi.yaml; then
+            echo "asyncapi.yaml already current for this release"
+          else
+            git add crates/shared/wire/asyncapi.yaml
+            git commit -m "chore: regenerate asyncapi.yaml"
+            git push origin "$HEAD_BRANCH"
+          fi
+
   build-frontend:
     needs: release-plz
     if: ${{ needs.release-plz.outputs.released == 'true' }}

@@ -106,6 +106,15 @@ cannot disagree with the code it derives from. Cross-version wire compatibility 
 as before this change. A `schemars` minor-version bump that changes derived output flips the golden test
 red into a reviewable regen diff — caught, not silent.
 
+The document's `info.version` is `env!("CARGO_PKG_VERSION")` for `uptrakit-wire`, so a release-time crate
+version bump also makes the committed `asyncapi.yaml` stale (only the cosmetic version line changes; the
+protocol contract is frozen at `CURRENT_PROTOCOL_VERSION = 1`). Rather than pinning the field to a static
+value, the release pipeline regenerates the document as part of release-PR generation: the `release-pr`
+job in `.github/workflows/release-plz.yml` runs `UPDATE_ASYNCAPI=1 cargo test -p uptrakit-wire --features
+schema asyncapi_yaml_is_up_to_date` on the release branch and commits any resulting diff, mirroring the
+adjacent frontend-version bump step. The golden test therefore stays green on release PRs with no manual
+step (the `--features schema` build yields byte-identical output to the `--all-features` regen script).
+
 ### Standing obligation
 
 Any future custom `Serialize`/`Deserialize` impl on a type reached by the schema derivation (directly or
