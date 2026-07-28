@@ -117,6 +117,25 @@ macro_rules! access_catalog {
                 },
             )+
         ];
+
+        /// Typed constants for every valid built-in action, plus the
+        /// paired `&'static str` action strings (for OpenAPI security
+        /// declarations and the CI scope dictionary, which need
+        /// compile-time strings; consts must be consumed via macro
+        /// expansion, not literal-only attribute slots — spec note).
+        pub mod actions {
+            use crate::access::{Action, Verb};
+
+            use super::Resource;
+
+            $( $(
+                pub const $const_name: Action = Action {
+                    resource: Resource::$variant,
+                    verb: Verb::$verb,
+                };
+                pub const $const_str_name: &str = concat!($res_str, ":", $verb_str);
+            )+ )+
+        }
     };
 }
 
