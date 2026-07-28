@@ -1,7 +1,7 @@
 //! `cargo xtask contribution-monotonicity-check` — ADR-0032 Layer B.
 //! Runs the registry `dump_contributions` example in two feature lanes and
 //! asserts: fingerprint keys ≡ registry [features] table; baseline
-//! fingerprint ≡ EXPECTED_BASELINE_FINGERPRINT; union fingerprint all-true;
+//! fingerprint ≡ expected_baseline_fingerprint(); union fingerprint all-true;
 //! per-plugin contribution supersets; baseline is a PROPER subset (canary).
 
 use std::collections::BTreeMap;
@@ -76,7 +76,7 @@ fn fingerprint_key_violations(
         }
     }
     for key in fingerprint.keys() {
-        if !declared.iter().any(|d| d == key) {
+        if !declared.contains(key) {
             violations.push(format!(
                 "fingerprint carries key `{key}` not declared in registry [features]"
             ));
@@ -117,9 +117,17 @@ fn superset_violations(baseline: &Dump, union: &Dump) -> Vec<String> {
             }
         }
         for (label, base_list, uni_list) in [
-            ("agent interaction", &base.agent_interactions, &uni.agent_interactions),
+            (
+                "agent interaction",
+                &base.agent_interactions,
+                &uni.agent_interactions,
+            ),
             ("migration", &base.migrations, &uni.migrations),
-            ("agent migration", &base.agent_migrations, &uni.agent_migrations),
+            (
+                "agent migration",
+                &base.agent_migrations,
+                &uni.agent_migrations,
+            ),
         ] {
             for id in base_list.iter() {
                 if !uni_list.contains(id) {

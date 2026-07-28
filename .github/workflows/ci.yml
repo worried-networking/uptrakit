@@ -119,7 +119,8 @@ jobs:
       # ADR-0032 Layer B: cross-build contribution superset diff. Two nested
       # cargo builds; baseline uses its own target dir (see xtask module) so
       # it does not thrash the all-features cache.
-      - run: cargo xtask contribution-monotonicity-check
+      - name: Contribution monotonicity check
+        run: cargo xtask contribution-monotonicity-check
 
   backend-test:
     runs-on:
