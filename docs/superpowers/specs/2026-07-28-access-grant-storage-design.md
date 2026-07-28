@@ -249,8 +249,11 @@ Functions (M1.2 surface — M1.6a adds nothing to storage, only handlers):
      exists; grant writes are an infrequent admin path (M1.6a is the only writer) and the cap is an
      anti-abuse soft bound, not a security invariant. Revisit only if a concurrent grant-writer
      appears; do not build locking for it now.
-- `load_grants_for_principal(db, tenant_id: Uuid, user_id: Uuid, role_ids: &[Uuid]) -> Result<Vec<ResolvedGrant>>`
-  — **one** query (batch invariant, no N+1): `Condition::any()` over
+- `load_grants_for_principal(db, tenant_id: Uuid, user_id: Uuid, role_ids: &[Uuid]) -> Result<GrantLoad>`
+  where `GrantLoad { pub grants: Vec<ResolvedGrant>, pub corrupt_skipped: usize }` — the count
+  exists so M1.3's engine can emit the aggregate corruption counter this section mandates below
+  (folded into this contract per the M1.3 review round, 2026-07-28, instead of a cross-spec
+  amendment) — **one** query (batch invariant, no N+1): `Condition::any()` over
   (`subject_type = user` ∧ `subject_id = user_id` ∧ (`tenant_id = ?` ∨ `tenant_id IS NULL`)) ∪
   (`subject_type = role` ∧ `subject_id IS IN role_ids`). Role-subject rows are always
   `tenant_id NULL` by rule 2, and tenant scoping comes from the caller's `user_roles`-derived
@@ -261,8 +264,9 @@ Functions (M1.2 surface — M1.6a adds nothing to storage, only handlers):
   allow-only union, so dropping an allow row can only *shrink* authority — while a whole-call error
   would convert one corrupt role-subject row into a simultaneous lockout of every user holding that
   role, including `access:manage` holders (self-inflicted DoS, no self-service recovery). The skip
-  is loud (error log per row; M1.3 MUST add an aggregate counter/metric when it wires the engine —
-  systemic corruption must not manifest only as a flood of individual denials), never silent.
+  is loud (error log per row; the returned `corrupt_skipped` count exists so M1.3's engine MUST
+  emit an aggregate counter/metric from it — systemic corruption must not manifest only as a flood
+  of individual denials), never silent.
   Whole-call errors are reserved for the query itself failing. **Invariant guard**: the skip is
   fail-closed ONLY while the model is allow-only union — if any deny/exclusion grant semantics are
   ever introduced (none planned; 08-rejected-alternatives rejects them), corrupt-row handling must
@@ -333,7 +337,7 @@ Query module (B rows owned by M1.2):
   role + global user rows in one call; foreign user's/role's rows absent); loud-skip on a
   hand-inserted bad JSON row (test writes malformed JSON via the entity directly — in-crate test
   may bypass the module precisely to prove the read behavior): the call SUCCEEDS, returns the valid
-  rows, and omits the corrupt one (authority shrinks, never errors the principal's whole
+  rows with `corrupt_skipped == 1`, and omits the corrupt one (authority shrinks, never errors the principal's whole
   resolution).
 - `MAX_GRANTS_PER_SUBJECT` enforced at the boundary (insert #201 for one subject rejected;
   count-1 at bound accepted — seed via batch insert, not a 200-iteration loop of module calls).
