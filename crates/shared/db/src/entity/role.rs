@@ -6,11 +6,18 @@ use time::OffsetDateTime;
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
-    #[sea_orm(unique)]
     pub name: String,
     pub description: Option<String>,
     pub is_built_in: bool,
     pub created_at: OffsetDateTime,
+    /// `None` = global role (the eight built-ins); `Some` = tenant-defined
+    /// custom role (creatable from M1.6a). Per-scope name uniqueness is
+    /// enforced by the partial index pair `uix_roles_global_name` /
+    /// `uix_roles_tenant_name`, not a column constraint.
+    ///
+    /// M1.6a note: role deletion must also delete the role's `access_grants`
+    /// rows — `access_grants.subject_id` carries no FK, so nothing cascades.
+    pub tenant_id: Option<Uuid>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -567,6 +567,7 @@ mod tests {
             description: Set(None),
             is_built_in: Set(false),
             created_at: Set(now),
+            tenant_id: Set(None),
         }
         .insert(db)
         .await

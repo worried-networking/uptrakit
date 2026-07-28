@@ -84,6 +84,7 @@ mod m20260516_000001_2fa;
 mod m20260610_000001_service_merge_redirect;
 mod m20260702_000001_hsi_discovery_provenance;
 mod m20260727_000001_plugin_type_id_grammar;
+mod m20260728_000001_access_grants_and_role_scope;
 
 pub struct Migrator;
 
@@ -172,6 +173,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260610_000001_service_merge_redirect::Migration),
             Box::new(m20260702_000001_hsi_discovery_provenance::Migration),
             Box::new(m20260727_000001_plugin_type_id_grammar::Migration),
+            Box::new(m20260728_000001_access_grants_and_role_scope::Migration),
         ]
     }
 }
