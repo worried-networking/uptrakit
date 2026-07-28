@@ -201,7 +201,7 @@ Enums currently annotated with `#[non_exhaustive]`:
 - `Permission`
 - `AccessPreset`
 
-**`uptrakit-internal-wire`:**
+**`uptrakit-wire`:**
 
 - `CloseReason`
 - `ServiceMessage`, `ControllerMessage`
@@ -1018,7 +1018,7 @@ impl FromStr for MyType {
 ### Conventions
 
 - **Error type naming:** `Parse{TypeName}Error` (e.g., `ParsePermissionError`, `ParseMqttTransportError`).
-- **Error derivation:** Use `thiserror::Error` in crates that depend on `thiserror`. In crates without `thiserror` (e.g., `uptrakit-internal-wire`),
+- **Error derivation:** Use `thiserror::Error` in crates that depend on `thiserror`. In crates without `thiserror` (e.g., `uptrakit-wire`),
   implement `Display` and `Error` manually.
 - **Call sites:** Prefer `s.parse::<MyType>()` over explicit `MyType::from_str(s)`.
 - **Fallible conversions with defaults:** Use `s.parse::<MyType>().unwrap_or_default()` when a default is acceptable.

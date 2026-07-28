@@ -218,7 +218,7 @@ cargo test -p uptrakit-scheduler-engine --features oidc
 
 ## Dependencies
 
-The engine depends on `uptrakit-shared-db`, `uptrakit-internal-wire`, `uptrakit-shared-types`,
+The engine depends on `uptrakit-shared-db`, `uptrakit-wire`, `uptrakit-shared-types`,
 `uptrakit-command`, `uptrakit-plugin-infrastructure-core`, and `uptrakit-plugin-infrastructure-registry`.
 It does **not** depend on `uptrakit-web-api`, `uptrakit-nats`, or any controller-specific crate.
 

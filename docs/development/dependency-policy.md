@@ -17,12 +17,12 @@ version number or path locally.
 # Root Cargo.toml
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
-uptrakit-internal-wire = { path = "crates/shared/wire" }
+uptrakit-wire = { path = "crates/shared/wire" }
 
 # crates/foo/Cargo.toml
 [dependencies]
 serde = { workspace = true }
-uptrakit-internal-wire = { workspace = true }
+uptrakit-wire = { workspace = true }
 # adding extra features on top of the workspace definition is allowed:
 tokio = { workspace = true, features = ["fs"] }
 ```

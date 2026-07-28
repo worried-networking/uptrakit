@@ -1135,7 +1135,7 @@ When adding a new plugin, always implement both directions.
 
 The agent crate imports `uptrakit-command` for shell execution and `uptrakit-plugin-infrastructure-registry` for plugin dispatch -- it does not depend
 on `uptrakit-plugin-infrastructure-core` directly. The web-api crate imports `uptrakit-plugin-infrastructure-registry` (not
-`uptrakit-plugin-infrastructure-core`). The wire protocol crate (`uptrakit-internal-wire`) imports `PluginTypeId`, `ReleaseAsset`, and `ReleaseInfo`
+`uptrakit-plugin-infrastructure-core`). The wire protocol crate (`uptrakit-wire`) imports `PluginTypeId`, `ReleaseAsset`, and `ReleaseInfo`
 directly from `uptrakit-shared-types`, keeping it free of plugin-implementation dependencies.
 
 The update step can always be overridden by a custom shell script, regardless of plugin.

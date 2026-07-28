@@ -214,7 +214,7 @@ Each service sends a `BTreeSet<Capability>` in its `EnrollPayload` during enroll
 ### ServiceProfile (derived, never stored)
 
 `ServiceProfile` is a runtime-only enum derived from a service's capability set via `ServiceProfile::from_capabilities()` (defined in
-`uptrakit-internal-wire`). It drives controller-side behavioral defaults (ping interval, shutdown timeout, human-readable label) but is never
+`uptrakit-wire`). It drives controller-side behavioral defaults (ping interval, shutdown timeout, human-readable label) but is never
 persisted to the database.
 
 | Profile         | Key capability      | Typical services       | Default ping | Shutdown timeout |

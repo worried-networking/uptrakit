@@ -8,7 +8,7 @@ description: SecretString wrapper, AES-256-GCM envelope encryption, master key h
 
 ## SecretString
 
-`SecretString` (defined in `crates/shared/types/src/secret_string.rs`, re-exported by `uptrakit-internal-wire` and
+`SecretString` (defined in `crates/shared/types/src/secret_string.rs`, re-exported by `uptrakit-wire` and
 `uptrakit-web-api-types`) is a newtype wrapper that prevents accidental logging of sensitive values:
 
 - `Debug` output: `SecretString(***)`

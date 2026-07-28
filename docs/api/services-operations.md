@@ -65,7 +65,7 @@ service is using the profile-based default rather than a per-service override.
 
 - **Wire protocol**: `ServiceSettingsPayload.ping_interval` is a required `Duration` field serialized as
   a whole-second `u32` via `#[serde(with = "duration_seconds")]`. The `duration_seconds` module in
-  `uptrakit-internal-wire` converts between `std::time::Duration` and `u32` seconds on the wire.
+  `uptrakit-wire` converts between `std::time::Duration` and `u32` seconds on the wire.
   `ServiceSettingsPayload.tenant_id` is an `Option<Uuid>` present for tenant-scoped services (agents, SSH
   agents) and absent for system services.
 - **SDK event loop**: The ping timer starts as `None` and is created when the first `ServiceSettings`

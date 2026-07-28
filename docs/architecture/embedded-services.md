@@ -123,7 +123,7 @@ agent operations (discovery, updates) are tenant-scoped. The feature requires si
 The embedded agent communicates with the controller through `EmbeddedTransport` (in-process mpsc
 channels). Messages flow through the same `MessageProcessor` pipeline as WebSocket-connected
 services, so the controller applies identical validation, routing, and side effects. The
-`ServiceTransport` trait (defined in `uptrakit-internal-wire`) abstracts the transport layer,
+`ServiceTransport` trait (defined in `uptrakit-wire`) abstracts the transport layer,
 allowing `uptrakit-agent-core` to operate identically over both WebSocket and in-process channels.
 
 ### Yield behaviour (same-host coexistence)
