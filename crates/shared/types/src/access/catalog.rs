@@ -9,11 +9,13 @@ use super::verb::Verb;
 
 /// One built-in resource row of the catalog.
 ///
-/// `#[non_exhaustive]` — rows will gain metadata fields. Documented
-/// exception to the required-constructor rule
-/// (`docs/development/coding-standards.md`): rows are static data emitted
-/// only by the in-crate catalog macro; a foreign `CatalogEntry` would be a
-/// fake catalog row, so no constructor is provided — consumers read fields.
+/// `#[non_exhaustive]` — rows will gain metadata fields. The
+/// required-constructor rule (`docs/development/coding-standards.md`
+/// §`#[non_exhaustive]` on Public Structs) is deliberately excepted here,
+/// as documented and justified in the access-types design spec: rows are
+/// static data emitted only by the in-crate catalog macro; a foreign
+/// `CatalogEntry` would be a fake catalog row, so no constructor is
+/// provided — consumers read fields.
 #[non_exhaustive]
 #[derive(Debug)]
 pub struct CatalogEntry {
