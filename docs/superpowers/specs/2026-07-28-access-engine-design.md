@@ -84,10 +84,19 @@ docs + ADR + CONTEXT.md vocabulary (M1.9); selector matching, `TargetRef::HostSo
   `ActionPattern` + `matches(&Action)` (incl. `system.`-exclusion and dynamic-namespace semantics),
   `Selector`, bounds.
 - **M1.2** (`uptrakit_shared_db::access_grants`):
-  `load_grants_for_principal(db, tenant_id: Uuid, user_id: Uuid, role_ids: &[Uuid]) -> Result<Vec<ResolvedGrant>>`
-  — one query, fail-closed `CorruptRow` on unparseable rows; `ResolvedGrant { id, tenant_id,
+  `load_grants_for_principal(db, tenant_id: Uuid, user_id: Uuid, role_ids: &[Uuid]) -> Result<GrantLoad>`
+  with `GrantLoad { grants: Vec<ResolvedGrant>, corrupt_skipped: usize }` — one query;
+  **corrupt rows are loud-skipped, never call-fatal** (per-row `tracing::error!`; fail-closed under
+  allow-only union — dropping an allow row only shrinks authority; whole-call errors are reserved
+  for the query itself failing); the `corrupt_skipped` count feeds the engine's aggregate metric
+  below. (The count-bearing return was folded into the M1.2 spec during this spec's review round,
+  2026-07-28 — no cross-spec amendment remains outstanding.) `ResolvedGrant { id, tenant_id,
   subject, patterns: Vec<ActionPattern>, selector: Selector }`. Any drift found at plan time goes
   back into the M1.2 plan, not absorbed silently here.
+- Dynamic-ness of a concrete `Action` (authorize step 1) derives from M1.1's existing accessors —
+  `action.resource()` then `plugin_type().is_some() || surface_id().is_some()` (or a
+  variant-sealed `Plugin(..)`/`Surface(..)` rest-pattern match, which M1.1 permits externally) —
+  no M1.1 surface amendment needed.
 - `user_roles` is `TenantScoped` (`crates/shared/db/src/entity/tenant_scoped.rs`); role-ID loading
   goes through `TenantDb` per the tenant-safe-query invariant.
 
@@ -133,7 +142,7 @@ fn in the module.
 ```rust
 pub struct AccessEngine {
     db: DatabaseConnection,
-    cache: moka::sync::Cache<(Uuid /* user */, Uuid /* tenant */), Arc<CachedAuthority>>,
+    cache: moka::sync::Cache<(Uuid /* tenant */, Uuid /* user */), Arc<CachedAuthority>>,  // key order = context() param order
     registry: Option<Arc<dyn DynamicActionRegistry>>,
     ttl: Duration,                       // default ACCESS_CACHE_TTL = 60 s
 }
@@ -145,6 +154,10 @@ pub struct AccessContext {
     authority: Arc<CachedAuthority>,
     scope: Option<Vec<ActionPattern>>,   // None = credential with no scope concept (pre-M3 session JWT)
 }
+// rustdoc: point-in-time snapshot. Per-request rebuild (the M1.4a contract) covers ordinary
+// handlers; a long-lived streaming holder (SSE/WS) IS one request — it needs periodic
+// re-`context()` or an invalidation-aware refresh, which per-request rebuild does not provide.
+// Carried as an M1.4a/M1.5 residual for the streaming enforcement sites.
 ```
 
 Constructor `AccessEngine::new(db)` + builder-style `with_registry(...)` / test-only TTL/capacity
@@ -180,6 +193,28 @@ never an empty-but-authorized context (C12; the HTTP-500 mapping is M1.4a's midd
 "Database Error Propagation in Auth Handlers" rule). Nothing is cached on error. Concurrent misses
 may duplicate the load (contrarian decision 5 — accepted, documented in rustdoc). `scope` is
 per-request state layered on the cached core, per `07` §Caching.
+
+**Corrupt-row observability** (discharges M1.2's "M1.3 MUST add an aggregate counter/metric"
+directive): when the loader reports a non-zero corrupt-skip count, `context()` emits
+`metrics::counter!("uptrakit_access_corrupt_grant_rows_skipped_total").increment(count)` — name
+per the repo metric idiom (`uptrakit_` prefix, `_total` suffix; precedent
+`crates/ui/surface-proxy/src/registry.rs:1064`), **deliberately label-free**, a stated deviation
+from the every-counter-labeled precedent set: the only per-call candidates (user/tenant IDs) are
+unbounded-cardinality labels — the github.rs counters label with closed sets
+(`provider`/`status`/`reason`/`consumer`), and even the surface-proxy precedent's
+`surface`/`interaction` labels are registration-time-bounded rather than per-principal — while
+this counter has a single fixed cause, already encoded in its name, so a constant label would be
+shape-mimicry without signal. Per-principal detail rides the
+companion aggregate `tracing::warn!` naming the principal. A second counter,
+`metrics::counter!("uptrakit_access_context_loads_total", "reason" => "miss" | "stale")`
+(bounded two-value label, the github.rs `reason` style), increments on every cache-missing/stale
+successful `context()` load (error-path loads do not increment — nothing was cached). A `"miss"`
+alone cannot distinguish flush-induced reloads from cold-start loads, so its companion
+`metrics::counter!("uptrakit_access_invalidations_total", "origin" => "local" | "remote")`
+increments in `invalidate_subjects`/`apply_remote_invalidation` — correlating the two attributes
+reload bursts to flushes, the evidence the M2 granular-invalidation deferral is gated on. Systemic corruption thus surfaces as a
+counter, not only a flood of per-row error logs; the skipped rows are already absent from the
+returned authority (fail-closed shrink; M1.2's contract).
 
 ### Decision (`authorize()` / `visibility()`)
 
@@ -225,8 +260,15 @@ pub fn apply_remote_invalidation(&self, payload: &AccessInvalidatedPayload)
 ```
 
 Both flush the whole cache (`cache.invalidate_all()` — contrarian decision 1) and `tracing::debug!`
-the subject lists. moka's `invalidate_all` guarantees subsequent `get`s do not return invalidated
-entries — the local "effect on next request" half of C10 holds immediately. The engine does **not**
+the subject lists. moka's `invalidate_all` guarantees subsequent `get`s do not return entries
+inserted **before** the call — so the local "effect on next request" half of C10 holds for every
+cached entry, with one documented race: a load already in flight when the flush fires may insert
+pre-mutation authority *after* it, serving stale data until the TTL backstop. Bounded by the same
+60 s envelope already accepted for a lost NATS event; the claim is stated as "reflected on the
+next request absent a concurrent in-flight load, TTL-bounded otherwise" in the rustdoc, and C10's
+single-threaded test asserts the former, not literal immediacy. (An insert-time
+invalidation-generation stamp would close the race — rejected as disproportionate machinery for a
+window the TTL already bounds.) The engine does **not**
 publish NATS: mutation sites (M1.6a) call `invalidate_subjects` locally *and* publish
 `ControllerMessage::AccessInvalidated` through the existing `publish_controller_event` path
 (`crates/ui/controller-core/src/notification.rs:157`, `TokenRevoked` template → JetStream subject
@@ -251,7 +293,8 @@ dead code); stated honestly rather than pre-wiring a consumer.
 
 ## Wire: `ControllerMessage::AccessInvalidated`
 
-Following the `TokenRevoked` sibling shape exactly (`crates/shared/wire/src/payloads.rs:1072`):
+Following the `TokenRevoked` sibling shape exactly (`TokenRevokedPayload` in
+`crates/shared/wire/src/payloads.rs` — re-locate at plan time, line refs drift):
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -273,13 +316,19 @@ pub struct AccessInvalidatedPayload {
   catch-all, which would silently skip bounds) checking both vectors.
 - In-crate exhaustive-guardrail updates (contrarian decision 4, all compile- or test-enforced):
   `classify_controller_message_variant` (handler-owned, `TokenRevoked` group),
-  `variant_discriminant_name`, `make_all_controller_message_variants`, variant-catalog test; plus
+  `variant_discriminant_name`, `make_all_controller_message_variants`, variant-catalog test —
+  which hardcodes a total-count assertion ("exactly 38 entries", `tests.rs` ~3130) that must bump
+  in the same change (registry-size-guard class: invisible to compile/clippy, fails only the full
+  test run); plus
   an explicit test that `is_nats_publishable()` returns `true` for it (it must ride NATS; the
   deny-list is credential-oriented).
 - `scripts/regen-asyncapi.sh` → commit `crates/shared/wire/asyncapi.yaml`
   (`asyncapi_yaml_is_up_to_date` golden gate, schema feature world).
-- `docs/api/wire-protocol.md`: document the variant beside `TokenRevoked` (standing rule: wire
-  changes → AsyncAPI regen **and** wire-protocol doc).
+- `docs/api/wire-protocol.md`: add an `access_invalidated` subsection under
+  `## Controller–Controller Messages (NATS only)` (the section documenting
+  `broadcast_admin_event`/`workload_claim_announcement`; note `TokenRevoked` itself is absent from
+  this doc — the NATS-only section is the anchor, not a TokenRevoked entry). Standing rule: wire
+  changes → AsyncAPI regen **and** wire-protocol doc.
 
 ## Manifest changes
 
@@ -289,6 +338,9 @@ pub struct AccessInvalidatedPayload {
   `moka = { workspace = true, features = ["sync"] }` — the `sync` cache is a non-default feature
   in moka 0.12 (verify the exact feature name against the pinned crate at plan time); features
   declared at the consuming crate like the sibling `uuid`/`serde` convention.
+- `[dependencies]`: `metrics = { workspace = true }` (already registered at root, `0.24`) — the
+  corrupt-row aggregate counter; controller-core does not carry it today. Both new manifest lines
+  follow the file's column-aligned `= { workspace = true }` formatting.
 - `[dev-dependencies]`: `sea-orm` gains the `mock` feature (C13's transaction-log assertion);
   existing dev-deps already carry `uptrakit-shared-db` with `migration, db-sqlite` + sqlx-sqlite +
   tokio `macros, rt, time` (verified 2026-07-28) — no other test-infra additions.
@@ -305,7 +357,11 @@ module (grants) and entities (principals). Anti-vacuity rules applied throughout
 cache-hit assertions accompany staleness tests, and deny tests assert the *specific* `DenyReason`
 (standing rule: a 403 for the wrong reason is a red test).
 
-§C rows owned by M1.3 (C2/C3/C6/C8/C16 and the `Filter` arm of C9 are M2.x):
+§C rows owned by M1.3 — C7 unregistered-half only, C9 M1 arms only (C2/C3/C6/C8/C16, C9's
+`Filter` arm, and C7's unparseable-string half — a boundary parse deny, M1.4a/M1.5 — are later
+tasks'). Cache-implementation-agnosticism constraint: tests may assert first-party
+TTL/staleness and invalidation effects, **never** eviction policy/ordering/`max_capacity`
+behavior — that keeps the sanctioned `parking_lot` hand-roll fallback a drop-in swap.
 
 - **C1**: allow via direct user grant; via role-inherited grant; via wildcard pattern — three
   separate cases.
@@ -324,7 +380,16 @@ cache-hit assertions accompany staleness tests, and deny tests assert the *speci
   via grant mutation not yet visible); `advance(31 s)` → stale, reload, mutation visible. Never a
   real sleep.
 - **C12**: resolution against a broken DB (closed/absent-table connection) → `Err`; assert it is
-  an error, not an empty-grants `Ok` (fail-closed, no `unwrap_or_default` shape anywhere).
+  an error, not an empty-grants `Ok` (fail-closed, no `unwrap_or_default` shape anywhere). Row
+  corruption is deliberately NOT this row's territory (M1.2 contract: loud-skip): a companion test
+  seeds one corrupt + one valid grant row and asserts `context()` succeeds with only the valid
+  grant's authority — the skip shrinks, never errors, never widens. The counter emissions
+  themselves (corrupt-rows, context-loads, and invalidations alike) are thin wrappers over
+  already-asserted state transitions and go unasserted — named residual, not silent. No metrics-recorder harness exists in-repo; the one counter-testability
+  precedent (`github.rs`'s `RuntimeMetrics` `AtomicU64` mirror + `#[cfg(test)]` snapshot,
+  `crates/ui/web-api/src/global_providers/github.rs:89`) is deliberately not adopted — a parallel
+  mirror struct for a single fixed-cause counter is disproportionate machinery; revisit if the
+  engine grows more metrics.
 - **C13**: `MockDatabase` (sea-orm `mock` feature) principal with 5 roles → transaction log
   records exactly **2** statements (roles, grants) — no per-role queries, no stray existence
   probes. Correctness of the real SQL shape is covered by the SQLite tests; this row pins the
@@ -363,6 +428,7 @@ cargo check  --all-features            # needs frontend/build (embed-frontend)
 cargo clippy --all-targets --all-features
 cargo test   --all-features
 cargo deny check                       # new dep: moka
+markdownlint --config .markdownlint.json '**/*.md'   # wire-protocol.md + this spec change
 ```
 
 `scripts/regen-asyncapi.sh` runs in the same task as the wire change (golden gate).
@@ -380,7 +446,8 @@ name).
   order, cache/TTL design (why not moka expiry), invalidation contract (flush-all semantics, who
   publishes), dark-ship state (constructed in M1.4a), pointer at
   `.superpowers/authn-and-authz-refactoring/07-decision-and-enforcement.md`.
-- `docs/api/wire-protocol.md`: `AccessInvalidated` section beside `TokenRevoked`.
+- `docs/api/wire-protocol.md`: `access_invalidated` subsection under
+  `## Controller–Controller Messages (NATS only)`.
 - `crates/shared/wire/asyncapi.yaml`: regenerated, committed (never hand-edited — ADR-0029).
 - **No canonical security-doc/ADR/CONTEXT.md updates in M1.3 — deliberate deferral**: the engine
   is dark until M1.4a; `docs/security/auth-and-authorization.md` + ADR + vocabulary land in M1.9
@@ -421,4 +488,7 @@ deny audit Events (M1.6b); `me`/JWT-claims swap + frontend action strings (M1.7)
 `Permission`/extractor/enum-mirror-table removal (M1.8); canonical docs + ADR + CONTEXT.md
 vocabulary (M1.9); selector/target matching beyond `All`, `TargetRef::HostSoftwareItem`,
 `Visibility::Filter` production, visibility-aware `TenantDb` queries, granular cache invalidation
-(M2.x, granular invalidation additionally gated on profiling evidence).
+(M2.x, granular invalidation additionally gated on profiling evidence — now producible via the
+`uptrakit_access_context_loads_total` counter). M1.6a residual: validate the "grant/role mutations
+are rare" flush-all assumption against real role-assignment churn (bulk assignment flushes the
+whole per-instance cache per mutation) before wiring the publishers.
