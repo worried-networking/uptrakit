@@ -30,6 +30,7 @@ rustls = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["net"], optional = true }
 webpki-roots = { workspace = true, optional = true }
 url = { workspace = true }
+uuid = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
 husky-rs = { workspace = true }

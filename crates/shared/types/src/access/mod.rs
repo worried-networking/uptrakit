@@ -12,6 +12,9 @@
 //! Design: `docs/superpowers/specs/2026-07-28-access-types-core-design.md`
 //! and `.superpowers/authn-and-authz-refactoring/05-action-model.md`.
 
+pub mod bounds;
+mod selector;
 mod verb;
 
+pub use selector::{Selector, SelectorSupport, SelectorValidationError};
 pub use verb::{ParseVerbError, Verb};
