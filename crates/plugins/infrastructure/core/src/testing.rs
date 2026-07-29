@@ -266,3 +266,114 @@ impl InfraActionInvoker for RecordingActionInvoker {
         })
     }
 }
+
+/// Synthetic Instance-scoped, surface-bearing plugin fixture (spec 2026-07-27 §5.1).
+///
+/// Consumed by the catalog enablement guard tests and by web-api's
+/// effective-enablement route tests. Test-local only: it is never listed in
+/// the registry crate's `all_descriptors()`, so ADR-0032 monotonicity guards
+/// (which read descriptor-level builders) never see it.
+pub mod instance_surface_fixture {
+    #![expect(
+        clippy::expect_used,
+        reason = "infallible literal surface ID and value constructions; panic would indicate a programming error in the surface manifest"
+    )]
+
+    use uptrakit_surfaces as surfaces;
+
+    use crate::descriptor::{
+        ConfigModel, PluginFamily, PluginScope, SurfaceActionContext, SurfaceActionError,
+    };
+    use crate::{
+        InteractionDelivery, PluginSurface, PluginSurfaceRegistration, RegisteredInteraction,
+    };
+
+    /// Plugin type id of the fixture.
+    pub const TYPE_ID: &str = "__test_instance_surface_plugin";
+    /// Wire provider id declared on the fixture's surfaces arm.
+    pub const PROVIDER_ID: &str = "plugin.test-instance-surface";
+    /// Surface id of the fixture's single surface.
+    pub const SURFACE_ID: &str = "test-instance.surface";
+    /// Interaction id of the fixture's single `PluginHandled` interaction.
+    pub const INTERACTION_ID: &str = "ping";
+
+    fn ping_handler<'a>(
+        _ctx: &'a SurfaceActionContext<'a>,
+        _params: serde_json::Value,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = std::result::Result<serde_json::Value, SurfaceActionError>,
+                > + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async { Ok(serde_json::json!({ "pong": true })) })
+    }
+
+    fn fixture_surface_descriptor() -> surfaces::SurfaceDescriptor {
+        surfaces::SurfaceDescriptor::builder()
+            .surface_id(surfaces::SurfaceId::new(SURFACE_ID).expect("literal surface id is valid"))
+            .label("Test Instance Surface")
+            .priority(100)
+            .slot(surfaces::SLOT_SETTINGS_TABS)
+            .scope(surfaces::Scope::Global)
+            .targeting(surfaces::Targeting::Universal)
+            .provider_kind(surfaces::ProviderKind::Plugin)
+            .required_capabilities(surfaces::CapabilitySet::from_capabilities([
+                surfaces::Capability::TextBlockNode,
+                surfaces::Capability::MutationAction,
+            ]))
+            .root_node(surfaces::SurfaceNode::TextBlock {
+                text: "ok".to_string(),
+            })
+            .build()
+    }
+
+    fn registrations() -> Vec<PluginSurfaceRegistration> {
+        vec![PluginSurfaceRegistration {
+            surfaces: vec![PluginSurface {
+                descriptor: fixture_surface_descriptor(),
+                interactions: vec![RegisteredInteraction::new(
+                    surfaces::InteractionDescriptor::new(
+                        surfaces::InteractionId::new(INTERACTION_ID)
+                            .expect("literal interaction id is valid"),
+                        surfaces::InteractionKind::MutationAction,
+                        "Ping",
+                        surfaces::InteractionTransport::ControllerLocal,
+                    ),
+                    InteractionDelivery::PluginHandled(ping_handler),
+                )],
+                data_sources: vec![],
+            }],
+        }]
+    }
+
+    #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+    struct Config;
+
+    impl crate::PluginConfig for Config {}
+
+    #[expect(
+        dead_code,
+        reason = "constructed by declare_plugin! generated code; not directly instantiated in tests"
+    )]
+    struct Plugin;
+
+    crate::declare_plugin!(
+        Plugin,
+        Config,
+        TYPE_ID,
+        {
+            display_name: "Test Instance Surface Plugin",
+            family: PluginFamily::Enhancement,
+            config_model: ConfigModel::None,
+            scope: PluginScope::Instance,
+            roles: [],
+            surfaces: {
+                provider_id: "plugin.test-instance-surface",
+                registrations: registrations,
+            },
+        }
+    );
+}

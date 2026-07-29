@@ -441,9 +441,23 @@ impl PluginSurfaceActionOps for PluginCatalog {
 }
 
 impl PluginSurfaceOps for PluginCatalog {
+    /// Wire surface registrations for every plugin the boot catalog
+    /// constructed. Instance-scoped plugins that were boot-disabled are
+    /// skipped — registration and dispatch derive from the same boot
+    /// decision, so a boot-disabled plugin can never surface a page whose
+    /// interactions have no dispatch entry (ADR-0033).
+    ///
+    /// ADR-0032 coordination: monotonicity guards must keep reading the
+    /// descriptor-level builders (`(ops.registrations)()` /
+    /// `all_descriptors()`), never this filtered runtime accessor — pointing
+    /// a presence guard here would let the boot gate silently defeat it.
     fn surface_registrations(&self) -> Vec<uptrakit_surfaces::SurfaceRegistration> {
         self.descriptors
             .values()
+            .filter(|descriptor| {
+                descriptor.scope != PluginScope::Instance
+                    || self.instance_states.enabled(descriptor.type_id)
+            })
             .filter_map(|descriptor| descriptor.surfaces.map(|ops| (ops, (ops.registrations)())))
             .flat_map(|(ops, registrations)| {
                 registrations
@@ -1828,5 +1842,108 @@ mod tests {
             1,
             "enabled instance-scoped plugin must construct lifecycle singleton"
         );
+    }
+
+    #[cfg(feature = "testing")]
+    mod instance_enablement_guard {
+        use super::*;
+        use crate::testing::instance_surface_fixture as fixture;
+
+        fn build(states: InstancePluginStates) -> PluginCatalog {
+            PluginCatalog::new(
+                vec![&fixture::DESCRIPTOR],
+                &CatalogConfig::default(),
+                states,
+            )
+            .expect("catalog should build with the fixture descriptor")
+        }
+
+        /// §3.3 guard: registration ⊆ dispatch. Every `PluginHandled`
+        /// interaction that `surface_registrations()` exposes must have a
+        /// `surface_dispatch` entry under the same
+        /// `(surface, action, method)` key.
+        #[test]
+        fn boot_enabled_fixture_registrations_are_dispatchable() {
+            let catalog = build(InstancePluginStates::from_pairs([(fixture::TYPE_ID, true)]));
+
+            let handled: Vec<_> = catalog
+                .interaction_deliveries()
+                .into_iter()
+                .filter(|(_, _, _, kind)| *kind == InteractionDeliveryKind::PluginHandled)
+                .collect();
+            assert!(
+                handled
+                    .iter()
+                    .any(|(surface, ..)| surface == fixture::SURFACE_ID),
+                "fixture must contribute a PluginHandled interaction: {handled:?}"
+            );
+
+            let registered: Vec<(String, String, uptrakit_surfaces::InteractionHttpMethod)> =
+                catalog
+                    .surface_registrations()
+                    .into_iter()
+                    .flat_map(|registration| registration.surfaces)
+                    .flat_map(|surface| {
+                        let surface_id = surface.descriptor.surface_id.as_str().to_string();
+                        surface
+                            .interactions
+                            .into_iter()
+                            .map(move |interaction| {
+                                let method = interaction.effective_http_method();
+                                (
+                                    surface_id.clone(),
+                                    interaction.interaction_id.as_str().to_string(),
+                                    method,
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .collect();
+
+            for (surface_id, interaction_id, method, _) in &handled {
+                assert!(
+                    registered
+                        .iter()
+                        .any(|(s, i, m)| { s == surface_id && i == interaction_id && m == method }),
+                    "PluginHandled interaction absent from surface_registrations(): \
+                     {surface_id}/{interaction_id}"
+                );
+                let key = (
+                    surface_id.clone(),
+                    interaction_id.clone(),
+                    method.as_str().to_string(),
+                );
+                assert!(
+                    catalog.surface_dispatch.contains_key(&key),
+                    "registration without dispatch entry: {key:?}"
+                );
+            }
+        }
+
+        /// §3.3 root fix: a boot-disabled Instance plugin contributes zero
+        /// surface registrations, while its descriptor stays in the index
+        /// (the listing predicate needs it).
+        #[test]
+        fn boot_disabled_fixture_contributes_no_registrations_but_stays_indexed() {
+            let catalog = build(InstancePluginStates::all_disabled());
+
+            assert!(
+                catalog.surface_registrations().iter().all(|registration| {
+                    registration.provider.provider_id != fixture::PROVIDER_ID
+                }),
+                "boot-disabled fixture must not contribute surface registrations"
+            );
+            assert!(
+                catalog
+                    .get(&PluginTypeId::from_static(fixture::TYPE_ID))
+                    .is_some(),
+                "descriptor index must keep the boot-disabled fixture"
+            );
+            assert_eq!(
+                fixture::DESCRIPTOR.surfaces.map(|ops| ops.provider_id),
+                Some(fixture::PROVIDER_ID),
+                "fixture PROVIDER_ID const must match the declared surfaces arm"
+            );
+        }
     }
 }
