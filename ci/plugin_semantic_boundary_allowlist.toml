@@ -57,3 +57,18 @@ rule_id = "plugin-core-import"
 match_kind = "import_path"
 match_value = "uptrakit_plugin_infrastructure_core::service_metadata"
 reason = "embedded controller needs service_metadata for runtime metadata; this is a stable, non-plugin-specific module"
+
+# web-api/test_harness/mod.rs: the shared REST test harness builds a synthetic
+# Instance-scoped surface fixture for effective-enablement route tests, importing
+# it from plugin-infrastructure-core's `testing` module (dev-dependency, testing
+# feature). The whole `test_harness` module is `#[cfg(all(test, feature = "db-sqlite"))]`
+# (lib.rs), so this import never compiles into the production controller binary — but
+# the boundary scanner's test-only path heuristic only recognizes `tests`/`integration_tests`
+# dirs and the cfg gate lives on the parent `mod` declaration, so it misclassifies the file
+# as production. Test-only fixture wiring; no plugin-specific types cross into production code.
+[[entries]]
+path = "crates/ui/web-api/src/test_harness/mod.rs"
+rule_id = "plugin-core-import"
+match_kind = "import_path"
+match_value = "uptrakit_plugin_infrastructure_core::testing"
+reason = "test-only harness (cfg(all(test, feature=db-sqlite))) imports the synthetic surface fixture from plugin-infrastructure-core::testing; never compiled into production binary; scanner misses the parent-mod cfg gate"

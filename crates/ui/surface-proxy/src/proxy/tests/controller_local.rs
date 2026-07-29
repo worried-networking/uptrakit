@@ -695,7 +695,7 @@ async fn invoke_allows_undeclared_body_key_to_pass_through() {
     assert!(response.success);
 }
 
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn invoke_denies_plugin_controller_local_interaction_without_provider_visibility() {
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     registry
