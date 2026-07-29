@@ -39,7 +39,8 @@ than inventing a new layout.
 
 Handlers must declare only the focused sub-state(s) they actually need, not
 `State<Arc<AppState>>`. The available sub-states — `DbState`, `AuthState`, `CertState`,
-`BroadcastState`, `OidcState`, `AuditEmitterState`, `PluginOpsState`, `GlobalProvidersState` — are
+`BroadcastState`, `OidcState`, `AuditEmitterState`, `PluginOpsState`, `GlobalProvidersState`,
+`AccessState` (action-extractor access to the `AccessEngine`) — are
 defined and wired in `src/app_state.rs`; read that file rather than relying on a count here, since
 new sub-states get added over time. Most sub-states implement `FromRef<Arc<AppState>>` directly in
 `app_state.rs`; `DbState` and `AuthState` instead come from blanket generic

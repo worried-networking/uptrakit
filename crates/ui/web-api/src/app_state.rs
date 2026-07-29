@@ -147,6 +147,11 @@ pub struct AuditEmitterState(pub uptrakit_audit_log::AuditEmitter);
 #[derive(Clone)]
 pub struct PluginOpsState(pub Arc<dyn PluginOps>);
 
+/// Focused sub-state handing the action extractors the [`AccessEngine`]
+/// (`crates/ui/web-api/src/middleware/action.rs`).
+#[derive(Clone)]
+pub struct AccessState(pub Arc<uptrakit_controller_core::access::AccessEngine>);
+
 /// Focused Axum sub-state for host-owned global provider runtimes.
 #[derive(Clone)]
 pub struct GlobalProvidersState(pub Arc<crate::global_providers::GlobalProviders>);
@@ -335,6 +340,10 @@ pub struct AppState {
     /// Defaults to [`ControllerUpdateDispatcher`] wired from the state's own fields.
     /// Override via [`AppStateBuilder::update_dispatcher`] to inject a test double.
     pub update_dispatcher: Arc<dyn uptrakit_controller_core::update::UpdateDispatcher>,
+    /// Grant-based authorization engine (M1.3). Constructed without a
+    /// dynamic-action registry until M1.5; consulted by the M1.4a action
+    /// extractors via [`AccessState`].
+    pub access_engine: Arc<uptrakit_controller_core::access::AccessEngine>,
     /// Snapshot of instance-scoped plugin enable state and configuration.
     ///
     /// Loaded once at boot from `instance_plugin_setting` and updated atomically
@@ -1023,6 +1032,10 @@ impl AppStateBuilder {
             .recent_reload_events_rx
             .unwrap_or_else(|| tokio::sync::watch::channel(Vec::new()).1);
 
+        let access_engine = Arc::new(uptrakit_controller_core::access::AccessEngine::new(
+            db.clone(),
+        ));
+
         Ok(AppState {
             db: DbState::new(db),
             cert: CertState {
@@ -1141,6 +1154,7 @@ impl AppStateBuilder {
                 None
             },
             update_dispatcher,
+            access_engine,
             instance_plugin_snapshot: self.instance_plugin_snapshot.unwrap_or_else(|| {
                 Arc::new(arc_swap::ArcSwap::from_pointee(
                     uptrakit_web_api_queries::instance_plugin_settings::InstancePluginSnapshot::empty(),
@@ -1266,6 +1280,12 @@ impl FromRef<Arc<AppState>> for AuditEmitterState {
 impl FromRef<Arc<AppState>> for PluginOpsState {
     fn from_ref(state: &Arc<AppState>) -> Self {
         PluginOpsState(state.plugin.plugin_ops.clone())
+    }
+}
+
+impl FromRef<Arc<AppState>> for AccessState {
+    fn from_ref(state: &Arc<AppState>) -> Self {
+        AccessState(state.access_engine.clone())
     }
 }
 

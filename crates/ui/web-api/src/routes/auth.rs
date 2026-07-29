@@ -1031,6 +1031,9 @@ mod tests {
 
         Arc::new(AppState {
             db: crate::app_state::DbState::new(db.clone()),
+            access_engine: Arc::new(uptrakit_controller_core::access::AccessEngine::new(
+                db.clone(),
+            )),
             cert: crate::app_state::CertState {
                 ca_snapshot: ca_rx,
                 ca_key_store,
