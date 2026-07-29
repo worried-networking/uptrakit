@@ -1,0 +1,528 @@
+//! `AccessEngine` — the single access decision point (PDP), M1.3.
+//!
+//! **Decision rule:** `Allow` iff grant ∧ scope ∧ selector all pass, in the
+//! normative check order: dynamic-action registry → grant match → token
+//! scope → target/selector (see [`AccessEngine::authorize`]).
+//!
+//! **Cache/TTL design:** bounded `moka::sync::Cache` keyed `(tenant_id,
+//! user_id)` with a **first-party read-time staleness check** (60 s), not
+//! moka `time_to_live` — moka's quanta-based expiry clock is unreachable by
+//! `tokio::time::advance`, so the backstop would be untestable and asserting
+//! it would test upstream behavior. `context()` treats a hit older than the
+//! TTL as a miss and reloads; a stale entry that is never read again sits
+//! harmlessly until size eviction.
+//!
+//! **Invalidation contract:** grant/role mutation sites (M1.6a) call
+//! [`AccessEngine::invalidate_subjects`] locally and publish
+//! `ControllerMessage::AccessInvalidated` through the existing
+//! `publish_controller_event` path; remote instances route the payload to
+//! [`AccessEngine::apply_remote_invalidation`] via the M1.4a
+//! `deliver_controller_event` arm. Both flush the whole cache. The 60 s TTL
+//! backstop covers lost events.
+//!
+//! **Dark-ship state:** library-complete in M1.3 with zero production
+//! construction — M1.4a constructs the engine in `AppState` and builds
+//! [`AccessContext`] in `require_auth`.
+//!
+//! Full design: `.superpowers/authn-and-authz-refactoring/07-decision-and-enforcement.md`
+//! and `docs/superpowers/specs/2026-07-28-access-engine-design.md`.
+
+pub mod shim;
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use rootcause::prelude::*;
+use sea_orm::{ColumnTrait, DatabaseConnection, QueryFilter};
+use uuid::Uuid;
+
+use uptrakit_shared_db::TenantDb;
+use uptrakit_shared_db::access_grants::{
+    AccessGrantError, ResolvedGrant, load_grants_for_principal,
+};
+use uptrakit_shared_db::entity::user_role;
+use uptrakit_shared_macros::impl_report_conversion;
+use uptrakit_shared_types::access::{Action, ActionPattern, Selector};
+use uptrakit_shared_types::access::{Decision, DenyReason, TargetRef, Visibility};
+
+/// Default TTL backstop for cached principal authority.
+const ACCESS_CACHE_TTL: Duration = Duration::from_secs(60);
+/// Bounded cache size (entries), per the M1.3 design.
+const ACCESS_CACHE_MAX_CAPACITY: u64 = 10_000;
+
+/// Errors from `AccessEngine` principal resolution.
+#[non_exhaustive]
+#[derive(Debug, thiserror::Error)]
+pub enum AccessEngineError {
+    /// Loading the principal's role assignments failed.
+    #[error("role resolution failed: {0}")]
+    RoleResolution(sea_orm::DbErr),
+    /// Loading the principal's access grants failed.
+    #[error("grant resolution failed: {0}")]
+    GrantResolution(AccessGrantError),
+}
+
+/// Module-wide result alias (covers every fn in this module).
+pub type Result<T> = std::result::Result<T, rootcause::Report<AccessEngineError>>;
+
+impl_report_conversion!(sea_orm::DbErr => AccessEngineError::RoleResolution);
+impl_report_conversion!(AccessGrantError => AccessEngineError::GrantResolution);
+
+/// Engine-owned registry seam for dynamic (`plugin.*` / `surface.*`) actions.
+///
+/// `None` in M1.3 means **every** dynamic action denies (fail-closed:
+/// nothing is registered). M1.5 injects the live plugin-catalog and
+/// surface-registry implementations. Narrow, workflow-scoped trait — the
+/// typed-boundary pattern of ADR-0018.
+pub trait DynamicActionRegistry: Send + Sync {
+    /// Is this concrete dynamic action currently registered?
+    fn is_registered(&self, action: &Action) -> bool;
+}
+
+/// Point-in-time snapshot of one principal's resolved grants.
+struct CachedAuthority {
+    grants: Vec<ResolvedGrant>,
+    loaded_at: tokio::time::Instant,
+}
+
+/// The single decision point: batched grant resolution + bounded cache +
+/// pure in-memory decision evaluation.
+pub struct AccessEngine {
+    db: DatabaseConnection,
+    /// Key order matches `context()`'s parameter order: `(tenant_id, user_id)`.
+    cache: moka::sync::Cache<(Uuid, Uuid), Arc<CachedAuthority>>,
+    registry: Option<Arc<dyn DynamicActionRegistry>>,
+    ttl: Duration,
+}
+
+/// Per-request access context: the cached authority core plus per-request
+/// credential scope.
+///
+/// Point-in-time snapshot. Per-request rebuild (the M1.4a contract) covers
+/// ordinary handlers; a long-lived streaming holder (SSE/WS) IS one request
+/// — it needs periodic re-`context()` or an invalidation-aware refresh,
+/// which per-request rebuild does not provide. Carried as an M1.4a/M1.5
+/// residual for the streaming enforcement sites.
+pub struct AccessContext {
+    /// The authenticated principal.
+    pub user_id: Uuid,
+    /// Carried for M1.6b deny-audit and logging; unused by evaluation.
+    pub tenant_id: Uuid,
+    authority: Arc<CachedAuthority>,
+    /// `None` = credential with no scope concept (pre-M3 session JWT).
+    /// `Some(vec![])` = a scope ceiling that admits nothing.
+    scope: Option<Vec<ActionPattern>>,
+}
+
+impl AccessEngine {
+    /// Build an engine over the given connection with no dynamic-action
+    /// registry (every dynamic action denies until M1.5 injects one).
+    pub fn new(db: DatabaseConnection) -> Self {
+        Self {
+            db,
+            cache: moka::sync::Cache::builder()
+                .max_capacity(ACCESS_CACHE_MAX_CAPACITY)
+                .build(),
+            registry: None,
+            ttl: ACCESS_CACHE_TTL,
+        }
+    }
+
+    /// Inject the dynamic-action registry (M1.5 wires the live impls).
+    #[must_use]
+    pub fn with_registry(mut self, registry: Arc<dyn DynamicActionRegistry>) -> Self {
+        self.registry = Some(registry);
+        self
+    }
+
+    /// Resolve a principal's access context.
+    ///
+    /// Fresh cache hit → wrap and return. Miss or TTL-stale hit → exactly two
+    /// queries (role ids via `TenantDb`, then the batched
+    /// `{user} ∪ roles` grant load) and re-insert. Errors propagate — never
+    /// an empty-but-authorized context; nothing is cached on error.
+    /// Concurrent misses for one key may duplicate the load (idempotent
+    /// reads, last-insert-wins — accepted at deployment scale; moka's
+    /// coalescing `try_get_with` cannot await the async DB load).
+    pub async fn context(
+        &self,
+        tenant_id: Uuid,
+        user_id: Uuid,
+        scope: Option<Vec<ActionPattern>>,
+    ) -> Result<AccessContext> {
+        let key = (tenant_id, user_id);
+        let authority = match self.cache.get(&key) {
+            Some(entry) if entry.loaded_at.elapsed() <= self.ttl => entry,
+            stale => {
+                let reason = if stale.is_some() { "stale" } else { "miss" };
+                let entry = self.load_authority(tenant_id, user_id).await?;
+                self.cache.insert(key, Arc::clone(&entry));
+                metrics::counter!("uptrakit_access_context_loads_total", "reason" => reason)
+                    .increment(1);
+                entry
+            }
+        };
+        Ok(AccessContext {
+            user_id,
+            tenant_id,
+            authority,
+            scope,
+        })
+    }
+
+    async fn load_authority(&self, tenant_id: Uuid, user_id: Uuid) -> Result<Arc<CachedAuthority>> {
+        let tenant_db = TenantDb::new(self.db.clone(), tenant_id);
+        let role_ids: Vec<Uuid> = tenant_db
+            .find::<user_role::Entity>()
+            .filter(user_role::Column::UserId.eq(user_id))
+            .all(tenant_db.db())
+            .await
+            .context_to()?
+            .into_iter()
+            .map(|row| row.role_id)
+            .collect();
+
+        let load = load_grants_for_principal(&self.db, tenant_id, user_id, &role_ids)
+            .await
+            .context_to()?;
+
+        if load.corrupt_skipped > 0 {
+            // Deliberately label-free: the only per-call label candidates
+            // (user/tenant ids) are unbounded-cardinality; the single fixed
+            // cause is already encoded in the name. Per-principal detail
+            // rides the companion warn below.
+            metrics::counter!("uptrakit_access_corrupt_grant_rows_skipped_total")
+                .increment(load.corrupt_skipped as u64);
+            tracing::warn!(
+                %tenant_id,
+                %user_id,
+                corrupt_skipped = load.corrupt_skipped,
+                "skipped corrupt access grant rows while resolving principal authority"
+            );
+        }
+
+        Ok(Arc::new(CachedAuthority {
+            grants: load.grants,
+            loaded_at: tokio::time::Instant::now(),
+        }))
+    }
+}
+
+impl AccessEngine {
+    /// Authorize `action` (optionally against `target`) for the context's
+    /// principal. Pure and synchronous — cheap enough per batch item.
+    ///
+    /// Normative check order:
+    /// 1. **Dynamic-action registry** (`plugin.*`/`surface.*` resources
+    ///    only): unregistered → `Deny(UnknownAction)`. Built-in actions skip
+    ///    this step — parse-time catalog membership is their registration.
+    /// 2. **Grant match**: no grant pattern matches → `Deny(NoGrant)`.
+    /// 3. **Token scope**: `None` → vacuously true (credential with no scope
+    ///    concept); `Some` with no matching pattern → `Deny(OutOfScope)`
+    ///    (an empty `Some` vec denies everything).
+    /// 4. **Target/selector**: every M1 grant carries `Selector::All` (B9
+    ///    write gate), so any target is covered by whichever grant matched;
+    ///    `Deny(OutsideSelector)` is unreachable until M2.1.
+    pub fn authorize(
+        &self,
+        ctx: &AccessContext,
+        action: &Action,
+        target: Option<&TargetRef>,
+    ) -> Decision {
+        let resource = action.resource();
+        let is_dynamic = resource.plugin_type().is_some() || resource.surface_id().is_some();
+        if is_dynamic {
+            let registered = self
+                .registry
+                .as_ref()
+                .is_some_and(|registry| registry.is_registered(action));
+            if !registered {
+                return Decision::Deny(DenyReason::UnknownAction);
+            }
+        }
+
+        let matching_grants: Vec<&ResolvedGrant> = ctx
+            .authority
+            .grants
+            .iter()
+            .filter(|g| g.patterns.iter().any(|pattern| pattern.matches(action)))
+            .collect();
+        if matching_grants.is_empty() {
+            return Decision::Deny(DenyReason::NoGrant);
+        }
+
+        if let Some(scope) = &ctx.scope
+            && !scope.iter().any(|pattern| pattern.matches(action))
+        {
+            return Decision::Deny(DenyReason::OutOfScope);
+        }
+
+        if !matching_grants
+            .iter()
+            .any(|g| selector_covers(&g.selector, target))
+        {
+            return Decision::Deny(DenyReason::OutsideSelector);
+        }
+
+        Decision::Allow
+    }
+
+    /// Visibility verdict for `action`: grants matching the action **and**
+    /// surviving scope intersection — any → `Full` (every M1 selector is
+    /// `All`), none → `Visibility::None`. M2.3 adds the selector-union →
+    /// `Filter` arm to this match-then-union shape.
+    ///
+    /// Deliberately omits the dynamic-action registry gate that
+    /// [`AccessEngine::authorize`] applies (per the PDP design): M1.5 list
+    /// sites over dynamic (`plugin.*`/`surface.*`) resources must not rely
+    /// on `visibility()` alone to filter unknown/unregistered actions.
+    pub fn visibility(&self, ctx: &AccessContext, action: &Action) -> Visibility {
+        if let Some(scope) = &ctx.scope
+            && !scope.iter().any(|pattern| pattern.matches(action))
+        {
+            return Visibility::None;
+        }
+        let has_matching_grant = ctx
+            .authority
+            .grants
+            .iter()
+            .any(|g| g.patterns.iter().any(|pattern| pattern.matches(action)));
+        if has_matching_grant {
+            Visibility::Full
+        } else {
+            Visibility::None
+        }
+    }
+}
+
+/// Does this grant's selector cover the target? Written over the selector so
+/// M2.1 extends (adds arms) rather than rewrites. `Selector` is
+/// `#[non_exhaustive]` cross-crate, so the wildcard arm is compulsory — and
+/// deliberately fail-closed.
+fn selector_covers(selector: &Selector, _target: Option<&TargetRef>) -> bool {
+    match selector {
+        Selector::All => true,
+        // M2.1 adds Tags/Hosts/Software/Items arms; unreachable in M1
+        // (the B9 write gate admits only Selector::All).
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use sea_orm::sea_query::{Alias, Query};
+    use sea_orm::{
+        ActiveModelTrait, ConnectOptions, ConnectionTrait, Database, DatabaseConnection, DbBackend,
+        EntityTrait, MockDatabase, Set,
+    };
+    use time::OffsetDateTime;
+    use uptrakit_shared_db::access_grants::{GrantSubject, NewGrant, insert_grant};
+    use uptrakit_shared_db::entity::{tenant, user};
+    use uptrakit_shared_types::MaskedEmail;
+    use uptrakit_shared_types::access::Selector;
+
+    use super::*;
+
+    async fn test_db() -> DatabaseConnection {
+        let mut opt = ConnectOptions::new("sqlite::memory:");
+        opt.max_connections(1).min_connections(1);
+        let db = Database::connect(opt).await.expect("connect to test db");
+        uptrakit_shared_db::migration::run_migrations(&db)
+            .await
+            .expect("run migrations");
+        db
+    }
+
+    async fn default_tenant_id(db: &DatabaseConnection) -> Uuid {
+        tenant::Entity::find()
+            .one(db)
+            .await
+            .expect("query tenants")
+            .expect("default tenant is seeded")
+            .id
+    }
+
+    async fn seed_user(db: &DatabaseConnection) -> Uuid {
+        let id = Uuid::now_v7();
+        let now = OffsetDateTime::now_utc();
+        user::ActiveModel {
+            id: Set(id),
+            email: Set(MaskedEmail::new(format!("u-{id}@example.com"))),
+            first_name: Set("Test".to_string()),
+            last_name: Set("User".to_string()),
+            password_hash: Set(None),
+            is_active: Set(true),
+            deactivated_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(db)
+        .await
+        .expect("insert user");
+        id
+    }
+
+    async fn grant(db: &DatabaseConnection, tenant_id: Uuid, subject: GrantSubject, pattern: &str) {
+        let patterns = vec![pattern.parse::<ActionPattern>().expect("valid pattern")];
+        insert_grant(
+            db,
+            NewGrant {
+                subject,
+                tenant_id: Some(tenant_id),
+                patterns: &patterns,
+                selector: Selector::All,
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect("insert grant");
+    }
+
+    async fn seed_corrupt_grant_row(db: &DatabaseConnection, tenant_id: Uuid, user_id: Uuid) {
+        let now = OffsetDateTime::now_utc();
+        let stmt = Query::insert()
+            .into_table(Alias::new("access_grants"))
+            .columns([
+                Alias::new("id"),
+                Alias::new("tenant_id"),
+                Alias::new("subject_type"),
+                Alias::new("subject_id"),
+                Alias::new("patterns"),
+                Alias::new("selector"),
+                Alias::new("created_at"),
+                Alias::new("updated_at"),
+            ])
+            .values_panic([
+                Uuid::now_v7().into(),
+                tenant_id.into(),
+                "user".into(),
+                user_id.into(),
+                serde_json::json!(["not a pattern ["]).into(),
+                serde_json::json!({"type": "all"}).into(),
+                now.into(),
+                now.into(),
+            ])
+            .to_owned();
+        db.execute(&stmt).await.expect("seed corrupt grant row");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn context_ttl_backstop_reloads_after_sixty_seconds() {
+        // MockDatabase, not sqlite::memory: — start_paused + sqlx pool is
+        // forbidden (testing.md: pool timers fire under auto-advance).
+        // Two loads expected: initial + past-TTL reload; each consumes one
+        // (roles, grants) result pair.
+        let db = MockDatabase::new(DbBackend::Sqlite)
+            .append_query_results([Vec::<user_role::Model>::new()])
+            .append_query_results([Vec::<BTreeMap<String, sea_orm::Value>>::new()])
+            .append_query_results([Vec::<user_role::Model>::new()])
+            .append_query_results([Vec::<BTreeMap<String, sea_orm::Value>>::new()])
+            .into_connection();
+        let engine = AccessEngine::new(db);
+        let tenant_id = Uuid::nil();
+        let user_id = Uuid::nil();
+
+        engine
+            .context(tenant_id, user_id, None)
+            .await
+            .expect("initial load");
+
+        tokio::time::advance(Duration::from_secs(30)).await;
+        engine
+            .context(tenant_id, user_id, None)
+            .await
+            .expect("within-TTL hit");
+
+        tokio::time::advance(Duration::from_secs(31)).await;
+        engine
+            .context(tenant_id, user_id, None)
+            .await
+            .expect("past-TTL reload");
+
+        let statement_count: usize = engine
+            .db
+            .clone()
+            .into_transaction_log()
+            .iter()
+            .map(|tx| tx.statements().len())
+            .sum();
+        assert_eq!(
+            statement_count, 4,
+            "exactly two loads of two statements each: the within-TTL hit must issue no \
+             queries (caching works) and the past-TTL read must reload (staleness works)"
+        );
+    }
+
+    #[tokio::test]
+    async fn context_propagates_db_errors_never_empty_authority() {
+        let db = Database::connect("sqlite::memory:").await.expect("connect");
+        let engine = AccessEngine::new(db);
+        let result = engine.context(Uuid::nil(), Uuid::nil(), None).await;
+        assert!(
+            result.is_err(),
+            "resolution against a missing schema must error, not return empty authority"
+        );
+    }
+
+    #[tokio::test]
+    async fn context_skips_corrupt_rows_and_keeps_valid_authority() {
+        let db = test_db().await;
+        let tenant_id = default_tenant_id(&db).await;
+        let user_id = seed_user(&db).await;
+        grant(&db, tenant_id, GrantSubject::User(user_id), "hosts:read").await;
+        seed_corrupt_grant_row(&db, tenant_id, user_id).await;
+
+        let engine = AccessEngine::new(db);
+        let ctx = engine
+            .context(tenant_id, user_id, None)
+            .await
+            .expect("corrupt rows loud-skip; the call must succeed");
+        assert_eq!(
+            ctx.authority.grants.len(),
+            1,
+            "only the valid grant's authority survives"
+        );
+    }
+
+    #[tokio::test]
+    async fn context_resolution_is_exactly_two_queries() {
+        let now = OffsetDateTime::now_utc();
+        let tenant_id = Uuid::nil();
+        let user_id = Uuid::now_v7();
+        let roles: Vec<user_role::Model> = (0..5)
+            .map(|_| user_role::Model {
+                tenant_id,
+                user_id,
+                role_id: Uuid::now_v7(),
+                assigned_at: now,
+            })
+            .collect();
+
+        let db = MockDatabase::new(DbBackend::Sqlite)
+            .append_query_results([roles])
+            .append_query_results([Vec::<BTreeMap<String, sea_orm::Value>>::new()])
+            .into_connection();
+
+        let engine = AccessEngine::new(db);
+        let ctx = engine
+            .context(tenant_id, user_id, None)
+            .await
+            .expect("mock resolution succeeds");
+        assert_eq!(ctx.authority.grants.len(), 0);
+
+        let statement_count: usize = engine
+            .db
+            .clone()
+            .into_transaction_log()
+            .iter()
+            .map(|tx| tx.statements().len())
+            .sum();
+        assert_eq!(
+            statement_count, 2,
+            "principal resolution must be exactly two round-trips (roles, grants) for 5 roles"
+        );
+    }
+}

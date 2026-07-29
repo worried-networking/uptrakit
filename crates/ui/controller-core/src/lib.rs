@@ -5,6 +5,7 @@
 //! are permitted — they provide auth and query primitives without importing the routing layer.
 //! Enforced by the absence of `uptrakit-web-api` and `uptrakit-mcp` in `Cargo.toml`.
 
+pub mod access;
 pub mod audit;
 pub mod auth;
 pub mod connections;

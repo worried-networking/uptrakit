@@ -20,14 +20,17 @@ uptrakit-crypto                         = { workspace = true }
 uptrakit-plugin-infrastructure-registry = { workspace = true }
 uptrakit-wire                           = { workspace = true }
 uptrakit-service-connections            = { workspace = true }
+uptrakit-shared-macros                  = { workspace = true }
 async-trait  = { workspace = true }
 axum         = { workspace = true, optional = true }
 ipnet        = { workspace = true }
+metrics      = { workspace = true }
+moka         = { workspace = true, features = ["sync"] }
 sea-orm      = { workspace = true }
 serde_json   = { workspace = true }
 time         = { workspace = true }
 uuid         = { workspace = true }
-tokio        = { workspace = true }
+tokio        = { workspace = true, features = ["time"] }
 tokio-util   = { workspace = true }
 parking_lot  = { workspace = true }
 rootcause    = { workspace = true }
@@ -47,8 +50,8 @@ testing = []
 
 [dev-dependencies]
 uptrakit-shared-db = { workspace = true, features = ["migration", "db-sqlite"] }
-sea-orm            = { workspace = true, features = ["sqlx-sqlite"] }
-tokio              = { workspace = true, features = ["macros", "rt", "time"] }
+sea-orm            = { workspace = true, features = ["sqlx-sqlite", "mock"] }
+tokio              = { workspace = true, features = ["macros", "rt", "time", "test-util"] }
 
 [lints]
 workspace = true
