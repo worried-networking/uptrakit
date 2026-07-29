@@ -1,3 +1,4 @@
+pub(crate) mod access_grant;
 pub mod api_rate_limit;
 pub mod api_token;
 pub mod audit_log;
