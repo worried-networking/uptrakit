@@ -3,6 +3,7 @@ use super::test_support::*;
 
 use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
+use uptrakit_plugin_infrastructure_core::testing::instance_surface_fixture as fixture;
 use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_wire::limits::MAX_SHORT_STRING_LEN;
 use uptrakit_wire::report_tracker::ReportTracker;
@@ -1510,4 +1511,228 @@ async fn provider_origin_match_completes_handler() {
         uptrakit_plugin_infrastructure_proxmox::testing::host_mapping_host_id(&db, mapping_id)
             .await;
     assert_eq!(bound_host_id, Some(host.id));
+}
+
+// ---------------------------------------------------------------------------
+// §5.4: provider-origin invocations are gated by LIVE effective enablement,
+// not just boot state — driven by the synthetic Instance-scoped fixture
+// plugin (`uptrakit_plugin_infrastructure_core::testing::instance_surface_fixture`).
+// ---------------------------------------------------------------------------
+
+/// ADR-0033 §5.4(a): a provider-origin invocation against a plugin that is
+/// not effectively enabled (boot-enabled, no live row ⇒ disabled) is denied
+/// by the proxy's stored filter — no `AuthenticatedUser` exists on this path.
+#[cfg(feature = "db-sqlite")]
+#[tokio::test]
+async fn provider_origin_denied_for_live_disabled_plugin() {
+    let db = crate::test_harness::setup_migrated_db_with_plugins().await;
+    let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+    let (state, _jwt) = crate::test_harness::build_test_state_with_plugin_surfaces(
+        db.clone(),
+        tenant_id,
+        Some(crate::test_harness::synthetic_instance_catalog(true)),
+    )
+    .await;
+    let service_id = Uuid::now_v7();
+    insert_test_service_row(&db, tenant_id, service_id, "uptrakit-agent-ssh").await;
+    register_calling_service_as_provider(&state, service_id, tenant_id);
+
+    let processor = MessageProcessor {
+        state: Arc::clone(&state),
+        service_id,
+        cert: None,
+        is_system: false,
+        has_update_tracking: false,
+        has_software_discovery: false,
+        has_update_hooks: false,
+        has_ui_surfaces: true,
+        has_workload_claims: false,
+        runtime_instance_id: None,
+        service_app_name: Some("uptrakit-agent-ssh".to_string()),
+        service_tenant_id: Some(tenant_id),
+        linked_host_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
+        report_tracker: ReportTracker::new(),
+    };
+    let request_id = Uuid::now_v7();
+
+    let response = processor
+        .handle_surface_action_request(surfaces::SurfaceActionRequest {
+            request_id,
+            tenant_id: tenant_id.to_string(),
+            surface_id: surfaces::SurfaceId::new(fixture::SURFACE_ID).unwrap(),
+            interaction_id: surfaces::InteractionId::new(fixture::INTERACTION_ID).unwrap(),
+            method: Default::default(),
+            idempotency_key: "provider-origin-live-disabled".to_string(),
+            target_provider_id: None,
+            caller_origin: surfaces::CallerOrigin::Provider {
+                provider_id: "provider-a".to_string(),
+            },
+            params: serde_json::Map::new(),
+            encrypted_sensitive_params: None,
+        })
+        .await;
+
+    let [ControllerMessage::SurfaceActionResponse(reply)] = response.replies.as_slice() else {
+        panic!("expected exactly one SurfaceActionResponse reply");
+    };
+    assert_eq!(reply.request_id, request_id);
+    assert!(
+        !reply.success,
+        "boot-enabled fixture with no live row must be denied"
+    );
+    assert!(
+        reply.error.is_some(),
+        "denial reply must carry an error payload"
+    );
+}
+
+/// ADR-0033 §5.4(b): disable via the instance-plugins route AFTER the proxy
+/// was constructed, then invoke — a filter frozen at construction would still
+/// serve the request; the live-handle filter must deny it.
+#[cfg(feature = "db-sqlite")]
+#[tokio::test]
+async fn provider_origin_toggle_then_invoke_without_restart_is_denied() {
+    let db = crate::test_harness::setup_migrated_db_with_plugins().await;
+    let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+    let (state, _jwt) = crate::test_harness::build_test_state_with_plugin_surfaces(
+        db.clone(),
+        tenant_id,
+        Some(crate::test_harness::synthetic_instance_catalog(true)),
+    )
+    .await;
+    let service_id = Uuid::now_v7();
+    insert_test_service_row(&db, tenant_id, service_id, "uptrakit-agent-ssh").await;
+    register_calling_service_as_provider(&state, service_id, tenant_id);
+
+    let processor = MessageProcessor {
+        state: Arc::clone(&state),
+        service_id,
+        cert: None,
+        is_system: false,
+        has_update_tracking: false,
+        has_software_discovery: false,
+        has_update_hooks: false,
+        has_ui_surfaces: true,
+        has_workload_claims: false,
+        runtime_instance_id: None,
+        service_app_name: Some("uptrakit-agent-ssh".to_string()),
+        service_tenant_id: Some(tenant_id),
+        linked_host_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
+        report_tracker: ReportTracker::new(),
+    };
+
+    // 1. Build a router over the SAME state and enable the plugin live
+    //    through the production write path (never poke the ArcSwap directly).
+    let router = crate::build_router(Arc::clone(&state));
+    let client = crate::test_harness::http_client::TestClient::new(router);
+    let (register_status, admin_auth) = crate::test_harness::fixtures::register_user(
+        &client,
+        "owner@test.local",
+        "TestPassword123!",
+    )
+    .await;
+    assert_eq!(
+        register_status,
+        http::StatusCode::CREATED,
+        "admin registration must succeed"
+    );
+    let admin_token = admin_auth.access_token.expose_secret().to_string();
+
+    let enable_status = client
+        .put_json(
+            &format!("/api/v1/instance-plugins/{}/enabled", fixture::TYPE_ID),
+            &serde_json::json!({ "enabled": true }),
+        )
+        .bearer(&admin_token)
+        .send_status()
+        .await;
+    assert_eq!(
+        enable_status,
+        http::StatusCode::OK,
+        "instance-plugin enable must succeed"
+    );
+
+    // 2. Control: fire the invocation while live-enabled — proves the enabled
+    //    path works, which is what makes step 4's denial assertion meaningful.
+    let enabled_response = processor
+        .handle_surface_action_request(surfaces::SurfaceActionRequest {
+            request_id: Uuid::now_v7(),
+            tenant_id: tenant_id.to_string(),
+            surface_id: surfaces::SurfaceId::new(fixture::SURFACE_ID).unwrap(),
+            interaction_id: surfaces::InteractionId::new(fixture::INTERACTION_ID).unwrap(),
+            method: Default::default(),
+            idempotency_key: "provider-origin-toggle-enabled".to_string(),
+            target_provider_id: None,
+            caller_origin: surfaces::CallerOrigin::Provider {
+                provider_id: "provider-a".to_string(),
+            },
+            params: serde_json::Map::new(),
+            encrypted_sensitive_params: None,
+        })
+        .await;
+    let [ControllerMessage::SurfaceActionResponse(enabled_reply)] =
+        enabled_response.replies.as_slice()
+    else {
+        panic!("expected exactly one SurfaceActionResponse reply");
+    };
+    assert!(
+        enabled_reply.success,
+        "control invocation while live-enabled must succeed: {:?}",
+        enabled_reply.error
+    );
+    let enabled_result = enabled_reply
+        .result
+        .as_ref()
+        .expect("success response has a result");
+    assert_eq!(
+        enabled_result["pong"], true,
+        "fixture handler result must round-trip"
+    );
+
+    // 3. Disable through the same production write path.
+    let disable_status = client
+        .put_json(
+            &format!("/api/v1/instance-plugins/{}/enabled", fixture::TYPE_ID),
+            &serde_json::json!({ "enabled": false }),
+        )
+        .bearer(&admin_token)
+        .send_status()
+        .await;
+    assert_eq!(
+        disable_status,
+        http::StatusCode::OK,
+        "instance-plugin disable must succeed"
+    );
+
+    // 4. Fire the SAME invocation again, with no reconstruction of the proxy
+    //    or state — a filter frozen at construction would still serve this.
+    let disabled_response = processor
+        .handle_surface_action_request(surfaces::SurfaceActionRequest {
+            request_id: Uuid::now_v7(),
+            tenant_id: tenant_id.to_string(),
+            surface_id: surfaces::SurfaceId::new(fixture::SURFACE_ID).unwrap(),
+            interaction_id: surfaces::InteractionId::new(fixture::INTERACTION_ID).unwrap(),
+            method: Default::default(),
+            idempotency_key: "provider-origin-toggle-disabled".to_string(),
+            target_provider_id: None,
+            caller_origin: surfaces::CallerOrigin::Provider {
+                provider_id: "provider-a".to_string(),
+            },
+            params: serde_json::Map::new(),
+            encrypted_sensitive_params: None,
+        })
+        .await;
+    let [ControllerMessage::SurfaceActionResponse(disabled_reply)] =
+        disabled_response.replies.as_slice()
+    else {
+        panic!("expected exactly one SurfaceActionResponse reply");
+    };
+    assert!(
+        !disabled_reply.success,
+        "invocation after live-disable without restart must be denied"
+    );
+    assert!(
+        disabled_reply.error.is_some(),
+        "denial reply must carry an error payload"
+    );
 }
