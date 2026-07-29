@@ -19,8 +19,9 @@ task freezes.
 Wire the `AccessEngine` into REST request handling and freeze the conversion contract the M1.4b
 sweep will apply mechanically: engine constructed in `AppState`; `AccessContext` built once per
 authenticated request in `require_auth` and stored in request extensions; a new action-extractor
-macro (same `FromRequestParts` shape and 401/403 semantics as `permission_extractor!`) checking
-`engine.authorize(ctx, action, None)`; native OpenAPI security schemes (`oauth2` with a
+macro (same `FromRequestParts` shape and 401/403 semantics as `permission_extractor!`, plus one
+new outcome the legacy macro never produces: 500 fail-closed when the engine is unavailable — §4)
+checking `engine.authorize(ctx, action, None)`; native OpenAPI security schemes (`oauth2` with a
 catalog-generated scope dictionary + `developer_token` bearer) registered beside the legacy
 `bearer_token`; the `deliver_controller_event` arm for `ControllerMessage::AccessInvalidated`; a
 new CI gate asserting each converted operation's `oauth2` scope list matches its handler's action
@@ -40,8 +41,10 @@ compiled; the routes it still guards are untouched.
    parsing beyond the comfortable reach of the bash+rg `verify_*` family (a known failure class:
    wrapped attributes split across a line-oriented pipeline). Precedent for Python gates in both
    CI and pre-push exists (`ci/check_plugin_semantic_boundary.py` runs in `.husky/pre-push` and
-   `.github/workflows/ci.yml`; `ci/verify_db_access_policy.py` walks `routes/` pairing utoipa
-   attrs with handlers).
+   `.github/workflows/ci.yml`); `ci/verify_db_access_policy.py` supplies the Rust-parsing
+   pattern — a comment/string-aware lexer, top-level item splitter, and balanced `#[...]`
+   attribute scanner over `routes/` (it pairs handler **fns** with a policy TOML; it does not
+   read `#[utoipa::path]` — the utoipa-attr parsing itself is net-new).
 3. **Deny observability (trace + counter) ships in the extractor now.** Resolved Q6
    (`09-resolved-questions.md` §Decision engine #6: ordinary denies = debug trace + counter
    metric) is implemented nowhere yet; the extractor's 403 path is its single natural site.
@@ -65,7 +68,7 @@ compiled; the routes it still guards are untouched.
 - `require_auth` (`crates/ui/web-api/src/middleware/require_auth.rs:126`) authenticates JWT or
   `upk_` API token and inserts `AuthenticatedUser` (+ `AuthenticatedApiTokenId`, `SetupRequired`)
   into extensions at :196-202. No engine wiring.
-- `permission_extractor!` (`crates/ui/web-api/src/middleware/permission.rs:35-85`) generates 36
+- `permission_extractor!` (`crates/ui/web-api/src/middleware/permission.rs:35-85`) generates 35
   `Can*` tuple structs `(pub AuthenticatedUser)` with `new()` test bypass; 401 when the
   `AuthenticatedUser` extension is missing, 403 on `!user.has_permission(perm)`, both via
   `error_response(StatusCode, &str) -> Response`.
@@ -95,17 +98,26 @@ compiled; the routes it still guards are untouched.
   `ControllerResources` (`event_delivery.rs:24-39`) is built at `nats_transport.rs:276` from
   `NatsConsumerConfig` (`nats_transport.rs:51-68`), which is filled from `app_state` at
   `crates/core/controller-runtime/src/boot/serve.rs:178`.
-- `AppState` is constructed at **two** sites: `AppStateBuilder::build()`
-  (`crates/ui/web-api/src/app_state.rs:914`, literal at :1003) and the test harness literal
-  (`crates/ui/web-api/src/test_harness/mod.rs`, `build_test_state_with_plugin_ops`, literal at
-  ~:495). The plan must re-grep `AppState {` workspace-wide before freezing its edit list.
+- `AppState` struct literals are **many**, not two: beyond `AppStateBuilder::build()`
+  (`crates/ui/web-api/src/app_state.rs:914`, literal at :1003) and the test harness
+  (`test_harness/mod.rs`, `build_test_state_with_plugin_ops`), a spec-time grep for `AppState {`
+  finds full literals in `lib.rs`, `middleware/require_auth.rs`, `middleware/resolve_ip.rs`,
+  `middleware/audit_log.rs`, `integration_tests/oauth_mcp_roundtrip.rs`, `routes/surfaces.rs`,
+  `routes/auth.rs`, `routes/me_2fa.rs`, `routes/settings_nats.rs`, `routes/mfa.rs`,
+  `routes/services/tests.rs`, and five `routes/service_ws/handler/` files (`test_support.rs`,
+  `credentials.rs`, `embedded.rs`, `service_config.rs`, `messages/tests.rs`) — legacy
+  test-support fixtures predating the TestApp harness. Struct-literal exhaustiveness means the
+  new field must be added at **every** one (mechanical: the engine derives from the `db` handle
+  already in scope at each fixture). The plan re-greps and enumerates each; this list is a
+  spec-time floor. Consolidating those fixtures onto the harness is out of scope.
 - No existing CI script touches `x-required-permission` (grep over `ci/`, `.github/`, `.husky/`,
   `scripts/`: zero hits) — the new gate is net-new.
 - `metrics` is already a `uptrakit-web-api` dependency (Cargo.toml:86).
 
 ## Scope
 
-In: `Clone` derive on `AccessContext` (controller-core); `access_engine` field on `AppState` +
+In: `Clone` derive on `AccessContext` (controller-core); `DenyReason::as_str()` + `Display`
+(shared-types, sibling-enum convention); `access_engine` field on `AppState` +
 `AccessState` sub-state; context build in `require_auth`; new `action_extractor!` macro + the four
 hosts-family extractors; `SecurityAddon` scheme additions; hosts.rs reference conversion +
 `./scripts/regen-api.sh` artifacts; `AccessInvalidated` delivery arm
@@ -125,9 +137,11 @@ until M1.5 — the `AccessContext` doc's long-lived-holder residual is restated,
 
 ## Consumed contracts (pinned)
 
-- **M1.3 engine**: signatures quoted above. `context()` errors ⇒ HTTP 500 (standing "DB errors in
-  auth/authz handlers must propagate as 500" rule). `authorize` is pure/sync; per-request
-  evaluation is cheap.
+- **M1.3 engine**: signatures quoted above. `context()` errors ⇒ `AccessAuthority::Unavailable`
+  ⇒ 500 at every action-extractor site (fail-closed, satisfying the standing "DB errors in
+  auth/authz handlers must propagate as 500" rule at the authorization point), pass-through on
+  routes with no action extractor (§3). `authorize` is pure/sync; per-request evaluation is
+  cheap.
 - **Scope term (test C15 semantics)**: every credential `require_auth` accepts today (session JWT —
   no `scope` claim until M3 — and legacy `upk_` API tokens — no scopes until M4) passes
   `scope: None`: vacuously-true scope term, authority = grants alone, behavior-equivalent window
@@ -155,9 +169,9 @@ type's surface minimal; nothing formats it).
 - New field `pub access_engine: Arc<uptrakit_controller_core::access::AccessEngine>` on
   `AppState`. Constructed inside `AppStateBuilder::build()` from the connection the builder
   already holds (`AccessEngine::new(db.clone())`, **no** `with_registry` — M1.5 injects one) and
-  in the test-harness literal the same way. No new builder parameter: the engine is derived
-  state, like the audit emitter. The plan re-runs `grep -rn "AppState {" crates/` and covers
-  every literal.
+  identically at every struct-literal site enumerated in Verified current state (each fixture has
+  a `db` handle in scope). No new builder parameter: the engine is derived state, like the audit
+  emitter. The plan re-runs `grep -rn "AppState {" crates/` and covers every literal.
 - New sub-state following the `PluginOpsState` precedent (`app_state.rs:136` + `FromRef` at
   :1241): `pub struct AccessState(pub Arc<AccessEngine>);` +
   `impl FromRef<Arc<AppState>> for AccessState`. This is how the extractor reaches the engine —
@@ -173,11 +187,23 @@ setup-gate, immediately before the existing extension inserts (:196-202):
 - `state.access_engine.context(state.default_tenant_id, auth_user.user_id, None).await`
   — tenant is the deployment's single active tenant (`AppState.default_tenant_id`, the same value
   every handler uses today); scope is `None` per the pinned scope term.
-- `Ok(ctx)` ⇒ `req.extensions_mut().insert(ctx)` beside `AuthenticatedUser`.
-- `Err(report)` ⇒ `tracing::error!(error = %report, "access context resolution failed")` +
-  `error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")` — the auth-path
-  DB-failure rule; never `unwrap_or`-degrade to an empty context (that would be a silent
-  authority wipe on one branch and fail-open on none — 500 is the only honest outcome).
+- The extension type is **not** a bare `AccessContext` but a marker enum defined beside the
+  extractor: `#[derive(Clone)] pub enum AccessAuthority { Ready(AccessContext), Unavailable }`.
+  `Ok(ctx)` ⇒ insert `AccessAuthority::Ready(ctx)` beside `AuthenticatedUser`.
+- `Err(report)` ⇒ `tracing::warn!(error = %report, "access context resolution failed")` +
+  insert `AccessAuthority::Unavailable` and **continue the request** — `warn`, not `error`,
+  because at this point no request has failed (unconverted routes proceed on the legacy path;
+  during a grant-DB outage an `error` here would fire on every authenticated request including
+  succeeding ones). The `error`-level line belongs to the extractor's 500 site, where a request
+  genuinely fails. The failure verdict is
+  rendered where authorization is actually demanded: action extractors map `Unavailable` to a
+  500 (fail-closed for every governed route — the auth-path DB-failure rule; never an
+  empty-context fallback, which would be a silent authority wipe). Endpoints with **no** action
+  extractor (`me`, `logout`, unconverted families) keep today's semantics — this matters
+  because `me` carries a deliberate, documented guard (`routes/auth.rs:2472-2487`): a 500 from
+  `me` makes the SPA eject a logged-in user on a transient DB blip. A whole-request 500 in the
+  middleware would bypass that guard for the entire M1.4a→M1.7 window; the marker keeps `me`
+  alive and is exactly the seam M1.7's `authority: "unavailable"` response field will read.
 - Cost: one moka read per request on cache hit; two batched queries per (user, tenant) per 60 s
   TTL window on miss (M1.3 measured contract). Applied to **all** `require_auth` traffic
   including not-yet-converted routes — this is intentional (M1.4b converts consumers, not the
@@ -208,26 +234,43 @@ Generated per name (mirroring `permission.rs:35-85`, differences called out):
   bypass — same tuple payload, so converted handlers change only the type path.
 - `impl<S> FromRequestParts<S> for $name where S: Send + Sync, AccessState: FromRef<S>`:
   1. `AuthenticatedUser` extension missing ⇒ 401 `"Authentication required"` (unchanged).
-  2. `AccessContext` extension missing ⇒ 401 as well — it means the route is mounted outside
-     `require_auth`, indistinguishable from unauthenticated; a debug-assert-style
-     `tracing::error!` marks it as a wiring bug.
-  3. `AccessState::from_ref(state)` → `engine.authorize(&ctx, &$action, None)`:
+  2. `AccessAuthority` extension missing while `AuthenticatedUser` was present ⇒ **500** + a
+     `tracing::error!` wiring-bug line — auth demonstrably ran, so a missing marker is a broken
+     server invariant (both extensions are inserted together in `require_auth`), not a
+     credential problem; 401 would mislabel the fault domain. Unreachable in production today.
+     `AccessAuthority::Unavailable` ⇒ 500
+     `error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")` with the
+     `tracing::error!(error-context)` line — engine failure fails closed on every governed
+     route (see §3).
+  3. On `AccessAuthority::Ready(ctx)`: `AccessState::from_ref(state)` →
+     `engine.authorize(&ctx, &$action, None)`:
      `Decision::Allow` ⇒ `Ok($name(user))`; `Decision::Deny(reason)` ⇒ deny trace
      (`tracing::debug!` with `action`, `user_id`, bounded `reason` label) + counter
-     `metrics::counter!("uptrakit_access_denies_total", "reason" => <static str per DenyReason
-     variant>)` + 403 `error_response(StatusCode::FORBIDDEN, "Insufficient permissions")` —
-     the D3 generic body, no grant/selector detail.
-- The `DenyReason -> &'static str` label mapping is a small private fn in `action.rs` with an
-  exhaustive match (`#[non_exhaustive]` enum from another crate ⇒ a wildcard arm mapping unknown
-  variants to `"other"`; the four known variants are named).
+     `metrics::counter!("uptrakit_access_denies_total", "reason" => reason.as_str())
+     .increment(1)` (the `.increment(1)` is load-bearing — the bare macro call only returns a
+     handle; sibling shape at `controller-core/src/access/mod.rs:161-162`) + 403
+     `error_response(StatusCode::FORBIDDEN, "Insufficient permissions")` — the D3 generic body,
+     no grant/selector detail.
+- The `DenyReason -> &'static str` label mapping lives **on the type**:
+  `impl DenyReason { pub const fn as_str(&self) -> &'static str }` + `Display` in
+  `crates/shared/types/src/access/decision.rs`, matching the crate's sibling bounded enums
+  (`update_status.rs`, `plugin_role.rs`, `os_family.rs`, … all carry `as_str()`/`Display`).
+  In-crate the match is exhaustive despite `#[non_exhaustive]`, so a future variant
+  compile-breaks the mapping instead of silently falling into a wildcard. The extractor labels
+  the counter with `reason.as_str()`.
 - Name collisions with the legacy module (`CanUpdateHosts`, `CanTriggerChecks` exist in both
   `middleware::permission` and `middleware::action`) are legal — different module paths; each
   route file imports exactly one. Never glob-import either module.
-- In-file unit tests mirror `permission.rs:197-295`: 401 on missing extensions, 403 on
-  no-grant context, allow on granted context — driven through `from_request_parts` with a
-  minimal state type implementing `FromRef` for `AccessState` and contexts built via a
-  `MockDatabase`-backed engine (copy the fixture idiom from the engine's own
-  `dummy_engine()`-based tests in `controller-core/src/access/mod.rs`).
+- In-file unit tests mirror `permission.rs:197-295`, extended to the new verdict set: 401 on
+  missing `AuthenticatedUser`; 500 on present-`AuthenticatedUser`/absent-marker (rule 2's
+  broken-invariant branch); 500 on `Unavailable`; 403 on no-grant context; allow on granted
+  context — driven through `from_request_parts` with a
+  minimal state type implementing `FromRef` for `AccessState`, and contexts built via a real
+  engine over `sqlite::memory:` + `uptrakit_shared_db::migration::run_migrations` (the idiom of
+  the engine's own `test_db()` tests and of TestApp — web-api's dev-deps already carry
+  `uptrakit-shared-db` with `["migration", "db-sqlite"]`). **Not** `MockDatabase`: web-api's
+  `sea-orm` dependency has no `mock` feature, and a dependency's dev-features never propagate —
+  reaching for `MockDatabase` here would need a new dev-dep feature for no gain.
 
 `permission_extractor!` and all 36 legacy extractors stay compiled and referenced by the
 unconverted route files; nothing is deleted here (M1.8 owns deletion).
@@ -238,8 +281,25 @@ The `Modify` impl registers, in addition to the existing `bearer_token` (kept �
 decision 1):
 
 - `"oauth2"` — `SecurityScheme::OAuth2` with one `Flow::AuthorizationCode`:
-  `AuthorizationCode::new("/oauth/authorize", "/api/v1/oauth/token", scopes)` (relative URLs —
-  same-origin AS; matches how the SPA reaches these endpoints today), scopes =
+  `AuthorizationCode::new("/oauth/authorize", "/api/v1/oauth/token", scopes)`. **Relative URLs
+  are a deliberate choice, not an oversight**: `openapi.json` is a committed build artifact
+  regenerated offline — the deployment issuer is unknown at regen time, so an absolute URL would
+  bake in a wrong host. The runtime RFC 8414 document (`routes/oauth/metadata.rs:33-35`, which
+  builds these same URLs absolute from the live issuer) remains the authoritative endpoint
+  discovery; the scheme description says exactly that and points clients at
+  `/.well-known/oauth-authorization-server`. Swagger UI (served same-origin at `/api/docs`)
+  resolves relative flow URLs against the browser location; whether its Authorize button
+  completes end-to-end additionally depends on the AS accepting Swagger's redirect URI and a
+  registered client id — AS-registration concerns out of M1.4a scope, noted so a future
+  "Authorize is broken" report isn't misattributed to the relative-URL choice. **Probe
+  obligation**: strict OpenAPI validators can read the flow-URL fields as absolute-URL-only —
+  the plan's first scheme task runs the full artifact chain (`./scripts/regen-api.sh` →
+  `npm run check` → `cargo xtask openapi-client-check`) against the relative-URL scheme before
+  the hosts conversion builds on it; if any link rejects, the pinned fallback is a fixed
+  documented placeholder origin (the committed spec has **no** `servers` block and the real
+  issuer is unknowable at regen time, so no absolute URL can be derived — the placeholder is
+  explicitly marked non-authoritative in the scheme description, next to the RFC 8414 pointer
+  clients must actually use). Scopes =
   `CATALOG.iter().flat_map(|e| e.verbs.iter()).map(|v| (v.action_str, v.description)).collect::<Scopes>()`.
   Scheme description (via `OAuth2::with_description`) documents: the device flow exists but is
   not representable in the OAS flows object, and the dynamic `plugin.*`/`surface.*` namespaces
@@ -265,7 +325,17 @@ Per operation: drop `extensions(("x-required-permission" = json!(...)))`, replac
 
 Handler bodies are otherwise untouched (tuple payload keeps `caller`/`_user` bindings working).
 `host_tags.rs` and `software_items/host_assignments.rs` are **not** part of the reference family
-(M1.4b domains). `./scripts/regen-api.sh` runs in this task; `openapi.json` +
+(M1.4b domains).
+
+**Known intended divergence on this family** (scoping the milestone's "behavior-equivalent"
+claim honestly): the M1.2 seed applies the owner-designed `hosts:read` **pairing rule**
+(`06-grant-model.md` §Seed roles: `operator` and `software_manager` carry explicit `hosts:read`
+because host-anchored visibility is sourced from it — a trigger verb without it would pass the
+gate yet see zero rows). Legacy permission seeds gave `view_hosts` to `viewer` only. So a
+principal holding **only** `operator` (or only `software_manager`) flips from 403 to 200 on
+`GET /api/v1/hosts` when this family converts — an intended, documented widening, not drift.
+`hosts:update`/`hosts:delete`/`checks:trigger` holders match the legacy sets exactly. Pinned
+deliberately by a test (below) so the flip ships as a decision, not silently. `./scripts/regen-api.sh` runs in this task; `openapi.json` +
 `frontend/src/lib/api/generated/` are committed **unopened** (regen + `git add`; never read the
 generated artifacts into context).
 
@@ -281,7 +351,10 @@ generated artifacts into context).
 - `NatsConsumerConfig` (`nats_transport.rs:51`) gains
   `pub access_engine: Option<Arc<AccessEngine>>`; the consumer loop passes
   `access_engine.as_ref()` into `ControllerResources` (`nats_transport.rs:276`); `serve.rs:178`
-  fills it with `Some(Arc::clone(&app_state.access_engine))`.
+  fills it with `Some(Arc::clone(&app_state.access_engine))`. The consumer-spawn path logs at
+  `info` whether the engine handle is wired — a modest startup breadcrumb (serve.rs hardcodes
+  `Some`, so only a future field-drop refactor defaulting the `Option` would flip it), useful
+  because a `None` otherwise degrades to debug-log + 60 s-stale authority on one instance.
 - No publisher exists until M1.6a — the arm is reachable only from another instance's future
   publishes; its test feeds `deliver_controller_event` a constructed
   `ControllerMessage::AccessInvalidated` directly and asserts the engine cache was flushed
@@ -308,7 +381,14 @@ Inputs, parsed at run time (no committed mirror tables — mirrors drift):
    `.`/`-` mapping is ambiguous, e.g. `PLUGIN_CONFIGS_TRIGGER` ↔ `plugin-configs:trigger`).
 3. **Route scan**: every `.rs` under `crates/ui/web-api/src/routes/` — for each
    `#[utoipa::path(...)]` attribute (captured by balanced-parenthesis scan over the file text,
-   never line-oriented regex — attributes wrap) paired with the following `async fn` signature.
+   never line-oriented regex — attributes wrap) paired with the handler `async fn` it decorates.
+   **The pairing must consume the full attribute stack, not "the next line"**: the dominant
+   shape in the tree is `#[utoipa::path(...)]` followed by `#[tracing::instrument(skip_all)]`
+   (all 6 hosts.rs operations; most route files) before the `fn`. The scanner collects every
+   leading `#[...]` of the item then the fn signature — the shape
+   `ci/verify_db_access_policy.py` already implements in `_split_top_level_items` /
+   `_scan_balanced_attribute` (reuse that machinery's approach; the scripts stay standalone per
+   repo practice, so copy the pattern, cite the source in a comment).
 
 Checks (violations print `file:line` + a named rule, exit non-zero):
 
@@ -323,7 +403,11 @@ Checks (violations print `file:line` + a named rule, exit non-zero):
 - **R4 developer_token pairing**: every operation declaring `oauth2` also declares
   `("developer_token" = [])` (the alternatives are a fixed pair until M3 revisits).
 - Unconverted operations (`bearer_token` + `x-required-permission`) are ignored except by R3 —
-  transition tolerance for the M1.4b window.
+  transition tolerance for the M1.4b window. Stated honestly: the gate proves every **converted**
+  operation consistent and grows monotonically with the sweep; it cannot detect an operation
+  that *should* have been converted but was left on the legacy path. That closing assertion
+  (zero `bearer_token`/`x-required-permission` remaining) belongs to M1.4b's final sub-PR, which
+  extends this script rather than adding a second one.
 - **Non-vacuity guards** (green-on-empty is a defect): hard error if the extractor map parses
   empty, if the catalog map parses empty, or if zero operations declare a non-empty `oauth2`
   scope list (hosts guarantees ≥1 from this task on).
@@ -347,9 +431,10 @@ None expected: `uptrakit-web-api` already depends on `metrics`, `uptrakit-contro
 (features `["axum-integration"]`), `uptrakit-shared-db`, `uptrakit-shared-types`
 (`["openapi", ...]`); utoipa security types are already imported in `router.rs`. The plan
 verifies no new feature axis is needed (the scheme builder uses `CATALOG`, which is
-feature-ungated). If the extractor unit tests need engine fixtures, controller-core is already a
-dev-dep with `["testing"]` and sea-orm `mock` comes via controller-core's own dev surface — the
-plan confirms with a compile probe rather than assuming.
+feature-ungated). Extractor unit tests use the `sqlite::memory:` + migrations idiom (§4) —
+web-api's existing dev-deps cover it; `sea_orm::MockDatabase` is **not** reachable from web-api
+(no `mock` feature on its `sea-orm` entry; a dependency's dev-deps never propagate) and is not
+used. The plan compile-probes the fixture before freezing the test task.
 
 ## Tests
 
@@ -362,22 +447,35 @@ from existing `integration_tests/*.rs`):
   (b) an `upk_` API token created through the existing token endpoint for the same user. The ×2
   rule is the test plan's standing requirement for D1/D3.
 - **D2 (subset)** — no credential ⇒ 401 on a hosts route (never 403).
-- **D3 (subset)** — a second registered user with **no** role assignments and no direct grants ⇒
-  403 with the generic body on `GET /api/v1/hosts`, ×2 credentials. Assert the body carries no
+- **D3 (subset)** — **registration is not a zero-grant fixture**: every non-first registered
+  user is auto-assigned the `viewer` role (`routes/auth.rs:363`, `assign_viewer_role`) whose
+  seed grant is `*:read` — so a freshly-registered second user already passes `CanReadHosts`.
+  The zero-grant principal is **staged explicitly**: register the second user, delete its
+  `user_roles` rows directly in the DB, call
+  `app.state.access_engine.invalidate_subjects(&[user_id], &[])`, then assert 403 with the
+  generic body on `GET /api/v1/hosts`, ×2 credentials. Assert the body carries no
   grant/selector detail (compare against the fixed `"Insufficient permissions"` message).
 - **Immediate effect** (M1 exit criterion "grant changes take effect on the next request") —
-  grant the zero-grant user `hosts:read` via `access_grants::insert_grant` +
-  `app.state.access_engine.invalidate_subjects(&[user_id], &[])` ⇒ next request 200; then
+  continuing from the staged zero-grant user: insert a direct `hosts:read` grant via
+  `access_grants::insert_grant` + `invalidate_subjects` ⇒ next request 200; then
   `delete_grant` + `invalidate_subjects` ⇒ next request 403. No TTL wait, no re-login — this is
   the observable difference from the JWT-snapshot era.
+- **Pairing-rule pin** — a user holding only the `operator` role gets 200 on
+  `GET /api/v1/hosts` — asserting the intended `hosts:read` pairing widening (§6) as an explicit
+  decision. Staged the same way as D3, **never** via the role-update endpoint: direct DB
+  `user_roles` write (viewer row removed, operator row present) + explicit
+  `invalidate_subjects` — the endpoint calls no invalidation until M1.6a, so a warmed cache
+  would serve the stale viewer context (`*:read`) and green the test regardless of the pairing.
 - **Delivery arm** — direct `deliver_controller_event` test as in §7.
-- **Extractor unit tests** — §4 (401/403/allow at the macro level).
-- **Middleware 500 path** — engine failure ⇒ 500 is covered at engine level by M1.3's DB-error
-  tests; staging a broken DB inside a live TestApp is not reachable with the current harness, so
-  the REST-level 500 branch is covered by the middleware's error-arm unit shape only if the plan
-  finds a cheap seam (e.g. dropping the sqlite file is not applicable in-memory). If no cheap
-  seam exists, the branch ships with the tracing assertion deferred and the rationale recorded —
-  do not fabricate a harness capability.
+- **Extractor unit tests** — §4's full verdict set (401 missing-user; 500 missing-marker; 500
+  `Unavailable`; 403 no-grant; allow) — the fail-closed engine-failure branch is unit-reachable
+  now that the verdict lives in the extractor, resolving the earlier "no cheap seam" concern.
+- **Engine-failure semantics** — the DB-error path itself is covered by M1.3's engine tests; the
+  REST-side verdict (`Unavailable` ⇒ 500 on governed routes) is covered by the extractor unit
+  test above. Staging a live engine failure inside TestApp (to also assert `me` stays 200) is
+  not reachable with the current harness — do not fabricate that capability; the `me` guarantee
+  holds structurally (no action extractor on `me` ⇒ the marker is never read there) and gets its
+  endpoint-level test in M1.7 when `me` starts reading the marker.
 - **CI gate unittest** — §8 (rules R1–R4 + non-vacuity, committed RED fixtures).
 
 Non-goals restated: no `start_paused` anywhere here (no test awaits tokio time; the TTL behavior
@@ -402,7 +500,9 @@ In dependency order, all foreground:
 8. `cargo clippy --all-targets --all-features` + `cargo test --all-features` (requires
    `frontend/build/`; build frontend first)
 9. `cargo xtask audit-coverage-check` (hosts handlers keep their names/methods — expected
-   no-op, run to prove it), `bash ci/verify_handler_state_contract.sh`,
+   no-op, run to prove it), `cargo xtask openapi-client-check` (endpoint metadata changed; the
+   client surface should be unaffected — run to prove it, per the "Keep the openapi-client in
+   sync" invariant), `bash ci/verify_handler_state_contract.sh`,
    `python3 ci/verify_db_access_policy.py`, `markdownlint --config .markdownlint.json '**/*.md'`
 
 ## Documentation deliverables
@@ -441,6 +541,11 @@ In dependency order, all foreground:
   load on unconverted routes during the window, but makes the extractor async-DB-dependent,
   duplicates the load across multiple extractors on one request, and diverges from the pinned
   task contract ("built in `require_auth`, stored in request extensions"). Rejected.
+- **Whole-request 500 in `require_auth` on engine failure**: simpler than the
+  `AccessAuthority` marker, but it 500s `me`/`logout` on a grant-resolution DB blip — bypassing
+  `me`'s documented SPA-logout guard (`routes/auth.rs:2472-2487`) for the whole M1.4a→M1.7
+  window, on traffic that is DB-free for authorization today. Rejected: fail-closed belongs at
+  the authorization point, not the authentication pass.
 - **Delete `bearer_token` scheme in M1.4a**: forces the full sweep into this task (dangling
   scheme refs otherwise) — defeats the M1.4a/M1.4b split. Rejected (grilling decision 1).
 - **Bash+rg CI gate**: family precedent exists, but multi-line utoipa attributes plus two macro
