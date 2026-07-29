@@ -49,6 +49,44 @@ pub enum DenyReason {
     UnknownAction,
 }
 
+impl DenyReason {
+    /// Stable lowercase label for logs and the deny counter metric.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::NoGrant => "no_grant",
+            Self::OutOfScope => "out_of_scope",
+            Self::OutsideSelector => "outside_selector",
+            Self::UnknownAction => "unknown_action",
+        }
+    }
+}
+
+impl std::fmt::Display for DenyReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deny_reason_labels_are_stable_and_display_matches() {
+        let cases = [
+            (DenyReason::NoGrant, "no_grant"),
+            (DenyReason::OutOfScope, "out_of_scope"),
+            (DenyReason::OutsideSelector, "outside_selector"),
+            (DenyReason::UnknownAction, "unknown_action"),
+        ];
+        for (reason, label) in cases {
+            assert_eq!(reason.as_str(), label);
+            assert_eq!(reason.to_string(), label);
+        }
+    }
+}
+
 /// Visibility verdict for list/read filtering.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
