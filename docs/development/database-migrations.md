@@ -842,7 +842,7 @@ async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
 
 - `m20260302_000003_host_packages_has_update.rs` — table recreation with
   `GENERATED ALWAYS AS` stored column, both `up` and `down` use the helpers
-- `m20260318_000001_cron_to_interval.rs` — table recreation with `CASE`-based
+- `m20260318_000002_cron_to_interval.rs` — table recreation with `CASE`-based
   data transformation, backend branching (SQLite recreation vs. PostgreSQL
   `ALTER TABLE`)
 
