@@ -220,6 +220,14 @@ impl SurfaceRegistry {
                 Some((existing_provider_id, entry))
             });
 
+        // Normalize BEFORE admission so the collision check compares effective
+        // (normalized) contracts on both sides. Stored providers are always
+        // normalized; comparing a raw incoming registration against them makes
+        // byte-identical providers spuriously mismatch (e.g. a DataLoad's method
+        // is rewritten POST -> GET only in the stored copy).
+        normalize_interaction_methods(&mut registration);
+        warn_dataloads_without_params(&registration);
+
         if let Err(error) = self.validate_registration_admission_locked(
             &inner,
             &registration,
@@ -234,9 +242,6 @@ impl SurfaceRegistry {
             }
             return Err(error);
         }
-
-        normalize_interaction_methods(&mut registration);
-        warn_dataloads_without_params(&registration);
 
         if let Some(existing) = inner.providers.get(&provider_id)
             && existing.service_id != Some(service_id)
@@ -268,10 +273,10 @@ impl SurfaceRegistry {
         self.validate_registration_basics(surfaces::ProviderKind::BuiltIn, &registration, None)?;
         let provider_id = registration.provider.provider_id.clone();
         let mut inner = self.inner.lock();
-        self.validate_registration_admission_locked(&inner, &registration, None, None)?;
-
+        // Normalize before admission so collisions compare effective contracts.
         normalize_interaction_methods(&mut registration);
         warn_dataloads_without_params(&registration);
+        self.validate_registration_admission_locked(&inner, &registration, None, None)?;
 
         if let Some(existing) = inner.providers.get(&provider_id)
             && existing.registration.provider.provider_kind != surfaces::ProviderKind::BuiltIn
@@ -300,10 +305,10 @@ impl SurfaceRegistry {
         self.validate_registration_basics(surfaces::ProviderKind::Plugin, &registration, None)?;
         let provider_id = registration.provider.provider_id.clone();
         let mut inner = self.inner.lock();
-        self.validate_registration_admission_locked(&inner, &registration, None, None)?;
-
+        // Normalize before admission so collisions compare effective contracts.
         normalize_interaction_methods(&mut registration);
         warn_dataloads_without_params(&registration);
+        self.validate_registration_admission_locked(&inner, &registration, None, None)?;
 
         if let Some(existing) = inner.providers.get(&provider_id)
             && existing.registration.provider.provider_kind != surfaces::ProviderKind::Plugin
@@ -1981,6 +1986,68 @@ mod tests {
             rejection.reasons[0].code,
             SurfaceProviderRejectionCode::UnsupportedGeneration
         );
+    }
+
+    #[test]
+    fn two_service_providers_with_identical_dataload_contract_coexist() {
+        // Regression: a targeted surface may be offered by multiple providers
+        // when their contracts match. The `ssh-agent.hosts` surface carries a
+        // DataLoad interaction declared with the default method (POST), which
+        // admission normalizes to GET. The collision check must compare the
+        // NORMALIZED form on both sides — otherwise the second (e.g. external
+        // uptrakit-agent-ssh) provider mismatches the first (embedded) provider
+        // whose stored copy was already rewritten to GET.
+        let registry = registry();
+
+        // Build a registration whose surface includes a DataLoad interaction
+        // created with the wire-default method (POST).
+        let with_dataload = |provider_id: &str| {
+            let mut registration = registration_for_service(provider_id, tenant_a());
+            registration
+                .capabilities
+                .0
+                .insert(surfaces::Capability::DataLoad);
+            let surface = &mut registration.surfaces[0];
+            surface
+                .descriptor
+                .required_capabilities
+                .0
+                .insert(surfaces::Capability::DataLoad);
+            let dataload = surfaces::InteractionDescriptor::new(
+                surfaces::InteractionId::new("hosts").unwrap(),
+                surfaces::InteractionKind::DataLoad,
+                "List Hosts",
+                surfaces::InteractionTransport::ProviderProxied,
+            );
+            assert_eq!(
+                dataload.http_method,
+                surfaces::InteractionHttpMethod::Post,
+                "DataLoad interaction is authored with the default POST method"
+            );
+            surface.interactions.push(dataload);
+            registration
+        };
+
+        // First provider (embedded ssh-agent) registers and is stored normalized.
+        registry
+            .register_service(
+                Uuid::now_v7(),
+                "uptrakit-agent-ssh",
+                Some(tenant_a()),
+                with_dataload("service.uptrakit-agent-ssh.embedded"),
+            )
+            .expect("first provider should register");
+
+        // Second provider (external agent-ssh) with a byte-identical contract
+        // body must be admitted, not rejected as a contract mismatch.
+        registry
+            .register_service(
+                Uuid::now_v7(),
+                "uptrakit-agent-ssh",
+                Some(tenant_a()),
+                with_dataload("service.uptrakit-agent-ssh.external"),
+            )
+            .expect("identical second provider must coexist, not mismatch");
     }
 
     #[test]
