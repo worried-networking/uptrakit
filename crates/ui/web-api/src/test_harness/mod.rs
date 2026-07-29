@@ -257,7 +257,8 @@ impl crate::surface_proxy::SurfaceLocalActionExecutor for RecordingSurfaceExecut
 
 /// Create an in-memory SQLite database with all migrations applied.
 pub(crate) async fn setup_migrated_db() -> DatabaseConnection {
-    let opt = ConnectOptions::new("sqlite::memory:".to_owned());
+    let mut opt = ConnectOptions::new("sqlite::memory:".to_owned());
+    opt.max_connections(1).min_connections(1);
     let db = Database::connect(opt).await.expect("test db");
     uptrakit_shared_db::migration::run_migrations(&db)
         .await

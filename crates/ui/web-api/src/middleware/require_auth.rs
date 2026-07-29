@@ -193,6 +193,24 @@ pub async fn require_auth(
         );
     }
 
+    // M1.4a: resolve the principal's grant-based authority once per request.
+    // Failure inserts `Unavailable` and the request PROCEEDS — action
+    // extractors render it as a fail-closed 500; routes without an action
+    // extractor (`me`, `logout`, unconverted families) keep their semantics.
+    // `warn`, not `error`: nothing has failed for this request yet.
+    let authority = match state
+        .access_engine
+        .context(state.default_tenant_id, auth_user.user_id, None)
+        .await
+    {
+        Ok(ctx) => crate::middleware::action::AccessAuthority::Ready(ctx),
+        Err(report) => {
+            tracing::warn!(error = %report, "access context resolution failed");
+            crate::middleware::action::AccessAuthority::Unavailable
+        }
+    };
+    req.extensions_mut().insert(authority);
+
     if let Some(api_token_id) = api_token_id {
         req.extensions_mut().insert(api_token_id);
     }
