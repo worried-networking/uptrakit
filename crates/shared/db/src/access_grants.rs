@@ -472,6 +472,19 @@ pub async fn load_grants_for_principal(
     })
 }
 
+/// `db-migrate` table descriptor for `access_grants`. This module is the
+/// sanctioned exception in `ci/verify_engine_owned_entities.sh` — the only
+/// place permitted to name the `access_grant` entity — so
+/// `crate::migrate_core_tables::core_tables()` calls this function instead of
+/// naming the entity itself. Plain row copy/clean/verify; no validation
+/// applies (db-migrate moves already-validated rows between backends).
+#[cfg(feature = "db-migrate")]
+pub fn core_table_descriptor() -> crate::migrate_core_tables::CoreTableDescriptor {
+    crate::migrate_core_tables::CoreTableDescriptor::for_entity::<access_grant::Entity>(
+        "access_grants",
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use sea_orm::{ConnectOptions, Database, DatabaseConnection, QueryFilter};

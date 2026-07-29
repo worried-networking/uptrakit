@@ -138,7 +138,12 @@ pub struct CoreTableDescriptor {
 }
 
 impl CoreTableDescriptor {
-    fn for_entity<E>(name: &'static str) -> Self
+    /// `pub(crate)` (not private): [`crate::access_grants::core_table_descriptor`]
+    /// builds the `access_grants` descriptor from the engine-owned module —
+    /// the only place permitted to name the `access_grant` entity
+    /// (`ci/verify_engine_owned_entities.sh`) — so this constructor must be
+    /// callable from a sibling module in the same crate.
+    pub(crate) fn for_entity<E>(name: &'static str) -> Self
     where
         E: EntityTrait + 'static,
         E::Model: IntoActiveModel<E::ActiveModel> + Send + Sync + 'static,
@@ -168,6 +173,10 @@ pub fn core_tables() -> Vec<CoreTableDescriptor> {
 
     vec![
         CoreTableDescriptor::for_entity::<Tenant>("tenants"),
+        // Built via the engine-owned module, not `for_entity::<access_grant::Entity>`
+        // directly — `ci/verify_engine_owned_entities.sh` bans naming the
+        // entity outside `access_grants.rs`/the migration dir.
+        crate::access_grants::core_table_descriptor(),
         CoreTableDescriptor::for_entity::<User>("users"),
         CoreTableDescriptor::for_entity::<CaCertificate>("ca_certificates"),
         CoreTableDescriptor::for_entity::<CrlCache>("crl_cache"),
