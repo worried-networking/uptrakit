@@ -171,6 +171,14 @@ All endpoints require the `update_software` permission. Handlers live in
 `crates/ui/web-api/src/routes/plugin_type_settings.rs`; the merge itself is implemented in
 `crates/ui/web-api-queries/src/queries/plugin_configs.rs`.
 
+### Instance-scoped plugin enablement
+
+An Instance-scoped plugin's runtime functionality is governed by **effective enablement**
+(ADR-0033): effective = boot catalog state ∧ live snapshot state. Disabling takes effect
+immediately (surfaces and transports close); enabling stays pending until restart. An absent
+`instance_plugin_setting` row means disabled — deliberately: there is no seeding and no migration,
+and the admin UI lists Instance plugins from descriptors regardless of row.
+
 ### Per-Host Latest Version Tracking
 
 The `available_versions` table has been removed. Latest version information is now tracked

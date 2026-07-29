@@ -1,7 +1,8 @@
 # 0006 — Instance-Scoped Plugins
 
 **Date:** 2026-05-11
-**Status:** Accepted
+**Status:** Accepted — Decision 4 superseded and Decision 2 refined by
+[ADR-0033](0033-effective-plugin-enablement-and-surface-visibility.md) (effective = boot ∧ live)
 
 ## Context
 
@@ -70,6 +71,11 @@ plugin management to a role that cannot change network or SMTP settings — is a
 Nothing in the current architecture prevents it.
 
 ## Decision 4 — Single visibility predicate; disabled plugins return 404
+
+> **Superseded by [ADR-0033](0033-effective-plugin-enablement-and-surface-visibility.md):** the
+> surfaces legs are now gated by user-independent effective enablement (a required registry filter),
+> not by this predicate. The predicate still governs plugin listing/config endpoints. Decisions 1–3
+> stand unchanged.
 
 A single predicate, `crate::visibility::is_plugin_visible_to_user`, gates every plugin-listing
 endpoint and the surfaces registry. When an instance-scoped plugin is disabled, tenant users

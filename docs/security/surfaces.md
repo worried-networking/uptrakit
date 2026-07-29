@@ -80,6 +80,16 @@ with it.
 
 Handlers of flagged interactions must not treat provider origin as privileged beyond tenant membership.
 
+### Effective-enablement gate
+
+Every tenant-facing surfaces leg — list, providers, read, invoke, and provider-origin invocation —
+is gated on the owning plugin's effective enablement (boot ∧ live, ADR-0033) via a required
+`SurfaceProviderVisibility` filter on the registry's resolution methods. The posture is fail-closed:
+a Plugin-kind provider that resolves to no compiled-in descriptor is never visible, and
+`SurfaceProxy` defaults to denying all plugin providers unless the production filter is wired in.
+A hidden surface's response is byte-identical to an unknown surface's (404, no existence
+side-channel), for every permission tier — there is no admin override on the surfaces legs.
+
 ## Response caching
 
 Surface GET responses set `Cache-Control: private, no-store`; results are per-tenant and per-permission data that must

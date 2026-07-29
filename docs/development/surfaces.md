@@ -236,6 +236,17 @@ These endpoints are utoipa-registered; frontend access goes through the generate
 `frontend/src/lib/api/surfaces.ts` is retired). Full route family, query contract, and error semantics: [Shared
 Surface API](../api/surfaces.md).
 
+### Provider visibility filter
+
+The tenant-facing `SurfaceRegistry` methods (`list_surfaces_for_tenant`,
+`list_targeted_providers_for_surface`, `resolve_surface_read`,
+`resolve_surface_action_for_method`) take a required `visibility: &dyn SurfaceProviderVisibility`
+parameter — a caller cannot resolve without deciding plugin visibility. Production callers pass the
+controller's `PluginEffectiveEnablement` (stored on `SurfaceProxyDeps`); `SurfaceProxy` stores the
+filter at construction (`with_provider_visibility`, deny-all default) for its internal resolution,
+which is the only gate on the provider-origin leg. Tests that don't exercise enablement use the
+`testing`-gated `AllProvidersVisible`. Service- and BuiltIn-kind providers are never consulted.
+
 ### Declaring an interaction's method
 
 Every `InteractionDescriptor` carries `http_method` (`get` | `post` | `put` | `delete`; wire default `post`).

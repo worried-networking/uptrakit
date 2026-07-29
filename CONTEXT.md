@@ -84,6 +84,11 @@ level via `global_settings`, gated by `ManageGlobalSettings`. When disabled, no 
 Surface, or runtime hook exposes its existence to tenant Operators.
 _Avoid_: global plugin (in code), system plugin, root plugin
 
+**Effective Enablement**:
+An Instance-Scoped Plugin's runtime availability: effective = boot catalog state AND live snapshot
+state (ADR-0033). Disable is immediate; enable stays pending until restart. Governs every surfaces
+leg for every permission tier.
+
 **Contribution Monotonicity**:
 The invariant that enabling a Cargo feature may only add plugin descriptor contributions
 (Surfaces, migrations, role slots), never remove or alter them. Guarded by the registry
