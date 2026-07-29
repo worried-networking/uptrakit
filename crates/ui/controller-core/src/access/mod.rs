@@ -319,9 +319,10 @@ mod tests {
     };
     use time::OffsetDateTime;
     use uptrakit_shared_db::access_grants::{GrantSubject, NewGrant, insert_grant};
-    use uptrakit_shared_db::entity::{tenant, user};
+    use uptrakit_shared_db::entity::{role, tenant, user};
     use uptrakit_shared_types::MaskedEmail;
     use uptrakit_shared_types::access::Selector;
+    use uptrakit_shared_types::access::{Resource, Verb, actions};
 
     use super::*;
 
@@ -407,6 +408,254 @@ mod tests {
             ])
             .to_owned();
         db.execute(&stmt).await.expect("seed corrupt grant row");
+    }
+
+    fn dummy_engine() -> AccessEngine {
+        AccessEngine::new(MockDatabase::new(DbBackend::Sqlite).into_connection())
+    }
+
+    fn resolved_grant(pattern: &str) -> ResolvedGrant {
+        ResolvedGrant {
+            id: Uuid::nil(),
+            tenant_id: Some(Uuid::nil()),
+            subject: GrantSubject::User(Uuid::nil()),
+            patterns: vec![pattern.parse().expect("valid pattern")],
+            selector: Selector::All,
+        }
+    }
+
+    fn ctx_with(grants: Vec<ResolvedGrant>, scope: Option<Vec<ActionPattern>>) -> AccessContext {
+        AccessContext {
+            user_id: Uuid::nil(),
+            tenant_id: Uuid::nil(),
+            authority: Arc::new(CachedAuthority {
+                grants,
+                loaded_at: tokio::time::Instant::now(),
+            }),
+            scope,
+        }
+    }
+
+    fn scope_of(patterns: &[&str]) -> Option<Vec<ActionPattern>> {
+        Some(
+            patterns
+                .iter()
+                .map(|p| p.parse().expect("valid pattern"))
+                .collect(),
+        )
+    }
+
+    #[tokio::test]
+    async fn c1a_direct_user_grant_allows() {
+        let db = test_db().await;
+        let tenant_id = default_tenant_id(&db).await;
+        let user_id = seed_user(&db).await;
+        grant(&db, tenant_id, GrantSubject::User(user_id), "hosts:read").await;
+
+        let engine = AccessEngine::new(db);
+        let ctx = engine
+            .context(tenant_id, user_id, None)
+            .await
+            .expect("context resolves");
+        assert_eq!(
+            engine.authorize(&ctx, &actions::HOSTS_READ, None),
+            Decision::Allow
+        );
+    }
+
+    #[tokio::test]
+    async fn c1b_role_inherited_grant_allows() {
+        let db = test_db().await;
+        let tenant_id = default_tenant_id(&db).await;
+        let user_id = seed_user(&db).await;
+        let viewer_id = role::Entity::find()
+            .filter(role::Column::Name.eq("viewer"))
+            .one(&db)
+            .await
+            .expect("query roles")
+            .expect("viewer role is seeded")
+            .id;
+        user_role::ActiveModel {
+            tenant_id: Set(tenant_id),
+            user_id: Set(user_id),
+            role_id: Set(viewer_id),
+            assigned_at: Set(OffsetDateTime::now_utc()),
+        }
+        .insert(&db)
+        .await
+        .expect("insert user_role");
+
+        let engine = AccessEngine::new(db);
+        let ctx = engine
+            .context(tenant_id, user_id, None)
+            .await
+            .expect("context resolves");
+        assert_eq!(
+            engine.authorize(&ctx, &actions::HOSTS_READ, None),
+            Decision::Allow,
+            "viewer role's *:read grant must be inherited"
+        );
+    }
+
+    #[test]
+    fn c1c_wildcard_pattern_allows() {
+        let engine = dummy_engine();
+        let ctx = ctx_with(vec![resolved_grant("hosts:*")], None);
+        assert_eq!(
+            engine.authorize(&ctx, &actions::HOSTS_READ, None),
+            Decision::Allow
+        );
+    }
+
+    #[test]
+    fn c4_no_grant_denies() {
+        let engine = dummy_engine();
+        let ctx = ctx_with(vec![], None);
+        assert_eq!(
+            engine.authorize(&ctx, &actions::HOSTS_READ, None),
+            Decision::Deny(DenyReason::NoGrant)
+        );
+    }
+
+    #[test]
+    fn c5_scope_ceiling_denies_out_of_scope() {
+        let engine = dummy_engine();
+        let ctx = ctx_with(
+            vec![resolved_grant("hosts:read")],
+            scope_of(&["services:read"]),
+        );
+        assert_eq!(
+            engine.authorize(&ctx, &actions::HOSTS_READ, None),
+            Decision::Deny(DenyReason::OutOfScope)
+        );
+    }
+
+    /// Registry seam used only by C7 — proves the seam, not the stub.
+    struct StubRegistry {
+        registered: Vec<Action>,
+    }
+
+    impl DynamicActionRegistry for StubRegistry {
+        fn is_registered(&self, action: &Action) -> bool {
+            self.registered.contains(action)
+        }
+    }
+
+    #[test]
+    fn c7_dynamic_action_registry_seam() {
+        let dynamic = Resource::plugin("foo").expect("valid plugin resource");
+        let action = Action::new(dynamic, Verb::Manage).expect("dynamic action");
+        let ctx = ctx_with(vec![resolved_grant("plugin.foo:manage")], None);
+
+        let no_registry = dummy_engine();
+        assert_eq!(
+            no_registry.authorize(&ctx, &action, None),
+            Decision::Deny(DenyReason::UnknownAction),
+            "no registry at all must deny dynamic actions"
+        );
+
+        let empty_registry =
+            dummy_engine().with_registry(Arc::new(StubRegistry { registered: vec![] }));
+        assert_eq!(
+            empty_registry.authorize(&ctx, &action, None),
+            Decision::Deny(DenyReason::UnknownAction),
+            "an empty registry must still deny"
+        );
+
+        let populated_registry = dummy_engine().with_registry(Arc::new(StubRegistry {
+            registered: vec![action.clone()],
+        }));
+        assert_eq!(
+            populated_registry.authorize(&ctx, &action, None),
+            Decision::Allow,
+            "registering the action must allow once grant/scope pass"
+        );
+    }
+
+    #[test]
+    fn c9_visibility_m1_arms() {
+        let engine = dummy_engine();
+
+        let full = ctx_with(vec![resolved_grant("hosts:read")], None);
+        assert_eq!(
+            engine.visibility(&full, &actions::HOSTS_READ),
+            Visibility::Full
+        );
+
+        let no_grant = ctx_with(vec![], None);
+        assert_eq!(
+            engine.visibility(&no_grant, &actions::HOSTS_READ),
+            Visibility::None
+        );
+
+        let out_of_scope = ctx_with(
+            vec![resolved_grant("hosts:read")],
+            scope_of(&["services:read"]),
+        );
+        assert_eq!(
+            engine.visibility(&out_of_scope, &actions::HOSTS_READ),
+            Visibility::None
+        );
+    }
+
+    #[test]
+    fn c14_scope_grant_intersection_both_directions() {
+        let engine = dummy_engine();
+
+        let wide_grant_narrow_scope =
+            ctx_with(vec![resolved_grant("*:*")], scope_of(&["hosts:read"]));
+        assert_eq!(
+            engine.authorize(&wide_grant_narrow_scope, &actions::HOSTS_READ, None),
+            Decision::Allow
+        );
+        assert_eq!(
+            engine.authorize(&wide_grant_narrow_scope, &actions::SERVICES_READ, None),
+            Decision::Deny(DenyReason::OutOfScope)
+        );
+
+        let narrow_grant_wide_scope =
+            ctx_with(vec![resolved_grant("hosts:read")], scope_of(&["*:*"]));
+        assert_eq!(
+            engine.authorize(&narrow_grant_wide_scope, &actions::HOSTS_READ, None),
+            Decision::Allow
+        );
+        assert_eq!(
+            engine.authorize(&narrow_grant_wide_scope, &actions::SERVICES_READ, None),
+            Decision::Deny(DenyReason::NoGrant)
+        );
+    }
+
+    #[test]
+    fn c15_no_scope_vs_empty_scope() {
+        let engine = dummy_engine();
+
+        let no_scope_concept = ctx_with(vec![resolved_grant("hosts:read")], None);
+        assert_eq!(
+            engine.authorize(&no_scope_concept, &actions::HOSTS_READ, None),
+            Decision::Allow,
+            "grants alone must authorize when the credential has no scope concept"
+        );
+
+        let empty_scope_ceiling = ctx_with(vec![resolved_grant("hosts:read")], Some(vec![]));
+        assert_eq!(
+            engine.authorize(&empty_scope_ceiling, &actions::HOSTS_READ, None),
+            Decision::Deny(DenyReason::OutOfScope),
+            "an empty Some(scope) ceiling must admit nothing"
+        );
+    }
+
+    #[test]
+    fn target_arm_selector_all_covers_any_target() {
+        let engine = dummy_engine();
+        let ctx = ctx_with(vec![resolved_grant("hosts:read")], None);
+        assert_eq!(
+            engine.authorize(
+                &ctx,
+                &actions::HOSTS_READ,
+                Some(&TargetRef::Host(Uuid::nil()))
+            ),
+            Decision::Allow
+        );
     }
 
     #[tokio::test(start_paused = true)]
