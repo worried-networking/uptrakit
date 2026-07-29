@@ -12,6 +12,10 @@ use rootcause::prelude::*;
 use thiserror::Error;
 use uptrakit_shared_macros::impl_report_conversion;
 
+mod browse;
+
+pub use browse::{browse_all, browse_first};
+
 /// mDNS service type advertised by the controller and browsed by clients.
 pub const SERVICE_TYPE: &str = "_uptrakit._tcp.local.";
 
