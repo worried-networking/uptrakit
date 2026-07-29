@@ -297,9 +297,10 @@ variants: `InvalidField { field, message }`, `InvalidIdentifier`, `Contract`.
 
 - **"service"** — in uptrakit this always means a satellite component of the Controller
   (Agent, Agent-SSH, MQTT, Scheduler). Never use to mean a managed Software Item on a Host.
-- **"discovery"** — two distinct concepts exist: Software Discovery (installed software
-  inventory on a Host) and Proxmox VE Discovery (infrastructure inventory from a PVE host).
-  Always qualify with the prefix.
+- **"discovery"** — three distinct concepts exist: Software Discovery (installed software
+  inventory on a Host), Proxmox VE Discovery (infrastructure inventory from a PVE host), and
+  Zeroconf Discovery (locating the Controller itself via mDNS/DNS-SD on the local network;
+  Services and the CLI browse, the Controller advertises). Always qualify with the prefix.
 - **"release"** — means "available version to upgrade to." For Docker containers this maps to
   an image tag; for GitHub-based items it maps to a GitHub release. The term is canonical
   regardless of the underlying mechanism.

@@ -243,6 +243,34 @@ Internal-only clients (e.g. the openapi-client connecting to a known controller 
 the CA certificate fetch in service-sdk) do not need SSRF protection because their
 target URLs are not user-controlled.
 
+### Documented exception: operator-context CLI clients
+
+The SSRF rule's threat model is server-side confused-deputy fetches and DNS rebinding: a
+server process, acting on a URL supplied by one user, is tricked into reaching a host that
+user could not otherwise reach. That model does not apply to the CLI's bootstrap clients
+(`fetch_ca` in `crates/ui/cli/src/commands/auth.rs`), which run at the operator's own
+network position with no server-side ambient authority — the request goes exactly where the
+operator invoking the CLI could already reach directly.
+
+`SsrfSafeResolver` would be either breaking or vacuous here: Strict mode blocks the
+private-range addresses self-hosted controllers actually live on (and mDNS-discovered URLs
+are usually IP literals a DNS resolver never even sees, so the rebinding attack the resolver
+guards against cannot occur on this path), while permissive mode allows all resolved
+addresses and adds no protection. The compensating control on the discovery path is the
+mandatory interactive URL confirmation plus the fingerprint (TOFU) ceremony in
+`establish_ca_trust` — the URL the client connects to is either operator-typed or
+operator-confirmed before any request carrying credentials is sent.
+
+This is a second, narrower exception alongside the "Internal-only clients" carve-out above,
+and the two must not be conflated: the internal-only exception's rationale is
+**not-user-controlled** (the openapi-client and service-sdk CA fetch target a URL the
+process itself was configured with, never a value an end user supplied at request time); this
+exception's rationale is **operator-controlled-and-confirmed** (the CLI's target URL _is_
+user-supplied — typed or discovered — but the "user" is the same operator running the
+process, at their own network vantage point, and the value is confirmed via the fingerprint
+ceremony before use). Both end up skipping `SsrfSafeResolver`, but for different reasons; do
+not cite one exception's rationale to justify a future case that only fits the other.
+
 ## NATS Plugin Config Protection
 
 Plugin configs published to NATS JetStream are encrypted with AES-256-GCM

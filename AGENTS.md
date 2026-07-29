@@ -120,6 +120,7 @@ uptrakit/
 │   │   ├── audit-log/                 # uptrakit-audit-log        (lib) — semantic audit domain, emitters, dispatcher, backends
 │   │   ├── update-hooks/             # uptrakit-config-merge     (lib) — resolve_effective_config(), merge_config()
 │   │   ├── backoff/                   # uptrakit-backoff          (lib) — exponential backoff (reconnect_backoff_builder)
+│   │   ├── zeroconf/                   # uptrakit-zeroconf        (lib) — mDNS/DNS-SD contract + browse (SERVICE_TYPE, TXT keys)
 │   │   └── wire/                       # uptrakit-wire             (lib) — service↔controller wire protocol, Capability, ServiceProfile
 │   └── ui/                             # See crates/ui/web-api/AGENTS.md for web-api handler conventions
 │       ├── cli/                        # uptrakit-cli             (bin+lib) — CLI over openapi-client; SSE for --follow
