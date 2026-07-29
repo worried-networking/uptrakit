@@ -44,6 +44,7 @@ use uptrakit_shared_db::entity::user_role;
 use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_shared_types::access::{Action, ActionPattern, Selector};
 use uptrakit_shared_types::access::{Decision, DenyReason, TargetRef, Visibility};
+use uptrakit_wire::AccessInvalidatedPayload;
 
 /// Default TTL backstop for cached principal authority.
 const ACCESS_CACHE_TTL: Duration = Duration::from_secs(60);
@@ -292,6 +293,48 @@ impl AccessEngine {
         } else {
             Visibility::None
         }
+    }
+}
+
+impl AccessEngine {
+    /// Flush the whole cache after a local grant/role mutation.
+    ///
+    /// Full flush per event is provably correct and uses only infallible
+    /// cache API (granular `invalidate_entries_if` needs builder opt-in and
+    /// returns a `Result` the no-unwrap invariant cannot swallow for an auth
+    /// invalidation); grant/role mutations are rare admin operations. The
+    /// subject lists are logged for observability only.
+    ///
+    /// Effect: reflected on the next request absent a concurrent in-flight
+    /// load — a load already in flight when the flush fires may insert
+    /// pre-mutation authority after it, serving stale data until the TTL
+    /// backstop (the same 60 s envelope already accepted for a lost NATS
+    /// event). The engine does NOT publish NATS: mutation sites (M1.6a)
+    /// call this locally and publish `ControllerMessage::AccessInvalidated`
+    /// via the existing `publish_controller_event` path.
+    pub fn invalidate_subjects(&self, user_ids: &[Uuid], role_ids: &[Uuid]) {
+        self.cache.invalidate_all();
+        metrics::counter!("uptrakit_access_invalidations_total", "origin" => "local").increment(1);
+        tracing::debug!(
+            ?user_ids,
+            ?role_ids,
+            "flushed access cache after local grant/role mutation"
+        );
+    }
+
+    /// Flush the whole cache for a received `AccessInvalidated` event
+    /// (routed here by the M1.4a `deliver_controller_event` arm). Receivers
+    /// always flush — the payload's lists are diagnostic; there is no
+    /// `tenant_id` by design (a global-grant revoke must invalidate every
+    /// tenant's entries).
+    pub fn apply_remote_invalidation(&self, payload: &AccessInvalidatedPayload) {
+        self.cache.invalidate_all();
+        metrics::counter!("uptrakit_access_invalidations_total", "origin" => "remote").increment(1);
+        tracing::debug!(
+            user_ids = ?payload.user_ids,
+            role_ids = ?payload.role_ids,
+            "flushed access cache after remote AccessInvalidated event"
+        );
     }
 }
 
@@ -772,6 +815,77 @@ mod tests {
         assert_eq!(
             statement_count, 2,
             "principal resolution must be exactly two round-trips (roles, grants) for 5 roles"
+        );
+    }
+
+    #[tokio::test]
+    async fn invalidate_subjects_takes_effect_on_next_context() {
+        let db = test_db().await;
+        let tenant_id = default_tenant_id(&db).await;
+        let user_id = seed_user(&db).await;
+        grant(&db, tenant_id, GrantSubject::User(user_id), "hosts:read").await;
+        let engine = AccessEngine::new(db.clone());
+
+        let first = engine
+            .context(tenant_id, user_id, None)
+            .await
+            .expect("first load");
+        assert_eq!(first.authority.grants.len(), 1);
+
+        grant(&db, tenant_id, GrantSubject::User(user_id), "services:read").await;
+
+        // Positive control: within TTL and without invalidation the cached
+        // (stale) authority is served — caching exists.
+        let cached = engine
+            .context(tenant_id, user_id, None)
+            .await
+            .expect("cached");
+        assert_eq!(
+            cached.authority.grants.len(),
+            1,
+            "pre-invalidation reads must serve the cache"
+        );
+
+        engine.invalidate_subjects(&[user_id], &[]);
+        let fresh = engine
+            .context(tenant_id, user_id, None)
+            .await
+            .expect("post-flush reload");
+        assert_eq!(
+            fresh.authority.grants.len(),
+            2,
+            "next context() must reflect the mutation"
+        );
+    }
+
+    #[tokio::test]
+    async fn apply_remote_invalidation_takes_effect_on_next_context() {
+        let db = test_db().await;
+        let tenant_id = default_tenant_id(&db).await;
+        let user_id = seed_user(&db).await;
+        grant(&db, tenant_id, GrantSubject::User(user_id), "hosts:read").await;
+        let engine = AccessEngine::new(db.clone());
+
+        let first = engine
+            .context(tenant_id, user_id, None)
+            .await
+            .expect("first load");
+        assert_eq!(first.authority.grants.len(), 1);
+
+        grant(&db, tenant_id, GrantSubject::User(user_id), "services:read").await;
+
+        engine.apply_remote_invalidation(&uptrakit_wire::AccessInvalidatedPayload {
+            user_ids: vec![user_id],
+            role_ids: vec![],
+        });
+        let fresh = engine
+            .context(tenant_id, user_id, None)
+            .await
+            .expect("post-flush reload");
+        assert_eq!(
+            fresh.authority.grants.len(),
+            2,
+            "remote invalidation must flush the cache"
         );
     }
 }
