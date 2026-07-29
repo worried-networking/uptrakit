@@ -72,7 +72,7 @@ transitive dependency into the squat chain.
 - Crate: `crates/shared/zeroconf` (`uptrakit-zeroconf`)
 - Advertiser (controller-runtime): `crates/core/controller-runtime`
 - Browser (service-sdk): `crates/shared/service-sdk`
-- Browser (CLI): `crates/ui/cli/src/commands/auth.rs`
+- Browser (CLI): `crates/ui/cli/src/discovery.rs`
 - Publish policy: `release-plz.toml`
 - Squat-chain design: `docs/superpowers/specs/2026-06-09-publishable-crate-squat-chain-break-design.md`
 - Banned-dependency guard: `crates/shared/service-sdk/tests/no_workspace_db_deps.rs`
