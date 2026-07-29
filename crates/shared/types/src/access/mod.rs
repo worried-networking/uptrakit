@@ -15,6 +15,7 @@
 mod action;
 pub mod bounds;
 mod catalog;
+mod decision;
 mod pattern;
 mod selector;
 mod verb;
@@ -22,6 +23,7 @@ mod verb;
 pub use action::{Action, ParseActionError};
 pub use catalog::actions;
 pub use catalog::{CATALOG, CatalogEntry, ParseResourceError, Resource, VerbEntry};
+pub use decision::{Decision, DenyReason, TargetRef, Visibility};
 pub use pattern::{ActionPattern, ParsePatternError, ResourcePattern, VerbPattern};
 pub use selector::{Selector, SelectorSupport, SelectorValidationError};
 pub use verb::{ParseVerbError, Verb};
