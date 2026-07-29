@@ -13,28 +13,20 @@ use std::net::SocketAddr;
 use mdns_sd::{ServiceDaemon, ServiceInfo};
 use tokio_util::sync::CancellationToken;
 
+use uptrakit_controller_core::settings::ZeroconfSnapshot;
 use uptrakit_web_api::ca_snapshot::CaPublicSnapshot;
-use uptrakit_web_api::settings::ZeroconfSnapshot;
-
-/// mDNS service type for Uptrakit controller discovery.
-pub(crate) const SERVICE_TYPE: &str = "_uptrakit._tcp.local.";
+use uptrakit_zeroconf::SERVICE_TYPE;
 
 /// Build TXT record properties from the current CA snapshot and zeroconf settings.
 pub(crate) fn build_txt_properties(
     ca_snapshot: &CaPublicSnapshot,
     zeroconf: &ZeroconfSnapshot,
 ) -> Vec<(&'static str, String)> {
-    let mut properties = vec![("ca_fp", ca_snapshot.active_fingerprint.clone())];
-
-    if let Some(ref url) = zeroconf.url {
-        properties.push(("url", url.clone()));
-    }
-
-    if let Some(ref pki_addr) = zeroconf.pki_addr {
-        properties.push(("pki_addr", pki_addr.clone()));
-    }
-
-    properties
+    uptrakit_zeroconf::build_txt_properties(
+        &ca_snapshot.active_fingerprint,
+        zeroconf.url.as_deref(),
+        zeroconf.pki_addr.as_deref(),
+    )
 }
 
 /// Strip any `.local` or `.local.` suffix from a hostname, returning the bare label.

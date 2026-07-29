@@ -13,7 +13,7 @@ embedded-scheduler = ["dep:uptrakit-scheduler-runtime"]
 embedded-agent = ["dep:uptrakit-agent-core", "dep:uptrakit-agent-runtime"]
 embedded-ssh-agent = ["dep:uptrakit-agent-core", "dep:uptrakit-agent-ssh-runtime", "dep:base64", "dep:uptrakit-service-sdk", "uptrakit-agent-ssh-runtime/service-migrations"]
 embedded-mqtt = ["dep:uptrakit-mqtt-runtime", "dep:base64", "dep:uptrakit-service-sdk"]
-zeroconf = ["dep:mdns-sd"]
+zeroconf = ["dep:mdns-sd", "dep:uptrakit-zeroconf"]
 oidc = ["uptrakit-web-api/oidc", "uptrakit-scheduler-runtime?/oidc"]
 swagger-ui = ["uptrakit-web-api/swagger-ui"]
 db-all = ["db-sqlite", "db-postgres", "uptrakit-web-api/db-all"]
@@ -97,6 +97,7 @@ tracing-journald = { workspace = true, optional = true }
 reqwest = { workspace = true }
 uptrakit-frontend = { workspace = true, optional = true }
 mdns-sd = { workspace = true, optional = true }
+uptrakit-zeroconf = { workspace = true, optional = true }
 uptrakit-mcp = { workspace = true, optional = true }
 
 [dev-dependencies]

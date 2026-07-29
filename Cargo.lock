@@ -7432,6 +7432,7 @@ dependencies = [
  "uptrakit-web-api",
  "uptrakit-web-api-queries",
  "uptrakit-wire",
+ "uptrakit-zeroconf",
  "url",
  "uuid",
  "x509-cert",
