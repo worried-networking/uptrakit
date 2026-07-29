@@ -97,6 +97,192 @@ async fn boot_disabled_fixture_is_absent_from_surfaces_list_raw_bytes() {
     );
 }
 
+/// Fetches `(status, body)` for a leg against the given surface id.
+async fn leg_response(
+    app: &TestApp,
+    token: &str,
+    uri: &str,
+) -> (http::StatusCode, axum::body::Bytes) {
+    app.client().get(uri).bearer(token).send_bytes().await
+}
+
+/// Fetches `(status, body)` for the POST invoke leg against the given surface id.
+async fn leg_response_post(
+    app: &TestApp,
+    token: &str,
+    uri: &str,
+) -> (http::StatusCode, axum::body::Bytes) {
+    app.client()
+        .post_json(uri, &serde_json::json!({ "params": {} }))
+        .bearer(token)
+        .send_bytes()
+        .await
+}
+
+/// Asserts a leg's response for the fixture surface is byte-identical to the
+/// same leg's response for an unknown surface (spec §5.3: no existence
+/// side-channel — never the distinct NoTenantCompatibleProvider message).
+async fn assert_leg_matches_unknown(app: &TestApp, token: &str, leg: &str) {
+    let real = leg_response(app, token, &leg.replace("{sid}", fixture::SURFACE_ID)).await;
+    let unknown = leg_response(app, token, &leg.replace("{sid}", "no.such-surface")).await;
+    assert_eq!(real.0, http::StatusCode::NOT_FOUND, "leg {leg} must 404");
+    assert_eq!(
+        real, unknown,
+        "leg {leg}: hidden-surface response must be byte-identical to unknown-surface"
+    );
+}
+
+/// POST-invoke variant of [`assert_leg_matches_unknown`]: asserts the invoke
+/// leg for the fixture surface is byte-identical to the same leg for an
+/// unknown surface (spec §5.3: no existence side-channel).
+async fn assert_invoke_leg_matches_unknown(app: &TestApp, token: &str) {
+    let real = leg_response_post(
+        app,
+        token,
+        &format!("/api/v1/surfaces/{}/interactions/ping", fixture::SURFACE_ID),
+    )
+    .await;
+    let unknown = leg_response_post(
+        app,
+        token,
+        "/api/v1/surfaces/no.such-surface/interactions/ping",
+    )
+    .await;
+    assert_eq!(real.0, http::StatusCode::NOT_FOUND, "invoke leg must 404");
+    assert_eq!(
+        real, unknown,
+        "invoke leg: hidden-surface response must be byte-identical to unknown-surface"
+    );
+}
+
+/// Row 2 (§3.5): boot-enabled, live-disabled — absent + 404 immediately, no
+/// restart, for BOTH tiers; admin summary shows the disable took effect
+/// while running_enabled (boot state) stays true.
+#[tokio::test]
+async fn live_disable_takes_effect_immediately_on_every_leg_for_every_tier() {
+    let (app, admin_token, tenant_token) = matrix_app(true).await;
+    set_live_enabled(&app, &admin_token, true).await;
+    assert!(
+        listed_surface_ids(&app, &tenant_token)
+            .await
+            .contains(&fixture::SURFACE_ID.to_string())
+    );
+
+    // Flip through the production write path (the instance-plugins route),
+    // never by poking the ArcSwap directly.
+    set_live_enabled(&app, &admin_token, false).await;
+
+    for token in [&tenant_token, &admin_token] {
+        assert!(
+            !listed_surface_ids(&app, token)
+                .await
+                .contains(&fixture::SURFACE_ID.to_string()),
+            "live-disabled surface must vanish from the list without restart"
+        );
+        assert_leg_matches_unknown(&app, token, "/api/v1/surfaces/{sid}/providers").await;
+        assert_leg_matches_unknown(&app, token, "/api/v1/surfaces/{sid}").await;
+        assert_invoke_leg_matches_unknown(&app, token).await;
+    }
+
+    let (status, body): (_, Vec<serde_json::Value>) = app
+        .client()
+        .get("/api/v1/instance-plugins")
+        .bearer(&admin_token)
+        .send_json()
+        .await;
+    assert_eq!(status, http::StatusCode::OK);
+    let row = body
+        .iter()
+        .find(|p| p["plugin_type"] == fixture::TYPE_ID)
+        .expect("fixture must appear in the admin instance-plugins list");
+    assert_eq!(row["enabled"], false, "live disable must be reflected");
+    assert_eq!(
+        row["running_enabled"], true,
+        "running_enabled intentionally reflects boot state (pending-restart badge input)"
+    );
+}
+
+/// Row 3 (§3.5): boot-disabled, live-enabled (pending restart) — absent + 404
+/// for both tiers; admin summary shows enabled=true / running_enabled=false.
+#[tokio::test]
+async fn pending_restart_enabled_surface_absent_for_every_tier() {
+    let (app, admin_token, tenant_token) = matrix_app(false).await;
+    set_live_enabled(&app, &admin_token, true).await;
+
+    for token in [&tenant_token, &admin_token] {
+        assert!(
+            !listed_surface_ids(&app, token)
+                .await
+                .contains(&fixture::SURFACE_ID.to_string())
+        );
+        assert_leg_matches_unknown(&app, token, "/api/v1/surfaces/{sid}/providers").await;
+        assert_leg_matches_unknown(&app, token, "/api/v1/surfaces/{sid}").await;
+        assert_invoke_leg_matches_unknown(&app, token).await;
+    }
+
+    let (_, body): (_, Vec<serde_json::Value>) = app
+        .client()
+        .get("/api/v1/instance-plugins")
+        .bearer(&admin_token)
+        .send_json()
+        .await;
+    let row = body
+        .iter()
+        .find(|p| p["plugin_type"] == fixture::TYPE_ID)
+        .expect("fixture row");
+    assert_eq!(row["enabled"], true);
+    assert_eq!(row["running_enabled"], false, "pending-restart state");
+}
+
+/// Row 4 (§3.5): boot-disabled, no live row (absent = disabled, D4) — absent
+/// + 404 for both tiers.
+#[tokio::test]
+async fn boot_disabled_without_row_is_absent_for_every_tier() {
+    let (app, admin_token, tenant_token) = matrix_app(false).await;
+    for token in [&tenant_token, &admin_token] {
+        assert!(
+            !listed_surface_ids(&app, token)
+                .await
+                .contains(&fixture::SURFACE_ID.to_string())
+        );
+        assert_leg_matches_unknown(&app, token, "/api/v1/surfaces/{sid}/providers").await;
+        assert_leg_matches_unknown(&app, token, "/api/v1/surfaces/{sid}").await;
+        assert_invoke_leg_matches_unknown(&app, token).await;
+    }
+}
+
+/// Row 1 positive complements the smoke test: read + providers 200 for both
+/// tiers when effectively enabled.
+#[tokio::test]
+async fn effectively_enabled_surface_readable_for_every_tier() {
+    let (app, admin_token, tenant_token) = matrix_app(true).await;
+    set_live_enabled(&app, &admin_token, true).await;
+    for token in [&tenant_token, &admin_token] {
+        let (status, _) = leg_response(
+            &app,
+            token,
+            &format!("/api/v1/surfaces/{}", fixture::SURFACE_ID),
+        )
+        .await;
+        assert_eq!(
+            status,
+            http::StatusCode::OK,
+            "read leg must serve the surface"
+        );
+        let (status, _) = leg_response(
+            &app,
+            token,
+            &format!("/api/v1/surfaces/{}/providers", fixture::SURFACE_ID),
+        )
+        .await;
+        assert_eq!(
+            status,
+            http::StatusCode::OK,
+            "providers leg must serve the surface"
+        );
+    }
+}
+
 /// Smoke: boot-enabled + live-enabled fixture is listed and dispatchable.
 #[tokio::test]
 async fn boot_and_live_enabled_fixture_is_listed_and_dispatchable() {
