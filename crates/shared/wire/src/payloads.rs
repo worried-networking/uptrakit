@@ -1099,6 +1099,7 @@ pub struct TokenRevokedPayload {
 /// global (NULL-tenant) user grant surfaces in every tenant's cache entry
 /// for that user, so receivers must always flush across tenants. Both lists
 /// may be empty.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AccessInvalidatedPayload {
@@ -1106,6 +1107,12 @@ pub struct AccessInvalidatedPayload {
     pub user_ids: Vec<Uuid>,
     /// Roles whose grant rows changed.
     pub role_ids: Vec<Uuid>,
+}
+
+impl AccessInvalidatedPayload {
+    pub fn new(user_ids: Vec<Uuid>, role_ids: Vec<Uuid>) -> Self {
+        Self { user_ids, role_ids }
+    }
 }
 
 /// Per-host metadata published to MQTT for MQTT-browser visibility and Home Assistant.

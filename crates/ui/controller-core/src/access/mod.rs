@@ -874,10 +874,10 @@ mod tests {
 
         grant(&db, tenant_id, GrantSubject::User(user_id), "services:read").await;
 
-        engine.apply_remote_invalidation(&uptrakit_wire::AccessInvalidatedPayload {
-            user_ids: vec![user_id],
-            role_ids: vec![],
-        });
+        engine.apply_remote_invalidation(&uptrakit_wire::AccessInvalidatedPayload::new(
+            vec![user_id],
+            vec![],
+        ));
         let fresh = engine
             .context(tenant_id, user_id, None)
             .await
