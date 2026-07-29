@@ -83,6 +83,9 @@ bash ci/verify_dataload_declares_params.sh
 echo "[pre-push] Running no-new-cfg-not-feature check..."
 bash ci/verify_no_new_cfg_not_feature.sh
 
+echo "[pre-push] Running engine-owned-entities check..."
+bash ci/verify_engine_owned_entities.sh
+
 echo "[pre-push] Running audit coverage check..."
 cargo xtask audit-coverage-check
 

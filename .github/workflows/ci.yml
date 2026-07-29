@@ -72,6 +72,7 @@ jobs:
       - run: bash ci/verify_no_inline_query_params.sh
       - run: bash ci/verify_dataload_declares_params.sh
       - run: bash ci/verify_no_new_cfg_not_feature.sh
+      - run: bash ci/verify_engine_owned_entities.sh
       - run: bash ci/verify_agents_md_budget.sh
 
   backend-lint:
