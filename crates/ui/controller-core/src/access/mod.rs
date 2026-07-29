@@ -104,6 +104,7 @@ pub struct AccessEngine {
 /// — it needs periodic re-`context()` or an invalidation-aware refresh,
 /// which per-request rebuild does not provide. Carried as an M1.4a/M1.5
 /// residual for the streaming enforcement sites.
+#[derive(Clone)]
 pub struct AccessContext {
     /// The authenticated principal.
     pub user_id: Uuid,
