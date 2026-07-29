@@ -66,6 +66,26 @@ uptrakit auth token list
 uptrakit auth token revoke <TOKEN_ID>
 ```
 
+### `auth login` discovery and TOFU flags
+
+When `--server` is omitted and no server URL is stored from a previous login, `uptrakit auth login` browses the
+local network for an advertised controller (`_uptrakit._tcp.local.`) before falling back to a manual
+`Server URL:` prompt. See
+[Zero-Configuration Discovery: CLI Login Discovery](zeroconf-discovery.md#cli-login-discovery) for the full
+discovery and selection flow.
+
+| Condition                                                        | Behavior                                                                                                               |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `--server <url>` given, or a server is stored from a prior login | Discovery is skipped entirely; the given/stored URL is used as-is.                                                     |
+| Discovery finds a controller and you accept it                   | The interactive TOFU (trust-on-first-use) pinning ceremony runs automatically, even without `--tofu`.                  |
+| `--insecure` combined with discovery                             | Discovery only supplies the server URL; no TOFU ceremony runs (`--insecure` and `--tofu` are mutually exclusive).      |
+| `--tofu=<fingerprint>`                                           | Always authoritative: a mismatch against the mDNS-advertised fingerprint is logged as a warning, never a hard failure. |
+
+`--tofu` pinning presumes the controller serves a TLS certificate chaining to its internal CA. For deployments
+behind a reverse proxy that terminates a public certificate, skip TOFU entirely: use `--server <url>` and let
+the connection use system trust roots. If a CA was previously pinned for that server, clear it first with
+`uptrakit auth ca forget`.
+
 See also: [Auth Flows](https://github.com/worried-networking/uptrakit/tree/main/docs/api/), [Auth and Authorization](../security/auth-and-authorization.md).
 
 ## Services

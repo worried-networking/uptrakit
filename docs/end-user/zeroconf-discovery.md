@@ -92,6 +92,35 @@ address. The CA fingerprint is still advertised and verified as normal.
 
 Changes to zeroconf settings require a controller restart to take effect.
 
+## CLI Login Discovery
+
+`uptrakit auth login` (the CLI, not the agent/SSH-agent/MQTT services above) also uses zeroconf discovery, but
+only as a one-off browse at login time -- it does not persist a `discovery.json` cache. Discovery kicks in only
+when both `--server` is omitted and no server URL is stored from a previous login:
+
+- The CLI browses for `_uptrakit._tcp.local.` for up to 10 seconds. A responding controller typically surfaces
+  in the results about 2 seconds after its reply arrives, giving other advertisers on the network a short grace
+  window to answer too.
+- **One controller found** -- the CLI prints the discovered URL and its advertised CA fingerprint, then asks
+  `Use this controller? [y/N]`.
+- **Multiple controllers found** -- the CLI lists them by number and prompts you to pick one.
+- **Nothing found, declined, or an invalid selection** -- the CLI falls back to a manual `Server URL:` prompt.
+- Discovery requires an interactive terminal. Non-interactive logins (scripts, CI) must pass `--server <url>`
+  explicitly, and `--tofu=<fingerprint>` as well if you also want fingerprint pinning without a prompt.
+
+**Trust asymmetry.** Accepting a discovered controller and typing the same URL in by hand are not equivalent:
+
+- **Accept a discovered controller** -- the CLI automatically runs the interactive TOFU (trust-on-first-use)
+  ceremony: it fetches the controller's CA, cross-checks it against the mDNS-advertised fingerprint, and pins
+  it to local config.
+- **Decline and type the URL manually** (even the exact same URL) -- no TOFU ceremony runs. The connection uses
+  system trust roots unless you separately pass `--tofu` on the `login` command; the CLI prints a hint on this
+  fallback path reminding you of that.
+
+See [CLI Usage Guide](cli-usage.md#authentication) for the full flag reference and
+[Zero-Configuration Discovery Security: CLI Trust Flow](../security/zeroconf-discovery.md#cli-trust-flow) for the
+trust model.
+
 ## Cache Behaviour
 
 After the first successful discovery, the resolved URL and CA fingerprint are saved to `discovery.json` in the

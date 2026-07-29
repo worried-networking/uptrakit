@@ -8,11 +8,15 @@ For the security model and threat analysis, see [Zero-Configuration Discovery Se
 
 Zero-configuration discovery allows Uptrakit services (agent, SSH agent, MQTT) to find the controller on the
 local network without an explicit `--url` flag. The controller advertises its presence via mDNS/DNS-SD (RFC 6762 /
-RFC 6763), and services browse for the advertisement automatically when `--url` is omitted.
+RFC 6763), and services browse for the advertisement automatically when `--url` is omitted. The `uptrakit` CLI
+also browses at `auth login` time (see [CLI login discovery](#cli-login-discovery-implementation) below), as a
+separate, non-persistent consumer of the same contract.
 
 The feature is opt-in on the controller side: it must be enabled via the `--zeroconf` CLI flag or the
 `zeroconf.enabled` database setting (toggled via web UI or API). On the service side, discovery runs
-automatically when no `--url` is provided and the `zeroconf` feature is compiled in.
+automatically when no `--url` is provided and the `zeroconf` feature is compiled in. The CLI's discovery path is
+always compiled in (it is not feature-gated) since `uptrakit auth login` unconditionally offers it as a
+fallback.
 
 ### mDNS service type
 
@@ -49,38 +53,93 @@ When `url` is absent, services construct the controller URL from the mDNS-resolv
 If no controller is found within the timeout, the service exits with an error instructing the user to provide
 `--url` explicitly.
 
+### CLI login discovery implementation
+
+`uptrakit auth login` (`crates/ui/cli/src/discovery.rs` + `crates/ui/cli/src/commands/auth.rs`) is a distinct
+discovery consumer with its own flow, not a reuse of `service-sdk::discovery`:
+
+1. `resolve_server_source()` decides whether to discover at all: an explicit `--server`/`UPTRAKIT_SERVER` or a
+   stored `config.server` short-circuits discovery entirely; only when neither is present does the CLI attempt
+   it.
+2. `discover_server_interactive()` calls `uptrakit_zeroconf::browse_all(BROWSE_WINDOW, BROWSE_SETTLE)` with
+   `BROWSE_WINDOW = 10s` and `BROWSE_SETTLE = 2s` -- the shared adaptive-settle collector, not the services'
+   first-match `browse_first()`. A browse failure (no multicast, sandboxed socket) is swallowed and falls back
+   to manual entry rather than aborting login.
+3. Zero, one, or multiple results drive the interactive prompt (single-hit confirm, multi-hit numbered menu,
+   `parse_selection()` for input validation).
+4. If the operator accepts a discovered controller, `login()` synthesizes an implicit TOFU ceremony
+   (`effective_tofu = Some(String::new())`) unless `--insecure` was passed or `--tofu` was already given
+   explicitly.
+5. Before `establish_ca_trust()` runs, `cross_check_advertised()` compares the mDNS-advertised `ca_fp` against
+   the fingerprint of the CA actually fetched from `/api/v1/pki/ca.crt` -- see
+   [Zero-Configuration Discovery Security: CLI Trust Flow](../security/zeroconf-discovery.md#cli-trust-flow) for
+   the semantics of that cross-check.
+
+No cache is written or read: every login without a resolved server re-browses from scratch.
+
 ## Crate and dependency
 
-The feature uses the `mdns-sd` crate (pure Rust, async-compatible). Both the controller advertiser and the
-service browser depend on it.
+The mDNS/DNS-SD contract is split out of the controller and service-sdk crates into a dedicated
+`uptrakit-zeroconf` crate, which is the only crate that depends directly on the `mdns-sd` crate for TXT-record
+building/parsing and the browse loop:
 
-| Crate                  | Dependency                              |
-| ---------------------- | --------------------------------------- |
-| `uptrakit-controller`  | `mdns-sd` (gated on `zeroconf` feature) |
-| `uptrakit-service-sdk` | `mdns-sd` (gated on `zeroconf` feature) |
+- **`uptrakit-zeroconf`** (`crates/shared/zeroconf`) owns `SERVICE_TYPE`, the TXT record keys (`ca_fp`, `url`,
+  `pki_addr`), `build_txt_properties()`/`parse_txt()`, and the browse primitives `browse_first()` (first-match,
+  used by services) and `browse_all()` (adaptive-settle collection with fingerprint-keyed dedup, used by the
+  CLI). It depends on `mdns-sd` directly.
+- **`uptrakit-controller-runtime`** keeps the advertiser (`run_advertiser()` in `src/zeroconf.rs`): it still
+  depends on `mdns-sd` directly (to drive `ServiceDaemon`/`ServiceInfo` registration/shutdown), plus
+  `uptrakit-zeroconf` for a snapshot-typed adapter -- `build_txt_properties()` in this crate takes the
+  controller's `CaPublicSnapshot` and `ZeroconfSnapshot` and delegates to `uptrakit_zeroconf::build_txt_properties()`
+  for the actual TXT-key contract.
+- **`uptrakit-service-sdk`** keeps `DiscoveryCache` and `discovery.json` persistence (`src/discovery.rs`) but no
+  longer depends on `mdns-sd` directly; its `browse_mdns()` wraps `uptrakit_zeroconf::browse_first()`.
+- **`uptrakit-cli`** (`crates/ui/cli`) depends on `uptrakit-zeroconf` unconditionally (not feature-gated); its
+  `src/discovery.rs` owns the login-time interactive browse/selection/TOFU-ceremony flow, calling
+  `uptrakit_zeroconf::browse_all()` directly. It has no cache -- every `auth login` without a resolved server
+  browses fresh.
+
+**Contract-ownership rule:** the service type and TXT keys live in `uptrakit-zeroconf` and nowhere else. Any new
+consumer parses TXT records via `uptrakit_zeroconf::parse_txt()` and browses via `browse_first()`/`browse_all()`
+-- never a second hand-rolled `mdns-sd` browse loop.
+
+| Crate                         | Dependency                                                             |
+| ----------------------------- | ---------------------------------------------------------------------- |
+| `uptrakit-zeroconf`           | `mdns-sd` (unconditional)                                              |
+| `uptrakit-controller-runtime` | `mdns-sd` + `uptrakit-zeroconf` (both gated on `zeroconf` feature)     |
+| `uptrakit-service-sdk`        | `uptrakit-zeroconf` (gated on `zeroconf` feature; no direct `mdns-sd`) |
+| `uptrakit-cli`                | `uptrakit-zeroconf` (unconditional)                                    |
 
 ## Key files
 
 ```text
-crates/core/controller/src/zeroconf.rs           # mDNS advertiser (register, TXT records, shutdown)
-crates/shared/service-sdk/src/discovery.rs        # mDNS browser, cache load/save/clear, DiscoveryResult
-crates/shared/service-sdk/src/lifecycle.rs         # resolve_connection() integrates discovery into lifecycle
-crates/ui/web-api/src/routes/settings_zeroconf.rs # GET/PUT /api/v1/global-settings/zeroconf handlers
-crates/shared/web-api-types/src/settings_zeroconf.rs # ZeroconfSettingsResponse, UpdateZeroconfSettingsRequest
+crates/shared/zeroconf/src/lib.rs                    # SERVICE_TYPE, TXT keys, build_txt_properties(), parse_txt(), DiscoveredController
+crates/shared/zeroconf/src/browse.rs                  # browse_first(), browse_all() (adaptive-settle + fingerprint dedup)
+crates/core/controller-runtime/src/zeroconf.rs        # mDNS advertiser (run_advertiser, snapshot-typed TXT adapter, shutdown)
+crates/shared/service-sdk/src/discovery.rs            # DiscoveryCache, cache load/save/clear, DiscoveryResult, browse_mdns() wrapper
+crates/shared/service-sdk/src/lifecycle.rs            # resolve_connection() integrates discovery into lifecycle
+crates/ui/cli/src/discovery.rs                        # CLI login-time interactive browse/selection/TOFU-ceremony flow
+crates/ui/web-api/src/routes/settings_zeroconf.rs     # GET/PUT /api/v1/global-settings/zeroconf handlers
+crates/shared/web-api-types/src/settings_zeroconf.rs  # ZeroconfSettingsResponse, UpdateZeroconfSettingsRequest
 ```
 
 ## Feature flag
 
-The `zeroconf` Cargo feature is **default-enabled** on both `uptrakit-service-sdk` and `uptrakit-controller`.
+The `zeroconf` Cargo feature is **default-enabled** on both `uptrakit-service-sdk` and
+`uptrakit-controller-runtime`.
 
-- **`uptrakit-service-sdk`**: `zeroconf = ["dep:mdns-sd"]` -- enables the `discovery` module and mDNS browse
-  code paths in `resolve_connection()`.
-- **`uptrakit-controller`**: `zeroconf = ["dep:mdns-sd", "dep:hostname"]` -- enables the `zeroconf` module
-  and mDNS advertiser startup.
+- **`uptrakit-service-sdk`**: `zeroconf = ["dep:uptrakit-zeroconf"]` -- enables the `discovery` module and mDNS
+  browse code paths in `resolve_connection()`.
+- **`uptrakit-controller-runtime`**: `zeroconf = ["dep:mdns-sd", "dep:uptrakit-zeroconf"]` -- enables the
+  `zeroconf` module and mDNS advertiser startup.
 
 When the `zeroconf` feature is disabled at compile time, `--url` becomes mandatory for services. The controller
 compiles without mDNS support and the `--zeroconf` CLI flag is unavailable. All zeroconf-related code is compiled
 out via `#[cfg(feature = "zeroconf")]`.
+
+`uptrakit-cli`'s dependency on `uptrakit-zeroconf` is **not** feature-gated: the login-time browse fallback is
+always compiled into the CLI binary, independent of whether the controller or any service was built with
+`zeroconf` enabled.
 
 ## Configuration reference
 
@@ -180,12 +239,25 @@ mitigation details.
 
 ### Unit tests
 
-The `zeroconf.rs` and `discovery.rs` modules include unit tests for TXT record building, cache serialization,
-URL construction from mDNS data, and edge cases (IPv6, loopback filtering, backward-compatible deserialization):
+The shared contract crate covers TXT-key build/parse and the browse dedup/policy logic:
 
 ```bash
-cargo test -p uptrakit-controller zeroconf
+cargo test -p uptrakit-zeroconf
+```
+
+The controller-runtime advertiser and the service-sdk cache/browse wrapper have their own unit tests for TXT
+record building (via the snapshot adapter), cache serialization, and backward-compatible deserialization:
+
+```bash
+cargo test -p uptrakit-controller-runtime zeroconf
 cargo test -p uptrakit-service-sdk discovery
+```
+
+The CLI's login-time discovery module (`discovery.rs`) has unit tests for source-resolution precedence,
+fingerprint cross-check outcomes, and menu-selection parsing:
+
+```bash
+cargo test -p uptrakit-cli discovery
 ```
 
 The `settings_zeroconf.rs` types have validation tests:

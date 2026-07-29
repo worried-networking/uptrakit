@@ -90,6 +90,46 @@ The `discovery.json` cache file is written with `0o600` permissions (owner read/
 `uptrakit_directories::write_secure_file_str()`. This prevents other users on the same host from reading or
 tampering with the cached discovery result.
 
+## CLI Trust Flow
+
+`uptrakit auth login` uses a different trust flow than the agent/SSH-agent/MQTT services described above: the
+CLI performs a one-off browse with no persisted discovery cache, and treats the mDNS-advertised CA fingerprint
+(`ca_fp`) as a consistency cross-check rather than a MITM defense.
+
+- **The trust gate.** The only thing that establishes trust is the interactive fingerprint confirmation --
+  accepting `Trust this CA? [y/N]` after comparing the printed fingerprint out-of-band -- or an explicit
+  `--tofu=<fingerprint>` supplied on the command line. Nothing else pins the CA.
+- **The advertised fingerprint is a consistency cross-check, not MITM protection.** An attacker who controls
+  both the mDNS responder and the controller endpoint can set `ca_fp` in the spoofed TXT record to match their
+  own CA, passing the cross-check trivially. What the cross-check does catch is split control (a legitimate
+  advertisement whose CA has since diverged from the URL it points at) and stale or misconfigured
+  advertisements.
+- **The cross-check hard-fails only when no explicit fingerprint was supplied.** Passing `--tofu=<fp>` makes
+  that fingerprint authoritative -- a mismatch against the mDNS-advertised value is logged as a warning, never a
+  hard failure. A stale or forged TXT record therefore cannot be used to deny a login that is otherwise
+  correctly pinned.
+- **Non-TTY logins with no server configured fail closed before browsing.** If stdin is not a terminal and
+  neither `--server` nor a stored server is available, the CLI refuses to start an mDNS browse at all --
+  including when `--insecure` is also passed. An unattended script can never silently accept whatever responds
+  on the LAN.
+- **The stored-CA rotation gate is never bypassed by discovery.** If a CA is already pinned in local config and
+  the server now presents a different one, `auth login` still hard-fails with the standard rotation error; a
+  discovery-driven login carries no special permission to overwrite stored trust.
+
+### Trusted-CA, no-stored-server re-entry
+
+A login can be interrupted after the CA trust step succeeds but before the OAuth device flow completes -- for
+example, the operator approves the CA prompt but closes the terminal before authorizing in the browser. In that
+state, local config holds a pinned CA fingerprint but no stored server URL (the server is only saved once login
+fully succeeds). On the next run the CLI discovers again, and if a _different_ responder answers this time, the
+rotation gate above bails with the standard "Controller CA has changed" error rather than silently re-pinning.
+
+To recover:
+
+- Run `uptrakit auth ca trust --tofu=<fingerprint>` -- the error message's own remediation -- to explicitly
+  accept the new CA, or
+- Run `uptrakit auth ca forget` to clear the stored CA entirely and start over from an unpinned state.
+
 ## Recommendations for High-Security Environments
 
 For environments where mDNS-based discovery is not appropriate, Uptrakit supports fully explicit configuration
