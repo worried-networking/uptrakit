@@ -14,7 +14,7 @@ use super::super::super::{
 };
 use super::super::{TestPluginInvoker, tenant_id, user_id};
 use super::{ensure_master_key, setup_notification_db};
-use crate::registry::{SurfaceRegistry, SurfaceRegistryConfig};
+use crate::registry::{AllProvidersVisible, SurfaceRegistry, SurfaceRegistryConfig};
 
 struct ErrorPluginInvoker {
     error_message: String,
@@ -100,13 +100,15 @@ async fn invoke_notifications_email_save_global_smtp_emits_global_setting_update
     ensure_master_key();
     let db = setup_notification_db().await;
     let seen = StdArc::new(Mutex::new(Vec::new()));
-    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
-        PluginSurfaceLocalExecutor::new_without_database(Arc::new(TestPluginInvoker {
-            response: serde_json::json!({"ok": true}),
-            seen: StdArc::clone(&seen),
-        }))
-        .with_audit_emitter(super::test_audit_emitter(db.clone())),
-    ));
+    let proxy = SurfaceProxy::new()
+        .with_local_executor(Arc::new(
+            PluginSurfaceLocalExecutor::new_without_database(Arc::new(TestPluginInvoker {
+                response: serde_json::json!({"ok": true}),
+                seen: StdArc::clone(&seen),
+            }))
+            .with_audit_emitter(super::test_audit_emitter(db.clone())),
+        ))
+        .with_provider_visibility(Arc::new(AllProvidersVisible));
     let service_connections = ServiceConnectionRegistry::new();
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     registry
@@ -187,12 +189,14 @@ async fn invoke_notifications_email_save_global_smtp_emits_global_setting_update
 async fn invoke_notifications_telegram_save_global_telegram_failure_emits_failed_audit() {
     ensure_master_key();
     let db = setup_notification_db().await;
-    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
-        PluginSurfaceLocalExecutor::new_without_database(Arc::new(ErrorPluginInvoker {
-            error_message: "Internal server error".to_string(),
-        }))
-        .with_audit_emitter(super::test_audit_emitter(db.clone())),
-    ));
+    let proxy = SurfaceProxy::new()
+        .with_local_executor(Arc::new(
+            PluginSurfaceLocalExecutor::new_without_database(Arc::new(ErrorPluginInvoker {
+                error_message: "Internal server error".to_string(),
+            }))
+            .with_audit_emitter(super::test_audit_emitter(db.clone())),
+        ))
+        .with_provider_visibility(Arc::new(AllProvidersVisible));
     let service_connections = ServiceConnectionRegistry::new();
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     registry

@@ -13,6 +13,7 @@ use super::super::{
     SurfaceProxyError, map_surface_action_error,
 };
 use super::{TestPluginInvoker, tenant_id, user_id};
+use crate::registry::AllProvidersVisible;
 use crate::registry::{SurfaceRegistry, SurfaceRegistryConfig};
 use uptrakit_service_connections::ServiceConnectionRegistry;
 
@@ -231,9 +232,11 @@ async fn invoke_executes_plugin_controller_local_interaction() {
         response: serde_json::json!({"ok": true}),
         seen: StdArc::clone(&seen),
     };
-    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
-        PluginSurfaceLocalExecutor::new_without_database(Arc::new(invoker)),
-    ));
+    let proxy = SurfaceProxy::new()
+        .with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new_without_database(
+            Arc::new(invoker),
+        )))
+        .with_provider_visibility(Arc::new(AllProvidersVisible));
     let service_connections = ServiceConnectionRegistry::new();
 
     let response = proxy
@@ -296,11 +299,13 @@ async fn invoke_controller_local_preserves_surface_action_error_categories() {
     ];
 
     for (suffix, plugin_error, expected_proxy_error) in cases {
-        let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
-            PluginSurfaceLocalExecutor::new_without_database(Arc::new(ErrorPluginInvoker {
-                error: plugin_error,
-            })),
-        ));
+        let proxy = SurfaceProxy::new()
+            .with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new_without_database(
+                Arc::new(ErrorPluginInvoker {
+                    error: plugin_error,
+                }),
+            )))
+            .with_provider_visibility(Arc::new(AllProvidersVisible));
         let err = proxy
             .invoke(
                 &service_connections,
@@ -337,13 +342,17 @@ async fn invoke_controller_local_rejects_concurrent_duplicate_idempotency() {
     let started = StdArc::new(tokio::sync::Notify::new());
     let release = StdArc::new(tokio::sync::Notify::new());
     let calls = StdArc::new(std::sync::atomic::AtomicUsize::new(0));
-    let proxy = Arc::new(SurfaceProxy::new().with_local_executor(Arc::new(
-        PluginSurfaceLocalExecutor::new_without_database(Arc::new(BlockingPluginInvoker {
-            started: StdArc::clone(&started),
-            release: StdArc::clone(&release),
-            calls: StdArc::clone(&calls),
-        })),
-    )));
+    let proxy = Arc::new(
+        SurfaceProxy::new()
+            .with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new_without_database(
+                Arc::new(BlockingPluginInvoker {
+                    started: StdArc::clone(&started),
+                    release: StdArc::clone(&release),
+                    calls: StdArc::clone(&calls),
+                }),
+            )))
+            .with_provider_visibility(Arc::new(AllProvidersVisible)),
+    );
     let service_connections = Arc::new(ServiceConnectionRegistry::new());
 
     let proxy_first = Arc::clone(&proxy);
@@ -426,9 +435,13 @@ async fn controller_local_client_disconnect_releases_idempotency() {
         release: StdArc::clone(&release),
         calls: StdArc::clone(&calls),
     };
-    let proxy = Arc::new(SurfaceProxy::new().with_local_executor(Arc::new(
-        PluginSurfaceLocalExecutor::new_without_database(Arc::new(invoker)),
-    )));
+    let proxy = Arc::new(
+        SurfaceProxy::new()
+            .with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new_without_database(
+                Arc::new(invoker),
+            )))
+            .with_provider_visibility(Arc::new(AllProvidersVisible)),
+    );
     let service_connections = ServiceConnectionRegistry::new();
 
     // Register the `started` waiter BEFORE spawning. `BlockingPluginInvoker::invoke`
@@ -498,9 +511,11 @@ async fn invoke_controller_local_allows_cleartext_sensitive_fields() {
         response: serde_json::json!({"ok": true}),
         seen: StdArc::new(Mutex::new(Vec::new())),
     };
-    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
-        PluginSurfaceLocalExecutor::new_without_database(Arc::new(invoker)),
-    ));
+    let proxy = SurfaceProxy::new()
+        .with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new_without_database(
+            Arc::new(invoker),
+        )))
+        .with_provider_visibility(Arc::new(AllProvidersVisible));
     let service_connections = ServiceConnectionRegistry::new();
     let mut params = serde_json::Map::new();
     params.insert("smtp_password".to_string(), serde_json::json!("clear"));
@@ -542,9 +557,11 @@ async fn invoke_stamps_effective_get_method_for_data_load_controller_local() {
         .expect("plugin registration should succeed");
 
     let captured = StdArc::new(Mutex::new(None));
-    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(CapturingLocalExecutor {
-        captured: StdArc::clone(&captured),
-    }));
+    let proxy = SurfaceProxy::new()
+        .with_local_executor(Arc::new(CapturingLocalExecutor {
+            captured: StdArc::clone(&captured),
+        }))
+        .with_provider_visibility(Arc::new(AllProvidersVisible));
     let service_connections = ServiceConnectionRegistry::new();
 
     let response = proxy
@@ -594,9 +611,11 @@ async fn invoke_rejects_body_missing_required_declared_param() {
         response: serde_json::json!({"ok": true}),
         seen: StdArc::new(Mutex::new(Vec::new())),
     };
-    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
-        PluginSurfaceLocalExecutor::new_without_database(Arc::new(invoker)),
-    ));
+    let proxy = SurfaceProxy::new()
+        .with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new_without_database(
+            Arc::new(invoker),
+        )))
+        .with_provider_visibility(Arc::new(AllProvidersVisible));
     let service_connections = ServiceConnectionRegistry::new();
 
     let err = proxy
@@ -639,9 +658,11 @@ async fn invoke_allows_undeclared_body_key_to_pass_through() {
         response: serde_json::json!({"ok": true}),
         seen: StdArc::clone(&seen),
     };
-    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
-        PluginSurfaceLocalExecutor::new_without_database(Arc::new(invoker)),
-    ));
+    let proxy = SurfaceProxy::new()
+        .with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new_without_database(
+            Arc::new(invoker),
+        )))
+        .with_provider_visibility(Arc::new(AllProvidersVisible));
     let service_connections = ServiceConnectionRegistry::new();
 
     let mut params = serde_json::Map::new();
@@ -672,4 +693,58 @@ async fn invoke_allows_undeclared_body_key_to_pass_through() {
         .expect("undeclared body keys must pass through untyped");
 
     assert!(response.success);
+}
+
+#[tokio::test(start_paused = true)]
+async fn invoke_denies_plugin_controller_local_interaction_without_provider_visibility() {
+    let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+    registry
+        .bootstrap_plugin(plugin_registration("plugin.notifications.email"))
+        .expect("plugin registration should succeed");
+
+    let seen = StdArc::new(Mutex::new(Vec::new()));
+    let invoker = TestPluginInvoker {
+        response: serde_json::json!({"ok": true}),
+        seen: StdArc::clone(&seen),
+    };
+    // Deliberately constructed WITHOUT `.with_provider_visibility(...)` — the proxy's
+    // fail-closed default (`DenyAllPluginProviders`) must hide the Plugin-kind provider
+    // registered above, even though a local executor is wired and would otherwise
+    // happily service the request.
+    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
+        PluginSurfaceLocalExecutor::new_without_database(Arc::new(invoker)),
+    ));
+    let service_connections = ServiceConnectionRegistry::new();
+
+    let err = proxy
+        .invoke(
+            &service_connections,
+            &registry,
+            SurfaceInvokeRequest {
+                method: None,
+                tenant_id: tenant_id(),
+                surface_id: "notifications.email.global-smtp".to_string(),
+                interaction_id: "smtp".to_string(),
+                idempotency_key: "idem-plugin-local-deny-default".to_string(),
+                target_provider_id: None,
+                caller_origin: SurfaceCallerOrigin::UserSession {
+                    user_id: user_id(),
+                    session_id: "session-1".to_string(),
+                },
+                params: serde_json::Map::new(),
+                encrypted_sensitive_params: None,
+            },
+            Some(Duration::from_secs(5)),
+        )
+        .await
+        .expect_err("a Plugin-kind provider must be denied without explicit visibility");
+
+    assert!(
+        matches!(err, SurfaceProxyError::NoProvider),
+        "fail-closed default must surface NoProvider, got {err:?}"
+    );
+    assert!(
+        seen.lock().is_empty(),
+        "the local executor must never be reached when the provider is hidden by the deny-all default"
+    );
 }

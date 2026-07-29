@@ -121,6 +121,7 @@ pub(crate) async fn assemble(
         .plugin_ops(components.plugins.plugin_ops)
         .surface_registry(components.plugins.surface_registry)
         .surface_proxy(components.plugins.surface_proxy)
+        .surface_provider_visibility(components.plugins.provider_visibility)
         .workload_claim_registry(components.workload_claim_registry)
         .instance_plugin_snapshot(Arc::clone(&components.plugins.instance_snapshot_handle))
         .reject_dangerous_commands(true)

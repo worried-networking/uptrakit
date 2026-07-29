@@ -11,7 +11,7 @@ use super::super::{
     SurfaceProxyError,
 };
 use super::{TestPluginInvoker, tenant_id, user_id};
-use crate::registry::{SurfaceRegistry, SurfaceRegistryConfig};
+use crate::registry::{AllProvidersVisible, SurfaceRegistry, SurfaceRegistryConfig};
 use uptrakit_service_connections::ServiceConnectionRegistry;
 
 fn registration(provider_id: &str, service_tenant: Uuid) -> surfaces::SurfaceRegistration {
@@ -636,12 +636,14 @@ async fn invoke_provider_origin_can_route_to_another_provider() {
 async fn invoke_provider_origin_denied_for_permission_gated_interaction() {
     let registry = registry();
     let service_connections = ServiceConnectionRegistry::new();
-    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
-        PluginSurfaceLocalExecutor::new_without_database(Arc::new(TestPluginInvoker {
-            response: serde_json::json!({"routed": true}),
-            seen: Arc::new(Mutex::new(Vec::new())),
-        })),
-    ));
+    let proxy = SurfaceProxy::new()
+        .with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new_without_database(
+            Arc::new(TestPluginInvoker {
+                response: serde_json::json!({"routed": true}),
+                seen: Arc::new(Mutex::new(Vec::new())),
+            }),
+        )))
+        .with_provider_visibility(Arc::new(AllProvidersVisible));
 
     let service_a = Uuid::now_v7();
     registry
@@ -693,12 +695,14 @@ async fn invoke_provider_origin_denied_for_permission_gated_interaction() {
 async fn invoke_provider_origin_allowed_when_provider_invocable() {
     let registry = registry();
     let service_connections = ServiceConnectionRegistry::new();
-    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
-        PluginSurfaceLocalExecutor::new_without_database(Arc::new(TestPluginInvoker {
-            response: serde_json::json!({"routed": true}),
-            seen: Arc::new(Mutex::new(Vec::new())),
-        })),
-    ));
+    let proxy = SurfaceProxy::new()
+        .with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new_without_database(
+            Arc::new(TestPluginInvoker {
+                response: serde_json::json!({"routed": true}),
+                seen: Arc::new(Mutex::new(Vec::new())),
+            }),
+        )))
+        .with_provider_visibility(Arc::new(AllProvidersVisible));
 
     let service_a = Uuid::now_v7();
     registry
@@ -751,12 +755,14 @@ async fn invoke_provider_origin_allowed_when_provider_invocable() {
 async fn invoke_provider_origin_resolves_target_from_surface_when_target_none() {
     let registry = registry();
     let service_connections = ServiceConnectionRegistry::new();
-    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
-        PluginSurfaceLocalExecutor::new_without_database(Arc::new(TestPluginInvoker {
-            response: serde_json::json!({"routed": true}),
-            seen: Arc::new(Mutex::new(Vec::new())),
-        })),
-    ));
+    let proxy = SurfaceProxy::new()
+        .with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new_without_database(
+            Arc::new(TestPluginInvoker {
+                response: serde_json::json!({"routed": true}),
+                seen: Arc::new(Mutex::new(Vec::new())),
+            }),
+        )))
+        .with_provider_visibility(Arc::new(AllProvidersVisible));
 
     let service_a = Uuid::now_v7();
     registry
@@ -863,7 +869,11 @@ async fn invoke_provider_origin_self_target_when_target_none() {
 async fn invoke_explicit_bogus_target_errors_with_named_provider() {
     let registry = registry();
     let service_connections = ServiceConnectionRegistry::new();
-    let proxy = SurfaceProxy::new();
+    // This test registers a Plugin-kind provider (`plugin_registration_with_permission`)
+    // and asserts on resolution behavior once that provider is a known candidate — it
+    // needs the provider visible, or resolution short-circuits to `NoProvider` before
+    // ever reaching the "unknown explicit target" branch this test targets.
+    let proxy = SurfaceProxy::new().with_provider_visibility(Arc::new(AllProvidersVisible));
 
     registry
         .bootstrap_plugin(plugin_registration_with_permission("provider-b", true))

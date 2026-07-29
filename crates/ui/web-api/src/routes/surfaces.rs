@@ -15,7 +15,7 @@ use axum::{
 };
 use sea_orm::EntityTrait;
 use serde_json::Value;
-use uptrakit_shared_types::{Permission, PluginTypeId};
+use uptrakit_shared_types::Permission;
 use uptrakit_web_api_types::surfaces::{
     InvokeSurfaceInteractionRequest, ListSurfacesQuery, ReadSurfaceInteractionQuery,
     SurfaceProviderAvailability, SurfaceProviderInfo, SurfaceReadResponse, SurfaceResponse,
@@ -50,39 +50,16 @@ use crate::surface_registry::{SurfaceCatalogItem, SurfaceRegistryLookupError};
 pub async fn list_surfaces(
     State(state): State<Arc<AppState>>,
     tenant_ctx: TenantContext,
-    axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
     Query(query): Query<ListSurfacesQuery>,
 ) -> Response {
     let catalog = state.surface_proxy_deps.registry.list_surfaces_for_tenant(
         tenant_ctx.tenant_id,
         query.slot.as_deref(),
         query.page.as_deref(),
+        state.surface_proxy_deps.visibility.as_ref(),
     );
 
-    let snapshot = state.instance_plugin_snapshot.load_full();
-    let plugin_ops = state.plugin.plugin_ops.as_ref();
-    let filtered: Vec<SurfaceCatalogItem> = catalog
-        .into_iter()
-        .filter(|item| {
-            if item.descriptor.provider_kind != surfaces::ProviderKind::Plugin {
-                return true;
-            }
-            // Plugin-backed surface — consult predicate.
-            plugin_ops
-                .get(&PluginTypeId::new(&item.provider_id))
-                .map(|d| {
-                    crate::visibility::is_plugin_visible_to_user(
-                        d,
-                        plugin_ops,
-                        snapshot.as_ref(),
-                        &auth_user,
-                    )
-                })
-                .unwrap_or(true) // Unknown plugin id → pass through (defensive default).
-        })
-        .collect();
-
-    with_private_no_store((StatusCode::OK, Json(group_surface_catalog(filtered))).into_response())
+    with_private_no_store((StatusCode::OK, Json(group_surface_catalog(catalog))).into_response())
 }
 
 /// Surface GET responses are per-tenant and per-permission; shared caches and
@@ -135,7 +112,11 @@ pub async fn list_surface_providers(
         let providers = state
             .surface_proxy_deps
             .registry
-            .list_targeted_providers_for_surface(&surface_id, tenant_ctx.tenant_id);
+            .list_targeted_providers_for_surface(
+                &surface_id,
+                tenant_ctx.tenant_id,
+                state.surface_proxy_deps.visibility.as_ref(),
+            );
         if providers.is_empty() {
             return error_response_with_code(
                 StatusCode::NOT_FOUND,
@@ -237,11 +218,11 @@ pub async fn get_surface_read(
     Path(surface_id): Path<String>,
 ) -> Response {
     let response = async {
-        let resolved = match state
-            .surface_proxy_deps
-            .registry
-            .resolve_surface_read(tenant_ctx.tenant_id, &surface_id)
-        {
+        let resolved = match state.surface_proxy_deps.registry.resolve_surface_read(
+            tenant_ctx.tenant_id,
+            &surface_id,
+            state.surface_proxy_deps.visibility.as_ref(),
+        ) {
             Ok(resolved) => resolved,
             Err(error) => return map_lookup_error(error),
         };
@@ -384,6 +365,7 @@ async fn dispatch_surface_interaction(
             &interaction_id,
             Some(&method),
             target_provider_id.as_deref(),
+            ctx.state.surface_proxy_deps.visibility.as_ref(),
         ) {
         Ok(resolved) => resolved,
         Err(SurfaceRegistryLookupError::MethodNotAllowed {
@@ -1925,6 +1907,7 @@ mod tests {
                         crate::surface_registry::SurfaceRegistryConfig::default(),
                     )),
                     Arc::new(crate::surface_proxy::SurfaceProxy::new()),
+                    Arc::new(crate::surface_proxy::AllProvidersVisible),
                 ),
                 config_test_proxy: Arc::new(crate::config_test_proxy::ConfigTestProxy::new()),
                 workload_claim_registry: Arc::new(

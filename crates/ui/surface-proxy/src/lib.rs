@@ -9,7 +9,11 @@ pub use proxy::{
     SurfaceProxyError, map_surface_action_error,
 };
 pub use registry::{
-    ResolvedSurfaceAction, ResolvedSurfaceRead, SurfaceCatalogItem, SurfaceProviderRejection,
-    SurfaceProviderRejectionCode, SurfaceProviderRejectionReason, SurfaceProviderSummary,
-    SurfaceRegistry, SurfaceRegistryConfig, SurfaceRegistryError, SurfaceRegistryLookupError,
+    DenyAllPluginProviders, ResolvedSurfaceAction, ResolvedSurfaceRead, SurfaceCatalogItem,
+    SurfaceProviderRejection, SurfaceProviderRejectionCode, SurfaceProviderRejectionReason,
+    SurfaceProviderSummary, SurfaceProviderVisibility, SurfaceRegistry, SurfaceRegistryConfig,
+    SurfaceRegistryError, SurfaceRegistryLookupError,
 };
+
+#[cfg(any(test, feature = "testing"))]
+pub use registry::AllProvidersVisible;

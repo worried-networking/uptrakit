@@ -11,7 +11,7 @@ use super::super::super::{
 };
 use super::super::{tenant_id, user_id};
 use super::ensure_master_key;
-use crate::registry::{SurfaceRegistry, SurfaceRegistryConfig};
+use crate::registry::{AllProvidersVisible, SurfaceRegistry, SurfaceRegistryConfig};
 
 fn proxmox_update_protection_registration(
     provider_id: &str,
@@ -136,10 +136,12 @@ async fn invoke_proxmox_save_global_defaults_emits_success_audit_row() {
         ))
         .expect("plugin registration should succeed");
 
-    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
-        PluginSurfaceLocalExecutor::new(Arc::new(db.clone()), Arc::clone(&plugin_ops))
-            .with_audit_emitter(super::test_audit_emitter(db.clone())),
-    ));
+    let proxy = SurfaceProxy::new()
+        .with_local_executor(Arc::new(
+            PluginSurfaceLocalExecutor::new(Arc::new(db.clone()), Arc::clone(&plugin_ops))
+                .with_audit_emitter(super::test_audit_emitter(db.clone())),
+        ))
+        .with_provider_visibility(Arc::new(AllProvidersVisible));
     let service_connections = ServiceConnectionRegistry::new();
 
     let mut params = serde_json::Map::new();
@@ -221,10 +223,12 @@ async fn invoke_proxmox_save_item_overrides_emits_software_item_update_audit_row
         ))
         .expect("plugin registration should succeed");
 
-    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
-        PluginSurfaceLocalExecutor::new(Arc::new(db.clone()), Arc::clone(&plugin_ops))
-            .with_audit_emitter(super::test_audit_emitter(db.clone())),
-    ));
+    let proxy = SurfaceProxy::new()
+        .with_local_executor(Arc::new(
+            PluginSurfaceLocalExecutor::new(Arc::new(db.clone()), Arc::clone(&plugin_ops))
+                .with_audit_emitter(super::test_audit_emitter(db.clone())),
+        ))
+        .with_provider_visibility(Arc::new(AllProvidersVisible));
     let service_connections = ServiceConnectionRegistry::new();
 
     let mut params = serde_json::Map::new();
@@ -300,10 +304,12 @@ async fn invoke_proxmox_save_scaling_global_defaults_emits_tenant_setting_update
         ))
         .expect("plugin registration should succeed");
 
-    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
-        PluginSurfaceLocalExecutor::new(Arc::new(db.clone()), Arc::clone(&plugin_ops))
-            .with_audit_emitter(super::test_audit_emitter(db.clone())),
-    ));
+    let proxy = SurfaceProxy::new()
+        .with_local_executor(Arc::new(
+            PluginSurfaceLocalExecutor::new(Arc::new(db.clone()), Arc::clone(&plugin_ops))
+                .with_audit_emitter(super::test_audit_emitter(db.clone())),
+        ))
+        .with_provider_visibility(Arc::new(AllProvidersVisible));
     let service_connections = ServiceConnectionRegistry::new();
 
     let mut params = serde_json::Map::new();
@@ -381,10 +387,12 @@ async fn invoke_proxmox_save_scaling_item_overrides_emits_software_item_update_a
         ))
         .expect("plugin registration should succeed");
 
-    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
-        PluginSurfaceLocalExecutor::new(Arc::new(db.clone()), Arc::clone(&plugin_ops))
-            .with_audit_emitter(super::test_audit_emitter(db.clone())),
-    ));
+    let proxy = SurfaceProxy::new()
+        .with_local_executor(Arc::new(
+            PluginSurfaceLocalExecutor::new(Arc::new(db.clone()), Arc::clone(&plugin_ops))
+                .with_audit_emitter(super::test_audit_emitter(db.clone())),
+        ))
+        .with_provider_visibility(Arc::new(AllProvidersVisible));
     let service_connections = ServiceConnectionRegistry::new();
 
     let mut params = serde_json::Map::new();

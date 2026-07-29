@@ -95,16 +95,19 @@ impl TestApp {
             crate::surface_registry::SurfaceRegistryConfig::default(),
         ));
         let surface_proxy = Arc::new(
-            crate::surface_proxy::SurfaceProxy::new().with_local_executor(Arc::new(
-                RecordingSurfaceExecutor {
+            crate::surface_proxy::SurfaceProxy::new()
+                .with_local_executor(Arc::new(RecordingSurfaceExecutor {
                     calls: Arc::clone(&calls),
-                },
-            )),
+                }))
+                .with_provider_visibility(Arc::new(crate::surface_proxy::AllProvidersVisible)),
         );
 
         let mut app_state = (*state).clone();
-        app_state.surface_proxy_deps =
-            crate::app_state::SurfaceProxyDeps::new(Arc::clone(&surface_registry), surface_proxy);
+        app_state.surface_proxy_deps = crate::app_state::SurfaceProxyDeps::new(
+            Arc::clone(&surface_registry),
+            surface_proxy,
+            Arc::new(crate::surface_proxy::AllProvidersVisible),
+        );
         let state = Arc::new(app_state);
 
         surface_registry.register_provider_for_test(stub_surface_registration(stubs), None, None);
@@ -344,19 +347,30 @@ pub(crate) async fn build_test_state_with_plugin_surfaces(
             .expect("bootstrap plugin surfaces in test harness");
     }
 
+    let surface_visibility: Arc<dyn crate::surface_proxy::SurfaceProviderVisibility> =
+        Arc::new(crate::visibility::PluginEffectiveEnablement::new(
+            Arc::clone(&state.plugin.plugin_ops),
+            Arc::clone(&state.instance_plugin_snapshot),
+        ));
+
     let surface_proxy = Arc::new(
-        crate::surface_proxy::SurfaceProxy::new().with_local_executor(Arc::new(
-            crate::surface_proxy::PluginSurfaceLocalExecutor::new(
-                Arc::new(db),
-                Arc::clone(&state.plugin.plugin_ops),
-            )
-            .with_audit_emitter(state.audit_emitter.clone()),
-        )),
+        crate::surface_proxy::SurfaceProxy::new()
+            .with_local_executor(Arc::new(
+                crate::surface_proxy::PluginSurfaceLocalExecutor::new(
+                    Arc::new(db),
+                    Arc::clone(&state.plugin.plugin_ops),
+                )
+                .with_audit_emitter(state.audit_emitter.clone()),
+            ))
+            .with_provider_visibility(Arc::clone(&surface_visibility)),
     );
 
     let mut app_state = (*state).clone();
-    app_state.surface_proxy_deps =
-        crate::app_state::SurfaceProxyDeps::new(surface_registry, surface_proxy);
+    app_state.surface_proxy_deps = crate::app_state::SurfaceProxyDeps::new(
+        surface_registry,
+        surface_proxy,
+        surface_visibility,
+    );
     (Arc::new(app_state), jwt)
 }
 
@@ -492,6 +506,15 @@ pub(crate) async fn build_test_state_with_plugin_ops(
         &uptrakit_config_reload::RuntimeConfig::default(),
     );
 
+    let instance_plugin_snapshot = Arc::new(arc_swap::ArcSwap::from_pointee(
+        uptrakit_web_api_queries::instance_plugin_settings::InstancePluginSnapshot::empty(),
+    ));
+    let surface_visibility: Arc<dyn crate::surface_proxy::SurfaceProviderVisibility> =
+        Arc::new(crate::visibility::PluginEffectiveEnablement::new(
+            Arc::clone(&plugin_ops),
+            Arc::clone(&instance_plugin_snapshot),
+        ));
+
     let state = Arc::new(AppState {
         db: crate::app_state::DbState::new(db.clone()),
         cert: crate::app_state::CertState {
@@ -546,6 +569,7 @@ pub(crate) async fn build_test_state_with_plugin_ops(
                 crate::surface_registry::SurfaceRegistryConfig::default(),
             )),
             Arc::new(crate::surface_proxy::SurfaceProxy::new()),
+            surface_visibility,
         ),
         config_test_proxy: Arc::new(crate::config_test_proxy::ConfigTestProxy::new()),
         workload_claim_registry: Arc::new(crate::workload_claims::WorkloadClaimRegistry::new()),
@@ -559,9 +583,7 @@ pub(crate) async fn build_test_state_with_plugin_ops(
         #[cfg(feature = "test-utils")]
         test_reexec_notify: None,
         update_dispatcher: update_dispatcher_for_test,
-        instance_plugin_snapshot: Arc::new(arc_swap::ArcSwap::from_pointee(
-            uptrakit_web_api_queries::instance_plugin_settings::InstancePluginSnapshot::empty(),
-        )),
+        instance_plugin_snapshot,
         coordinator_handle: {
             let (tx, _) = tokio::sync::mpsc::unbounded_channel();
             uptrakit_config_reload::ReloadCoordinator::new(

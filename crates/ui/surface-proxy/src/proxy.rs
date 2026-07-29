@@ -220,6 +220,7 @@ struct ProviderFailureState {
 pub struct SurfaceProxy {
     pending: Arc<Mutex<PendingState>>,
     local_executor: Arc<dyn SurfaceLocalActionExecutor>,
+    provider_visibility: Arc<dyn crate::registry::SurfaceProviderVisibility>,
 }
 
 impl Default for SurfaceProxy {
@@ -233,6 +234,7 @@ impl SurfaceProxy {
         Self {
             pending: Arc::new(Mutex::new(PendingState::default())),
             local_executor: Arc::new(local_executor::NoopSurfaceLocalExecutor),
+            provider_visibility: Arc::new(crate::registry::DenyAllPluginProviders),
         }
     }
 
@@ -241,6 +243,19 @@ impl SurfaceProxy {
         local_executor: Arc<dyn SurfaceLocalActionExecutor>,
     ) -> Self {
         self.local_executor = local_executor;
+        self
+    }
+
+    /// Stores the plugin-provider visibility filter used by [`Self::invoke`]'s
+    /// internal resolution — the only gate on the provider-origin leg.
+    /// Defaults to [`crate::registry::DenyAllPluginProviders`] (fail-closed):
+    /// a proxy constructed without the production wiring hides plugin
+    /// surfaces rather than serving them ungated.
+    pub fn with_provider_visibility(
+        mut self,
+        provider_visibility: Arc<dyn crate::registry::SurfaceProviderVisibility>,
+    ) -> Self {
+        self.provider_visibility = provider_visibility;
         self
     }
 
@@ -262,8 +277,13 @@ impl SurfaceProxy {
         request: SurfaceInvokeRequest,
         timeout_override: Option<Duration>,
     ) -> Result<surfaces::SurfaceActionResponse, SurfaceProxyError> {
-        let target_provider_id =
-            implicit_target_provider_for_request(service_connections, registry, &request).await?;
+        let target_provider_id = implicit_target_provider_for_request(
+            service_connections,
+            registry,
+            &request,
+            self.provider_visibility.as_ref(),
+        )
+        .await?;
         let resolved = registry
             .resolve_surface_action_for_method(
                 request.tenant_id,
@@ -271,6 +291,7 @@ impl SurfaceProxy {
                 &request.interaction_id,
                 request.method.as_ref(),
                 target_provider_id.as_deref(),
+                self.provider_visibility.as_ref(),
             )
             .map_err(map_lookup_error)?;
 
@@ -883,6 +904,7 @@ async fn implicit_target_provider_for_request(
     service_connections: &ServiceConnectionRegistry,
     registry: &SurfaceRegistry,
     request: &SurfaceInvokeRequest,
+    visibility: &dyn crate::registry::SurfaceProviderVisibility,
 ) -> Result<Option<String>, SurfaceProxyError> {
     if request.target_provider_id.is_some() {
         return Ok(request.target_provider_id.clone());
@@ -892,8 +914,11 @@ async fn implicit_target_provider_for_request(
     // the self-target check and the availability-aware fallthrough. The fallthrough
     // runs on every nested provider→plugin call, so re-enumerating (and re-locking the
     // registry) per branch would be wasteful.
-    let providers = registry
-        .list_targeted_providers_for_surface(request.surface_id.as_str(), request.tenant_id);
+    let providers = registry.list_targeted_providers_for_surface(
+        request.surface_id.as_str(),
+        request.tenant_id,
+        visibility,
+    );
 
     // A provider-origin call targets the requested surface's provider, which is not
     // necessarily the caller's own: nested provider→controller-plugin calls (agent-ssh

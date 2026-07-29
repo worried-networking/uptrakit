@@ -49,6 +49,7 @@ pub(crate) struct PluginBits {
     >,
     pub surface_registry: Arc<uptrakit_web_api::surface_registry::SurfaceRegistry>,
     pub surface_proxy: Arc<uptrakit_web_api::surface_proxy::SurfaceProxy>,
+    pub provider_visibility: Arc<dyn uptrakit_web_api::surface_proxy::SurfaceProviderVisibility>,
     pub embedded_host: Arc<crate::embedded::EmbeddedServiceHost>,
 }
 
@@ -286,14 +287,23 @@ pub(crate) async fn build(
     }
 
     let audit_emitter = uptrakit_audit_log::AuditEmitter::new(audit_dispatcher.clone());
-    let surface_proxy = Arc::new(
-        uptrakit_web_api::surface_proxy::SurfaceProxy::new().with_local_executor(Arc::new(
-            uptrakit_web_api::surface_proxy::PluginSurfaceLocalExecutor::new(
-                Arc::new(db_conn.clone()),
+    let provider_visibility: Arc<dyn uptrakit_web_api::surface_proxy::SurfaceProviderVisibility> =
+        Arc::new(
+            uptrakit_web_api::visibility::PluginEffectiveEnablement::new(
                 Arc::clone(&plugin_ops),
-            )
-            .with_audit_emitter(audit_emitter.clone()),
-        )),
+                Arc::clone(&instance_snapshot_handle),
+            ),
+        );
+    let surface_proxy = Arc::new(
+        uptrakit_web_api::surface_proxy::SurfaceProxy::new()
+            .with_local_executor(Arc::new(
+                uptrakit_web_api::surface_proxy::PluginSurfaceLocalExecutor::new(
+                    Arc::new(db_conn.clone()),
+                    Arc::clone(&plugin_ops),
+                )
+                .with_audit_emitter(audit_emitter.clone()),
+            ))
+            .with_provider_visibility(Arc::clone(&provider_visibility)),
     );
 
     // Embedded service host.
@@ -320,6 +330,7 @@ pub(crate) async fn build(
             instance_snapshot_handle,
             surface_registry,
             surface_proxy,
+            provider_visibility,
             embedded_host,
         },
         auth: AuthStores {

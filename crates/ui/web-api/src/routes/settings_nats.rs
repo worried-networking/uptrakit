@@ -565,6 +565,7 @@ mod tests {
                     crate::surface_registry::SurfaceRegistryConfig::default(),
                 )),
                 Arc::new(crate::surface_proxy::SurfaceProxy::new()),
+                Arc::new(crate::surface_proxy::AllProvidersVisible),
             ),
             config_test_proxy: Arc::new(crate::config_test_proxy::ConfigTestProxy::new()),
             workload_claim_registry: Arc::new(crate::workload_claims::WorkloadClaimRegistry::new()),

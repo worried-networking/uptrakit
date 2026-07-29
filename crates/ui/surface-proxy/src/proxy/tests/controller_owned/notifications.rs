@@ -15,7 +15,7 @@ use super::super::super::{
 };
 use super::super::{tenant_id, user_id};
 use super::{ensure_master_key, setup_notification_db};
-use crate::registry::{SurfaceRegistry, SurfaceRegistryConfig};
+use crate::registry::{AllProvidersVisible, SurfaceRegistry, SurfaceRegistryConfig};
 
 fn notification_channel_registration(
     provider_id: &str,
@@ -99,10 +99,12 @@ async fn invoke_allowlisted_notification_create_executes_controller_owned_path()
         ))
         .expect("plugin registration should succeed");
 
-    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new(
-        Arc::new(db),
-        Arc::clone(&plugin_ops),
-    )));
+    let proxy = SurfaceProxy::new()
+        .with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new(
+            Arc::new(db),
+            Arc::clone(&plugin_ops),
+        )))
+        .with_provider_visibility(Arc::new(AllProvidersVisible));
     let service_connections = ServiceConnectionRegistry::new();
 
     let mut params = Map::new();
@@ -170,10 +172,12 @@ async fn invoke_notifications_email_configure_smtp_executes_controller_local_pat
         ))
         .expect("plugin registration should succeed");
 
-    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new(
-        Arc::new(db),
-        Arc::clone(&plugin_ops),
-    )));
+    let proxy = SurfaceProxy::new()
+        .with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new(
+            Arc::new(db),
+            Arc::clone(&plugin_ops),
+        )))
+        .with_provider_visibility(Arc::new(AllProvidersVisible));
     let service_connections = ServiceConnectionRegistry::new();
 
     let mut params = Map::new();
@@ -287,10 +291,12 @@ async fn invoke_notifications_email_smtp_get_routes_read() {
         .bootstrap_plugin(read_registration)
         .expect("plugin registration should succeed");
 
-    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new(
-        Arc::new(db),
-        Arc::clone(&plugin_ops),
-    )));
+    let proxy = SurfaceProxy::new()
+        .with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new(
+            Arc::new(db),
+            Arc::clone(&plugin_ops),
+        )))
+        .with_provider_visibility(Arc::new(AllProvidersVisible));
     let service_connections = ServiceConnectionRegistry::new();
 
     let response = proxy
@@ -418,10 +424,12 @@ async fn invoke_allowlisted_notification_row_actions_use_controller_owned_path()
     );
 
     let service_connections = ServiceConnectionRegistry::new();
-    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new(
-        Arc::new(db),
-        Arc::clone(&plugin_ops),
-    )));
+    let proxy = SurfaceProxy::new()
+        .with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new(
+            Arc::new(db),
+            Arc::clone(&plugin_ops),
+        )))
+        .with_provider_visibility(Arc::new(AllProvidersVisible));
 
     // Post-rename: edit/delete collapse onto the `channels` noun (method
     // disambiguates); `test` keeps its own id. Each pair must resolve to the
@@ -503,10 +511,12 @@ async fn invoke_allowlisted_notification_create_emits_audit_row() {
         ))
         .expect("plugin registration should succeed");
 
-    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
-        PluginSurfaceLocalExecutor::new(Arc::new(db.clone()), Arc::clone(&plugin_ops))
-            .with_audit_emitter(super::test_audit_emitter(db.clone())),
-    ));
+    let proxy = SurfaceProxy::new()
+        .with_local_executor(Arc::new(
+            PluginSurfaceLocalExecutor::new(Arc::new(db.clone()), Arc::clone(&plugin_ops))
+                .with_audit_emitter(super::test_audit_emitter(db.clone())),
+        ))
+        .with_provider_visibility(Arc::new(AllProvidersVisible));
     let service_connections = ServiceConnectionRegistry::new();
 
     let mut params = serde_json::Map::new();
@@ -635,10 +645,12 @@ async fn invoke_notifications_email_channels_put_routes_edit() {
     );
 
     let service_connections = ServiceConnectionRegistry::new();
-    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
-        PluginSurfaceLocalExecutor::new(Arc::new(db.clone()), Arc::clone(&plugin_ops))
-            .with_audit_emitter(super::test_audit_emitter(db.clone())),
-    ));
+    let proxy = SurfaceProxy::new()
+        .with_local_executor(Arc::new(
+            PluginSurfaceLocalExecutor::new(Arc::new(db.clone()), Arc::clone(&plugin_ops))
+                .with_audit_emitter(super::test_audit_emitter(db.clone())),
+        ))
+        .with_provider_visibility(Arc::new(AllProvidersVisible));
 
     // 1. Create an email channel (POST channels) to obtain a real id.
     let create_registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());

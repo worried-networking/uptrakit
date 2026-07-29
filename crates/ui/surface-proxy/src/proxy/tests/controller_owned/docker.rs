@@ -15,7 +15,7 @@ use super::super::super::{
 };
 use super::super::{TestPluginInvoker, tenant_id, user_id};
 use super::{ensure_master_key, setup_notification_db};
-use crate::registry::{SurfaceRegistry, SurfaceRegistryConfig};
+use crate::registry::{AllProvidersVisible, SurfaceRegistry, SurfaceRegistryConfig};
 
 struct ErrorPluginInvoker {
     error_message: String,
@@ -95,13 +95,15 @@ async fn invoke_docker_switch_tag_success_emits_software_item_update_audit_row()
     let software_item_id = Uuid::now_v7();
     let host_id = Uuid::now_v7();
     let seen = StdArc::new(Mutex::new(Vec::new()));
-    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
-        PluginSurfaceLocalExecutor::new_without_database(Arc::new(TestPluginInvoker {
-            response: serde_json::json!({"ok": true}),
-            seen: StdArc::clone(&seen),
-        }))
-        .with_audit_emitter(super::test_audit_emitter(db.clone())),
-    ));
+    let proxy = SurfaceProxy::new()
+        .with_local_executor(Arc::new(
+            PluginSurfaceLocalExecutor::new_without_database(Arc::new(TestPluginInvoker {
+                response: serde_json::json!({"ok": true}),
+                seen: StdArc::clone(&seen),
+            }))
+            .with_audit_emitter(super::test_audit_emitter(db.clone())),
+        ))
+        .with_provider_visibility(Arc::new(AllProvidersVisible));
     let service_connections = ServiceConnectionRegistry::new();
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     registry
@@ -186,12 +188,14 @@ async fn invoke_docker_switch_tag_invalid_image_emits_validation_failed_audit_ro
     let db = setup_notification_db().await;
     let software_item_id = Uuid::now_v7();
     let host_id = Uuid::now_v7();
-    let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
-        PluginSurfaceLocalExecutor::new_without_database(Arc::new(ErrorPluginInvoker {
-            error_message: "invalid image reference: bad tag".to_string(),
-        }))
-        .with_audit_emitter(super::test_audit_emitter(db.clone())),
-    ));
+    let proxy = SurfaceProxy::new()
+        .with_local_executor(Arc::new(
+            PluginSurfaceLocalExecutor::new_without_database(Arc::new(ErrorPluginInvoker {
+                error_message: "invalid image reference: bad tag".to_string(),
+            }))
+            .with_audit_emitter(super::test_audit_emitter(db.clone())),
+        ))
+        .with_provider_visibility(Arc::new(AllProvidersVisible));
     let service_connections = ServiceConnectionRegistry::new();
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     registry

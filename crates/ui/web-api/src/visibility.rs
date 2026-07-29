@@ -2,6 +2,9 @@
 //! "is this plugin visible to this user" check so route handlers, the
 //! surface registry, and any future filter call into one helper.
 
+use std::sync::Arc;
+
+use arc_swap::ArcSwap;
 use uptrakit_plugin_infrastructure_registry::{
     PluginDescriptor, PluginOps, PluginScope, PluginTypeId,
 };
@@ -67,6 +70,53 @@ pub fn is_plugin_visible_to_user(
             );
             true
         }
+    }
+}
+
+/// [`crate::surface_proxy::SurfaceProviderVisibility`] backed by effective
+/// enablement (ADR-0033). Holds live handles — the snapshot ArcSwap is
+/// loaded on every call, so a runtime disable takes effect immediately on
+/// every leg, including provider-origin invocations resolved inside the
+/// proxy. Capturing a loaded snapshot instead would freeze boot state and
+/// silently break disable-is-immediate on exactly that leg.
+pub struct PluginEffectiveEnablement {
+    plugin_ops: Arc<dyn PluginOps>,
+    snapshot: Arc<ArcSwap<InstancePluginSnapshot>>,
+}
+
+impl PluginEffectiveEnablement {
+    /// Creates the filter from the live plugin-ops and snapshot handles.
+    #[must_use]
+    pub fn new(
+        plugin_ops: Arc<dyn PluginOps>,
+        snapshot: Arc<ArcSwap<InstancePluginSnapshot>>,
+    ) -> Self {
+        Self {
+            plugin_ops,
+            snapshot,
+        }
+    }
+}
+
+impl crate::surface_proxy::SurfaceProviderVisibility for PluginEffectiveEnablement {
+    fn plugin_provider_visible(&self, provider_id: &str) -> bool {
+        let snapshot = self.snapshot.load_full();
+        self.plugin_ops
+            .all()
+            .into_iter()
+            .find(|descriptor| {
+                descriptor
+                    .surfaces
+                    .is_some_and(|ops| ops.provider_id == provider_id)
+            })
+            .map(|descriptor| {
+                effective_instance_enabled(
+                    self.plugin_ops.as_ref(),
+                    snapshot.as_ref(),
+                    &PluginTypeId::from_static(descriptor.type_id),
+                )
+            })
+            .unwrap_or(false)
     }
 }
 

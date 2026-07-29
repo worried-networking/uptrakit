@@ -181,6 +181,40 @@ struct SurfaceRegistryInner {
     surface_to_providers: HashMap<String, BTreeSet<String>>,
 }
 
+/// Decides whether a plugin-backed surface provider is currently servable.
+/// Service- and BuiltIn-kind providers are not consulted (spec 2026-07-27 D2);
+/// the filter is a required parameter on every tenant-facing enumeration and
+/// resolution method so no leg can resolve without deciding visibility.
+pub trait SurfaceProviderVisibility: Send + Sync {
+    /// Returns `true` when the Plugin-kind provider with this wire
+    /// `provider_id` is effectively enabled.
+    fn plugin_provider_visible(&self, provider_id: &str) -> bool;
+}
+
+/// Fail-closed default: hides every Plugin-kind provider. Production wiring
+/// replaces it with the controller's effective-enablement filter; anything
+/// constructed without that wiring must hide plugin surfaces, never serve
+/// them ungated.
+pub struct DenyAllPluginProviders;
+
+impl SurfaceProviderVisibility for DenyAllPluginProviders {
+    fn plugin_provider_visible(&self, _provider_id: &str) -> bool {
+        false
+    }
+}
+
+/// Permissive filter for tests that exercise registry/proxy mechanics
+/// without plugin-enablement concerns.
+#[cfg(any(test, feature = "testing"))]
+pub struct AllProvidersVisible;
+
+#[cfg(any(test, feature = "testing"))]
+impl SurfaceProviderVisibility for AllProvidersVisible {
+    fn plugin_provider_visible(&self, _provider_id: &str) -> bool {
+        true
+    }
+}
+
 pub struct SurfaceRegistry {
     config: SurfaceRegistryConfig,
     inner: Mutex<SurfaceRegistryInner>,
@@ -343,11 +377,18 @@ impl SurfaceRegistry {
         tenant_id: Uuid,
         slot_filter: Option<&str>,
         page_filter: Option<&str>,
+        visibility: &dyn SurfaceProviderVisibility,
     ) -> Vec<SurfaceCatalogItem> {
         let inner = self.inner.lock();
         let mut items = Vec::new();
 
         for (provider_id, provider) in &inner.providers {
+            if provider.registration.provider.provider_kind == surfaces::ProviderKind::Plugin
+                && !visibility.plugin_provider_visible(provider_id)
+            {
+                continue;
+            }
+
             for registered in &provider.registration.surfaces {
                 if !surface_visible_for_tenant(
                     &provider.registration.effective_tenant_binding,
@@ -392,6 +433,7 @@ impl SurfaceRegistry {
         &self,
         surface_id: &str,
         tenant_id: Uuid,
+        visibility: &dyn SurfaceProviderVisibility,
     ) -> Vec<SurfaceProviderSummary> {
         let inner = self.inner.lock();
         let mut providers = Vec::new();
@@ -405,6 +447,11 @@ impl SurfaceRegistry {
             let Some(provider) = inner.providers.get(&provider_id) else {
                 continue;
             };
+            if provider.registration.provider.provider_kind == surfaces::ProviderKind::Plugin
+                && !visibility.plugin_provider_visible(&provider_id)
+            {
+                continue;
+            }
             let Some(surface) = provider
                 .registration
                 .surfaces
@@ -454,8 +501,9 @@ impl SurfaceRegistry {
         interaction_id: &str,
         method: Option<&surfaces::InteractionHttpMethod>,
         target_provider_id: Option<&str>,
+        visibility: &dyn SurfaceProviderVisibility,
     ) -> Result<ResolvedSurfaceAction, SurfaceRegistryLookupError> {
-        let providers = self.list_targeted_providers_for_surface(surface_id, tenant_id);
+        let providers = self.list_targeted_providers_for_surface(surface_id, tenant_id, visibility);
         if providers.is_empty() {
             return Err(SurfaceRegistryLookupError::SurfaceNotFound);
         }
@@ -543,22 +591,13 @@ impl SurfaceRegistry {
         &self,
         tenant_id: Uuid,
         surface_id: &str,
+        visibility: &dyn SurfaceProviderVisibility,
     ) -> Result<ResolvedSurfaceRead, SurfaceRegistryLookupError> {
-        let provider_ids = {
-            let inner = self.inner.lock();
-            inner
-                .surface_to_providers
-                .get(surface_id)
-                .cloned()
-                .unwrap_or_default()
-        };
-        if provider_ids.is_empty() {
+        let providers = self.list_targeted_providers_for_surface(surface_id, tenant_id, visibility);
+        if providers.is_empty() {
             return Err(SurfaceRegistryLookupError::SurfaceNotFound);
         }
-
-        let candidates = preferred_provider_candidates(
-            self.list_targeted_providers_for_surface(surface_id, tenant_id),
-        )?;
+        let candidates = preferred_provider_candidates(providers)?;
         let selected_provider_id = candidates
             .first()
             .expect("preferred candidate resolution should yield at least one provider")
@@ -1654,6 +1693,7 @@ mod tests {
                 "load-data",
                 None,
                 Some("plugin.dataload_test_provider"),
+                &AllProvidersVisible,
             )
             .expect("stored interaction should resolve");
         assert_eq!(
@@ -1732,6 +1772,7 @@ mod tests {
             "dup-action",
             None,
             Some("plugin.dataload_test_provider"),
+            &AllProvidersVisible,
         );
         assert!(
             matches!(
@@ -1755,6 +1796,7 @@ mod tests {
                 "dup-action",
                 Some(&surfaces::InteractionHttpMethod::Get),
                 Some("plugin.dataload_test_provider"),
+                &AllProvidersVisible,
             )
             .expect("GET should resolve the DataLoad sibling");
         assert_eq!(
@@ -1769,6 +1811,7 @@ mod tests {
                 "dup-action",
                 Some(&surfaces::InteractionHttpMethod::Post),
                 Some("plugin.dataload_test_provider"),
+                &AllProvidersVisible,
             )
             .expect("POST should resolve the MutationAction sibling");
         assert_eq!(
@@ -1787,6 +1830,7 @@ mod tests {
             "dup-action",
             Some(&surfaces::InteractionHttpMethod::Delete),
             Some("plugin.dataload_test_provider"),
+            &AllProvidersVisible,
         );
         match result {
             Err(SurfaceRegistryLookupError::MethodNotAllowed { allowed, .. }) => {
@@ -1841,6 +1885,7 @@ mod tests {
             "dup-action",
             Some(&surfaces::InteractionHttpMethod::Delete),
             Some("plugin.dataload_test_provider"),
+            &AllProvidersVisible,
         );
 
         match result {
@@ -1891,6 +1936,7 @@ mod tests {
                 "refresh",
                 None,
                 Some("provider-a"),
+                &AllProvidersVisible,
             )
             .expect("single registered method must resolve when method is None");
         assert_eq!(
@@ -1914,6 +1960,7 @@ mod tests {
             "refresh",
             Some(&surfaces::InteractionHttpMethod::Get),
             Some("provider-a"),
+            &AllProvidersVisible,
         );
         assert!(
             matches!(
@@ -1941,6 +1988,7 @@ mod tests {
             "does-not-exist",
             None,
             Some("provider-a"),
+            &AllProvidersVisible,
         );
         assert!(matches!(
             none_result,
@@ -1953,6 +2001,7 @@ mod tests {
             "does-not-exist",
             Some(&surfaces::InteractionHttpMethod::Post),
             Some("provider-a"),
+            &AllProvidersVisible,
         );
         assert!(
             matches!(
@@ -2092,7 +2141,7 @@ mod tests {
         assert_eq!(registry.provider_surface_count("provider-a"), 0);
         assert!(
             registry
-                .list_surfaces_for_tenant(tenant_a(), None, None)
+                .list_surfaces_for_tenant(tenant_a(), None, None, &AllProvidersVisible)
                 .is_empty()
         );
     }
@@ -2109,8 +2158,10 @@ mod tests {
             )
             .expect("registration should succeed");
 
-        let tenant_a_surfaces = registry.list_surfaces_for_tenant(tenant_a(), None, None);
-        let tenant_b_surfaces = registry.list_surfaces_for_tenant(tenant_b(), None, None);
+        let tenant_a_surfaces =
+            registry.list_surfaces_for_tenant(tenant_a(), None, None, &AllProvidersVisible);
+        let tenant_b_surfaces =
+            registry.list_surfaces_for_tenant(tenant_b(), None, None, &AllProvidersVisible);
 
         assert_eq!(tenant_a_surfaces.len(), 1);
         assert!(tenant_b_surfaces.is_empty());
@@ -2336,7 +2387,8 @@ mod tests {
             .bootstrap_builtin(built_in_registration)
             .expect("bootstrap should succeed");
 
-        let surfaces = registry.list_surfaces_for_tenant(tenant_a(), None, None);
+        let surfaces =
+            registry.list_surfaces_for_tenant(tenant_a(), None, None, &AllProvidersVisible);
         assert!(
             surfaces
                 .iter()
@@ -2390,7 +2442,8 @@ mod tests {
             .bootstrap_plugin(plugin_registration)
             .expect("plugin bootstrap should succeed");
 
-        let surfaces = registry.list_surfaces_for_tenant(tenant_a(), None, None);
+        let surfaces =
+            registry.list_surfaces_for_tenant(tenant_a(), None, None, &AllProvidersVisible);
         assert!(
             surfaces
                 .iter()
@@ -2431,7 +2484,8 @@ mod tests {
             "webhook provider should contribute shared-surface registrations"
         );
 
-        let surfaces = registry.list_surfaces_for_tenant(tenant_a(), None, None);
+        let surfaces =
+            registry.list_surfaces_for_tenant(tenant_a(), None, None, &AllProvidersVisible);
         assert!(
             surfaces
                 .iter()
@@ -2693,7 +2747,7 @@ mod tests {
             )
             .expect("registration should succeed");
 
-        let visible = registry.list_surfaces_for_tenant(tenant, None, None);
+        let visible = registry.list_surfaces_for_tenant(tenant, None, None, &AllProvidersVisible);
         assert_eq!(
             visible.len(),
             1,
@@ -2721,7 +2775,11 @@ mod tests {
             )
             .expect("tenant b registration should succeed");
 
-        let providers = registry.list_targeted_providers_for_surface("ssh.guest.panel", tenant_a());
+        let providers = registry.list_targeted_providers_for_surface(
+            "ssh.guest.panel",
+            tenant_a(),
+            &AllProvidersVisible,
+        );
         assert_eq!(providers.len(), 1);
         assert_eq!(providers[0].provider_id, "provider-a");
         assert!(providers[0].tenant_compatible);
@@ -2751,11 +2809,21 @@ mod tests {
             )
             .expect("registration should succeed");
 
-        let settings_page = registry.list_surfaces_for_tenant(tenant_a(), None, Some("settings"));
+        let settings_page = registry.list_surfaces_for_tenant(
+            tenant_a(),
+            None,
+            Some("settings"),
+            &AllProvidersVisible,
+        );
         assert_eq!(settings_page.len(), 1);
         assert_eq!(settings_page[0].surface_id, "other.surface");
 
-        let software_page = registry.list_surfaces_for_tenant(tenant_a(), None, Some("software"));
+        let software_page = registry.list_surfaces_for_tenant(
+            tenant_a(),
+            None,
+            Some("software"),
+            &AllProvidersVisible,
+        );
         assert_eq!(software_page.len(), 1);
         assert_eq!(software_page[0].surface_id, "settings.in.id");
     }
@@ -2777,11 +2845,21 @@ mod tests {
             )
             .expect("registration should succeed");
 
-        let hosts_page = registry.list_surfaces_for_tenant(tenant_a(), None, Some("hosts"));
+        let hosts_page = registry.list_surfaces_for_tenant(
+            tenant_a(),
+            None,
+            Some("hosts"),
+            &AllProvidersVisible,
+        );
         assert_eq!(hosts_page.len(), 1);
         assert_eq!(hosts_page[0].surface_id, "host.detail.surface");
 
-        let settings_page = registry.list_surfaces_for_tenant(tenant_a(), None, Some("settings"));
+        let settings_page = registry.list_surfaces_for_tenant(
+            tenant_a(),
+            None,
+            Some("settings"),
+            &AllProvidersVisible,
+        );
         assert!(settings_page.is_empty());
     }
 
@@ -2802,11 +2880,21 @@ mod tests {
             )
             .expect("registration should succeed");
 
-        let software_page = registry.list_surfaces_for_tenant(tenant_a(), None, Some("software"));
+        let software_page = registry.list_surfaces_for_tenant(
+            tenant_a(),
+            None,
+            Some("software"),
+            &AllProvidersVisible,
+        );
         assert_eq!(software_page.len(), 1);
         assert_eq!(software_page[0].surface_id, "software.item.tabs.surface");
 
-        let hosts_page = registry.list_surfaces_for_tenant(tenant_a(), None, Some("hosts"));
+        let hosts_page = registry.list_surfaces_for_tenant(
+            tenant_a(),
+            None,
+            Some("hosts"),
+            &AllProvidersVisible,
+        );
         assert!(hosts_page.is_empty());
     }
 
@@ -2825,7 +2913,7 @@ mod tests {
         );
 
         let read = registry
-            .resolve_surface_read(tenant_a(), "ssh.guest.panel")
+            .resolve_surface_read(tenant_a(), "ssh.guest.panel", &AllProvidersVisible)
             .expect("read resolution should succeed");
         assert_eq!(
             read.descriptor.provider_kind,
@@ -2838,6 +2926,7 @@ mod tests {
             "refresh",
             None,
             None,
+            &AllProvidersVisible,
         );
         assert!(matches!(
             action,
@@ -2851,10 +2940,97 @@ mod tests {
                 "refresh",
                 None,
                 Some("provider-a"),
+                &AllProvidersVisible,
             )
             .expect("explicit service target should resolve");
         assert_eq!(action.provider_id, "provider-a");
         assert_eq!(action.provider_kind, surfaces::ProviderKind::Service);
+    }
+
+    #[test]
+    fn plugin_provider_hidden_by_filter_is_absent_everywhere() {
+        let registry = registry();
+        registry.register_provider_for_test(
+            registration_for_plugin_same_surface("plugin-a"),
+            None,
+            None,
+        );
+
+        let surfaces =
+            registry.list_surfaces_for_tenant(tenant_a(), None, None, &DenyAllPluginProviders);
+        assert!(
+            surfaces
+                .iter()
+                .all(|surface| surface.provider_id != "plugin-a"),
+            "a hidden plugin provider must not appear in the tenant catalog"
+        );
+
+        let providers = registry.list_targeted_providers_for_surface(
+            "ssh.guest.panel",
+            tenant_a(),
+            &DenyAllPluginProviders,
+        );
+        assert!(
+            providers.is_empty(),
+            "the only registered provider is a hidden plugin, so no targeted providers should remain"
+        );
+
+        let read_result =
+            registry.resolve_surface_read(tenant_a(), "ssh.guest.panel", &DenyAllPluginProviders);
+        assert!(
+            matches!(
+                read_result,
+                Err(SurfaceRegistryLookupError::SurfaceNotFound)
+            ),
+            "a surface with only a hidden plugin provider must resolve as not found, got {read_result:?}"
+        );
+
+        let action_result = registry.resolve_surface_action_for_method(
+            tenant_a(),
+            "ssh.guest.panel",
+            "refresh",
+            None,
+            None,
+            &DenyAllPluginProviders,
+        );
+        assert!(
+            matches!(
+                action_result,
+                Err(SurfaceRegistryLookupError::SurfaceNotFound)
+            ),
+            "a surface with only a hidden plugin provider must resolve as not found, got {action_result:?}"
+        );
+    }
+
+    #[test]
+    fn service_provider_unaffected_by_deny_filter() {
+        let registry = registry();
+        registry.register_provider_for_test(
+            registration_for_service("provider-a", tenant_a()),
+            Some(Uuid::now_v7()),
+            Some("uptrakit-agent-ssh"),
+        );
+
+        let surfaces =
+            registry.list_surfaces_for_tenant(tenant_a(), None, None, &DenyAllPluginProviders);
+        assert!(
+            surfaces
+                .iter()
+                .any(|surface| surface.provider_id == "provider-a"),
+            "a Service-kind provider must stay listed under the deny-all-plugins filter"
+        );
+
+        let providers = registry.list_targeted_providers_for_surface(
+            "ssh.guest.panel",
+            tenant_a(),
+            &DenyAllPluginProviders,
+        );
+        assert!(
+            providers
+                .iter()
+                .any(|provider| provider.provider_id == "provider-a"),
+            "a Service-kind provider must remain a targeted candidate under the deny-all-plugins filter"
+        );
     }
 
     /// Builds a minimal plugin [`SurfaceRegistration`] with the given root node and

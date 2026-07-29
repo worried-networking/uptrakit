@@ -284,6 +284,7 @@ pub(super) async fn build_handler_test_state(
         surface_proxy_deps: crate::app_state::SurfaceProxyDeps::new(
             surface_registry,
             surface_proxy,
+            Arc::new(crate::surface_proxy::AllProvidersVisible),
         ),
         config_test_proxy: Arc::new(crate::config_test_proxy::ConfigTestProxy::new()),
         workload_claim_registry: Arc::new(crate::workload_claims::WorkloadClaimRegistry::new()),

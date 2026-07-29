@@ -653,6 +653,7 @@ impl MessageProcessor {
                 payload.interaction_id.as_str(),
                 None,
                 payload.target_provider_id.as_deref(),
+                self.state.surface_proxy_deps.visibility.as_ref(),
             ) {
             Ok(resolved) => Some(resolved),
             Err(error) => {

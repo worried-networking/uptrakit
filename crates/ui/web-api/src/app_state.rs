@@ -21,7 +21,7 @@ use crate::embedded_support::EmbeddedServiceNotifier;
 use crate::notification_service::NotificationService;
 use crate::service_connections::ServiceConnectionRegistry;
 use crate::settings::Settings;
-use crate::surface_proxy::SurfaceProxy;
+use crate::surface_proxy::{DenyAllPluginProviders, SurfaceProviderVisibility, SurfaceProxy};
 use crate::surface_registry::SurfaceRegistry;
 
 /// Grouped surface-proxy dependencies stored in [`AppState`].
@@ -36,13 +36,25 @@ pub struct SurfaceProxyDeps {
     pub registry: Arc<SurfaceRegistry>,
     /// Request/response proxy for surface interaction invocations.
     pub proxy: Arc<SurfaceProxy>,
+    /// Plugin-provider visibility filter handlers pass into registry
+    /// enumeration/resolution calls (ADR-0033).
+    pub visibility: Arc<dyn SurfaceProviderVisibility>,
 }
 
 impl SurfaceProxyDeps {
-    /// Creates a new [`SurfaceProxyDeps`] from a registry and proxy.
+    /// Creates a new [`SurfaceProxyDeps`] from a registry, proxy, and
+    /// plugin-provider visibility filter.
     #[must_use]
-    pub fn new(registry: Arc<SurfaceRegistry>, proxy: Arc<SurfaceProxy>) -> Self {
-        Self { registry, proxy }
+    pub fn new(
+        registry: Arc<SurfaceRegistry>,
+        proxy: Arc<SurfaceProxy>,
+        visibility: Arc<dyn SurfaceProviderVisibility>,
+    ) -> Self {
+        Self {
+            registry,
+            proxy,
+            visibility,
+        }
     }
 }
 
@@ -442,6 +454,7 @@ pub struct AppStateBuilder {
     audit_emitter: Option<uptrakit_audit_log::AuditEmitter>,
     surface_registry: Option<Arc<SurfaceRegistry>>,
     surface_proxy: Option<Arc<SurfaceProxy>>,
+    surface_provider_visibility: Option<Arc<dyn SurfaceProviderVisibility>>,
     config_test_proxy: Option<Arc<ConfigTestProxy>>,
     workload_claim_registry: Option<Arc<crate::workload_claims::WorkloadClaimRegistry>>,
     reject_dangerous_commands: bool,
@@ -509,6 +522,7 @@ impl AppStateBuilder {
             audit_emitter: None,
             surface_registry: None,
             surface_proxy: None,
+            surface_provider_visibility: None,
             config_test_proxy: None,
             workload_claim_registry: None,
             reject_dangerous_commands: false,
@@ -785,6 +799,15 @@ impl AppStateBuilder {
     /// Optional — defaults to an empty proxy with no pending requests.
     pub fn surface_proxy(mut self, v: Arc<SurfaceProxy>) -> Self {
         self.surface_proxy = Some(v);
+        self
+    }
+
+    /// Override the plugin-provider visibility filter.
+    ///
+    /// Optional — defaults to [`DenyAllPluginProviders`] (fail-closed); the
+    /// real controller boot always supplies the effective-enablement filter.
+    pub fn surface_provider_visibility(mut self, v: Arc<dyn SurfaceProviderVisibility>) -> Self {
+        self.surface_provider_visibility = Some(v);
         self
     }
 
@@ -1077,6 +1100,8 @@ impl AppStateBuilder {
                 }),
                 self.surface_proxy
                     .unwrap_or_else(|| Arc::new(SurfaceProxy::new())),
+                self.surface_provider_visibility
+                    .unwrap_or_else(|| Arc::new(DenyAllPluginProviders)),
             ),
             config_test_proxy: self
                 .config_test_proxy
