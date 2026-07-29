@@ -123,6 +123,28 @@ impl TestApp {
         };
         (app, calls)
     }
+
+    /// Build a [`TestApp`] on the plugin-surfaces wiring
+    /// ([`build_test_state_with_plugin_surfaces`]) with an optional catalog
+    /// override — the route-level entry point for effective-enablement
+    /// matrix tests (spec §5.2(a)).
+    pub(crate) async fn with_plugin_surfaces(
+        plugin_ops_override: Option<Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps>>,
+    ) -> Self {
+        let db = setup_migrated_db_with_plugins().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (state, jwt) =
+            build_test_state_with_plugin_surfaces(db.clone(), tenant_id, plugin_ops_override).await;
+        let router = build_router(Arc::clone(&state));
+
+        Self {
+            state,
+            router,
+            db,
+            jwt,
+            tenant_id,
+        }
+    }
 }
 
 /// Input descriptor for [`TestApp::with_stub_surfaces`]: a minimal,
@@ -332,11 +354,19 @@ pub(crate) async fn build_test_state_with_external_tls_cert(
 ///
 /// Pair with [`setup_migrated_db_with_plugins`] so plugin-owned tables exist
 /// on `db` before seeding/querying them.
+///
+/// `plugin_ops_override` reaches this surfaces-wired builder the same way it
+/// reaches [`build_test_state_with_plugin_ops`] directly (spec §5.2(b)) — so
+/// route-level effective-enablement matrix tests can swap in a synthetic
+/// catalog (e.g. [`synthetic_instance_catalog`]) while keeping the real
+/// admission + visibility wiring below.
 pub(crate) async fn build_test_state_with_plugin_surfaces(
     db: DatabaseConnection,
     tenant_id: uuid::Uuid,
+    plugin_ops_override: Option<Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps>>,
 ) -> (Arc<AppState>, Arc<JwtManager>) {
-    let (state, jwt) = build_test_state_with_plugin_ops(db.clone(), tenant_id, None).await;
+    let (state, jwt) =
+        build_test_state_with_plugin_ops(db.clone(), tenant_id, plugin_ops_override).await;
 
     let surface_registry = Arc::new(crate::surface_registry::SurfaceRegistry::new(
         crate::surface_registry::SurfaceRegistryConfig::default(),
@@ -372,6 +402,25 @@ pub(crate) async fn build_test_state_with_plugin_surfaces(
         surface_visibility,
     );
     (Arc::new(app_state), jwt)
+}
+
+/// Catalog containing only the synthetic Instance-scoped surface-bearing
+/// fixture plugin, with its boot state set to `boot_enabled` (spec §5.1).
+pub(crate) fn synthetic_instance_catalog(
+    boot_enabled: bool,
+) -> Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> {
+    use uptrakit_plugin_infrastructure_core::testing::instance_surface_fixture;
+    Arc::new(
+        uptrakit_plugin_infrastructure_registry::PluginCatalog::new(
+            vec![&instance_surface_fixture::DESCRIPTOR],
+            &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            uptrakit_plugin_infrastructure_registry::InstancePluginStates::from_pairs([(
+                instance_surface_fixture::TYPE_ID,
+                boot_enabled,
+            )]),
+        )
+        .expect("synthetic fixture catalog should build"),
+    )
 }
 
 pub(crate) async fn build_test_state_with_plugin_ops(

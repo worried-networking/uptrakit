@@ -1144,7 +1144,8 @@ async fn provider_origin_denied_for_unflagged_permissioned_interaction() {
     let db = crate::test_harness::setup_migrated_db_with_plugins().await;
     let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
     let (state, _jwt) =
-        crate::test_harness::build_test_state_with_plugin_surfaces(db.clone(), tenant_id).await;
+        crate::test_harness::build_test_state_with_plugin_surfaces(db.clone(), tenant_id, None)
+            .await;
     let service_id = Uuid::now_v7();
     insert_test_service_row(&db, tenant_id, service_id, "uptrakit-agent-ssh").await;
     register_calling_service_as_provider(&state, service_id, tenant_id);
@@ -1240,7 +1241,8 @@ async fn provider_origin_unmatched_guests_executes_and_audits_service_actor() {
         )
         .await;
     let (state, _jwt) =
-        crate::test_harness::build_test_state_with_plugin_surfaces(db.clone(), tenant_id).await;
+        crate::test_harness::build_test_state_with_plugin_surfaces(db.clone(), tenant_id, None)
+            .await;
     let service_id = Uuid::now_v7();
     insert_test_service_row(&db, tenant_id, service_id, "uptrakit-agent-ssh").await;
     register_calling_service_as_provider(&state, service_id, tenant_id);
@@ -1346,7 +1348,8 @@ async fn provider_origin_unmatched_guests_resolves_target_from_surface() {
         )
         .await;
     let (state, _jwt) =
-        crate::test_harness::build_test_state_with_plugin_surfaces(db.clone(), tenant_id).await;
+        crate::test_harness::build_test_state_with_plugin_surfaces(db.clone(), tenant_id, None)
+            .await;
     let service_id = Uuid::now_v7();
     insert_test_service_row(&db, tenant_id, service_id, "uptrakit-agent-ssh").await;
     register_calling_service_as_provider(&state, service_id, tenant_id);
@@ -1447,7 +1450,8 @@ async fn provider_origin_match_completes_handler() {
         .await;
     let host = crate::test_harness::fixtures::insert_host(&db, tenant_id).await;
     let (state, _jwt) =
-        crate::test_harness::build_test_state_with_plugin_surfaces(db.clone(), tenant_id).await;
+        crate::test_harness::build_test_state_with_plugin_surfaces(db.clone(), tenant_id, None)
+            .await;
     let service_id = Uuid::now_v7();
     insert_test_service_row(&db, tenant_id, service_id, "uptrakit-agent-ssh").await;
     register_calling_service_as_provider(&state, service_id, tenant_id);

@@ -322,6 +322,7 @@ pub mod instance_surface_fixture {
             .provider_kind(surfaces::ProviderKind::Plugin)
             .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                 surfaces::Capability::TextBlockNode,
+                surfaces::Capability::UniversalTargeting,
                 surfaces::Capability::MutationAction,
             ]))
             .root_node(surfaces::SurfaceNode::TextBlock {

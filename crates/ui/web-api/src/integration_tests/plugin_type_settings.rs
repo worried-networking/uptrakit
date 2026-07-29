@@ -15,54 +15,7 @@
 #[cfg(feature = "dashboard-icons")]
 use crate::test_harness::TestApp;
 #[cfg(feature = "dashboard-icons")]
-use crate::test_harness::fixtures::register_user;
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-/// Register the admin (first user), re-open registration, then register a
-/// second user who gets the built-in "user" role (ViewSettings but NOT
-/// ManageGlobalSettings).  Returns `(admin_token, tenant_token)`.
-#[cfg(feature = "dashboard-icons")]
-async fn register_admin_and_tenant_user(app: &TestApp) -> (String, String) {
-    let client = app.client();
-
-    // First user → owner role (all permissions including ManageGlobalSettings).
-    let (status, admin_auth) = register_user(&client, "owner@test.local", "TestPassword123!").await;
-    assert_eq!(
-        status,
-        http::StatusCode::CREATED,
-        "admin registration failed"
-    );
-    let admin_token = admin_auth.access_token.expose_secret().to_string();
-
-    // Re-open registration so the second user can sign up.
-    let reopen = client
-        .put_json(
-            "/api/v1/settings/access",
-            &serde_json::json!({ "mode": "open" }),
-        )
-        .bearer(&admin_token)
-        .header("if-match", "W/\"settings-v0\"")
-        .send_status()
-        .await;
-    assert_eq!(
-        reopen,
-        http::StatusCode::OK,
-        "failed to re-open registration"
-    );
-
-    // Second user → built-in "user" role: ViewSettings but NOT ManageGlobalSettings.
-    let (status, tenant_auth) =
-        register_user(&client, "tenant@test.local", "TestPassword123!").await;
-    assert_eq!(
-        status,
-        http::StatusCode::CREATED,
-        "tenant user registration failed"
-    );
-    let tenant_token = tenant_auth.access_token.expose_secret().to_string();
-
-    (admin_token, tenant_token)
-}
+use crate::test_harness::fixtures::register_admin_and_tenant_user;
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 

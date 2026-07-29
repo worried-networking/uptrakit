@@ -164,4 +164,13 @@ impl RequestBuilder {
     pub(crate) async fn send_status(self) -> http::StatusCode {
         self.send().await.status()
     }
+
+    /// Execute the request and return `(StatusCode, raw body bytes)` — for
+    /// byte-identical response-shape assertions.
+    pub(crate) async fn send_bytes(self) -> (http::StatusCode, axum::body::Bytes) {
+        let resp = self.send().await;
+        let status = resp.status();
+        let bytes = resp.into_body().collect().await.expect("body").to_bytes();
+        (status, bytes)
+    }
 }
