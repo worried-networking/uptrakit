@@ -1,3 +1,4 @@
+pub mod action;
 pub mod audit_log;
 pub mod etag;
 pub mod permission;
