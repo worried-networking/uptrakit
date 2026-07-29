@@ -8754,6 +8754,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "uptrakit-zeroconf"
+version = "0.0.1"
+dependencies = [
+ "mdns-sd",
+ "rootcause",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+ "uptrakit-shared-macros",
+]
+
+[[package]]
 name = "ureq"
 version = "3.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

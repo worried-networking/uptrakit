@@ -125,6 +125,7 @@ uptrakit-controller-runtime = { path = "crates/core/controller-runtime", version
 uptrakit-crypto = { path = "crates/shared/crypto", version = "0.0.1" }
 uptrakit-shared-db = { path = "crates/shared/db", version = "0.0.1", default-features = false }
 uptrakit-directories = { path = "crates/shared/directories", version = "0.0.1" }
+uptrakit-zeroconf = { path = "crates/shared/zeroconf", version = "0.0.1" }
 uptrakit-web-api-types = { path = "crates/shared/web-api-types", version = "0.0.2" }
 uptrakit-nats = { path = "crates/shared/nats", version = "0.0.1" }
 uptrakit-scheduler-runtime = { path = "crates/core/scheduler-runtime", version = "0.0.3", default-features = false }

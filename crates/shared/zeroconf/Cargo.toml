@@ -1,0 +1,20 @@
+[package]
+name = "uptrakit-zeroconf"
+description = "Uptrakit zeroconf contract — mDNS/DNS-SD service type, TXT record build/parse, and controller browse primitives"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version = "0.0.1"
+publish = true
+
+[dependencies]
+mdns-sd = { workspace = true }
+rootcause = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt", "time"] }
+tracing = { workspace = true }
+uptrakit-shared-macros = { workspace = true }
+
+[lints]
+workspace = true
