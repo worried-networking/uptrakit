@@ -35,6 +35,7 @@ pub enum Decision {
 /// regardless of the reason (the D3 generic-403 rule).
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(test, derive(strum::EnumIter))]
 pub enum DenyReason {
     /// No grant pattern matched the action.
     NoGrant,
@@ -70,17 +71,19 @@ impl std::fmt::Display for DenyReason {
 
 #[cfg(test)]
 mod tests {
+    use strum::IntoEnumIterator;
+
     use super::*;
 
     #[test]
     fn deny_reason_labels_are_stable_and_display_matches() {
-        let cases = [
-            (DenyReason::NoGrant, "no_grant"),
-            (DenyReason::OutOfScope, "out_of_scope"),
-            (DenyReason::OutsideSelector, "outside_selector"),
-            (DenyReason::UnknownAction, "unknown_action"),
-        ];
-        for (reason, label) in cases {
+        for reason in DenyReason::iter() {
+            let label = match reason {
+                DenyReason::NoGrant => "no_grant",
+                DenyReason::OutOfScope => "out_of_scope",
+                DenyReason::OutsideSelector => "outside_selector",
+                DenyReason::UnknownAction => "unknown_action",
+            };
             assert_eq!(reason.as_str(), label);
             assert_eq!(reason.to_string(), label);
         }
