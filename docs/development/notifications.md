@@ -631,6 +631,14 @@ permissions, see [Authentication and Authorization](../security/auth-and-authori
 | `DELETE` | `/api/v1/notifications/channels/{id}`      | `manage_notifications` | Delete channel            |
 | `POST`   | `/api/v1/notifications/channels/{id}/test` | `manage_notifications` | Send test notification    |
 
+Channel create/update/test validate the channel type against a live transport
+(`plugin_ops.transport(...)`) because they must interpret the submitted config. **Delete intentionally
+skips that check** (ADR-0033 D5): deletion is cleanup and must keep working for channels whose plugin
+type is no longer compiled into the running binary — otherwise such rows would orphan permanently. The
+surface-dispatch route to notification interactions still 404s while the owning plugin is not
+effectively enabled; only the direct, permission-gated DELETE endpoint stays reachable, pinned by
+`delete_channel_succeeds_for_unknown_channel_type`.
+
 ### Rules
 
 | Method   | Path                               | Permission             | Description                        |

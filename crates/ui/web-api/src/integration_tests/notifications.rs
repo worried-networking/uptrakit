@@ -6,7 +6,9 @@
 
 use crate::test_harness::TestApp;
 use crate::test_harness::fixtures::{register_and_get_token, seed_permissions_for_owner};
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Set,
+};
 use uptrakit_shared_db::entity::audit_log;
 
 async fn tenant_audit_row_for_action(
@@ -410,5 +412,47 @@ async fn delete_rule_db_failure_writes_failed_audit_event() {
     assert_eq!(
         details["reason_code"],
         serde_json::json!("rule_delete_failed")
+    );
+}
+
+/// D5 (spec 2026-07-27 §3.6): channel deletion is cleanup and must work even
+/// when the channel's plugin type is no longer compiled in — create/update/
+/// test validate against a live transport, delete deliberately does not.
+#[tokio::test]
+async fn delete_channel_succeeds_for_unknown_channel_type() {
+    let app = TestApp::new().await;
+    let token = setup_with_notification_perms(&app).await;
+
+    let id = uuid::Uuid::now_v7();
+    let now = time::OffsetDateTime::now_utc();
+    let config = uptrakit_crypto::EncryptedString::new(
+        "{}".to_string(),
+        "uptrakit:notification_channels:config",
+    )
+    .expect("encrypt channel config");
+    uptrakit_shared_db::entity::notification_channel::ActiveModel {
+        id: Set(id),
+        tenant_id: Set(app.tenant_id),
+        name: Set("orphaned channel".to_string()),
+        channel_type: Set("no-such-plugin".to_string()),
+        config: Set(config),
+        enabled: Set(true),
+        created_at: Set(now),
+        updated_at: Set(now),
+    }
+    .insert(&app.db)
+    .await
+    .expect("insert orphan channel row");
+
+    let status = app
+        .client()
+        .delete(&format!("/api/v1/notifications/channels/{id}"))
+        .bearer(&token)
+        .send_status()
+        .await;
+    assert_eq!(
+        status,
+        http::StatusCode::NO_CONTENT,
+        "delete must succeed for a channel whose plugin type is not compiled in"
     );
 }
