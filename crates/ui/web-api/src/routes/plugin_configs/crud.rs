@@ -116,7 +116,12 @@ pub async fn list_plugin_types(
                 .plugin_ops
                 .get(id)
                 .map(|d| {
-                    crate::visibility::is_plugin_visible_to_user(d, snapshot.as_ref(), &auth_user)
+                    crate::visibility::is_plugin_visible_to_user(
+                        d,
+                        state.plugin.plugin_ops.as_ref(),
+                        snapshot.as_ref(),
+                        &auth_user,
+                    )
                 })
                 .unwrap_or(false)
         })

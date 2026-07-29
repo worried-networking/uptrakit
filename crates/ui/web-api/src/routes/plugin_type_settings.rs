@@ -120,6 +120,7 @@ pub async fn list_plugin_type_settings(
                         .map(|d| {
                             crate::visibility::is_plugin_visible_to_user(
                                 d,
+                                plugin_ops.0.as_ref(),
                                 snapshot.as_ref(),
                                 &auth_user,
                             )
@@ -168,6 +169,7 @@ pub async fn get_plugin_type_settings(
     if let Some(desc) = plugin_ops.0.get(&plugin_type_id)
         && !crate::visibility::is_plugin_visible_to_user(
             desc,
+            plugin_ops.0.as_ref(),
             state.instance_plugin_snapshot.load().as_ref(),
             &auth_user,
         )
@@ -229,6 +231,7 @@ pub async fn upsert_plugin_type_settings(
     if let Some(desc) = plugin_ops.0.get(&plugin_type_id)
         && !crate::visibility::is_plugin_visible_to_user(
             desc,
+            plugin_ops.0.as_ref(),
             state.instance_plugin_snapshot.load().as_ref(),
             &user,
         )
@@ -381,6 +384,7 @@ pub async fn delete_plugin_type_settings(
     if let Some(desc) = plugin_ops.0.get(&plugin_type_id)
         && !crate::visibility::is_plugin_visible_to_user(
             desc,
+            plugin_ops.0.as_ref(),
             state.instance_plugin_snapshot.load().as_ref(),
             &user,
         )

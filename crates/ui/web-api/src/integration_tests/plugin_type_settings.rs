@@ -167,3 +167,34 @@ async fn admin_list_plugin_type_settings_includes_disabled_instance_plugin_after
         "admin list must include the disabled instance-scoped plugin's settings row"
     );
 }
+
+/// ADR-0033: a pending-restart-enabled plugin (live row enabled, boot-disabled
+/// catalog) is NOT effectively enabled, so it stays hidden from tenant users.
+#[cfg(feature = "dashboard-icons")]
+#[tokio::test]
+async fn tenant_user_get_settings_for_pending_restart_enabled_plugin_returns_404() {
+    let app = TestApp::new().await;
+    let (_admin_token, tenant_token) = register_admin_and_tenant_user(&app).await;
+
+    // TestApp's catalog boots with InstancePluginStates::all_disabled();
+    // seeding the live row enabled produces exactly the pending-restart state.
+    crate::test_harness::fixtures::upsert_instance_plugin_setting(
+        &app,
+        "enhancement.dashboard-icons",
+        true,
+    )
+    .await;
+
+    let status = app
+        .client()
+        .get("/api/v1/plugin-type-settings/enhancement.dashboard-icons")
+        .bearer(&tenant_token)
+        .send_status()
+        .await;
+
+    assert_eq!(
+        status,
+        http::StatusCode::NOT_FOUND,
+        "pending-restart-enabled plugin must stay hidden from tenant users"
+    );
+}

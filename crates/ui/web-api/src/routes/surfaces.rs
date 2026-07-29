@@ -71,7 +71,12 @@ pub async fn list_surfaces(
             plugin_ops
                 .get(&PluginTypeId::new(&item.provider_id))
                 .map(|d| {
-                    crate::visibility::is_plugin_visible_to_user(d, snapshot.as_ref(), &auth_user)
+                    crate::visibility::is_plugin_visible_to_user(
+                        d,
+                        plugin_ops,
+                        snapshot.as_ref(),
+                        &auth_user,
+                    )
                 })
                 .unwrap_or(true) // Unknown plugin id → pass through (defensive default).
         })

@@ -2,18 +2,41 @@
 //! "is this plugin visible to this user" check so route handlers, the
 //! surface registry, and any future filter call into one helper.
 
-use uptrakit_plugin_infrastructure_registry::{PluginDescriptor, PluginScope};
+use uptrakit_plugin_infrastructure_registry::{
+    PluginDescriptor, PluginOps, PluginScope, PluginTypeId,
+};
 use uptrakit_web_api_queries::instance_plugin_settings::InstancePluginSnapshot;
 use uptrakit_web_api_types::permissions::Permission;
 
 use crate::middleware::require_auth::AuthenticatedUser;
 
+/// Effective enablement of a plugin's runtime functionality (ADR-0033):
+/// `Tenant` scope is always effective; `Instance` scope is effective only
+/// when the boot catalog constructed the plugin (`instance_enabled`) AND the
+/// live snapshot says enabled; an unknown `type_id` is never effective
+/// (fail-closed). The snapshot is consulted only in the `Instance` arm —
+/// Tenant plugins have no row.
+pub fn effective_instance_enabled(
+    plugin_ops: &dyn PluginOps,
+    snapshot: &InstancePluginSnapshot,
+    type_id: &PluginTypeId,
+) -> bool {
+    match plugin_ops.get(type_id) {
+        Some(descriptor) if descriptor.scope == PluginScope::Instance => {
+            plugin_ops.instance_enabled(type_id) && snapshot.enabled(type_id.as_str())
+        }
+        Some(_) => true,
+        None => false,
+    }
+}
+
 /// Returns `true` if the user is allowed to see the plugin in any tenant-
 /// facing listing, surface, or detail response.
 ///
 /// - `Tenant`-scoped plugins: always visible.
-/// - `Instance`-scoped + enabled: visible to everyone.
-/// - `Instance`-scoped + disabled: visible only to users with
+/// - `Instance`-scoped + **effectively** enabled (boot ∧ live): visible to
+///   everyone.
+/// - `Instance`-scoped + not effectively enabled: visible only to users with
 ///   `ManageGlobalSettings` (instance owners).
 ///
 /// `PluginScope` is `#[non_exhaustive]`; the wildcard arm logs a warning
@@ -22,13 +45,18 @@ use crate::middleware::require_auth::AuthenticatedUser;
 /// scope variant ship before this predicate is updated.
 pub fn is_plugin_visible_to_user(
     descriptor: &PluginDescriptor,
+    plugin_ops: &dyn PluginOps,
     snapshot: &InstancePluginSnapshot,
     user: &AuthenticatedUser,
 ) -> bool {
     match descriptor.scope {
         PluginScope::Tenant => true,
         PluginScope::Instance => {
-            let enabled = snapshot.enabled(descriptor.type_id);
+            let enabled = effective_instance_enabled(
+                plugin_ops,
+                snapshot,
+                &PluginTypeId::from_static(descriptor.type_id),
+            );
             enabled || user.has_permission(Permission::ManageGlobalSettings)
         }
         _ => {
@@ -189,12 +217,32 @@ mod tests {
         )
     }
 
+    /// Catalog over the two local fixture descriptors with the Instance
+    /// fixture's boot state set to `boot_enabled`. Returns the fallible
+    /// build so `expect` stays inside `#[test]` bodies.
+    fn test_plugin_ops(
+        boot_enabled: bool,
+    ) -> uptrakit_plugin_infrastructure_core::Result<
+        uptrakit_plugin_infrastructure_registry::PluginCatalog,
+    > {
+        uptrakit_plugin_infrastructure_registry::PluginCatalog::new(
+            vec![tenant_plugin_descriptor(), instance_plugin_descriptor()],
+            &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            uptrakit_plugin_infrastructure_registry::InstancePluginStates::from_pairs([(
+                "test.instance.scoped",
+                boot_enabled,
+            )]),
+        )
+    }
+
     #[test]
     fn tenant_scoped_always_visible() {
+        let ops = test_plugin_ops(false).expect("test catalog builds");
         let snapshot = InstancePluginSnapshot::empty();
         let user = tenant_user();
         assert!(is_plugin_visible_to_user(
             tenant_plugin_descriptor(),
+            &ops,
             &snapshot,
             &user
         ));
@@ -202,6 +250,7 @@ mod tests {
 
     #[test]
     fn instance_scoped_enabled_visible_to_tenant_user() {
+        let ops = test_plugin_ops(true).expect("test catalog builds");
         let snapshot = InstancePluginSnapshot::empty().with_upserted(
             "test.instance.scoped".to_string(),
             uptrakit_web_api_queries::instance_plugin_settings::InstancePluginRow {
@@ -213,6 +262,7 @@ mod tests {
         let user = tenant_user();
         assert!(is_plugin_visible_to_user(
             instance_plugin_descriptor(),
+            &ops,
             &snapshot,
             &user
         ));
@@ -220,6 +270,7 @@ mod tests {
 
     #[test]
     fn instance_scoped_disabled_hidden_from_tenant_user() {
+        let ops = test_plugin_ops(true).expect("test catalog builds");
         let snapshot = InstancePluginSnapshot::empty().with_upserted(
             "test.instance.scoped".to_string(),
             uptrakit_web_api_queries::instance_plugin_settings::InstancePluginRow {
@@ -231,6 +282,7 @@ mod tests {
         let user = tenant_user();
         assert!(!is_plugin_visible_to_user(
             instance_plugin_descriptor(),
+            &ops,
             &snapshot,
             &user
         ));
@@ -238,6 +290,7 @@ mod tests {
 
     #[test]
     fn instance_scoped_disabled_visible_to_admin_user() {
+        let ops = test_plugin_ops(true).expect("test catalog builds");
         let snapshot = InstancePluginSnapshot::empty().with_upserted(
             "test.instance.scoped".to_string(),
             uptrakit_web_api_queries::instance_plugin_settings::InstancePluginRow {
@@ -249,6 +302,7 @@ mod tests {
         let user = admin_user();
         assert!(is_plugin_visible_to_user(
             instance_plugin_descriptor(),
+            &ops,
             &snapshot,
             &user
         ));
@@ -256,6 +310,7 @@ mod tests {
 
     #[test]
     fn instance_scoped_enabled_visible_to_admin_user() {
+        let ops = test_plugin_ops(true).expect("test catalog builds");
         let snapshot = InstancePluginSnapshot::empty().with_upserted(
             "test.instance.scoped".to_string(),
             uptrakit_web_api_queries::instance_plugin_settings::InstancePluginRow {
@@ -267,6 +322,52 @@ mod tests {
         let user = admin_user();
         assert!(is_plugin_visible_to_user(
             instance_plugin_descriptor(),
+            &ops,
+            &snapshot,
+            &user
+        ));
+    }
+
+    /// ADR-0033: boot-disabled catalog (pending restart) means the plugin was
+    /// never constructed at boot, so it stays hidden from tenant users even
+    /// though the live row now says enabled.
+    #[test]
+    fn pending_restart_enabled_hidden_from_tenant_user() {
+        let ops = test_plugin_ops(false).expect("test catalog builds");
+        let snapshot = InstancePluginSnapshot::empty().with_upserted(
+            "test.instance.scoped".to_string(),
+            uptrakit_web_api_queries::instance_plugin_settings::InstancePluginRow {
+                enabled: true,
+                config: serde_json::json!({}),
+                updated_at: time::OffsetDateTime::now_utc(),
+            },
+        );
+        let user = tenant_user();
+        assert!(!is_plugin_visible_to_user(
+            instance_plugin_descriptor(),
+            &ops,
+            &snapshot,
+            &user
+        ));
+    }
+
+    /// ADR-0033: admin override still applies to a pending-restart-enabled
+    /// plugin — instance owners can see it to trigger the restart.
+    #[test]
+    fn pending_restart_enabled_visible_to_admin_user() {
+        let ops = test_plugin_ops(false).expect("test catalog builds");
+        let snapshot = InstancePluginSnapshot::empty().with_upserted(
+            "test.instance.scoped".to_string(),
+            uptrakit_web_api_queries::instance_plugin_settings::InstancePluginRow {
+                enabled: true,
+                config: serde_json::json!({}),
+                updated_at: time::OffsetDateTime::now_utc(),
+            },
+        );
+        let user = admin_user();
+        assert!(is_plugin_visible_to_user(
+            instance_plugin_descriptor(),
+            &ops,
             &snapshot,
             &user
         ));
