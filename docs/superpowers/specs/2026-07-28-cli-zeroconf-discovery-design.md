@@ -252,19 +252,31 @@ config)` so that whenever trust establishment proceeds, the interactive
 The discovery path therefore implies TOFU even when the user did not pass `--tofu`; the
 `--server` path keeps today's behavior (system roots unless `--tofu` given). This asymmetry is
 intentional: a discovered controller is presumed to run the internal CA that advertised
-`ca_fp`. It is documented, not inferred.
+`ca_fp`. It is documented, not inferred. The asymmetry extends to the manual-fallback arm:
+declining a discovered controller and typing the same URL by hand follows the manual
+(system-roots) path — accepting pins, retyping does not. To keep that from silently failing
+self-hosted logins, the fallback path prints a one-line hint ("manual entry uses system trust
+roots; pass --tofu to pin a self-hosted controller's CA") — printed only when neither
+`--tofu` nor `--insecure` was given (under `--insecure` the advice would be rejected at
+dispatch; with `--tofu` the pin already applies) — and the end-user docs state it.
+The docs also name the recovery for the trusted-CA-but-no-stored-server re-entry state (trust
+step succeeded, OAuth aborted, next run discovers a different responder → rotation-gate bail):
+`uptrakit auth ca forget` is the reset escape hatch alongside the error's own
+`auth ca trust --tofu=<fp>` remediation.
 
 Flag × state × TTY matrix (pinned):
 
-| Server source    | `--tofu`       | `--insecure` | TTY | Behavior                                                                                            |
-| ---------------- | -------------- | ------------ | --- | --------------------------------------------------------------------------------------------------- |
-| `--server` / env | any            | any          | any | Unchanged (no discovery).                                                                           |
-| `config.server`  | any            | any          | any | Unchanged (prompt with stored default; no discovery).                                               |
-| none             | any            | any          | no  | Bail with guidance before browsing (new message; replaces today's EOF → "server URL is required").  |
-| none             | absent or bare | no           | yes | Browse → confirm/select → cross-check → interactive TOFU prompt.                                    |
-| none             | `=<fp>`        | no           | yes | Browse → confirm/select → pin against user fp (no prompt); advertised mismatch warns, never blocks. |
-| none             | conflict       | yes          | —   | Manual dispatch-level bail rejects `--tofu` + `--insecure` (unchanged; not clap `conflicts_with`).  |
-| none             | absent         | yes          | yes | Browse → confirm/select → no pinning, insecure semantics unchanged.                                 |
+| Server source          | `--tofu`       | `--insecure` | TTY | Behavior                                                                                                                                                                                 |
+| ---------------------- | -------------- | ------------ | --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--server` / env       | any            | any          | any | Unchanged (no discovery).                                                                                                                                                                |
+| `config.server`        | any            | any          | any | Unchanged (prompt with stored default; no discovery).                                                                                                                                    |
+| none                   | any            | any          | no  | Bail with guidance before browsing (new message; replaces today's EOF → "server URL is required").                                                                                       |
+| none                   | absent or bare | no           | yes | Browse → confirm/select → cross-check → interactive TOFU prompt.                                                                                                                         |
+| none                   | `=<fp>`        | no           | yes | Browse → confirm/select → pin against user fp (no prompt); advertised mismatch warns, never blocks.                                                                                      |
+| none                   | conflict       | yes          | —   | Manual dispatch-level bail rejects `--tofu` + `--insecure` (unchanged; not clap `conflicts_with`).                                                                                       |
+| none                   | absent         | yes          | yes | Browse → confirm/select → no pinning, insecure semantics unchanged.                                                                                                                      |
+| none → manual fallback | any            | no           | yes | Declined/failed discovery, operator types a URL: today's manual behavior — system roots unless `--tofu`; the `--tofu` hint prints only when neither `--tofu` nor `--insecure` was given. |
+| none → manual fallback | absent         | yes          | yes | Declined/failed discovery under `--insecure`: typed URL connects with insecure semantics (no pinning, no hint — `--tofu` advice would be rejected alongside `--insecure` at dispatch).   |
 
 Observable behavior changes (intentional, named): the interactive no-server login gains a
 browse phase before any prompt — up to 10 s when no controller answers, ~2 s (settle) when one
