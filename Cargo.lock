@@ -7312,6 +7312,7 @@ dependencies = [
  "uptrakit-shared-types",
  "uptrakit-tracing-init",
  "uptrakit-wire",
+ "uptrakit-zeroconf",
  "uuid",
 ]
 

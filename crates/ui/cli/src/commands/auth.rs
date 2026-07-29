@@ -63,6 +63,40 @@ fn pem_fingerprint(pem: &str) -> Result<String> {
     Ok(uptrakit_shared_types::hex::encode(h.finalize()))
 }
 
+/// Fetch the controller CA over an intentionally-insecure bootstrap client
+/// and return `(pem, sha256_fingerprint)`.
+///
+/// SsrfSafeResolver intentionally omitted: CLI tool where operator IS the
+/// user — they either typed the server URL directly or explicitly
+/// confirmed a LAN-discovered one before any request is sent. Restricting
+/// private-range IPs breaks legitimate self-hosted setups. The workspace
+/// SSRF rule targets server-side paths processing user-submitted URLs;
+/// the documented operator-context exception lives in
+/// docs/security/secure-development.md (SSRF section).
+async fn fetch_ca(server: &str) -> Result<(String, String)> {
+    let bootstrap_client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(60))
+        .tls_danger_accept_invalid_certs(true)
+        .build()
+        .context_to()?;
+
+    let ca_url = format!("{}/api/v1/pki/ca.crt", server.trim_end_matches('/'));
+    let fetched_pem = bootstrap_client
+        .get(&ca_url)
+        .send()
+        .await
+        .context_to()?
+        .error_for_status()
+        .context_to()?
+        .text()
+        .await
+        .context_to()?;
+
+    let fetched_fp = pem_fingerprint(&fetched_pem)?;
+    Ok((fetched_pem, fetched_fp))
+}
+
 /// Fetch the controller CA, optionally verify its fingerprint, prompt for
 /// interactive confirmation, and persist the PEM to config.
 ///
@@ -87,31 +121,7 @@ pub async fn establish_ca_trust(
 ) -> Result<()> {
     use std::io::IsTerminal as _;
 
-    // Bootstrap client: insecure because we don't have the CA yet.
-    // SsrfSafeResolver intentionally omitted: CLI tool where operator IS the user.
-    // They chose the server URL; restricting private-range IPs breaks legitimate
-    // self-hosted setups. The workspace SSRF rule applies to server-side paths
-    // processing user-submitted URLs, not CLI-operator-controlled config.
-    let bootstrap_client = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(10))
-        .timeout(std::time::Duration::from_secs(60))
-        .tls_danger_accept_invalid_certs(true)
-        .build()
-        .context_to()?;
-
-    let ca_url = format!("{}/api/v1/pki/ca.crt", server.trim_end_matches('/'));
-    let fetched_pem = bootstrap_client
-        .get(&ca_url)
-        .send()
-        .await
-        .context_to()?
-        .error_for_status()
-        .context_to()?
-        .text()
-        .await
-        .context_to()?;
-
-    let fetched_fp = pem_fingerprint(&fetched_pem)?;
+    let (fetched_pem, fetched_fp) = fetch_ca(server).await?;
 
     if let Some(stored_pem) = &config.ca_pem {
         let stored_fp = pem_fingerprint(stored_pem)?;
@@ -439,14 +449,46 @@ pub async fn login(
     tofu: Option<String>,
 ) -> Result<()> {
     let mut config = load_config()?;
-    let server = if let Some(s) = server_override {
-        s.to_string()
-    } else if let Some(s) = &config.server {
-        let input = prompt(&format!("Server URL [{}]: ", s))?;
-        if input.is_empty() { s.clone() } else { input }
-    } else {
-        prompt("Server URL: ")?
-    };
+    use std::io::IsTerminal as _;
+
+    let mut discovered: Option<uptrakit_zeroconf::DiscoveredController> = None;
+    let server =
+        match crate::discovery::resolve_server_source(server_override, config.server.as_deref()) {
+            crate::discovery::ServerSource::Explicit(server) => server,
+            crate::discovery::ServerSource::PromptWithDefault(stored) => {
+                let input = prompt(&format!("Server URL [{}]: ", stored))?;
+                if input.is_empty() { stored } else { input }
+            }
+            crate::discovery::ServerSource::Discover => {
+                if !std::io::stdin().is_terminal() {
+                    bail!(CliError::Other(
+                        "no server configured; pass --server <url> (and --tofu=<fingerprint> \
+                     for non-interactive CA pinning) — zeroconf discovery requires an \
+                     interactive terminal"
+                            .into()
+                    ));
+                }
+                match crate::discovery::discover_server_interactive().await? {
+                    Some(controller) => {
+                        let url = controller.url.clone();
+                        discovered = Some(controller);
+                        url
+                    }
+                    None => {
+                        // Hint only where its advice is actionable: --tofu is rejected
+                        // alongside --insecure at dispatch, and with --tofu the pin
+                        // already applies.
+                        if tofu.is_none() && !insecure {
+                            eprintln!(
+                                "Tip: manual entry uses system trust roots; pass --tofu to pin a \
+                             self-hosted controller's CA."
+                            );
+                        }
+                        prompt("Server URL: ")?
+                    }
+                }
+            }
+        };
 
     if server.is_empty() {
         bail!(CliError::Other("server URL is required".into()));
@@ -454,12 +496,42 @@ pub async fn login(
 
     // TOFU: establish CA trust before OAuth flow.
     // None=no TOFU, ""=interactive prompt, "fp"=non-interactive fingerprint.
-    if let Some(raw) = tofu {
+    // A discovery-accepted server implies TOFU (interactive ceremony) unless
+    // --insecure was given (--insecure + --tofu is rejected in dispatch()).
+    let effective_tofu = if discovered.is_some() && !insecure && tofu.is_none() {
+        Some(String::new())
+    } else {
+        tofu
+    };
+
+    if let Some(raw) = effective_tofu {
         let fp_hint = if raw.is_empty() {
             None
         } else {
             Some(parse_fingerprint(&raw)?)
         };
+
+        // Discovery pre-step: consistency cross-check of the advertised CA
+        // fingerprint against the CA the server actually serves. Hard-fails
+        // only when no explicit --tofu fingerprint outranks the
+        // advertisement; emits at most one advisory line. The trust decision
+        // itself is always made by establish_ca_trust below.
+        if let Some(advertised) = discovered
+            .as_ref()
+            .and_then(|d| d.ca_fingerprint.as_deref())
+        {
+            let (_pem, fetched_fp) = fetch_ca(&server).await?;
+            match crate::discovery::cross_check_advertised(
+                Some(advertised),
+                &fetched_fp,
+                fp_hint.is_some(),
+            ) {
+                crate::discovery::CrossCheck::Ok => {}
+                crate::discovery::CrossCheck::Warn(msg) => eprintln!("Warning: {msg}"),
+                crate::discovery::CrossCheck::Fail(msg) => bail!(CliError::Other(msg)),
+            }
+        }
+
         establish_ca_trust(&server, fp_hint.as_deref(), false, &mut config).await?;
     }
 
@@ -803,7 +875,7 @@ pub async fn ca_forget() -> Result<()> {
     Ok(())
 }
 
-fn prompt(msg: &str) -> Result<String> {
+pub(crate) fn prompt(msg: &str) -> Result<String> {
     eprint!("{}", msg);
     let mut input = String::new();
     std::io::stdin().read_line(&mut input).context_to()?;

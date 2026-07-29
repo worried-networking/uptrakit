@@ -36,6 +36,7 @@ uptrakit-directories = { workspace = true }
 uptrakit-wire = { workspace = true }
 uptrakit-shared-types = { workspace = true }
 uptrakit-crypto = { workspace = true }
+uptrakit-zeroconf = { workspace = true }
 sha2 = { workspace = true }
 rustls = { workspace = true }
 reqwest = { workspace = true }
