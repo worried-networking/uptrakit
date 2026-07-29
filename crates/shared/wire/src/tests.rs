@@ -2245,6 +2245,18 @@ fn is_nats_publishable_allows_non_credential_variants() {
     );
 }
 
+#[test]
+fn access_invalidated_is_nats_publishable() {
+    let msg = ControllerMessage::AccessInvalidated(AccessInvalidatedPayload {
+        user_ids: vec![],
+        role_ids: vec![],
+    });
+    assert!(
+        msg.is_nats_publishable(),
+        "AccessInvalidated must be NATS-publishable"
+    );
+}
+
 // ── SetUpdateFreeze tests ────────────────────────────────────────────
 
 #[test]
@@ -2799,7 +2811,7 @@ fn test_plugin_config_not_nats_publishable() {
 // SDK-owned (8): Pong, Certificate, ServiceSettings, CaBundleUpdated,
 //   RequestCertRenewal, ServerRestarting, ServiceConfigAck, Unknown
 //
-// Handler-owned (30): all remaining variants.
+// Handler-owned (31): all remaining variants.
 // =========================================================================
 
 /// Classification of a `ControllerMessage` variant with respect to the SDK dispatch tier.
@@ -2855,6 +2867,7 @@ fn classify_controller_message_variant(msg: &ControllerMessage) -> VariantOwners
         ControllerMessage::RequestCrlRenewal(_) => VariantOwnership::HandlerOwned,
         ControllerMessage::SoftwareStatesChanged(_) => VariantOwnership::HandlerOwned,
         ControllerMessage::TokenRevoked(_) => VariantOwnership::HandlerOwned,
+        ControllerMessage::AccessInvalidated(_) => VariantOwnership::HandlerOwned,
         ControllerMessage::BroadcastAdminEvent(_) => VariantOwnership::HandlerOwned,
         ControllerMessage::WorkloadClaimResult(_) => VariantOwnership::HandlerOwned,
         ControllerMessage::WorkloadClaimAnnouncement(_) => VariantOwnership::HandlerOwned,
@@ -2902,6 +2915,7 @@ fn variant_discriminant_name(msg: &ControllerMessage) -> &'static str {
         ControllerMessage::RequestCrlRenewal(_) => "RequestCrlRenewal",
         ControllerMessage::SoftwareStatesChanged(_) => "SoftwareStatesChanged",
         ControllerMessage::TokenRevoked(_) => "TokenRevoked",
+        ControllerMessage::AccessInvalidated(_) => "AccessInvalidated",
         ControllerMessage::BroadcastAdminEvent(_) => "BroadcastAdminEvent",
         ControllerMessage::WorkloadClaimResult(_) => "WorkloadClaimResult",
         ControllerMessage::WorkloadClaimAnnouncement(_) => "WorkloadClaimAnnouncement",
@@ -3061,6 +3075,10 @@ fn make_all_controller_message_variants() -> Vec<ControllerMessage> {
             iat_cutoff: None,
             purge_after: None,
         }),
+        ControllerMessage::AccessInvalidated(AccessInvalidatedPayload {
+            user_ids: vec![uuid1],
+            role_ids: vec![],
+        }),
         ControllerMessage::BroadcastAdminEvent(BroadcastAdminEventPayload {
             tenant_id: Some(uuid1),
             event_json: "{}".into(),
@@ -3130,11 +3148,11 @@ fn test_variant_catalog_spot_checks() {
 fn test_variant_catalog_classification() {
     let variants = make_all_controller_message_variants();
 
-    // 1. Total count must be exactly 38 — one entry per variant.
+    // 1. Total count must be exactly 39 — one entry per variant.
     assert_eq!(
         variants.len(),
-        38,
-        "make_all_controller_message_variants must return exactly 38 entries (one per variant); \
+        39,
+        "make_all_controller_message_variants must return exactly 39 entries (one per variant); \
          update it when adding or removing ControllerMessage variants"
     );
 
@@ -3143,7 +3161,7 @@ fn test_variant_catalog_classification() {
     let unique: HashSet<&'static str> = names.iter().copied().collect();
     assert_eq!(
         unique.len(),
-        38,
+        39,
         "make_all_controller_message_variants contains duplicate variant entries: {:?}",
         {
             let mut seen = HashSet::new();

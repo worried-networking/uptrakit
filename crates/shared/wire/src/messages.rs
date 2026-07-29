@@ -2,11 +2,12 @@ use serde::{Deserialize, Serialize};
 
 use super::capabilities::ErrorPayload;
 use super::payloads::{
-    ApprovedPayload, BatchUpdateResultPayload, BroadcastAdminEventPayload, CaBundleUpdatedPayload,
-    CertificatePayload, CheckVersionsPayload, DeleteServiceConfigPayload, DisconnectingPayload,
-    DiscoverSoftwarePayload, DiscoveryResultsPayload, EnrollPayload, EnrolledPayload,
-    ExecuteBatchUpdatePayload, ExecuteUpdatePayload, HostConnectivityUpdatedPayload, PingPayload,
-    PongPayload, RegisterPayload, RejectedPayload, ReportHostsPayload, ReportPluginConfigPayload,
+    AccessInvalidatedPayload, ApprovedPayload, BatchUpdateResultPayload,
+    BroadcastAdminEventPayload, CaBundleUpdatedPayload, CertificatePayload, CheckVersionsPayload,
+    DeleteServiceConfigPayload, DisconnectingPayload, DiscoverSoftwarePayload,
+    DiscoveryResultsPayload, EnrollPayload, EnrolledPayload, ExecuteBatchUpdatePayload,
+    ExecuteUpdatePayload, HostConnectivityUpdatedPayload, PingPayload, PongPayload,
+    RegisterPayload, RejectedPayload, ReportHostsPayload, ReportPluginConfigPayload,
     ReportPluginConfigResponsePayload, RequestCaRotationPayload, RequestCertRenewalPayload,
     RequestCrlRenewalPayload, ServerRestartingPayload, ServiceConfigAckPayload,
     ServiceConfigDeliveryPayload, ServiceConfigUpdatedPayload, ServiceCredentialsPayload,
@@ -268,6 +269,14 @@ pub enum ControllerMessage {
     ///
     /// **Safe to publish via NATS** — contains no credential material.
     TokenRevoked(TokenRevokedPayload),
+    /// Cross-controller access-cache invalidation published by the controller
+    /// that mutated access grants or role assignments. Controller→controller
+    /// over NATS only — never sent over the service WebSocket. Receivers
+    /// flush their whole access cache; the ID lists are diagnostic and
+    /// forward-compat only (no granular invalidation promise).
+    ///
+    /// **Safe to publish via NATS** — contains no credential material.
+    AccessInvalidated(AccessInvalidatedPayload),
     /// Cross-controller admin event broadcast.
     ///
     /// Published via NATS to the `controller` subject by any controller

@@ -70,6 +70,11 @@ pub const MAX_DISCOVERY_PLUGIN_RESULTS: usize = 50;
 /// Maximum number of discoveries per plugin result.
 pub const MAX_DISCOVERIES_PER_PLUGIN: usize = 1_000;
 
+/// Maximum ids per `AccessInvalidatedPayload` list (`user_ids` / `role_ids`).
+/// Aligned with `uptrakit_shared_types::access::bounds::MAX_GRANTS_PER_SUBJECT`
+/// (200); batch mutations touch at most 100 subjects.
+pub const MAX_ACCESS_INVALIDATION_IDS: usize = 200;
+
 /// Maximum byte length of a `DiscoveredSoftware.qualifier` string.
 pub const MAX_DISCOVERED_QUALIFIER_LEN: usize = 256;
 

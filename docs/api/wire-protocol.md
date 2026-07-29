@@ -1639,6 +1639,28 @@ History page updates regardless of which instance processed the original API req
 
 **Safe to publish via NATS** — contains no credential material or plugin configs.
 
+### `access_invalidated`
+
+Published by the controller that mutated access grants or role assignments. Receiving controllers flush their entire
+access-authority cache; the ID lists are diagnostic and forward-compatibility detail, not a promise of granular
+invalidation. There is deliberately no `tenant_id` field — a global (NULL-tenant) user grant appears in every tenant's
+cache entry for that user, so receivers always flush across all tenants.
+
+```json
+{
+  "protocol_version": 1,
+  "seq": 1,
+  "type": "access_invalidated",
+  "user_ids": ["550e8400-e29b-41d4-a716-446655440000"],
+  "role_ids": []
+}
+```
+
+| Field      | Type   | Required | Description                                                       |
+| ---------- | ------ | -------- | ----------------------------------------------------------------- |
+| `user_ids` | UUID[] | Yes      | Users whose grant rows or role assignments changed. May be empty. |
+| `role_ids` | UUID[] | Yes      | Roles whose grant rows changed. May be empty.                     |
+
 ### `workload_claim_announcement`
 
 Published when claims are granted or released. Used by other controllers to update their

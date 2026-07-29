@@ -1089,6 +1089,25 @@ pub struct TokenRevokedPayload {
     pub purge_after: Option<i64>,
 }
 
+/// Cross-controller access-cache invalidation event.
+///
+/// Published to the `controller` NATS subject by the controller that mutated
+/// access grants or role assignments (mutation sites land in M1.6a).
+/// Receivers flush their **entire** access-authority cache — the subject
+/// lists are observability and forward-compat detail, not a promise of
+/// granular invalidation. There is deliberately no `tenant_id` field: a
+/// global (NULL-tenant) user grant surfaces in every tenant's cache entry
+/// for that user, so receivers must always flush across tenants. Both lists
+/// may be empty.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct AccessInvalidatedPayload {
+    /// Users whose grant rows or role assignments changed.
+    pub user_ids: Vec<Uuid>,
+    /// Roles whose grant rows changed.
+    pub role_ids: Vec<Uuid>,
+}
+
 /// Per-host metadata published to MQTT for MQTT-browser visibility and Home Assistant.
 ///
 /// Included in [`SoftwareStatesPayload`]. All fields are sourced exclusively

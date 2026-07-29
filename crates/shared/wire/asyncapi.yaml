@@ -59,6 +59,8 @@ channels:
         $ref: '#/components/messages/workload_claim'
       workload_release:
         $ref: '#/components/messages/workload_release'
+      access_invalidated:
+        $ref: '#/components/messages/access_invalidated'
       approved:
         $ref: '#/components/messages/approved'
       broadcast_admin_event:
@@ -166,6 +168,7 @@ operations:
     channel:
       $ref: '#/channels/service'
     messages:
+    - $ref: '#/channels/service/messages/access_invalidated'
     - $ref: '#/channels/service/messages/approved'
     - $ref: '#/channels/service/messages/broadcast_admin_event'
     - $ref: '#/channels/service/messages/ca_bundle_updated'
@@ -1215,6 +1218,48 @@ components:
       - service_id
       - tenant_id
       - claimed_at
+    access_invalidatedPayload:
+      description: |-
+        Cross-controller access-cache invalidation published by the controller
+        that mutated access grants or role assignments. Controller→controller
+        over NATS only — never sent over the service WebSocket. Receivers
+        flush their whole access cache; the ID lists are diagnostic and
+        forward-compat only (no granular invalidation promise).
+
+        **Safe to publish via NATS** — contains no credential material.
+      type: object
+      properties:
+        type:
+          type: string
+          const: access_invalidated
+        user_ids:
+          description: Users whose grant rows or role assignments changed.
+          type: array
+          items:
+            type: string
+            format: uuid
+        role_ids:
+          description: Roles whose grant rows changed.
+          type: array
+          items:
+            type: string
+            format: uuid
+        protocol_version:
+          type: integer
+          format: uint32
+          minimum: 0
+        seq:
+          type: integer
+          format: uint64
+          minimum: 0
+        trace_context:
+          $ref: '#/components/schemas/TraceContext'
+      required:
+      - type
+      - user_ids
+      - role_ids
+      - protocol_version
+      - seq
     approvedPayload:
       type: object
       properties:
@@ -3578,6 +3623,10 @@ components:
       - protocol_version
       - seq
   messages:
+    access_invalidated:
+      name: access_invalidated
+      payload:
+        $ref: '#/components/schemas/access_invalidatedPayload'
     approved:
       name: approved
       payload:

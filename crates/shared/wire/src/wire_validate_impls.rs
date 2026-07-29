@@ -102,6 +102,7 @@ impl WireValidate for ControllerMessage {
             ControllerMessage::RequestCaRotation(p) => p.wire_validate(),
             ControllerMessage::RequestCrlRenewal(_) => Ok(()),
             ControllerMessage::TokenRevoked(_) => Ok(()),
+            ControllerMessage::AccessInvalidated(p) => p.wire_validate(),
             ControllerMessage::WorkloadClaimResult(p) => p.wire_validate(),
             ControllerMessage::WorkloadClaimAnnouncement(p) => p.wire_validate(),
             ControllerMessage::WorkloadClaimSyncRequest(_) => Ok(()),
@@ -1536,6 +1537,14 @@ impl WireValidate for TestPluginConfigResultPayload {
     }
 }
 
+impl WireValidate for AccessInvalidatedPayload {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_vec_len(&self.user_ids, MAX_ACCESS_INVALIDATION_IDS, "user_ids")?;
+        check_vec_len(&self.role_ids, MAX_ACCESS_INVALIDATION_IDS, "role_ids")?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![expect(
@@ -2349,5 +2358,34 @@ mod tests {
                 vec![],
             );
         assert!(payload.wire_validate().is_ok());
+    }
+
+    #[test]
+    fn access_invalidated_at_limit_accepted() {
+        let payload = AccessInvalidatedPayload {
+            user_ids: vec![uuid::Uuid::nil(); MAX_ACCESS_INVALIDATION_IDS],
+            role_ids: vec![uuid::Uuid::nil(); MAX_ACCESS_INVALIDATION_IDS],
+        };
+        assert!(
+            payload.wire_validate().is_ok(),
+            "at-limit lists must validate"
+        );
+    }
+
+    #[test]
+    fn access_invalidated_over_limit_rejected() {
+        let over = AccessInvalidatedPayload {
+            user_ids: vec![uuid::Uuid::nil(); MAX_ACCESS_INVALIDATION_IDS + 1],
+            role_ids: vec![],
+        };
+        let err = over.wire_validate().unwrap_err();
+        assert_eq!(err.field, "user_ids");
+
+        let over = AccessInvalidatedPayload {
+            user_ids: vec![],
+            role_ids: vec![uuid::Uuid::nil(); MAX_ACCESS_INVALIDATION_IDS + 1],
+        };
+        let err = over.wire_validate().unwrap_err();
+        assert_eq!(err.field, "role_ids");
     }
 }
