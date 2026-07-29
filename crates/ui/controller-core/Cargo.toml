@@ -51,6 +51,7 @@ testing = []
 [dev-dependencies]
 uptrakit-shared-db = { workspace = true, features = ["migration", "db-sqlite"] }
 sea-orm            = { workspace = true, features = ["sqlx-sqlite", "mock"] }
+strum              = { workspace = true }
 tokio              = { workspace = true, features = ["macros", "rt", "time", "test-util"] }
 
 [lints]
