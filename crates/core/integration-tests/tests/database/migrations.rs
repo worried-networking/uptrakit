@@ -90,3 +90,63 @@ db_test!(
     all_core_entities_queryable,
     test_all_core_entities_queryable
 );
+
+async fn test_access_grant_storage_migrated(harness: &TestHarness) {
+    use sea_orm::sea_query::{Alias, Expr, ExprTrait, Query};
+    use sea_orm::{ActiveModelTrait, ConnectionTrait, EntityTrait, Set};
+
+    // Seed grants present: exactly eight role-subject rows (content equality
+    // is covered by the shared-db suite; the engine-owned entity must not be
+    // used here — builders only).
+    let rows = harness
+        .db
+        .query_all(
+            &Query::select()
+                .column(Alias::new("id"))
+                .from(Alias::new("access_grants"))
+                .and_where(Expr::col(Alias::new("subject_type")).eq("role"))
+                .and_where(Expr::col(Alias::new("created_by")).is_null())
+                .to_owned(),
+        )
+        .await
+        .expect("query access_grants");
+    assert_eq!(rows.len(), 8, "eight seed grants must exist");
+
+    // Per-scope role-name uniqueness on the live backend.
+    let tenants = uptrakit_shared_db::entity::tenant::Entity::find()
+        .all(&harness.db)
+        .await
+        .expect("query tenants");
+    let tenant_id = tenants.first().expect("default tenant exists").id;
+    let now = time::OffsetDateTime::now_utc();
+    let dup = uptrakit_shared_db::entity::role::ActiveModel {
+        id: Set(uuid::Uuid::now_v7()),
+        name: Set("viewer".to_string()),
+        description: Set(None),
+        is_built_in: Set(false),
+        created_at: Set(now),
+        tenant_id: Set(None),
+    }
+    .insert(&harness.db)
+    .await;
+    assert!(
+        dup.is_err(),
+        "duplicate global role name must violate uix_roles_global_name"
+    );
+    uptrakit_shared_db::entity::role::ActiveModel {
+        id: Set(uuid::Uuid::now_v7()),
+        name: Set("viewer".to_string()),
+        description: Set(None),
+        is_built_in: Set(false),
+        created_at: Set(now),
+        tenant_id: Set(Some(tenant_id)),
+    }
+    .insert(&harness.db)
+    .await
+    .expect("tenant scope may reuse a global role name");
+}
+
+db_test!(
+    access_grant_storage_migrated,
+    test_access_grant_storage_migrated
+);
