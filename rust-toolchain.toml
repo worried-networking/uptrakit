@@ -1,0 +1,8 @@
+# Pins the toolchain so local, pre-push, and CI lint outcomes agree.
+# Lint/dead-code analysis differs across rustc/clippy versions (see
+# .superpowers/common-mistakes-archive.md, unfulfilled_lint_expectations entry);
+# an unpinned repo drifts as local stable advances. Bumping this file is a
+# migration: sweep the whole -D warnings clippy gate under the new version.
+[toolchain]
+channel = "1.97.0"
+components = ["rustfmt", "clippy"]
