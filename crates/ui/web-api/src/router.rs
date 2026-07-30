@@ -6,7 +6,9 @@ use axum::middleware as axum_mw;
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use utoipa::OpenApi;
-use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
+use utoipa::openapi::security::{
+    AuthorizationCode, Flow, HttpAuthScheme, HttpBuilder, OAuth2, Scopes, SecurityScheme,
+};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
@@ -488,6 +490,42 @@ impl utoipa::Modify for SecurityAddon {
                     HttpBuilder::new()
                         .scheme(HttpAuthScheme::Bearer)
                         .bearer_format("JWT")
+                        .build(),
+                ),
+            );
+
+            let scopes: Scopes = uptrakit_shared_types::access::CATALOG
+                .iter()
+                .flat_map(|entry| entry.verbs.iter())
+                .map(|verb| (verb.action_str, verb.description))
+                .collect();
+            components.add_security_scheme(
+                "oauth2",
+                SecurityScheme::OAuth2(OAuth2::with_description(
+                    [Flow::AuthorizationCode(AuthorizationCode::new(
+                        "/oauth/authorize",
+                        "/api/v1/oauth/token",
+                        scopes,
+                    ))],
+                    "Scopes are catalog action strings. The dynamic `plugin.*` / \
+                     `surface.*` namespaces are an open set not enumerated here; the \
+                     device flow exists but is not representable in the OAS flows \
+                     object. Flow URLs are relative to this deployment's origin — \
+                     the authoritative endpoint discovery is \
+                     `/.well-known/oauth-authorization-server` (RFC 8414).",
+                )),
+            );
+            components.add_security_scheme(
+                "developer_token",
+                SecurityScheme::Http(
+                    HttpBuilder::new()
+                        .scheme(HttpAuthScheme::Bearer)
+                        .bearer_format("upk_")
+                        .description(Some(
+                            "Opaque developer/API token (`upk_` prefix). Carries no \
+                             scope field; per-operation action requirements are \
+                             enforced server-side identically to oauth2 scopes.",
+                        ))
                         .build(),
                 ),
             );

@@ -17002,6 +17002,62 @@
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "JWT"
+      },
+      "developer_token": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "upk_",
+        "description": "Opaque developer/API token (`upk_` prefix). Carries no scope field; per-operation action requirements are enforced server-side identically to oauth2 scopes."
+      },
+      "oauth2": {
+        "type": "oauth2",
+        "flows": {
+          "authorizationCode": {
+            "authorizationUrl": "/oauth/authorize",
+            "tokenUrl": "/api/v1/oauth/token",
+            "scopes": {
+              "access:manage": "Manage grants, roles, and role assignments (authority administration)",
+              "audit:read": "View tenant-scoped audit log entries",
+              "checks:trigger": "Trigger version checks and autodiscovery",
+              "commands:manage": "Modify command-bearing plugin config fields (code execution authority)",
+              "discovery.ignores:manage": "Manage autodiscovery ignore rules",
+              "hosts.tags:manage": "Create, edit, delete, and assign host tags (tag-scoped grants make this access-control authority)",
+              "hosts:delete": "Deactivate hosts",
+              "hosts:read": "View hosts",
+              "hosts:update": "Update host properties",
+              "mcp:use": "Access the MCP server endpoint",
+              "notifications:manage": "Create/modify notification channels and rules; SMTP settings",
+              "notifications:read": "View notification channels, rules, log",
+              "plugin-configs:trigger": "Test plugin configurations against hosts (dry-run validation)",
+              "scheduler:manage": "Manage scheduled tasks",
+              "services:approve": "Approve pending service enrollments",
+              "services:delete": "Deactivate/remove services",
+              "services:read": "View tenant services and their status",
+              "services:reject": "Reject pending service enrollments",
+              "services:update": "Update service settings (ping interval, freeze, merge)",
+              "settings.auth:manage": "Manage registration, authentication, OIDC providers",
+              "settings.certificates:manage": "Manage agent certificate settings",
+              "settings.enrollment-tokens:manage": "Manage tenant enrollment tokens",
+              "settings:read": "View all tenant settings",
+              "software:create": "Create software items and plugin configs",
+              "software:delete": "Delete software items and plugin configs",
+              "software:read": "View software items, plugin configs, history",
+              "software:update": "Edit software items and plugin configs",
+              "system.audit:read": "View system-level audit log entries",
+              "system.config-state:manage": "Manage instance config reload state (clear degraded)",
+              "system.config-state:read": "View instance config reload state",
+              "system.services:approve": "Approve pending system services",
+              "system.services:delete": "Deactivate system services",
+              "system.services:read": "View system services (MQTT bridge, external scheduler)",
+              "system.services:reject": "Reject pending system services",
+              "system.services:update": "Update system service settings",
+              "system.settings:manage": "Manage global infrastructure settings",
+              "updates:trigger": "Trigger update execution (single and batch)",
+              "users:manage": "Manage user lifecycle (activate/deactivate, MFA resets, email changes)"
+            }
+          }
+        },
+        "description": "Scopes are catalog action strings. The dynamic `plugin.*` / `surface.*` namespaces are an open set not enumerated here; the device flow exists but is not representable in the OAS flows object. Flow URLs are relative to this deployment's origin — the authoritative endpoint discovery is `/.well-known/oauth-authorization-server` (RFC 8414)."
       }
     }
   },
