@@ -2551,10 +2551,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "hosts:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_hosts"
+        ]
       }
     },
     "/api/v1/hosts/batch": {
@@ -2598,10 +2602,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "hosts:delete"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "deactivate_hosts"
+        ]
       }
     },
     "/api/v1/hosts/{host_id}/batch-update": {
@@ -2702,10 +2710,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "hosts:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_hosts"
+        ]
       },
       "put": {
         "tags": [
@@ -2758,10 +2770,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "hosts:update"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "update_hosts"
+        ]
       },
       "delete": {
         "tags": [
@@ -2797,10 +2813,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "hosts:delete"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "deactivate_hosts"
+        ]
       }
     },
     "/api/v1/hosts/{id}/discover": {
@@ -2840,10 +2860,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "checks:trigger"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "trigger_checks"
+        ]
       }
     },
     "/api/v1/hosts/{id}/discovery-allowlist": {

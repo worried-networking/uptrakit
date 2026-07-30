@@ -1,9 +1,7 @@
 use crate::AppState;
 use crate::actions::hosts as host_actions;
 use crate::error_response::error_response;
-use crate::middleware::permission::{
-    CanDeactivateHosts, CanTriggerChecks, CanUpdateHosts, CanViewHosts,
-};
+use crate::middleware::action::{CanDeleteHosts, CanReadHosts, CanTriggerChecks, CanUpdateHosts};
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::queries::hosts as host_queries;
 use crate::routes::service_ws::trigger_discovery_for_agent_host;
@@ -49,13 +47,12 @@ pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams
         (status = 403, description = "Not authorized")
     ),
     tag = "Hosts",
-    extensions(("x-required-permission" = json!("view_hosts"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["hosts:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_hosts(
     tenant_db: TenantDb,
-    CanViewHosts(_user): CanViewHosts,
+    CanReadHosts(_user): CanReadHosts,
     Query(params): Query<PaginationParams>,
 ) -> Response {
     match host_queries::list_hosts(&tenant_db, &params).await {
@@ -81,13 +78,12 @@ pub async fn list_hosts(
         (status = 404, description = "Host not found")
     ),
     tag = "Hosts",
-    extensions(("x-required-permission" = json!("view_hosts"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["hosts:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_host(
     tenant_db: TenantDb,
-    CanViewHosts(_user): CanViewHosts,
+    CanReadHosts(_user): CanReadHosts,
     Path(host_id): Path<Uuid>,
 ) -> Response {
     match host_queries::get_active_host(&tenant_db, host_id).await {
@@ -115,8 +111,7 @@ pub async fn get_host(
         (status = 404, description = "Host not found")
     ),
     tag = "Hosts",
-    extensions(("x-required-permission" = json!("update_hosts"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["hosts:update"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_host(
@@ -239,14 +234,13 @@ pub async fn update_host(
         (status = 404, description = "Host not found")
     ),
     tag = "Hosts",
-    extensions(("x-required-permission" = json!("deactivate_hosts"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["hosts:delete"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn deactivate_host(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanDeactivateHosts(caller): CanDeactivateHosts,
+    CanDeleteHosts(caller): CanDeleteHosts,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(host_id): Path<Uuid>,
 ) -> Response {
@@ -349,13 +343,12 @@ pub async fn deactivate_host(
     post,
     path = "/api/v1/hosts/{id}/discover",
     params(("id" = Uuid, Path, description = "Host UUID")),
-    extensions(("x-required-permission" = json!("trigger_checks"))),
     responses(
         (status = 200, description = "Discovery triggered", body = TriggerDiscoveryResponse),
         (status = 404, description = "Host not found")
     ),
     tag = "Hosts",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["checks:trigger"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn discover_host(
@@ -501,14 +494,13 @@ pub async fn discover_host(
         (status = 403, description = "Not authorized")
     ),
     tag = "Hosts",
-    extensions(("x-required-permission" = json!("deactivate_hosts"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["hosts:delete"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn batch_hosts(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanDeactivateHosts(caller): CanDeactivateHosts,
+    CanDeleteHosts(caller): CanDeleteHosts,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Json(body): Json<BatchActionRequest>,
 ) -> Response {

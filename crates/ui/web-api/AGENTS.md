@@ -60,15 +60,18 @@ Common typed extractors live in `src/extract.rs`: `Validated<T>` (JSON body dese
 plain `Json<T>` extraction), `ClientIp` / `ProxyIp`, `ServiceIdentity`, and `SessionSvc` /
 `ApiTokenSvc` (eliminate manual `Service::new()` construction in handlers).
 
-Authorization uses typed permission extractors, never inline checks. `src/middleware/permission.rs`
-defines a `permission_extractor!` macro that generates types like `CanViewHosts`, `CanApproveServices`,
-`CanTriggerUpdates`, etc., each tied to a `Permission` variant. Declare the required permission in the
-handler signature — e.g. `CanViewHosts(_user): CanViewHosts` — instead of calling
-`user.has_permission(...)` in the body. Every protected endpoint's `#[utoipa::path]` annotation must
-also carry the matching `x-required-permission` extension so the OpenAPI spec documents the
-requirement. The sole exception is handlers with a custom auth path (e.g. WebSocket handlers reading
-a `?token=` query parameter before the normal extractor chain runs) — these may call
-`has_permission()` inline but must carry a `// APPROVED: custom auth path` comment. Full rationale in
+Authorization uses typed extractors, never inline checks. Two models coexist during the M1.4a/b
+transition. Unconverted route families use `src/middleware/permission.rs`'s `permission_extractor!`
+macro, which generates types like `CanApproveServices`, `CanTriggerUpdates`, etc., each tied to a
+`Permission` variant; declare the required permission in the handler signature — e.g.
+`CanApproveServices(_user): CanApproveServices` — instead of calling `user.has_permission(...)` in the
+body, and carry the matching `x-required-permission` extension on the `#[utoipa::path]` annotation.
+Families converted to the AccessEngine model (starting with `hosts`) instead use `src/middleware/action.rs`'s
+`action_extractor!` macro (e.g. `CanReadHosts`), and declare a native `security(("oauth2" = ["hosts:read"]),
+("developer_token" = []))` OpenAPI requirement in place of `x-required-permission`. The sole exception in
+either model is handlers with a custom auth path (e.g. WebSocket handlers reading a `?token=` query
+parameter before the normal extractor chain runs) — these may call `has_permission()` inline but must
+carry a `// APPROVED: custom auth path` comment. Full rationale in
 [`docs/security/auth-and-authorization.md`](../../../docs/security/auth-and-authorization.md).
 
 ## OpenAPI rules

@@ -423,6 +423,24 @@ for the permission pattern conventions.
    and add `extensions(("x-required-permission" = json!("xxx")))` to the corresponding `#[utoipa::path]` annotation.
 1. Add the variant to the `Permission` TypeScript enum in `frontend/src/lib/types.ts`.
 
+### Transition: action extractors (M1.4a)
+
+A second, parallel authorization model is being rolled out route family by route family. Converted
+families enforce through `action_extractor!`-generated types (`crates/ui/web-api/src/middleware/action.rs`),
+backed by the `AccessEngine` (`crates/ui/controller-core/src/access/mod.rs`) rather than the JWT's
+embedded `permissions` claim — decisions reflect live DB grants on every request (immediate effect on
+grant/revoke, no re-login required), and denial always returns a fixed, generic `403 Forbidden` body
+(`"Insufficient permissions"`, no grant/selector detail). Their `#[utoipa::path]` annotation declares a
+native OpenAPI security requirement, e.g. `security(("oauth2" = ["hosts:read"]), ("developer_token" = []))`,
+instead of the `x-required-permission` extension. The `hosts` route family (`crates/ui/web-api/src/routes/hosts.rs`)
+is the first converted family and serves as the reference conversion.
+
+Unconverted route families keep the `permission_extractor!` + `x-required-permission` model described
+above until the M1.4b sweep converts them. Which model a given handler uses is visible from its
+extractor import: `crate::middleware::action::CanXxx` (new) vs. `crate::middleware::permission::CanXxx`
+(legacy) — the two macros generate similarly-named but distinct types, never mix them in the same
+handler.
+
 ## System Service Credential Guard
 
 Four capabilities grant access to sensitive infrastructure secrets:

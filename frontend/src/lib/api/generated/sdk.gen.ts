@@ -872,7 +872,11 @@ export const updateHostTag = <ThrowOnError extends boolean = true>(options: Opti
  */
 export const listHosts = <ThrowOnError extends boolean = true>(options?: Options<ListHostsData, ThrowOnError>): RequestResult<ListHostsResponses, ListHostsErrors, ThrowOnError> => (options?.client ?? client).get<ListHostsResponses, ListHostsErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -888,7 +892,11 @@ export const listHosts = <ThrowOnError extends boolean = true>(options?: Options
  */
 export const batchHosts = <ThrowOnError extends boolean = true>(options: Options<BatchHostsData, ThrowOnError>): RequestResult<BatchHostsResponses, BatchHostsErrors, ThrowOnError> => (options.client ?? client).post<BatchHostsResponses, BatchHostsErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -926,7 +934,11 @@ export const triggerHostBatchUpdate = <ThrowOnError extends boolean = true>(opti
  */
 export const deactivateHost = <ThrowOnError extends boolean = true>(options: Options<DeactivateHostData, ThrowOnError>): RequestResult<DeactivateHostResponses, DeactivateHostErrors, ThrowOnError> => (options.client ?? client).delete<DeactivateHostResponses, DeactivateHostErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -939,7 +951,11 @@ export const deactivateHost = <ThrowOnError extends boolean = true>(options: Opt
  */
 export const getHost = <ThrowOnError extends boolean = true>(options: Options<GetHostData, ThrowOnError>): RequestResult<GetHostResponses, GetHostErrors, ThrowOnError> => (options.client ?? client).get<GetHostResponses, GetHostErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -952,7 +968,11 @@ export const getHost = <ThrowOnError extends boolean = true>(options: Options<Ge
  */
 export const updateHost = <ThrowOnError extends boolean = true>(options: Options<UpdateHostData, ThrowOnError>): RequestResult<UpdateHostResponses, UpdateHostErrors, ThrowOnError> => (options.client ?? client).put<UpdateHostResponses, UpdateHostErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -971,7 +991,11 @@ export const updateHost = <ThrowOnError extends boolean = true>(options: Options
  */
 export const discoverHost = <ThrowOnError extends boolean = true>(options: Options<DiscoverHostData, ThrowOnError>): RequestResult<DiscoverHostResponses, DiscoverHostErrors, ThrowOnError> => (options.client ?? client).post<DiscoverHostResponses, DiscoverHostErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],

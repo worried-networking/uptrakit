@@ -1,3 +1,4 @@
+mod access_rest_enforcement;
 mod auth_flow;
 mod device_auth_http_roundtrip;
 mod device_auth_oauth;
