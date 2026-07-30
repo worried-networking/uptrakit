@@ -184,6 +184,7 @@ pub(super) async fn spawn_background_tasks(
                 revocation_notify: Some(Arc::clone(&app_state.cert.revocation_notify)),
                 token_denylist: Some(Arc::clone(&app_state.auth.token_denylist)),
                 claim_registry: Some(Arc::clone(&app_state.workload_claim_registry)),
+                access_engine: Some(Arc::clone(&app_state.access_engine)),
             },
         );
         bg.track("nats-consumer", h);

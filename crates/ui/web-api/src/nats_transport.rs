@@ -65,6 +65,8 @@ pub struct NatsConsumerConfig {
     pub token_denylist: Option<Arc<crate::auth::token_denylist::TokenDenylist>>,
     /// Workload claim registry for tenant-scoped routing of remote events.
     pub claim_registry: Option<Arc<crate::workload_claims::WorkloadClaimRegistry>>,
+    /// Access engine for cross-controller grant-cache invalidation (optional).
+    pub access_engine: Option<Arc<uptrakit_controller_core::access::AccessEngine>>,
 }
 
 /// Maximum delivery attempts before a message is dropped.
@@ -175,6 +177,7 @@ impl NatsTransport {
             revocation_notify,
             token_denylist,
             claim_registry,
+            access_engine,
         } = config;
         let consumer = match self.create_consumer().await {
             Ok(c) => c,
@@ -184,7 +187,10 @@ impl NatsTransport {
             }
         };
 
-        tracing::info!("NATS consumer started");
+        tracing::info!(
+            access_engine_wired = access_engine.is_some(),
+            "NATS consumer started"
+        );
 
         let builder = consumer_backoff_builder();
         let mut backoff = builder.build();
@@ -280,6 +286,7 @@ impl NatsTransport {
                     token_denylist: token_denylist.as_ref(),
                     event_broadcaster: Some(&event_broadcaster),
                     claim_registry: claim_registry.as_ref(),
+                    access_engine: access_engine.as_ref(),
                 };
                 let delivered = crate::event_delivery::deliver_event(
                     &registry,

@@ -36,6 +36,8 @@ pub struct ControllerResources<'a> {
     pub event_broadcaster: Option<&'a crate::event_broadcaster::EventBroadcaster>,
     /// Workload claim registry for tenant-scoped routing of remote events.
     pub claim_registry: Option<&'a Arc<WorkloadClaimRegistry>>,
+    /// Access engine for cross-controller grant-cache invalidation.
+    pub access_engine: Option<&'a Arc<uptrakit_controller_core::access::AccessEngine>>,
 }
 
 /// Parse a capability string back to a typed [`Capability`] variant.
@@ -339,6 +341,14 @@ pub async fn deliver_controller_event(
             }
             true
         }
+        ControllerMessage::AccessInvalidated(payload) => {
+            if let Some(engine) = resources.access_engine {
+                engine.apply_remote_invalidation(&payload);
+            } else {
+                tracing::debug!("received AccessInvalidated but no access engine configured");
+            }
+            true
+        }
         _ => {
             tracing::warn!(
                 msg_type = ?std::mem::discriminant(&msg),
@@ -391,6 +401,12 @@ fn parse_sync_claims(
 
 #[cfg(test)]
 mod tests {
+    use sea_orm::{ConnectOptions, Database, EntityTrait};
+    use uptrakit_controller_core::access::AccessEngine;
+    use uptrakit_shared_db::access_grants::{GrantSubject, NewGrant, insert_grant};
+    use uptrakit_shared_db::entity::tenant;
+    use uptrakit_shared_types::access::{Action, ActionPattern, Decision, Selector};
+
     use super::*;
 
     #[test]
@@ -471,6 +487,7 @@ mod tests {
             token_denylist: None,
             event_broadcaster: None,
             claim_registry: None,
+            access_engine: None,
         };
         let result = deliver_event(&registry, &db, &resources, None, None, msg).await;
         assert!(result);
@@ -493,6 +510,7 @@ mod tests {
             token_denylist: None,
             event_broadcaster: None,
             claim_registry: None,
+            access_engine: None,
         };
         let result = deliver_event(&registry, &db, &resources, Some(service_id), None, msg).await;
         assert!(result);
@@ -513,6 +531,7 @@ mod tests {
             token_denylist: None,
             event_broadcaster: None,
             claim_registry: None,
+            access_engine: None,
         };
         let result = deliver_event(
             &registry,
@@ -524,5 +543,88 @@ mod tests {
         )
         .await;
         assert!(result);
+    }
+
+    async fn access_test_db() -> DatabaseConnection {
+        let mut opt = ConnectOptions::new("sqlite::memory:");
+        opt.max_connections(1).min_connections(1);
+        let db = Database::connect(opt).await.expect("connect test db");
+        uptrakit_shared_db::migration::run_migrations(&db)
+            .await
+            .expect("run migrations");
+        db
+    }
+
+    async fn access_default_tenant_id(db: &DatabaseConnection) -> Uuid {
+        tenant::Entity::find()
+            .one(db)
+            .await
+            .expect("query tenant")
+            .expect("seeded default tenant")
+            .id
+    }
+
+    #[tokio::test]
+    async fn access_invalidated_arm_flushes_engine_cache() {
+        let db = access_test_db().await;
+        let engine = Arc::new(AccessEngine::new(db.clone()));
+        let tenant_id = access_default_tenant_id(&db).await;
+        let user_id = Uuid::now_v7();
+
+        // Warm the cache with an empty-authority context.
+        let _ = engine
+            .context(tenant_id, user_id, None)
+            .await
+            .expect("warm");
+
+        // Grant AFTER warming: invisible until the cache drops the entry.
+        let patterns = vec![
+            "hosts:read"
+                .parse::<ActionPattern>()
+                .expect("valid pattern"),
+        ];
+        insert_grant(
+            &db,
+            NewGrant {
+                subject: GrantSubject::User(user_id),
+                tenant_id: Some(tenant_id),
+                patterns: &patterns,
+                selector: Selector::All,
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect("insert grant");
+
+        let resources = ControllerResources {
+            notification_service: None,
+            ca_rotation_trigger: None,
+            revocation_notify: None,
+            token_denylist: None,
+            event_broadcaster: None,
+            claim_registry: None,
+            access_engine: Some(&engine),
+        };
+        let delivered = deliver_controller_event(
+            &db,
+            &resources,
+            ControllerMessage::AccessInvalidated(uptrakit_wire::AccessInvalidatedPayload::new(
+                vec![user_id],
+                vec![],
+            )),
+        )
+        .await;
+        assert!(delivered);
+
+        let ctx = engine
+            .context(tenant_id, user_id, None)
+            .await
+            .expect("reload");
+        let action = "hosts:read".parse::<Action>().expect("valid action");
+        assert!(
+            matches!(engine.authorize(&ctx, &action, None), Decision::Allow),
+            "post-invalidation context must see the new grant (cache flushed)"
+        );
     }
 }
