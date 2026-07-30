@@ -238,6 +238,29 @@ Or run the entire workspace (preferred, mirrors CI):
 cargo test --all-features
 ```
 
+### Choosing feature worlds for scoped gates
+
+Feature-gated code makes a wrong `--features` list fail silently in either direction: a command that omits a feature the
+gated module needs compiles zero gated code (false green -- `cargo test` finds no tests to run), while a command that
+strips a `#[cfg]`'d test harness floods phantom `unused import` deny-errors from untouched files (false red). Before
+naming any scoped gate command in a plan or running one:
+
+- Read the module's own `cfg` line in `lib.rs` **and** the crate's `default` feature list. A `--features X` world where
+  `X` already sits in `default` is not a distinct world -- the distinct world is X-OFF, usually the crate's documented
+  isolation gate (`--no-default-features --features db-sqlite`).
+- Compile-probe the exact command at baseline (unmodified `main`) before relying on it. Scoped `-p <crate>
+--all-targets` runs can fail at baseline through asymmetric dev-dependency feature unification.
+- A guard test that iterates a feature-gated collection must assert the target members are **present** before asserting
+  they are clean -- an emptied collection passes vacuously. Derive presence from observed data (`iter().any(...)`),
+  never from `cfg!()` of another crate's feature: resolver-3 feature unification lets a workspace build force a feature
+  on (for example `agent-infra` via `agent-ssh-runtime`) and empty a collection that a scoped build populates.
+- Pair every per-world `cargo clippy` with the matching `cargo test` -- a world covered only by clippy never executes
+  the tests that exist only in that world.
+- A change that adds or feature-gates data other crates assert on must run at least one feature-unified whole-workspace
+  test (`cargo test --no-default-features --features db-sqlite` and/or `--all-features`), not only scoped `-p` gates.
+- Adding a field to a widely-constructed shared struct must compile **every** feature-gated struct literal: grep
+  `TypeName {` across the workspace, then build with the feature superset covering all hits.
+
 ### What We Test
 
 - Pure logic (unit tests)
