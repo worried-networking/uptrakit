@@ -57,6 +57,7 @@ bash ci/verify_handler_state_contract.sh                             # No handle
 python3 ci/verify_db_access_policy.py                                # db_access_policy.toml consistent with routes/
 bash ci/verify_agents_md_budget.sh                                   # AGENTS.md files within size budgets
 bash ci/verify_no_new_cfg_not_feature.sh                             # Additive-only feature flags: no new negated-feature cfg outside allowlist
+python3 ci/verify_action_security_declarations.py                    # Operation oauth2 scope lists match handler action extractors
 cargo xtask contribution-monotonicity-check                          # Plugin contributions survive feature unification (ADR-0032)
 ```
 
@@ -71,6 +72,12 @@ The semantic-boundary gate applies to production code paths, including non-plugi
 production frontend code under `frontend/src/**`, and in-scope manifest dependency tables. It intentionally exempts
 `docs/**`, test-only code, examples, and migrations. Those exemptions do not apply to production files that merely
 contain `test` in their name.
+
+For the M1.4b closing sweep: a route family's `action_extractor!` entries and its handler conversions should land in
+the same commit, but `ci/verify_action_security_declarations.py` stays green either way — the import-gating in its
+`_check_file` skips R1 for any file that has not imported `middleware::action`, and a file can never import
+same-named extractors from both `middleware::action` and `middleware::permission` unqualified (a compile error), so
+the import line always disambiguates fully.
 
 ### OIDC feature toggle
 

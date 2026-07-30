@@ -68,6 +68,9 @@ bash scripts/check_deny.sh ${DENY_BASE:+"$DENY_BASE"}
 echo "[pre-push] Running semantic boundary check..."
 python3 ci/check_plugin_semantic_boundary.py
 
+echo "[pre-push] Running action-security-declarations check..."
+python3 ci/verify_action_security_declarations.py
+
 echo "[pre-push] Running no-security-audit check..."
 bash ci/verify_no_security_audit.sh
 

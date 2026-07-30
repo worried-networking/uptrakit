@@ -46,6 +46,7 @@ bash ci/verify_handler_state_contract.sh                             # No handle
 python3 ci/verify_db_access_policy.py                                # db_access_policy.toml consistent with routes/
 bash ci/verify_agents_md_budget.sh                                   # AGENTS.md size budget gate
 bash ci/verify_no_new_cfg_not_feature.sh                             # Additive-only feature flags: no new negated-feature cfg outside allowlist
+python3 ci/verify_action_security_declarations.py                    # Operation oauth2 scope lists match handler action extractors
 ```
 
 > **Note:** `--all-features` includes `embed-frontend`, which requires `frontend/build/`. Build the frontend first

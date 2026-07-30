@@ -66,6 +66,7 @@ jobs:
       - uses: actions/checkout@v7
       - run: sudo apt-get install -y ripgrep
       - run: python3 -m unittest ci/test_check_plugin_semantic_boundary.py
+      - run: python3 -m unittest ci/test_verify_action_security_declarations.py
       - run: python3 ci/check_plugin_semantic_boundary.py
       - run: bash ci/verify_no_security_audit.sh
       - run: bash ci/verify_typed_audit_actions.sh
@@ -73,6 +74,7 @@ jobs:
       - run: bash ci/verify_dataload_declares_params.sh
       - run: bash ci/verify_no_new_cfg_not_feature.sh
       - run: bash ci/verify_engine_owned_entities.sh
+      - run: python3 ci/verify_action_security_declarations.py
       - run: bash ci/verify_agents_md_budget.sh
 
   backend-lint:
