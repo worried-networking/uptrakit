@@ -433,7 +433,7 @@ Every file below is a named deliverable of the implementation; none are optional
    non-TTY rule, and the reverse-proxy pinning incompatibility guidance.
 4. `docs/development/zeroconf-discovery.md` — implementation map updated for the crate split
    (who owns what: contract crate / advertiser adapter / SDK cache layer / CLI flow).
-5. `docs/adr/0033-shared-zeroconf-crate.md` — new ADR: extraction rationale, crate boundary
+5. `docs/adr/0035-shared-zeroconf-crate.md` — new ADR: extraction rationale, crate boundary
    (contract + browse primitives only; persistence and snapshot-typed builders stay with their
    owners), published squat-chain membership and its cost, alternatives rejected.
 6. `AGENTS.md` — tree line for `crates/shared/zeroconf`.

@@ -1,4 +1,4 @@
-# 0033 — Shared Zeroconf Crate
+# 0035 — Shared Zeroconf Crate
 
 **Date:** 2026-07-29 **Status:** Accepted
 
