@@ -1,0 +1,14 @@
+# adrs (https://joshrotenberg.com/adrs/) — pinned 0.10.1 in CI.
+# adr_dir is REQUIRED: once adrs.toml exists it takes precedence over .adr-dir,
+# and without this key every adrs command silently retargets to the default
+# doc/adr (empirically verified on 0.10.1).
+adr_dir = "docs/adr"
+no_edit = true               # agents/scripts create ADRs; authors edit the file afterwards
+default_status = "accepted"  # repo practice: ADRs land accepted
+
+[templates]
+format = "nygard"
+
+[doctor]
+ignore = ["ADR011"]          # numbering gaps are accepted policy (0014 gap); duplicates stay fatal via ADR012
+warnings_as_errors = false
