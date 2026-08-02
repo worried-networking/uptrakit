@@ -1,7 +1,10 @@
-# ADR 0018 — Typed Plugin Extension Boundary
+# 0018 — Typed Plugin Extension Boundary
 
 Date: 2026-06-02
-Status: Accepted (retroactive, ratified by implementation in commits `ce0dba5d3` and `c50be1d01`)
+
+## Status
+
+Accepted (retroactive, ratified by implementation in commits `ce0dba5d3` and `c50be1d01`)
 
 ## Context
 

@@ -1,4 +1,10 @@
-# RouterOS Bootstrap: Non-POSIX Detection and Executor Architecture
+# 0002 — RouterOS Bootstrap: Non-POSIX Detection and Executor Architecture
+
+Date: 2026-05-07
+
+## Status
+
+Accepted
 
 ## Probe-then-route detection during bootstrap
 

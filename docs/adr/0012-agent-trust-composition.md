@@ -1,6 +1,10 @@
-# ADR-0012: Agent Trust Composition
+# 0012 — Agent Trust Composition
 
-Status: Accepted
+Date: 2026-05-13
+
+## Status
+
+Accepted
 
 ## Context
 

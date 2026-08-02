@@ -1,7 +1,10 @@
-# ADR 0017 — ETag Route-Layer Middleware over Per-Handler Extractors
+# 0017 — ETag Route-Layer Middleware over Per-Handler Extractors
 
 Date: 2026-05-24
-Status: Accepted
+
+## Status
+
+Accepted
 
 ## Context
 

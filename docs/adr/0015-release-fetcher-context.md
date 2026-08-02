@@ -1,7 +1,10 @@
-# ADR 0015 — ReleaseFetchContext: Extending ReleaseFetcher Factories
+# 0015 — ReleaseFetchContext: Extending ReleaseFetcher Factories
 
 Date: 2026-05-13
-Status: Accepted
+
+## Status
+
+Accepted
 
 ## Context
 

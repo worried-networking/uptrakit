@@ -1,6 +1,10 @@
-# ADR-0011: SPIFFE Service Identity
+# 0011 — SPIFFE Service Identity
 
-Status: Accepted
+Date: 2026-05-13
+
+## Status
+
+Accepted
 
 ## Context
 

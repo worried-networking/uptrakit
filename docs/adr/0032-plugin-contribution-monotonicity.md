@@ -1,6 +1,10 @@
 # 0032 — Plugin Contribution Monotonicity
 
-**Date:** 2026-07-27 **Status:** Accepted
+Date: 2026-07-27
+
+## Status
+
+Accepted
 
 ## Context
 

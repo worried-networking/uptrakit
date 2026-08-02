@@ -1,4 +1,4 @@
-# ADR-0022: Architecture-Health Tooling — Hybrid Cargo Gates + Advisory CodeScene
+# 0022 — Architecture-Health Tooling — Hybrid Cargo Gates + Advisory CodeScene
 
 Date: 2026-06-18
 

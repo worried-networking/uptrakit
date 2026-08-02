@@ -1,7 +1,10 @@
 # 0005 — Service Binary/Runtime Boundary
 
-**Date:** 2026-05-07
-**Status:** Accepted
+Date: 2026-05-07
+
+## Status
+
+Accepted
 
 ## Context
 

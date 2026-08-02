@@ -1,6 +1,10 @@
 # 0024 — Update Liveness and the `Interrupted` Status
 
-**Date:** 2026-06-25 **Status:** Accepted
+Date: 2026-06-25
+
+## Status
+
+Accepted
 
 ## Context
 

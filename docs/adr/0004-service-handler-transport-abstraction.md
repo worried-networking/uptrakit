@@ -1,7 +1,10 @@
-# `ServiceHandler` Transport Abstraction
+# 0004 — `ServiceHandler` Transport Abstraction
 
-**Date:** 2026-05-07  
-**Status:** Accepted
+Date: 2026-05-07
+
+## Status
+
+Accepted
 
 ## Context
 

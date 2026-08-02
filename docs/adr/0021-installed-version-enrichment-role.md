@@ -1,4 +1,4 @@
-# ADR-0021: Installed Version Enrichment Role
+# 0021 — Installed Version Enrichment Role
 
 Date: 2026-06-17
 

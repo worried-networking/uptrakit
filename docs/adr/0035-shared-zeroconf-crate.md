@@ -1,6 +1,10 @@
 # 0035 — Shared Zeroconf Crate
 
-**Date:** 2026-07-29 **Status:** Accepted
+Date: 2026-07-29
+
+## Status
+
+Accepted
 
 ## Context
 

@@ -1,7 +1,10 @@
 # 0007 — Audit Stateful Transactional Emit
 
-**Date:** 2026-05-14
-**Status:** Accepted
+Date: 2026-05-14
+
+## Status
+
+Accepted
 
 ## Context
 

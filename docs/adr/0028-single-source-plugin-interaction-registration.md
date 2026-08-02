@@ -1,6 +1,10 @@
 # 0028 — Single-Source Plugin Interaction Registration
 
-**Date:** 2026-07-16 **Status:** Accepted
+Date: 2026-07-16
+
+## Status
+
+Accepted
 
 ## Context
 

@@ -1,7 +1,10 @@
-# ADR 0020 — Service Merge Redirect
+# 0020 — Service Merge Redirect
 
 Date: 2026-06-09
-Status: Accepted
+
+## Status
+
+Accepted
 
 ## Context
 

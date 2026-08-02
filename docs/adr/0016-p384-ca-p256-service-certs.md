@@ -1,7 +1,10 @@
-# ADR 0016 — P-384 for CA, P-256 for Server/Service/ECIES Certs
+# 0016 — P-384 for CA, P-256 for Server/Service/ECIES Certs
 
 Date: 2026-05-18
-Status: Accepted
+
+## Status
+
+Accepted
 
 ## Context
 

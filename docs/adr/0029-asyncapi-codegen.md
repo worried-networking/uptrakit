@@ -1,6 +1,10 @@
 # 0029 — AsyncAPI Codegen for the Wire Protocol
 
-**Date:** 2026-07-20 **Status:** Accepted
+Date: 2026-07-20
+
+## Status
+
+Accepted
 
 ## Context
 

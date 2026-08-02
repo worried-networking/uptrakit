@@ -1,6 +1,10 @@
 # 0025 — Drift-Proof OpenAPI Parameters via Derived `IntoParams`
 
-**Date:** 2026-07-01 **Status:** Accepted
+Date: 2026-07-01
+
+## Status
+
+Accepted
 
 ## Context
 

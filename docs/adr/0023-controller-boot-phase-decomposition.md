@@ -1,6 +1,10 @@
 # 0023 — Controller Boot Phase Decomposition
 
-**Date:** 2026-06-23 **Status:** Accepted
+Date: 2026-06-23
+
+## Status
+
+Accepted
 
 ## Context
 

@@ -1,6 +1,10 @@
 # 0027 — Discovery-Based Uninstall Reconciliation
 
-**Date:** 2026-07-11 **Status:** Accepted
+Date: 2026-07-11
+
+## Status
+
+Accepted
 
 ## Context
 

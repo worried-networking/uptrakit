@@ -1,7 +1,11 @@
 # 0010 — MCP OAuth 2.1 Authorization Server Placement
 
-- Status: Accepted
-- Date: 2026-05-12
+Date: 2026-05-12
+
+## Status
+
+Accepted
+
 - Spec: `docs/superpowers/specs/2026-05-12-mcp-oauth-authorization-design.md`
 
 ## Context

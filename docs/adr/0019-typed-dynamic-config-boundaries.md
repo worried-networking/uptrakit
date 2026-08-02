@@ -1,7 +1,10 @@
-# ADR 0019 — Typed Dynamic Config Boundaries
+# 0019 — Typed Dynamic Config Boundaries
 
 Date: 2026-06-03
-Status: Accepted
+
+## Status
+
+Accepted
 
 ## Context
 

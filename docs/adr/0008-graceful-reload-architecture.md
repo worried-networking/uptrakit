@@ -1,7 +1,10 @@
 # 0008 — Graceful Reload Architecture
 
-**Date:** 2026-05-12
-**Status:** Accepted
+Date: 2026-05-12
+
+## Status
+
+Accepted
 
 ## Context
 

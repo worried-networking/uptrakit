@@ -1,4 +1,10 @@
-# web-api Decomposition Strategy
+# 0001 — web-api Decomposition Strategy
+
+Date: 2026-05-01
+
+## Status
+
+Accepted
 
 `uptrakit-web-api` is large enough to cause real navigation and compile-time
 friction. The naive fix — extract all business logic into one monolithic parent

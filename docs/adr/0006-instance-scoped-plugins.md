@@ -1,7 +1,10 @@
 # 0006 — Instance-Scoped Plugins
 
-**Date:** 2026-05-11
-**Status:** Accepted — Decision 4 superseded and Decision 2 refined by
+Date: 2026-05-11
+
+## Status
+
+Accepted — Decision 4 superseded and Decision 2 refined by
 [ADR-0033](0033-effective-plugin-enablement-and-surface-visibility.md) (effective = boot ∧ live)
 
 ## Context

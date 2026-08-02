@@ -1,7 +1,11 @@
 # 0034 — Plugin Provider Identity
 
-**Date:** 2026-08-02
-**Status:** Accepted
+Date: 2026-08-02
+
+## Status
+
+Accepted
+
 **Amends:** [ADR-0028](0028-single-source-plugin-interaction-registration.md), [ADR-0033](0033-effective-plugin-enablement-and-surface-visibility.md)
 
 ## Context

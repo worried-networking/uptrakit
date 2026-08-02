@@ -1,6 +1,10 @@
 # 0030 — Surfaces REST Method Model
 
-**Date:** 2026-07-20 **Status:** Accepted
+Date: 2026-07-20
+
+## Status
+
+Accepted
 
 ## Context
 

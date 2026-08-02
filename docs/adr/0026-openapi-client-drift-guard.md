@@ -1,6 +1,10 @@
 # 0026 — OpenAPI Client Drift Guard (no code generation)
 
-**Date:** 2026-07-01 **Status:** Accepted
+Date: 2026-07-01
+
+## Status
+
+Accepted
 
 ## Context
 

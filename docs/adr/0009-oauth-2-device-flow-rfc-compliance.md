@@ -1,7 +1,11 @@
 # 0009 — OAuth 2.0 Device Authorization Grant: strict RFC compliance, minimum-viable issuance
 
-- Status: Accepted
-- Date: 2026-05-12
+Date: 2026-05-12
+
+## Status
+
+Accepted
+
 - Spec: `docs/superpowers/specs/2026-05-12-rfc8628-device-auth-design.md`
 
 ## Context

@@ -1,7 +1,11 @@
 # 0033 — Effective Plugin Enablement and Surface Visibility
 
-**Date:** 2026-07-29
-**Status:** Accepted
+Date: 2026-07-29
+
+## Status
+
+Accepted
+
 **Supersedes:** ADR-0006 Decision 4 (single-predicate surfaces gating)
 
 ## Context

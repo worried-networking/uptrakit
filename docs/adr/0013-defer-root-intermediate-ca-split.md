@@ -1,6 +1,10 @@
-# ADR-0013: Defer Root/Intermediate Managed CA Split
+# 0013 — Defer Root/Intermediate Managed CA Split
 
-Status: Accepted (deferral)
+Date: 2026-05-13
+
+## Status
+
+Accepted (deferral)
 
 ## Context
 
