@@ -157,7 +157,7 @@ fn request_with_idem(idempotency_key: &str) -> SurfaceInvokeRequest {
         surface_id: "ssh.guest.panel".to_string(),
         interaction_id: "refresh".to_string(),
         idempotency_key: idempotency_key.to_string(),
-        target_provider_id: Some("provider-a".to_string()),
+        target_provider_id: Some("service.provider-a".to_string()),
         caller_origin: SurfaceCallerOrigin::UserSession {
             user_id: user_id(),
             session_id: "session-1".to_string(),
@@ -181,7 +181,7 @@ async fn register_service_for_proxy(
             service_id,
             "uptrakit-agent-ssh",
             Some(tenant_id()),
-            registration("provider-a", tenant_id()),
+            registration("service.provider-a", tenant_id()),
         )
         .expect("registration should succeed");
 
@@ -319,7 +319,7 @@ async fn invoke_allows_provider_proxied_requests_without_sensitive_payload() {
             surface_id: "ssh.guest.panel".to_string(),
             interaction_id: "refresh".to_string(),
             idempotency_key: "idem-no-sensitive-payload".to_string(),
-            target_provider_id: Some("provider-a".to_string()),
+            target_provider_id: Some("service.provider-a".to_string()),
             caller_origin: SurfaceCallerOrigin::UserSession {
                 user_id: user_id(),
                 session_id: "session-1".to_string(),
@@ -486,7 +486,7 @@ async fn invoke_validates_input_schema_before_dispatch() {
     let service_connections = ServiceConnectionRegistry::new();
     let proxy = SurfaceProxy::new();
     let service_id = Uuid::now_v7();
-    let mut custom_registration = registration("provider-a", tenant_id());
+    let mut custom_registration = registration("service.provider-a", tenant_id());
     custom_registration.surfaces[0].interactions[0].input_schema =
         Some(surfaces::SchemaContract::Integer);
     registry
@@ -555,18 +555,18 @@ async fn invoke_provider_origin_can_route_to_another_provider() {
     let proxy = Arc::new(SurfaceProxy::new());
 
     let service_a = Uuid::now_v7();
-    let mut reg_a = registration("provider-a", tenant_id());
+    let mut reg_a = registration("service.provider-a", tenant_id());
     reg_a.surfaces[0].interactions[0].required_permission = None;
     registry
         .register_service(service_a, "uptrakit-agent-ssh", Some(tenant_id()), reg_a)
-        .expect("provider-a registration should succeed");
+        .expect("service.provider-a registration should succeed");
 
     let service_b = Uuid::now_v7();
-    let mut reg_b = registration("provider-b", tenant_id());
+    let mut reg_b = registration("service.provider-b", tenant_id());
     reg_b.surfaces[0].interactions[0].required_permission = None;
     registry
         .register_service(service_b, "uptrakit-agent-ssh", Some(tenant_id()), reg_b)
-        .expect("provider-b registration should succeed");
+        .expect("service.provider-b registration should succeed");
 
     let (_rx_a, _cancel_a) = service_connections
         .register(
@@ -603,7 +603,7 @@ async fn invoke_provider_origin_can_route_to_another_provider() {
     });
 
     let mut request = request_with_idem("idem-cross-provider");
-    request.target_provider_id = Some("provider-b".to_string());
+    request.target_provider_id = Some("service.provider-b".to_string());
     request.caller_origin = SurfaceCallerOrigin::Provider {
         service_id: service_a,
     };
@@ -651,9 +651,9 @@ async fn invoke_provider_origin_denied_for_permission_gated_interaction() {
             service_a,
             "uptrakit-agent-ssh",
             Some(tenant_id()),
-            registration("provider-a", tenant_id()),
+            registration("service.provider-a", tenant_id()),
         )
-        .expect("provider-a registration should succeed");
+        .expect("service.provider-a registration should succeed");
 
     registry
         .bootstrap_plugin(plugin_registration_with_permission("provider-b", false))
@@ -710,9 +710,9 @@ async fn invoke_provider_origin_allowed_when_provider_invocable() {
             service_a,
             "uptrakit-agent-ssh",
             Some(tenant_id()),
-            registration("provider-a", tenant_id()),
+            registration("service.provider-a", tenant_id()),
         )
-        .expect("provider-a registration should succeed");
+        .expect("service.provider-a registration should succeed");
 
     registry
         .bootstrap_plugin(plugin_registration_with_permission("provider-b", true))
@@ -747,8 +747,8 @@ async fn invoke_provider_origin_allowed_when_provider_invocable() {
 /// Regression for the production break: the agent sends nested provider→plugin
 /// calls with `target_provider_id: None` (it cannot know the controller-side
 /// plugin's provider id). Before the resolution fix, implicit resolution forced
-/// the caller's own provider (`provider-a`) as the target and failed with
-/// `InvalidProvider("provider-a")` — the `provider_invocable` gate was never
+/// the caller's own provider (`service.provider-a`) as the target and failed with
+/// `InvalidProvider("service.provider-a")` — the `provider_invocable` gate was never
 /// reached. Same setup as `invoke_provider_origin_allowed_when_provider_invocable`
 /// but with `target_provider_id: None`, exercising the real agent path.
 #[tokio::test(start_paused = true)]
@@ -770,9 +770,9 @@ async fn invoke_provider_origin_resolves_target_from_surface_when_target_none() 
             service_a,
             "uptrakit-agent-ssh",
             Some(tenant_id()),
-            registration("provider-a", tenant_id()),
+            registration("service.provider-a", tenant_id()),
         )
-        .expect("provider-a registration should succeed");
+        .expect("service.provider-a registration should succeed");
 
     registry
         .bootstrap_plugin(plugin_registration_with_permission("provider-b", true))
@@ -814,11 +814,11 @@ async fn invoke_provider_origin_self_target_when_target_none() {
     let proxy = Arc::new(SurfaceProxy::new());
 
     let service_a = Uuid::now_v7();
-    let mut reg_a = registration("provider-a", tenant_id());
+    let mut reg_a = registration("service.provider-a", tenant_id());
     reg_a.surfaces[0].interactions[0].required_permission = None;
     registry
         .register_service(service_a, "uptrakit-agent-ssh", Some(tenant_id()), reg_a)
-        .expect("provider-a registration should succeed");
+        .expect("service.provider-a registration should succeed");
 
     let (mut rx_a, _cancel_a) = service_connections
         .register(
@@ -926,9 +926,9 @@ async fn invoke_returns_no_provider_for_yielded_service_provider() {
             service_a,
             "uptrakit-agent-ssh",
             Some(tenant_id()),
-            registration("provider-a", tenant_id()),
+            registration("service.provider-a", tenant_id()),
         )
-        .expect("provider-a registration should succeed");
+        .expect("service.provider-a registration should succeed");
 
     let (mut rx_a, _cancel_a) = service_connections
         .register(
@@ -986,7 +986,7 @@ async fn invoke_fails_immediately_when_provider_disconnects() {
         ControllerMessage::SurfaceActionRequest(_)
     ));
 
-    proxy.fail_in_flight_for_provider("provider-a");
+    proxy.fail_in_flight_for_provider("service.provider-a");
 
     let result = invoke_task.await.expect("invoke task should finish");
     assert!(matches!(
@@ -1028,7 +1028,7 @@ async fn provider_proxied_client_disconnect_releases_budget_and_idempotency() {
             .pending
             .lock()
             .in_flight_per_provider
-            .get("provider-a")
+            .get("service.provider-a")
             .copied(),
         Some(1),
         "provider budget must be reserved mid-flight (non-vacuous baseline)"

@@ -1596,8 +1596,8 @@ mod tests {
     #[test]
     fn group_surface_catalog_merges_only_identical_descriptors() {
         let grouped = group_surface_catalog(vec![
-            catalog_item("ssh.guest.panel", "SSH Guest Panel", "provider-a"),
-            catalog_item("ssh.guest.panel", "SSH Guest Panel", "provider-b"),
+            catalog_item("ssh.guest.panel", "SSH Guest Panel", "service.provider-a"),
+            catalog_item("ssh.guest.panel", "SSH Guest Panel", "service.provider-b"),
             catalog_item("ssh.guest.panel", "Different Label", "provider-c"),
         ]);
 
@@ -1997,7 +1997,7 @@ mod tests {
             .surface_proxy_deps
             .registry
             .register_provider_for_test(
-                service_surface_registration("provider-a", tenant_id),
+                service_surface_registration("service.provider-a", tenant_id),
                 Some(Uuid::now_v7()),
                 Some("uptrakit-agent-ssh"),
             );
@@ -2011,7 +2011,7 @@ mod tests {
             Json(InvokeSurfaceInteractionRequest {
                 params: serde_json::Map::new(),
                 encrypted_sensitive_params: None,
-                target_provider_id: Some("provider-a".to_string()),
+                target_provider_id: Some("service.provider-a".to_string()),
                 idempotency_key: Some("surface-permission-denied".to_string()),
                 timeout_seconds: Some(5),
             }),
@@ -2048,7 +2048,7 @@ mod tests {
             .expect("permission denial audit should include details");
         assert_eq!(details["surface_id"], "ssh.guest.panel");
         assert_eq!(details["interaction_id"], "refresh");
-        assert_eq!(details["target_provider_id"], "provider-a");
+        assert_eq!(details["target_provider_id"], "service.provider-a");
         assert_eq!(details["permission_scope"], "surface");
         assert_eq!(details["required_permission"], "view_software");
         assert_eq!(details["reason_code"], "missing_required_permission");
@@ -2063,7 +2063,7 @@ mod tests {
             .surface_proxy_deps
             .registry
             .register_provider_for_test(
-                service_surface_registration("provider-a", tenant_id),
+                service_surface_registration("service.provider-a", tenant_id),
                 Some(Uuid::now_v7()),
                 Some("uptrakit-agent-ssh"),
             );
@@ -2079,7 +2079,7 @@ mod tests {
             Json(InvokeSurfaceInteractionRequest {
                 params: serde_json::Map::new(),
                 encrypted_sensitive_params: None,
-                target_provider_id: Some("provider-a".to_string()),
+                target_provider_id: Some("service.provider-a".to_string()),
                 idempotency_key: Some("interaction-permission-denied".to_string()),
                 timeout_seconds: Some(5),
             }),
@@ -2116,7 +2116,7 @@ mod tests {
             .expect("permission denial audit should include details");
         assert_eq!(details["surface_id"], "ssh.guest.panel");
         assert_eq!(details["interaction_id"], "refresh");
-        assert_eq!(details["target_provider_id"], "provider-a");
+        assert_eq!(details["target_provider_id"], "service.provider-a");
         assert_eq!(details["permission_scope"], "interaction");
         assert_eq!(details["required_permission"], "update_software");
         assert_eq!(details["reason_code"], "missing_required_permission");
@@ -2132,7 +2132,7 @@ mod tests {
             .surface_proxy_deps
             .registry
             .register_provider_for_test(
-                service_surface_registration("provider-a", tenant_id),
+                service_surface_registration("service.provider-a", tenant_id),
                 Some(Uuid::now_v7()),
                 Some("uptrakit-agent-ssh"),
             );
@@ -2202,7 +2202,7 @@ mod tests {
             .surface_proxy_deps
             .registry
             .register_provider_for_test(
-                service_surface_registration("provider-a", tenant_id),
+                service_surface_registration("service.provider-a", tenant_id),
                 Some(service_id),
                 Some("uptrakit-agent-ssh"),
             );
@@ -2244,7 +2244,7 @@ mod tests {
             Json(InvokeSurfaceInteractionRequest {
                 params: serde_json::Map::new(),
                 encrypted_sensitive_params: None,
-                target_provider_id: Some("provider-a".to_string()),
+                target_provider_id: Some("service.provider-a".to_string()),
                 idempotency_key: Some("api-token-success".to_string()),
                 timeout_seconds: Some(5),
             }),
@@ -2278,7 +2278,7 @@ mod tests {
             .expect("success audit should include details");
         assert_eq!(details["surface_id"], "ssh.guest.panel");
         assert_eq!(details["interaction_id"], "refresh");
-        assert_eq!(details["target_provider_id"], "provider-a");
+        assert_eq!(details["target_provider_id"], "service.provider-a");
         assert_eq!(details["provider_kind"], "service");
         assert_eq!(details["auth_method"], "api_token");
         assert_eq!(details["provider_service_app_name"], "uptrakit-agent-ssh");
@@ -2294,7 +2294,7 @@ mod tests {
             .surface_proxy_deps
             .registry
             .register_provider_for_test(
-                service_surface_registration("provider-a", tenant_id),
+                service_surface_registration("service.provider-a", tenant_id),
                 Some(service_id),
                 Some("uptrakit-agent-ssh"),
             );
@@ -2322,7 +2322,7 @@ mod tests {
             Json(InvokeSurfaceInteractionRequest {
                 params: serde_json::Map::new(),
                 encrypted_sensitive_params: None,
-                target_provider_id: Some("provider-a".to_string()),
+                target_provider_id: Some("service.provider-a".to_string()),
                 idempotency_key: Some("provider-unavailable".to_string()),
                 timeout_seconds: Some(5),
             }),
@@ -2353,7 +2353,7 @@ mod tests {
             .expect("failed audit should include details");
         assert_eq!(details["surface_id"], "ssh.guest.panel");
         assert_eq!(details["interaction_id"], "refresh");
-        assert_eq!(details["target_provider_id"], "provider-a");
+        assert_eq!(details["target_provider_id"], "service.provider-a");
         assert_eq!(details["provider_kind"], "service");
         assert_eq!(details["auth_method"], "password");
         assert_eq!(details["reason_code"], "provider_unavailable");

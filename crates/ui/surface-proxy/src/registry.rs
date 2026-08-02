@@ -651,6 +651,35 @@ impl SurfaceRegistry {
             });
         }
 
+        // Provider-id namespaces are enforced per registration source
+        // (ADR-0034, fail-closed): a service can never occupy a plugin's
+        // identity in the provider-keyed registry map, and `builtin.` is
+        // reserved before any production BuiltIn provider exists.
+        let namespace_violation = match source_kind {
+            surfaces::ProviderKind::Service if !provider_id.starts_with("service.") => {
+                Some("service surface registrations must use a `service.`-prefixed provider id")
+            }
+            surfaces::ProviderKind::BuiltIn if !provider_id.starts_with("builtin.") => {
+                Some("built-in surface registrations must use a `builtin.`-prefixed provider id")
+            }
+            surfaces::ProviderKind::Plugin
+                if provider_id.starts_with("service.") || provider_id.starts_with("builtin.") =>
+            {
+                Some("plugin surface registrations must not use a reserved provider-id namespace")
+            }
+            surfaces::ProviderKind::Service
+            | surfaces::ProviderKind::BuiltIn
+            | surfaces::ProviderKind::Plugin => None,
+            _ => Some("unknown registration source kind is not admitted"),
+        };
+        if let Some(message) = namespace_violation {
+            reasons.push(SurfaceProviderRejectionReason {
+                code: SurfaceProviderRejectionCode::InvalidTransport,
+                message: message.to_string(),
+                surface_id: None,
+            });
+        }
+
         if source_kind == surfaces::ProviderKind::Service {
             match service_tenant_id {
                 Some(expected_tenant_id) => {
@@ -1924,7 +1953,7 @@ mod tests {
     fn resolve_surface_action_for_method_none_resolves_single_method_interaction() {
         let registry = registry();
         registry.register_provider_for_test(
-            registration_for_service("provider-a", tenant_a()),
+            registration_for_service("service.provider-a", tenant_a()),
             Some(Uuid::now_v7()),
             Some("uptrakit-agent-ssh"),
         );
@@ -1935,7 +1964,7 @@ mod tests {
                 "ssh.guest.panel",
                 "refresh",
                 None,
-                Some("provider-a"),
+                Some("service.provider-a"),
                 &AllProvidersVisible,
             )
             .expect("single registered method must resolve when method is None");
@@ -1949,7 +1978,7 @@ mod tests {
     fn resolve_surface_action_for_method_rejects_mismatched_method_on_single_registration() {
         let registry = registry();
         registry.register_provider_for_test(
-            registration_for_service("provider-a", tenant_a()),
+            registration_for_service("service.provider-a", tenant_a()),
             Some(Uuid::now_v7()),
             Some("uptrakit-agent-ssh"),
         );
@@ -1959,7 +1988,7 @@ mod tests {
             "ssh.guest.panel",
             "refresh",
             Some(&surfaces::InteractionHttpMethod::Get),
-            Some("provider-a"),
+            Some("service.provider-a"),
             &AllProvidersVisible,
         );
         assert!(
@@ -1977,7 +2006,7 @@ mod tests {
     {
         let registry = registry();
         registry.register_provider_for_test(
-            registration_for_service("provider-a", tenant_a()),
+            registration_for_service("service.provider-a", tenant_a()),
             Some(Uuid::now_v7()),
             Some("uptrakit-agent-ssh"),
         );
@@ -1987,7 +2016,7 @@ mod tests {
             "ssh.guest.panel",
             "does-not-exist",
             None,
-            Some("provider-a"),
+            Some("service.provider-a"),
             &AllProvidersVisible,
         );
         assert!(matches!(
@@ -2000,7 +2029,7 @@ mod tests {
             "ssh.guest.panel",
             "does-not-exist",
             Some(&surfaces::InteractionHttpMethod::Post),
-            Some("provider-a"),
+            Some("service.provider-a"),
             &AllProvidersVisible,
         );
         assert!(
@@ -2017,7 +2046,7 @@ mod tests {
     #[test]
     fn register_service_rejects_unsupported_generation_with_structured_reason() {
         let registry = registry();
-        let mut registration = registration_for_service("provider-a", tenant_a());
+        let mut registration = registration_for_service("service.provider-a", tenant_a());
         registration.framework_generation = surfaces::FrameworkGeneration::new(2, 0);
 
         let err = registry
@@ -2029,11 +2058,114 @@ mod tests {
             )
             .expect_err("registration should fail");
         let rejection = rejection(err);
-        assert_eq!(rejection.provider_id, "provider-a");
+        assert_eq!(rejection.provider_id, "service.provider-a");
         assert_eq!(rejection.reasons.len(), 1);
         assert_eq!(
             rejection.reasons[0].code,
             SurfaceProviderRejectionCode::UnsupportedGeneration
+        );
+    }
+
+    #[test]
+    fn register_service_rejects_bare_provider_id_namespace() {
+        let registry = registry();
+        let registration = registration_for_service("bare-provider", tenant_a());
+
+        let err = registry
+            .register_service(
+                Uuid::now_v7(),
+                "uptrakit-agent-ssh",
+                Some(tenant_a()),
+                registration,
+            )
+            .expect_err("bare provider id should be rejected");
+        let rejection = rejection(err);
+        assert_eq!(rejection.provider_id, "bare-provider");
+        assert_eq!(
+            rejection.reasons[0].code,
+            SurfaceProviderRejectionCode::InvalidTransport
+        );
+        assert!(
+            rejection.reasons[0].message.contains("service."),
+            "rejection must name the required namespace, got: {}",
+            rejection.reasons[0].message
+        );
+    }
+
+    #[test]
+    fn bootstrap_builtin_rejects_unprefixed_provider_id() {
+        let registry = registry();
+        let registration = surfaces::SurfaceRegistration {
+            provider: surfaces::ProviderIdentity {
+                provider_id: "controller-unprefixed".to_string(),
+                provider_kind: surfaces::ProviderKind::BuiltIn,
+                provider_namespace: "controller".to_string(),
+            },
+            framework_generation: surfaces::FrameworkGeneration::new(1, 0),
+            capabilities: surfaces::CapabilitySet::from_capabilities([
+                surfaces::Capability::TextBlockNode,
+                surfaces::Capability::UniversalTargeting,
+            ]),
+            effective_tenant_binding: surfaces::EffectiveTenantBinding {
+                scope: surfaces::Scope::Global,
+                tenant_id: None,
+            },
+            surfaces: vec![surfaces::RegisteredSurface {
+                descriptor: surfaces::SurfaceDescriptor::builder()
+                    .surface_id(surfaces::SurfaceId::new("controller.status").unwrap())
+                    .label("Controller status")
+                    .priority(0)
+                    .slot("settings.below.global")
+                    .scope(surfaces::Scope::Global)
+                    .targeting(surfaces::Targeting::Universal)
+                    .provider_kind(surfaces::ProviderKind::BuiltIn)
+                    .required_capabilities(surfaces::CapabilitySet::from_capabilities([
+                        surfaces::Capability::TextBlockNode,
+                        surfaces::Capability::UniversalTargeting,
+                    ]))
+                    .root_node(surfaces::SurfaceNode::TextBlock {
+                        text: "ok".to_string(),
+                    })
+                    .build(),
+                interactions: vec![],
+                data_sources: vec![],
+            }],
+            encryption_metadata: None,
+        };
+
+        let err = registry
+            .bootstrap_builtin(registration)
+            .expect_err("unprefixed built-in provider id should be rejected");
+        let rejection = rejection(err);
+        assert_eq!(rejection.provider_id, "controller-unprefixed");
+        assert!(
+            rejection.reasons.iter().any(|reason| {
+                reason.code == SurfaceProviderRejectionCode::InvalidTransport
+                    && reason.message.contains("builtin.")
+            }),
+            "rejection must name the required namespace, got: {:?}",
+            rejection.reasons
+        );
+    }
+
+    #[test]
+    fn bootstrap_plugin_rejects_reserved_namespace_provider_id() {
+        let registry = registry();
+        let mut registration = registration_for_plugin_same_surface("plugin.provider-a");
+        registration.provider.provider_id = "service.squatter".to_string();
+
+        let err = registry
+            .bootstrap_plugin(registration)
+            .expect_err("reserved-namespace plugin provider id should be rejected");
+        let rejection = rejection(err);
+        assert_eq!(rejection.provider_id, "service.squatter");
+        assert!(
+            rejection.reasons.iter().any(|reason| {
+                reason.code == SurfaceProviderRejectionCode::InvalidTransport
+                    && reason.message.contains("reserved")
+            }),
+            "rejection must name the reserved namespace, got: {:?}",
+            rejection.reasons
         );
     }
 
@@ -2103,7 +2235,7 @@ mod tests {
     fn register_service_is_batch_atomic_when_any_surface_is_invalid() {
         let registry = registry();
         let service_id = Uuid::now_v7();
-        let mut registration = registration_for_service("provider-a", tenant_a());
+        let mut registration = registration_for_service("service.provider-a", tenant_a());
         registration.surfaces.push(surfaces::RegisteredSurface {
             descriptor: surfaces::SurfaceDescriptor::builder()
                 .surface_id(surfaces::SurfaceId::new("ssh.invalid").unwrap())
@@ -2138,7 +2270,7 @@ mod tests {
                     | SurfaceProviderRejectionCode::SchemaOrLimitFailure
             )
         }));
-        assert_eq!(registry.provider_surface_count("provider-a"), 0);
+        assert_eq!(registry.provider_surface_count("service.provider-a"), 0);
         assert!(
             registry
                 .list_surfaces_for_tenant(tenant_a(), None, None, &AllProvidersVisible)
@@ -2154,7 +2286,7 @@ mod tests {
                 Uuid::now_v7(),
                 "uptrakit-agent-ssh",
                 Some(tenant_a()),
-                registration_for_service("provider-a", tenant_a()),
+                registration_for_service("service.provider-a", tenant_a()),
             )
             .expect("registration should succeed");
 
@@ -2175,7 +2307,7 @@ mod tests {
                 Uuid::now_v7(),
                 "uptrakit-agent-ssh",
                 Some(tenant_b()),
-                registration_for_service("provider-a", tenant_a()),
+                registration_for_service("service.provider-a", tenant_a()),
             )
             .expect_err("mismatched tenant binding must fail");
         let rejection = rejection(err);
@@ -2188,7 +2320,7 @@ mod tests {
     #[test]
     fn registration_rejects_sensitive_fields_without_encryption_metadata() {
         let registry = registry();
-        let mut registration = registration_for_service("provider-a", tenant_a());
+        let mut registration = registration_for_service("service.provider-a", tenant_a());
         registration.encryption_metadata = None;
 
         let err = registry
@@ -2277,7 +2409,7 @@ mod tests {
         let registry = registry();
         let registration = surfaces::SurfaceRegistration {
             provider: surfaces::ProviderIdentity {
-                provider_id: "controller.builtin_sensitive".to_string(),
+                provider_id: "builtin.controller-sensitive".to_string(),
                 provider_kind: surfaces::ProviderKind::BuiltIn,
                 provider_namespace: "controller".to_string(),
             },
@@ -2347,7 +2479,7 @@ mod tests {
         let registry = registry();
         let built_in_registration = surfaces::SurfaceRegistration {
             provider: surfaces::ProviderIdentity {
-                provider_id: "controller.builtin".to_string(),
+                provider_id: "builtin.controller".to_string(),
                 provider_kind: surfaces::ProviderKind::BuiltIn,
                 provider_namespace: "controller".to_string(),
             },
@@ -2510,7 +2642,7 @@ mod tests {
         };
         let registry = SurfaceRegistry::new(config);
 
-        let mut registration = registration_for_service("provider-a", tenant_a());
+        let mut registration = registration_for_service("service.provider-a", tenant_a());
         let duplicate = registration.surfaces[0].interactions[0].clone();
         registration.surfaces[0].interactions.push(duplicate);
 
@@ -2534,7 +2666,7 @@ mod tests {
     fn registration_rejects_duplicate_universal_surface_in_same_scope() {
         let registry = registry();
 
-        let mut first = registration_for_service("provider-a", tenant_a());
+        let mut first = registration_for_service("service.provider-a", tenant_a());
         first.surfaces[0].descriptor.targeting = surfaces::Targeting::Universal;
         first.surfaces[0].interactions.clear();
         first.surfaces[0].data_sources.clear();
@@ -2556,7 +2688,7 @@ mod tests {
             )
             .expect("first registration should succeed");
 
-        let mut second = registration_for_service("provider-b", tenant_a());
+        let mut second = registration_for_service("service.provider-b", tenant_a());
         second.surfaces[0].descriptor.targeting = surfaces::Targeting::Universal;
         second.surfaces[0].interactions.clear();
         second.surfaces[0].data_sources.clear();
@@ -2587,7 +2719,7 @@ mod tests {
         registry
             .bootstrap_builtin(surfaces::SurfaceRegistration {
                 provider: surfaces::ProviderIdentity {
-                    provider_id: "controller.builtin".to_string(),
+                    provider_id: "builtin.controller".to_string(),
                     provider_kind: surfaces::ProviderKind::BuiltIn,
                     provider_namespace: "controller".to_string(),
                 },
@@ -2630,7 +2762,7 @@ mod tests {
                 Uuid::now_v7(),
                 "uptrakit-agent-ssh",
                 Some(tenant_a()),
-                registration_for_service("provider-a", tenant_a()),
+                registration_for_service("service.provider-a", tenant_a()),
             )
             .expect_err("service registration must fail when built-in already owns the surface");
         assert!(matches!(err, SurfaceRegistryError::ProviderConflict(_)));
@@ -2644,11 +2776,11 @@ mod tests {
                 Uuid::now_v7(),
                 "uptrakit-agent-ssh",
                 Some(tenant_a()),
-                registration_for_service("provider-a", tenant_a()),
+                registration_for_service("service.provider-a", tenant_a()),
             )
             .expect("first registration should succeed");
 
-        let mut conflicting = registration_for_service("provider-b", tenant_a());
+        let mut conflicting = registration_for_service("service.provider-b", tenant_a());
         conflicting.surfaces[0].descriptor.label = "Different label".to_string();
 
         let err = registry
@@ -2671,11 +2803,11 @@ mod tests {
                 existing_service_id,
                 "uptrakit-agent-ssh",
                 Some(tenant_a()),
-                registration_for_service("provider-a", tenant_a()),
+                registration_for_service("service.provider-a", tenant_a()),
             )
             .expect("initial registration should succeed");
 
-        let mut conflicting = registration_for_service("provider-b", tenant_a());
+        let mut conflicting = registration_for_service("service.provider-b", tenant_a());
         conflicting.surfaces[0].descriptor.label = "Different label".to_string();
         let incoming_service_id = Uuid::now_v7();
         let err = registry
@@ -2690,15 +2822,15 @@ mod tests {
         assert!(matches!(err, SurfaceRegistryError::ProviderConflict(_)));
         assert_eq!(
             registry.provider_id_for_service(&existing_service_id),
-            Some("provider-a".to_string())
+            Some("service.provider-a".to_string())
         );
-        assert_eq!(registry.provider_surface_count("provider-a"), 1);
+        assert_eq!(registry.provider_surface_count("service.provider-a"), 1);
         assert!(
             registry
                 .provider_id_for_service(&incoming_service_id)
                 .is_none()
         );
-        assert_eq!(registry.provider_surface_count("provider-b"), 0);
+        assert_eq!(registry.provider_surface_count("service.provider-b"), 0);
     }
 
     #[test]
@@ -2710,7 +2842,7 @@ mod tests {
                 service_id,
                 "uptrakit-agent-ssh",
                 Some(tenant_a()),
-                registration_for_service("provider-a", tenant_a()),
+                registration_for_service("service.provider-a", tenant_a()),
             )
             .expect("initial registration should succeed");
 
@@ -2719,23 +2851,23 @@ mod tests {
                 service_id,
                 "uptrakit-agent-ssh",
                 Some(tenant_a()),
-                registration_for_service("provider-b", tenant_a()),
+                registration_for_service("service.provider-b", tenant_a()),
             )
             .expect("provider rotation for same service should succeed");
 
         assert_eq!(
             registry.provider_id_for_service(&service_id),
-            Some("provider-b".to_string())
+            Some("service.provider-b".to_string())
         );
-        assert_eq!(registry.provider_surface_count("provider-a"), 0);
-        assert_eq!(registry.provider_surface_count("provider-b"), 1);
+        assert_eq!(registry.provider_surface_count("service.provider-a"), 0);
+        assert_eq!(registry.provider_surface_count("service.provider-b"), 1);
     }
 
     #[test]
     fn tenant_partition_visibility_accepts_non_canonical_tenant_uuid_string() {
         let registry = registry();
         let tenant = Uuid::parse_str("aaaaaaaa-1111-1111-1111-111111111111").unwrap();
-        let mut registration = registration_for_service("provider-a", tenant);
+        let mut registration = registration_for_service("service.provider-a", tenant);
         registration.effective_tenant_binding.tenant_id = Some(tenant.to_string().to_uppercase());
 
         registry
@@ -2763,7 +2895,7 @@ mod tests {
                 Uuid::now_v7(),
                 "uptrakit-agent-ssh",
                 Some(tenant_a()),
-                registration_for_service("provider-a", tenant_a()),
+                registration_for_service("service.provider-a", tenant_a()),
             )
             .expect("tenant a registration should succeed");
         registry
@@ -2771,7 +2903,7 @@ mod tests {
                 Uuid::now_v7(),
                 "uptrakit-agent-ssh",
                 Some(tenant_b()),
-                registration_for_service("provider-b", tenant_b()),
+                registration_for_service("service.provider-b", tenant_b()),
             )
             .expect("tenant b registration should succeed");
 
@@ -2781,14 +2913,14 @@ mod tests {
             &AllProvidersVisible,
         );
         assert_eq!(providers.len(), 1);
-        assert_eq!(providers[0].provider_id, "provider-a");
+        assert_eq!(providers[0].provider_id, "service.provider-a");
         assert!(providers[0].tenant_compatible);
     }
 
     #[test]
     fn list_surfaces_page_filter_uses_slot_mapping_not_surface_id_substring() {
         let registry = registry();
-        let mut registration = registration_for_service("provider-a", tenant_a());
+        let mut registration = registration_for_service("service.provider-a", tenant_a());
         registration.surfaces[0].descriptor.surface_id =
             surfaces::SurfaceId::new("settings.in.id").unwrap();
         registration.surfaces[0].descriptor.slot = surfaces::SLOT_SOFTWARE_TABS.to_string();
@@ -2831,7 +2963,7 @@ mod tests {
     #[test]
     fn list_surfaces_page_filter_includes_host_detail_slot_on_hosts_page() {
         let registry = registry();
-        let mut registration = registration_for_service("provider-a", tenant_a());
+        let mut registration = registration_for_service("service.provider-a", tenant_a());
         registration.surfaces[0].descriptor.surface_id =
             surfaces::SurfaceId::new("host.detail.surface").unwrap();
         registration.surfaces[0].descriptor.slot = "host_detail.tabs".to_string();
@@ -2866,7 +2998,7 @@ mod tests {
     #[test]
     fn list_surfaces_page_filter_includes_software_item_tabs_slot_on_software_page() {
         let registry = registry();
-        let mut registration = registration_for_service("provider-a", tenant_a());
+        let mut registration = registration_for_service("service.provider-a", tenant_a());
         registration.surfaces[0].descriptor.surface_id =
             surfaces::SurfaceId::new("software.item.tabs.surface").unwrap();
         registration.surfaces[0].descriptor.slot = surfaces::SLOT_SOFTWARE_ITEM_TABS.to_string();
@@ -2902,7 +3034,7 @@ mod tests {
     fn shared_surface_resolution_uses_default_provider_order() {
         let registry = registry();
         registry.register_provider_for_test(
-            registration_for_service("provider-a", tenant_a()),
+            registration_for_service("service.provider-a", tenant_a()),
             Some(Uuid::now_v7()),
             Some("uptrakit-agent-ssh"),
         );
@@ -2939,11 +3071,11 @@ mod tests {
                 "ssh.guest.panel",
                 "refresh",
                 None,
-                Some("provider-a"),
+                Some("service.provider-a"),
                 &AllProvidersVisible,
             )
             .expect("explicit service target should resolve");
-        assert_eq!(action.provider_id, "provider-a");
+        assert_eq!(action.provider_id, "service.provider-a");
         assert_eq!(action.provider_kind, surfaces::ProviderKind::Service);
     }
 
@@ -3006,7 +3138,7 @@ mod tests {
     fn service_provider_unaffected_by_deny_filter() {
         let registry = registry();
         registry.register_provider_for_test(
-            registration_for_service("provider-a", tenant_a()),
+            registration_for_service("service.provider-a", tenant_a()),
             Some(Uuid::now_v7()),
             Some("uptrakit-agent-ssh"),
         );
@@ -3016,7 +3148,7 @@ mod tests {
         assert!(
             surfaces
                 .iter()
-                .any(|surface| surface.provider_id == "provider-a"),
+                .any(|surface| surface.provider_id == "service.provider-a"),
             "a Service-kind provider must stay listed under the deny-all-plugins filter"
         );
 
@@ -3028,7 +3160,7 @@ mod tests {
         assert!(
             providers
                 .iter()
-                .any(|provider| provider.provider_id == "provider-a"),
+                .any(|provider| provider.provider_id == "service.provider-a"),
             "a Service-kind provider must remain a targeted candidate under the deny-all-plugins filter"
         );
     }
@@ -3190,7 +3322,7 @@ mod tests {
     #[test]
     fn registration_rejects_data_source_pagination_above_1000() {
         let registry = registry();
-        let mut registration = registration_for_service("provider-a", tenant_a());
+        let mut registration = registration_for_service("service.provider-a", tenant_a());
         registration.capabilities = surfaces::CapabilitySet::from_capabilities([
             surfaces::Capability::TextBlockNode,
             surfaces::Capability::TargetedTargeting,

@@ -312,7 +312,7 @@ mod tests {
                     service_id,
                     "uptrakit-mqtt",
                     Some(tenant_id),
-                    test_surface_registration("provider-mqtt", tenant_id),
+                    test_surface_registration("service.provider-mqtt", tenant_id),
                 )
                 .expect("service surface registration should succeed");
 
@@ -329,7 +329,7 @@ mod tests {
                     .surface_proxy_deps
                     .registry
                     .provider_id_for_service(&service_id),
-                Some("provider-mqtt".to_string())
+                Some("service.provider-mqtt".to_string())
             );
 
             let (service_tx, service_rx) = tokio::sync::mpsc::channel(1);

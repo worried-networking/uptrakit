@@ -959,7 +959,7 @@ mod tests {
                     .surface_proxy_deps
                     .registry
                     .provider_id_for_service(&service_id),
-                Some("provider-a".to_string())
+                Some("service.provider-a".to_string())
             );
 
             cleanup_authenticated_session(
@@ -1265,7 +1265,7 @@ mod tests {
                             "refresh".to_string(),
                             None,
                             "replaced-session-test".to_string(),
-                            Some("provider-a".to_string()),
+                            Some("service.provider-a".to_string()),
                             crate::surface_proxy::SurfaceCallerOrigin::UserSession {
                                 user_id: uuid::Uuid::now_v7(),
                                 session_id: "session-1".to_string(),
@@ -1559,9 +1559,9 @@ mod tests {
                     service_id,
                     "uptrakit-agent-ssh",
                     Some(tenant_id),
-                    test_surface_registration("provider-a", tenant_id),
+                    test_surface_registration("service.provider-a", tenant_id),
                 )
-                .expect("provider-a registration should succeed");
+                .expect("service.provider-a registration should succeed");
 
             let (_rx, _cancel) = state
                 .service_connections
@@ -1588,7 +1588,7 @@ mod tests {
                             "refresh".to_string(),
                             None,
                             "rotate-provider".to_string(),
-                            Some("provider-a".to_string()),
+                            Some("service.provider-a".to_string()),
                             crate::surface_proxy::SurfaceCallerOrigin::UserSession {
                                 user_id: Uuid::now_v7(),
                                 session_id: "session-1".to_string(),
@@ -1621,7 +1621,10 @@ mod tests {
             };
 
             let response = processor
-                .handle_surface_registration(test_surface_registration("provider-b", tenant_id))
+                .handle_surface_registration(test_surface_registration(
+                    "service.provider-b",
+                    tenant_id,
+                ))
                 .await;
             assert!(response.replies.is_empty());
             assert!(matches!(response.action, ProcessorAction::Continue));

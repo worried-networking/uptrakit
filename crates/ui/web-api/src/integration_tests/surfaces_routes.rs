@@ -20,7 +20,7 @@ use uuid::Uuid;
 fn test_surface_registration(tenant_id: Uuid) -> surfaces::SurfaceRegistration {
     surfaces::SurfaceRegistration {
         provider: surfaces::ProviderIdentity {
-            provider_id: "provider-a".to_string(),
+            provider_id: "service.provider-a".to_string(),
             provider_kind: surfaces::ProviderKind::Service,
             provider_namespace: "service".to_string(),
         },

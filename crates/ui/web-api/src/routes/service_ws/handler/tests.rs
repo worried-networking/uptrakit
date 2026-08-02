@@ -233,9 +233,9 @@ async fn surface_action_scope_violation_emits_denied_tenant_audit_row() {
             interaction_id: surfaces::InteractionId::new("smtp").unwrap(),
             method: Default::default(),
             idempotency_key: "scope-violation".to_string(),
-            target_provider_id: Some("provider-a".to_string()),
+            target_provider_id: Some("service.provider-a".to_string()),
             caller_origin: surfaces::CallerOrigin::Provider {
-                provider_id: "provider-a".to_string(),
+                provider_id: "service.provider-a".to_string(),
             },
             params: serde_json::Map::from_iter([(
                 "host".to_string(),
@@ -289,7 +289,7 @@ async fn surface_action_scope_violation_emits_denied_tenant_audit_row() {
     assert_eq!(details["service_app_name"], "uptrakit-mqtt");
     assert_eq!(details["surface_id"], "notifications.email");
     assert_eq!(details["interaction_id"], "smtp");
-    assert_eq!(details["target_provider_id"], "provider-a");
+    assert_eq!(details["target_provider_id"], "service.provider-a");
     assert_eq!(details["service_tenant_id"], tenant_id.to_string());
     assert_eq!(
         details["requested_tenant_id"],
@@ -333,9 +333,9 @@ async fn surface_action_invalid_payload_emits_validation_failed_tenant_audit_row
             interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
             method: Default::default(),
             idempotency_key: "x".repeat(MAX_SHORT_STRING_LEN + 1),
-            target_provider_id: Some("provider-a".to_string()),
+            target_provider_id: Some("service.provider-a".to_string()),
             caller_origin: surfaces::CallerOrigin::Provider {
-                provider_id: "provider-a".to_string(),
+                provider_id: "service.provider-a".to_string(),
             },
             params: serde_json::Map::new(),
             encrypted_sensitive_params: None,
@@ -377,7 +377,7 @@ async fn surface_action_invalid_payload_emits_validation_failed_tenant_audit_row
         .expect("invalid payload audit should include details");
     assert_eq!(details["surface_id"], "ssh.guest.panel");
     assert_eq!(details["interaction_id"], "refresh");
-    assert_eq!(details["target_provider_id"], "provider-a");
+    assert_eq!(details["target_provider_id"], "service.provider-a");
     assert_eq!(details["reason_code"], "invalid_request");
     assert!(details.get("params").is_none());
 }
@@ -416,9 +416,9 @@ async fn surface_action_invalid_tenant_emits_validation_failed_tenant_audit_row(
             interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
             method: Default::default(),
             idempotency_key: "invalid-tenant".to_string(),
-            target_provider_id: Some("provider-a".to_string()),
+            target_provider_id: Some("service.provider-a".to_string()),
             caller_origin: surfaces::CallerOrigin::Provider {
-                provider_id: "provider-a".to_string(),
+                provider_id: "service.provider-a".to_string(),
             },
             params: serde_json::Map::new(),
             encrypted_sensitive_params: None,
@@ -455,7 +455,7 @@ async fn surface_action_invalid_tenant_emits_validation_failed_tenant_audit_row(
         .expect("invalid tenant audit should include details");
     assert_eq!(details["surface_id"], "ssh.guest.panel");
     assert_eq!(details["interaction_id"], "refresh");
-    assert_eq!(details["target_provider_id"], "provider-a");
+    assert_eq!(details["target_provider_id"], "service.provider-a");
     assert_eq!(details["reason_code"], "invalid_tenant_id");
     assert!(details.get("params").is_none());
 }
@@ -468,7 +468,7 @@ async fn surface_action_lookup_failure_emits_validation_failed_tenant_audit_row(
     let state = build_db_audited_state(db.clone(), tenant_id).await;
     let service_id = Uuid::now_v7();
     insert_test_service_row(&db, tenant_id, service_id, "uptrakit-agent-ssh").await;
-    let mut registration = test_surface_registration("provider-a", tenant_id);
+    let mut registration = test_surface_registration("service.provider-a", tenant_id);
     registration.surfaces[0].interactions[0].required_permission = None;
     state
         .surface_proxy_deps
@@ -508,7 +508,7 @@ async fn surface_action_lookup_failure_emits_validation_failed_tenant_audit_row(
             idempotency_key: "lookup-failure".to_string(),
             target_provider_id: Some("missing-provider".to_string()),
             caller_origin: surfaces::CallerOrigin::Provider {
-                provider_id: "provider-a".to_string(),
+                provider_id: "service.provider-a".to_string(),
             },
             params: serde_json::Map::new(),
             encrypted_sensitive_params: None,
@@ -559,7 +559,7 @@ async fn surface_action_success_emits_success_tenant_audit_row() {
     let state = build_db_audited_state(db.clone(), tenant_id).await;
     let service_id = Uuid::now_v7();
     insert_test_service_row(&db, tenant_id, service_id, "uptrakit-agent-ssh").await;
-    let mut registration = test_surface_registration("provider-a", tenant_id);
+    let mut registration = test_surface_registration("service.provider-a", tenant_id);
     registration.surfaces[0].interactions[0].required_permission = None;
     state
         .surface_proxy_deps
@@ -621,9 +621,9 @@ async fn surface_action_success_emits_success_tenant_audit_row() {
             interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
             method: Default::default(),
             idempotency_key: "surface-success".to_string(),
-            target_provider_id: Some("provider-a".to_string()),
+            target_provider_id: Some("service.provider-a".to_string()),
             caller_origin: surfaces::CallerOrigin::Provider {
-                provider_id: "provider-a".to_string(),
+                provider_id: "service.provider-a".to_string(),
             },
             params: serde_json::Map::new(),
             encrypted_sensitive_params: None,
@@ -664,7 +664,7 @@ async fn surface_action_success_emits_success_tenant_audit_row() {
         .expect("success audit should include details");
     assert_eq!(details["surface_id"], "ssh.guest.panel");
     assert_eq!(details["interaction_id"], "refresh");
-    assert_eq!(details["target_provider_id"], "provider-a");
+    assert_eq!(details["target_provider_id"], "service.provider-a");
     assert_eq!(details["provider_kind"], "service");
     assert_eq!(details["provider_service_app_name"], "uptrakit-agent-ssh");
     assert!(details.get("reason_code").is_none());
@@ -679,7 +679,7 @@ async fn surface_action_provider_unavailable_emits_failed_tenant_audit_row() {
     let state = build_db_audited_state(db.clone(), tenant_id).await;
     let service_id = Uuid::now_v7();
     insert_test_service_row(&db, tenant_id, service_id, "uptrakit-agent-ssh").await;
-    let mut registration = test_surface_registration("provider-a", tenant_id);
+    let mut registration = test_surface_registration("service.provider-a", tenant_id);
     registration.surfaces[0].interactions[0].required_permission = None;
     state
         .surface_proxy_deps
@@ -728,9 +728,9 @@ async fn surface_action_provider_unavailable_emits_failed_tenant_audit_row() {
             interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
             method: Default::default(),
             idempotency_key: "surface-provider-unavailable".to_string(),
-            target_provider_id: Some("provider-a".to_string()),
+            target_provider_id: Some("service.provider-a".to_string()),
             caller_origin: surfaces::CallerOrigin::Provider {
-                provider_id: "provider-a".to_string(),
+                provider_id: "service.provider-a".to_string(),
             },
             params: serde_json::Map::new(),
             encrypted_sensitive_params: None,
@@ -771,7 +771,7 @@ async fn surface_action_provider_unavailable_emits_failed_tenant_audit_row() {
         .expect("failed audit should include details");
     assert_eq!(details["surface_id"], "ssh.guest.panel");
     assert_eq!(details["interaction_id"], "refresh");
-    assert_eq!(details["target_provider_id"], "provider-a");
+    assert_eq!(details["target_provider_id"], "service.provider-a");
     assert_eq!(details["provider_kind"], "service");
     assert_eq!(details["provider_service_app_name"], "uptrakit-agent-ssh");
     assert_eq!(details["reason_code"], "provider_unavailable");
@@ -802,7 +802,7 @@ async fn invalid_surface_registration_emits_validation_failed_tenant_audit_row()
         linked_host_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
         report_tracker: ReportTracker::new(),
     };
-    let mut registration = test_surface_registration("provider-a", tenant_id);
+    let mut registration = test_surface_registration("service.provider-a", tenant_id);
     registration.effective_tenant_binding.tenant_id = None;
 
     let response = processor.handle_surface_registration(registration).await;
@@ -829,13 +829,13 @@ async fn invalid_surface_registration_emits_validation_failed_tenant_audit_row()
         uptrakit_audit_log::AuditOutcome::ValidationFailed.as_str()
     );
     assert_eq!(row.target_type.as_deref(), Some("surface_provider"));
-    assert_eq!(row.target_id.as_deref(), Some("provider-a"));
-    assert_eq!(row.target_display.as_deref(), Some("provider-a"));
+    assert_eq!(row.target_id.as_deref(), Some("service.provider-a"));
+    assert_eq!(row.target_display.as_deref(), Some("service.provider-a"));
     let details = row
         .details_json
         .as_ref()
         .expect("validation failure audit should include details");
-    assert_eq!(details["provider_id"], "provider-a");
+    assert_eq!(details["provider_id"], "service.provider-a");
     assert_eq!(details["provider_kind"], "service");
     assert_eq!(details["framework_generation"], "1.0");
     assert_eq!(details["capability_count"], 4);
@@ -868,7 +868,7 @@ async fn incompatible_surface_registration_emits_denied_tenant_audit_row() {
         linked_host_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
         report_tracker: ReportTracker::new(),
     };
-    let mut registration = test_surface_registration("provider-a", tenant_id);
+    let mut registration = test_surface_registration("service.provider-a", tenant_id);
     registration.framework_generation = surfaces::FrameworkGeneration::new(2, 0);
 
     let response = processor.handle_surface_registration(registration).await;
@@ -895,13 +895,13 @@ async fn incompatible_surface_registration_emits_denied_tenant_audit_row() {
         uptrakit_audit_log::AuditOutcome::Denied.as_str()
     );
     assert_eq!(row.target_type.as_deref(), Some("surface_provider"));
-    assert_eq!(row.target_id.as_deref(), Some("provider-a"));
-    assert_eq!(row.target_display.as_deref(), Some("provider-a"));
+    assert_eq!(row.target_id.as_deref(), Some("service.provider-a"));
+    assert_eq!(row.target_display.as_deref(), Some("service.provider-a"));
     let details = row
         .details_json
         .as_ref()
         .expect("rejection audit should include details");
-    assert_eq!(details["provider_id"], "provider-a");
+    assert_eq!(details["provider_id"], "service.provider-a");
     assert_eq!(details["provider_kind"], "service");
     assert_eq!(details["framework_generation"], "2.0");
     assert_eq!(details["capability_count"], 4);
@@ -934,7 +934,7 @@ async fn successful_system_surface_registration_emits_success_system_audit_row()
         linked_host_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
         report_tracker: ReportTracker::new(),
     };
-    let mut registration = test_surface_registration("provider-system", tenant_id);
+    let mut registration = test_surface_registration("service.provider-system", tenant_id);
     registration.effective_tenant_binding.scope = surfaces::Scope::Global;
     registration.effective_tenant_binding.tenant_id = None;
 
@@ -959,13 +959,16 @@ async fn successful_system_surface_registration_emits_success_system_audit_row()
         uptrakit_audit_log::AuditOutcome::Success.as_str()
     );
     assert_eq!(row.target_type.as_deref(), Some("surface_provider"));
-    assert_eq!(row.target_id.as_deref(), Some("provider-system"));
-    assert_eq!(row.target_display.as_deref(), Some("provider-system"));
+    assert_eq!(row.target_id.as_deref(), Some("service.provider-system"));
+    assert_eq!(
+        row.target_display.as_deref(),
+        Some("service.provider-system")
+    );
     let details = row
         .details_json
         .as_ref()
         .expect("success audit should include details");
-    assert_eq!(details["provider_id"], "provider-system");
+    assert_eq!(details["provider_id"], "service.provider-system");
     assert_eq!(details["provider_kind"], "service");
     assert_eq!(details["framework_generation"], "1.0");
     assert_eq!(details["capability_count"], 4);
@@ -1006,7 +1009,7 @@ async fn surface_registration_success_broadcasts_surfaces_changed() {
         report_tracker: ReportTracker::new(),
     };
     let response = processor
-        .handle_surface_registration(test_surface_registration("provider-a", tenant_id))
+        .handle_surface_registration(test_surface_registration("service.provider-a", tenant_id))
         .await;
 
     assert!(response.replies.is_empty(), "success path returns cont()");
@@ -1028,7 +1031,7 @@ async fn surface_registration_rejection_does_not_broadcast() {
     insert_test_service_row(&db, tenant_id, service_id, "uptrakit-agent-ssh").await;
     insert_test_service_row(&db, tenant_id, service_id_b, "uptrakit-agent-ssh-2").await;
 
-    // Register provider-a from service_id (succeeds).
+    // Register service.provider-a from service_id (succeeds).
     state
         .surface_proxy_deps
         .registry
@@ -1036,7 +1039,7 @@ async fn surface_registration_rejection_does_not_broadcast() {
             service_id,
             "uptrakit-agent-ssh",
             Some(tenant_id),
-            test_surface_registration("provider-a", tenant_id),
+            test_surface_registration("service.provider-a", tenant_id),
         )
         .expect("first registration should succeed");
 
@@ -1046,8 +1049,8 @@ async fn surface_registration_rejection_does_not_broadcast() {
         .subscribe(tenant_id)
         .await;
 
-    // Try to claim the SAME provider ID ("provider-a") from a different service
-    // (service_id_b). The registry rejects this because provider-a is already bound
+    // Try to claim the SAME provider ID ("service.provider-a") from a different service
+    // (service_id_b). The registry rejects this because service.provider-a is already bound
     // to service_id — two different services cannot share the same provider ID.
     let processor = MessageProcessor {
         state: Arc::clone(&state),
@@ -1066,7 +1069,7 @@ async fn surface_registration_rejection_does_not_broadcast() {
         report_tracker: ReportTracker::new(),
     };
     let response = processor
-        .handle_surface_registration(test_surface_registration("provider-a", tenant_id))
+        .handle_surface_registration(test_surface_registration("service.provider-a", tenant_id))
         .await;
 
     assert!(
@@ -1134,7 +1137,7 @@ fn register_calling_service_as_provider(
             service_id,
             "uptrakit-agent-ssh",
             Some(tenant_id),
-            test_surface_registration("provider-a", tenant_id),
+            test_surface_registration("service.provider-a", tenant_id),
         )
         .expect("calling service should register as a surface provider");
 }
@@ -1183,7 +1186,7 @@ async fn provider_origin_denied_for_unflagged_permissioned_interaction() {
             idempotency_key: "provider-origin-discover-denied".to_string(),
             target_provider_id: Some("plugin.infrastructure.proxmox".to_string()),
             caller_origin: surfaces::CallerOrigin::Provider {
-                provider_id: "provider-a".to_string(),
+                provider_id: "service.provider-a".to_string(),
             },
             params: serde_json::Map::new(),
             encrypted_sensitive_params: None,
@@ -1276,7 +1279,7 @@ async fn provider_origin_unmatched_guests_executes_and_audits_service_actor() {
             idempotency_key: "provider-origin-unmatched-guests".to_string(),
             target_provider_id: Some("plugin.infrastructure.proxmox".to_string()),
             caller_origin: surfaces::CallerOrigin::Provider {
-                provider_id: "provider-a".to_string(),
+                provider_id: "service.provider-a".to_string(),
             },
             params: serde_json::Map::from_iter([(
                 "per_page".to_string(),
@@ -1383,7 +1386,7 @@ async fn provider_origin_unmatched_guests_resolves_target_from_surface() {
             idempotency_key: "provider-origin-unmatched-guests-implicit".to_string(),
             target_provider_id: None,
             caller_origin: surfaces::CallerOrigin::Provider {
-                provider_id: "provider-a".to_string(),
+                provider_id: "service.provider-a".to_string(),
             },
             params: serde_json::Map::from_iter([(
                 "per_page".to_string(),
@@ -1485,7 +1488,7 @@ async fn provider_origin_match_completes_handler() {
             idempotency_key: "provider-origin-match".to_string(),
             target_provider_id: Some("plugin.infrastructure.proxmox".to_string()),
             caller_origin: surfaces::CallerOrigin::Provider {
-                provider_id: "provider-a".to_string(),
+                provider_id: "service.provider-a".to_string(),
             },
             params: serde_json::Map::from_iter([
                 ("mapping_id".to_string(), serde_json::json!(mapping_id)),
@@ -1565,7 +1568,7 @@ async fn provider_origin_denied_for_live_disabled_plugin() {
             idempotency_key: "provider-origin-live-disabled".to_string(),
             target_provider_id: None,
             caller_origin: surfaces::CallerOrigin::Provider {
-                provider_id: "provider-a".to_string(),
+                provider_id: "service.provider-a".to_string(),
             },
             params: serde_json::Map::new(),
             encrypted_sensitive_params: None,
@@ -1664,7 +1667,7 @@ async fn provider_origin_toggle_then_invoke_without_restart_is_denied() {
             idempotency_key: "provider-origin-toggle-enabled".to_string(),
             target_provider_id: None,
             caller_origin: surfaces::CallerOrigin::Provider {
-                provider_id: "provider-a".to_string(),
+                provider_id: "service.provider-a".to_string(),
             },
             params: serde_json::Map::new(),
             encrypted_sensitive_params: None,
@@ -1716,7 +1719,7 @@ async fn provider_origin_toggle_then_invoke_without_restart_is_denied() {
             idempotency_key: "provider-origin-toggle-disabled".to_string(),
             target_provider_id: None,
             caller_origin: surfaces::CallerOrigin::Provider {
-                provider_id: "provider-a".to_string(),
+                provider_id: "service.provider-a".to_string(),
             },
             params: serde_json::Map::new(),
             encrypted_sensitive_params: None,

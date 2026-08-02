@@ -379,7 +379,7 @@ pub(super) fn register_test_runtime_state(
             service_id,
             "uptrakit-agent-ssh",
             Some(tenant_id),
-            test_surface_registration("provider-a", tenant_id),
+            test_surface_registration("service.provider-a", tenant_id),
         )
         .expect("surface registration should succeed");
 }

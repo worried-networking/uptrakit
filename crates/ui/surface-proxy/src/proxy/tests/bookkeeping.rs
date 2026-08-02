@@ -56,7 +56,7 @@ fn take_pending_does_not_evict_a_reused_idempotency_reservation() {
     state.pending.insert(
         owner_a,
         PendingRequest {
-            provider_id: "provider-a".to_string(),
+            provider_id: "service.provider-a".to_string(),
             tenant_id: Uuid::nil(),
             idempotency_key: key.clone(),
             deadline: Instant::now() + Duration::from_secs(30),
@@ -65,7 +65,7 @@ fn take_pending_does_not_evict_a_reused_idempotency_reservation() {
     );
     *state
         .in_flight_per_provider
-        .entry("provider-a".to_string())
+        .entry("service.provider-a".to_string())
         .or_default() += 1;
     *state.in_flight_per_tenant.entry(Uuid::nil()).or_default() += 1;
     state.reserve_idempotency(
@@ -103,7 +103,7 @@ fn cleanup_expired_reaps_orphaned_in_flight_past_deadline_plus_margin() {
         .expect("test clock is far enough past boot to subtract the sweep margin");
     state.register_pending(PendingRegistration {
         request_id,
-        provider_id: "provider-a",
+        provider_id: "service.provider-a",
         tenant_id: Uuid::nil(),
         idempotency_key: idem_key("orphan"),
         request_fingerprint: 1,
@@ -111,7 +111,10 @@ fn cleanup_expired_reaps_orphaned_in_flight_past_deadline_plus_margin() {
         sender: tx,
     });
     assert_eq!(
-        state.in_flight_per_provider.get("provider-a").copied(),
+        state
+            .in_flight_per_provider
+            .get("service.provider-a")
+            .copied(),
         Some(1)
     );
 
@@ -143,7 +146,7 @@ fn cleanup_expired_spares_slow_but_alive_request_and_records_no_failure() {
     // Deadline still 300s in the future ⇒ slow-but-alive, must not be reaped.
     state.register_pending(PendingRegistration {
         request_id,
-        provider_id: "provider-a",
+        provider_id: "service.provider-a",
         tenant_id: Uuid::nil(),
         idempotency_key: idem_key("slow"),
         request_fingerprint: 1,
@@ -158,7 +161,10 @@ fn cleanup_expired_spares_slow_but_alive_request_and_records_no_failure() {
         "slow-but-alive request must survive the sweep"
     );
     assert_eq!(
-        state.in_flight_per_provider.get("provider-a").copied(),
+        state
+            .in_flight_per_provider
+            .get("service.provider-a")
+            .copied(),
         Some(1),
         "counter untouched"
     );

@@ -199,7 +199,7 @@ mod tests {
             surface_registration_error_message(
                 &crate::surface_registry::SurfaceRegistryError::ProviderRejected(
                     crate::surface_registry::SurfaceProviderRejection::new(
-                        "provider-a".to_string(),
+                        "service.provider-a".to_string(),
                         vec![crate::surface_registry::SurfaceProviderRejectionReason::new(
                         crate::surface_registry::SurfaceProviderRejectionCode::InvalidTransport,
                         "invalid transport".to_string(),
@@ -211,7 +211,7 @@ mod tests {
 
         let parsed: serde_json::Value =
             serde_json::from_str(&message).expect("expected JSON rejection payload");
-        assert_eq!(parsed["provider_id"], "provider-a");
+        assert_eq!(parsed["provider_id"], "service.provider-a");
         assert_eq!(parsed["reasons"][0]["message"], "invalid transport");
     }
 
