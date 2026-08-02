@@ -42,7 +42,12 @@ cannot land, including duplicates produced by merges and rebases. All future ADR
    `**Status:**`/`**Date:**` inline lines rather than duplicating them), add missing section headings
    above existing prose. Prose untouched save for explicitly-listed one-sentence bridges where a
    required section has no prose at all. No rule suppression for format rules, no full rewrite.
-2. **Duplicate resolution: `0033-shared-zeroconf-crate.md` → `0034-shared-zeroconf-crate.md`.** The
+2. **Duplicate resolution: `0033-shared-zeroconf-crate.md` → `0035-shared-zeroconf-crate.md`.**
+   **0034 is reserved**: the in-flight plan
+   `docs/superpowers/plans/2026-07-30-plugin-provider-identity-unification.md` mints ADR-0034 and
+   bakes the number into code comments across its tasks, so its renumber cost is higher — this spec
+   yields (both documents now state the coordination; the plan's own re-verify clause names this
+   spec). The
    `0014` gap stays (doctor gap rule suppressed; see config). No mass renumbering.
 3. **Missing local binary: warn-and-skip for `adrs doctor` in hooks; CI is the hard gate.** The
    duplicate-number guard is pure shell (no binary needed) and always hard-fails locally.
@@ -86,7 +91,10 @@ that one line; bumping it is a normal PR.
 
 ### 2. Corpus import (mechanical, content-preserving)
 
-- Rename `0033-shared-zeroconf-crate.md` → `0034-shared-zeroconf-crate.md`. Reference sweep is derived at
+- Rename `0033-shared-zeroconf-crate.md` → `0035-shared-zeroconf-crate.md` (0034 reserved by the
+  in-flight identity-unification plan — see Decisions). All target numbers here are provisional:
+  re-verify the free set with `ls docs/adr/` immediately before executing the rename/`adrs new`
+  steps, and re-point the sweep greps if the landscape moved. Reference sweep is derived at
   plan time by grep, not from memory, covering the site classes: exact path literal
   (`0033-shared-zeroconf-crate`), bare `ADR-0033` refs whose context means zeroconf (known: 2 in
   `docs/superpowers/plans/2026-07-29-zeroconf-b-cli-discovery.md` /
@@ -239,7 +247,7 @@ are user-global (outside the repo) — updated in place, not part of the repo co
 Code / config:
 
 1. `.adr-dir`, `adrs.toml` (repo root, committed).
-2. Corpus normalization commit(s): 0033→0034 rename + reference sweep; header normalization /
+2. Corpus normalization commit(s): 0033→0035 rename + reference sweep; header normalization /
    inline-metadata conversion across the corpus (each file gains only what it lacks); then
    `adrs link 33 Supersedes 6` + link-landed assertion.
 3. `ci/verify_adr_numbers.sh` (dup guard, two modes, RED-probed; parity sibling
@@ -251,7 +259,8 @@ Code / config:
 
 Documentation (all repo docs must pass markdownlint):
 
-1. Meta-ADR `0035-manage-adrs-with-adrs.md` — created via `adrs new`.
+1. Meta-ADR `0036-manage-adrs-with-adrs.md` — created via `adrs new` (number provisional; the tool
+   allocates max+1 at creation time, which is the point).
 2. `docs/development/architecture-decision-records.md` — process doc: creating ADRs with `adrs`,
    config meaning, gate layering, collision recovery.
 3. `docs/development/quality-gates.md` — new gate entries (canonical source) **and** the AGENTS.md
@@ -274,7 +283,7 @@ Documentation (all repo docs must pass markdownlint):
 
 - **Doctor parsing is title-keyed.** Pre-normalization gap/duplicate output is partly spurious; the plan
   re-measures doctor output after normalization instead of trusting today's numbers.
-- **Rename sweep classes.** The 0033→0034 sweep greps exact literals, composed forms, and bare-word
+- **Rename sweep classes.** The 0033→0035 sweep greps exact literals, composed forms, and bare-word
   `\bADR-0033\b` mentions (comments/help text), scoped per hit to zeroconf attribution — never a
   remembered file list.
 - **Hook bypass honesty.** `--no-verify` skips every local hook; `post-rewrite` cannot abort; a
