@@ -54,7 +54,8 @@ consumes — descriptor and dispatch are now authored at the same call site, so 
 The `surface_actions: { actions, handle_action }` and `owned_surface_ids:` arms are gone. The single
 `surfaces: { provider_id, registrations }` arm takes a `fn() -> Vec<PluginSurfaceRegistration>`. A plugin
 developer touches only their own crate — the registrations fn and its handler shims — never a global
-routing table.
+routing table. (Amended by ADR-0034: the arm is now `surfaces: { registrations }` — the provider id
+derives from the descriptor's `type_id`.)
 
 ### Exact-id routing replaces longest-prefix routing
 

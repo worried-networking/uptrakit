@@ -103,6 +103,8 @@ Service and plugin providers are admitted through `SurfaceRegistry` with strict 
 - required capability coverage
 - slot ID validation against central slot registry
 - provider-kind/transport compatibility
+- provider-id namespace per source kind (`service.` / `builtin.` / neither for plugins) — fail-closed
+  (ADR-0034)
 - tenant-binding correctness for authenticated service context
 - allowlist checks for controller queries and SSE topics
 - contract shape and depth limits

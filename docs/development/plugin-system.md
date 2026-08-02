@@ -581,7 +581,6 @@ declare_plugin!(WebhookPlugin, WebhookConfig, "notifications.webhook", {
     roles: [NotificationTransport],
     notification_transport: create_webhook_transport,
     surfaces: {
-        provider_id: "plugin.notifications.webhook",
         registrations: webhook_plugin_surfaces,
     },
 });

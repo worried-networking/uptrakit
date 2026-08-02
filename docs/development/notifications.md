@@ -148,7 +148,6 @@ declare_plugin!(WebhookPlugin, WebhookChannelConfig, "notifications.webhook", {
     notification_transport: create_webhook_transport,
     raw_settings_keys: &[],
     surfaces: {
-        provider_id: "plugin.notifications.webhook",
         registrations: webhook_plugin_surfaces,
     },
 });
@@ -355,7 +354,6 @@ declare_plugin!(SlackPlugin, SlackChannelConfig, "slack", {
     notification_transport: create_slack_transport,
     raw_settings_keys: &[],
     surfaces: {
-        provider_id: "plugin.slack",
         registrations: slack_plugin_surfaces,
     },
 });
@@ -434,7 +432,7 @@ transport field directly. The shared `list_channels` helper (in `uptrakit-notifi
 behind the `extensions` feature) provides pagination and config flattening that all notification
 plugins share. See [Shared list_channels helper](#shared-list_channels-helper) for details.
 
-The `declare_plugin!` macro's `surfaces: { provider_id, registrations }` arm wires the `*_plugin_surfaces`
+The `declare_plugin!` macro's `surfaces: { registrations }` arm wires the `*_plugin_surfaces`
 fn into the descriptor; `PluginCatalog` derives the exact-id `(surface_id, interaction_id)` dispatch map
 from it at build time. Each handler receives a `descriptor::SurfaceActionContext` exposing the typed
 controller boundary via its `controller` field -- use its accessors (`ctx.tenant_id()`,
@@ -886,7 +884,7 @@ without transport-specific branching in frontend route code.
 
 Each notification plugin owns its interaction registrations and handlers in a `surfaces.rs` module
 within the plugin crate. This keeps all transport-specific knowledge co-located with the plugin
-implementation. `declare_plugin!`'s single `surfaces: { provider_id, registrations }` arm
+implementation. `declare_plugin!`'s single `surfaces: { registrations }` arm
 (ADR-0028) is the source for both: `registrations` is a `fn() -> Vec<PluginSurfaceRegistration>`
 where each interaction is a `RegisteredInteraction::new(descriptor, delivery)` pairing a
 `surfaces::InteractionDescriptor` with an `InteractionDelivery` -- `PluginHandled(shim)` for

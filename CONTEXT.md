@@ -158,7 +158,8 @@ Slots allow many.
 _Avoid_: placeholder, region
 
 **Surface Provider**:
-A built-in, Plugin, or Service that registers a Surface into a Slot at runtime.
+A built-in, Plugin, or Service that registers a Surface into a Slot at runtime. A Plugin
+provider's id is its plugin type id; Service ids are `service.`-prefixed, built-ins `builtin.`.
 _Avoid_: plugin provider (conflates with Plugin), contributor
 
 **TOFU mode**:

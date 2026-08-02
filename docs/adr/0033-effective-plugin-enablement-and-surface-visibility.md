@@ -60,6 +60,10 @@ descriptor whose `descriptor.surfaces.provider_id` equals the requested `provide
 descriptor is not visible (fail-closed) — `provider_id` is never treated as a `PluginTypeId` directly;
 the two identifier spaces are distinct and the match is by field equality, not by reuse.
 
+**Amended by ADR-0034:** the authored `provider_id` field is deleted; the filter now resolves
+`provider_id` directly as the plugin type id (the identity is structural, so the "never treated as a
+PluginTypeId" caveat no longer applies).
+
 **Alternatives rejected:**
 
 - **`provider_to_type` index on the catalog:** rejected in a prior review round — `all()` already

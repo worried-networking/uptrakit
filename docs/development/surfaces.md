@@ -24,7 +24,9 @@ Three provider kinds are supported:
 - `Plugin` — controller startup bootstrap (`PluginSurfaceOps::surface_registrations()`)
 - `BuiltIn` — controller startup bootstrap for built-in controllers/providers
 
-Provider identity is `provider_id` + `provider_kind`.
+Provider identity is `provider_id` + `provider_kind`. For `Plugin`-kind providers the `provider_id` IS
+the plugin type id (ADR-0034); admission enforces `service.`-prefixed ids for `Service` providers and
+`builtin.` for `BuiltIn` providers, and rejects either reserved root on `Plugin`-kind ids.
 
 ## Slot registry ownership
 
@@ -167,7 +169,8 @@ bootstraps these registrations into `SurfaceRegistry`.
 
 Plugin-side surfaces and interactions have a single source of truth (ADR-0028;
 `crates/plugins/infrastructure/core/src/registration.rs`): the `declare_plugin!` macro's
-`surfaces: { provider_id, registrations }` arm, where `registrations` is a `fn() -> Vec<PluginSurfaceRegistration>`.
+`surfaces: { registrations }` arm, where `registrations` is a `fn() -> Vec<PluginSurfaceRegistration>`
+(the provider id is derived from the descriptor's `type_id`, ADR-0034 — not authored in this arm).
 Each interaction is a `RegisteredInteraction::new(descriptor, delivery)`, pairing a wire
 `surfaces::InteractionDescriptor` with an `InteractionDelivery`. `RegisteredInteraction::new` derives
 `descriptor.transport` from the delivery and overwrites whatever the caller set — transport is never
