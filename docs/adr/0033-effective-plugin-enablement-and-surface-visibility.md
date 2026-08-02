@@ -14,7 +14,7 @@ Instance-plugin enablement had two diverging sources of truth (boot catalog vs l
 and ADR-0006 Decision 4's visibility gating was enforced on none of the surfaces legs (dead predicate
 key on list, no filter on providers/read/invoke/provider-origin).
 
-## Decisions
+## Decision
 
 - **Effective = boot ∧ live.** A plugin is tenant-effective only when the boot catalog constructed it
   AND the live snapshot says enabled. Disable takes effect immediately; enable stays pending-restart
@@ -84,6 +84,10 @@ PluginTypeId" caveat no longer applies).
   types); cycle or duplication.
 - **Per-leg call sites + CI grep gate:** keeps the drift class that produced this bug; the prior
   docs-only mitigation for a same-class bug in this area is already disproven by recurrence.
+
+## Consequences
+
+The per-tier outcome matrix above records the operative consequences.
 
 ## References
 

@@ -18,6 +18,10 @@ level by an administrator with `ManageGlobalSettings` authority. The first concr
 Four decisions shaped the implementation. Each is recorded here with the rejected alternative and
 the rationale.
 
+## Decision
+
+The four numbered decisions below constitute the decision record.
+
 ## Decision 1 — Dedicated `instance_plugin_setting` table, not raw keys in `global_settings`
 
 Instance plugin state is stored in a purpose-built `instance_plugin_setting` table with columns

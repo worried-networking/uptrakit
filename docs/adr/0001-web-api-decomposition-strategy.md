@@ -6,6 +6,8 @@ Date: 2026-05-01
 
 Accepted
 
+## Context
+
 `uptrakit-web-api` is large enough to cause real navigation and compile-time
 friction. The naive fix — extract all business logic into one monolithic parent
 crate (`uptrakit-domain-ops`) that `web-api` depends on — would rename the problem
@@ -15,6 +17,8 @@ minimal because the heavy dependencies (`sea-orm`, crypto) already live in
 substantive orchestration (21–589 lines per file) but has no single coherent concept
 and is called from many route files, so it does not qualify as an extraction unit on
 its own.
+
+## Decision
 
 We adopt **targeted per-concept extraction** instead. A subsystem is extracted into
 its own crate only when it passes all three of:

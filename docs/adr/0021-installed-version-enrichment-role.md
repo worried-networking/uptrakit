@@ -60,6 +60,10 @@ Add a new typed plugin role `InstalledVersionEnricher`:
 The Skills enricher caps the commits-by-path walk at 90 to bound API cost. If `out_of_window` becomes a common reason tag in production,
 raise the cap or pair it with a persistent per-`(owner, repo, path)` SHA→date cache.
 
+## Consequences
+
+Consequences are captured in the Write semantics, Observability, and Operational note sections above.
+
 ## Alternatives considered
 
 - **Plugin-type switch in web-api** — rejected: violates ADR-0018.

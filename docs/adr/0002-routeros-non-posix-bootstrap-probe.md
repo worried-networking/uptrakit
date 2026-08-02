@@ -6,6 +6,13 @@ Date: 2026-05-07
 
 Accepted
 
+## Context
+
+Agent-SSH must manage RouterOS hosts alongside POSIX hosts; the three titled sections below record the related
+decisions on detection, trait placement, and capability access.
+
+## Decision
+
 ## Probe-then-route detection during bootstrap
 
 When Agent-SSH bootstraps a new host it connects over SSH, but the operator does
@@ -72,3 +79,8 @@ This is the same pattern already used for `ControllerRuntime` on the
 controller-side plugin path. It extends runtime capabilities without growing the
 base trait, keeps the extension invisible to plugins that do not need it, and
 requires no changes to the plugin system's dispatch or registry logic.
+
+## Consequences
+
+Consequences are recorded inline in each section above (accepted TOCTOU window, dependency-direction constraint,
+downcast failure semantics).
