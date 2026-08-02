@@ -7,6 +7,8 @@ Date: 2026-05-11
 Accepted — Decision 4 superseded and Decision 2 refined by
 [ADR-0033](0033-effective-plugin-enablement-and-surface-visibility.md) (effective = boot ∧ live)
 
+Superseded by [33. 0033 — Effective Plugin Enablement and Surface Visibility](0033-effective-plugin-enablement-and-surface-visibility.md)
+
 ## Context
 
 The plugin system previously recognised only one configuration scope: Tenant-Scoped plugins, where

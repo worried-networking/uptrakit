@@ -8,6 +8,8 @@ Accepted
 
 **Supersedes:** ADR-0006 Decision 4 (single-predicate surfaces gating)
 
+Supersedes [6. 0006 — Instance-Scoped Plugins](0006-instance-scoped-plugins.md)
+
 ## Context
 
 Instance-plugin enablement had two diverging sources of truth (boot catalog vs live ArcSwap snapshot),
