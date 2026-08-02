@@ -25,6 +25,7 @@ use crate::middleware::require_auth::AuthenticatedUser;
 /// rendering the verdict here, not in the middleware, is what preserves
 /// `me`'s documented 200-on-DB-blip guard (`routes/auth.rs`) until M1.7.
 #[derive(Clone)]
+#[non_exhaustive]
 pub enum AccessAuthority {
     /// Grants resolved; carries the per-request context.
     Ready(AccessContext),
