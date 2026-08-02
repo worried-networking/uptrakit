@@ -61,7 +61,6 @@ macro_rules! declare_plugin {
             $(, global_provider_consumers: [ $( $global_provider_consumer:expr ),+ $(,)? ] )?
             $(, sudo: $sudo_fn:expr )?
             $(, surfaces: {
-                provider_id: $provider_id:expr,
                 registrations: $registrations_fn:expr $(,)?
             } )?
             $(, migrations: $migrations_fn:expr )?
@@ -177,9 +176,7 @@ macro_rules! declare_plugin {
 
         // Surface ops static — $registrations_fn drives this repetition
         $(
-            $crate::__declare_unified_surface_ops_static!(
-                $provider_id, $registrations_fn
-            );
+            $crate::__declare_unified_surface_ops_static!($registrations_fn);
         )?
 
         // ── 5. Static descriptor ────────────────────────────────────────
@@ -285,7 +282,7 @@ macro_rules! declare_plugin {
                 rc
             },
             surfaces: $crate::__optional_static_ref!(surfaces
-                $(, surfaces: { provider_id: $provider_id } )?
+                $(, surfaces: { registrations: $registrations_fn } )?
             ),
             type_settings: $crate::__optional_static_ref!(type_settings
                 $(, type_settings: $ts_marker )?
@@ -791,11 +788,10 @@ macro_rules! __declare_type_settings_static {
 #[macro_export]
 #[doc(hidden)]
 macro_rules! __declare_unified_surface_ops_static {
-    ($provider_id:expr, $registrations_fn:expr) => {
+    ($registrations_fn:expr) => {
         #[doc(hidden)]
         static __PLUGIN_UNIFIED_SURFACES: $crate::PluginSurfaceRegistrationOps =
             $crate::PluginSurfaceRegistrationOps {
-                provider_id: $provider_id,
                 registrations: $registrations_fn,
             };
     };
@@ -817,7 +813,7 @@ macro_rules! __optional_static_ref {
     (type_settings) => {
         None
     };
-    (surfaces, surfaces: { provider_id: $provider_id:expr }) => {
+    (surfaces, surfaces: { registrations: $registrations_fn:expr }) => {
         Some(&__PLUGIN_UNIFIED_SURFACES)
     };
     (surfaces) => {

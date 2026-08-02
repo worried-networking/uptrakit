@@ -130,7 +130,7 @@ async fn invoke_proxmox_save_global_defaults_emits_success_audit_row() {
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     registry
         .bootstrap_plugin(proxmox_update_protection_registration(
-            "plugin.infrastructure.proxmox",
+            "infrastructure.proxmox",
             "proxmox.settings.update-hooks",
             "global-defaults",
         ))
@@ -217,7 +217,7 @@ async fn invoke_proxmox_save_item_overrides_emits_software_item_update_audit_row
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     registry
         .bootstrap_plugin(proxmox_update_protection_registration(
-            "plugin.infrastructure.proxmox",
+            "infrastructure.proxmox",
             "proxmox.software-item.update-hooks",
             "overrides",
         ))
@@ -298,7 +298,7 @@ async fn invoke_proxmox_save_scaling_global_defaults_emits_tenant_setting_update
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     registry
         .bootstrap_plugin(proxmox_update_protection_registration(
-            "plugin.infrastructure.proxmox",
+            "infrastructure.proxmox",
             "proxmox.settings.resource-scaling",
             "global-defaults",
         ))
@@ -381,7 +381,7 @@ async fn invoke_proxmox_save_scaling_item_overrides_emits_software_item_update_a
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     registry
         .bootstrap_plugin(proxmox_update_protection_registration(
-            "plugin.infrastructure.proxmox",
+            "infrastructure.proxmox",
             "proxmox.software-item.resource-scaling",
             "overrides",
         ))

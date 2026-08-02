@@ -1393,7 +1393,6 @@ declare_plugin!(ProxmoxPlugin, ProxmoxConfig, "infrastructure.proxmox", {
         ],
     },
     surfaces: {
-        provider_id: "plugin.infrastructure.proxmox",
         registrations: proxmox_plugin_surfaces,
     },
     migrations: __proxmox_migrations,
@@ -1514,7 +1513,7 @@ mod tests {
         // in every feature configuration (ADR-0032).
         let registrations: Vec<_> = proxmox_plugin_surfaces()
             .iter()
-            .map(|r| r.to_wire("plugin.infrastructure.proxmox"))
+            .map(|r| r.to_wire("infrastructure.proxmox"))
             .collect();
         assert!(
             !registrations.is_empty(),
@@ -1609,7 +1608,7 @@ mod tests {
     fn proxmox_host_info_surface_uses_explicit_data_source_contract() {
         let registrations: Vec<_> = proxmox_plugin_surfaces()
             .iter()
-            .map(|r| r.to_wire("plugin.infrastructure.proxmox"))
+            .map(|r| r.to_wire("infrastructure.proxmox"))
             .collect();
         let host_info = registrations
             .iter()
@@ -1638,7 +1637,7 @@ mod tests {
     fn proxmox_hosts_surface_has_full_table_layout() {
         let registrations: Vec<_> = proxmox_plugin_surfaces()
             .iter()
-            .map(|r| r.to_wire("plugin.infrastructure.proxmox"))
+            .map(|r| r.to_wire("infrastructure.proxmox"))
             .collect();
         let reg = &registrations[0];
         let hosts = reg
@@ -1732,7 +1731,7 @@ mod tests {
     fn proxmox_hosts_registers_unmatched_guests_and_provider_invocable_match() {
         let registrations: Vec<_> = proxmox_plugin_surfaces()
             .iter()
-            .map(|r| r.to_wire("plugin.infrastructure.proxmox"))
+            .map(|r| r.to_wire("infrastructure.proxmox"))
             .collect();
         let reg = &registrations[0];
         let hosts = reg
@@ -1770,7 +1769,7 @@ mod tests {
     fn policy_surfaces_keep_preload_and_backup_options_contract() {
         let registrations: Vec<_> = proxmox_plugin_surfaces()
             .iter()
-            .map(|r| r.to_wire("plugin.infrastructure.proxmox"))
+            .map(|r| r.to_wire("infrastructure.proxmox"))
             .collect();
         let settings_policy = registrations
             .iter()
@@ -1899,7 +1898,7 @@ mod tests {
     fn proxmox_hosts_surface_interactions_carry_icons() {
         let registrations: Vec<_> = proxmox_plugin_surfaces()
             .iter()
-            .map(|r| r.to_wire("plugin.infrastructure.proxmox"))
+            .map(|r| r.to_wire("infrastructure.proxmox"))
             .collect();
         let proxmox = registrations
             .first()

@@ -1184,7 +1184,7 @@ async fn provider_origin_denied_for_unflagged_permissioned_interaction() {
             interaction_id: surfaces::InteractionId::new("discover").unwrap(),
             method: Default::default(),
             idempotency_key: "provider-origin-discover-denied".to_string(),
-            target_provider_id: Some("plugin.infrastructure.proxmox".to_string()),
+            target_provider_id: Some("infrastructure.proxmox".to_string()),
             caller_origin: surfaces::CallerOrigin::Provider {
                 provider_id: "service.provider-a".to_string(),
             },
@@ -1277,7 +1277,7 @@ async fn provider_origin_unmatched_guests_executes_and_audits_service_actor() {
             interaction_id: surfaces::InteractionId::new("unmatched-guests").unwrap(),
             method: Default::default(),
             idempotency_key: "provider-origin-unmatched-guests".to_string(),
-            target_provider_id: Some("plugin.infrastructure.proxmox".to_string()),
+            target_provider_id: Some("infrastructure.proxmox".to_string()),
             caller_origin: surfaces::CallerOrigin::Provider {
                 provider_id: "service.provider-a".to_string(),
             },
@@ -1333,7 +1333,7 @@ async fn provider_origin_unmatched_guests_executes_and_audits_service_actor() {
 /// `target_provider_id: None` (the agent cannot know the controller-side plugin's
 /// provider id). Same as `provider_origin_unmatched_guests_executes_and_audits_service_actor`
 /// but with `target_provider_id: None`, so implicit resolution — not a hardcoded
-/// target — routes to `plugin.infrastructure.proxmox`.
+/// target — routes to `infrastructure.proxmox`.
 #[cfg(feature = "db-sqlite")]
 #[tokio::test]
 async fn provider_origin_unmatched_guests_resolves_target_from_surface() {
@@ -1486,7 +1486,7 @@ async fn provider_origin_match_completes_handler() {
             interaction_id: surfaces::InteractionId::new("match").unwrap(),
             method: Default::default(),
             idempotency_key: "provider-origin-match".to_string(),
-            target_provider_id: Some("plugin.infrastructure.proxmox".to_string()),
+            target_provider_id: Some("infrastructure.proxmox".to_string()),
             caller_origin: surfaces::CallerOrigin::Provider {
                 provider_id: "service.provider-a".to_string(),
             },

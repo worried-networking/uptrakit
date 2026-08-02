@@ -168,9 +168,9 @@ impl PluginSurfaceRegistration {
     /// identical across every plugin registration today, producing the wire
     /// [`surfaces::SurfaceRegistration`].
     ///
-    /// `provider_id` is genuinely per-plugin (e.g. `"plugin.releases.docker"`)
-    /// and is threaded through as a parameter rather than a hand-authored
-    /// field on this type.
+    /// `provider_id` is the owning plugin's type id (ADR-0034) — the
+    /// aggregation site passes `descriptor.type_id`; there is no separately
+    /// authored provider identity.
     #[must_use]
     pub fn to_wire(&self, provider_id: &str) -> surfaces::SurfaceRegistration {
         surfaces::SurfaceRegistration {
@@ -301,18 +301,12 @@ mod tests {
         );
 
         let surface_one = PluginSurface {
-            descriptor: minimal_surface_descriptor(
-                "plugin.sample.one",
-                surfaces::Capability::TableNode,
-            ),
+            descriptor: minimal_surface_descriptor("sample.one", surfaces::Capability::TableNode),
             interactions: vec![interaction_a, interaction_b],
             data_sources: vec![],
         };
         let surface_two = PluginSurface {
-            descriptor: minimal_surface_descriptor(
-                "plugin.sample.two",
-                surfaces::Capability::FormNode,
-            ),
+            descriptor: minimal_surface_descriptor("sample.two", surfaces::Capability::FormNode),
             interactions: vec![],
             data_sources: vec![],
         };
@@ -321,9 +315,9 @@ mod tests {
             surfaces: vec![surface_one, surface_two],
         };
 
-        let wire = registration.to_wire("plugin.sample");
+        let wire = registration.to_wire("sample.provider");
 
-        assert_eq!(wire.provider.provider_id, "plugin.sample");
+        assert_eq!(wire.provider.provider_id, "sample.provider");
         assert_eq!(wire.provider.provider_kind, surfaces::ProviderKind::Plugin);
         assert_eq!(wire.provider.provider_namespace, "plugin");
         assert_eq!(

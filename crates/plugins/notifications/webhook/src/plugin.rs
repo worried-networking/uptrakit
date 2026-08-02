@@ -528,7 +528,6 @@ declare_plugin!(WebhookPlugin, WebhookChannelConfig, "notifications.webhook", {
     notification_transport: create_webhook_transport,
     raw_settings_keys: &[],
     surfaces: {
-        provider_id: "plugin.notifications.webhook",
         registrations: webhook_plugin_surfaces,
     },
 });
@@ -684,7 +683,7 @@ mod tests {
     fn descriptor_has_plugin_surface_registrations() {
         let registrations = webhook_plugin_surfaces()
             .iter()
-            .map(|r| r.to_wire("plugin.notifications.webhook"))
+            .map(|r| r.to_wire("notifications.webhook"))
             .collect::<Vec<_>>();
         assert!(
             !registrations.is_empty(),
@@ -711,7 +710,7 @@ mod tests {
     fn webhook_surface_keeps_table_data_source_and_action_shapes() {
         let registrations = webhook_plugin_surfaces()
             .iter()
-            .map(|r| r.to_wire("plugin.notifications.webhook"))
+            .map(|r| r.to_wire("notifications.webhook"))
             .collect::<Vec<_>>();
         let webhook_surface = registrations
             .iter()

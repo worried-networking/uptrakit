@@ -458,11 +458,15 @@ impl PluginSurfaceOps for PluginCatalog {
                 descriptor.scope != PluginScope::Instance
                     || self.instance_states.enabled(descriptor.type_id)
             })
-            .filter_map(|descriptor| descriptor.surfaces.map(|ops| (ops, (ops.registrations)())))
-            .flat_map(|(ops, registrations)| {
+            .filter_map(|descriptor| {
+                descriptor
+                    .surfaces
+                    .map(|ops| (descriptor.type_id, (ops.registrations)()))
+            })
+            .flat_map(|(type_id, registrations)| {
                 registrations
                     .into_iter()
-                    .map(|registration| registration.to_wire(ops.provider_id))
+                    .map(|registration| registration.to_wire(type_id))
                     .collect::<Vec<_>>()
             })
             .collect()
@@ -901,7 +905,6 @@ mod tests {
                 config_model: ConfigModel::None,
                 roles: [],
                 surfaces: {
-                    provider_id: "plugin.test_unified_demo_surface",
                     registrations: registrations,
                 },
             }
@@ -964,7 +967,6 @@ mod tests {
                 config_model: ConfigModel::None,
                 roles: [],
                 surfaces: {
-                    provider_id: "plugin.test_unified_dup_surface_a",
                     registrations: registrations,
                 },
             }
@@ -1027,7 +1029,6 @@ mod tests {
                 config_model: ConfigModel::None,
                 roles: [],
                 surfaces: {
-                    provider_id: "plugin.test_unified_dup_surface_b",
                     registrations: registrations,
                 },
             }
@@ -1250,7 +1251,7 @@ mod tests {
         vec![PluginSurfaceRegistration {
             surfaces: vec![PluginSurface {
                 descriptor: surfaces::SurfaceDescriptor::builder()
-                    .surface_id(surfaces::SurfaceId::new("plugin.test.surface").unwrap())
+                    .surface_id(surfaces::SurfaceId::new("test.surface").unwrap())
                     .label("Test surface")
                     .priority(100)
                     .slot(surfaces::SLOT_SETTINGS_TABS)
@@ -1272,7 +1273,6 @@ mod tests {
     }
 
     static TEST_SURFACE_OPS: PluginSurfaceRegistrationOps = PluginSurfaceRegistrationOps {
-        provider_id: "plugin.test_provider",
         registrations: test_plugin_surface_registration,
     };
 
@@ -1539,11 +1539,11 @@ mod tests {
         assert_eq!(registrations.len(), 1);
         assert_eq!(
             registrations[0].provider.provider_id,
-            "plugin.test_provider"
+            "__test_surface_plugin"
         );
         assert_eq!(
             registrations[0].surfaces[0].descriptor.surface_id.as_str(),
-            "plugin.test.surface"
+            "test.surface"
         );
     }
 
@@ -1928,9 +1928,10 @@ mod tests {
             let catalog = build(InstancePluginStates::all_disabled());
 
             assert!(
-                catalog.surface_registrations().iter().all(|registration| {
-                    registration.provider.provider_id != fixture::PROVIDER_ID
-                }),
+                catalog
+                    .surface_registrations()
+                    .iter()
+                    .all(|registration| { registration.provider.provider_id != fixture::TYPE_ID }),
                 "boot-disabled fixture must not contribute surface registrations"
             );
             assert!(
@@ -1938,11 +1939,6 @@ mod tests {
                     .get(&PluginTypeId::from_static(fixture::TYPE_ID))
                     .is_some(),
                 "descriptor index must keep the boot-disabled fixture"
-            );
-            assert_eq!(
-                fixture::DESCRIPTOR.surfaces.map(|ops| ops.provider_id),
-                Some(fixture::PROVIDER_ID),
-                "fixture PROVIDER_ID const must match the declared surfaces arm"
             );
         }
     }

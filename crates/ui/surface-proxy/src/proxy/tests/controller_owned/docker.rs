@@ -107,7 +107,7 @@ async fn invoke_docker_switch_tag_success_emits_software_item_update_audit_row()
     let service_connections = ServiceConnectionRegistry::new();
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     registry
-        .bootstrap_plugin(docker_switch_tag_registration("plugin.releases.docker"))
+        .bootstrap_plugin(docker_switch_tag_registration("releases.docker"))
         .expect("plugin registration should succeed");
 
     let mut params = serde_json::Map::new();
@@ -199,7 +199,7 @@ async fn invoke_docker_switch_tag_invalid_image_emits_validation_failed_audit_ro
     let service_connections = ServiceConnectionRegistry::new();
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     registry
-        .bootstrap_plugin(docker_switch_tag_registration("plugin.releases.docker"))
+        .bootstrap_plugin(docker_switch_tag_registration("releases.docker"))
         .expect("plugin registration should succeed");
 
     let mut params = serde_json::Map::new();

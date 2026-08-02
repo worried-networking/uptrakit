@@ -11,7 +11,7 @@ pub(crate) fn allowlisted_docker_switch_tag_controller_local_action(
     interaction_id: &str,
     method: &InteractionHttpMethod,
 ) -> bool {
-    matches!(provider_id, "plugin.releases.docker" | "releases.docker")
+    provider_id == PLUGIN_TYPE_RELEASES_DOCKER
         && super::table_tier(surface_id, interaction_id, method)
             == Some(super::ExecutorTier::PluginWithAudit)
         && surface_id == "docker.item-host-actions"

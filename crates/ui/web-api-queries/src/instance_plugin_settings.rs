@@ -401,12 +401,12 @@ mod tests {
     #[tokio::test]
     async fn load_at_boot_reflects_set_enabled() {
         let db = setup_db().await;
-        set_enabled(&db, "plugin.a", true).await.unwrap();
-        set_enabled(&db, "plugin.b", false).await.unwrap();
+        set_enabled(&db, "test.a", true).await.unwrap();
+        set_enabled(&db, "test.b", false).await.unwrap();
 
         let snapshot = load_at_boot(&db).await.unwrap();
-        assert!(snapshot.enabled("plugin.a"));
-        assert!(!snapshot.enabled("plugin.b"));
+        assert!(snapshot.enabled("test.a"));
+        assert!(!snapshot.enabled("test.b"));
         assert_eq!(snapshot.iter().count(), 2);
     }
 

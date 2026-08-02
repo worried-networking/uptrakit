@@ -290,8 +290,6 @@ pub mod instance_surface_fixture {
 
     /// Plugin type id of the fixture.
     pub const TYPE_ID: &str = "__test_instance_surface_plugin";
-    /// Wire provider id declared on the fixture's surfaces arm.
-    pub const PROVIDER_ID: &str = "plugin.test-instance-surface";
     /// Surface id of the fixture's single surface.
     pub const SURFACE_ID: &str = "test-instance.surface";
     /// Interaction id of the fixture's single `PluginHandled` interaction.
@@ -372,7 +370,6 @@ pub mod instance_surface_fixture {
             scope: PluginScope::Instance,
             roles: [],
             surfaces: {
-                provider_id: "plugin.test-instance-surface",
                 registrations: registrations,
             },
         }

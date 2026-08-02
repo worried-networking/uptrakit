@@ -212,9 +212,11 @@ pub use crate::surface_form_authoring::{
 };
 
 /// Single-source surface registration ops (ADR-0028).
+///
+/// No provider id is authored here: a plugin provider's wire id IS the
+/// owning descriptor's `type_id` (ADR-0034), threaded in by the aggregation
+/// site (`PluginCatalog::surface_registrations()`).
 pub struct PluginSurfaceRegistrationOps {
-    /// Wire provider id, e.g. `"plugin.notifications.webhook"`.
-    pub provider_id: &'static str,
     /// Returns the plugin's surface registrations with paired deliveries.
     pub registrations: fn() -> Vec<crate::registration::PluginSurfaceRegistration>,
 }

@@ -100,23 +100,17 @@ impl PluginEffectiveEnablement {
 
 impl crate::surface_proxy::SurfaceProviderVisibility for PluginEffectiveEnablement {
     fn plugin_provider_visible(&self, provider_id: &str) -> bool {
+        // A Plugin-kind provider id IS the plugin type id (ADR-0034).
+        // Ids reaching this filter are pre-gated to Plugin-kind by the
+        // registry call sites (they check `provider_kind == Plugin` before
+        // consulting the filter — the registry itself holds all kinds);
+        // `effective_instance_enabled` is fail-closed on unknown type ids.
         let snapshot = self.snapshot.load_full();
-        self.plugin_ops
-            .all()
-            .into_iter()
-            .find(|descriptor| {
-                descriptor
-                    .surfaces
-                    .is_some_and(|ops| ops.provider_id == provider_id)
-            })
-            .map(|descriptor| {
-                effective_instance_enabled(
-                    self.plugin_ops.as_ref(),
-                    snapshot.as_ref(),
-                    &PluginTypeId::from_static(descriptor.type_id),
-                )
-            })
-            .unwrap_or(false)
+        effective_instance_enabled(
+            self.plugin_ops.as_ref(),
+            snapshot.as_ref(),
+            &PluginTypeId::new(provider_id),
+        )
     }
 }
 

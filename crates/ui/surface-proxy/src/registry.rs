@@ -1657,7 +1657,7 @@ mod tests {
 
         surfaces::SurfaceRegistration {
             provider: surfaces::ProviderIdentity {
-                provider_id: "plugin.dataload_test_provider".to_string(),
+                provider_id: "dataload_test_provider".to_string(),
                 provider_kind: surfaces::ProviderKind::Plugin,
                 provider_namespace: "plugin".to_string(),
             },
@@ -1721,7 +1721,7 @@ mod tests {
                 "test.dataload.surface",
                 "load-data",
                 None,
-                Some("plugin.dataload_test_provider"),
+                Some("dataload_test_provider"),
                 &AllProvidersVisible,
             )
             .expect("stored interaction should resolve");
@@ -1800,7 +1800,7 @@ mod tests {
             "test.dataload.surface",
             "dup-action",
             None,
-            Some("plugin.dataload_test_provider"),
+            Some("dataload_test_provider"),
             &AllProvidersVisible,
         );
         assert!(
@@ -1824,7 +1824,7 @@ mod tests {
                 "test.dataload.surface",
                 "dup-action",
                 Some(&surfaces::InteractionHttpMethod::Get),
-                Some("plugin.dataload_test_provider"),
+                Some("dataload_test_provider"),
                 &AllProvidersVisible,
             )
             .expect("GET should resolve the DataLoad sibling");
@@ -1839,7 +1839,7 @@ mod tests {
                 "test.dataload.surface",
                 "dup-action",
                 Some(&surfaces::InteractionHttpMethod::Post),
-                Some("plugin.dataload_test_provider"),
+                Some("dataload_test_provider"),
                 &AllProvidersVisible,
             )
             .expect("POST should resolve the MutationAction sibling");
@@ -1858,7 +1858,7 @@ mod tests {
             "test.dataload.surface",
             "dup-action",
             Some(&surfaces::InteractionHttpMethod::Delete),
-            Some("plugin.dataload_test_provider"),
+            Some("dataload_test_provider"),
             &AllProvidersVisible,
         );
         match result {
@@ -1913,7 +1913,7 @@ mod tests {
             "test.dataload.surface",
             "dup-action",
             Some(&surfaces::InteractionHttpMethod::Delete),
-            Some("plugin.dataload_test_provider"),
+            Some("dataload_test_provider"),
             &AllProvidersVisible,
         );
 
@@ -2151,7 +2151,7 @@ mod tests {
     #[test]
     fn bootstrap_plugin_rejects_reserved_namespace_provider_id() {
         let registry = registry();
-        let mut registration = registration_for_plugin_same_surface("plugin.provider-a");
+        let mut registration = registration_for_plugin_same_surface("provider-a");
         registration.provider.provider_id = "service.squatter".to_string();
 
         let err = registry
@@ -2346,7 +2346,7 @@ mod tests {
         let registry = registry();
         let registration = surfaces::SurfaceRegistration {
             provider: surfaces::ProviderIdentity {
-                provider_id: "plugin.notifications.telegram".to_string(),
+                provider_id: "notifications.telegram".to_string(),
                 provider_kind: surfaces::ProviderKind::Plugin,
                 provider_namespace: "plugin".to_string(),
             },
@@ -2533,7 +2533,7 @@ mod tests {
         let registry = registry();
         let plugin_registration = surfaces::SurfaceRegistration {
             provider: surfaces::ProviderIdentity {
-                provider_id: "plugin.releases.docker".to_string(),
+                provider_id: "releases.docker".to_string(),
                 provider_kind: surfaces::ProviderKind::Plugin,
                 provider_namespace: "plugin".to_string(),
             },
@@ -2596,7 +2596,7 @@ mod tests {
                 registrations.extend(
                     (surface_ops.registrations)()
                         .into_iter()
-                        .map(|registration| registration.to_wire(surface_ops.provider_id)),
+                        .map(|registration| registration.to_wire(descriptor.type_id)),
                 );
             }
             for registration in registrations {
@@ -2604,7 +2604,7 @@ mod tests {
                 registry
                     .bootstrap_plugin(registration)
                     .expect("catalog plugin registration should be admitted");
-                if provider_id == "plugin.notifications.webhook" {
+                if provider_id == "notifications.webhook" {
                     saw_webhook_provider = true;
                 }
             }
@@ -3173,7 +3173,7 @@ mod tests {
     ) -> surfaces::SurfaceRegistration {
         surfaces::SurfaceRegistration {
             provider: surfaces::ProviderIdentity {
-                provider_id: "plugin.test_provider".to_string(),
+                provider_id: "test_provider".to_string(),
                 provider_kind: surfaces::ProviderKind::Plugin,
                 provider_namespace: "plugin".to_string(),
             },

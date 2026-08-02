@@ -414,7 +414,6 @@ declare_plugin!(DockerPlugin, DockerConfig, "releases.docker", {
         uptrakit_plugin_infrastructure_core::PluginCapability::DetectHostCompatibility,
     ]
     , surfaces: {
-        provider_id: "plugin.releases.docker",
         registrations: DockerPlugin::docker_plugin_surfaces_static,
     }
 });

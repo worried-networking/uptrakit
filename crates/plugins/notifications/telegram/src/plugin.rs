@@ -614,7 +614,6 @@ declare_plugin!(TelegramPlugin, TelegramChannelConfig, "notifications.telegram",
     notification_transport: create_telegram_transport,
     raw_settings_keys: &["global_telegram.bot_token"],
     surfaces: {
-        provider_id: "plugin.notifications.telegram",
         registrations: telegram_plugin_surfaces,
     },
 });
@@ -744,7 +743,7 @@ mod tests {
     fn descriptor_has_plugin_surface_registrations() {
         let registrations = telegram_plugin_surfaces()
             .iter()
-            .map(|r| r.to_wire("plugin.notifications.telegram"))
+            .map(|r| r.to_wire("notifications.telegram"))
             .collect::<Vec<_>>();
         assert!(!registrations.is_empty());
         assert!(registrations.iter().all(|registration| {
@@ -773,7 +772,7 @@ mod tests {
     fn telegram_channel_surface_keeps_table_and_sensitive_action_contract() {
         let registrations = telegram_plugin_surfaces()
             .iter()
-            .map(|r| r.to_wire("plugin.notifications.telegram"))
+            .map(|r| r.to_wire("notifications.telegram"))
             .collect::<Vec<_>>();
         let channel_surface = registrations
             .iter()
@@ -844,7 +843,7 @@ mod tests {
     fn telegram_global_settings_surface_keeps_preload_form_behavior() {
         let registrations = telegram_plugin_surfaces()
             .iter()
-            .map(|r| r.to_wire("plugin.notifications.telegram"))
+            .map(|r| r.to_wire("notifications.telegram"))
             .collect::<Vec<_>>();
         let settings_surface = registrations
             .iter()

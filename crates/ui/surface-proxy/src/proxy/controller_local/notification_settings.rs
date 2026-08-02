@@ -25,10 +25,9 @@ pub(crate) fn allowlisted_notification_settings_controller_local_action(
     let channel_type = surface_id
         .strip_prefix("notifications.")
         .and_then(|rest| rest.split('.').next())?;
-    let stripped = provider_id
-        .strip_prefix("plugin.")
-        .and_then(|s| s.strip_prefix("notifications."));
-    if stripped != Some(channel_type) {
+    // A notification plugin's provider id IS its plugin type id (ADR-0034);
+    // derive the expected id from the channel type instead of string surgery.
+    if provider_id != uptrakit_shared_types::notification_plugin_type(channel_type).as_str() {
         return None;
     }
     match (surface_id, interaction_id) {

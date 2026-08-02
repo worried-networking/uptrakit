@@ -15,11 +15,11 @@ pub(crate) fn notification_channel_type_for_surface_id(surface_id: &str) -> Opti
 }
 
 fn allowlisted_notification_channel_provider(provider_id: &str, channel_type: &str) -> bool {
-    // Canonical notification plugin provider ID: "plugin.notifications.{channel_type}"
-    // (e.g. "plugin.notifications.email"). Deriving it at runtime from `channel_type`
-    // avoids hardcoding individual plugin-type identifiers and handles any future
-    // notification plugins automatically.
-    provider_id == format!("plugin.notifications.{channel_type}")
+    // A notification plugin's provider id IS its plugin type id
+    // (`notifications.{channel_type}`, ADR-0034). Deriving it via the shared
+    // helper avoids hardcoding individual plugin-type identifiers and
+    // handles any future notification plugins automatically.
+    provider_id == uptrakit_shared_types::notification_plugin_type(channel_type).as_str()
 }
 
 pub(crate) fn allowlisted_notification_channel_controller_local_action<'a>(

@@ -113,7 +113,7 @@ async fn invoke_notifications_email_save_global_smtp_emits_global_setting_update
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     registry
         .bootstrap_plugin(notification_settings_registration(
-            "plugin.notifications.email",
+            "notifications.email",
             "notifications.email.global-smtp",
             "smtp",
             surfaces::InteractionHttpMethod::Put,
@@ -201,7 +201,7 @@ async fn invoke_notifications_telegram_save_global_telegram_failure_emits_failed
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     registry
         .bootstrap_plugin(notification_settings_registration(
-            "plugin.notifications.telegram",
+            "notifications.telegram",
             "notifications.telegram.global-settings",
             "settings",
             surfaces::InteractionHttpMethod::Put,

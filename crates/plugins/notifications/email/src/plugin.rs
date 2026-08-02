@@ -1147,7 +1147,6 @@ declare_plugin!(EmailPlugin, EmailChannelConfig, "notifications.email", {
         "global_smtp.helo_host",
     ],
     surfaces: {
-        provider_id: "plugin.notifications.email",
         registrations: email_plugin_surfaces,
     },
 });
@@ -1319,7 +1318,7 @@ mod tests {
     fn descriptor_has_plugin_surface_registrations() {
         let registrations = email_plugin_surfaces()
             .iter()
-            .map(|r| r.to_wire("plugin.notifications.email"))
+            .map(|r| r.to_wire("notifications.email"))
             .collect::<Vec<_>>();
         assert!(!registrations.is_empty());
         assert!(registrations.iter().all(|registration| {
@@ -1346,7 +1345,7 @@ mod tests {
     fn email_channel_surface_keeps_table_data_and_action_contract() {
         let registrations = email_plugin_surfaces()
             .iter()
-            .map(|r| r.to_wire("plugin.notifications.email"))
+            .map(|r| r.to_wire("notifications.email"))
             .collect::<Vec<_>>();
         let channel_surface = registrations
             .iter()
@@ -1451,7 +1450,7 @@ mod tests {
     fn email_global_smtp_surface_keeps_form_submit_shape() {
         let registrations = email_plugin_surfaces()
             .iter()
-            .map(|r| r.to_wire("plugin.notifications.email"))
+            .map(|r| r.to_wire("notifications.email"))
             .collect::<Vec<_>>();
         let smtp_surface = registrations
             .iter()

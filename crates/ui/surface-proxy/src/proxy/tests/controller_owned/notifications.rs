@@ -92,7 +92,7 @@ async fn invoke_allowlisted_notification_create_executes_controller_owned_path()
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     registry
         .bootstrap_plugin(notification_channel_registration(
-            "plugin.notifications.webhook",
+            "notifications.webhook",
             "notifications.webhook",
             "channels",
             surfaces::InteractionHttpMethod::Post,
@@ -165,7 +165,7 @@ async fn invoke_notifications_email_configure_smtp_executes_controller_local_pat
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     registry
         .bootstrap_plugin(notification_channel_registration(
-            "plugin.notifications.email",
+            "notifications.email",
             "notifications.email",
             "smtp",
             surfaces::InteractionHttpMethod::Put,
@@ -241,7 +241,7 @@ async fn invoke_notifications_email_smtp_get_routes_read() {
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     let read_registration = surfaces::SurfaceRegistration {
         provider: surfaces::ProviderIdentity {
-            provider_id: "plugin.notifications.email".to_string(),
+            provider_id: "notifications.email".to_string(),
             provider_kind: surfaces::ProviderKind::Plugin,
             provider_namespace: "plugin".to_string(),
         },
@@ -442,7 +442,7 @@ async fn invoke_allowlisted_notification_row_actions_use_controller_owned_path()
         let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
         registry
             .bootstrap_plugin(notification_channel_registration(
-                "plugin.notifications.webhook",
+                "notifications.webhook",
                 "notifications.webhook",
                 interaction_id,
                 method.clone(),
@@ -504,7 +504,7 @@ async fn invoke_allowlisted_notification_create_emits_audit_row() {
     let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     registry
         .bootstrap_plugin(notification_channel_registration(
-            "plugin.notifications.webhook",
+            "notifications.webhook",
             "notifications.webhook",
             "channels",
             surfaces::InteractionHttpMethod::Post,
@@ -656,7 +656,7 @@ async fn invoke_notifications_email_channels_put_routes_edit() {
     let create_registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     create_registry
         .bootstrap_plugin(notification_channel_registration(
-            "plugin.notifications.email",
+            "notifications.email",
             "notifications.email",
             "channels",
             surfaces::InteractionHttpMethod::Post,
@@ -701,7 +701,7 @@ async fn invoke_notifications_email_channels_put_routes_edit() {
     let edit_registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
     edit_registry
         .bootstrap_plugin(notification_channel_registration(
-            "plugin.notifications.email",
+            "notifications.email",
             "notifications.email",
             "channels",
             surfaces::InteractionHttpMethod::Put,
