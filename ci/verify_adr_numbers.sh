@@ -54,7 +54,11 @@ if [[ "${1:-}" == "--against" ]]; then
       echo "  rebasing/merging would create a duplicate. Renumber to the next free number."
       failures=1
     fi
-  done < <(git diff --name-only --diff-filter=A "$rev".."$branch" -- "$ADR_DIR" | numbers_in | uniq)
+  # --no-renames: two independently-added ADRs sharing the standard template
+  # boilerplate (Date/Status/Context/Decision/Consequences headers) clear git's
+  # default ~50% similarity threshold and get paired as a rename, which
+  # --diff-filter=A does not match — silently defeating this exact check.
+  done < <(git diff --no-renames --name-only --diff-filter=A "$rev".."$branch" -- "$ADR_DIR" | numbers_in | uniq)
 fi
 
 if ((failures)); then
