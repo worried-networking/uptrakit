@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::app_state::{AuditEmitterState, DbState};
 use crate::auth::{password, token};
 use crate::error_response::error_response;
-use crate::middleware::permission::CanManageGlobalSettings;
+use crate::middleware::action::CanManageSystemSettings;
 use crate::middleware::require_auth::{
     AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
 };
@@ -62,14 +62,13 @@ fn emit_system_enrollment_token_audit(
         (status = 403, description = "Not authorized")
     ),
     tag = "System Services",
-    extensions(("x-required-permission" = json!("manage_global_settings"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.settings:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn create_system_enrollment_token(
     State(db): State<DbState>,
     State(audit): State<AuditEmitterState>,
-    CanManageGlobalSettings(user): CanManageGlobalSettings,
+    CanManageSystemSettings(user): CanManageSystemSettings,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Json(body): Json<CreateSystemEnrollmentTokenRequest>,
 ) -> Response {
@@ -205,13 +204,12 @@ pub async fn create_system_enrollment_token(
         (status = 403, description = "Not authorized")
     ),
     tag = "System Services",
-    extensions(("x-required-permission" = json!("manage_global_settings"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.settings:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_system_enrollment_tokens(
     State(db): State<DbState>,
-    CanManageGlobalSettings(_user): CanManageGlobalSettings,
+    CanManageSystemSettings(_user): CanManageSystemSettings,
     Query(query): Query<ListSystemEnrollmentTokensQuery>,
 ) -> Response {
     match set_queries::list_system_enrollment_tokens(db.db(), &query.pagination()).await {
@@ -237,13 +235,12 @@ pub async fn list_system_enrollment_tokens(
         (status = 404, description = "System enrollment token not found")
     ),
     tag = "System Services",
-    extensions(("x-required-permission" = json!("manage_global_settings"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.settings:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_system_enrollment_token(
     State(db): State<DbState>,
-    CanManageGlobalSettings(_user): CanManageGlobalSettings,
+    CanManageSystemSettings(_user): CanManageSystemSettings,
     Path(token_id): Path<Uuid>,
 ) -> Response {
     match set_queries::get_system_enrollment_token(db.db(), token_id).await {
@@ -270,14 +267,13 @@ pub async fn get_system_enrollment_token(
         (status = 404, description = "System enrollment token not found")
     ),
     tag = "System Services",
-    extensions(("x-required-permission" = json!("manage_global_settings"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.settings:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn revoke_system_enrollment_token(
     State(db): State<DbState>,
     State(audit): State<AuditEmitterState>,
-    CanManageGlobalSettings(user): CanManageGlobalSettings,
+    CanManageSystemSettings(user): CanManageSystemSettings,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(token_id): Path<Uuid>,
 ) -> Response {
@@ -412,7 +408,7 @@ mod tests {
         let response = create_system_enrollment_token(
             State(DbState::from_ref(&state)),
             State(AuditEmitterState::from_ref(&state)),
-            CanManageGlobalSettings::new(auth_user),
+            CanManageSystemSettings::new(auth_user),
             None,
             Json(CreateSystemEnrollmentTokenRequest {
                 name: "System Token".to_string(),
@@ -453,7 +449,7 @@ mod tests {
         let response = revoke_system_enrollment_token(
             State(DbState::from_ref(&state)),
             State(AuditEmitterState::from_ref(&state)),
-            CanManageGlobalSettings::new(auth_user),
+            CanManageSystemSettings::new(auth_user),
             None,
             Path(missing_id),
         )
@@ -493,7 +489,7 @@ mod tests {
         let response = revoke_system_enrollment_token(
             State(DbState::from_ref(&state)),
             State(AuditEmitterState::from_ref(&state)),
-            CanManageGlobalSettings::new(auth_user),
+            CanManageSystemSettings::new(auth_user),
             None,
             Path(token.id),
         )

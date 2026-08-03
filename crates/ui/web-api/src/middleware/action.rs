@@ -145,6 +145,20 @@ action_extractor! {
     CanDeleteHosts => actions::HOSTS_DELETE,
     /// `checks:trigger` — trigger version checks / discovery.
     CanTriggerChecks => actions::CHECKS_TRIGGER,
+    /// `services:read` — list/get tenant services.
+    CanReadServices => actions::SERVICES_READ,
+    /// `services:approve` — approve pending service enrollments.
+    CanApproveServices => actions::SERVICES_APPROVE,
+    /// `services:reject` — reject pending service enrollments.
+    CanRejectServices => actions::SERVICES_REJECT,
+    /// `services:delete` — deactivate/remove services.
+    CanDeleteServices => actions::SERVICES_DELETE,
+    /// `services:update` — update service settings.
+    CanUpdateServices => actions::SERVICES_UPDATE,
+    /// `settings.enrollment-tokens:manage` — manage tenant enrollment tokens.
+    CanManageSettingsEnrollmentTokens => actions::SETTINGS_ENROLLMENT_TOKENS_MANAGE,
+    /// `system.settings:manage` — manage global infrastructure settings.
+    CanManageSystemSettings => actions::SYSTEM_SETTINGS_MANAGE,
 }
 
 #[cfg(test)]

@@ -10,8 +10,8 @@ use crate::auth::AuthMethod;
 use crate::auth::permissions::Permission;
 use crate::auth::registration::{RegistrationMode, RegistrationSettings};
 use crate::cert_signer::{AgentCertSigner, CertSignerError, SignedCertBundle};
-use crate::middleware::permission::{
-    CanApproveServices, CanRejectServices, CanRemoveServices, CanUpdateServices,
+use crate::middleware::action::{
+    CanApproveServices, CanDeleteServices, CanRejectServices, CanUpdateServices,
 };
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, AuthenticatedUser};
 use crate::settings::Settings;
@@ -798,7 +798,7 @@ async fn deactivate_service_writes_service_deactivate_audit_event() {
     let response = deactivate_service(
         State(Arc::clone(&state)),
         tenant_db,
-        CanRemoveServices::new(auth_user),
+        CanDeleteServices::new(auth_user),
         None,
         Path(target.id),
     )
@@ -842,7 +842,7 @@ async fn deactivate_service_missing_service_writes_denied_audit_event() {
     let response = deactivate_service(
         State(Arc::clone(&state)),
         tenant_db,
-        CanRemoveServices::new(auth_user),
+        CanDeleteServices::new(auth_user),
         None,
         Path(missing_service_id),
     )

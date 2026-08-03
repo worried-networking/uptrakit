@@ -3,7 +3,7 @@
 use super::{ListServicesQuery, PaginatedResponse, ServiceResponse, UpdateServiceRequest};
 use crate::AppState;
 use crate::error_response::error_response;
-use crate::middleware::permission::{CanUpdateServices, CanViewServices};
+use crate::middleware::action::{CanReadServices, CanUpdateServices};
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::queries::services as svc_queries;
 use crate::tenant_db::TenantDb;
@@ -31,14 +31,13 @@ use uuid::Uuid;
         (status = 403, description = "Not authorized")
     ),
     tag = "Services",
-    extensions(("x-required-permission" = json!("view_services"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["services:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_services(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanViewServices(_user): CanViewServices,
+    CanReadServices(_user): CanReadServices,
     Query(query): Query<ListServicesQuery>,
 ) -> Response {
     match svc_queries::list_services(&tenant_db, &query).await {
@@ -72,14 +71,13 @@ pub async fn list_services(
         (status = 404, description = "Service not found")
     ),
     tag = "Services",
-    extensions(("x-required-permission" = json!("view_services"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["services:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_service(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanViewServices(_user): CanViewServices,
+    CanReadServices(_user): CanReadServices,
     Path(service_id): Path<Uuid>,
 ) -> Response {
     match svc_queries::get_active_service_detail(&tenant_db, service_id).await {
@@ -114,8 +112,7 @@ pub async fn get_service(
         (status = 404, description = "Service not found")
     ),
     tag = "Services",
-    extensions(("x-required-permission" = json!("update_services"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["services:update"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_service(

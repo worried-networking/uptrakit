@@ -5,8 +5,8 @@ use super::{MessageResponse, ServiceResponse, SetUpdateFreezeRequest};
 use crate::AppState;
 use crate::api_error::ApiError;
 use crate::error_response::error_response;
-use crate::middleware::permission::{
-    CanApproveServices, CanRejectServices, CanRemoveServices, CanUpdateServices,
+use crate::middleware::action::{
+    CanApproveServices, CanDeleteServices, CanRejectServices, CanUpdateServices,
 };
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::notifications::events::{NotificationEvent, NotificationEventDetails};
@@ -44,8 +44,7 @@ use uuid::Uuid;
         (status = 404, description = "Service not found")
     ),
     tag = "Services",
-    extensions(("x-required-permission" = json!("approve_services"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["services:approve"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn approve_service(
@@ -226,8 +225,7 @@ pub async fn approve_service(
         (status = 404, description = "Service not found")
     ),
     tag = "Services",
-    extensions(("x-required-permission" = json!("reject_services"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["services:reject"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn reject_service(
@@ -416,14 +414,13 @@ pub async fn reject_service(
         (status = 404, description = "Service not found")
     ),
     tag = "Services",
-    extensions(("x-required-permission" = json!("remove_services"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["services:delete"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn deactivate_service(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanRemoveServices(user): CanRemoveServices,
+    CanDeleteServices(user): CanDeleteServices,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(service_id): Path<Uuid>,
 ) -> Result<impl IntoResponse, ApiError> {
@@ -602,8 +599,7 @@ pub async fn deactivate_service(
         (status = 409, description = "Service not connected")
     ),
     tag = "Services",
-    extensions(("x-required-permission" = json!("update_services"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["services:update"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn set_update_freeze(

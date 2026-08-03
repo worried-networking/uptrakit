@@ -411,10 +411,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "services:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_services"
+        ]
       }
     },
     "/api/v1/auth/device/deny": {
@@ -460,10 +464,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "services:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_services"
+        ]
       }
     },
     "/api/v1/auth/device/lookup": {
@@ -506,10 +514,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "services:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_services"
+        ]
       }
     },
     "/api/v1/auth/email-change/confirm": {
@@ -1573,10 +1585,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "settings.enrollment-tokens:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_enrollment_tokens"
+        ]
       },
       "post": {
         "tags": [
@@ -1617,10 +1633,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "settings.enrollment-tokens:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_enrollment_tokens"
+        ]
       }
     },
     "/api/v1/enrollment-tokens/{id}": {
@@ -1665,10 +1685,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "settings.enrollment-tokens:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_enrollment_tokens"
+        ]
       },
       "delete": {
         "tags": [
@@ -1704,10 +1728,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "settings.enrollment-tokens:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_enrollment_tokens"
+        ]
       }
     },
     "/api/v1/global-settings": {
@@ -5054,10 +5082,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "services:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_services"
+        ]
       }
     },
     "/api/v1/services/batch": {
@@ -5149,10 +5181,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "services:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_services"
+        ]
       },
       "put": {
         "tags": [
@@ -5208,10 +5244,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "services:update"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "update_services"
+        ]
       },
       "delete": {
         "tags": [
@@ -5247,10 +5287,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "services:delete"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "remove_services"
+        ]
       }
     },
     "/api/v1/services/{id}/approve": {
@@ -5295,10 +5339,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "services:approve"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "approve_services"
+        ]
       }
     },
     "/api/v1/services/{id}/reject": {
@@ -5343,10 +5391,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "services:reject"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "reject_services"
+        ]
       }
     },
     "/api/v1/services/{id}/update-freeze": {
@@ -5408,10 +5460,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "services:update"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "update_services"
+        ]
       }
     },
     "/api/v1/services/{target_id}/merge": {
@@ -5470,10 +5526,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "services:update"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "update_services"
+        ]
       }
     },
     "/api/v1/settings": {
@@ -8072,10 +8132,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.settings:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_global_settings"
+        ]
       },
       "post": {
         "tags": [
@@ -8116,10 +8180,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.settings:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_global_settings"
+        ]
       }
     },
     "/api/v1/system-enrollment-tokens/{id}": {
@@ -8164,10 +8232,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.settings:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_global_settings"
+        ]
       },
       "delete": {
         "tags": [
@@ -8203,10 +8275,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.settings:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_global_settings"
+        ]
       }
     },
     "/api/v1/system-services": {

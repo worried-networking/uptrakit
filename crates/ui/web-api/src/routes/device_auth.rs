@@ -11,7 +11,7 @@ use crate::api_error::ApiError;
 use crate::auth::token::hash_token;
 use crate::auth_audit_classification::DeviceFlowErrorAuditExt;
 use crate::extract::Validated;
-use crate::middleware::permission::CanViewServices;
+use crate::middleware::action::CanReadServices;
 use crate::middleware::require_auth::{
     AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
 };
@@ -61,13 +61,12 @@ fn emit_device_auth_decision_audit(
         (status = 409, description = "Already authorized")
     ),
     tag = "Authentication",
-    extensions(("x-required-permission" = json!("view_services"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["services:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn device_auth_approve(
     State(state): State<Arc<AppState>>,
-    CanViewServices(auth_user): CanViewServices,
+    CanReadServices(auth_user): CanReadServices,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Json(req): Json<DeviceAuthApproveRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
@@ -126,13 +125,12 @@ pub async fn device_auth_approve(
         (status = 409, description = "Already authorized or denied"),
     ),
     tag = "Authentication",
-    extensions(("x-required-permission" = json!("view_services"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["services:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn device_auth_deny(
     State(state): State<Arc<AppState>>,
-    CanViewServices(auth_user): CanViewServices,
+    CanReadServices(auth_user): CanReadServices,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Validated(req): Validated<DeviceAuthDenyRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
@@ -190,13 +188,12 @@ pub async fn device_auth_deny(
         (status = 404, description = "Device flow not found"),
     ),
     tag = "Authentication",
-    extensions(("x-required-permission" = json!("view_services"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["services:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn device_auth_lookup(
     State(state): State<Arc<AppState>>,
-    _auth: CanViewServices,
+    _auth: CanReadServices,
     Query(query): Query<DeviceAuthLookupQuery>,
 ) -> Result<axum::Json<DeviceAuthLookupResponse>, ApiError> {
     if let Err(e) = query.validate() {

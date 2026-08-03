@@ -6,7 +6,7 @@ use crate::AppState;
 use crate::actions::services as svc_actions;
 use crate::api_error::ApiError;
 use crate::error_response::{error_response, error_response_with_code};
-use crate::middleware::permission::CanUpdateServices;
+use crate::middleware::action::CanUpdateServices;
 use crate::middleware::require_auth::AuthenticatedApiTokenId;
 use crate::queries::services as svc_queries;
 use crate::tenant_db::TenantDb;
@@ -37,8 +37,7 @@ use uuid::Uuid;
         (status = 404, description = "Service not found")
     ),
     tag = "Services",
-    extensions(("x-required-permission" = json!("update_services"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["services:update"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn merge_service(

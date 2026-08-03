@@ -246,3 +246,126 @@ async fn pairing_rule_operator_only_reads_hosts() {
         http::StatusCode::OK
     );
 }
+
+/// Shared D-row probe for a GET list endpoint of a converted family:
+/// D2 no credential → 401; D3 zero-grant JWT and API token → 403;
+/// D4 unrelated-action grant → still 403; D1 `action` grant → 200 on both
+/// credentials.
+async fn assert_family_enforcement(path: &str, action: &str, unrelated_action: &str) {
+    let app = TestApp::new().await;
+    let client = app.client();
+    assert_eq!(
+        client.get(path).send_status().await,
+        http::StatusCode::UNAUTHORIZED,
+        "{path}: D2 expected 401"
+    );
+    let (user_id, token) = staged_zero_grant_user(&app).await;
+    let upk_token = mint_api_token(&client, &token, "d-row-probe").await;
+    assert_eq!(
+        client.get(path).bearer(&token).send_status().await,
+        http::StatusCode::FORBIDDEN,
+        "{path}: D3 jwt expected 403"
+    );
+    assert_eq!(
+        client.get(path).bearer(&upk_token).send_status().await,
+        http::StatusCode::FORBIDDEN,
+        "{path}: D3 api-token expected 403"
+    );
+    let unrelated = vec![
+        unrelated_action
+            .parse::<ActionPattern>()
+            .expect("unrelated pattern"),
+    ];
+    let unrelated_id = insert_grant(
+        &app.db,
+        NewGrant {
+            subject: GrantSubject::User(user_id),
+            tenant_id: Some(app.tenant_id),
+            patterns: &unrelated,
+            selector: Selector::All,
+            description: None,
+            created_by: None,
+        },
+    )
+    .await
+    .expect("insert unrelated grant");
+    app.state.access_engine.invalidate_subjects(&[user_id], &[]);
+    assert_eq!(
+        client.get(path).bearer(&token).send_status().await,
+        http::StatusCode::FORBIDDEN,
+        "{path}: D4 expected 403 with unrelated grant"
+    );
+    delete_grant(&app.db, unrelated_id)
+        .await
+        .expect("delete unrelated grant");
+    let patterns = vec![action.parse::<ActionPattern>().expect("action pattern")];
+    insert_grant(
+        &app.db,
+        NewGrant {
+            subject: GrantSubject::User(user_id),
+            tenant_id: Some(app.tenant_id),
+            patterns: &patterns,
+            selector: Selector::All,
+            description: None,
+            created_by: None,
+        },
+    )
+    .await
+    .expect("insert action grant");
+    app.state.access_engine.invalidate_subjects(&[user_id], &[]);
+    assert_eq!(
+        client.get(path).bearer(&token).send_status().await,
+        http::StatusCode::OK,
+        "{path}: D1 jwt expected 200"
+    );
+    assert_eq!(
+        client.get(path).bearer(&upk_token).send_status().await,
+        http::StatusCode::OK,
+        "{path}: D1 api-token expected 200"
+    );
+}
+
+#[tokio::test]
+async fn b1_services_family_enforcement() {
+    assert_family_enforcement("/api/v1/services", "services:read", "notifications:read").await;
+}
+
+#[tokio::test]
+async fn b1_enrollment_tokens_family_enforcement() {
+    assert_family_enforcement(
+        "/api/v1/enrollment-tokens",
+        "settings.enrollment-tokens:manage",
+        "services:read",
+    )
+    .await;
+}
+
+/// D2 on every converted B1 family (spec §Tests). A lost/typoed `security()`
+/// block mis-declares the op as public in the OpenAPI contract (runtime 401
+/// still comes from `require_auth`); this loop pins the runtime 401 per
+/// family, the golden diff catches the contract lie. One path per file.
+#[tokio::test]
+async fn b1_no_credential_is_401_per_family() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    for path in [
+        "/api/v1/services",
+        "/api/v1/enrollment-tokens",
+        "/api/v1/system-enrollment-tokens",
+    ] {
+        assert_eq!(
+            client.get(path).send_status().await,
+            http::StatusCode::UNAUTHORIZED,
+            "{path}: D2 expected 401"
+        );
+    }
+    // device_auth.rs is POST-only:
+    assert_eq!(
+        client
+            .post_json("/api/v1/auth/device/lookup", &serde_json::json!({}))
+            .send_status()
+            .await,
+        http::StatusCode::UNAUTHORIZED,
+        "device lookup: D2 expected 401"
+    );
+}

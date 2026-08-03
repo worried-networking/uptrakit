@@ -99,7 +99,11 @@ export const revokeApiToken = <ThrowOnError extends boolean = true>(options: Opt
  */
 export const deviceAuthApprove = <ThrowOnError extends boolean = true>(options: Options<DeviceAuthApproveData, ThrowOnError>): RequestResult<DeviceAuthApproveResponses, DeviceAuthApproveErrors, ThrowOnError> => (options.client ?? client).post<DeviceAuthApproveResponses, DeviceAuthApproveErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -116,7 +120,11 @@ export const deviceAuthApprove = <ThrowOnError extends boolean = true>(options: 
  */
 export const deviceAuthDeny = <ThrowOnError extends boolean = true>(options: Options<DeviceAuthDenyData, ThrowOnError>): RequestResult<DeviceAuthDenyResponses, DeviceAuthDenyErrors, ThrowOnError> => (options.client ?? client).post<DeviceAuthDenyResponses, DeviceAuthDenyErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -133,7 +141,11 @@ export const deviceAuthDeny = <ThrowOnError extends boolean = true>(options: Opt
  */
 export const deviceAuthLookup = <ThrowOnError extends boolean = true>(options: Options<DeviceAuthLookupData, ThrowOnError>): RequestResult<DeviceAuthLookupResponses, DeviceAuthLookupErrors, ThrowOnError> => (options.client ?? client).get<DeviceAuthLookupResponses, DeviceAuthLookupErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -513,7 +525,11 @@ export const removeTenantDiscoveryAllowlistEntry = <ThrowOnError extends boolean
  */
 export const listEnrollmentTokens = <ThrowOnError extends boolean = true>(options?: Options<ListEnrollmentTokensData, ThrowOnError>): RequestResult<ListEnrollmentTokensResponses, ListEnrollmentTokensErrors, ThrowOnError> => (options?.client ?? client).get<ListEnrollmentTokensResponses, ListEnrollmentTokensErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -526,7 +542,11 @@ export const listEnrollmentTokens = <ThrowOnError extends boolean = true>(option
  */
 export const createEnrollmentToken = <ThrowOnError extends boolean = true>(options: Options<CreateEnrollmentTokenData, ThrowOnError>): RequestResult<CreateEnrollmentTokenResponses, CreateEnrollmentTokenErrors, ThrowOnError> => (options.client ?? client).post<CreateEnrollmentTokenResponses, CreateEnrollmentTokenErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -543,7 +563,11 @@ export const createEnrollmentToken = <ThrowOnError extends boolean = true>(optio
  */
 export const revokeEnrollmentToken = <ThrowOnError extends boolean = true>(options: Options<RevokeEnrollmentTokenData, ThrowOnError>): RequestResult<RevokeEnrollmentTokenResponses, RevokeEnrollmentTokenErrors, ThrowOnError> => (options.client ?? client).delete<RevokeEnrollmentTokenResponses, RevokeEnrollmentTokenErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -556,7 +580,11 @@ export const revokeEnrollmentToken = <ThrowOnError extends boolean = true>(optio
  */
 export const getEnrollmentToken = <ThrowOnError extends boolean = true>(options: Options<GetEnrollmentTokenData, ThrowOnError>): RequestResult<GetEnrollmentTokenResponses, GetEnrollmentTokenErrors, ThrowOnError> => (options.client ?? client).get<GetEnrollmentTokenResponses, GetEnrollmentTokenErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -1678,7 +1706,11 @@ export const triggerScheduledTask = <ThrowOnError extends boolean = true>(option
  */
 export const listServices = <ThrowOnError extends boolean = true>(options?: Options<ListServicesData, ThrowOnError>): RequestResult<ListServicesResponses, ListServicesErrors, ThrowOnError> => (options?.client ?? client).get<ListServicesResponses, ListServicesErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -1711,7 +1743,11 @@ export const batchServices = <ThrowOnError extends boolean = true>(options: Opti
  */
 export const deactivateService = <ThrowOnError extends boolean = true>(options: Options<DeactivateServiceData, ThrowOnError>): RequestResult<DeactivateServiceResponses, DeactivateServiceErrors, ThrowOnError> => (options.client ?? client).delete<DeactivateServiceResponses, DeactivateServiceErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -1724,7 +1760,11 @@ export const deactivateService = <ThrowOnError extends boolean = true>(options: 
  */
 export const getService = <ThrowOnError extends boolean = true>(options: Options<GetServiceData, ThrowOnError>): RequestResult<GetServiceResponses, GetServiceErrors, ThrowOnError> => (options.client ?? client).get<GetServiceResponses, GetServiceErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -1737,7 +1777,11 @@ export const getService = <ThrowOnError extends boolean = true>(options: Options
  */
 export const updateService = <ThrowOnError extends boolean = true>(options: Options<UpdateServiceData, ThrowOnError>): RequestResult<UpdateServiceResponses, UpdateServiceErrors, ThrowOnError> => (options.client ?? client).put<UpdateServiceResponses, UpdateServiceErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -1754,7 +1798,11 @@ export const updateService = <ThrowOnError extends boolean = true>(options: Opti
  */
 export const approveService = <ThrowOnError extends boolean = true>(options: Options<ApproveServiceData, ThrowOnError>): RequestResult<ApproveServiceResponses, ApproveServiceErrors, ThrowOnError> => (options.client ?? client).post<ApproveServiceResponses, ApproveServiceErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -1767,7 +1815,11 @@ export const approveService = <ThrowOnError extends boolean = true>(options: Opt
  */
 export const rejectService = <ThrowOnError extends boolean = true>(options: Options<RejectServiceData, ThrowOnError>): RequestResult<RejectServiceResponses, RejectServiceErrors, ThrowOnError> => (options.client ?? client).post<RejectServiceResponses, RejectServiceErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -1788,7 +1840,11 @@ export const rejectService = <ThrowOnError extends boolean = true>(options: Opti
  */
 export const setUpdateFreeze = <ThrowOnError extends boolean = true>(options: Options<SetUpdateFreezeData, ThrowOnError>): RequestResult<SetUpdateFreezeResponses, SetUpdateFreezeErrors, ThrowOnError> => (options.client ?? client).post<SetUpdateFreezeResponses, SetUpdateFreezeErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -1807,7 +1863,11 @@ export const setUpdateFreeze = <ThrowOnError extends boolean = true>(options: Op
  */
 export const mergeService = <ThrowOnError extends boolean = true>(options: Options<MergeServiceData, ThrowOnError>): RequestResult<MergeServiceResponses, MergeServiceErrors, ThrowOnError> => (options.client ?? client).post<MergeServiceResponses, MergeServiceErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2489,7 +2549,11 @@ export const listSystemAuditLogs = <ThrowOnError extends boolean = true>(options
  */
 export const listSystemEnrollmentTokens = <ThrowOnError extends boolean = true>(options?: Options<ListSystemEnrollmentTokensData, ThrowOnError>): RequestResult<ListSystemEnrollmentTokensResponses, ListSystemEnrollmentTokensErrors, ThrowOnError> => (options?.client ?? client).get<ListSystemEnrollmentTokensResponses, ListSystemEnrollmentTokensErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2502,7 +2566,11 @@ export const listSystemEnrollmentTokens = <ThrowOnError extends boolean = true>(
  */
 export const createSystemEnrollmentToken = <ThrowOnError extends boolean = true>(options: Options<CreateSystemEnrollmentTokenData, ThrowOnError>): RequestResult<CreateSystemEnrollmentTokenResponses, CreateSystemEnrollmentTokenErrors, ThrowOnError> => (options.client ?? client).post<CreateSystemEnrollmentTokenResponses, CreateSystemEnrollmentTokenErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2519,7 +2587,11 @@ export const createSystemEnrollmentToken = <ThrowOnError extends boolean = true>
  */
 export const revokeSystemEnrollmentToken = <ThrowOnError extends boolean = true>(options: Options<RevokeSystemEnrollmentTokenData, ThrowOnError>): RequestResult<RevokeSystemEnrollmentTokenResponses, RevokeSystemEnrollmentTokenErrors, ThrowOnError> => (options.client ?? client).delete<RevokeSystemEnrollmentTokenResponses, RevokeSystemEnrollmentTokenErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2532,7 +2604,11 @@ export const revokeSystemEnrollmentToken = <ThrowOnError extends boolean = true>
  */
 export const getSystemEnrollmentToken = <ThrowOnError extends boolean = true>(options: Options<GetSystemEnrollmentTokenData, ThrowOnError>): RequestResult<GetSystemEnrollmentTokenResponses, GetSystemEnrollmentTokenErrors, ThrowOnError> => (options.client ?? client).get<GetSystemEnrollmentTokenResponses, GetSystemEnrollmentTokenErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],

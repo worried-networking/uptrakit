@@ -4,6 +4,8 @@
 )]
 
 use http::StatusCode;
+use uptrakit_shared_db::access_grants::{GrantSubject, NewGrant, insert_grant};
+use uptrakit_shared_types::access::{ActionPattern, Selector};
 use uptrakit_web_api_types::{
     oauth::{
         AuthorizationServerMetadata, DeviceAuthDenyResponse, DeviceAuthLookupResponse,
@@ -501,35 +503,54 @@ async fn invalid_client_when_client_id_mismatches() {
     assert_eq!(err.error, OAuthErrorCode::InvalidClient);
 }
 
-/// `POST /auth/device/deny` must return 403 when authenticated but lacking
-/// `CanViewServices` permission.
+/// `POST /auth/device/deny` authorizes on the single mapped `services:read`
+/// grant alone (positive proof a lone action-grant suffices — no other
+/// action, no JWT `Permission`, is consulted). The JWT's legacy `Permission`
+/// claim is irrelevant post-conversion (`CanReadServices` only consults
+/// `AccessEngine` grants), so the ephemeral user is granted `services:read`
+/// directly via `insert_grant` and the request proceeds past authorization
+/// to the handler's business logic, which then 404s on the unknown
+/// `user_code` (mirrors `deny_unknown_user_code_returns_not_found`).
 #[tokio::test]
 async fn deny_requires_permission() {
     let app = TestApp::new().await;
     let client = app.client();
 
-    // Mint a token with ViewSettings only (no CanViewServices).
+    let user_id = uuid::Uuid::now_v7();
+    // Mint a token with ViewSettings only; the JWT `Permission` claim is not
+    // consulted by `CanReadServices` post-conversion, so the token's own
+    // claims are deliberately unrelated to the granted action below.
     let viewer_token = app
         .jwt
-        .create_access_token(
-            uuid::Uuid::now_v7(),
-            &[Permission::ViewSettings],
-            "password",
-            None,
-            None,
-        )
+        .create_access_token(user_id, &[Permission::ViewSettings], "password", None, None)
         .expect("mint viewer token");
+
+    let patterns = vec!["services:read".parse::<ActionPattern>().expect("pattern")];
+    insert_grant(
+        &app.db,
+        NewGrant {
+            subject: GrantSubject::User(user_id),
+            tenant_id: Some(app.tenant_id),
+            patterns: &patterns,
+            selector: Selector::All,
+            description: None,
+            created_by: None,
+        },
+    )
+    .await
+    .expect("insert grant");
+    app.state.access_engine.invalidate_subjects(&[user_id], &[]);
 
     let status = client
         .post_json(
             "/api/v1/auth/device/deny",
-            &serde_json::json!({ "user_code": "ABCD-EFGH" }),
+            &serde_json::json!({ "user_code": "BCDF-GHJK" }),
         )
         .bearer(&viewer_token)
         .send_status()
         .await;
 
-    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
 /// `GET /.well-known/oauth-authorization-server` must return 200 without any
