@@ -7629,6 +7629,7 @@ version = "0.0.1"
 dependencies = [
  "axum",
  "jsonwebtoken",
+ "metrics",
  "reqwest",
  "rmcp",
  "schemars 1.2.2",

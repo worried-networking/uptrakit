@@ -4,21 +4,17 @@ use std::task::{Context, Poll};
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::EntityTrait;
 use tower::{Layer, Service};
 use uuid::Uuid;
 
 use uptrakit_audit_log::{AuditActionType, AuditActorType, AuditEntry, AuditOutcome};
+use uptrakit_controller_core::auth::AuthFailure;
 use uptrakit_controller_core::auth::api_token::{
     authenticate_api_token, emit_api_token_auth_audit,
 };
-use uptrakit_controller_core::auth::{AuthFailure, Permission};
-// DB entity prelude exports `Permission` as the ORM entity — alias it to
-// avoid the name collision with `uptrakit_controller_core::auth::Permission`
-// (the permission enum used throughout this file).
-use uptrakit_shared_db::entity::prelude::Permission as DbPermissionEntity;
-use uptrakit_shared_db::entity::prelude::{RolePermission, User, UserRole};
-use uptrakit_shared_db::entity::{permission, role_permission, user_role};
+use uptrakit_shared_db::entity::prelude::User;
+use uptrakit_shared_types::access::{Decision, actions};
 use uptrakit_web_api_types::oauth::McpScope;
 
 use crate::context::{McpAuthError, McpAuthMethod, McpRequestContext};
@@ -141,7 +137,7 @@ where
                 )),
                 Err(McpAuthError::Forbidden) => Ok(plain(
                     StatusCode::FORBIDDEN,
-                    "User is deactivated or lacks the AccessMcp permission",
+                    "User is deactivated or lacks mcp:use access",
                 )),
                 Err(McpAuthError::Internal) => Ok(plain(
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -230,7 +226,7 @@ fn unauthorized_with_www_auth(
 /// Validate a `upk_`-prefixed API token for an MCP request.
 ///
 /// Accepts `None` (missing header) or `Some(token_str)`. Handles the full
-/// auth path: missing token, JWT rejection, DB lookup, `AccessMcp` permission
+/// auth path: missing token, JWT rejection, DB lookup, `mcp:use` access
 /// check, and audit emission. Does not require `AppState`.
 ///
 /// # Errors
@@ -238,8 +234,8 @@ fn unauthorized_with_www_auth(
 /// Returns [`McpAuthError::MissingCredentials`] if no token is present,
 /// [`McpAuthError::JwtNotAccepted`] for non-API-token bearer values,
 /// [`McpAuthError::Unauthorized`] for invalid/revoked tokens,
-/// [`McpAuthError::Forbidden`] for deactivated users or missing `AccessMcp`,
-/// and [`McpAuthError::Internal`] on database failures.
+/// [`McpAuthError::Forbidden`] for deactivated users or missing `mcp:use`
+/// access, and [`McpAuthError::Internal`] on database failures.
 pub async fn validate_api_token_for_mcp(
     state: &McpState,
     token: Option<&str>,
@@ -290,15 +286,55 @@ pub async fn validate_api_token_for_mcp(
             }
         };
 
-    if !auth_user.has_permission(Permission::AccessMcp) {
-        emit_api_token_auth_audit(
-            &state.audit_emitter,
-            state.default_tenant_id,
-            None,
-            AuditOutcome::Denied,
-            "missing_access_mcp_permission",
-        );
-        return Err(McpAuthError::Forbidden);
+    let access = match state
+        .access_engine
+        .context(state.default_tenant_id, auth_user.user_id, None)
+        .await
+    {
+        Ok(ctx) => ctx,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to resolve access context for MCP");
+            emit_api_token_auth_audit(
+                &state.audit_emitter,
+                state.default_tenant_id,
+                None,
+                AuditOutcome::Denied,
+                "internal_error",
+            );
+            return Err(McpAuthError::Internal);
+        }
+    };
+    match state
+        .access_engine
+        .authorize(&access, &actions::MCP_USE, None)
+    {
+        Decision::Allow => {}
+        Decision::Deny(reason) => {
+            metrics::counter!(
+                "uptrakit_access_denies_total",
+                "reason" => reason.as_str()
+            )
+            .increment(1);
+            emit_api_token_auth_audit(
+                &state.audit_emitter,
+                state.default_tenant_id,
+                None,
+                AuditOutcome::Denied,
+                "missing_access_mcp_permission",
+            );
+            return Err(McpAuthError::Forbidden);
+        }
+        // `Decision` is #[non_exhaustive] in another crate.
+        _ => {
+            emit_api_token_auth_audit(
+                &state.audit_emitter,
+                state.default_tenant_id,
+                None,
+                AuditOutcome::Denied,
+                "missing_access_mcp_permission",
+            );
+            return Err(McpAuthError::Forbidden);
+        }
     }
 
     emit_api_token_auth_audit(
@@ -325,15 +361,15 @@ pub async fn validate_api_token_for_mcp(
 /// Validate an OAuth 2.1 JWT access token for an MCP request.
 ///
 /// Verifies the JWT (signature, `iss`, `aud`, `exp`, etc.), loads the subject
-/// user from the DB, checks `is_active`, loads their permissions, and verifies
-/// the `AccessMcp` permission is present.
+/// user from the DB, checks `is_active`, and verifies the engine-checked
+/// principal holds `mcp:use` access.
 ///
 /// # Errors
 ///
 /// - [`McpAuthError::Unauthorized`] — JWT invalid, expired, wrong `iss`/`aud`,
 ///   or malformed `sub`/`tenant_id`/`jti` claims.
 /// - [`McpAuthError::Forbidden`] — user not found, deactivated, or lacks
-///   the `AccessMcp` permission.
+///   `mcp:use` access.
 /// - [`McpAuthError::Internal`] — database failure.
 pub async fn validate_oauth_access_token_for_mcp(
     state: &McpState,
@@ -404,23 +440,43 @@ pub async fn validate_oauth_access_token_for_mcp(
         return Err(McpAuthError::Forbidden);
     }
 
-    let permissions = match load_user_permissions_for_mcp(state.db.db(), tenant_id, user_id).await {
-        Ok(perms) => perms,
+    let access = match state.access_engine.context(tenant_id, user_id, None).await {
+        Ok(ctx) => ctx,
         Err(e) => {
-            tracing::error!(error = %e, %user_id, "failed to load user permissions for OAuth MCP");
+            tracing::error!(error = %e, %user_id, "failed to resolve access context for OAuth MCP");
             emit_mcp_oauth_audit(state, Some(user_id), AuditOutcome::Denied, "internal_error");
             return Err(McpAuthError::Internal);
         }
     };
-
-    if !permissions.contains(&Permission::AccessMcp) {
-        emit_mcp_oauth_audit(
-            state,
-            Some(user_id),
-            AuditOutcome::Denied,
-            "missing_access_mcp_permission",
-        );
-        return Err(McpAuthError::Forbidden);
+    match state
+        .access_engine
+        .authorize(&access, &actions::MCP_USE, None)
+    {
+        Decision::Allow => {}
+        Decision::Deny(reason) => {
+            metrics::counter!(
+                "uptrakit_access_denies_total",
+                "reason" => reason.as_str()
+            )
+            .increment(1);
+            emit_mcp_oauth_audit(
+                state,
+                Some(user_id),
+                AuditOutcome::Denied,
+                "missing_access_mcp_permission",
+            );
+            return Err(McpAuthError::Forbidden);
+        }
+        // `Decision` is #[non_exhaustive] in another crate.
+        _ => {
+            emit_mcp_oauth_audit(
+                state,
+                Some(user_id),
+                AuditOutcome::Denied,
+                "missing_access_mcp_permission",
+            );
+            return Err(McpAuthError::Forbidden);
+        }
     }
 
     emit_mcp_oauth_audit(state, Some(user_id), AuditOutcome::Success, "authenticated");
@@ -435,7 +491,7 @@ pub async fn validate_oauth_access_token_for_mcp(
         user_id,
         jti,
         tenant_id,
-        permissions,
+        Vec::new(),
         McpAuthMethod::OAuth {
             client_id: claims.client_id,
             jti,
@@ -466,52 +522,6 @@ fn emit_mcp_oauth_audit(
         Ok(e) => state.audit_emitter.emit_event(e),
         Err(e) => tracing::warn!(error = %e, "failed to build MCP_OAUTH_AUTHENTICATE audit entry"),
     }
-}
-
-/// Load the permission set for `user_id` in `tenant_id`.
-///
-/// Mirrors the same query in `uptrakit_controller_core::auth::api_token`
-/// (which is private); duplicated here because `uptrakit-mcp` must not depend
-/// on `uptrakit-web-api`.
-async fn load_user_permissions_for_mcp(
-    db: &sea_orm::DatabaseConnection,
-    tenant_id: Uuid,
-    user_id: Uuid,
-) -> Result<Vec<Permission>, sea_orm::DbErr> {
-    let user_roles = UserRole::find()
-        .filter(user_role::Column::TenantId.eq(tenant_id))
-        .filter(user_role::Column::UserId.eq(user_id))
-        .all(db)
-        .await?;
-
-    let role_ids: Vec<Uuid> = user_roles.iter().map(|ur| ur.role_id).collect();
-    if role_ids.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let role_perms = RolePermission::find()
-        .filter(role_permission::Column::RoleId.is_in(role_ids))
-        .all(db)
-        .await?;
-
-    let perm_ids: Vec<Uuid> = role_perms.iter().map(|rp| rp.permission_id).collect();
-    if perm_ids.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let perm_models = DbPermissionEntity::find()
-        .filter(permission::Column::Id.is_in(perm_ids))
-        .all(db)
-        .await?;
-
-    let mut seen = std::collections::HashSet::new();
-    let permissions = perm_models
-        .into_iter()
-        .filter_map(|p| p.name.parse::<Permission>().ok())
-        .filter(|p| seen.insert(p.clone()))
-        .collect();
-
-    Ok(permissions)
 }
 
 // ---------------------------------------------------------------------------

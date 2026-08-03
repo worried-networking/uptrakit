@@ -14,6 +14,7 @@ uptrakit-shared-db        = { workspace = true }
 uptrakit-controller-core  = { workspace = true }
 uptrakit-web-api-queries  = { workspace = true }
 uptrakit-audit-log        = { workspace = true }
+uptrakit-shared-types     = { workspace = true }
 tokio-util                = { workspace = true }
 tracing                   = { workspace = true }
 rmcp                      = { workspace = true }
@@ -26,6 +27,7 @@ uuid                   = { workspace = true }
 serde                  = { workspace = true }
 serde_json             = { workspace = true }
 thiserror              = { workspace = true }
+metrics                = { workspace = true }
 
 [features]
 db-sqlite = ["uptrakit-shared-db/db-sqlite", "sea-orm/sqlx-sqlite"]
@@ -34,7 +36,6 @@ db-sqlite = ["uptrakit-shared-db/db-sqlite", "sea-orm/sqlx-sqlite"]
 jsonwebtoken = { workspace = true, features = ["aws_lc_rs"] }
 uptrakit-shared-db     = { workspace = true, features = ["migration", "db-sqlite"] }
 uptrakit-web-api-auth  = { workspace = true }
-uptrakit-shared-types  = { workspace = true }
 uptrakit-crypto        = { workspace = true, features = ["testing"] }
 reqwest                = { workspace = true }
 time                   = { workspace = true }

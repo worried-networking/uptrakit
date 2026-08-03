@@ -98,7 +98,7 @@ pub enum McpAuthError {
     /// API token is invalid, expired, or revoked.
     #[error("unauthorized")]
     Unauthorized,
-    /// User is deactivated or lacks the `AccessMcp` permission.
+    /// User is deactivated or lacks `mcp:use` access.
     #[error("forbidden")]
     Forbidden,
     /// Internal error during validation.

@@ -48,10 +48,6 @@ struct McpTestApp {
     db: DatabaseConnection,
     tenant_id: Uuid,
     cancel: CancellationToken,
-    #[expect(
-        dead_code,
-        reason = "used by app.engine.invalidate_subjects(...) in Task 4"
-    )]
     engine: Arc<AccessEngine>,
 }
 
@@ -199,12 +195,19 @@ async fn insert_user(db: &DatabaseConnection, email: &str) -> Uuid {
 /// Link user to the "viewer" built-in role, which has `access_mcp` via
 /// migration m20260424_000001_access_mcp_permission. Do NOT use "owner"
 /// (removed in m20260310_000002_granular_permissions).
+///
+/// Returns the viewer role's `Uuid` so callers can look up its seeded
+/// `mcp:use` access grant via `uptrakit_shared_db::access_grants`.
 #[expect(
     clippy::unwrap_used,
     clippy::expect_used,
     reason = "test fixture — panic on setup failure"
 )]
-async fn link_user_to_access_mcp_role(db: &DatabaseConnection, tenant_id: Uuid, user_id: Uuid) {
+async fn link_user_to_access_mcp_role(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    user_id: Uuid,
+) -> Uuid {
     let viewer_role = role::Entity::find()
         .filter(role::Column::Name.eq("viewer"))
         .one(db)
@@ -222,6 +225,8 @@ async fn link_user_to_access_mcp_role(db: &DatabaseConnection, tenant_id: Uuid, 
     .insert(db)
     .await
     .unwrap();
+
+    viewer_role.id
 }
 
 #[expect(clippy::unwrap_used, reason = "test fixture — panic on setup failure")]
@@ -473,5 +478,209 @@ async fn missing_access_mcp_permission_returns_403() {
     assert!(
         resp.headers().get("Mcp-Session-Id").is_none(),
         "McpAuthLayer must not set Mcp-Session-Id on 403"
+    );
+}
+
+/// Engine-gate discriminator: legacy role_permissions still grant
+/// access_mcp, but the engine grant row is gone -> 403 only once the
+/// gate reads the engine.
+#[tokio::test]
+async fn api_token_denied_when_mcp_use_grant_removed() {
+    let app = McpTestApp::new().await;
+    let user_id = insert_user(&app.db, "no-grant@example.com").await;
+    let viewer_role_id = link_user_to_access_mcp_role(&app.db, app.tenant_id, user_id).await;
+    let token = create_api_token(&app.db, user_id).await;
+
+    // access_grants is engine-owned: reach it only via the public
+    // choke-point module, never the sealed entity.
+    let load = uptrakit_shared_db::access_grants::load_grants_for_principal(
+        &app.db,
+        app.tenant_id,
+        user_id,
+        &[viewer_role_id],
+    )
+    .await
+    .expect("load grants");
+    let mcp_grant = load
+        .grants
+        .iter()
+        .find(|grant| grant.patterns.iter().any(|p| p.to_string() == "mcp:use"))
+        .expect("mcp:use backfill grant must exist after migrations");
+    uptrakit_shared_db::access_grants::delete_grant(&app.db, mcp_grant.id)
+        .await
+        .expect("delete grant");
+    // Not strictly needed on a cold cache, but makes the test assert the
+    // intended semantic instead of depending on cache-warming order.
+    app.engine.invalidate_subjects(&[user_id], &[]);
+
+    let client = Client::new();
+    let resp = client
+        .post(format!("http://{}/mcp", app.addr))
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json, text/event-stream")
+        .header("Authorization", format!("Bearer {token}"))
+        .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}"#)
+        .send()
+        .await
+        .expect("send request");
+
+    assert_eq!(
+        resp.status().as_u16(),
+        403,
+        "removed mcp:use grant must return 403"
+    );
+    assert!(
+        resp.headers().get("Mcp-Session-Id").is_none(),
+        "McpAuthLayer must not set Mcp-Session-Id on 403"
+    );
+}
+
+/// Same discriminator as `api_token_denied_when_mcp_use_grant_removed`, but
+/// for the OAuth JWT path.
+#[tokio::test]
+async fn oauth_denied_when_mcp_use_grant_removed() {
+    let app = McpTestApp::new_with_oauth().await;
+    let user_id = insert_user(&app.db, "no-grant-oauth@example.com").await;
+    let viewer_role_id = link_user_to_access_mcp_role(&app.db, app.tenant_id, user_id).await;
+    let token = mint_test_jwt(user_id, app.tenant_id);
+
+    let load = uptrakit_shared_db::access_grants::load_grants_for_principal(
+        &app.db,
+        app.tenant_id,
+        user_id,
+        &[viewer_role_id],
+    )
+    .await
+    .expect("load grants");
+    let mcp_grant = load
+        .grants
+        .iter()
+        .find(|grant| grant.patterns.iter().any(|p| p.to_string() == "mcp:use"))
+        .expect("mcp:use backfill grant must exist after migrations");
+    uptrakit_shared_db::access_grants::delete_grant(&app.db, mcp_grant.id)
+        .await
+        .expect("delete grant");
+    app.engine.invalidate_subjects(&[user_id], &[]);
+
+    let client = Client::new();
+    let resp = client
+        .post(format!("http://{}/mcp", app.addr))
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json, text/event-stream")
+        .header("Authorization", format!("Bearer {token}"))
+        .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}"#)
+        .send()
+        .await
+        .expect("send request");
+
+    assert_eq!(
+        resp.status().as_u16(),
+        403,
+        "removed mcp:use grant must return 403"
+    );
+    assert!(
+        resp.headers().get("Mcp-Session-Id").is_none(),
+        "McpAuthLayer must not set Mcp-Session-Id on 403"
+    );
+}
+
+/// Allow-path: viewer role intact with its seeded `mcp:use` grant ->
+/// the engine gate admits the request on both auth paths.
+#[tokio::test]
+async fn api_token_allowed_when_mcp_use_grant_present() {
+    let app = McpTestApp::new().await;
+    let user_id = insert_user(&app.db, "with-grant-api@example.com").await;
+    link_user_to_access_mcp_role(&app.db, app.tenant_id, user_id).await;
+    let token = create_api_token(&app.db, user_id).await;
+
+    let client = Client::new();
+    let resp = client
+        .post(format!("http://{}/mcp", app.addr))
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json, text/event-stream")
+        .header("Authorization", format!("Bearer {token}"))
+        .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}"#)
+        .send()
+        .await
+        .expect("send request");
+
+    assert_eq!(
+        resp.status().as_u16(),
+        200,
+        "intact mcp:use grant must allow the request"
+    );
+}
+
+#[tokio::test]
+async fn oauth_allowed_when_mcp_use_grant_present() {
+    let app = McpTestApp::new_with_oauth().await;
+    let user_id = insert_user(&app.db, "with-grant-oauth@example.com").await;
+    link_user_to_access_mcp_role(&app.db, app.tenant_id, user_id).await;
+    let token = mint_test_jwt(user_id, app.tenant_id);
+
+    let client = Client::new();
+    let resp = client
+        .post(format!("http://{}/mcp", app.addr))
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json, text/event-stream")
+        .header("Authorization", format!("Bearer {token}"))
+        .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}"#)
+        .send()
+        .await
+        .expect("send request");
+
+    assert_eq!(
+        resp.status().as_u16(),
+        200,
+        "intact mcp:use grant must allow the request"
+    );
+}
+
+/// Proves in-process cache coherence on the MCP path: a successful call,
+/// then the user's role link is removed and the engine cache invalidated,
+/// then the next call must be denied immediately (no cache staleness
+/// window). The NATS cross-process invalidation leg is covered elsewhere
+/// and is not this test's claim.
+#[tokio::test]
+async fn api_token_denied_immediately_after_role_removed_and_invalidated() {
+    let app = McpTestApp::new().await;
+    let user_id = insert_user(&app.db, "revoke@example.com").await;
+    link_user_to_access_mcp_role(&app.db, app.tenant_id, user_id).await;
+    let token = create_api_token(&app.db, user_id).await;
+
+    let client = Client::new();
+    let init_body = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}"#;
+
+    let first = client
+        .post(format!("http://{}/mcp", app.addr))
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json, text/event-stream")
+        .header("Authorization", format!("Bearer {token}"))
+        .body(init_body)
+        .send()
+        .await
+        .expect("send first request");
+    assert_eq!(first.status().as_u16(), 200, "first call must succeed");
+
+    user_role::Entity::delete_many()
+        .filter(user_role::Column::UserId.eq(user_id))
+        .exec(&app.db)
+        .await
+        .expect("delete user_roles");
+    app.engine.invalidate_subjects(&[user_id], &[]);
+
+    let second = client
+        .post(format!("http://{}/mcp", app.addr))
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json, text/event-stream")
+        .header("Authorization", format!("Bearer {token}"))
+        .body(init_body)
+        .send()
+        .await
+        .expect("send second request");
+    assert_eq!(
+        second.status().as_u16(),
+        403,
+        "role removal + invalidation must deny the very next call"
     );
 }
