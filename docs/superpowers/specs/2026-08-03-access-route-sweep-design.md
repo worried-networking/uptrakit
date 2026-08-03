@@ -14,7 +14,7 @@ action mapping is purely the 05 table — "the rows are its application".
 **Implementation sequencing**: M1.1–M1.4a landed (M1.4a train ends at `02b50abe9`; reference
 conversion `fb6f301a2` = `routes/hosts.rs`). M1.5 has an approved spec, no plan yet. M1.6a/M1.6b
 are unspecced. Batches B1–B5 below can start immediately and land in any order; **B6 is blocked on
-M1.5 landing** (same-file ownership, see Handoffs).
+M1.5 landing** (same-file ownership, decisions 2–3).
 
 ## Problem / goal
 
@@ -47,7 +47,9 @@ contract.
 ## Corrections to the milestone text (verified against the live tree, 2026-08-03)
 
 - **Counts**: 157 `x-required-permission` sites across 49 files; 165 `bearer_token` sites across
-  50 files (adds `routes/me_2fa.rs`, which carries `bearer_token` but never had the extension).
+  49 files. The two 49-file sets differ by one member each way: `routes/me_2fa.rs` carries
+  `bearer_token` but never had the extension, and `routes/settings_ca.rs` carries the extension
+  but **no** `security()` block at all (its `rotate_ca` op needs a net-new declaration — see B3).
   The milestone's "156 sites / ~129 files" mixed the site count with the total-file count and
   predates M1.4a. Plans re-count from the tree at write time.
 - **The "seven surface wrappers" are eight today** (`routes/surfaces.rs` sites whose extension
@@ -62,9 +64,11 @@ contract.
 
 ## Scope rule
 
-A route operation is in scope iff it carries `security(("bearer_token" = []))` in
-`crates/ui/web-api/src/routes/`, excluding `users.rs`, `roles.rs`, `access_presets.rs`
-(decision 2). This includes `me_2fa.rs`'s five extension-less operations. Out of scope: inline
+A route operation is in scope iff it carries `security(("bearer_token" = []))` **or**
+`x-required-permission` in `crates/ui/web-api/src/routes/`, excluding `users.rs`, `roles.rs`,
+`access_presets.rs` (decision 2). The OR matters at both edges: `me_2fa.rs` has five
+extension-less `bearer_token` operations, and `settings_ca.rs` has one extension-only operation
+with no `security()` block (B3 adds one). Out of scope: inline
 handler-body `has_permission` conversions (all M1.5's — its spec re-greps the class at plan
 time), `interactive_ws.rs` (no utoipa operation; M1.5 owns it), MCP, wire, frontend gating.
 
@@ -81,7 +85,8 @@ Reference: `routes/hosts.rs` post-`fb6f301a2`.
    is also what `ci/verify_action_security_declarations.py` keys on).
 3. **Declaration rewrite** inside `#[utoipa::path]`: delete the
    `extensions(("x-required-permission" = …))` entry; replace `security(("bearer_token" = []))`
-   per class:
+   per class — or **add** the new `security(...)` entry where none exists today (sole case:
+   `settings_ca.rs` `rotate_ca`, which currently declares no security at all):
 
    | Class                                                                      | Declaration                                                                                                                                            |
    | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -100,30 +105,60 @@ Reference: `routes/hosts.rs` post-`fb6f301a2`.
 
 Appended to the single `action_extractor!` invocation in `middleware/action.rs` (the CI script
 parses exactly that invocation), each batch adding the extractors its files need — the lists
-below assume B1→B5 order; since batches may land in any order, a shared extractor (e.g.
-`CanManageSystemSettings`, used by B1, B2, and B3 files) is added by whichever batch lands first.
-Naming rule:
-derive from the **action** (verb + resource), matching the M1.4a set (`CanReadHosts`, not the
-legacy `CanViewHosts`). Expected additions (plan confirms exact spelling at write time):
+below mark cross-batch extractors "(shared)" in every batch that needs them — whichever batch
+lands first adds a shared extractor; later batches find it present.
+Naming rule
+(per `07-decision-and-enforcement.md`'s example set — "`CanReadHosts`, `CanTriggerUpdates`,
+`CanManageSettingsAuth`"): `Can` + verb + the resource's segments **in resource order**
+(`settings.auth` → `SettingsAuth`, `system.config-state` → `SystemConfigState`). This
+deliberately avoids reproducing legacy `permission_extractor!` names for dotted resources
+(`CanManageAuthSettings`, `CanManageEnrollmentTokens` exist in `middleware/permission.rs` —
+same-name reuse would compile via import disambiguation but defeats the rename's audit value).
+Expected additions (plan confirms exact spelling at write time):
 
 - B1: `CanReadServices`, `CanApproveServices`, `CanRejectServices`, `CanDeleteServices`,
-  `CanUpdateServices`, `CanManageEnrollmentTokens`, `CanManageSystemSettings`
-- B2: `CanReadSoftware`, `CanCreateSoftware`, `CanUpdateSoftware`, `CanDeleteSoftware`,
-  `CanTriggerUpdates`, `CanManageCommands`, `CanTriggerPluginConfigs`, `CanManageDiscoveryIgnores`
-- B3: `CanReadSettings`, `CanManageAuthSettings`, `CanManageCertificateSettings`,
-  `CanReadConfigState`, `CanManageConfigState`
+  `CanUpdateServices`, `CanManageSettingsEnrollmentTokens`, `CanManageSystemSettings` (shared)
+- B2: `CanReadSoftware` (shared), `CanCreateSoftware`, `CanUpdateSoftware`, `CanDeleteSoftware`,
+  `CanTriggerUpdates`, `CanManageCommands` (shared), `CanTriggerPluginConfigs`,
+  `CanManageDiscoveryIgnores`, `CanManageSystemSettings` (shared)
+- B3: `CanReadSettings`, `CanManageSettingsAuth`, `CanManageSettingsCertificates`,
+  `CanReadSystemConfigState`, `CanManageSystemConfigState`, `CanManageSystemSettings` (shared)
 - B4: `CanManageHostTags`, `CanManageScheduler`
 - B5: `CanReadAudit`, `CanReadSystemAudit`, `CanReadNotifications`, `CanManageNotifications`
 - B6: `CanReadSystemServices`, `CanApproveSystemServices`, `CanRejectSystemServices`,
-  `CanDeleteSystemServices`, `CanUpdateSystemServices`
+  `CanDeleteSystemServices`, `CanUpdateSystemServices`, plus `CanReadSoftware` (shared),
+  `CanManageCommands` (shared), and `CanManageSystemSettings` (shared) for
+  `plugin_configs/crud.rs`/`plugin_type_settings.rs` — B6 depends only on M1.5, so if it lands
+  before B2/B3 it adds these itself
 
 `permission_extractor!` and its extractors stay compiled (pub items, no dead-code warnings);
 M1.8 deletes them together with `Permission`.
 
 ## Batch plan
 
-Every batch: conversion per the recipe, its harness rows (§Tests), regen, one green-tree commit.
-Batches B1–B5 are mutually independent; B6 last, after M1.5.
+Every batch: conversion per the recipe, its harness rows (§Tests), the scope-map golden
+refresh (§Tests), regen, one green-tree commit. Batches B1–B5 are mutually independent; B6
+last, after M1.5.
+
+### B0 — live-grant parity check (before B1; verify, not build)
+
+The M1.2 migrations seed `access_grants` **only for the eight built-in roles**; the legacy
+remap explicitly preserves assignments, not permissions ("the courtesy remap is vacuous" —
+`m20260728_000001_access_grants_and_role_scope.rs`). Any operator-created custom role that
+carries permissions **and** is assigned to a user therefore has **no** engine grant, and each
+converted family would 403 that user — an incremental production authz cutover per batch.
+(There is no per-user permission table; roles are the only permission carrier —
+`entity/{role_permission,user_role}.rs`.) Before B1, run the concrete audit against the live
+DB: non-built-in roles with both permissions and an assignment, i.e.
+`role_permissions JOIN roles ON is_built_in = false JOIN user_roles` — any row is a finding.
+Record the result (empty or not) in the B1 plan/commit. Expected outcome on the single live
+deployment: empty. (M1.4a's hosts conversion crossing cleanly is near-zero evidence here — it
+exercised one family for the sessions actually used.) If rows exist, a forward data migration
+backfilling equivalent `access_grants` becomes a B0 deliverable landing before B1, and the B4
+divergence check extends to it (a custom principal relying on legacy `update_hosts` for tag
+writes needs an explicit `hosts.tags:manage` grant decision by the owner). The one-shot check
+is sufficient only under the stated operating assumption: single-operator deployment, no
+custom roles created during the batch window — creating one mid-sweep re-triggers B0.
 
 ### B1 — services + enrollment tokens
 
@@ -161,14 +196,14 @@ Batches B1–B5 are mutually independent; B6 last, after M1.5.
 
 ### B3 — settings
 
-| File                                                                                                                                                                                                                              | Mapping                                                                                  |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `settings_access.rs`                                                                                                                                                                                                              | `manage_auth_settings` → `settings.auth:manage`; `view_settings` → `settings:read`       |
-| `settings_agent_certs.rs`                                                                                                                                                                                                         | `manage_agent_certs` → `settings.certificates:manage`; `view_settings` → `settings:read` |
-| `settings_combined.rs`                                                                                                                                                                                                            | `view_settings` → `settings:read`                                                        |
-| `settings_ca.rs`, `settings_global_combined.rs`, `settings_nats.rs`, `settings_network.rs`, `settings_oauth.rs`, `settings_provider_github.rs`, `settings_reset.rs`, `settings_zeroconf.rs`, `server_cert.rs`, `system_alerts.rs` | `manage_global_settings` → `system.settings:manage`                                      |
-| `oidc_providers.rs`                                                                                                                                                                                                               | `manage_auth_settings` → `settings.auth:manage`; `view_settings` → `settings:read`       |
-| `instance_config_state.rs`                                                                                                                                                                                                        | `view/manage_instance_config_state` → `system.config-state:read/manage`                  |
+| File                                                                                                                                                                                                                              | Mapping                                                                                                                                                                                     |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `settings_access.rs`                                                                                                                                                                                                              | `manage_auth_settings` → `settings.auth:manage`; `view_settings` → `settings:read`                                                                                                          |
+| `settings_agent_certs.rs`                                                                                                                                                                                                         | `manage_agent_certs` → `settings.certificates:manage`; `view_settings` → `settings:read`                                                                                                    |
+| `settings_combined.rs`                                                                                                                                                                                                            | `view_settings` → `settings:read`                                                                                                                                                           |
+| `settings_ca.rs`, `settings_global_combined.rs`, `settings_nats.rs`, `settings_network.rs`, `settings_oauth.rs`, `settings_provider_github.rs`, `settings_reset.rs`, `settings_zeroconf.rs`, `server_cert.rs`, `system_alerts.rs` | `manage_global_settings` → `system.settings:manage`. **Special case** `settings_ca.rs` `rotate_ca`: no `security()` block exists today — the governed declaration is **added**, not swapped |
+| `oidc_providers.rs`                                                                                                                                                                                                               | `manage_auth_settings` → `settings.auth:manage`; `view_settings` → `settings:read`                                                                                                          |
+| `instance_config_state.rs`                                                                                                                                                                                                        | `view/manage_instance_config_state` → `system.config-state:read/manage`                                                                                                                     |
 
 ### B4 — host tags + scheduler
 
@@ -198,24 +233,28 @@ mirroring M1.4a's `pairing_rule_operator_only_reads_hosts` precedent.
 
 Declarations only; the handler bodies will already enforce through the engine (M1.5).
 
-| File                      | Declaration                                                                                                                                                                                                            |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `surfaces.rs`             | 2 `authenticated-only` list ops + 1 `none: always 405` stub → authenticated-only form; the dynamic wrappers (8 at spec time; set = the `dynamic:` extension grep) → authenticated-only form + `x-action-dynamic: true` |
-| `system_services.rs`      | singles → `system.services:read/approve/reject/delete/update` extractors; the batch op → OR alternatives (`system.services:approve` \| `system.services:reject` \| `system.services:delete`)                           |
-| `services/batch.rs`       | OR alternatives (`services:approve` \| `services:reject` \| `services:delete`)                                                                                                                                         |
-| `plugin_configs/crud.rs`  | `manage_commands` ops → `commands:manage` extractor; the read ops (inline OR-of-three body) → OR alternatives matching the landed M1.5 enforcement (`software:read` \| `settings:read` \| `system.settings:manage`)    |
-| `plugin_type_settings.rs` | `manage_global_settings` ops → `system.settings:manage`; any op whose handler M1.5 converts to an authorize-OR → matching OR alternatives                                                                              |
+| File                      | Declaration                                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `surfaces.rs`             | 2 `authenticated-only` list ops + 1 `none: always 405` stub → authenticated-only form; the dynamic wrappers (8 at spec time; set = the `dynamic:` extension grep) → authenticated-only form + `x-action-dynamic: true`                                                                                                                                                                   |
+| `system_services.rs`      | singles → `system.services:read/approve/reject/delete/update` extractors; the batch op → OR alternatives (`system.services:approve` \| `system.services:reject` \| `system.services:delete`)                                                                                                                                                                                             |
+| `services/batch.rs`       | OR alternatives (`services:approve` \| `services:reject` \| `services:delete`)                                                                                                                                                                                                                                                                                                           |
+| `plugin_configs/crud.rs`  | `manage_commands` ops → `commands:manage` extractor; `list_plugin_configs`/`get_plugin_config` (plain `view_software` checks) → ordinary single-action `software:read` extractor; **only** `list_plugin_types` (the sole inline OR-of-three site, `crud.rs:100`) → OR alternatives matching the landed M1.5 enforcement (`software:read` \| `settings:read` \| `system.settings:manage`) |
+| `plugin_type_settings.rs` | `manage_global_settings` ops → `system.settings:manage`; any op whose handler M1.5 converts to an authorize-OR → matching OR alternatives                                                                                                                                                                                                                                                |
 
 For every OR endpoint, the B6 plan derives the alternative list from the **landed M1.5 code**,
 not from this table — the table is the expected outcome, the code is the authority.
 
 **CI script extension** (`ci/verify_action_security_declarations.py`), same commit as the first
 OR declaration: today `_oauth2_scopes` reads only the first `("oauth2" = […])` group and R1
-rejects extractor-less non-empty scopes, so OR endpoints cannot be declared. New rule R5:
-collect **all** `oauth2` requirement groups; when an operation declares more than one —
-(a) the handler must use **no** action extractor (alternatives exist precisely because
-enforcement is inline), (b) each alternative carries exactly one scope, (c) every declared scope
-(here and in R1) must exist in the catalog map. R2/R3/R4 unchanged. Verified per the gate-script
+rejects extractor-less non-empty scopes, so OR endpoints cannot be declared. Rule R5 — not a
+bolt-on: it restructures `_oauth2_scopes` to return **all** `oauth2` requirement groups (the
+single-group assumption threads through `_check_file`'s R1/R2 branches, which must switch on
+group count), and point (c) is genuinely new logic (single-action sites get catalog validity
+transitively via R1's extractor comparison; OR sites have no extractor to compare against). When
+an operation declares more than one group — (a) the handler must use **no** action extractor
+(alternatives exist precisely because enforcement is inline), (b) each alternative carries
+exactly one scope, (c) every declared scope (here and in R1) must exist in the catalog map.
+R2/R3/R4 unchanged. Verified per the gate-script
 discipline: an observed end-to-end RED (scratch perturbation: add an extractor to an OR handler;
 mis-spell a scope) plus the existing non-vacuity guards.
 
@@ -250,21 +289,43 @@ one representative endpoint per route family per batch:
   duplication here — B6 only asserts the declarations, via the CI script and D14).
 - **D14** (script perturbation) — extended for R5 as above; runs as the gate-script RED check,
   not a Rust test.
+- **Scope-map golden** (added in B1, grows every batch): a committed golden file mapping every
+  `routes/` operation to its declared security class (`operationId → sorted oauth2 scopes`,
+  `authenticated-only`, `dynamic`, or `unconverted`), generated **one-directionally** from the
+  committed `crates/ui/web-api/openapi.json` (never hand-edited), with a sync test beside the
+  existing `integration_tests/openapi_spec.rs` precedent (which already reads `openapi.json`
+  the same way). Honest scope of what this buys: it is a condensed review surface — one
+  greppable diff per batch of every endpoint's scope string (the full `openapi.json` diff
+  buries them), which is where a wrong-but-R1-consistent mapping (copy-pasted extractor +
+  matching wrong scope) gets caught by the reviewer; and it is the **only** ongoing pin on
+  B6's extractor-less OR/dynamic declarations, which R5 checks for catalog membership only.
+  It is not an independent oracle — it derives from the same regen step it audits.
 
 Existing per-family route tests keep passing unchanged except where they minted permissions via
 the legacy snapshot — the M1.2 seed/remap means grants already exist for seeded roles; any test
 fixture that grants legacy `Permission`s to custom users is updated to insert grants (pattern
-established by M1.4a's hosts conversion).
+established by M1.4a's hosts conversion). That fixture rule covers **tests** only; the live-data
+counterpart is B0.
 
 ## Quality gates (per batch)
 
-`cargo fmt --all` / `cargo fmt --check`; `cargo clippy --all-targets --all-features` (frontend
-built) and the minimal-feature clippy; `cargo test -p uptrakit-web-api --all-features`;
-`./scripts/regen-api.sh` + stage `openapi.json` and `frontend/src/lib/api/generated/`;
+`cargo fmt --all` (check form: `cargo fmt --all -- --check`);
+`cargo check --no-default-features --features db-sqlite` and `cargo check --all-features`;
+`cargo clippy --all-targets --all-features` (frontend built) and
+`cargo clippy --all-targets --no-default-features --features db-sqlite`;
+`cargo test -p uptrakit-web-api --all-features`;
+`./scripts/regen-api.sh` + stage `openapi.json` and `frontend/src/lib/api/generated/` (the staged
+generated client rides through the frontend lint/format/check hooks);
 `python3 ci/verify_action_security_declarations.py`; `python3 ci/verify_db_access_policy.py`;
 `bash ci/verify_handler_state_contract.sh`; `cargo xtask audit-coverage-check` (route files are
-touched — the `.routes(routes!())` re-keying trap); markdownlint on any doc touched. Full
-pre-push before each batch lands.
+touched — the `.routes(routes!())` re-keying trap); markdownlint on any doc touched;
+`bash ci/verify_agents_md_budget.sh` in B6 (it edits `crates/ui/web-api/AGENTS.md`). Full
+pre-push (cargo check/clippy/deny, semantic-boundary check, cargo test, frontend checks, ADR
+gates) before each batch lands.
+
+**Commit convention**: each batch commits as `feat(web-api)!: …` — same type/scope/breaking
+marker as the M1.4a reference commit `fb6f301a2` (every batch changes the per-operation OpenAPI
+security contract).
 
 ## Documentation deliverables
 
@@ -295,4 +356,12 @@ pre-push before each batch lands.
   permissions need grant-insertion updates; bounded by the M1.4a precedent and the shared
   fixtures.
 - **OR-declaration form depends on landed M1.5 semantics** — mitigated by deriving B6's
-  alternative lists from the merged code at plan time.
+  alternative lists from the merged code at plan time; ongoing drift between OR declarations
+  and inline enforcement is surfaced by the scope-map golden (§Tests), not by the CI script
+  (R5 cannot compare against inline code).
+- **Live custom grants** — each batch is a production authz cutover for any non-built-in
+  principal holding legacy permissions; B0 verifies none exist (or backfills). For any
+  principal B0 misses, frontend and backend diverge until M1.7: the UI still offers the
+  control (gating reads the legacy JWT permission list, not OpenAPI metadata), the backend
+  403s it — offer-then-deny UX, not a cosmetic gap. B0's precision is what keeps that set
+  empty.
