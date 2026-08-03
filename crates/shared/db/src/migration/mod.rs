@@ -86,6 +86,7 @@ mod m20260702_000001_hsi_discovery_provenance;
 mod m20260727_000001_plugin_type_id_grammar;
 mod m20260728_000001_access_grants_and_role_scope;
 mod m20260728_000002_seed_access_grants;
+mod m20260803_000001_seed_mcp_use_grants;
 
 pub struct Migrator;
 
@@ -176,6 +177,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260727_000001_plugin_type_id_grammar::Migration),
             Box::new(m20260728_000001_access_grants_and_role_scope::Migration),
             Box::new(m20260728_000002_seed_access_grants::Migration),
+            Box::new(m20260803_000001_seed_mcp_use_grants::Migration),
         ]
     }
 }

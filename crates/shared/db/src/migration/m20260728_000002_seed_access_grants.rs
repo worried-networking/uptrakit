@@ -315,6 +315,13 @@ mod tests {
     }
 
     /// (subject_id → (patterns, selector, tenant_id is null, created_by is null))
+    ///
+    /// Scoped to `description IS NULL`: M1.2 seed rows carry a NULL
+    /// description, while the M1.5 `mcp:use` backfill migration
+    /// (`m20260803_000001_seed_mcp_use_grants.rs`) adds a second role-subject
+    /// row (marked description) for `viewer`/`operator`/`software_manager`.
+    /// Without this filter those pairs collapse under the `subject_id` key
+    /// and the assertions below would read the wrong row.
     async fn seed_rows(
         db: &DatabaseConnection,
     ) -> BTreeMap<Uuid, (BTreeSet<String>, serde_json::Value, bool, bool)> {
@@ -330,6 +337,7 @@ mod tests {
                     ])
                     .from(Alias::new("access_grants"))
                     .and_where(Expr::col(Alias::new("subject_type")).eq("role"))
+                    .and_where(Expr::col(Alias::new("description")).is_null())
                     .to_owned(),
             )
             .await

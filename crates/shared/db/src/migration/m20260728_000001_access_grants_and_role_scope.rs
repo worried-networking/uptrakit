@@ -673,8 +673,15 @@ mod tests {
     async fn up_down_up_round_trips() {
         let db = test_db().await;
         Migrator::up(&db, None).await.expect("up");
-        // Roll back the seed migration + this one.
-        Migrator::down(&db, Some(2))
+        // Roll back every migration from this one onward (itself plus
+        // whatever later migrations append additional access_grants rows,
+        // e.g. the M1.5 mcp:use backfill) — computed dynamically via
+        // `migration_index()` rather than hardcoded, so appending a future
+        // migration after this one cannot silently under-roll-back.
+        let total = Migrator::migrations().len();
+        let steps = total - usize::try_from(migration_index()).expect("index fits usize");
+        let steps = <u32 as std::convert::TryFrom<usize>>::try_from(steps).expect("steps fits u32");
+        Migrator::down(&db, Some(steps))
             .await
             .expect("down must revert cleanly");
         // access_grants must be gone after down.
