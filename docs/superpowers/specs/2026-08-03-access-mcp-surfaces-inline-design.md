@@ -40,8 +40,9 @@ Move every non-REST-extractor enforcement surface onto the `AccessEngine`:
 - **Non-extractor sites**: the interactive update WS gate and every inline handler-body
   `has_permission` conversion.
 
-After this task, the only consumers of the legacy `Permission` world are the unconverted M1.4b
-route families and the machinery M1.7/M1.8 delete.
+After this task, the only consumers of the legacy `Permission` world are the not-yet-converted
+route families (M1.4b batches B1–B6; `users.rs`/`roles.rs`/`access_presets.rs` ride to
+M1.6a/M1.6b per that spec's decision 2) and the machinery M1.7/M1.8 delete.
 
 ## Decisions locked during grilling (owner, 2026-08-03)
 
@@ -422,6 +423,20 @@ the shared counter. Conversions:
 
 The batch-permission denial audit emissions at those sites keep their existing action types and
 reasons — only the decision source changes.
+
+## Cutover parity (shared obligation with M1.4b's B0)
+
+M1.5's conversions are production authz cutovers of the same class M1.4b's B0 guards: the M1.2
+migrations seed `access_grants` only for the eight built-in roles, so a custom (non-built-in)
+role carrying legacy permissions with a live assignment has **no** engine grant — after M1.5,
+such a principal would 403 on MCP, permission-gated surfaces, the interactive WS, and the five
+inline endpoints. M1.4b runs its B0 audit strictly before its B1; M1.5 may land **first**.
+Therefore: whichever of M1.5 / M1.4b-B1 lands first runs the B0 audit (non-built-in roles with
+both `role_permissions` rows and a `user_roles` assignment — query per the M1.4b spec §B0) and
+records the result in its plan/commit; if M1.4b's B0 already ran and recorded empty, M1.5 cites
+that record instead of re-running. A non-empty result triggers B0's backfill deliverable before
+M1.5's enforcement commits land. Same one-shot-validity caveat: a custom role created after the
+audit re-triggers it.
 
 ## Manifest changes
 
