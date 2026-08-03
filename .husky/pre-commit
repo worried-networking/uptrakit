@@ -5,6 +5,10 @@ set -euo pipefail
 
 _GIT_DIR=$(git rev-parse --git-dir)
 if [[ -f "$_GIT_DIR/MERGE_HEAD" ]]; then
+  # ADR dup guard still runs for merge commits: the concluding commit of a
+  # conflicted merge must fail on a duplicate ADR number (clean merges are
+  # covered by pre-merge-commit; staged-file lints stay skipped here).
+  bash ci/verify_adr_numbers.sh
   echo "[pre-commit] Merge commit — skipping checks."
   exit 0
 fi
@@ -34,6 +38,7 @@ FRONTEND_ESLINT_FILES=()
 FRONTEND_PRETTIER_FILES=()
 ROUTES_RS_FILES=()
 ACTIONS_FILES=()
+ADR_FILES=()
 WEBSITE_DOCS_TOUCHED=0
 AGENTS_MD_TOUCHED=0
 
@@ -66,6 +71,7 @@ for path in "${STAGED_PATHS[@]}"; do
   esac
   [[ "$path" =~ ^crates/ui/web-api/src/routes/.*\.rs$ ]] && ROUTES_RS_FILES+=("$path")
   [[ "${path##*/}" == "AGENTS.md" ]] && AGENTS_MD_TOUCHED=1
+  [[ "$path" == docs/adr/* ]] && ADR_FILES+=("$path")
   if [[ "$path" == website/* ]]; then
     WEBSITE_DOCS_TOUCHED=1
   else
@@ -164,6 +170,20 @@ if (( AGENTS_MD_TOUCHED )); then
   echo '[pre-commit] Verifying AGENTS.md size budgets...'
   # Repo-wide check (sub-second); gated on staged AGENTS.md files to keep the hook fast.
   bash ci/verify_agents_md_budget.sh
+fi
+
+if (( ${#ADR_FILES[@]} > 0 )); then
+  echo '[pre-commit] Verifying ADR numbers...'
+  bash ci/verify_adr_numbers.sh
+  echo '[pre-commit] Checking ADR TOC staleness...'
+  bash scripts/regen-adr-toc.sh --check
+  if ! command -v adrs >/dev/null 2>&1; then
+    printf '[pre-commit] WARNING: adrs not installed — skipping adrs doctor (CI enforces).\n' >&2
+    printf '[pre-commit] Install: cargo install adrs --locked\n' >&2
+  else
+    echo '[pre-commit] Running adrs doctor...'
+    adrs doctor
+  fi
 fi
 
 if (( ${#FRONTEND_ESLINT_FILES[@]} > 0 || ${#FRONTEND_PRETTIER_FILES[@]} > 0 )); then

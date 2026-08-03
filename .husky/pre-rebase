@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# pre-rebase: refuse a rebase that would create a duplicate ADR number.
+# $1 = upstream the series was forked from; $2 = branch being rebased
+# (unset when rebasing the current branch). A non-zero exit aborts the
+# rebase BEFORE any commit is replayed.
+# Known seam: `--onto <other>` targets and interactive renumber edits are
+# not predictable here — post-rewrite warns, pre-push/CI catch.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+upstream="$1"
+branch="${2:-HEAD}"
+if ! bash ci/verify_adr_numbers.sh --against "$upstream" "$branch"; then
+  echo "[pre-rebase] ADR number collision predicted — rebase refused." >&2
+  echo "[pre-rebase] Renumber your ADR to the next free number, then rebase again." >&2
+  exit 1
+fi

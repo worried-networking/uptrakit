@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# pre-merge-commit: runs after a CLEAN (non-conflicted, non-fast-forward)
+# `git merge` resolves, before the merge commit is created. A non-zero exit
+# aborts the merge. Conflicted merges conclude via `git commit`, which runs
+# pre-commit's merge-path ADR guard instead.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+echo '[pre-merge-commit] Verifying ADR numbers...'
+bash ci/verify_adr_numbers.sh

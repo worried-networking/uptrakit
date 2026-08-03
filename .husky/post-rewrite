@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# post-rewrite: advisory only — git IGNORES this hook's exit code, so it
+# cannot abort the rebase/amend that just completed. It exists to make a
+# duplicate created by an --onto/interactive rebase loud immediately
+# instead of at pre-push/CI.
+set -uo pipefail
+cd "$(git rev-parse --show-toplevel)"
+if ! bash ci/verify_adr_numbers.sh >/dev/null 2>&1; then
+  echo "[post-rewrite] WARNING: duplicate ADR numbers present after rewrite —" >&2
+  echo "[post-rewrite] renumber before pushing; pre-push and CI will fail." >&2
+fi
