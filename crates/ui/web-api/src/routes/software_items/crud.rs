@@ -7,8 +7,8 @@
 use crate::AppState;
 use crate::error_response::error_response;
 use crate::extract::Validated;
-use crate::middleware::permission::{
-    CanCreateSoftware, CanDeleteSoftware, CanUpdateSoftware, CanViewSoftware,
+use crate::middleware::action::{
+    CanCreateSoftware, CanDeleteSoftware, CanReadSoftware, CanUpdateSoftware,
 };
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::queries::plugin_type_settings as pts_queries;
@@ -45,14 +45,13 @@ use super::{
     post,
     path = "/api/v1/software-items",
     request_body = CreateSoftwareItemRequest,
-    extensions(("x-required-permission" = json!("create_software"))),
     responses(
         (status = 201, description = "Software item created", body = SoftwareItemResponse),
         (status = 400, description = "Invalid input"),
         (status = 409, description = "Duplicate software item")
     ),
     tag = "Software Items",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["software:create"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn create_software_item(
@@ -188,17 +187,16 @@ pub async fn create_software_item(
     get,
     path = "/api/v1/software-items",
     params(ListSoftwareItemsParams),
-    extensions(("x-required-permission" = json!("view_software"))),
     responses(
         (status = 200, description = "Paginated list of software items", body = PaginatedResponse<SoftwareItemResponse>),
     ),
     tag = "Software Items",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["software:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_software_items(
     tenant_db: TenantDb,
-    CanViewSoftware(_user): CanViewSoftware,
+    CanReadSoftware(_user): CanReadSoftware,
     Query(params): Query<ListSoftwareItemsParams>,
 ) -> Response {
     if params
@@ -222,18 +220,17 @@ pub async fn list_software_items(
     get,
     path = "/api/v1/software-items/{id}",
     params(("id" = Uuid, Path, description = "Software item UUID")),
-    extensions(("x-required-permission" = json!("view_software"))),
     responses(
         (status = 200, description = "Software item details", body = SoftwareItemDetailResponse),
         (status = 404, description = "Software item not found")
     ),
     tag = "Software Items",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["software:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_software_item(
     tenant_db: TenantDb,
-    CanViewSoftware(_user): CanViewSoftware,
+    CanReadSoftware(_user): CanReadSoftware,
     Path(item_id): Path<Uuid>,
 ) -> Response {
     match item_queries::get_software_item(&tenant_db, item_id).await {
@@ -252,14 +249,13 @@ pub async fn get_software_item(
     path = "/api/v1/software-items/{id}",
     params(("id" = Uuid, Path, description = "Software item UUID")),
     request_body = UpdateSoftwareItemRequest,
-    extensions(("x-required-permission" = json!("update_software"))),
     responses(
         (status = 200, description = "Software item updated", body = SoftwareItemResponse),
         (status = 404, description = "Software item not found"),
         (status = 409, description = "Duplicate software item")
     ),
     tag = "Software Items",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["software:update"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_software_item(
@@ -442,13 +438,12 @@ pub async fn update_software_item(
     params(
         ("id" = Uuid, Path, description = "Software item UUID"),
     ),
-    extensions(("x-required-permission" = json!("delete_software"))),
     responses(
         (status = 204, description = "Software item deleted"),
         (status = 404, description = "Software item not found")
     ),
     tag = "Software Items",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["software:delete"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn delete_software_item(
@@ -558,14 +553,13 @@ pub async fn delete_software_item(
     post,
     path = "/api/v1/software-items/{id}/approve",
     params(("id" = Uuid, Path, description = "Software item UUID")),
-    extensions(("x-required-permission" = json!("update_software"))),
     responses(
         (status = 200, description = "Software item approved", body = SoftwareItemResponse),
         (status = 404, description = "Software item not found"),
         (status = 409, description = "Item is already featured")
     ),
     tag = "Software Items",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["software:update"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn approve_software_item(

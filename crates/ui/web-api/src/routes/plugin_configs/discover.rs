@@ -1,6 +1,6 @@
 use crate::AppState;
 use crate::error_response::error_response;
-use crate::middleware::permission::CanTriggerChecks;
+use crate::middleware::action::CanTriggerChecks;
 use crate::tenant_db::TenantDb;
 use axum::{
     Json,
@@ -27,14 +27,13 @@ use uuid::Uuid;
     post,
     path = "/api/v1/plugin-configs/{id}/discover",
     params(("id" = Uuid, Path, description = "Plugin config UUID")),
-    extensions(("x-required-permission" = json!("trigger_checks"))),
     responses(
         (status = 200, description = "Discovery triggered", body = TriggerDiscoveryResponse),
         (status = 400, description = "Plugin type does not support discovery"),
         (status = 404, description = "Plugin config not found")
     ),
     tag = "Plugin Configs",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["checks:trigger"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn discover_plugin_config(

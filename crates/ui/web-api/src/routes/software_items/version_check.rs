@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 use crate::AppState;
 use crate::error_response::error_response;
-use crate::middleware::permission::CanTriggerChecks;
+use crate::middleware::action::CanTriggerChecks;
 use crate::middleware::require_auth::AuthenticatedApiTokenId;
 use crate::queries::plugin_configs::find_raw_active_config;
 use crate::queries::software_items as item_queries;
@@ -366,14 +366,13 @@ async fn classify_role_assignments(
     post,
     path = "/api/v1/software-items/{id}/check-versions",
     params(("id" = Uuid, Path, description = "Software item UUID")),
-    extensions(("x-required-permission" = json!("trigger_checks"))),
     responses(
         (status = 200, description = "Version check triggered", body = TriggerVersionCheckResponse),
         (status = 400, description = "Invalid input"),
         (status = 404, description = "Software item not found or no agents")
     ),
     tag = "Software Items",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["checks:trigger"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn check_versions(
@@ -499,14 +498,13 @@ pub async fn check_versions(
         ("id" = Uuid, Path, description = "Software item UUID"),
         ("host_id" = Uuid, Path, description = "Host UUID")
     ),
-    extensions(("x-required-permission" = json!("trigger_checks"))),
     responses(
         (status = 200, description = "Version check triggered", body = TriggerVersionCheckResponse),
         (status = 400, description = "Invalid input"),
         (status = 404, description = "Software item, host, or agent not found")
     ),
     tag = "Software Items",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["checks:trigger"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn check_versions_host(

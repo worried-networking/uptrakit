@@ -1,6 +1,6 @@
 //! HTTP handlers for `/api/v1/instance-plugins`.
 //!
-//! All four endpoints are gated by `CanManageGlobalSettings`. Write paths
+//! All four endpoints are gated by `CanManageSystemSettings`. Write paths
 //! persist changes to `instance_plugin_setting` and atomically swap the
 //! in-memory [`InstancePluginSnapshot`] in `AppState`.
 
@@ -27,7 +27,7 @@ use uptrakit_web_api_types::instance_plugins::{
 use crate::AppState;
 use crate::error_response::error_response;
 use crate::extract::Validated;
-use crate::middleware::permission::CanManageGlobalSettings;
+use crate::middleware::action::CanManageSystemSettings;
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::routes::plugin_configs::plugin_field_to_api_field;
 
@@ -101,19 +101,18 @@ fn resolve_instance_plugin<'a>(
 #[utoipa::path(
     get,
     path = "/api/v1/instance-plugins",
-    extensions(("x-required-permission" = json!("manage_global_settings"))),
     responses(
         (status = 200, description = "List of instance-scoped plugins", body = Vec<InstancePluginSummary>),
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Not authorized"),
     ),
     tag = "Instance Plugins",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.settings:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_instance_plugins(
     State(state): State<Arc<AppState>>,
-    CanManageGlobalSettings(_user): CanManageGlobalSettings,
+    CanManageSystemSettings(_user): CanManageSystemSettings,
 ) -> Response {
     let ops = state.plugin.plugin_ops.as_ref();
     let snapshot = state.instance_plugin_snapshot.load_full();
@@ -136,7 +135,6 @@ pub async fn list_instance_plugins(
     get,
     path = "/api/v1/instance-plugins/{plugin_type}",
     params(("plugin_type" = String, Path, description = "Plugin type identifier")),
-    extensions(("x-required-permission" = json!("manage_global_settings"))),
     responses(
         (status = 200, description = "Instance plugin detail", body = InstancePluginDetail),
         (status = 404, description = "Instance plugin not found"),
@@ -144,13 +142,13 @@ pub async fn list_instance_plugins(
         (status = 403, description = "Not authorized"),
     ),
     tag = "Instance Plugins",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.settings:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_instance_plugin(
     State(state): State<Arc<AppState>>,
     Path(plugin_type): Path<String>,
-    CanManageGlobalSettings(_user): CanManageGlobalSettings,
+    CanManageSystemSettings(_user): CanManageSystemSettings,
 ) -> Response {
     let id = PluginTypeId::new(&plugin_type);
     let ops = state.plugin.plugin_ops.as_ref();
@@ -169,7 +167,6 @@ pub async fn get_instance_plugin(
     path = "/api/v1/instance-plugins/{plugin_type}/enabled",
     params(("plugin_type" = String, Path, description = "Plugin type identifier")),
     request_body = SetInstancePluginEnabledRequest,
-    extensions(("x-required-permission" = json!("manage_global_settings"))),
     responses(
         (status = 200, description = "Plugin enabled state updated", body = InstancePluginSummary),
         (status = 404, description = "Instance plugin not found"),
@@ -177,13 +174,13 @@ pub async fn get_instance_plugin(
         (status = 403, description = "Not authorized"),
     ),
     tag = "Instance Plugins",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.settings:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn set_instance_plugin_enabled(
     State(state): State<Arc<AppState>>,
     Path(plugin_type): Path<String>,
-    CanManageGlobalSettings(user): CanManageGlobalSettings,
+    CanManageSystemSettings(user): CanManageSystemSettings,
     api_token_id: Option<axum::Extension<AuthenticatedApiTokenId>>,
     Validated(req): Validated<SetInstancePluginEnabledRequest>,
 ) -> Response {
@@ -298,7 +295,6 @@ pub async fn set_instance_plugin_enabled(
     path = "/api/v1/instance-plugins/{plugin_type}/config",
     params(("plugin_type" = String, Path, description = "Plugin type identifier")),
     request_body = UpsertInstancePluginConfigRequest,
-    extensions(("x-required-permission" = json!("manage_global_settings"))),
     responses(
         (status = 200, description = "Plugin configuration updated", body = InstancePluginSummary),
         (status = 400, description = "Invalid configuration"),
@@ -307,13 +303,13 @@ pub async fn set_instance_plugin_enabled(
         (status = 403, description = "Not authorized"),
     ),
     tag = "Instance Plugins",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.settings:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn upsert_instance_plugin_config(
     State(state): State<Arc<AppState>>,
     Path(plugin_type): Path<String>,
-    CanManageGlobalSettings(user): CanManageGlobalSettings,
+    CanManageSystemSettings(user): CanManageSystemSettings,
     api_token_id: Option<axum::Extension<AuthenticatedApiTokenId>>,
     Validated(req): Validated<UpsertInstancePluginConfigRequest>,
 ) -> Response {

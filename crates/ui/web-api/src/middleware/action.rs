@@ -159,6 +159,22 @@ action_extractor! {
     CanManageSettingsEnrollmentTokens => actions::SETTINGS_ENROLLMENT_TOKENS_MANAGE,
     /// `system.settings:manage` — manage global infrastructure settings.
     CanManageSystemSettings => actions::SYSTEM_SETTINGS_MANAGE,
+    /// `software:read` — view software items, plugin configs, history.
+    CanReadSoftware => actions::SOFTWARE_READ,
+    /// `software:create` — create software items and plugin configs.
+    CanCreateSoftware => actions::SOFTWARE_CREATE,
+    /// `software:update` — edit software items and plugin configs.
+    CanUpdateSoftware => actions::SOFTWARE_UPDATE,
+    /// `software:delete` — delete software items and plugin configs.
+    CanDeleteSoftware => actions::SOFTWARE_DELETE,
+    /// `updates:trigger` — trigger update execution (single and batch).
+    CanTriggerUpdates => actions::UPDATES_TRIGGER,
+    /// `commands:manage` — modify command-bearing plugin config fields.
+    CanManageCommands => actions::COMMANDS_MANAGE,
+    /// `plugin-configs:trigger` — test plugin configurations against hosts.
+    CanTriggerPluginConfigs => actions::PLUGIN_CONFIGS_TRIGGER,
+    /// `discovery.ignores:manage` — manage autodiscovery ignore rules.
+    CanManageDiscoveryIgnores => actions::DISCOVERY_IGNORES_MANAGE,
 }
 
 #[cfg(test)]

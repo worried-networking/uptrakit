@@ -408,7 +408,11 @@ export const register = <ThrowOnError extends boolean = true>(options: Options<R
  */
 export const listAutodiscoveryIgnores = <ThrowOnError extends boolean = true>(options?: Options<ListAutodiscoveryIgnoresData, ThrowOnError>): RequestResult<ListAutodiscoveryIgnoresResponses, unknown, ThrowOnError> => (options?.client ?? client).get<ListAutodiscoveryIgnoresResponses, unknown, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -423,7 +427,11 @@ export const listAutodiscoveryIgnores = <ThrowOnError extends boolean = true>(op
  */
 export const createAutodiscoveryIgnore = <ThrowOnError extends boolean = true>(options: Options<CreateAutodiscoveryIgnoreData, ThrowOnError>): RequestResult<CreateAutodiscoveryIgnoreResponses, CreateAutodiscoveryIgnoreErrors, ThrowOnError> => (options.client ?? client).post<CreateAutodiscoveryIgnoreResponses, CreateAutodiscoveryIgnoreErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -443,7 +451,11 @@ export const createAutodiscoveryIgnore = <ThrowOnError extends boolean = true>(o
  */
 export const batchAutodiscoveryIgnores = <ThrowOnError extends boolean = true>(options: Options<BatchAutodiscoveryIgnoresData, ThrowOnError>): RequestResult<BatchAutodiscoveryIgnoresResponses, BatchAutodiscoveryIgnoresErrors, ThrowOnError> => (options.client ?? client).post<BatchAutodiscoveryIgnoresResponses, BatchAutodiscoveryIgnoresErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -460,7 +472,11 @@ export const batchAutodiscoveryIgnores = <ThrowOnError extends boolean = true>(o
  */
 export const deleteAutodiscoveryIgnore = <ThrowOnError extends boolean = true>(options: Options<DeleteAutodiscoveryIgnoreData, ThrowOnError>): RequestResult<DeleteAutodiscoveryIgnoreResponses, DeleteAutodiscoveryIgnoreErrors, ThrowOnError> => (options.client ?? client).delete<DeleteAutodiscoveryIgnoreResponses, DeleteAutodiscoveryIgnoreErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -476,7 +492,11 @@ export const deleteAutodiscoveryIgnore = <ThrowOnError extends boolean = true>(o
  */
 export const listTenantDiscoveryAllowlist = <ThrowOnError extends boolean = true>(options?: Options<ListTenantDiscoveryAllowlistData, ThrowOnError>): RequestResult<ListTenantDiscoveryAllowlistResponses, ListTenantDiscoveryAllowlistErrors, ThrowOnError> => (options?.client ?? client).get<ListTenantDiscoveryAllowlistResponses, ListTenantDiscoveryAllowlistErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -493,7 +513,11 @@ export const listTenantDiscoveryAllowlist = <ThrowOnError extends boolean = true
  */
 export const addTenantDiscoveryAllowlistEntry = <ThrowOnError extends boolean = true>(options: Options<AddTenantDiscoveryAllowlistEntryData, ThrowOnError>): RequestResult<AddTenantDiscoveryAllowlistEntryResponses, AddTenantDiscoveryAllowlistEntryErrors, ThrowOnError> => (options.client ?? client).post<AddTenantDiscoveryAllowlistEntryResponses, AddTenantDiscoveryAllowlistEntryErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -512,7 +536,11 @@ export const addTenantDiscoveryAllowlistEntry = <ThrowOnError extends boolean = 
  */
 export const removeTenantDiscoveryAllowlistEntry = <ThrowOnError extends boolean = true>(options: Options<RemoveTenantDiscoveryAllowlistEntryData, ThrowOnError>): RequestResult<RemoveTenantDiscoveryAllowlistEntryResponses, RemoveTenantDiscoveryAllowlistEntryErrors, ThrowOnError> => (options.client ?? client).delete<RemoveTenantDiscoveryAllowlistEntryResponses, RemoveTenantDiscoveryAllowlistEntryErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -945,7 +973,11 @@ export const batchHosts = <ThrowOnError extends boolean = true>(options: Options
  */
 export const triggerHostBatchUpdate = <ThrowOnError extends boolean = true>(options: Options<TriggerHostBatchUpdateData, ThrowOnError>): RequestResult<TriggerHostBatchUpdateResponses, TriggerHostBatchUpdateErrors, ThrowOnError> => (options.client ?? client).post<TriggerHostBatchUpdateResponses, TriggerHostBatchUpdateErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -1039,7 +1071,11 @@ export const discoverHost = <ThrowOnError extends boolean = true>(options: Optio
  */
 export const listHostDiscoveryAllowlist = <ThrowOnError extends boolean = true>(options: Options<ListHostDiscoveryAllowlistData, ThrowOnError>): RequestResult<ListHostDiscoveryAllowlistResponses, ListHostDiscoveryAllowlistErrors, ThrowOnError> => (options.client ?? client).get<ListHostDiscoveryAllowlistResponses, ListHostDiscoveryAllowlistErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -1057,7 +1093,11 @@ export const listHostDiscoveryAllowlist = <ThrowOnError extends boolean = true>(
  */
 export const addHostDiscoveryAllowlistEntry = <ThrowOnError extends boolean = true>(options: Options<AddHostDiscoveryAllowlistEntryData, ThrowOnError>): RequestResult<AddHostDiscoveryAllowlistEntryResponses, AddHostDiscoveryAllowlistEntryErrors, ThrowOnError> => (options.client ?? client).post<AddHostDiscoveryAllowlistEntryResponses, AddHostDiscoveryAllowlistEntryErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -1077,7 +1117,11 @@ export const addHostDiscoveryAllowlistEntry = <ThrowOnError extends boolean = tr
  */
 export const removeHostDiscoveryAllowlistEntry = <ThrowOnError extends boolean = true>(options: Options<RemoveHostDiscoveryAllowlistEntryData, ThrowOnError>): RequestResult<RemoveHostDiscoveryAllowlistEntryResponses, RemoveHostDiscoveryAllowlistEntryErrors, ThrowOnError> => (options.client ?? client).delete<RemoveHostDiscoveryAllowlistEntryResponses, RemoveHostDiscoveryAllowlistEntryErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -1107,7 +1151,11 @@ export const setHostTags = <ThrowOnError extends boolean = true>(options: Option
  */
 export const listInstancePlugins = <ThrowOnError extends boolean = true>(options?: Options<ListInstancePluginsData, ThrowOnError>): RequestResult<ListInstancePluginsResponses, ListInstancePluginsErrors, ThrowOnError> => (options?.client ?? client).get<ListInstancePluginsResponses, ListInstancePluginsErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -1120,7 +1168,11 @@ export const listInstancePlugins = <ThrowOnError extends boolean = true>(options
  */
 export const getInstancePlugin = <ThrowOnError extends boolean = true>(options: Options<GetInstancePluginData, ThrowOnError>): RequestResult<GetInstancePluginResponses, GetInstancePluginErrors, ThrowOnError> => (options.client ?? client).get<GetInstancePluginResponses, GetInstancePluginErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -1133,7 +1185,11 @@ export const getInstancePlugin = <ThrowOnError extends boolean = true>(options: 
  */
 export const upsertInstancePluginConfig = <ThrowOnError extends boolean = true>(options: Options<UpsertInstancePluginConfigData, ThrowOnError>): RequestResult<UpsertInstancePluginConfigResponses, UpsertInstancePluginConfigErrors, ThrowOnError> => (options.client ?? client).put<UpsertInstancePluginConfigResponses, UpsertInstancePluginConfigErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -1150,7 +1206,11 @@ export const upsertInstancePluginConfig = <ThrowOnError extends boolean = true>(
  */
 export const setInstancePluginEnabled = <ThrowOnError extends boolean = true>(options: Options<SetInstancePluginEnabledData, ThrowOnError>): RequestResult<SetInstancePluginEnabledResponses, SetInstancePluginEnabledErrors, ThrowOnError> => (options.client ?? client).put<SetInstancePluginEnabledResponses, SetInstancePluginEnabledErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -1443,7 +1503,11 @@ export const createPluginConfig = <ThrowOnError extends boolean = true>(options:
  */
 export const batchPluginConfigs = <ThrowOnError extends boolean = true>(options: Options<BatchPluginConfigsData, ThrowOnError>): RequestResult<BatchPluginConfigsResponses, BatchPluginConfigsErrors, ThrowOnError> => (options.client ?? client).post<BatchPluginConfigsResponses, BatchPluginConfigsErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -1469,7 +1533,11 @@ export const batchPluginConfigs = <ThrowOnError extends boolean = true>(options:
  */
 export const testPluginConfig = <ThrowOnError extends boolean = true>(options: Options<TestPluginConfigData, ThrowOnError>): RequestResult<TestPluginConfigResponses, TestPluginConfigErrors, ThrowOnError> => (options.client ?? client).post<TestPluginConfigResponses, TestPluginConfigErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -1535,7 +1603,11 @@ export const updatePluginConfig = <ThrowOnError extends boolean = true>(options:
  */
 export const discoverPluginConfig = <ThrowOnError extends boolean = true>(options: Options<DiscoverPluginConfigData, ThrowOnError>): RequestResult<DiscoverPluginConfigResponses, DiscoverPluginConfigErrors, ThrowOnError> => (options.client ?? client).post<DiscoverPluginConfigResponses, DiscoverPluginConfigErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2086,7 +2158,11 @@ export const resetData = <ThrowOnError extends boolean = true>(options: Options<
  */
 export const listSoftwareItems = <ThrowOnError extends boolean = true>(options?: Options<ListSoftwareItemsData, ThrowOnError>): RequestResult<ListSoftwareItemsResponses, unknown, ThrowOnError> => (options?.client ?? client).get<ListSoftwareItemsResponses, unknown, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2099,7 +2175,11 @@ export const listSoftwareItems = <ThrowOnError extends boolean = true>(options?:
  */
 export const createSoftwareItem = <ThrowOnError extends boolean = true>(options: Options<CreateSoftwareItemData, ThrowOnError>): RequestResult<CreateSoftwareItemResponses, CreateSoftwareItemErrors, ThrowOnError> => (options.client ?? client).post<CreateSoftwareItemResponses, CreateSoftwareItemErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2119,7 +2199,11 @@ export const createSoftwareItem = <ThrowOnError extends boolean = true>(options:
  */
 export const batchSoftwareItems = <ThrowOnError extends boolean = true>(options: Options<BatchSoftwareItemsData, ThrowOnError>): RequestResult<BatchSoftwareItemsResponses, BatchSoftwareItemsErrors, ThrowOnError> => (options.client ?? client).post<BatchSoftwareItemsResponses, BatchSoftwareItemsErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2136,7 +2220,11 @@ export const batchSoftwareItems = <ThrowOnError extends boolean = true>(options:
  */
 export const executeSoftwareItemMerge = <ThrowOnError extends boolean = true>(options: Options<ExecuteSoftwareItemMergeData, ThrowOnError>): RequestResult<ExecuteSoftwareItemMergeResponses, ExecuteSoftwareItemMergeErrors, ThrowOnError> => (options.client ?? client).post<ExecuteSoftwareItemMergeResponses, ExecuteSoftwareItemMergeErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2153,7 +2241,11 @@ export const executeSoftwareItemMerge = <ThrowOnError extends boolean = true>(op
  */
 export const previewSoftwareItemMerge = <ThrowOnError extends boolean = true>(options: Options<PreviewSoftwareItemMergeData, ThrowOnError>): RequestResult<PreviewSoftwareItemMergeResponses, PreviewSoftwareItemMergeErrors, ThrowOnError> => (options.client ?? client).post<PreviewSoftwareItemMergeResponses, PreviewSoftwareItemMergeErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2170,7 +2262,11 @@ export const previewSoftwareItemMerge = <ThrowOnError extends boolean = true>(op
  */
 export const deleteSoftwareItem = <ThrowOnError extends boolean = true>(options: Options<DeleteSoftwareItemData, ThrowOnError>): RequestResult<DeleteSoftwareItemResponses, DeleteSoftwareItemErrors, ThrowOnError> => (options.client ?? client).delete<DeleteSoftwareItemResponses, DeleteSoftwareItemErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2183,7 +2279,11 @@ export const deleteSoftwareItem = <ThrowOnError extends boolean = true>(options:
  */
 export const getSoftwareItem = <ThrowOnError extends boolean = true>(options: Options<GetSoftwareItemData, ThrowOnError>): RequestResult<GetSoftwareItemResponses, GetSoftwareItemErrors, ThrowOnError> => (options.client ?? client).get<GetSoftwareItemResponses, GetSoftwareItemErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2196,7 +2296,11 @@ export const getSoftwareItem = <ThrowOnError extends boolean = true>(options: Op
  */
 export const updateSoftwareItem = <ThrowOnError extends boolean = true>(options: Options<UpdateSoftwareItemData, ThrowOnError>): RequestResult<UpdateSoftwareItemResponses, UpdateSoftwareItemErrors, ThrowOnError> => (options.client ?? client).put<UpdateSoftwareItemResponses, UpdateSoftwareItemErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2216,7 +2320,11 @@ export const updateSoftwareItem = <ThrowOnError extends boolean = true>(options:
  */
 export const approveSoftwareItem = <ThrowOnError extends boolean = true>(options: Options<ApproveSoftwareItemData, ThrowOnError>): RequestResult<ApproveSoftwareItemResponses, ApproveSoftwareItemErrors, ThrowOnError> => (options.client ?? client).post<ApproveSoftwareItemResponses, ApproveSoftwareItemErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2232,7 +2340,11 @@ export const approveSoftwareItem = <ThrowOnError extends boolean = true>(options
  */
 export const triggerItemBatchUpdate = <ThrowOnError extends boolean = true>(options: Options<TriggerItemBatchUpdateData, ThrowOnError>): RequestResult<TriggerItemBatchUpdateResponses, TriggerItemBatchUpdateErrors, ThrowOnError> => (options.client ?? client).post<TriggerItemBatchUpdateResponses, TriggerItemBatchUpdateErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2252,7 +2364,11 @@ export const triggerItemBatchUpdate = <ThrowOnError extends boolean = true>(opti
  */
 export const checkVersions = <ThrowOnError extends boolean = true>(options: Options<CheckVersionsData, ThrowOnError>): RequestResult<CheckVersionsResponses, CheckVersionsErrors, ThrowOnError> => (options.client ?? client).post<CheckVersionsResponses, CheckVersionsErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2268,7 +2384,11 @@ export const checkVersions = <ThrowOnError extends boolean = true>(options: Opti
  */
 export const assignHosts = <ThrowOnError extends boolean = true>(options: Options<AssignHostsData, ThrowOnError>): RequestResult<AssignHostsResponses, AssignHostsErrors, ThrowOnError> => (options.client ?? client).post<AssignHostsResponses, AssignHostsErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2290,7 +2410,11 @@ export const assignHosts = <ThrowOnError extends boolean = true>(options: Option
  */
 export const unassignHost = <ThrowOnError extends boolean = true>(options: Options<UnassignHostData, ThrowOnError>): RequestResult<UnassignHostResponses, UnassignHostErrors, ThrowOnError> => (options.client ?? client).delete<UnassignHostResponses, UnassignHostErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2303,7 +2427,11 @@ export const unassignHost = <ThrowOnError extends boolean = true>(options: Optio
  */
 export const updateHostAssignment = <ThrowOnError extends boolean = true>(options: Options<UpdateHostAssignmentData, ThrowOnError>): RequestResult<UpdateHostAssignmentResponses, UpdateHostAssignmentErrors, ThrowOnError> => (options.client ?? client).put<UpdateHostAssignmentResponses, UpdateHostAssignmentErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2320,7 +2448,11 @@ export const updateHostAssignment = <ThrowOnError extends boolean = true>(option
  */
 export const checkVersionsHost = <ThrowOnError extends boolean = true>(options: Options<CheckVersionsHostData, ThrowOnError>): RequestResult<CheckVersionsHostResponses, CheckVersionsHostErrors, ThrowOnError> => (options.client ?? client).post<CheckVersionsHostResponses, CheckVersionsHostErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2333,7 +2465,11 @@ export const checkVersionsHost = <ThrowOnError extends boolean = true>(options: 
  */
 export const deletePluginAssignment = <ThrowOnError extends boolean = true>(options: Options<DeletePluginAssignmentData, ThrowOnError>): RequestResult<DeletePluginAssignmentResponses, DeletePluginAssignmentErrors, ThrowOnError> => (options.client ?? client).delete<DeletePluginAssignmentResponses, DeletePluginAssignmentErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2346,7 +2482,11 @@ export const deletePluginAssignment = <ThrowOnError extends boolean = true>(opti
  */
 export const triggerUpdate = <ThrowOnError extends boolean = true>(options: Options<TriggerUpdateData, ThrowOnError>): RequestResult<TriggerUpdateResponses, TriggerUpdateErrors, ThrowOnError> => (options.client ?? client).post<TriggerUpdateResponses, TriggerUpdateErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2736,7 +2876,11 @@ export const getSystemAlerts = <ThrowOnError extends boolean = true>(options?: O
  */
 export const listBatches = <ThrowOnError extends boolean = true>(options?: Options<ListBatchesData, ThrowOnError>): RequestResult<ListBatchesResponses, ListBatchesErrors, ThrowOnError> => (options?.client ?? client).get<ListBatchesResponses, ListBatchesErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2749,7 +2893,11 @@ export const listBatches = <ThrowOnError extends boolean = true>(options?: Optio
  */
 export const getBatch = <ThrowOnError extends boolean = true>(options: Options<GetBatchData, ThrowOnError>): RequestResult<GetBatchResponses, GetBatchErrors, ThrowOnError> => (options.client ?? client).get<GetBatchResponses, GetBatchErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2766,7 +2914,11 @@ export const getBatch = <ThrowOnError extends boolean = true>(options: Options<G
  */
 export const streamBatchProgress = <ThrowOnError extends boolean = true>(options: Options<StreamBatchProgressData, ThrowOnError, unknown>): Promise<ServerSentEventsResult<StreamBatchProgressResponses>> => (options.client ?? client).sse.get<StreamBatchProgressResponses, StreamBatchProgressErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2779,7 +2931,11 @@ export const streamBatchProgress = <ThrowOnError extends boolean = true>(options
  */
 export const listUpdateHistory = <ThrowOnError extends boolean = true>(options?: Options<ListUpdateHistoryData, ThrowOnError>): RequestResult<ListUpdateHistoryResponses, ListUpdateHistoryErrors, ThrowOnError> => (options?.client ?? client).get<ListUpdateHistoryResponses, ListUpdateHistoryErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2792,7 +2948,11 @@ export const listUpdateHistory = <ThrowOnError extends boolean = true>(options?:
  */
 export const getUpdateHistory = <ThrowOnError extends boolean = true>(options: Options<GetUpdateHistoryData, ThrowOnError>): RequestResult<GetUpdateHistoryResponses, GetUpdateHistoryErrors, ThrowOnError> => (options.client ?? client).get<GetUpdateHistoryResponses, GetUpdateHistoryErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2809,7 +2969,11 @@ export const getUpdateHistory = <ThrowOnError extends boolean = true>(options: O
  */
 export const streamUpdateOutput = <ThrowOnError extends boolean = true>(options: Options<StreamUpdateOutputData, ThrowOnError, unknown>): Promise<ServerSentEventsResult<StreamUpdateOutputResponses>> => (options.client ?? client).sse.get<StreamUpdateOutputResponses, StreamUpdateOutputErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],

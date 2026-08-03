@@ -1267,10 +1267,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "software:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_software"
+        ]
       },
       "post": {
         "tags": [
@@ -1316,10 +1320,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "discovery.ignores:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_ignores"
+        ]
       }
     },
     "/api/v1/autodiscovery/ignores/batch": {
@@ -1363,10 +1371,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "discovery.ignores:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_ignores"
+        ]
       }
     },
     "/api/v1/autodiscovery/ignores/{id}": {
@@ -1398,10 +1410,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "discovery.ignores:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_ignores"
+        ]
       }
     },
     "/api/v1/discovery-allowlist": {
@@ -1435,10 +1451,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "software:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_software"
+        ]
       },
       "post": {
         "tags": [
@@ -1480,10 +1500,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "software:update"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "update_software"
+        ]
       }
     },
     "/api/v1/discovery-allowlist/{id}": {
@@ -1522,10 +1546,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "software:update"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "update_software"
+        ]
       }
     },
     "/api/v1/enrollment-tokens": {
@@ -2690,10 +2718,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "updates:trigger"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "trigger_updates"
+        ]
       }
     },
     "/api/v1/hosts/{id}": {
@@ -2944,10 +2976,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "software:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_software"
+        ]
       },
       "post": {
         "tags": [
@@ -3004,10 +3040,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "software:update"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "update_software"
+        ]
       }
     },
     "/api/v1/hosts/{id}/discovery-allowlist/{entry_id}": {
@@ -3056,10 +3096,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "software:update"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "update_software"
+        ]
       }
     },
     "/api/v1/hosts/{id}/tags": {
@@ -3156,10 +3200,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.settings:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_global_settings"
+        ]
       }
     },
     "/api/v1/instance-plugins/{plugin_type}": {
@@ -3203,10 +3251,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.settings:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_global_settings"
+        ]
       }
     },
     "/api/v1/instance-plugins/{plugin_type}/config": {
@@ -3263,10 +3315,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.settings:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_global_settings"
+        ]
       }
     },
     "/api/v1/instance-plugins/{plugin_type}/enabled": {
@@ -3320,10 +3376,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.settings:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_global_settings"
+        ]
       }
     },
     "/api/v1/instance/config-reload/clear-degraded": {
@@ -4291,10 +4351,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "commands:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_commands"
+        ]
       }
     },
     "/api/v1/plugin-configs/test": {
@@ -4338,10 +4402,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "plugin-configs:trigger"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "test_plugin_configs"
+        ]
       }
     },
     "/api/v1/plugin-configs/{id}": {
@@ -4510,10 +4578,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "checks:trigger"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "trigger_checks"
+        ]
       }
     },
     "/api/v1/plugin-type-settings": {
@@ -6203,10 +6275,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "software:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_software"
+        ]
       },
       "post": {
         "tags": [
@@ -6244,10 +6320,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "software:create"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "create_software"
+        ]
       }
     },
     "/api/v1/software-items/batch": {
@@ -6291,10 +6371,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "software:delete"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "delete_software"
+        ]
       }
     },
     "/api/v1/software-items/merge/execute": {
@@ -6331,10 +6415,15 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "software:delete",
+              "software:update"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "update_software and delete_software"
+        ]
       }
     },
     "/api/v1/software-items/merge/preview": {
@@ -6371,10 +6460,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "software:update"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "update_software"
+        ]
       }
     },
     "/api/v1/software-items/{id}": {
@@ -6413,10 +6506,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "software:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_software"
+        ]
       },
       "put": {
         "tags": [
@@ -6466,10 +6563,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "software:update"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "update_software"
+        ]
       },
       "delete": {
         "tags": [
@@ -6499,10 +6600,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "software:delete"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "delete_software"
+        ]
       }
     },
     "/api/v1/software-items/{id}/approve": {
@@ -6545,10 +6650,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "software:update"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "update_software"
+        ]
       }
     },
     "/api/v1/software-items/{id}/batch-update": {
@@ -6601,10 +6710,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "updates:trigger"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "trigger_updates"
+        ]
       }
     },
     "/api/v1/software-items/{id}/check-versions": {
@@ -6647,10 +6760,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "checks:trigger"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "trigger_checks"
+        ]
       }
     },
     "/api/v1/software-items/{id}/hosts": {
@@ -6703,10 +6820,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "software:update"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "update_software"
+        ]
       }
     },
     "/api/v1/software-items/{id}/hosts/{host_id}": {
@@ -6771,10 +6892,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "software:update"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "update_software"
+        ]
       },
       "delete": {
         "tags": [
@@ -6827,10 +6952,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "software:update"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "update_software"
+        ]
       }
     },
     "/api/v1/software-items/{id}/hosts/{host_id}/check-versions": {
@@ -6882,10 +7011,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "checks:trigger"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "trigger_checks"
+        ]
       }
     },
     "/api/v1/software-items/{id}/hosts/{host_id}/plugins/{role}/{ordinal}": {
@@ -6953,10 +7086,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "software:update"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "update_software"
+        ]
       }
     },
     "/api/v1/software-items/{id}/hosts/{host_id}/update": {
@@ -7021,10 +7158,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "updates:trigger"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "trigger_updates"
+        ]
       }
     },
     "/api/v1/surfaces": {
@@ -8770,10 +8911,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "software:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_software"
+        ]
       }
     },
     "/api/v1/update-batches/{id}": {
@@ -8818,10 +8963,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "software:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_software"
+        ]
       }
     },
     "/api/v1/update-batches/{id}/stream": {
@@ -8863,10 +9012,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "software:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_software"
+        ]
       }
     },
     "/api/v1/update-history": {
@@ -8968,10 +9121,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "software:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_software"
+        ]
       }
     },
     "/api/v1/update-history/{id}": {
@@ -9016,10 +9173,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "software:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_software"
+        ]
       }
     },
     "/api/v1/update-history/{id}/output/stream": {
@@ -9061,10 +9222,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "software:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_software"
+        ]
       }
     },
     "/api/v1/users": {

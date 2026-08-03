@@ -18,7 +18,7 @@ use crate::app_state::AuditEmitterState;
 use crate::auth::AuthMethod;
 use crate::auth::permissions::Permission;
 use crate::extract::Validated;
-use crate::middleware::permission::{
+use crate::middleware::action::{
     CanCreateSoftware, CanDeleteSoftware, CanTriggerChecks, CanTriggerUpdates, CanUpdateSoftware,
 };
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, AuthenticatedUser};

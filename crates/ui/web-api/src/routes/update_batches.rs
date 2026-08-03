@@ -36,7 +36,7 @@ use crate::actions::update_batches as batch_actions;
 use crate::api_error::ApiError;
 use crate::batch_progress_broadcaster::BatchProgressEvent;
 use crate::error_response::error_response;
-use crate::middleware::permission::{CanTriggerUpdates, CanViewSoftware};
+use crate::middleware::action::{CanReadSoftware, CanTriggerUpdates};
 use crate::middleware::require_auth::{
     AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
 };
@@ -110,14 +110,13 @@ fn batch_trigger_outcome(
     path = "/api/v1/hosts/{host_id}/batch-update",
     params(("host_id" = Uuid, Path, description = "Host UUID")),
     request_body = HostBatchUpdateRequest,
-    extensions(("x-required-permission" = json!("trigger_updates"))),
     responses(
         (status = 200, description = "Batch update triggered", body = BatchUpdateResponse),
         (status = 400, description = "Invalid input"),
         (status = 404, description = "Host not found")
     ),
     tag = "Update Batches",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["updates:trigger"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn trigger_host_batch_update(
@@ -243,14 +242,13 @@ pub async fn trigger_host_batch_update(
     path = "/api/v1/software-items/{id}/batch-update",
     params(("id" = Uuid, Path, description = "Software item UUID")),
     request_body = ItemBatchUpdateRequest,
-    extensions(("x-required-permission" = json!("trigger_updates"))),
     responses(
         (status = 200, description = "Batch update triggered", body = BatchUpdateResponse),
         (status = 400, description = "Invalid input"),
         (status = 404, description = "Software item not found")
     ),
     tag = "Update Batches",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["updates:trigger"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn trigger_item_batch_update(
@@ -354,13 +352,12 @@ pub async fn trigger_item_batch_update(
         (status = 403, description = "Not authorized")
     ),
     tag = "Update Batches",
-    extensions(("x-required-permission" = json!("view_software"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["software:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_batches(
     tenant_db: TenantDb,
-    CanViewSoftware(_user): CanViewSoftware,
+    CanReadSoftware(_user): CanReadSoftware,
     Query(query): Query<UpdateBatchListQuery>,
 ) -> Response {
     match batch_queries::list_batches(&tenant_db, &query).await {
@@ -388,13 +385,12 @@ pub async fn list_batches(
         (status = 404, description = "Batch not found")
     ),
     tag = "Update Batches",
-    extensions(("x-required-permission" = json!("view_software"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["software:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_batch(
     tenant_db: TenantDb,
-    CanViewSoftware(_user): CanViewSoftware,
+    CanReadSoftware(_user): CanReadSoftware,
     Path(batch_id): Path<Uuid>,
 ) -> Response {
     match batch_queries::get_batch_with_items(&tenant_db, batch_id).await {
@@ -663,13 +659,12 @@ fn sse_event_name(event: &BatchProgressEvent) -> &'static str {
         (status = 404, description = "Batch not found")
     ),
     tag = "Update Batches",
-    extensions(("x-required-permission" = json!("view_software"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["software:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn stream_batch_progress(
     tenant_db: TenantDb,
-    CanViewSoftware(_user): CanViewSoftware,
+    CanReadSoftware(_user): CanReadSoftware,
     State(state): State<Arc<AppState>>,
     Path(batch_id): Path<Uuid>,
 ) -> Response {

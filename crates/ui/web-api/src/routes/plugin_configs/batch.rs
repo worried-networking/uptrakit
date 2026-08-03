@@ -2,7 +2,7 @@ use crate::app_state::AuditEmitterState;
 use crate::error_response::error_response;
 use crate::extract::Validated;
 use crate::extractors::{IfMatch, SettingsVersion};
-use crate::middleware::permission::CanManageCommands;
+use crate::middleware::action::CanManageCommands;
 use crate::middleware::require_auth::AuthenticatedApiTokenId;
 use crate::queries::plugin_configs as pc_queries;
 use crate::tenant_db::TenantDb;
@@ -33,8 +33,7 @@ use super::audit::{AuditContext, emit_plugin_config_semantic_audit};
         (status = 403, description = "Not authorized")
     ),
     tag = "Plugin Configs",
-    extensions(("x-required-permission" = json!("manage_commands"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["commands:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn batch_plugin_configs(

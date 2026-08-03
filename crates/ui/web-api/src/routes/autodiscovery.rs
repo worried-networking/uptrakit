@@ -10,7 +10,7 @@ use std::sync::Arc;
 use crate::AppState;
 use crate::error_response::error_response;
 use crate::extract::Validated;
-use crate::middleware::permission::{CanManageIgnores, CanViewSoftware};
+use crate::middleware::action::{CanManageDiscoveryIgnores, CanReadSoftware};
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::queries::autodiscovery as autodiscovery_queries;
 use crate::tenant_db::TenantDb;
@@ -37,17 +37,16 @@ pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams
     get,
     path = "/api/v1/autodiscovery/ignores",
     params(ListIgnoresParams),
-    extensions(("x-required-permission" = json!("view_software"))),
     responses(
         (status = 200, description = "Paginated list of ignore rules", body = PaginatedResponse<SoftwareIgnoreResponse>),
     ),
     tag = "Autodiscovery",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["software:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_autodiscovery_ignores(
     tenant_db: TenantDb,
-    CanViewSoftware(_user): CanViewSoftware,
+    CanReadSoftware(_user): CanReadSoftware,
     Query(params): Query<ListIgnoresParams>,
 ) -> Response {
     let pagination = PaginationParams {
@@ -77,20 +76,19 @@ pub async fn list_autodiscovery_ignores(
     post,
     path = "/api/v1/autodiscovery/ignores",
     request_body = CreateSoftwareIgnoreRequest,
-    extensions(("x-required-permission" = json!("manage_ignores"))),
     responses(
         (status = 201, description = "Ignore rule created", body = SoftwareIgnoreResponse),
         (status = 200, description = "Ignore rule already exists", body = SoftwareIgnoreResponse),
         (status = 400, description = "Invalid input"),
     ),
     tag = "Autodiscovery",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["discovery.ignores:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn create_autodiscovery_ignore(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageIgnores(user): CanManageIgnores,
+    CanManageDiscoveryIgnores(user): CanManageDiscoveryIgnores,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Validated(req): Validated<CreateSoftwareIgnoreRequest>,
 ) -> Response {
@@ -238,19 +236,18 @@ pub async fn create_autodiscovery_ignore(
     delete,
     path = "/api/v1/autodiscovery/ignores/{id}",
     params(("id" = Uuid, Path, description = "Ignore rule UUID")),
-    extensions(("x-required-permission" = json!("manage_ignores"))),
     responses(
         (status = 204, description = "Ignore rule deleted"),
         (status = 404, description = "Ignore rule not found")
     ),
     tag = "Autodiscovery",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["discovery.ignores:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn delete_autodiscovery_ignore(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageIgnores(user): CanManageIgnores,
+    CanManageDiscoveryIgnores(user): CanManageDiscoveryIgnores,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(rule_id): Path<Uuid>,
 ) -> Response {
@@ -368,14 +365,13 @@ pub async fn delete_autodiscovery_ignore(
         (status = 403, description = "Not authorized")
     ),
     tag = "Autodiscovery",
-    extensions(("x-required-permission" = json!("manage_ignores"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["discovery.ignores:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn batch_autodiscovery_ignores(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageIgnores(user): CanManageIgnores,
+    CanManageDiscoveryIgnores(user): CanManageDiscoveryIgnores,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Validated(body): Validated<BatchActionRequest>,
 ) -> Response {

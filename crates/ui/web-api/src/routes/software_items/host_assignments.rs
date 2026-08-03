@@ -4,7 +4,7 @@
 
 use crate::AppState;
 use crate::error_response::error_response;
-use crate::middleware::permission::CanUpdateSoftware;
+use crate::middleware::action::CanUpdateSoftware;
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::queries::autodiscovery as autodiscovery_queries;
 use crate::queries::software_items as item_queries;
@@ -37,14 +37,13 @@ use super::{AssignHostsRequest, SoftwareItemDetailResponse, UpdateHostAssignment
     path = "/api/v1/software-items/{id}/hosts",
     params(("id" = Uuid, Path, description = "Software item UUID")),
     request_body = AssignHostsRequest,
-    extensions(("x-required-permission" = json!("update_software"))),
     responses(
         (status = 200, description = "Hosts assigned", body = SoftwareItemDetailResponse),
         (status = 400, description = "Invalid input"),
         (status = 404, description = "Software item not found")
     ),
     tag = "Software Items",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["software:update"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn assign_hosts(
@@ -226,13 +225,12 @@ pub struct DeleteHostAssignmentParams {
         ("host_id" = Uuid, Path, description = "Host UUID"),
         DeleteHostAssignmentParams
     ),
-    extensions(("x-required-permission" = json!("update_software"))),
     responses(
         (status = 204, description = "Host unassigned"),
         (status = 404, description = "Software item or host assignment not found")
     ),
     tag = "Software Items",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["software:update"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn unassign_host(
@@ -413,7 +411,6 @@ pub async fn unassign_host(
         ("host_id" = Uuid, Path, description = "Host UUID")
     ),
     request_body = UpdateHostAssignmentRequest,
-    extensions(("x-required-permission" = json!("update_software"))),
     responses(
         (status = 200, description = "Host assignment updated", body = SoftwareItemDetailResponse),
         (status = 400, description = "Invalid input"),
@@ -421,7 +418,7 @@ pub async fn unassign_host(
         (status = 409, description = "Duplicate host assignment")
     ),
     tag = "Software Items",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["software:update"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_host_assignment(
@@ -593,13 +590,12 @@ pub async fn update_host_assignment(
         ("role" = String, Path, description = "Plugin role (e.g. pre_update_hook)"),
         ("ordinal" = i32, Path, description = "Ordinal of the plugin assignment to remove")
     ),
-    extensions(("x-required-permission" = json!("update_software"))),
     responses(
         (status = 200, description = "Plugin assignment removed", body = SoftwareItemDetailResponse),
         (status = 404, description = "Software item, host, or plugin assignment not found"),
     ),
     tag = "Software Items",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["software:update"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn delete_plugin_assignment(

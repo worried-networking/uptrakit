@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::AppState;
 use crate::error_response::error_response;
-use crate::middleware::permission::CanViewSoftware;
+use crate::middleware::action::CanReadSoftware;
 use crate::queries::update_history as uh_queries;
 use crate::tenant_db::TenantDb;
 use crate::update_output_broadcaster::BroadcastEvent;
@@ -41,13 +41,12 @@ pub use uptrakit_web_api_types::update_history::{
         (status = 403, description = "Not authorized")
     ),
     tag = "Update History",
-    extensions(("x-required-permission" = json!("view_software"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["software:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_update_history(
     tenant_db: TenantDb,
-    CanViewSoftware(_user): CanViewSoftware,
+    CanReadSoftware(_user): CanReadSoftware,
     Query(query): Query<UpdateHistoryQuery>,
 ) -> Response {
     match uh_queries::list_update_history(&tenant_db, &query).await {
@@ -71,13 +70,12 @@ pub async fn list_update_history(
         (status = 404, description = "Record not found")
     ),
     tag = "Update History",
-    extensions(("x-required-permission" = json!("view_software"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["software:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_update_history(
     tenant_db: TenantDb,
-    CanViewSoftware(_user): CanViewSoftware,
+    CanReadSoftware(_user): CanReadSoftware,
     Path(record_id): Path<Uuid>,
 ) -> Response {
     match uh_queries::get_update_history(&tenant_db, record_id).await {
@@ -110,13 +108,12 @@ pub async fn get_update_history(
         (status = 404, description = "Record not found")
     ),
     tag = "Update History",
-    extensions(("x-required-permission" = json!("view_software"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["software:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn stream_update_output(
     tenant_db: TenantDb,
-    CanViewSoftware(_user): CanViewSoftware,
+    CanReadSoftware(_user): CanReadSoftware,
     State(state): State<Arc<AppState>>,
     Path(record_id): Path<Uuid>,
 ) -> Response {

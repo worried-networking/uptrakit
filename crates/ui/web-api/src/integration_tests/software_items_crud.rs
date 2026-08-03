@@ -10,9 +10,11 @@ use crate::test_harness::fixtures::{
 };
 use http_body_util::BodyExt;
 use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+use uptrakit_shared_db::access_grants::{GrantSubject, NewGrant, insert_grant};
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, service, software_item, user,
 };
+use uptrakit_shared_types::access::{ActionPattern, Selector};
 use uptrakit_web_api_types::permissions::Permission;
 use uuid::Uuid;
 
@@ -721,6 +723,27 @@ async fn merge_preview_allows_update_without_delete_but_execute_forbids_it() {
             None,
         )
         .expect("mint update-only token");
+
+    // `merge_preview`'s `CanUpdateSoftware` extractor consults only
+    // `AccessEngine` grants post-conversion, not the JWT's legacy
+    // `Permission` claim above, so grant `software:update` directly.
+    let patterns = vec!["software:update".parse::<ActionPattern>().expect("pattern")];
+    insert_grant(
+        &app.db,
+        NewGrant {
+            subject: GrantSubject::User(editor_user_id),
+            tenant_id: Some(app.tenant_id),
+            patterns: &patterns,
+            selector: Selector::All,
+            description: None,
+            created_by: None,
+        },
+    )
+    .await
+    .expect("insert grant");
+    app.state
+        .access_engine
+        .invalidate_subjects(&[editor_user_id], &[]);
 
     let survivor_id = Uuid::now_v7();
     let loser_id = Uuid::now_v7();

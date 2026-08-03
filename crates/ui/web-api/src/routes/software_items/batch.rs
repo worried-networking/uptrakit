@@ -13,7 +13,7 @@ use crate::AppState;
 use crate::actions::software_items as item_actions;
 use crate::error_response::error_response;
 use crate::extract::Validated;
-use crate::middleware::permission::CanDeleteSoftware;
+use crate::middleware::action::CanDeleteSoftware;
 use crate::middleware::require_auth::AuthenticatedApiTokenId;
 use crate::tenant_db::TenantDb;
 
@@ -37,8 +37,7 @@ use super::{BatchActionFailure, BatchActionRequest, BatchActionResponse, BatchAc
         (status = 403, description = "Not authorized")
     ),
     tag = "Software Items",
-    extensions(("x-required-permission" = json!("delete_software"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["software:delete"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn batch_software_items(

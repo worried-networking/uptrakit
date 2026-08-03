@@ -23,6 +23,7 @@ use crate::auth::permissions::Permission;
 #[cfg(feature = "db-sqlite")]
 use crate::extract::Validated;
 #[cfg(feature = "db-sqlite")]
+use crate::middleware::action::CanManageCommands as ActionCanManageCommands;
 use crate::middleware::permission::CanManageCommands;
 #[cfg(feature = "db-sqlite")]
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, AuthenticatedUser};
@@ -1111,7 +1112,7 @@ async fn batch_plugin_configs_unknown_action_writes_validation_failed_audit_even
         State(AuditEmitterState(state.audit_emitter.clone())),
         crate::extractors::IfMatch::for_test(),
         TenantDb::new_for_test(db.clone(), tenant_id),
-        CanManageCommands::new(AuthenticatedUser::new(
+        ActionCanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
             AuthMethod::ApiToken,
             vec![Permission::ManageCommands],
@@ -1156,7 +1157,7 @@ async fn batch_plugin_configs_delete_backend_failure_writes_failed_audit_event()
         State(AuditEmitterState(state.audit_emitter.clone())),
         crate::extractors::IfMatch::for_test(),
         TenantDb::new_for_test(db.clone(), tenant_id),
-        CanManageCommands::new(AuthenticatedUser::new(
+        ActionCanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
             AuthMethod::ApiToken,
             vec![Permission::ManageCommands],
@@ -1256,7 +1257,7 @@ async fn batch_plugin_configs_delete_summary_success_writes_success_outcome() {
         State(AuditEmitterState(state.audit_emitter.clone())),
         crate::extractors::IfMatch::for_test(),
         TenantDb::new_for_test(db.clone(), tenant_id),
-        CanManageCommands::new(AuthenticatedUser::new(
+        ActionCanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
             AuthMethod::ApiToken,
             vec![Permission::ManageCommands],
@@ -1307,7 +1308,7 @@ async fn batch_plugin_configs_delete_summary_partial_writes_partial_outcome() {
         State(AuditEmitterState(state.audit_emitter.clone())),
         crate::extractors::IfMatch::for_test(),
         TenantDb::new_for_test(db.clone(), tenant_id),
-        CanManageCommands::new(AuthenticatedUser::new(
+        ActionCanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
             AuthMethod::ApiToken,
             vec![Permission::ManageCommands],
@@ -1349,7 +1350,7 @@ async fn batch_plugin_configs_delete_summary_denied_writes_denied_outcome() {
         State(AuditEmitterState(state.audit_emitter.clone())),
         crate::extractors::IfMatch::for_test(),
         TenantDb::new_for_test(db.clone(), tenant_id),
-        CanManageCommands::new(AuthenticatedUser::new(
+        ActionCanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
             AuthMethod::ApiToken,
             vec![Permission::ManageCommands],

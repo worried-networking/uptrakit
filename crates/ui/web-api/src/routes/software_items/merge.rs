@@ -4,7 +4,7 @@ use axum::{Extension, Json, extract::State, http::StatusCode, response::IntoResp
 
 use crate::api_error::ApiError;
 use crate::app_state::AuditEmitterState;
-use crate::middleware::permission::{CanDeleteSoftware, CanUpdateSoftware};
+use crate::middleware::action::{CanDeleteSoftware, CanUpdateSoftware};
 use crate::middleware::require_auth::AuthenticatedApiTokenId;
 use crate::queries::software_items as item_queries;
 use crate::tenant_db::TenantDb;
@@ -22,13 +22,12 @@ use super::{
     post,
     path = "/api/v1/software-items/merge/preview",
     request_body = MergeSoftwareItemsPreviewRequest,
-    extensions(("x-required-permission" = json!("update_software"))),
     responses(
         (status = 200, description = "Merge preview calculated", body = MergeSoftwareItemsPreviewResponse),
         (status = 400, description = "Invalid merge request")
     ),
     tag = "Software Items",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["software:update"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn preview_software_item_merge(
@@ -45,13 +44,12 @@ pub async fn preview_software_item_merge(
     post,
     path = "/api/v1/software-items/merge/execute",
     request_body = MergeSoftwareItemsExecuteRequest,
-    extensions(("x-required-permission" = json!("update_software and delete_software"))),
     responses(
         (status = 200, description = "Software items merged", body = MergeSoftwareItemsExecuteResponse),
         (status = 400, description = "Invalid merge request")
     ),
     tag = "Software Items",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["software:delete", "software:update"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn execute_software_item_merge(

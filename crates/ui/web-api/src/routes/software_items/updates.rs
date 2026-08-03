@@ -1,6 +1,6 @@
 use crate::AppState;
 use crate::api_error::ApiError;
-use crate::middleware::permission::CanTriggerUpdates;
+use crate::middleware::action::CanTriggerUpdates;
 use crate::middleware::require_auth::AuthenticatedApiTokenId;
 use crate::queries::update_types::ActorType;
 use crate::tenant_db::TenantDb;
@@ -24,7 +24,6 @@ use super::{TriggerUpdateRequest, TriggerUpdateResponse, TriggerUpdateStatus};
         ("host_id" = Uuid, Path, description = "Host UUID")
     ),
     request_body = TriggerUpdateRequest,
-    extensions(("x-required-permission" = json!("trigger_updates"))),
     responses(
         (status = 200, description = "Update triggered", body = TriggerUpdateResponse),
         (status = 400, description = "Invalid input or validation failed"),
@@ -32,7 +31,7 @@ use super::{TriggerUpdateRequest, TriggerUpdateResponse, TriggerUpdateStatus};
         (status = 409, description = "Update already in progress")
     ),
     tag = "Software Items",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["updates:trigger"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn trigger_update(

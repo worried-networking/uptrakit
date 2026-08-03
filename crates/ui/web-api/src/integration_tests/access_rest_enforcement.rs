@@ -369,3 +369,74 @@ async fn b1_no_credential_is_401_per_family() {
         "device lookup: D2 expected 401"
     );
 }
+
+#[tokio::test]
+async fn b2_software_family_enforcement() {
+    assert_family_enforcement(
+        "/api/v1/software-items",
+        "software:read",
+        "scheduler:manage",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn b2_update_history_family_enforcement() {
+    assert_family_enforcement("/api/v1/update-history", "software:read", "services:read").await;
+}
+
+#[tokio::test]
+async fn b2_autodiscovery_ignores_family_enforcement() {
+    assert_family_enforcement(
+        "/api/v1/autodiscovery/ignores",
+        "software:read",
+        "discovery.ignores:manage",
+    )
+    .await;
+}
+
+/// D2 on every converted B2 file (spec §Tests), one path per file — 14
+/// files total. Six are GET list endpoints; the other eight
+/// (`software_items/{batch,merge,updates,version_check,host_assignments}.rs`,
+/// `plugin_configs/{batch,discover,test_action}.rs`) expose no GET route, so
+/// each is probed with its own POST path instead (dummy UUIDs fill path
+/// params — the auth extractor runs before path-param parsing rejects them).
+#[tokio::test]
+async fn b2_no_credential_is_401_per_family() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    for path in [
+        "/api/v1/software-items",
+        "/api/v1/update-history",
+        "/api/v1/update-batches",
+        "/api/v1/autodiscovery/ignores",
+        "/api/v1/discovery-allowlist",
+        "/api/v1/instance-plugins",
+    ] {
+        assert_eq!(
+            client.get(path).send_status().await,
+            http::StatusCode::UNAUTHORIZED,
+            "{path}: D2 expected 401"
+        );
+    }
+    let dummy = "00000000-0000-0000-0000-000000000000";
+    for path in [
+        "/api/v1/software-items/batch".to_string(),
+        format!("/api/v1/software-items/{dummy}/hosts"),
+        "/api/v1/software-items/merge/preview".to_string(),
+        format!("/api/v1/software-items/{dummy}/hosts/{dummy}/update"),
+        format!("/api/v1/software-items/{dummy}/check-versions"),
+        "/api/v1/plugin-configs/batch".to_string(),
+        format!("/api/v1/plugin-configs/{dummy}/discover"),
+        "/api/v1/plugin-configs/test".to_string(),
+    ] {
+        assert_eq!(
+            client
+                .post_json(&path, &serde_json::json!({}))
+                .send_status()
+                .await,
+            http::StatusCode::UNAUTHORIZED,
+            "{path}: D2 expected 401"
+        );
+    }
+}

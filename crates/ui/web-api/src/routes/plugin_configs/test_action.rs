@@ -2,7 +2,7 @@ use crate::AppState;
 use crate::config_test_proxy::ConfigTestProxyError;
 use crate::error_response::error_response;
 use crate::extract::Validated;
-use crate::middleware::permission::CanTestPluginConfigs;
+use crate::middleware::action::CanTriggerPluginConfigs;
 use crate::tenant_db::TenantDb;
 use axum::{
     Json,
@@ -107,7 +107,6 @@ async fn load_active_agent_service_for_host(
 #[utoipa::path(
     post,
     path = "/api/v1/plugin-configs/test",
-    extensions(("x-required-permission" = json!("test_plugin_configs"))),
     request_body = TestPluginConfigRequest,
     responses(
         (status = 200, description = "Test result", body = TestPluginConfigResponse),
@@ -116,13 +115,13 @@ async fn load_active_agent_service_for_host(
         (status = 502, description = "Agent did not respond"),
     ),
     tag = "Plugin Configs",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["plugin-configs:trigger"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn test_plugin_config(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanTestPluginConfigs(_user): CanTestPluginConfigs,
+    CanTriggerPluginConfigs(_user): CanTriggerPluginConfigs,
     Validated(body): Validated<TestPluginConfigRequest>,
 ) -> Response {
     // 1. Validate plugin type is known and supports per-instance plugin configs.

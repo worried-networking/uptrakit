@@ -25,7 +25,7 @@ use uuid::Uuid;
 use crate::AppState;
 use crate::api_error::ApiError;
 use crate::error_response::error_response;
-use crate::middleware::permission::{CanUpdateSoftware, CanViewSoftware};
+use crate::middleware::action::{CanReadSoftware, CanUpdateSoftware};
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::queries::discovery_allowlist as allowlist_queries;
 use crate::tenant_db::TenantDb;
@@ -45,19 +45,18 @@ pub use uptrakit_web_api_types::discovery_allowlist::{
 #[utoipa::path(
     get,
     path = "/api/v1/discovery-allowlist",
-    extensions(("x-required-permission" = json!("view_software"))),
     responses(
         (status = 200, description = "Tenant-wide discovery allowlist entries", body = Vec<TenantDiscoveryAllowlistEntry>),
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Not authorized")
     ),
     tag = "Autodiscovery",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["software:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_tenant_discovery_allowlist(
     tenant_db: TenantDb,
-    CanViewSoftware(_user): CanViewSoftware,
+    CanReadSoftware(_user): CanReadSoftware,
 ) -> Response {
     match allowlist_queries::list_tenant_allowlist(tenant_db.db(), tenant_db.tenant_id()).await {
         Ok(entries) => (StatusCode::OK, Json(entries)).into_response(),
@@ -77,7 +76,6 @@ pub async fn list_tenant_discovery_allowlist(
     post,
     path = "/api/v1/discovery-allowlist",
     request_body = CreateDiscoveryAllowlistEntryRequest,
-    extensions(("x-required-permission" = json!("update_software"))),
     responses(
         (status = 201, description = "Entry created (or existing entry returned)", body = TenantDiscoveryAllowlistEntry),
         (status = 400, description = "Invalid or non-discovery plugin type"),
@@ -85,7 +83,7 @@ pub async fn list_tenant_discovery_allowlist(
         (status = 403, description = "Not authorized")
     ),
     tag = "Autodiscovery",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["software:update"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn add_tenant_discovery_allowlist_entry(
@@ -239,7 +237,6 @@ pub async fn add_tenant_discovery_allowlist_entry(
     delete,
     path = "/api/v1/discovery-allowlist/{id}",
     params(("id" = Uuid, Path, description = "Allowlist entry UUID")),
-    extensions(("x-required-permission" = json!("update_software"))),
     responses(
         (status = 204, description = "Entry removed"),
         (status = 401, description = "Not authenticated"),
@@ -247,7 +244,7 @@ pub async fn add_tenant_discovery_allowlist_entry(
         (status = 404, description = "Entry not found")
     ),
     tag = "Autodiscovery",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["software:update"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn remove_tenant_discovery_allowlist_entry(
@@ -376,7 +373,6 @@ pub async fn remove_tenant_discovery_allowlist_entry(
     get,
     path = "/api/v1/hosts/{id}/discovery-allowlist",
     params(("id" = Uuid, Path, description = "Host UUID")),
-    extensions(("x-required-permission" = json!("view_software"))),
     responses(
         (status = 200, description = "Host-specific discovery allowlist entries", body = Vec<HostDiscoveryAllowlistEntry>),
         (status = 401, description = "Not authenticated"),
@@ -384,12 +380,12 @@ pub async fn remove_tenant_discovery_allowlist_entry(
         (status = 404, description = "Host not found")
     ),
     tag = "Autodiscovery",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["software:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_host_discovery_allowlist(
     tenant_db: TenantDb,
-    CanViewSoftware(_user): CanViewSoftware,
+    CanReadSoftware(_user): CanReadSoftware,
     Path(host_id): Path<Uuid>,
 ) -> Response {
     // Verify host belongs to tenant.
@@ -429,7 +425,6 @@ pub async fn list_host_discovery_allowlist(
     path = "/api/v1/hosts/{id}/discovery-allowlist",
     params(("id" = Uuid, Path, description = "Host UUID")),
     request_body = CreateDiscoveryAllowlistEntryRequest,
-    extensions(("x-required-permission" = json!("update_software"))),
     responses(
         (status = 201, description = "Entry created (or existing entry returned)", body = HostDiscoveryAllowlistEntry),
         (status = 400, description = "Invalid or non-discovery plugin type"),
@@ -438,7 +433,7 @@ pub async fn list_host_discovery_allowlist(
         (status = 404, description = "Host not found")
     ),
     tag = "Autodiscovery",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["software:update"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn add_host_discovery_allowlist_entry(
@@ -650,7 +645,6 @@ pub async fn add_host_discovery_allowlist_entry(
         ("id" = Uuid, Path, description = "Host UUID"),
         ("entry_id" = Uuid, Path, description = "Allowlist entry UUID")
     ),
-    extensions(("x-required-permission" = json!("update_software"))),
     responses(
         (status = 204, description = "Entry removed"),
         (status = 401, description = "Not authenticated"),
@@ -658,7 +652,7 @@ pub async fn add_host_discovery_allowlist_entry(
         (status = 404, description = "Entry not found")
     ),
     tag = "Autodiscovery",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["software:update"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn remove_host_discovery_allowlist_entry(
