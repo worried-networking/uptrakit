@@ -3,6 +3,7 @@ use schemars::JsonSchema;
 use sea_orm::EntityTrait;
 use serde::Serialize;
 use uptrakit_shared_db::entity::prelude::User;
+use uptrakit_shared_types::access::{Action, CATALOG, Decision};
 use uptrakit_web_api_types::oauth::McpScope;
 
 use crate::context::McpRequestContext;
@@ -11,9 +12,7 @@ use crate::tools::{McpHandler, mcp_error};
 
 // No catalog actions required beyond the connection-level `mcp:use` gate
 // (`McpAuthLayer`, `auth.rs`): any authenticated MCP principal may inspect
-// its own identity. `permissions` (the deleted-`Permission`-list rendering
-// of this tool's response) is superseded by a catalog-grounded listing in a
-// later task.
+// its own identity.
 pub(crate) const GET_CURRENT_USER_AUTH: ToolAuth = ToolAuth {
     required_scopes: &[McpScope::Read],
     required_actions: &[],
@@ -30,6 +29,10 @@ pub struct GetCurrentUserResult {
     pub first_name: String,
     /// Last name.
     pub last_name: String,
+    /// Concrete built-in actions the caller may perform (catalog-expanded;
+    /// dynamic `plugin.*`/`surface.*` actions are excluded until M1.7's `me`
+    /// machinery).
+    pub actions: Vec<String>,
 }
 
 impl McpHandler {
@@ -46,11 +49,29 @@ impl McpHandler {
             .map_err(|e| mcp_error(format!("database error: {e}")))?
             .ok_or_else(|| mcp_error("authenticated user not found in database"))?;
 
+        let mut actions = Vec::new();
+        for entry in CATALOG {
+            for verb_entry in entry.verbs {
+                let Ok(action) = Action::new(entry.resource.clone(), verb_entry.verb) else {
+                    continue;
+                };
+                if matches!(
+                    self.state
+                        .access_engine
+                        .authorize(&ctx.access, &action, None),
+                    Decision::Allow
+                ) {
+                    actions.push(verb_entry.action_str.to_owned());
+                }
+            }
+        }
+
         Ok(Json(GetCurrentUserResult {
             user_id: user.id.to_string(),
             email: user.email.expose_email().to_owned(),
             first_name: user.first_name,
             last_name: user.last_name,
+            actions,
         }))
     }
 }
@@ -67,6 +88,7 @@ mod tests {
             email: "test@example.com".to_owned(),
             first_name: "Alice".to_owned(),
             last_name: "Smith".to_owned(),
+            actions: vec!["mcp:use".to_owned()],
         };
         let json = serde_json::to_string(&result).expect("serialisation must succeed");
         assert!(

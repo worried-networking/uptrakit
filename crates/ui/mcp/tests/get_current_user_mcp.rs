@@ -445,6 +445,30 @@ async fn api_token_get_current_user_succeeds() {
         user_id.to_string(),
         "user_id must match"
     );
+
+    let actions = parsed["actions"]
+        .as_array()
+        .expect("actions must be an array");
+    assert!(
+        actions.iter().any(|a| a == "mcp:use"),
+        "actions must contain mcp:use, got: {actions:?}"
+    );
+    assert!(
+        actions.iter().any(|a| a == "software:read"),
+        "viewer's *:read wildcard must expand to software:read, got: {actions:?}"
+    );
+    assert!(
+        !actions.iter().any(|a| a == "updates:trigger"),
+        "viewer must not have updates:trigger, got: {actions:?}"
+    );
+    assert!(
+        !actions.iter().any(|a| a == "view_software"),
+        "actions must not contain legacy snake_case permission names, got: {actions:?}"
+    );
+    assert!(
+        parsed.get("permissions").is_none(),
+        "permissions key must not appear in the response"
+    );
 }
 
 #[tokio::test]
