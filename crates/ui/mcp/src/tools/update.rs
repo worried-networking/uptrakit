@@ -3,19 +3,19 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use uptrakit_controller_core::auth::Permission;
 use uptrakit_controller_core::update::{ActorInfo, DispatchOutcome, UpdateDispatchParams};
+use uptrakit_shared_types::access::actions;
 use uptrakit_web_api_queries::queries::update_types::ActorType;
 use uptrakit_web_api_types::oauth::McpScope;
 
 use crate::context::{McpRequestContext, McpTriggerError};
-use crate::oauth::tool_auth::{ToolAuth, require_scopes};
+use crate::oauth::tool_auth::{ToolAuth, require_tool_auth};
 use crate::state::McpState;
 use crate::tools::{McpHandler, mcp_error};
 
 pub(crate) const TRIGGER_UPDATE_AUTH: ToolAuth = ToolAuth {
     required_scopes: &[McpScope::Write],
-    required_permissions: &[Permission::TriggerUpdates],
+    required_actions: &[actions::UPDATES_TRIGGER],
 };
 
 // ---------------------------------------------------------------------------
@@ -53,15 +53,7 @@ impl McpHandler {
         ctx: McpRequestContext,
         input: TriggerUpdateInput,
     ) -> Result<Json<TriggerUpdateResult>, ErrorData> {
-        require_scopes(&ctx, TRIGGER_UPDATE_AUTH.required_scopes)
-            .map_err(|e| ErrorData::invalid_request(format!("insufficient_scope: {e}"), None))?;
-
-        if !ctx.has_permission(&Permission::TriggerUpdates) {
-            return Err(ErrorData::invalid_request(
-                "permission denied: TriggerUpdates required",
-                None,
-            ));
-        }
+        require_tool_auth(&self.state, &ctx, &TRIGGER_UPDATE_AUTH)?;
 
         #[expect(
             clippy::map_err_ignore,

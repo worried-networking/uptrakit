@@ -229,6 +229,40 @@ async fn link_user_to_access_mcp_role(
     viewer_role.id
 }
 
+/// Link user to the "operator" built-in role, whose seed grant
+/// (`m20260728_000002_seed_access_grants`) carries `updates:trigger` — unlike
+/// viewer's `*:read`, which does not cover a `:trigger` verb.
+#[expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "test fixture — panic on setup failure"
+)]
+async fn link_user_to_operator_role(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    user_id: Uuid,
+) -> Uuid {
+    let operator_role = role::Entity::find()
+        .filter(role::Column::Name.eq("operator"))
+        .one(db)
+        .await
+        .unwrap()
+        .expect("operator role must exist after migrations");
+
+    let now = OffsetDateTime::now_utc();
+    user_role::ActiveModel {
+        tenant_id: Set(tenant_id),
+        user_id: Set(user_id),
+        role_id: Set(operator_role.id),
+        assigned_at: Set(now),
+    }
+    .insert(db)
+    .await
+    .unwrap();
+
+    operator_role.id
+}
+
 #[expect(clippy::unwrap_used, reason = "test fixture — panic on setup failure")]
 async fn create_api_token(db: &DatabaseConnection, user_id: Uuid) -> String {
     let service = ApiTokenService::new(db.clone());
@@ -410,14 +444,6 @@ async fn api_token_get_current_user_succeeds() {
         parsed["user_id"].as_str().unwrap(),
         user_id.to_string(),
         "user_id must match"
-    );
-    assert!(
-        parsed["permissions"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|p| p.as_str() == Some("access_mcp")),
-        "permissions must contain access_mcp"
     );
 }
 
@@ -682,5 +708,100 @@ async fn api_token_denied_immediately_after_role_removed_and_invalidated() {
         second.status().as_u16(),
         403,
         "role removal + invalidation must deny the very next call"
+    );
+}
+
+// ── require_tool_auth: per-tool catalog action enforcement ─────────────────────
+
+/// Viewer's seeded `*:read` grant does not cover `updates:trigger` — the tool
+/// must be denied by `require_tool_auth`'s engine check, not merely by scope.
+#[tokio::test]
+async fn trigger_update_denied_for_viewer_only() {
+    let app = McpTestApp::new().await;
+    let user_id = insert_user(&app.db, "viewer-only@mcp.test").await;
+    link_user_to_access_mcp_role(&app.db, app.tenant_id, user_id).await;
+    let token = create_api_token(&app.db, user_id).await;
+
+    let session = McpSession::initialize(app.addr, &token).await;
+    let result = session
+        .call_tool(
+            "trigger_update",
+            json!({
+                "host_id": Uuid::nil().to_string(),
+                "software_item_id": Uuid::nil().to_string(),
+                "to_version": "1.0.0",
+            }),
+        )
+        .await;
+
+    let message = result["error"]["message"]
+        .as_str()
+        .expect("error.message must be a string for a permission-denied tool call");
+    assert!(
+        message.contains("permission denied: updates:trigger required"),
+        "expected permission-denied message, got: {message}"
+    );
+}
+
+/// Viewer + operator: operator's seed grant carries `updates:trigger`, so the
+/// engine check passes and the call reaches `NoopUpdateDispatcher`, which
+/// unconditionally fails with `UpdateDispatchError::Internal` regardless of
+/// input — proving the gate was passed without needing a working dispatcher.
+#[tokio::test]
+async fn trigger_update_proceeds_past_gate_for_viewer_and_operator() {
+    let app = McpTestApp::new().await;
+    let user_id = insert_user(&app.db, "viewer-operator@mcp.test").await;
+    link_user_to_access_mcp_role(&app.db, app.tenant_id, user_id).await;
+    link_user_to_operator_role(&app.db, app.tenant_id, user_id).await;
+    let token = create_api_token(&app.db, user_id).await;
+
+    let session = McpSession::initialize(app.addr, &token).await;
+    let result = session
+        .call_tool(
+            "trigger_update",
+            json!({
+                "host_id": Uuid::nil().to_string(),
+                "software_item_id": Uuid::nil().to_string(),
+                "to_version": "1.0.0",
+            }),
+        )
+        .await;
+
+    let message = result["error"]["message"]
+        .as_str()
+        .expect("error.message must be a string for a dispatcher-failed tool call");
+    assert!(
+        !message.contains("permission denied"),
+        "call must pass the permission gate, got: {message}"
+    );
+    assert!(
+        message.contains("trigger_update failed: internal error"),
+        "expected NoopUpdateDispatcher's Internal error to surface, got: {message}"
+    );
+}
+
+/// Viewer's `*:read` grant covers `software:read`, so `list_update_history`
+/// (a read-only tool) is allowed for a viewer-only user.
+#[tokio::test]
+async fn list_update_history_allowed_for_viewer() {
+    let app = McpTestApp::new().await;
+    let user_id = insert_user(&app.db, "viewer-history@mcp.test").await;
+    link_user_to_access_mcp_role(&app.db, app.tenant_id, user_id).await;
+    let token = create_api_token(&app.db, user_id).await;
+
+    let session = McpSession::initialize(app.addr, &token).await;
+    let result = session.call_tool("list_update_history", json!({})).await;
+
+    assert!(
+        result.get("error").is_none(),
+        "list_update_history must not error for a viewer, got: {result:?}"
+    );
+    let text = result["result"]["content"][0]["text"]
+        .as_str()
+        .expect("content[0].text must be a string");
+    let parsed: Value = serde_json::from_str(text).expect("text must be valid JSON");
+    assert!(
+        parsed["items"].as_array().is_some(),
+        "expected a paginated items array, got: {parsed:?}"
     );
 }

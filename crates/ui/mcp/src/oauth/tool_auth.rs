@@ -1,9 +1,12 @@
-use uptrakit_controller_core::auth::Permission;
+use rmcp::ErrorData;
+use uptrakit_shared_types::access::{Action, Decision};
 use uptrakit_web_api_types::oauth::McpScope;
 
 use crate::context::{McpAuthMethod, McpRequestContext};
+use crate::state::McpState;
 
-/// Static descriptor of the OAuth scopes and permissions required by an MCP tool.
+/// Static descriptor of the OAuth scopes and catalog actions required by an
+/// MCP tool.
 ///
 /// The `required_scopes` slice holds only unit variants (`McpScope::Read`,
 /// `McpScope::Write`) and is valid in a `const` context.
@@ -11,7 +14,7 @@ use crate::context::{McpAuthMethod, McpRequestContext};
 #[derive(Clone, Debug)]
 pub struct ToolAuth {
     pub required_scopes: &'static [McpScope],
-    pub required_permissions: &'static [Permission],
+    pub required_actions: &'static [Action],
 }
 
 /// Error returned when the caller's OAuth scopes are insufficient.
@@ -28,12 +31,15 @@ pub enum McpScopeError {
 ///
 /// Returns [`McpScopeError::Insufficient`] when an OAuth context is missing a
 /// required scope.
-pub fn require_scopes(ctx: &McpRequestContext, required: &[McpScope]) -> Result<(), McpScopeError> {
+pub fn require_scopes(
+    auth_method: &McpAuthMethod,
+    required: &[McpScope],
+) -> Result<(), McpScopeError> {
     #[expect(
         unreachable_patterns,
         reason = "McpAuthMethod is #[non_exhaustive]; wildcard arm handles future variants"
     )]
-    match &ctx.auth_method {
+    match auth_method {
         McpAuthMethod::ApiToken => Ok(()),
         McpAuthMethod::OAuth { scopes, .. } => {
             for r in required {
@@ -54,44 +60,64 @@ pub fn require_scopes(ctx: &McpRequestContext, required: &[McpScope]) -> Result<
     }
 }
 
+/// Unified per-tool authorization: OAuth scope check, then one engine
+/// `authorize` per declared action. Declaration = enforcement: a tool whose
+/// `ToolAuth` lists an action gets the engine check by construction.
+pub fn require_tool_auth(
+    state: &McpState,
+    ctx: &McpRequestContext,
+    auth: &ToolAuth,
+) -> Result<(), ErrorData> {
+    require_scopes(&ctx.auth_method, auth.required_scopes)
+        .map_err(|e| ErrorData::invalid_request(format!("insufficient_scope: {e}"), None))?;
+    for action in auth.required_actions {
+        match state.access_engine.authorize(&ctx.access, action, None) {
+            Decision::Allow => {}
+            Decision::Deny(reason) => {
+                metrics::counter!(
+                    "uptrakit_access_denies_total",
+                    "reason" => reason.as_str()
+                )
+                .increment(1);
+                return Err(ErrorData::invalid_request(
+                    format!("permission denied: {action} required"),
+                    None,
+                ));
+            }
+            // `Decision` is #[non_exhaustive] in another crate.
+            _ => {
+                return Err(ErrorData::invalid_request(
+                    format!("permission denied: {action} required"),
+                    None,
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use uuid::Uuid;
 
-    fn ctx_api_token() -> McpRequestContext {
-        McpRequestContext::new(
-            Uuid::nil(),
-            Uuid::nil(),
-            Uuid::nil(),
-            vec![],
-            McpAuthMethod::ApiToken,
-        )
-    }
-
-    fn ctx_oauth(scopes: Vec<McpScope>) -> McpRequestContext {
-        McpRequestContext::new(
-            Uuid::nil(),
-            Uuid::nil(),
-            Uuid::nil(),
-            vec![],
-            McpAuthMethod::OAuth {
-                client_id: "x".into(),
-                jti: Uuid::nil(),
-                scopes,
-            },
-        )
+    fn oauth_method(scopes: Vec<McpScope>) -> McpAuthMethod {
+        McpAuthMethod::OAuth {
+            client_id: "x".into(),
+            jti: Uuid::nil(),
+            scopes,
+        }
     }
 
     #[test]
     fn api_token_bypasses_scope_check() {
-        require_scopes(&ctx_api_token(), &[McpScope::Write]).unwrap();
+        require_scopes(&McpAuthMethod::ApiToken, &[McpScope::Write]).unwrap();
     }
 
     #[test]
     fn oauth_passes_when_scope_present() {
         require_scopes(
-            &ctx_oauth(vec![McpScope::Read, McpScope::Write]),
+            &oauth_method(vec![McpScope::Read, McpScope::Write]),
             &[McpScope::Write],
         )
         .unwrap();
@@ -99,7 +125,7 @@ mod tests {
 
     #[test]
     fn oauth_rejects_when_scope_missing() {
-        let result = require_scopes(&ctx_oauth(vec![McpScope::Read]), &[McpScope::Write]);
+        let result = require_scopes(&oauth_method(vec![McpScope::Read]), &[McpScope::Write]);
         assert!(matches!(
             result,
             Err(McpScopeError::Insufficient {
@@ -111,7 +137,7 @@ mod tests {
     #[test]
     fn oauth_passes_when_all_required_scopes_present() {
         require_scopes(
-            &ctx_oauth(vec![McpScope::Read, McpScope::Write]),
+            &oauth_method(vec![McpScope::Read, McpScope::Write]),
             &[McpScope::Read, McpScope::Write],
         )
         .unwrap();
@@ -119,6 +145,6 @@ mod tests {
 
     #[test]
     fn oauth_empty_required_scopes_always_passes() {
-        require_scopes(&ctx_oauth(vec![]), &[]).unwrap();
+        require_scopes(&oauth_method(vec![]), &[]).unwrap();
     }
 }

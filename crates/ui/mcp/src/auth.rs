@@ -349,7 +349,7 @@ pub async fn validate_api_token_for_mcp(
         auth_user.user_id,
         token_id,
         state.default_tenant_id,
-        auth_user.permissions,
+        access,
         McpAuthMethod::ApiToken,
     ))
 }
@@ -491,7 +491,7 @@ pub async fn validate_oauth_access_token_for_mcp(
         user_id,
         jti,
         tenant_id,
-        Vec::new(),
+        access,
         McpAuthMethod::OAuth {
             client_id: claims.client_id,
             jti,

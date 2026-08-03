@@ -2,7 +2,7 @@ use rmcp::handler::server::common::{AsRequestContext, FromContextPart};
 use thiserror::Error;
 use uuid::Uuid;
 
-use uptrakit_controller_core::auth::Permission;
+use uptrakit_controller_core::access::AccessContext;
 use uptrakit_controller_core::update::UpdateDispatchError;
 use uptrakit_web_api_types::oauth::McpScope;
 
@@ -31,12 +31,12 @@ pub enum McpAuthMethod {
 /// `#[non_exhaustive]`: OAuth 2.1 will add fields (scope claims, sub, etc.).
 /// External code must use `McpRequestContext::new(…)`.
 #[non_exhaustive]
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct McpRequestContext {
     pub user_id: Uuid,
     pub token_id: Uuid,
     pub tenant_id: Uuid,
-    pub permissions: Vec<Permission>,
+    pub access: AccessContext,
     pub auth_method: McpAuthMethod,
 }
 
@@ -47,21 +47,29 @@ impl McpRequestContext {
         user_id: Uuid,
         token_id: Uuid,
         tenant_id: Uuid,
-        permissions: Vec<Permission>,
+        access: AccessContext,
         auth_method: McpAuthMethod,
     ) -> Self {
         Self {
             user_id,
             token_id,
             tenant_id,
-            permissions,
+            access,
             auth_method,
         }
     }
+}
 
-    /// Returns `true` if the user holds `perm`.
-    pub fn has_permission(&self, perm: &Permission) -> bool {
-        self.permissions.contains(perm)
+// `AccessContext` is not `Debug` (the grant snapshot is internal); the manual
+// impl keeps `McpRequestContext` debuggable for tracing without exposing it.
+impl std::fmt::Debug for McpRequestContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("McpRequestContext")
+            .field("user_id", &self.user_id)
+            .field("token_id", &self.token_id)
+            .field("tenant_id", &self.tenant_id)
+            .field("auth_method", &self.auth_method)
+            .finish_non_exhaustive()
     }
 }
 

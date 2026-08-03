@@ -6,12 +6,17 @@ use uptrakit_shared_db::entity::prelude::User;
 use uptrakit_web_api_types::oauth::McpScope;
 
 use crate::context::McpRequestContext;
-use crate::oauth::tool_auth::{ToolAuth, require_scopes};
+use crate::oauth::tool_auth::{ToolAuth, require_tool_auth};
 use crate::tools::{McpHandler, mcp_error};
 
+// No catalog actions required beyond the connection-level `mcp:use` gate
+// (`McpAuthLayer`, `auth.rs`): any authenticated MCP principal may inspect
+// its own identity. `permissions` (the deleted-`Permission`-list rendering
+// of this tool's response) is superseded by a catalog-grounded listing in a
+// later task.
 pub(crate) const GET_CURRENT_USER_AUTH: ToolAuth = ToolAuth {
     required_scopes: &[McpScope::Read],
-    required_permissions: &[],
+    required_actions: &[],
 };
 
 /// Result returned by the `get_current_user` MCP tool.
@@ -25,8 +30,6 @@ pub struct GetCurrentUserResult {
     pub first_name: String,
     /// Last name.
     pub last_name: String,
-    /// Permissions held by the API token used for this request.
-    pub permissions: Vec<String>,
 }
 
 impl McpHandler {
@@ -35,8 +38,7 @@ impl McpHandler {
         &self,
         ctx: McpRequestContext,
     ) -> Result<Json<GetCurrentUserResult>, ErrorData> {
-        require_scopes(&ctx, GET_CURRENT_USER_AUTH.required_scopes)
-            .map_err(|e| ErrorData::invalid_request(format!("insufficient_scope: {e}"), None))?;
+        require_tool_auth(&self.state, &ctx, &GET_CURRENT_USER_AUTH)?;
 
         let user = User::find_by_id(ctx.user_id)
             .one(self.state.db.db())
@@ -44,18 +46,11 @@ impl McpHandler {
             .map_err(|e| mcp_error(format!("database error: {e}")))?
             .ok_or_else(|| mcp_error("authenticated user not found in database"))?;
 
-        let permissions = ctx
-            .permissions
-            .iter()
-            .map(|p| p.as_str().to_owned())
-            .collect();
-
         Ok(Json(GetCurrentUserResult {
             user_id: user.id.to_string(),
             email: user.email.expose_email().to_owned(),
             first_name: user.first_name,
             last_name: user.last_name,
-            permissions,
         }))
     }
 }
@@ -63,7 +58,6 @@ impl McpHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_controller_core::auth::Permission;
     use uuid::Uuid;
 
     #[test]
@@ -73,23 +67,11 @@ mod tests {
             email: "test@example.com".to_owned(),
             first_name: "Alice".to_owned(),
             last_name: "Smith".to_owned(),
-            permissions: vec!["access_mcp".to_owned(), "view_services".to_owned()],
         };
         let json = serde_json::to_string(&result).expect("serialisation must succeed");
-        assert!(
-            json.contains("access_mcp"),
-            "permissions should appear in JSON"
-        );
         assert!(
             json.contains("test@example.com"),
             "email should appear in JSON"
         );
-    }
-
-    #[test]
-    fn permissions_convert_to_strings() {
-        let perms = [Permission::AccessMcp, Permission::ViewServices];
-        let strings: Vec<String> = perms.iter().map(|p| p.as_str().to_owned()).collect();
-        assert_eq!(strings, ["access_mcp", "view_services"]);
     }
 }

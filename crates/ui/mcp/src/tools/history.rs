@@ -7,21 +7,21 @@ use uptrakit_web_api_types::pagination::PaginatedResponse;
 use uptrakit_web_api_types::update_history::{UpdateHistoryQuery, UpdateHistoryResponse};
 use uuid::Uuid;
 
-use uptrakit_controller_core::auth::Permission;
+use uptrakit_shared_types::access::actions;
 use uptrakit_web_api_queries::queries;
 
 use crate::context::McpRequestContext;
-use crate::oauth::tool_auth::{ToolAuth, require_scopes};
+use crate::oauth::tool_auth::{ToolAuth, require_tool_auth};
 use crate::tools::{McpHandler, mcp_error};
 
 pub(crate) const LIST_UPDATE_HISTORY_AUTH: ToolAuth = ToolAuth {
     required_scopes: &[McpScope::Read],
-    required_permissions: &[Permission::ViewSoftware],
+    required_actions: &[actions::SOFTWARE_READ],
 };
 
 pub(crate) const GET_UPDATE_HISTORY_DETAIL_AUTH: ToolAuth = ToolAuth {
     required_scopes: &[McpScope::Read],
-    required_permissions: &[Permission::ViewSoftware],
+    required_actions: &[actions::SOFTWARE_READ],
 };
 
 // ---------------------------------------------------------------------------
@@ -201,15 +201,7 @@ impl McpHandler {
         ctx: McpRequestContext,
         input: ListUpdateHistoryInput,
     ) -> Result<Json<ListUpdateHistoryResult>, ErrorData> {
-        require_scopes(&ctx, LIST_UPDATE_HISTORY_AUTH.required_scopes)
-            .map_err(|e| ErrorData::invalid_request(format!("insufficient_scope: {e}"), None))?;
-
-        if !ctx.has_permission(&Permission::ViewSoftware) {
-            return Err(ErrorData::invalid_request(
-                "permission denied: ViewSoftware required",
-                None,
-            ));
-        }
+        require_tool_auth(&self.state, &ctx, &LIST_UPDATE_HISTORY_AUTH)?;
 
         #[expect(
             clippy::map_err_ignore,
@@ -277,15 +269,7 @@ impl McpHandler {
         ctx: McpRequestContext,
         input: GetUpdateHistoryDetailInput,
     ) -> Result<Json<UpdateHistoryDetailResult>, ErrorData> {
-        require_scopes(&ctx, GET_UPDATE_HISTORY_DETAIL_AUTH.required_scopes)
-            .map_err(|e| ErrorData::invalid_request(format!("insufficient_scope: {e}"), None))?;
-
-        if !ctx.has_permission(&Permission::ViewSoftware) {
-            return Err(ErrorData::invalid_request(
-                "permission denied: ViewSoftware required",
-                None,
-            ));
-        }
+        require_tool_auth(&self.state, &ctx, &GET_UPDATE_HISTORY_DETAIL_AUTH)?;
 
         #[expect(
             clippy::map_err_ignore,
