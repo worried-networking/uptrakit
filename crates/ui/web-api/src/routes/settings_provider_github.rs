@@ -13,7 +13,7 @@ pub use uptrakit_web_api_types::settings_provider_github::{
 use crate::AppState;
 use crate::error_response::error_response;
 use crate::extract::Validated;
-use crate::middleware::permission::CanManageGlobalSettings;
+use crate::middleware::action::CanManageSystemSettings;
 
 const SECRET_MASK: &str = "***";
 
@@ -45,13 +45,12 @@ fn snapshot_to_response(
         (status = 403, description = "Not authorized")
     ),
     tag = "Global Settings",
-    extensions(("x-required-permission" = json!("manage_global_settings"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.settings:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_github_provider_settings(
     State(state): State<Arc<AppState>>,
-    CanManageGlobalSettings(_user): CanManageGlobalSettings,
+    CanManageSystemSettings(_user): CanManageSystemSettings,
 ) -> Response {
     let defaults = match uptrakit_shared_db::provider_settings::load_github_provider_defaults(
         state.db(),
@@ -83,13 +82,12 @@ pub async fn get_github_provider_settings(
         (status = 403, description = "Not authorized")
     ),
     tag = "Global Settings",
-    extensions(("x-required-permission" = json!("manage_global_settings"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.settings:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_github_provider_settings(
     State(state): State<Arc<AppState>>,
-    CanManageGlobalSettings(_user): CanManageGlobalSettings,
+    CanManageSystemSettings(_user): CanManageSystemSettings,
     Validated(req): Validated<UpdateGitHubProviderSettingsRequest>,
 ) -> Response {
     let current = match uptrakit_shared_db::provider_settings::load_github_provider_defaults(

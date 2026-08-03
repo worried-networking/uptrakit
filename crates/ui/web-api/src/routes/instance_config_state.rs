@@ -12,7 +12,7 @@ use uptrakit_web_api_types::instance_config_state::{
 
 use crate::AppState;
 use crate::error_response::error_response_with_code;
-use crate::middleware::permission::{CanManageInstanceConfigState, CanViewInstanceConfigState};
+use crate::middleware::action::{CanManageSystemConfigState, CanReadSystemConfigState};
 
 /// Get the current config reload coordinator state.
 #[utoipa::path(
@@ -23,13 +23,12 @@ use crate::middleware::permission::{CanManageInstanceConfigState, CanViewInstanc
         (status = 200, description = "Config state", body = ConfigStateResponse),
         (status = 403, description = "Not authorized")
     ),
-    extensions(("x-required-permission" = json!("view_instance_config_state"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.config-state:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_config_state(
     State(state): State<Arc<AppState>>,
-    _perm: CanViewInstanceConfigState,
+    _perm: CanReadSystemConfigState,
 ) -> Response {
     let coordinator_state = state.coordinator_handle.state();
     let file_state = state.config_file_state.borrow().clone();
@@ -91,13 +90,12 @@ pub async fn get_config_state(
         (status = 403, description = "Not authorized"),
         (status = 500, description = "Failed to clear")
     ),
-    extensions(("x-required-permission" = json!("manage_instance_config_state"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.config-state:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn clear_coordinator_degraded(
     State(state): State<Arc<AppState>>,
-    manage: CanManageInstanceConfigState,
+    manage: CanManageSystemConfigState,
 ) -> Response {
     if let Err(e) = state.coordinator_handle.clear_degraded().await {
         tracing::error!(error = %e, "clear_degraded failed");
@@ -107,9 +105,9 @@ pub async fn clear_coordinator_degraded(
             "config_reload.clear_degraded_failed",
         );
     }
-    // ManageInstanceConfigState implies ViewInstanceConfigState; reuse the inner
+    // CanManageSystemConfigState implies CanReadSystemConfigState; reuse the inner
     // AuthenticatedUser to avoid repeating the auth/permission check.
-    let view = CanViewInstanceConfigState::new(manage.0);
+    let view = CanReadSystemConfigState::new(manage.0);
     get_config_state(State(state), view).await
 }
 

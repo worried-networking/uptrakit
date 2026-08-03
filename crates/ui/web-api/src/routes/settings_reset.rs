@@ -2,7 +2,7 @@ use crate::AppState;
 use crate::actions::settings as settings_actions;
 use crate::error_response::error_response;
 use crate::extract::Validated;
-use crate::middleware::permission::CanManageGlobalSettings;
+use crate::middleware::action::CanManageSystemSettings;
 use crate::middleware::require_auth::{
     AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
 };
@@ -51,13 +51,12 @@ fn emit_reset_data_audit(
         (status = 403, description = "Not authorized")
     ),
     tag = "Settings",
-    extensions(("x-required-permission" = json!("manage_global_settings"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.settings:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn reset_data(
     State(state): State<Arc<AppState>>,
-    CanManageGlobalSettings(user): CanManageGlobalSettings,
+    CanManageSystemSettings(user): CanManageSystemSettings,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     tenant_db: TenantDb,
     Validated(_req): Validated<ResetDataRequest>,
@@ -109,7 +108,7 @@ mod tests {
     use super::*;
     use crate::auth::AuthMethod;
     use crate::auth::permissions::Permission;
-    use crate::middleware::permission::CanManageGlobalSettings;
+    use crate::middleware::action::CanManageSystemSettings;
     use crate::middleware::require_auth::AuthenticatedUser;
     use sea_orm::{
         ColumnTrait, ConnectOptions, Database, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
@@ -165,7 +164,7 @@ mod tests {
         let user_id = uuid::Uuid::now_v7();
         let response = reset_data(
             State(Arc::clone(&state)),
-            CanManageGlobalSettings::new(AuthenticatedUser::new(
+            CanManageSystemSettings::new(AuthenticatedUser::new(
                 user_id,
                 AuthMethod::Password,
                 vec![Permission::ManageGlobalSettings],

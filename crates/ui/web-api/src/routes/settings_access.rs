@@ -18,7 +18,7 @@ use crate::AppState;
 use crate::auth::AuthMethod;
 use crate::auth::registration::RegistrationMode;
 use crate::error_response::error_response;
-use crate::middleware::permission::{CanManageAuthSettings, CanViewSettings};
+use crate::middleware::action::{CanManageSettingsAuth, CanReadSettings};
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 #[cfg(feature = "oidc")]
 use {
@@ -48,13 +48,12 @@ fn current_response(state: &AppState) -> AccessSettingsResponse {
         (status = 403, description = "Not authorized")
     ),
     tag = "Settings",
-    extensions(("x-required-permission" = json!("view_settings"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["settings:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_access_settings(
     State(state): State<Arc<AppState>>,
-    CanViewSettings(_user): CanViewSettings,
+    CanReadSettings(_user): CanReadSettings,
 ) -> Response {
     (StatusCode::OK, Json(current_response(&state))).into_response()
 }
@@ -70,13 +69,12 @@ pub async fn get_access_settings(
         (status = 422, description = "Validation error (e.g., invite mode without token)")
     ),
     tag = "Settings",
-    extensions(("x-required-permission" = json!("manage_auth_settings"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["settings.auth:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_access_settings(
     State(state): State<Arc<AppState>>,
-    CanManageAuthSettings(user): CanManageAuthSettings,
+    CanManageSettingsAuth(user): CanManageSettingsAuth,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     #[cfg(feature = "oidc")] tenant_db: TenantDb,
     Json(req): Json<UpdateAccessSettingsRequest>,

@@ -6,7 +6,7 @@ use http::StatusCode;
 
 use crate::AppState;
 use crate::error_response::error_response;
-use crate::middleware::permission::CanManageGlobalSettings;
+use crate::middleware::action::CanManageSystemSettings;
 use crate::middleware::require_auth::{
     AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
 };
@@ -56,12 +56,12 @@ fn emit_rotate_ca_audit(
         (status = 403, description = "Not authorized"),
     ),
     tag = "Global Settings",
-    extensions(("x-required-permission" = json!("manage_global_settings")))
+    security(("oauth2" = ["system.settings:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn rotate_ca(
     State(state): State<Arc<AppState>>,
-    CanManageGlobalSettings(user): CanManageGlobalSettings,
+    CanManageSystemSettings(user): CanManageSystemSettings,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
 ) -> impl IntoResponse {
     let api_token_id = api_token_id.map(|value| value.0);
@@ -126,7 +126,7 @@ mod tests {
     use super::*;
     use crate::auth::AuthMethod;
     use crate::auth::permissions::Permission;
-    use crate::middleware::permission::CanManageGlobalSettings;
+    use crate::middleware::action::CanManageSystemSettings;
     use crate::middleware::require_auth::AuthenticatedUser;
     use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};
     use uptrakit_shared_db::entity::system_audit_log;
@@ -175,7 +175,7 @@ mod tests {
         let user_id = uuid::Uuid::now_v7();
         let response = rotate_ca(
             State(Arc::clone(&state)),
-            CanManageGlobalSettings::new(AuthenticatedUser::new(
+            CanManageSystemSettings::new(AuthenticatedUser::new(
                 user_id,
                 AuthMethod::Password,
                 vec![Permission::ManageGlobalSettings],
@@ -221,7 +221,7 @@ mod tests {
 
         let response = rotate_ca(
             State(Arc::clone(&state)),
-            CanManageGlobalSettings::new(AuthenticatedUser::new(
+            CanManageSystemSettings::new(AuthenticatedUser::new(
                 uuid::Uuid::now_v7(),
                 AuthMethod::Password,
                 vec![Permission::ManageGlobalSettings],

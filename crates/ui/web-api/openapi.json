@@ -1772,7 +1772,7 @@
           "Global Settings"
         ],
         "summary": "Get all global settings",
-        "description": "Returns network settings and (when NATS support is compiled in) the NATS\nURL configuration in a single response. Requires the\n`manage_global_settings` permission.\n\nSystem service enrollment tokens are managed via the dedicated\n`/api/v1/system-enrollment-tokens` endpoints.",
+        "description": "Returns network settings and (when NATS support is compiled in) the NATS\nURL configuration in a single response. Requires the\n`system.settings:manage` action.\n\nSystem service enrollment tokens are managed via the dedicated\n`/api/v1/system-enrollment-tokens` endpoints.",
         "operationId": "get_global_combined_settings",
         "responses": {
           "200": {
@@ -1794,10 +1794,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.settings:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_global_settings"
+        ]
       }
     },
     "/api/v1/global-settings/ca/rotate": {
@@ -1826,7 +1830,16 @@
             "description": "Not authorized"
           }
         },
-        "x-required-permission": "manage_global_settings"
+        "security": [
+          {
+            "oauth2": [
+              "system.settings:manage"
+            ]
+          },
+          {
+            "developer_token": []
+          }
+        ]
       }
     },
     "/api/v1/global-settings/nats": {
@@ -1857,10 +1870,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.settings:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_global_settings"
+        ]
       },
       "put": {
         "tags": [
@@ -1902,10 +1919,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.settings:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_global_settings"
+        ]
       }
     },
     "/api/v1/global-settings/network": {
@@ -1935,10 +1956,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.settings:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_global_settings"
+        ]
       },
       "put": {
         "tags": [
@@ -1979,10 +2004,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.settings:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_global_settings"
+        ]
       }
     },
     "/api/v1/global-settings/oauth": {
@@ -2021,10 +2050,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.settings:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_global_settings"
+        ]
       },
       "put": {
         "tags": [
@@ -2072,10 +2105,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.settings:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_global_settings"
+        ]
       }
     },
     "/api/v1/global-settings/providers/github": {
@@ -2104,10 +2141,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.settings:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_global_settings"
+        ]
       },
       "put": {
         "tags": [
@@ -2147,10 +2188,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.settings:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_global_settings"
+        ]
       }
     },
     "/api/v1/global-settings/zeroconf": {
@@ -2181,10 +2226,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.settings:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_global_settings"
+        ]
       },
       "put": {
         "tags": [
@@ -2226,10 +2275,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.settings:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_global_settings"
+        ]
       }
     },
     "/api/v1/host-tags": {
@@ -3414,10 +3467,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.config-state:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_instance_config_state"
+        ]
       }
     },
     "/api/v1/instance/config-state": {
@@ -3444,10 +3501,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.config-state:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_instance_config_state"
+        ]
       }
     },
     "/api/v1/notifications/channels": {
@@ -5635,10 +5696,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "settings:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_settings"
+        ]
       }
     },
     "/api/v1/settings/access": {
@@ -5668,10 +5733,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "settings:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_settings"
+        ]
       },
       "put": {
         "tags": [
@@ -5709,10 +5778,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "settings.auth:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_auth_settings"
+        ]
       }
     },
     "/api/v1/settings/agent-certificates": {
@@ -5742,10 +5815,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "settings:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_settings"
+        ]
       },
       "put": {
         "tags": [
@@ -5786,10 +5863,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "settings.certificates:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_agent_certs"
+        ]
       }
     },
     "/api/v1/settings/oidc-providers": {
@@ -5816,10 +5897,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "settings:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_settings"
+        ]
       },
       "post": {
         "tags": [
@@ -5857,10 +5942,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "settings.auth:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_auth_settings"
+        ]
       }
     },
     "/api/v1/settings/oidc-providers/{id}": {
@@ -5899,10 +5988,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "settings:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_settings"
+        ]
       },
       "put": {
         "tags": [
@@ -5949,10 +6042,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "settings.auth:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_auth_settings"
+        ]
       },
       "delete": {
         "tags": [
@@ -5985,10 +6082,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "settings.auth:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_auth_settings"
+        ]
       }
     },
     "/api/v1/settings/oidc-providers/{id}/activate": {
@@ -6030,10 +6131,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "settings.auth:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_auth_settings"
+        ]
       }
     },
     "/api/v1/settings/oidc-providers/{id}/deactivate": {
@@ -6075,10 +6180,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "settings.auth:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_auth_settings"
+        ]
       }
     },
     "/api/v1/settings/renew-server-certificate": {
@@ -6111,10 +6220,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.settings:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_global_settings"
+        ]
       }
     },
     "/api/v1/settings/reset-data": {
@@ -6157,10 +6270,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.settings:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_global_settings"
+        ]
       }
     },
     "/api/v1/software-items": {
@@ -8836,10 +8953,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.settings:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_global_settings"
+        ]
       }
     },
     "/api/v1/update-batches": {

@@ -247,6 +247,21 @@ async fn pairing_rule_operator_only_reads_hosts() {
     );
 }
 
+/// Grant-row `tenant_id` for an action string, mirroring
+/// `access_grants::pattern_plane`'s segment-aware dotted-`system.`-prefix
+/// rule: system-plane grants require `tenant_id` NULL, tenant-plane
+/// user-subject grants require a concrete tenant. Actions here are always
+/// `resource:verb`, never a bare wildcard, so the `Resource::Any` case that
+/// rule handles doesn't apply.
+fn action_grant_tenant_id(app: &TestApp, action: &str) -> Option<uuid::Uuid> {
+    let resource = action.split(':').next().unwrap_or(action);
+    if resource == "system" || resource.starts_with("system.") {
+        None
+    } else {
+        Some(app.tenant_id)
+    }
+}
+
 /// Shared D-row probe for a GET list endpoint of a converted family:
 /// D2 no credential → 401; D3 zero-grant JWT and API token → 403;
 /// D4 unrelated-action grant → still 403; D1 `action` grant → 200 on both
@@ -280,7 +295,7 @@ async fn assert_family_enforcement(path: &str, action: &str, unrelated_action: &
         &app.db,
         NewGrant {
             subject: GrantSubject::User(user_id),
-            tenant_id: Some(app.tenant_id),
+            tenant_id: action_grant_tenant_id(&app, unrelated_action),
             patterns: &unrelated,
             selector: Selector::All,
             description: None,
@@ -303,7 +318,7 @@ async fn assert_family_enforcement(path: &str, action: &str, unrelated_action: &
         &app.db,
         NewGrant {
             subject: GrantSubject::User(user_id),
-            tenant_id: Some(app.tenant_id),
+            tenant_id: action_grant_tenant_id(&app, action),
             patterns: &patterns,
             selector: Selector::All,
             description: None,
@@ -429,6 +444,74 @@ async fn b2_no_credential_is_401_per_family() {
         "/api/v1/plugin-configs/batch".to_string(),
         format!("/api/v1/plugin-configs/{dummy}/discover"),
         "/api/v1/plugin-configs/test".to_string(),
+    ] {
+        assert_eq!(
+            client
+                .post_json(&path, &serde_json::json!({}))
+                .send_status()
+                .await,
+            http::StatusCode::UNAUTHORIZED,
+            "{path}: D2 expected 401"
+        );
+    }
+}
+
+#[tokio::test]
+async fn b3_settings_family_enforcement() {
+    assert_family_enforcement("/api/v1/settings", "settings:read", "software:read").await;
+}
+
+#[tokio::test]
+async fn b3_config_state_family_enforcement() {
+    assert_family_enforcement(
+        "/api/v1/instance/config-state",
+        "system.config-state:read",
+        "settings:read",
+    )
+    .await;
+}
+
+/// D2 on every converted B3 file (spec §Tests), one path per file — 15
+/// files, 19 distinct routes (`oidc_providers.rs` contributes four paths,
+/// `instance_config_state.rs` two). Most expose a GET; the write-only routes
+/// (`settings_ca` POST `/ca/rotate`, `settings_reset` POST `/reset-data`,
+/// `server_cert` POST `/renew-server-certificate`, the oidc-providers
+/// activate/deactivate actions, and `instance_config_state`'s
+/// clear-degraded action) are probed with their own method instead — a GET
+/// on a POST-only route returns 405, not 401.
+#[tokio::test]
+async fn b3_no_credential_is_401_per_family() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let dummy = "00000000-0000-0000-0000-000000000000";
+    for path in [
+        "/api/v1/settings/access".to_string(),
+        "/api/v1/settings/agent-certificates".to_string(),
+        "/api/v1/settings".to_string(),
+        "/api/v1/global-settings".to_string(),
+        "/api/v1/global-settings/nats".to_string(),
+        "/api/v1/global-settings/network".to_string(),
+        "/api/v1/global-settings/oauth".to_string(),
+        "/api/v1/global-settings/providers/github".to_string(),
+        "/api/v1/global-settings/zeroconf".to_string(),
+        "/api/v1/settings/oidc-providers".to_string(),
+        format!("/api/v1/settings/oidc-providers/{dummy}"),
+        "/api/v1/instance/config-state".to_string(),
+        "/api/v1/system/alerts".to_string(),
+    ] {
+        assert_eq!(
+            client.get(&path).send_status().await,
+            http::StatusCode::UNAUTHORIZED,
+            "{path}: D2 expected 401"
+        );
+    }
+    for path in [
+        "/api/v1/global-settings/ca/rotate".to_string(),
+        "/api/v1/settings/reset-data".to_string(),
+        "/api/v1/settings/renew-server-certificate".to_string(),
+        format!("/api/v1/settings/oidc-providers/{dummy}/activate"),
+        format!("/api/v1/settings/oidc-providers/{dummy}/deactivate"),
+        "/api/v1/instance/config-reload/clear-degraded".to_string(),
     ] {
         assert_eq!(
             client

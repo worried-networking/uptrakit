@@ -2,7 +2,7 @@ use crate::AppState;
 use crate::auth::token::generate_uuid;
 use crate::error_response::error_response;
 use crate::extract::Validated;
-use crate::middleware::permission::{CanManageAuthSettings, CanViewSettings};
+use crate::middleware::action::{CanManageSettingsAuth, CanReadSettings};
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::tenant_db::TenantDb;
 use axum::{
@@ -96,20 +96,19 @@ fn oidc_provider_response_from(
     post,
     path = "/api/v1/settings/oidc-providers",
     request_body = CreateOidcProviderRequest,
-    extensions(("x-required-permission" = json!("manage_auth_settings"))),
     responses(
         (status = 201, description = "Provider created", body = OidcProviderResponse),
         (status = 400, description = "Invalid input"),
         (status = 409, description = "Slug already exists")
     ),
     tag = "OIDC Providers",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["settings.auth:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn create_provider(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageAuthSettings(user): CanManageAuthSettings,
+    CanManageSettingsAuth(user): CanManageSettingsAuth,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Validated(req): Validated<CreateOidcProviderRequest>,
 ) -> Response {
@@ -328,17 +327,16 @@ pub async fn create_provider(
 #[utoipa::path(
     get,
     path = "/api/v1/settings/oidc-providers",
-    extensions(("x-required-permission" = json!("view_settings"))),
     responses(
         (status = 200, description = "List of OIDC providers", body = Vec<OidcProviderResponse>),
     ),
     tag = "OIDC Providers",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["settings:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_providers(
     tenant_db: TenantDb,
-    CanViewSettings(_user): CanViewSettings,
+    CanReadSettings(_user): CanReadSettings,
 ) -> Response {
     let multi_tenancy_enabled =
         match crate::settings_store::is_multi_tenancy_enabled(tenant_db.db()).await {
@@ -374,19 +372,18 @@ pub async fn list_providers(
     get,
     path = "/api/v1/settings/oidc-providers/{id}",
     params(("id" = Uuid, Path, description = "Provider ID")),
-    extensions(("x-required-permission" = json!("view_settings"))),
     responses(
         (status = 200, description = "Provider details", body = OidcProviderResponse),
         (status = 404, description = "Provider not found")
     ),
     tag = "OIDC Providers",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["settings:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_provider(
     tenant_db: TenantDb,
     Path(provider_id): Path<Uuid>,
-    CanViewSettings(_user): CanViewSettings,
+    CanReadSettings(_user): CanReadSettings,
 ) -> Response {
     let multi_tenancy_enabled =
         match crate::settings_store::is_multi_tenancy_enabled(tenant_db.db()).await {
@@ -412,20 +409,19 @@ pub async fn get_provider(
     path = "/api/v1/settings/oidc-providers/{id}",
     params(("id" = Uuid, Path, description = "Provider ID")),
     request_body = UpdateOidcProviderRequest,
-    extensions(("x-required-permission" = json!("manage_auth_settings"))),
     responses(
         (status = 200, description = "Provider updated", body = OidcProviderResponse),
         (status = 404, description = "Provider not found")
     ),
     tag = "OIDC Providers",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["settings.auth:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_provider(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     Path(provider_id): Path<Uuid>,
-    CanManageAuthSettings(user): CanManageAuthSettings,
+    CanManageSettingsAuth(user): CanManageSettingsAuth,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Json(req): Json<UpdateOidcProviderRequest>,
 ) -> Response {
@@ -708,21 +704,20 @@ pub async fn update_provider(
     delete,
     path = "/api/v1/settings/oidc-providers/{id}",
     params(("id" = Uuid, Path, description = "Provider ID")),
-    extensions(("x-required-permission" = json!("manage_auth_settings"))),
     responses(
         (status = 204, description = "Provider deleted"),
         (status = 404, description = "Provider not found"),
         (status = 409, description = "Cannot delete: safety check failed")
     ),
     tag = "OIDC Providers",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["settings.auth:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn delete_provider(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     Path(provider_id): Path<Uuid>,
-    CanManageAuthSettings(user): CanManageAuthSettings,
+    CanManageSettingsAuth(user): CanManageSettingsAuth,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
@@ -856,21 +851,20 @@ pub async fn delete_provider(
     post,
     path = "/api/v1/settings/oidc-providers/{id}/activate",
     params(("id" = Uuid, Path, description = "Provider ID")),
-    extensions(("x-required-permission" = json!("manage_auth_settings"))),
     responses(
         (status = 200, description = "Provider activated", body = OidcProviderResponse),
         (status = 404, description = "Provider not found"),
         (status = 409, description = "Cannot activate: provider is deleted or config incomplete")
     ),
     tag = "OIDC Providers",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["settings.auth:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn activate_provider(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     Path(provider_id): Path<Uuid>,
-    CanManageAuthSettings(user): CanManageAuthSettings,
+    CanManageSettingsAuth(user): CanManageSettingsAuth,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
@@ -1115,21 +1109,20 @@ pub async fn activate_provider(
     post,
     path = "/api/v1/settings/oidc-providers/{id}/deactivate",
     params(("id" = Uuid, Path, description = "Provider ID")),
-    extensions(("x-required-permission" = json!("manage_auth_settings"))),
     responses(
         (status = 200, description = "Provider deactivated", body = OidcProviderResponse),
         (status = 404, description = "Provider not found"),
         (status = 409, description = "Cannot deactivate: safety check failed")
     ),
     tag = "OIDC Providers",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["settings.auth:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn deactivate_provider(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     Path(provider_id): Path<Uuid>,
-    CanManageAuthSettings(user): CanManageAuthSettings,
+    CanManageSettingsAuth(user): CanManageSettingsAuth,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);

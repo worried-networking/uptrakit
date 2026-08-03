@@ -22,7 +22,7 @@ pub use uptrakit_web_api_types::settings_nats::{NatsSettingsResponse, UpdateNats
 use crate::AppState;
 use crate::error_response::error_response;
 use crate::extract::Validated;
-use crate::middleware::permission::CanManageGlobalSettings;
+use crate::middleware::action::CanManageSystemSettings;
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::settings_store::{load_global_setting_raw, upsert_global_setting_raw};
 
@@ -73,13 +73,12 @@ fn emit_nats_failed_event(
         (status = 403, description = "Not authorized")
     ),
     tag = "Global Settings",
-    extensions(("x-required-permission" = json!("manage_global_settings"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.settings:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_nats_settings(
     State(state): State<Arc<AppState>>,
-    CanManageGlobalSettings(_user): CanManageGlobalSettings,
+    CanManageSystemSettings(_user): CanManageSystemSettings,
 ) -> Response {
     let nats_url = state.settings.nats_url();
     (StatusCode::OK, Json(snapshot_to_response(nats_url))).into_response()
@@ -104,13 +103,12 @@ pub async fn get_nats_settings(
         (status = 403, description = "Not authorized")
     ),
     tag = "Global Settings",
-    extensions(("x-required-permission" = json!("manage_global_settings"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.settings:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_nats_settings(
     State(state): State<Arc<AppState>>,
-    CanManageGlobalSettings(user): CanManageGlobalSettings,
+    CanManageSystemSettings(user): CanManageSystemSettings,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Validated(req): Validated<UpdateNatsSettingsRequest>,
 ) -> Response {
@@ -679,7 +677,7 @@ mod tests {
 
         let response = update_nats_settings(
             State(state),
-            CanManageGlobalSettings::new(AuthenticatedUser::new(
+            CanManageSystemSettings::new(AuthenticatedUser::new(
                 user.id,
                 AuthMethod::Password,
                 vec![Permission::ManageGlobalSettings],
@@ -745,7 +743,7 @@ mod tests {
 
         let response = update_nats_settings(
             State(state),
-            CanManageGlobalSettings::new(AuthenticatedUser::new(
+            CanManageSystemSettings::new(AuthenticatedUser::new(
                 user.id,
                 AuthMethod::Password,
                 vec![Permission::ManageGlobalSettings],
@@ -796,7 +794,7 @@ mod tests {
 
         let first_response = update_nats_settings(
             State(Arc::clone(&state)),
-            CanManageGlobalSettings::new(AuthenticatedUser::new(
+            CanManageSystemSettings::new(AuthenticatedUser::new(
                 user.id,
                 AuthMethod::Password,
                 vec![Permission::ManageGlobalSettings],
@@ -813,7 +811,7 @@ mod tests {
 
         let second_response = update_nats_settings(
             State(state),
-            CanManageGlobalSettings::new(AuthenticatedUser::new(
+            CanManageSystemSettings::new(AuthenticatedUser::new(
                 user.id,
                 AuthMethod::Password,
                 vec![Permission::ManageGlobalSettings],
@@ -862,7 +860,7 @@ mod tests {
 
         let response = update_nats_settings(
             State(state),
-            CanManageGlobalSettings::new(AuthenticatedUser::new(
+            CanManageSystemSettings::new(AuthenticatedUser::new(
                 user.id,
                 AuthMethod::ApiToken,
                 vec![Permission::ManageGlobalSettings],
@@ -923,7 +921,7 @@ mod tests {
 
         let response = update_nats_settings(
             State(state),
-            CanManageGlobalSettings::new(AuthenticatedUser::new(
+            CanManageSystemSettings::new(AuthenticatedUser::new(
                 user.id,
                 AuthMethod::Password,
                 vec![Permission::ManageGlobalSettings],
@@ -985,7 +983,7 @@ mod tests {
 
         let response = update_nats_settings(
             State(state),
-            CanManageGlobalSettings::new(AuthenticatedUser::new(
+            CanManageSystemSettings::new(AuthenticatedUser::new(
                 user.id,
                 AuthMethod::Password,
                 vec![Permission::ManageGlobalSettings],

@@ -625,14 +625,18 @@ export const getEnrollmentToken = <ThrowOnError extends boolean = true>(options:
  *
  * Returns network settings and (when NATS support is compiled in) the NATS
  * URL configuration in a single response. Requires the
- * `manage_global_settings` permission.
+ * `system.settings:manage` action.
  *
  * System service enrollment tokens are managed via the dedicated
  * `/api/v1/system-enrollment-tokens` endpoints.
  */
 export const getGlobalCombinedSettings = <ThrowOnError extends boolean = true>(options?: Options<GetGlobalCombinedSettingsData, ThrowOnError>): RequestResult<GetGlobalCombinedSettingsResponses, GetGlobalCombinedSettingsErrors, ThrowOnError> => (options?.client ?? client).get<GetGlobalCombinedSettingsResponses, GetGlobalCombinedSettingsErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -649,7 +653,19 @@ export const getGlobalCombinedSettings = <ThrowOnError extends boolean = true>(o
  *
  * Requires authentication (handled by the `require_auth` layer).
  */
-export const rotateCa = <ThrowOnError extends boolean = true>(options?: Options<RotateCaData, ThrowOnError>): RequestResult<RotateCaResponses, RotateCaErrors, ThrowOnError> => (options?.client ?? client).post<RotateCaResponses, RotateCaErrors, ThrowOnError>({ url: '/api/v1/global-settings/ca/rotate', ...options });
+export const rotateCa = <ThrowOnError extends boolean = true>(options?: Options<RotateCaData, ThrowOnError>): RequestResult<RotateCaResponses, RotateCaErrors, ThrowOnError> => (options?.client ?? client).post<RotateCaResponses, RotateCaErrors, ThrowOnError>({
+    security: [{
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
+            scheme: 'bearer',
+            type: 'http'
+        }],
+    url: '/api/v1/global-settings/ca/rotate',
+    ...options
+});
 
 /**
  * Get NATS settings
@@ -660,7 +676,11 @@ export const rotateCa = <ThrowOnError extends boolean = true>(options?: Options<
  */
 export const getNatsSettings = <ThrowOnError extends boolean = true>(options?: Options<GetNatsSettingsData, ThrowOnError>): RequestResult<GetNatsSettingsResponses, GetNatsSettingsErrors, ThrowOnError> => (options?.client ?? client).get<GetNatsSettingsResponses, GetNatsSettingsErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -680,7 +700,11 @@ export const getNatsSettings = <ThrowOnError extends boolean = true>(options?: O
  */
 export const updateNatsSettings = <ThrowOnError extends boolean = true>(options: Options<UpdateNatsSettingsData, ThrowOnError>): RequestResult<UpdateNatsSettingsResponses, UpdateNatsSettingsErrors, ThrowOnError> => (options.client ?? client).put<UpdateNatsSettingsResponses, UpdateNatsSettingsErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -697,7 +721,11 @@ export const updateNatsSettings = <ThrowOnError extends boolean = true>(options:
  */
 export const getNetworkSettings = <ThrowOnError extends boolean = true>(options?: Options<GetNetworkSettingsData, ThrowOnError>): RequestResult<GetNetworkSettingsResponses, GetNetworkSettingsErrors, ThrowOnError> => (options?.client ?? client).get<GetNetworkSettingsResponses, GetNetworkSettingsErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -710,7 +738,11 @@ export const getNetworkSettings = <ThrowOnError extends boolean = true>(options?
  */
 export const updateNetworkSettings = <ThrowOnError extends boolean = true>(options: Options<UpdateNetworkSettingsData, ThrowOnError>): RequestResult<UpdateNetworkSettingsResponses, UpdateNetworkSettingsErrors, ThrowOnError> => (options.client ?? client).put<UpdateNetworkSettingsResponses, UpdateNetworkSettingsErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -735,7 +767,11 @@ export const updateNetworkSettings = <ThrowOnError extends boolean = true>(optio
  */
 export const getOauthSettings = <ThrowOnError extends boolean = true>(options?: Options<GetOauthSettingsData, ThrowOnError>): RequestResult<GetOauthSettingsResponses, GetOauthSettingsErrors, ThrowOnError> => (options?.client ?? client).get<GetOauthSettingsResponses, GetOauthSettingsErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -755,7 +791,11 @@ export const getOauthSettings = <ThrowOnError extends boolean = true>(options?: 
  */
 export const updateOauthSettings = <ThrowOnError extends boolean = true>(options: Options<UpdateOauthSettingsData, ThrowOnError>): RequestResult<UpdateOauthSettingsResponses, UpdateOauthSettingsErrors, ThrowOnError> => (options.client ?? client).put<UpdateOauthSettingsResponses, UpdateOauthSettingsErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -769,7 +809,11 @@ export const updateOauthSettings = <ThrowOnError extends boolean = true>(options
 
 export const getGithubProviderSettings = <ThrowOnError extends boolean = true>(options?: Options<GetGithubProviderSettingsData, ThrowOnError>): RequestResult<GetGithubProviderSettingsResponses, GetGithubProviderSettingsErrors, ThrowOnError> => (options?.client ?? client).get<GetGithubProviderSettingsResponses, GetGithubProviderSettingsErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -779,7 +823,11 @@ export const getGithubProviderSettings = <ThrowOnError extends boolean = true>(o
 
 export const updateGithubProviderSettings = <ThrowOnError extends boolean = true>(options: Options<UpdateGithubProviderSettingsData, ThrowOnError>): RequestResult<UpdateGithubProviderSettingsResponses, UpdateGithubProviderSettingsErrors, ThrowOnError> => (options.client ?? client).put<UpdateGithubProviderSettingsResponses, UpdateGithubProviderSettingsErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -799,7 +847,11 @@ export const updateGithubProviderSettings = <ThrowOnError extends boolean = true
  */
 export const getZeroconfSettings = <ThrowOnError extends boolean = true>(options?: Options<GetZeroconfSettingsData, ThrowOnError>): RequestResult<GetZeroconfSettingsResponses, GetZeroconfSettingsErrors, ThrowOnError> => (options?.client ?? client).get<GetZeroconfSettingsResponses, GetZeroconfSettingsErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -819,7 +871,11 @@ export const getZeroconfSettings = <ThrowOnError extends boolean = true>(options
  */
 export const updateZeroconfSettings = <ThrowOnError extends boolean = true>(options: Options<UpdateZeroconfSettingsData, ThrowOnError>): RequestResult<UpdateZeroconfSettingsResponses, UpdateZeroconfSettingsErrors, ThrowOnError> => (options.client ?? client).put<UpdateZeroconfSettingsResponses, UpdateZeroconfSettingsErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -1230,7 +1286,11 @@ export const setInstancePluginEnabled = <ThrowOnError extends boolean = true>(op
  */
 export const clearCoordinatorDegraded = <ThrowOnError extends boolean = true>(options?: Options<ClearCoordinatorDegradedData, ThrowOnError>): RequestResult<ClearCoordinatorDegradedResponses, ClearCoordinatorDegradedErrors, ThrowOnError> => (options?.client ?? client).post<ClearCoordinatorDegradedResponses, ClearCoordinatorDegradedErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -1243,7 +1303,11 @@ export const clearCoordinatorDegraded = <ThrowOnError extends boolean = true>(op
  */
 export const getConfigState = <ThrowOnError extends boolean = true>(options?: Options<GetConfigStateData, ThrowOnError>): RequestResult<GetConfigStateResponses, GetConfigStateErrors, ThrowOnError> => (options?.client ?? client).get<GetConfigStateResponses, GetConfigStateErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -1956,7 +2020,11 @@ export const mergeService = <ThrowOnError extends boolean = true>(options: Optio
  */
 export const getCombinedSettings = <ThrowOnError extends boolean = true>(options?: Options<GetCombinedSettingsData, ThrowOnError>): RequestResult<GetCombinedSettingsResponses, GetCombinedSettingsErrors, ThrowOnError> => (options?.client ?? client).get<GetCombinedSettingsResponses, GetCombinedSettingsErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -1969,7 +2037,11 @@ export const getCombinedSettings = <ThrowOnError extends boolean = true>(options
  */
 export const getAccessSettings = <ThrowOnError extends boolean = true>(options?: Options<GetAccessSettingsData, ThrowOnError>): RequestResult<GetAccessSettingsResponses, GetAccessSettingsErrors, ThrowOnError> => (options?.client ?? client).get<GetAccessSettingsResponses, GetAccessSettingsErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -1982,7 +2054,11 @@ export const getAccessSettings = <ThrowOnError extends boolean = true>(options?:
  */
 export const updateAccessSettings = <ThrowOnError extends boolean = true>(options: Options<UpdateAccessSettingsData, ThrowOnError>): RequestResult<UpdateAccessSettingsResponses, UpdateAccessSettingsErrors, ThrowOnError> => (options.client ?? client).put<UpdateAccessSettingsResponses, UpdateAccessSettingsErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -1999,7 +2075,11 @@ export const updateAccessSettings = <ThrowOnError extends boolean = true>(option
  */
 export const getAgentCertificateSettings = <ThrowOnError extends boolean = true>(options?: Options<GetAgentCertificateSettingsData, ThrowOnError>): RequestResult<GetAgentCertificateSettingsResponses, GetAgentCertificateSettingsErrors, ThrowOnError> => (options?.client ?? client).get<GetAgentCertificateSettingsResponses, GetAgentCertificateSettingsErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2012,7 +2092,11 @@ export const getAgentCertificateSettings = <ThrowOnError extends boolean = true>
  */
 export const updateAgentCertificateSettings = <ThrowOnError extends boolean = true>(options: Options<UpdateAgentCertificateSettingsData, ThrowOnError>): RequestResult<UpdateAgentCertificateSettingsResponses, UpdateAgentCertificateSettingsErrors, ThrowOnError> => (options.client ?? client).put<UpdateAgentCertificateSettingsResponses, UpdateAgentCertificateSettingsErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2029,7 +2113,11 @@ export const updateAgentCertificateSettings = <ThrowOnError extends boolean = tr
  */
 export const listProviders = <ThrowOnError extends boolean = true>(options?: Options<ListProvidersData, ThrowOnError>): RequestResult<ListProvidersResponses, unknown, ThrowOnError> => (options?.client ?? client).get<ListProvidersResponses, unknown, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2042,7 +2130,11 @@ export const listProviders = <ThrowOnError extends boolean = true>(options?: Opt
  */
 export const createProvider = <ThrowOnError extends boolean = true>(options: Options<CreateProviderData, ThrowOnError>): RequestResult<CreateProviderResponses, CreateProviderErrors, ThrowOnError> => (options.client ?? client).post<CreateProviderResponses, CreateProviderErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2059,7 +2151,11 @@ export const createProvider = <ThrowOnError extends boolean = true>(options: Opt
  */
 export const deleteProvider = <ThrowOnError extends boolean = true>(options: Options<DeleteProviderData, ThrowOnError>): RequestResult<DeleteProviderResponses, DeleteProviderErrors, ThrowOnError> => (options.client ?? client).delete<DeleteProviderResponses, DeleteProviderErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2072,7 +2168,11 @@ export const deleteProvider = <ThrowOnError extends boolean = true>(options: Opt
  */
 export const getProvider = <ThrowOnError extends boolean = true>(options: Options<GetProviderData, ThrowOnError>): RequestResult<GetProviderResponses, GetProviderErrors, ThrowOnError> => (options.client ?? client).get<GetProviderResponses, GetProviderErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2085,7 +2185,11 @@ export const getProvider = <ThrowOnError extends boolean = true>(options: Option
  */
 export const updateProvider = <ThrowOnError extends boolean = true>(options: Options<UpdateProviderData, ThrowOnError>): RequestResult<UpdateProviderResponses, UpdateProviderErrors, ThrowOnError> => (options.client ?? client).put<UpdateProviderResponses, UpdateProviderErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2102,7 +2206,11 @@ export const updateProvider = <ThrowOnError extends boolean = true>(options: Opt
  */
 export const activateProvider = <ThrowOnError extends boolean = true>(options: Options<ActivateProviderData, ThrowOnError>): RequestResult<ActivateProviderResponses, ActivateProviderErrors, ThrowOnError> => (options.client ?? client).post<ActivateProviderResponses, ActivateProviderErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2115,7 +2223,11 @@ export const activateProvider = <ThrowOnError extends boolean = true>(options: O
  */
 export const deactivateProvider = <ThrowOnError extends boolean = true>(options: Options<DeactivateProviderData, ThrowOnError>): RequestResult<DeactivateProviderResponses, DeactivateProviderErrors, ThrowOnError> => (options.client ?? client).post<DeactivateProviderResponses, DeactivateProviderErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2128,7 +2240,11 @@ export const deactivateProvider = <ThrowOnError extends boolean = true>(options:
  */
 export const renewServerCertificate = <ThrowOnError extends boolean = true>(options?: Options<RenewServerCertificateData, ThrowOnError>): RequestResult<RenewServerCertificateResponses, RenewServerCertificateErrors, ThrowOnError> => (options?.client ?? client).post<RenewServerCertificateResponses, RenewServerCertificateErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2141,7 +2257,11 @@ export const renewServerCertificate = <ThrowOnError extends boolean = true>(opti
  */
 export const resetData = <ThrowOnError extends boolean = true>(options: Options<ResetDataData, ThrowOnError>): RequestResult<ResetDataResponses, ResetDataErrors, ThrowOnError> => (options.client ?? client).post<ResetDataResponses, ResetDataErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -2863,7 +2983,11 @@ export const rejectSystemService = <ThrowOnError extends boolean = true>(options
  */
 export const getSystemAlerts = <ThrowOnError extends boolean = true>(options?: Options<GetSystemAlertsData, ThrowOnError>): RequestResult<GetSystemAlertsResponses, GetSystemAlertsErrors, ThrowOnError> => (options?.client ?? client).get<GetSystemAlertsResponses, GetSystemAlertsErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],

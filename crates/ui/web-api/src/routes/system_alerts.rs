@@ -13,7 +13,7 @@ use http::StatusCode;
 use uptrakit_config_reload::CoordinatorState;
 
 use crate::AppState;
-use crate::middleware::permission::CanManageGlobalSettings;
+use crate::middleware::action::CanManageSystemSettings;
 
 pub use uptrakit_web_api_types::system_alerts::{AlertSeverity, SystemAlert, SystemAlertsResponse};
 
@@ -26,13 +26,12 @@ pub use uptrakit_web_api_types::system_alerts::{AlertSeverity, SystemAlert, Syst
         (status = 200, description = "System alerts", body = SystemAlertsResponse),
         (status = 403, description = "Not authorized")
     ),
-    extensions(("x-required-permission" = json!("manage_global_settings"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.settings:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_system_alerts(
     State(state): State<Arc<AppState>>,
-    CanManageGlobalSettings(_user): CanManageGlobalSettings,
+    CanManageSystemSettings(_user): CanManageSystemSettings,
 ) -> Response {
     let snapshot = state.cert.ca_snapshot.borrow().clone();
     let mut alerts = Vec::new();

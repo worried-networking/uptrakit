@@ -3,6 +3,9 @@
     reason = "fire-and-forget channel sends in tests drop results intentionally"
 )]
 
+use uptrakit_shared_db::access_grants::{GrantSubject, NewGrant, insert_grant};
+use uptrakit_shared_types::access::{ActionPattern, Selector};
+
 use crate::test_harness::TestApp;
 use crate::test_harness::fixtures::register_and_get_token;
 use http_body_util::BodyExt;
@@ -58,16 +61,33 @@ async fn github_provider_settings_forbids_missing_permission() {
     let app = TestApp::new().await;
     let client = app.client();
 
+    let user_id = uuid::Uuid::now_v7();
+    // Mint a token with the legacy ViewSettings claim; it is not consulted by
+    // the post-conversion action extractor (`CanManageSystemSettings` only
+    // reads `AccessEngine` grants), so the mapped `settings:read` action is
+    // granted directly. This endpoint requires `system.settings:manage`, so
+    // the grant is deliberately insufficient — the test still pins the
+    // "authenticated but under-privileged" boundary rather than trivially
+    // passing on a zero-grant subject.
     let token = app
         .jwt
-        .create_access_token(
-            uuid::Uuid::now_v7(),
-            &[Permission::ViewSettings],
-            "password",
-            None,
-            None,
-        )
+        .create_access_token(user_id, &[Permission::ViewSettings], "password", None, None)
         .expect("mint reduced-permission token");
+    let patterns = vec!["settings:read".parse::<ActionPattern>().expect("pattern")];
+    insert_grant(
+        &app.db,
+        NewGrant {
+            subject: GrantSubject::User(user_id),
+            tenant_id: Some(app.tenant_id),
+            patterns: &patterns,
+            selector: Selector::All,
+            description: None,
+            created_by: None,
+        },
+    )
+    .await
+    .expect("insert grant");
+    app.state.access_engine.invalidate_subjects(&[user_id], &[]);
 
     let (get_status, _): (_, serde_json::Value) = client
         .get("/api/v1/global-settings/providers/github")

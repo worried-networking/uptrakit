@@ -24,7 +24,7 @@ pub use uptrakit_web_api_types::settings_oauth::{
 use crate::AppState;
 use crate::error_response::error_response;
 use crate::extract::Validated;
-use crate::middleware::permission::CanManageGlobalSettings;
+use crate::middleware::action::CanManageSystemSettings;
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::oauth::resolve_mcp_enabled;
 use crate::settings_store::{load_global_setting_raw, upsert_global_setting_raw};
@@ -131,13 +131,12 @@ fn emit_oauth_failed_event(
         (status = 403, description = "Not authorized")
     ),
     tag = "Global Settings",
-    extensions(("x-required-permission" = json!("manage_global_settings"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.settings:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_oauth_settings(
     State(state): State<Arc<AppState>>,
-    CanManageGlobalSettings(_user): CanManageGlobalSettings,
+    CanManageSystemSettings(_user): CanManageSystemSettings,
 ) -> Response {
     let db_state = load_oauth_settings_from_db(&state).await;
     (StatusCode::OK, Json(db_state.into_response(&state))).into_response()
@@ -164,13 +163,12 @@ pub async fn get_oauth_settings(
         (status = 428, description = "If-Match header missing")
     ),
     tag = "Global Settings",
-    extensions(("x-required-permission" = json!("manage_global_settings"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.settings:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_oauth_settings(
     State(state): State<Arc<AppState>>,
-    CanManageGlobalSettings(user): CanManageGlobalSettings,
+    CanManageSystemSettings(user): CanManageSystemSettings,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Validated(req): Validated<UpdateOAuthSettingsRequest>,
 ) -> Response {

@@ -11,7 +11,7 @@ use uptrakit_shared_macros::impl_report_conversion;
 
 use crate::AppState;
 use crate::error_response::error_response;
-use crate::middleware::permission::CanManageGlobalSettings;
+use crate::middleware::action::CanManageSystemSettings;
 use crate::middleware::require_auth::{
     AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
 };
@@ -114,13 +114,12 @@ fn emit_server_cert_renew_audit(
         (status = 409, description = "Server certificate is externally managed; renewal via this API is rejected"),
         (status = 500, description = "Renewal failed")
     ),
-    extensions(("x-required-permission" = json!("manage_global_settings"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.settings:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn renew_server_certificate(
     State(state): State<Arc<AppState>>,
-    CanManageGlobalSettings(user): CanManageGlobalSettings,
+    CanManageSystemSettings(user): CanManageSystemSettings,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
@@ -335,7 +334,7 @@ mod tests {
     #[cfg(feature = "db-sqlite")]
     use crate::auth::permissions::Permission;
     #[cfg(feature = "db-sqlite")]
-    use crate::middleware::permission::CanManageGlobalSettings;
+    use crate::middleware::action::CanManageSystemSettings;
     #[cfg(feature = "db-sqlite")]
     use crate::middleware::require_auth::AuthenticatedUser;
     #[cfg(feature = "db-sqlite")]
@@ -478,7 +477,7 @@ mod tests {
         let user_id = uuid::Uuid::now_v7();
         let response = renew_server_certificate(
             State(Arc::clone(&state)),
-            CanManageGlobalSettings::new(AuthenticatedUser::new(
+            CanManageSystemSettings::new(AuthenticatedUser::new(
                 user_id,
                 AuthMethod::Password,
                 vec![Permission::ManageGlobalSettings],
@@ -537,7 +536,7 @@ mod tests {
         let user_id = uuid::Uuid::now_v7();
         let response = renew_server_certificate(
             State(Arc::clone(&state)),
-            CanManageGlobalSettings::new(AuthenticatedUser::new(
+            CanManageSystemSettings::new(AuthenticatedUser::new(
                 user_id,
                 AuthMethod::Password,
                 vec![Permission::ManageGlobalSettings],
@@ -592,7 +591,7 @@ mod tests {
         let user_id = uuid::Uuid::now_v7();
         let response = renew_server_certificate(
             State(Arc::clone(&state)),
-            CanManageGlobalSettings::new(AuthenticatedUser::new(
+            CanManageSystemSettings::new(AuthenticatedUser::new(
                 user_id,
                 AuthMethod::Password,
                 vec![Permission::ManageGlobalSettings],

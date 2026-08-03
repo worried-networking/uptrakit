@@ -9,7 +9,7 @@ use axum::{
 
 use crate::AppState;
 use crate::error_response::error_response;
-use crate::middleware::permission::CanViewSettings;
+use crate::middleware::action::CanReadSettings;
 use crate::queries::enrollment_tokens as et_queries;
 use uptrakit_web_api_types::enrollment_tokens::EnrollmentTokensSummary;
 use uptrakit_web_api_types::settings_agent_certs::AgentCertificateSettingsResponse;
@@ -25,13 +25,12 @@ use uptrakit_web_api_types::settings_combined::CombinedSettingsResponse;
         (status = 403, description = "Not authorized")
     ),
     tag = "Settings",
-    extensions(("x-required-permission" = json!("view_settings"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["settings:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_combined_settings(
     State(state): State<Arc<AppState>>,
-    CanViewSettings(_user): CanViewSettings,
+    CanReadSettings(_user): CanReadSettings,
 ) -> Response {
     let agent_certificates = AgentCertificateSettingsResponse {
         lifetime_hours: state.settings.agent_cert_lifetime_hours(),

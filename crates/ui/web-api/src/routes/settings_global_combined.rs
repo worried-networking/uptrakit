@@ -18,7 +18,7 @@ use axum::{
 };
 
 use crate::AppState;
-use crate::middleware::permission::CanManageGlobalSettings;
+use crate::middleware::action::CanManageSystemSettings;
 use uptrakit_web_api_types::settings_combined::GlobalSettingsCombinedResponse;
 use uptrakit_web_api_types::settings_nats::NatsSettingsResponse;
 use uptrakit_web_api_types::settings_network::NetworkSettingsResponse;
@@ -27,7 +27,7 @@ use uptrakit_web_api_types::settings_network::NetworkSettingsResponse;
 ///
 /// Returns network settings and (when NATS support is compiled in) the NATS
 /// URL configuration in a single response. Requires the
-/// `manage_global_settings` permission.
+/// `system.settings:manage` action.
 ///
 /// System service enrollment tokens are managed via the dedicated
 /// `/api/v1/system-enrollment-tokens` endpoints.
@@ -40,13 +40,12 @@ use uptrakit_web_api_types::settings_network::NetworkSettingsResponse;
         (status = 403, description = "Not authorized")
     ),
     tag = "Global Settings",
-    extensions(("x-required-permission" = json!("manage_global_settings"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.settings:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_global_combined_settings(
     State(state): State<Arc<AppState>>,
-    CanManageGlobalSettings(_user): CanManageGlobalSettings,
+    CanManageSystemSettings(_user): CanManageSystemSettings,
 ) -> Response {
     let network = state.settings.network();
     let network_response = NetworkSettingsResponse {

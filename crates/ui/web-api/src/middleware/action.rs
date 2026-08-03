@@ -175,6 +175,16 @@ action_extractor! {
     CanTriggerPluginConfigs => actions::PLUGIN_CONFIGS_TRIGGER,
     /// `discovery.ignores:manage` — manage autodiscovery ignore rules.
     CanManageDiscoveryIgnores => actions::DISCOVERY_IGNORES_MANAGE,
+    /// `settings:read` — view all tenant settings.
+    CanReadSettings => actions::SETTINGS_READ,
+    /// `settings.auth:manage` — manage registration, authentication, OIDC providers.
+    CanManageSettingsAuth => actions::SETTINGS_AUTH_MANAGE,
+    /// `settings.certificates:manage` — manage agent certificate settings.
+    CanManageSettingsCertificates => actions::SETTINGS_CERTIFICATES_MANAGE,
+    /// `system.config-state:read` — view instance config reload state.
+    CanReadSystemConfigState => actions::SYSTEM_CONFIG_STATE_READ,
+    /// `system.config-state:manage` — manage instance config reload state.
+    CanManageSystemConfigState => actions::SYSTEM_CONFIG_STATE_MANAGE,
 }
 
 #[cfg(test)]

@@ -6,7 +6,7 @@
 use crate::AppState;
 use crate::error_response::error_response;
 use crate::extract::Validated;
-use crate::middleware::permission::CanManageGlobalSettings;
+use crate::middleware::action::CanManageSystemSettings;
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::settings_store::upsert_global_setting_raw;
 use axum::{
@@ -148,13 +148,12 @@ fn validate_pki_addr(url_str: &str) -> Result<Option<String>, String> {
         (status = 403, description = "Not authorized")
     ),
     tag = "Global Settings",
-    extensions(("x-required-permission" = json!("manage_global_settings"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.settings:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_network_settings(
     State(state): State<Arc<AppState>>,
-    CanManageGlobalSettings(_user): CanManageGlobalSettings,
+    CanManageSystemSettings(_user): CanManageSystemSettings,
 ) -> Response {
     let network = state.settings.network();
     let trust_domain = {
@@ -192,13 +191,12 @@ pub async fn get_network_settings(
         (status = 403, description = "Not authorized")
     ),
     tag = "Global Settings",
-    extensions(("x-required-permission" = json!("manage_global_settings"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.settings:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_network_settings(
     State(state): State<Arc<AppState>>,
-    CanManageGlobalSettings(user): CanManageGlobalSettings,
+    CanManageSystemSettings(user): CanManageSystemSettings,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Validated(req): Validated<UpdateNetworkSettingsRequest>,
 ) -> Response {
@@ -614,7 +612,7 @@ mod tests {
     use super::*;
     use crate::auth::AuthMethod;
     use crate::auth::permissions::Permission;
-    use crate::middleware::permission::CanManageGlobalSettings;
+    use crate::middleware::action::CanManageSystemSettings;
     use crate::middleware::require_auth::AuthenticatedUser;
     use crate::test_harness::{build_test_state, insert_default_tenant, setup_migrated_db};
     use sea_orm::{
@@ -668,7 +666,7 @@ mod tests {
 
         let response = update_network_settings(
             State(Arc::clone(&state)),
-            CanManageGlobalSettings::new(AuthenticatedUser::new(
+            CanManageSystemSettings::new(AuthenticatedUser::new(
                 uuid::Uuid::now_v7(),
                 AuthMethod::Password,
                 vec![Permission::ManageGlobalSettings],
@@ -725,7 +723,7 @@ mod tests {
 
         let response = update_network_settings(
             State(Arc::clone(&state)),
-            CanManageGlobalSettings::new(AuthenticatedUser::new(
+            CanManageSystemSettings::new(AuthenticatedUser::new(
                 uuid::Uuid::now_v7(),
                 AuthMethod::Password,
                 vec![Permission::ManageGlobalSettings],

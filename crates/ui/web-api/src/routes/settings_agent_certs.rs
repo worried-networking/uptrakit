@@ -1,7 +1,7 @@
 use crate::AppState;
 use crate::SettingKey;
 use crate::error_response::error_response;
-use crate::middleware::permission::{CanManageAgentCerts, CanViewSettings};
+use crate::middleware::action::{CanManageSettingsCertificates, CanReadSettings};
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::settings_store::{delete_setting, upsert_setting};
 use axum::{
@@ -66,13 +66,12 @@ fn build_response(state: &AppState) -> AgentCertificateSettingsResponse {
         (status = 403, description = "Not authorized")
     ),
     tag = "Settings",
-    extensions(("x-required-permission" = json!("view_settings"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["settings:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_agent_certificate_settings(
     State(state): State<Arc<AppState>>,
-    CanViewSettings(_user): CanViewSettings,
+    CanReadSettings(_user): CanReadSettings,
 ) -> Response {
     (StatusCode::OK, Json(build_response(&state))).into_response()
 }
@@ -89,13 +88,12 @@ pub async fn get_agent_certificate_settings(
         (status = 403, description = "Not authorized")
     ),
     tag = "Settings",
-    extensions(("x-required-permission" = json!("manage_agent_certs"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["settings.certificates:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_agent_certificate_settings(
     State(state): State<Arc<AppState>>,
-    CanManageAgentCerts(user): CanManageAgentCerts,
+    CanManageSettingsCertificates(user): CanManageSettingsCertificates,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Json(req): Json<UpdateAgentCertificateSettingsRequest>,
 ) -> Response {
@@ -496,7 +494,7 @@ mod tests {
     use super::*;
     use crate::auth::AuthMethod;
     use crate::auth::permissions::Permission;
-    use crate::middleware::permission::CanManageAgentCerts;
+    use crate::middleware::action::CanManageSettingsCertificates;
     use crate::middleware::require_auth::AuthenticatedUser;
     use sea_orm::{
         ColumnTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait, PaginatorTrait,
@@ -549,7 +547,7 @@ mod tests {
         let user_id = uuid::Uuid::now_v7();
         let response = update_agent_certificate_settings(
             State(Arc::clone(&state)),
-            CanManageAgentCerts::new(AuthenticatedUser::new(
+            CanManageSettingsCertificates::new(AuthenticatedUser::new(
                 user_id,
                 AuthMethod::Password,
                 vec![Permission::ManageAgentCerts],
@@ -603,7 +601,7 @@ mod tests {
 
         let response = update_agent_certificate_settings(
             State(Arc::clone(&state)),
-            CanManageAgentCerts::new(AuthenticatedUser::new(
+            CanManageSettingsCertificates::new(AuthenticatedUser::new(
                 uuid::Uuid::now_v7(),
                 AuthMethod::Password,
                 vec![Permission::ManageAgentCerts],

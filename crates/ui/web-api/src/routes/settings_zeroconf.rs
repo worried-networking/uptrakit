@@ -23,7 +23,7 @@ pub use uptrakit_web_api_types::settings_zeroconf::{
 use crate::AppState;
 use crate::error_response::error_response;
 use crate::extract::Validated;
-use crate::middleware::permission::CanManageGlobalSettings;
+use crate::middleware::action::CanManageSystemSettings;
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::settings::ZeroconfSnapshot;
 use crate::settings_store::{load_global_setting_raw, upsert_global_setting_raw};
@@ -66,13 +66,12 @@ fn emit_zeroconf_failed_event(
         (status = 403, description = "Not authorized")
     ),
     tag = "Global Settings",
-    extensions(("x-required-permission" = json!("manage_global_settings"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.settings:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_zeroconf_settings(
     State(state): State<Arc<AppState>>,
-    CanManageGlobalSettings(_user): CanManageGlobalSettings,
+    CanManageSystemSettings(_user): CanManageSystemSettings,
 ) -> Response {
     let snap = state.settings.zeroconf();
     let ca_fingerprint = state.cert.ca_snapshot.borrow().active_fingerprint.clone();
@@ -104,13 +103,12 @@ pub async fn get_zeroconf_settings(
         (status = 403, description = "Not authorized")
     ),
     tag = "Global Settings",
-    extensions(("x-required-permission" = json!("manage_global_settings"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.settings:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_zeroconf_settings(
     State(state): State<Arc<AppState>>,
-    CanManageGlobalSettings(user): CanManageGlobalSettings,
+    CanManageSystemSettings(user): CanManageSystemSettings,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Validated(req): Validated<UpdateZeroconfSettingsRequest>,
 ) -> Response {
@@ -420,7 +418,7 @@ mod tests {
     use super::*;
     use crate::auth::AuthMethod;
     use crate::auth::permissions::Permission;
-    use crate::middleware::permission::CanManageGlobalSettings;
+    use crate::middleware::action::CanManageSystemSettings;
     use crate::middleware::require_auth::AuthenticatedUser;
     use sea_orm::{
         ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
@@ -475,7 +473,7 @@ mod tests {
         let user_id = uuid::Uuid::now_v7();
         let response = update_zeroconf_settings(
             State(Arc::clone(&state)),
-            CanManageGlobalSettings::new(AuthenticatedUser::new(
+            CanManageSystemSettings::new(AuthenticatedUser::new(
                 user_id,
                 AuthMethod::Password,
                 vec![Permission::ManageGlobalSettings],
