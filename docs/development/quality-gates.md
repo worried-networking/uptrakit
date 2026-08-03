@@ -226,6 +226,20 @@ The `.markdownlintignore` file excludes `node_modules/`, `target/`, `.claude/`, 
 
 CI runs markdownlint on every PR. A PR that fails any quality gate will not merge.
 
+### ADR corpus
+
+ADRs are managed and validated with the `adrs` CLI — see
+[Architecture Decision Records](architecture-decision-records.md). Gates (all wired into the git hooks and the CI
+`markdown` job):
+
+```sh
+bash ci/verify_adr_numbers.sh          # duplicate ADR numbers (pure shell, hard everywhere)
+bash scripts/regen-adr-toc.sh --check  # docs/adr/README.md staleness + link validity
+adrs doctor                            # format/link validation (warn-skip locally if absent; CI enforces)
+```
+
+Create ADRs with `adrs new "Title"` — never hand-allocate a number or hand-edit `docs/adr/README.md`.
+
 ## UI Visual Parity
 
 The approved UI design language is enforced through shared token and shell

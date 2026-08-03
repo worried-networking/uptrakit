@@ -47,6 +47,8 @@ python3 ci/verify_db_access_policy.py                                # db_access
 bash ci/verify_agents_md_budget.sh                                   # AGENTS.md size budget gate
 bash ci/verify_no_new_cfg_not_feature.sh                             # Additive-only feature flags: no new negated-feature cfg outside allowlist
 python3 ci/verify_action_security_declarations.py                    # Operation oauth2 scope lists match handler action extractors
+bash ci/verify_adr_numbers.sh                                        # No duplicate ADR numbers
+bash scripts/regen-adr-toc.sh --check                                # docs/adr/README.md staleness + links
 ```
 
 > **Note:** `--all-features` includes `embed-frontend`, which requires `frontend/build/`. Build the frontend first
@@ -201,7 +203,9 @@ These are non-negotiable design constraints. Do not violate them.
    naming the limitation) and the table-recreation guide live in [database-migrations.md](docs/development/database-migrations.md).
 1. **Cover new logic with tests.** Cover both success and failure paths. See [Testing](docs/development/testing.md).
 1. **Document everything.** Any code change must be documented in code or docs. Wire-protocol changes must be documented in
-   `crates/shared/wire/asyncapi.yaml` and reflected in [wire-protocol.md](docs/api/wire-protocol.md).
+   `crates/shared/wire/asyncapi.yaml` and reflected in [wire-protocol.md](docs/api/wire-protocol.md). Architectural decisions are recorded as ADRs
+   created with `adrs new "Title"` — never hand-allocate an ADR number or hand-edit `docs/adr/README.md`; see [ADR
+   process](docs/development/architecture-decision-records.md).
 1. **Wire protocol payloads must implement `WireValidate`.** Any new wire payload with `Vec<T>` or `String` fields must implement `WireValidate` in
    `wire_validate_impls.rs` (add limit constants in `limits.rs`). See [Payload Size Limits](docs/api/wire-protocol.md#payload-size-limits).
 1. **Large report payloads must use `send_auto_paginate()`.** When sending `DiscoveryResults`, `VersionCheckResults`, `ReportHosts`, or
@@ -358,7 +362,8 @@ plugin interactions via `ServiceMessage::SurfaceActionRequest` → `ControllerMe
 ## Detailed documentation references
 
 Every other topic (security, end-user guides, development standards, architecture, API/protocol) is indexed in
-[docs/README.md](docs/README.md).
+[docs/README.md](docs/README.md). ADRs in `docs/adr/` are created and validated with the `adrs` CLI — see
+[Architecture Decision Records](docs/development/architecture-decision-records.md).
 
 ## Maintaining this file
 
