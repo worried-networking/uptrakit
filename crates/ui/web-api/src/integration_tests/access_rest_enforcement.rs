@@ -523,3 +523,107 @@ async fn b3_no_credential_is_401_per_family() {
         );
     }
 }
+
+#[tokio::test]
+async fn b4_host_tags_read_family_enforcement() {
+    assert_family_enforcement("/api/v1/host-tags", "hosts:read", "scheduler:manage").await;
+}
+
+#[tokio::test]
+async fn b4_scheduler_family_enforcement() {
+    assert_family_enforcement("/api/v1/scheduler/tasks", "scheduler:manage", "hosts:read").await;
+}
+
+/// Pins the intended B4 divergence (spec §B4): `hosts:update` no longer
+/// authorizes tag writes; `hosts.tags:manage` authorizes tag writes but
+/// nothing in the hosts family.
+#[tokio::test]
+async fn b4_divergence_hosts_update_does_not_manage_tags() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let (user_id, token) = staged_zero_grant_user(&app).await;
+    let patterns = vec!["hosts:update".parse::<ActionPattern>().expect("pattern")];
+    insert_grant(
+        &app.db,
+        NewGrant {
+            subject: GrantSubject::User(user_id),
+            tenant_id: Some(app.tenant_id),
+            patterns: &patterns,
+            selector: Selector::All,
+            description: None,
+            created_by: None,
+        },
+    )
+    .await
+    .expect("insert hosts:update grant");
+    app.state.access_engine.invalidate_subjects(&[user_id], &[]);
+    // Tag write denied under hosts:update...
+    let status = client
+        .post_json(
+            "/api/v1/host-tags",
+            &serde_json::json!({ "name": "pin-tag", "color": null, "description": null }),
+        )
+        .bearer(&token)
+        .send_status()
+        .await;
+    assert_eq!(status, http::StatusCode::FORBIDDEN);
+    // ...but the hosts:update extractor itself passes (404 = authz cleared,
+    // lookup failed — no host fixture needed).
+    let status = client
+        .put_json(
+            &format!("/api/v1/hosts/{}", uuid::Uuid::now_v7()),
+            &serde_json::json!({}),
+        )
+        .bearer(&token)
+        .send_status()
+        .await;
+    assert_ne!(
+        status,
+        http::StatusCode::FORBIDDEN,
+        "hosts:update must clear the hosts extractor"
+    );
+}
+
+#[tokio::test]
+async fn b4_divergence_tags_manage_writes_tags_only() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let (user_id, token) = staged_zero_grant_user(&app).await;
+    let patterns = vec![
+        "hosts.tags:manage"
+            .parse::<ActionPattern>()
+            .expect("pattern"),
+    ];
+    insert_grant(
+        &app.db,
+        NewGrant {
+            subject: GrantSubject::User(user_id),
+            tenant_id: Some(app.tenant_id),
+            patterns: &patterns,
+            selector: Selector::All,
+            description: None,
+            created_by: None,
+        },
+    )
+    .await
+    .expect("insert hosts.tags:manage grant");
+    app.state.access_engine.invalidate_subjects(&[user_id], &[]);
+    let status = client
+        .post_json(
+            "/api/v1/host-tags",
+            &serde_json::json!({ "name": "pin-tag", "color": null, "description": null }),
+        )
+        .bearer(&token)
+        .send_status()
+        .await;
+    assert_eq!(status, http::StatusCode::CREATED);
+    assert_eq!(
+        client
+            .get("/api/v1/hosts")
+            .bearer(&token)
+            .send_status()
+            .await,
+        http::StatusCode::FORBIDDEN,
+        "tags-manage must not grant hosts:read"
+    );
+}

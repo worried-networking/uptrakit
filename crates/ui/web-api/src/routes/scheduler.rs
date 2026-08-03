@@ -11,7 +11,7 @@ use crate::AppState;
 use crate::api_error::ApiError;
 use crate::app_state::AuditEmitterState;
 use crate::error_response::error_response;
-use crate::middleware::permission::CanManageScheduler;
+use crate::middleware::action::CanManageScheduler;
 use crate::middleware::require_auth::{
     AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
 };
@@ -62,8 +62,7 @@ fn emit_scheduled_task_audit(
         (status = 200, description = "Scheduled tasks", body = Vec<ScheduledTaskResponse>),
         (status = 403, description = "Not authorized")
     ),
-    extensions(("x-required-permission" = json!("manage_scheduler"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["scheduler:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_scheduled_tasks(
@@ -92,8 +91,7 @@ pub async fn list_scheduled_tasks(
         (status = 404, description = "Task not found"),
         (status = 403, description = "Not authorized")
     ),
-    extensions(("x-required-permission" = json!("manage_scheduler"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["scheduler:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_scheduled_task(
@@ -126,8 +124,7 @@ pub async fn get_scheduled_task(
         (status = 404, description = "Task not found"),
         (status = 403, description = "Not authorized")
     ),
-    extensions(("x-required-permission" = json!("manage_scheduler"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["scheduler:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_scheduled_task(
@@ -304,8 +301,7 @@ pub async fn update_scheduled_task(
         (status = 404, description = "Task not found"),
         (status = 403, description = "Not authorized")
     ),
-    extensions(("x-required-permission" = json!("manage_scheduler"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["scheduler:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn trigger_scheduled_task(

@@ -892,7 +892,11 @@ export const updateZeroconfSettings = <ThrowOnError extends boolean = true>(opti
  */
 export const listHostTags = <ThrowOnError extends boolean = true>(options?: Options<ListHostTagsData, ThrowOnError>): RequestResult<ListHostTagsResponses, ListHostTagsErrors, ThrowOnError> => (options?.client ?? client).get<ListHostTagsResponses, ListHostTagsErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -905,7 +909,11 @@ export const listHostTags = <ThrowOnError extends boolean = true>(options?: Opti
  */
 export const createHostTag = <ThrowOnError extends boolean = true>(options: Options<CreateHostTagData, ThrowOnError>): RequestResult<CreateHostTagResponses, CreateHostTagErrors, ThrowOnError> => (options.client ?? client).post<CreateHostTagResponses, CreateHostTagErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -924,7 +932,11 @@ export const createHostTag = <ThrowOnError extends boolean = true>(options: Opti
  */
 export const batchHostTags = <ThrowOnError extends boolean = true>(options: Options<BatchHostTagsData, ThrowOnError>): RequestResult<BatchHostTagsResponses, BatchHostTagsErrors, ThrowOnError> => (options.client ?? client).post<BatchHostTagsResponses, BatchHostTagsErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -941,7 +953,11 @@ export const batchHostTags = <ThrowOnError extends boolean = true>(options: Opti
  */
 export const deleteHostTag = <ThrowOnError extends boolean = true>(options: Options<DeleteHostTagData, ThrowOnError>): RequestResult<DeleteHostTagResponses, DeleteHostTagErrors, ThrowOnError> => (options.client ?? client).delete<DeleteHostTagResponses, DeleteHostTagErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -954,7 +970,11 @@ export const deleteHostTag = <ThrowOnError extends boolean = true>(options: Opti
  */
 export const getHostTag = <ThrowOnError extends boolean = true>(options: Options<GetHostTagData, ThrowOnError>): RequestResult<GetHostTagResponses, GetHostTagErrors, ThrowOnError> => (options.client ?? client).get<GetHostTagResponses, GetHostTagErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -967,7 +987,11 @@ export const getHostTag = <ThrowOnError extends boolean = true>(options: Options
  */
 export const updateHostTag = <ThrowOnError extends boolean = true>(options: Options<UpdateHostTagData, ThrowOnError>): RequestResult<UpdateHostTagResponses, UpdateHostTagErrors, ThrowOnError> => (options.client ?? client).put<UpdateHostTagResponses, UpdateHostTagErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -1190,7 +1214,11 @@ export const removeHostDiscoveryAllowlistEntry = <ThrowOnError extends boolean =
  */
 export const setHostTags = <ThrowOnError extends boolean = true>(options: Options<SetHostTagsData, ThrowOnError>): RequestResult<SetHostTagsResponses, SetHostTagsErrors, ThrowOnError> => (options.client ?? client).put<SetHostTagsResponses, SetHostTagsErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -1786,7 +1814,11 @@ export const getRole = <ThrowOnError extends boolean = true>(options: Options<Ge
  */
 export const listScheduledTasks = <ThrowOnError extends boolean = true>(options?: Options<ListScheduledTasksData, ThrowOnError>): RequestResult<ListScheduledTasksResponses, ListScheduledTasksErrors, ThrowOnError> => (options?.client ?? client).get<ListScheduledTasksResponses, ListScheduledTasksErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -1799,7 +1831,11 @@ export const listScheduledTasks = <ThrowOnError extends boolean = true>(options?
  */
 export const getScheduledTask = <ThrowOnError extends boolean = true>(options: Options<GetScheduledTaskData, ThrowOnError>): RequestResult<GetScheduledTaskResponses, GetScheduledTaskErrors, ThrowOnError> => (options.client ?? client).get<GetScheduledTaskResponses, GetScheduledTaskErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -1812,7 +1848,11 @@ export const getScheduledTask = <ThrowOnError extends boolean = true>(options: O
  */
 export const updateScheduledTask = <ThrowOnError extends boolean = true>(options: Options<UpdateScheduledTaskData, ThrowOnError>): RequestResult<UpdateScheduledTaskResponses, UpdateScheduledTaskErrors, ThrowOnError> => (options.client ?? client).put<UpdateScheduledTaskResponses, UpdateScheduledTaskErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -1829,7 +1869,11 @@ export const updateScheduledTask = <ThrowOnError extends boolean = true>(options
  */
 export const triggerScheduledTask = <ThrowOnError extends boolean = true>(options: Options<TriggerScheduledTaskData, ThrowOnError>): RequestResult<TriggerScheduledTaskResponses, TriggerScheduledTaskErrors, ThrowOnError> => (options.client ?? client).post<TriggerScheduledTaskResponses, TriggerScheduledTaskErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],

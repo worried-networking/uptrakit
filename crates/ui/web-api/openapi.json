@@ -2354,10 +2354,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "hosts:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_hosts"
+        ]
       },
       "post": {
         "tags": [
@@ -2401,10 +2405,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "hosts.tags:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "update_hosts"
+        ]
       }
     },
     "/api/v1/host-tags/batch": {
@@ -2448,10 +2456,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "hosts.tags:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "update_hosts"
+        ]
       }
     },
     "/api/v1/host-tags/{id}": {
@@ -2496,10 +2508,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "hosts:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_hosts"
+        ]
       },
       "put": {
         "tags": [
@@ -2558,10 +2574,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "hosts.tags:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "update_hosts"
+        ]
       },
       "delete": {
         "tags": [
@@ -2597,10 +2617,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "hosts.tags:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "update_hosts"
+        ]
       }
     },
     "/api/v1/hosts": {
@@ -3217,10 +3241,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "hosts.tags:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "update_hosts"
+        ]
       }
     },
     "/api/v1/instance-plugins": {
@@ -4978,10 +5006,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "scheduler:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_scheduler"
+        ]
       }
     },
     "/api/v1/scheduler/tasks/{id}": {
@@ -5023,10 +5055,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "scheduler:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_scheduler"
+        ]
       },
       "put": {
         "tags": [
@@ -5079,10 +5115,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "scheduler:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_scheduler"
+        ]
       }
     },
     "/api/v1/scheduler/tasks/{id}/trigger": {
@@ -5124,10 +5164,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "scheduler:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_scheduler"
+        ]
       }
     },
     "/api/v1/services": {

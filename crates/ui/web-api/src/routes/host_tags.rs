@@ -1,7 +1,7 @@
 use crate::AppState;
 use crate::actions::host_tags as tag_actions;
 use crate::error_response::error_response;
-use crate::middleware::permission::{CanUpdateHosts, CanViewHosts};
+use crate::middleware::action::{CanManageHostTags, CanReadHosts};
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::queries::host_tags::{self as tag_queries, HostTagView};
 use crate::tenant_db::TenantDb;
@@ -43,13 +43,12 @@ pub use uptrakit_web_api_types::pagination::PaginatedResponse;
         (status = 403, description = "Not authorized")
     ),
     tag = "Host Tags",
-    extensions(("x-required-permission" = json!("view_hosts"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["hosts:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_host_tags(
     tenant_db: TenantDb,
-    CanViewHosts(_user): CanViewHosts,
+    CanReadHosts(_user): CanReadHosts,
     Query(params): Query<ListHostTagsQuery>,
 ) -> Response {
     match tag_queries::list_host_tags(&tenant_db, &params).await {
@@ -75,13 +74,12 @@ pub async fn list_host_tags(
         (status = 404, description = "Host tag not found")
     ),
     tag = "Host Tags",
-    extensions(("x-required-permission" = json!("view_hosts"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["hosts:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_host_tag(
     tenant_db: TenantDb,
-    CanViewHosts(_user): CanViewHosts,
+    CanReadHosts(_user): CanReadHosts,
     Path(tag_id): Path<Uuid>,
 ) -> Response {
     match tag_queries::get_host_tag(&tenant_db, tag_id).await {
@@ -107,14 +105,13 @@ pub async fn get_host_tag(
         (status = 409, description = "Tag with this name already exists")
     ),
     tag = "Host Tags",
-    extensions(("x-required-permission" = json!("update_hosts"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["hosts.tags:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn create_host_tag(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanUpdateHosts(caller): CanUpdateHosts,
+    CanManageHostTags(caller): CanManageHostTags,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Json(body): Json<CreateHostTagRequest>,
 ) -> Response {
@@ -266,14 +263,13 @@ pub async fn create_host_tag(
         (status = 409, description = "Tag with this name already exists")
     ),
     tag = "Host Tags",
-    extensions(("x-required-permission" = json!("update_hosts"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["hosts.tags:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_host_tag(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanUpdateHosts(caller): CanUpdateHosts,
+    CanManageHostTags(caller): CanManageHostTags,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(tag_id): Path<Uuid>,
     Json(body): Json<UpdateHostTagRequest>,
@@ -444,14 +440,13 @@ pub async fn update_host_tag(
         (status = 404, description = "Host tag not found")
     ),
     tag = "Host Tags",
-    extensions(("x-required-permission" = json!("update_hosts"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["hosts.tags:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn delete_host_tag(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanUpdateHosts(caller): CanUpdateHosts,
+    CanManageHostTags(caller): CanManageHostTags,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(tag_id): Path<Uuid>,
 ) -> Response {
@@ -571,14 +566,13 @@ pub async fn delete_host_tag(
         (status = 403, description = "Not authorized")
     ),
     tag = "Host Tags",
-    extensions(("x-required-permission" = json!("update_hosts"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["hosts.tags:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn batch_host_tags(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanUpdateHosts(caller): CanUpdateHosts,
+    CanManageHostTags(caller): CanManageHostTags,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Json(body): Json<BatchActionRequest>,
 ) -> Response {
@@ -687,14 +681,13 @@ pub async fn batch_host_tags(
         (status = 404, description = "Host not found")
     ),
     tag = "Host Tags",
-    extensions(("x-required-permission" = json!("update_hosts"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["hosts.tags:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn set_host_tags(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanUpdateHosts(caller): CanUpdateHosts,
+    CanManageHostTags(caller): CanManageHostTags,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(host_id): Path<Uuid>,
     Json(body): Json<SetHostTagsRequest>,

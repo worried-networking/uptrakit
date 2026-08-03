@@ -185,6 +185,11 @@ action_extractor! {
     CanReadSystemConfigState => actions::SYSTEM_CONFIG_STATE_READ,
     /// `system.config-state:manage` — manage instance config reload state.
     CanManageSystemConfigState => actions::SYSTEM_CONFIG_STATE_MANAGE,
+    /// `hosts.tags:manage` — create/edit/delete/assign host tags
+    /// (access-control authority under tag-scoped grants).
+    CanManageHostTags => actions::HOSTS_TAGS_MANAGE,
+    /// `scheduler:manage` — manage scheduled tasks.
+    CanManageScheduler => actions::SCHEDULER_MANAGE,
 }
 
 #[cfg(test)]
