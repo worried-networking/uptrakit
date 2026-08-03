@@ -87,7 +87,7 @@ only when a new workflow category is introduced, not when a new plugin is added.
   require a follow-up ADR.
 
 - **Open observability gap**: no workspace tracing-capture helper exists for asserting the
-  `tracing::error!` side effect in tests. The obligation is documented via a `// TODO(adr-0018)` comment
+  `tracing::error!` side effect in tests. The obligation is recorded via an `adr-0018`-tagged source-comment marker
   next to `map_surface_action_error` in
   `crates/ui/surface-proxy/src/proxy/controller_local.rs`. Resolution paths: export a capture helper
   from `uptrakit-tracing-init` under a `test-support` feature, or approve `tracing-test` as a

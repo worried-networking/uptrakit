@@ -31,7 +31,7 @@ independently so the API wire contract is unchanged. `#[non_exhaustive]` is appl
 structs as they are extensible. Finite-state patch fields (`icon_url`, plugin config overrides) use
 typed enums (`IconUrlPatch`, `JsonObjectMapPatch`) with custom `Deserialize` that covers the
 absent / null / value wire semantics. These enums are explicitly NOT `#[non_exhaustive]` because
-external crates construct their `Set(...)` tuple variant and must exhaustively match them.
+external crates construct their `Set(…)` tuple variant and must exhaustively match them.
 
 ### Settings consumers
 

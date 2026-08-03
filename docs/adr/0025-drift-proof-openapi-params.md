@@ -16,7 +16,7 @@ and again as a hand-maintained `params(("field" = Type, Query, description = "�
 
 The `openapi_json_is_up_to_date` golden test (`crates/ui/web-api/src/integration_tests/openapi_spec.rs`)
 does **not** catch this class of bug. It only asserts that the committed `openapi.json` equals what the
-current annotations regenerate — so if a `params(...)` block is missing a field the extractor accepts,
+current annotations regenerate — so if a `params(…)` block is missing a field the extractor accepts,
 the handler and the committed spec stay mutually consistent (both wrong), the test passes, and the
 generated client silently loses the parameter. This actually happened: `list_software_items`' manual
 block omitted the `query` (name filter) and `plugin_type` params, so the frontend software name-filter
@@ -41,7 +41,7 @@ hand-maintained alongside it. Concretely:
 - **Derive gating** differs between the shared `uptrakit-web-api-types` crate (feature-gated) and local
   `uptrakit-web-api` route structs (unconditional) — coding-standards has the exact form.
 - **Path params** stay inline; a handler with both keeps its Path tuples inline and adds the `IntoParams`
-  struct as a further entry in the same `params(...)` block.
+  struct as a further entry in the same `params(…)` block.
 - **Enum schemas** source `enum_values` from one place — `Self::all()` (`strum::EnumIter`) or the
   `wire_safe_enum!` macro's `$wire` list; an `Other(String)` catch-all enum that can't derive `EnumIter`
   hardcodes its values but is paired with a guard test asserting schema == `as_str()` set.

@@ -56,7 +56,7 @@ Specific sub-decisions:
 - **Model B rejected for v1.** Model B (external IdP issuing MCP tokens, Controller acting as RS only)
   requires JWKS fetching, per-issuer JWT validator dispatch, and scope→Permission mapping per AS row.
   v1 keeps three named seams (`PRM.authorization_servers` array, `uptrakit-mcp::auth` dispatch point,
-  `oauth_authorization_servers` table placeholder) so Phase 2 can add Model B without renaming any v1
+  `oauth_authorization_servers` reserved table name) so Phase 2 can add Model B without renaming any v1
   type or breaking any deployed client.
 - **Extraction seams preserved.** Every AS service (`OAuthAuthorizationService`,
   `OAuthTokenService`, `OAuthRefreshTokenService`, `OAuthConsentService`) takes its dependencies via

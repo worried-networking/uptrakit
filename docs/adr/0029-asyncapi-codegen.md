@@ -21,7 +21,7 @@ code. The prior guard — an `AsyncApiSpec` validator plus `spec_conformance_*` 
 it checked required-fields/`const`/enum membership for hand-picked messages only, and could not see
 missing schemas, undocumented messages, or extra/renamed fields — structurally the same blindness
 [ADR-0025](0025-drift-proof-openapi-params.md) documents for the OpenAPI golden test. No CI gate or
-script touched the yaml, and the drift was not recency lag: the yaml and the source it should describe
+script touched the yaml, and the drift was not recency lag: the yaml and the source it should mirror
 last changed on the same day, because messages were simply never added.
 
 `asyncapi.yaml` has no programmatic consumers beyond `include_str!` in tests; it exists as reference
@@ -66,7 +66,7 @@ minimal-feature-set pre-push gate elsewhere in the repo, not a new gap.
   (a) `ToAsyncApiMessage` operates on the tagged enum alone, while the envelope fields
   (`protocol_version`, `seq`, `trace_context`, `pagination`) live on the wrapping
   `ServiceEnvelope`/`ControllerEnvelope` structs, so the repo's flattened-envelope wire layout cannot be
-  expressed; (b) its codegen reads only per-variant `#[serde(rename = ...)]` and has no `rename_all`
+  expressed; (b) its codegen reads only per-variant `#[serde(rename = …)]` and has no `rename_all`
   handling at all, so both message enums' `rename_all = "snake_case"` discriminants and message-map keys
   would emit as bare PascalCase variant identifiers (`"Ping"`, not `"ping"`) — working around this would
   mean adding dozens of per-variant `rename` attributes to reshape wire code to fit a 0.x doc tool, which
@@ -139,7 +139,7 @@ floor, so it imposes no additional toolchain constraint.
 
 ## Consequences
 
-- `cargo ... --all-features` builds now compile `schemars` into `uptrakit-shared-types` and
+- `cargo <cmd> --all-features` builds now compile `schemars` into `uptrakit-shared-types` and
   `uptrakit-surfaces` (feature unification across the workspace's single `--all-features` build), a
   one-time compile-time cost.
 - The generated document's fitness for AsyncAPI tooling (AsyncAPI Studio / `@asyncapi/parser`) was

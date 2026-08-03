@@ -26,7 +26,7 @@ compile-time feature predicate, inside a workspace where features unify across m
 cannot observe which other workspace member turned its feature on, so the producing crate's local
 reasoning about "am I in the controller or the agent" is meaningless once linked into a merged
 binary. The existing regex gate, `ci/verify_no_new_cfg_not_feature.sh`, bans only the
-`#[cfg(not(feature = ...))]` attribute form; the second incident used the permitted `cfg!()`
+`#[cfg(not(feature = …))]` attribute form; the second incident used the permitted `cfg!()`
 expression form with subtractive semantics inside ordinary Rust control flow, which no regex over
 attribute syntax can distinguish from a legitimate boolean check. The class is unbounded in
 spelling (inverted predicates, let-bound booleans, helper indirection), so a textual gate can only
@@ -61,7 +61,7 @@ truth for process scope that could disagree with which fields are actually popul
 The line between legitimate and banned feature gating follows directly from that definition.
 Legitimate use is "this code does not exist without the feature": `#[cfg(feature = "X")]` on
 modules, dependencies, and items that genuinely cannot compile without it, expressed through one of
-two monotone shapes — an additive chain (`std::iter::empty().chain(#[cfg(feature = "X")] ...)`) or
+two monotone shapes — an additive chain (`std::iter::empty().chain(#[cfg(feature = "X")] …)`) or
 a pair of stubs (a real `#[cfg(feature = "X")]` function alongside a `#[cfg(not(feature = "X"))]`
 stub returning empty), each carrying an inline comment naming why the split exists. Banned use is
 "this data is suppressed although the code exists": any branch — `cfg!(feature)`, `if !cfg!`,
@@ -72,7 +72,7 @@ match, and caught behaviorally rather than textually.
 ### Enforcement: three behavioral layers; the regex gate is unchanged
 
 `ci/verify_no_new_cfg_not_feature.sh` keeps its one existing rule exactly as-is — it still bans the
-`#[cfg(not(feature = ...))]` attribute form and nothing more. The subtractive-`cfg!` class is
+`#[cfg(not(feature = …))]` attribute form and nothing more. The subtractive-`cfg!` class is
 enforced instead where it actually manifests: the compiled catalog produced by `all_descriptors()`.
 
 Two of the three layers are behavioral tests already landed in

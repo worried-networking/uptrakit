@@ -15,7 +15,7 @@ fire-and-forget semantics regardless of whether the action described an entity t
 workflow fact.
 
 V2 must guarantee that stateful audit rows — rows recording before/after snapshots of a mutated
-entity — commit or roll back atomically with the mutation they describe. An async best-effort path
+entity — commit or roll back atomically with the mutation they capture. An async best-effort path
 cannot provide that guarantee: if the process crashes between the mutation commit and the deferred
 audit write, the mutation is durable but the audit row is absent. For security-relevant entity
 transitions (plugin config updates, service approvals, user modifications) the resulting gap is not

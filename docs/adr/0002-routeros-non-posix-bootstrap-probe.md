@@ -13,7 +13,12 @@ decisions on detection, trait placement, and capability access.
 
 ## Decision
 
-## Probe-then-route detection during bootstrap
+Managing RouterOS hosts alongside POSIX hosts resolves into three coupled decisions, each detailed in the
+subsections below: how a non-POSIX host is detected during bootstrap, where the `RouterOsExecutor` trait sits in
+the crate graph so it stays cycle-free, and how the RouterOS plugin reaches OS-specific executor capabilities
+without depending on `agent-ssh` directly.
+
+### Probe-then-route detection during bootstrap
 
 When Agent-SSH bootstraps a new host it connects over SSH, but the operator does
 not tell uptrakit which OS family the host is running. We need to detect RouterOS
@@ -37,12 +42,12 @@ reinstalled between bootstrap and a later operation), but this is accepted as
 negligible for managed infrastructure where OS changes require explicit operator
 action.
 
-## `RouterOsExecutor` trait location
+### `RouterOsExecutor` trait location
 
 The RouterOS plugin crate (`uptrakit-package-manager-routeros`) must call methods
 on the SSH executor — check for available packages, install updates — but it
 cannot depend on `agent-ssh` directly. That dependency direction would create a
-cycle: `plugin` → `agent-ssh` → `plugin-infrastructure-core` → ... → `plugin`.
+cycle: `plugin` → `agent-ssh` → `plugin-infrastructure-core` → … → `plugin`.
 The trait must be visible to both `agent-ssh` (which provides the concrete
 implementation) and the plugin (which consumes it).
 
@@ -60,7 +65,7 @@ Duplicating the trait in each consumer would solve the dep cycle but violate DRY
 and diverge silently over time. Placing it in `plugin-infrastructure-core` is the
 minimal change that follows the established pattern.
 
-## Plugin access to RouterOS-specific capabilities via downcast
+### Plugin access to RouterOS-specific capabilities via downcast
 
 The plugin system's standard constructor signature is `new(config, runtime:
 Arc<dyn HostRuntime>)`. RouterOS plugins need access to `Arc<dyn RouterOsExecutor>`

@@ -235,7 +235,7 @@ ADRs are managed and validated with the `adrs` CLI — see
 ```sh
 bash ci/verify_adr_numbers.sh          # duplicate ADR numbers (pure shell, hard everywhere)
 bash scripts/regen-adr-toc.sh --check  # docs/adr/README.md staleness + link validity
-adrs doctor                            # format/link validation (warn-skip locally if absent; CI enforces)
+adrs doctor                            # format/link validation; warnings hard-fail (skipped locally if adrs absent; CI enforces)
 ```
 
 Create ADRs with `adrs new "Title"` — never hand-allocate a number or hand-edit `docs/adr/README.md`.

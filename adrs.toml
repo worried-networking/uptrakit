@@ -11,4 +11,4 @@ format = "nygard"
 
 [doctor]
 ignore = ["ADR011"]          # numbering gaps are accepted policy (0014 gap); duplicates stay fatal via ADR012
-warnings_as_errors = false
+warnings_as_errors = true    # thin/empty sections (ADR014) and every doctor lint hard-fail hooks + CI, not just duplicates

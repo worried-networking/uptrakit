@@ -59,7 +59,7 @@ resolution); the **payoff** is that a single conceptual resource — e.g. a sett
 
 ### B5 — Item addressing via optional trailing path segment
 
-A collection-shaped interaction may be targeted at a specific item via `.../interactions/{interaction_id}/{item_id}`
+A collection-shaped interaction may be targeted at a specific item via `…/interactions/{interaction_id}/{item_id}`
 rather than inventing a per-provider `id`-like body/query field. The path segment populates the framework-reserved
 `id` params key, overwriting any `id` already supplied via query or body — the path segment is authoritative.
 `POST` has no item-path route (create always targets the collection).

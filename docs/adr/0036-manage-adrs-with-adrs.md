@@ -18,7 +18,9 @@ collisions are structurally likely as long as numbers are allocated locally (max
   adr-tools-compatible mode: `adrs.toml` (`adr_dir = "docs/adr"`) + `.adr-dir`; plain markdown, no `--ng`
   frontmatter. New ADRs are created with `adrs new "Title"` — numbers are never hand-allocated.
 - Numbering stays sequential and human-readable. Gaps are accepted (0014 is permanent; doctor rule ADR011 is
-  suppressed in `adrs.toml`); duplicates are fatal (doctor rule ADR012).
+  suppressed in `adrs.toml`); duplicates are fatal (doctor rule ADR012). Every other doctor finding — errors and
+  warnings alike — fails the gate: `adrs.toml` sets `warnings_as_errors = true`, so an empty-or-thin required
+  section (ADR014) or any format lint blocks a commit, push, and CI run just as hard as a duplicate.
 - Enforcement is layered. A pure-shell guard (`ci/verify_adr_numbers.sh`) needs no binary and hard-fails in
   `pre-commit` (including the concluding commit of a conflicted merge), `pre-merge-commit`, and `pre-rebase`
   (which predicts the post-rebase collision from `upstream..branch` and refuses the rebase). `post-rewrite` warns
@@ -34,9 +36,13 @@ collisions are structurally likely as long as numbers are allocated locally (max
 
 ## Consequences
 
-- `adrs doctor` exits 0 across the corpus after a mechanical header normalization (titles, `Date:` lines,
-  `## Status` sections, umbrella headings). Residual doctor warnings are accepted: the ADR011-suppressed 0014 gap
-  and ~14 ADR014 thin-section warnings — fixing those means writing content, deliberately out of scope.
+- `adrs doctor --warnings-as-errors` exits 0 across the corpus. Header normalization (titles, `Date:` lines,
+  `## Status` sections, umbrella headings) cleared the format lints; the ADR014 warnings were then resolved rather
+  than tolerated — each flagged section was already substantive but tripped the heuristic on one incidental token
+  (an ASCII ellipsis inside an inline-code example, or a single flagged word), reworded into a meaning-preserving
+  equivalent and cross-checked against the governing design spec, while 0002's empty `## Decision` gained a
+  grounded preamble with its sub-decisions demoted to `###`. The one suppressed finding is the 0014 numbering gap
+  (ADR011).
 - The legacy corpus keeps its filenames; titles keep standard technical notation (no slug coupling).
 - Tooling risk is bounded: the collision guard and TOC gate are pure shell; only format validation depends on the
   external binary, and an adrs install outage in CI blocks merges the same way a RustSec advisory-DB outage

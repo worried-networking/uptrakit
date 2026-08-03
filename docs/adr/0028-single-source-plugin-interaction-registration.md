@@ -112,7 +112,7 @@ surface interaction: it is a public, unauthenticated inbound webhook (Telegram B
 verified per-channel-type inside the plugin, not through the authenticated user-invoke path. Registering
 it as an interaction would have expanded its surface area rather than fixed the drift. Instead,
 `NotificationTransport` (`crates/plugins/infrastructure/core/src/roles.rs`) gained a `handle_callback`
-method with a default implementation returning "callback not supported for channel type '...'"; telegram
+method with a default implementation returning "callback not supported for channel type '…'"; telegram
 overrides it with its existing verification logic. The route resolves the transport by `channel_type` via
 the existing `plugin_ops.transport(&channel_type_id)` lookup and calls the trait method directly — the
 `"handle_callback"` pseudo-action string and the fabricated `format!("notifications.{channel_type}")`
@@ -130,7 +130,7 @@ the model.
   derive from the same call, and `ControllerExecutor` delivery is guarded bidirectionally by a real test
   rather than a per-plugin parity check someone has to remember to add.
 - `SurfaceActionDescriptor`, `SurfaceActionLibrary`, `ApiSubmitDescriptor`, `ControllerSurfaceAction`,
-  `resolve_controller_surface_action`, the thirteen `.with_api_submit(...)` call sites, and the
+  `resolve_controller_surface_action`, the thirteen `.with_api_submit(…)` call sites, and the
   longest-prefix routing machinery are deleted. The unreachable Tier 1b `("proxmox.hosts", "add-config")`
   allowlist entry (no `add-config` interaction was ever registered, so it could never execute) is deleted
   with it — deleting it changes no audit posture, since plugin-config creation already flows through the
