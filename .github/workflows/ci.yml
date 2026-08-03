@@ -27,6 +27,13 @@ jobs:
           node-version: lts/*
       - run: npm install -g markdownlint-cli
       - run: markdownlint --config .markdownlint.json '**/*.md'
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: adrs@0.10.1
+      - name: adrs doctor
+        run: adrs doctor
+      - name: ADR TOC staleness
+        run: bash scripts/regen-adr-toc.sh --check
 
   backend-fmt:
     runs-on:
