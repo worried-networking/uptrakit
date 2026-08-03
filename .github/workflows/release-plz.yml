@@ -164,12 +164,12 @@ jobs:
       # We install release-plz the same way the action does and run release-pr
       # ourselves so stderr is always visible.
       - name: Install cargo-semver-checks
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.85.5
         with:
           tool: cargo-semver-checks@0.46
 
       - name: Install release-plz
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.85.5
         with:
           tool: release-plz@0.3.157
 

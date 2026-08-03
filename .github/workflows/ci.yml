@@ -48,7 +48,7 @@ jobs:
         with:
           shared-key: "rust-all-features"
           save-if: "false"
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@v2.85.5
         with:
           tool: cargo-deny@0.20.2
       - name: cargo deny check
@@ -110,7 +110,7 @@ jobs:
         with:
           shared-key: "rust-all-features"
           save-if: "false"
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@v2.85.5
         with:
           tool: cargo-llvm-cov@0.8.7
       # cargo-llvm-cov runs the full test suite under instrumentation (replaces the
@@ -206,7 +206,7 @@ jobs:
       - ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@v2.85.5
         with:
           tool: cargo-machete@0.9.2
       - name: cargo machete (advisory)
