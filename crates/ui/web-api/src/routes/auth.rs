@@ -764,8 +764,7 @@ pub async fn login(
         (status = 403, description = "Token does not belong to this user")
     ),
     tag = "Authentication",
-    extensions(("x-required-permission" = json!("self"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = []), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn logout(
@@ -2452,8 +2451,7 @@ pub async fn confirm_email_change(
         (status = 401, description = "Not authenticated")
     ),
     tag = "Authentication",
-    extensions(("x-required-permission" = json!("self"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = []), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn me(

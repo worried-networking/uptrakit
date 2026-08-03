@@ -256,10 +256,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "audit:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_audit_logs"
+        ]
       }
     },
     "/api/v1/auth/api-tokens": {
@@ -286,10 +290,12 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": []
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "self"
+        ]
       },
       "post": {
         "tags": [
@@ -324,10 +330,12 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": []
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "self"
+        ]
       }
     },
     "/api/v1/auth/api-tokens/{id}": {
@@ -362,10 +370,12 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": []
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "self"
+        ]
       }
     },
     "/api/v1/auth/device/approve": {
@@ -633,10 +643,12 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": []
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "self"
+        ]
       }
     },
     "/api/v1/auth/me": {
@@ -663,10 +675,12 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": []
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "self"
+        ]
       }
     },
     "/api/v1/auth/me/2fa": {
@@ -694,7 +708,10 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": []
+          },
+          {
+            "developer_token": []
           }
         ]
       }
@@ -740,7 +757,10 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": []
+          },
+          {
+            "developer_token": []
           }
         ]
       }
@@ -783,7 +803,10 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": []
+          },
+          {
+            "developer_token": []
           }
         ]
       }
@@ -819,7 +842,10 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": []
+          },
+          {
+            "developer_token": []
           }
         ]
       }
@@ -852,7 +878,10 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": []
+          },
+          {
+            "developer_token": []
           }
         ]
       }
@@ -3596,10 +3625,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "notifications:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_notifications"
+        ]
       },
       "post": {
         "tags": [
@@ -3640,10 +3673,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "notifications:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_notifications"
+        ]
       }
     },
     "/api/v1/notifications/channels/{id}": {
@@ -3688,10 +3725,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "notifications:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_notifications"
+        ]
       },
       "put": {
         "tags": [
@@ -3747,10 +3788,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "notifications:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_notifications"
+        ]
       },
       "delete": {
         "tags": [
@@ -3786,10 +3831,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "notifications:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_notifications"
+        ]
       }
     },
     "/api/v1/notifications/channels/{id}/test": {
@@ -3834,10 +3883,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "notifications:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_notifications"
+        ]
       }
     },
     "/api/v1/notifications/log": {
@@ -3897,10 +3950,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "notifications:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_notifications"
+        ]
       }
     },
     "/api/v1/notifications/rules": {
@@ -3985,10 +4042,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "notifications:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_notifications"
+        ]
       },
       "post": {
         "tags": [
@@ -4032,10 +4093,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "notifications:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_notifications"
+        ]
       }
     },
     "/api/v1/notifications/rules/{id}": {
@@ -4080,10 +4145,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "notifications:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_notifications"
+        ]
       },
       "put": {
         "tags": [
@@ -4139,10 +4208,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "notifications:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_notifications"
+        ]
       },
       "delete": {
         "tags": [
@@ -4178,10 +4251,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "notifications:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_notifications"
+        ]
       }
     },
     "/api/v1/oauth/device_authorization": {
@@ -8371,10 +8448,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.audit:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_system_audit_logs"
+        ]
       }
     },
     "/api/v1/system-enrollment-tokens": {

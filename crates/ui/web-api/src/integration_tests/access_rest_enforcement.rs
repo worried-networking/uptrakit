@@ -627,3 +627,53 @@ async fn b4_divergence_tags_manage_writes_tags_only() {
         "tags-manage must not grant hosts:read"
     );
 }
+
+#[tokio::test]
+async fn b5_notifications_family_enforcement() {
+    assert_family_enforcement(
+        "/api/v1/notifications/channels",
+        "notifications:read",
+        "audit:read",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn b5_audit_family_enforcement() {
+    assert_family_enforcement("/api/v1/audit-logs", "audit:read", "notifications:read").await;
+}
+
+/// D5 + D2: authenticated-only endpoints reject no-credential requests
+/// (401 — pins that the conversion left `require_auth` coverage intact and
+/// the op is NOT public) and succeed for a zero-grant principal (200).
+#[tokio::test]
+async fn d5_authenticated_only_endpoints_zero_grant_ok() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let (_user_id, token) = staged_zero_grant_user(&app).await;
+    for path in [
+        "/api/v1/auth/me",
+        "/api/v1/auth/api-tokens",
+        "/api/v1/auth/me/2fa",
+    ] {
+        assert_eq!(
+            client.get(path).send_status().await,
+            http::StatusCode::UNAUTHORIZED,
+            "{path}: authenticated-only must 401 without credentials"
+        );
+        assert_eq!(
+            client.get(path).bearer(&token).send_status().await,
+            http::StatusCode::OK,
+            "{path}: D5 zero-grant principal must succeed"
+        );
+    }
+    // Mutating authenticated-only op — the highest-stakes miss:
+    assert_eq!(
+        client
+            .post_json("/api/v1/auth/me/2fa/totp/enroll", &serde_json::json!({}))
+            .send_status()
+            .await,
+        http::StatusCode::UNAUTHORIZED,
+        "2fa totp enroll must 401 without credentials"
+    );
+}

@@ -1,7 +1,7 @@
 use crate::AppState;
 use crate::api_error::ApiError;
 use crate::error_response::error_response;
-use crate::middleware::permission::{CanManageNotifications, CanViewNotifications};
+use crate::middleware::action::{CanManageNotifications, CanReadNotifications};
 use crate::middleware::require_auth::{
     AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
 };
@@ -192,8 +192,7 @@ fn classify_notification_callback_error(
         (status = 403, description = "Not authorized")
     ),
     tag = "Notifications",
-    extensions(("x-required-permission" = json!("manage_notifications"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["notifications:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn create_channel(
@@ -335,14 +334,13 @@ pub async fn create_channel(
         (status = 403, description = "Not authorized")
     ),
     tag = "Notifications",
-    extensions(("x-required-permission" = json!("view_notifications"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["notifications:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_channels(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanViewNotifications(_user): CanViewNotifications,
+    CanReadNotifications(_user): CanReadNotifications,
     Query(params): Query<PaginationParams>,
 ) -> Response {
     match notif_queries::list_channels(&tenant_db, &params, &*state.plugin.plugin_ops).await {
@@ -368,14 +366,13 @@ pub async fn list_channels(
         (status = 404, description = "Channel not found")
     ),
     tag = "Notifications",
-    extensions(("x-required-permission" = json!("view_notifications"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["notifications:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_channel(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanViewNotifications(_user): CanViewNotifications,
+    CanReadNotifications(_user): CanReadNotifications,
     Path(channel_id): Path<Uuid>,
 ) -> Response {
     match notif_queries::get_channel(&tenant_db, channel_id, &*state.plugin.plugin_ops).await {
@@ -404,8 +401,7 @@ pub async fn get_channel(
         (status = 404, description = "Channel not found")
     ),
     tag = "Notifications",
-    extensions(("x-required-permission" = json!("manage_notifications"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["notifications:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_channel(
@@ -579,8 +575,7 @@ pub async fn update_channel(
         (status = 404, description = "Channel not found")
     ),
     tag = "Notifications",
-    extensions(("x-required-permission" = json!("manage_notifications"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["notifications:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn delete_channel(
@@ -705,8 +700,7 @@ pub async fn delete_channel(
         (status = 404, description = "Channel not found")
     ),
     tag = "Notifications",
-    extensions(("x-required-permission" = json!("manage_notifications"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["notifications:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn test_channel(
@@ -887,8 +881,7 @@ pub async fn test_channel(
         (status = 404, description = "Channel not found")
     ),
     tag = "Notifications",
-    extensions(("x-required-permission" = json!("manage_notifications"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["notifications:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn create_rule(
@@ -1016,13 +1009,12 @@ pub async fn create_rule(
         (status = 403, description = "Not authorized")
     ),
     tag = "Notifications",
-    extensions(("x-required-permission" = json!("view_notifications"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["notifications:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_rules(
     tenant_db: TenantDb,
-    CanViewNotifications(_user): CanViewNotifications,
+    CanReadNotifications(_user): CanReadNotifications,
     Query(query): Query<ListRulesQuery>,
 ) -> Response {
     let params = PaginationParams {
@@ -1060,13 +1052,12 @@ pub async fn list_rules(
         (status = 404, description = "Rule not found")
     ),
     tag = "Notifications",
-    extensions(("x-required-permission" = json!("view_notifications"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["notifications:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_rule(
     tenant_db: TenantDb,
-    CanViewNotifications(_user): CanViewNotifications,
+    CanReadNotifications(_user): CanReadNotifications,
     Path(rule_id): Path<Uuid>,
 ) -> Response {
     match notif_queries::get_rule(&tenant_db, rule_id).await {
@@ -1095,8 +1086,7 @@ pub async fn get_rule(
         (status = 404, description = "Rule not found")
     ),
     tag = "Notifications",
-    extensions(("x-required-permission" = json!("manage_notifications"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["notifications:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_rule(
@@ -1243,8 +1233,7 @@ pub async fn update_rule(
         (status = 404, description = "Rule not found")
     ),
     tag = "Notifications",
-    extensions(("x-required-permission" = json!("manage_notifications"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["notifications:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn delete_rule(
@@ -1364,13 +1353,12 @@ pub async fn delete_rule(
         (status = 403, description = "Not authorized")
     ),
     tag = "Notifications",
-    extensions(("x-required-permission" = json!("view_notifications"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["notifications:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_log(
     tenant_db: TenantDb,
-    CanViewNotifications(_user): CanViewNotifications,
+    CanReadNotifications(_user): CanReadNotifications,
     Query(params): Query<PaginationParams>,
 ) -> Response {
     match notif_queries::list_log(&tenant_db, &params).await {

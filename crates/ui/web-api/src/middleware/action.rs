@@ -190,6 +190,14 @@ action_extractor! {
     CanManageHostTags => actions::HOSTS_TAGS_MANAGE,
     /// `scheduler:manage` — manage scheduled tasks.
     CanManageScheduler => actions::SCHEDULER_MANAGE,
+    /// `audit:read` — view tenant-scoped audit log entries.
+    CanReadAudit => actions::AUDIT_READ,
+    /// `system.audit:read` — view system-level audit log entries.
+    CanReadSystemAudit => actions::SYSTEM_AUDIT_READ,
+    /// `notifications:read` — view notification channels, rules, log.
+    CanReadNotifications => actions::NOTIFICATIONS_READ,
+    /// `notifications:manage` — create/modify notification channels and rules.
+    CanManageNotifications => actions::NOTIFICATIONS_MANAGE,
 }
 
 #[cfg(test)]

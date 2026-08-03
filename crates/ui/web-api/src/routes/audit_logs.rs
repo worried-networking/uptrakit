@@ -15,7 +15,7 @@ use axum::{
 
 use crate::api_error::ApiError;
 use crate::app_state::DbState;
-use crate::middleware::permission::{CanViewAuditLogs, CanViewSystemAuditLogs};
+use crate::middleware::action::{CanReadAudit, CanReadSystemAudit};
 use crate::queries::audit_logs as audit_log_queries;
 use crate::tenant_db::TenantDb;
 
@@ -40,13 +40,12 @@ pub use uptrakit_web_api_types::pagination::PaginatedResponse;
         (status = 403, description = "Not authorized")
     ),
     tag = "Audit Logs",
-    extensions(("x-required-permission" = json!("view_audit_logs"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["audit:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_audit_logs(
     tenant_db: TenantDb,
-    CanViewAuditLogs(_user): CanViewAuditLogs,
+    CanReadAudit(_user): CanReadAudit,
     Query(params): Query<AuditLogListParams>,
 ) -> Result<impl IntoResponse, ApiError> {
     let resp = audit_log_queries::list_tenant_audit_logs(&tenant_db, &params).await?;
@@ -65,13 +64,12 @@ pub async fn list_audit_logs(
         (status = 403, description = "Not authorized")
     ),
     tag = "Audit Logs",
-    extensions(("x-required-permission" = json!("view_system_audit_logs"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.audit:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_system_audit_logs(
     State(db): State<DbState>,
-    CanViewSystemAuditLogs(_user): CanViewSystemAuditLogs,
+    CanReadSystemAudit(_user): CanReadSystemAudit,
     Query(params): Query<AuditLogListParams>,
 ) -> Result<impl IntoResponse, ApiError> {
     let resp = audit_log_queries::list_system_audit_logs(db.db(), &params).await?;

@@ -202,7 +202,7 @@ async fn re_auth_ok(
         (status = 401, description = "Not authenticated")
     ),
     tag = "Authentication",
-    security(("bearer_token" = []))
+    security(("oauth2" = []), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn mfa_status(
@@ -266,7 +266,7 @@ pub async fn mfa_status(
         (status = 409, description = "TOTP already active")
     ),
     tag = "Authentication",
-    security(("bearer_token" = []))
+    security(("oauth2" = []), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn totp_enroll(
@@ -402,7 +402,7 @@ pub async fn totp_enroll(
         (status = 401, description = "Not authenticated / wrong code")
     ),
     tag = "Authentication",
-    security(("bearer_token" = []))
+    security(("oauth2" = []), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn totp_confirm(
@@ -569,7 +569,7 @@ pub async fn totp_confirm(
         (status = 403, description = "Setup-required session cannot disable TOTP")
     ),
     tag = "Authentication",
-    security(("bearer_token" = []))
+    security(("oauth2" = []), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn totp_disable(
@@ -646,7 +646,7 @@ pub async fn totp_disable(
         (status = 404, description = "No active TOTP to regenerate codes for")
     ),
     tag = "Authentication",
-    security(("bearer_token" = []))
+    security(("oauth2" = []), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn regenerate_recovery_codes(
