@@ -16,6 +16,8 @@ mod oidc_callback;
 mod openapi_spec;
 mod plugin_configs;
 mod plugin_type_settings;
+#[cfg(all(feature = "oidc", feature = "nats", feature = "reset-data"))]
+mod scope_map;
 mod service_ws;
 mod services_crud;
 mod settings;
