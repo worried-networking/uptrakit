@@ -64,7 +64,8 @@ M1.6a/M1.6b per that spec's decision 2) and the machinery M1.7/M1.8 delete.
 3. **Unparseable `required_action` from the wire → whole registration rejected.** Surface
    permission values are **not** human-configurable: every current source is a compiled constant
    (verified — `AgentInteraction.permission` is fed only by `with_permission(...)` calls in
-   agent-ssh-runtime; the proxmox agent actions declare none; plugin/mqtt descriptors are
+   two files, `agent-ssh-runtime/src/surface_runtime.rs` and
+   `crates/plugins/infrastructure/proxmox/src/agent/plugin.rs`; plugin/mqtt descriptors are
    builder literals). After the sweep they are typed `Action` constants, so garbage can only
    arrive from a service sending a bad string over the wire — a broken app. Owner decision:
    reject the registration wholesale at admission (test I5 as written), no per-row skip
@@ -101,7 +102,9 @@ required_permissions: &'static [Permission] }` (`oauth/tool_auth.rs:10-15`);
 - `McpState` (`state.rs:23-37`, `#[non_exhaustive]`, sole constructor `McpState::new`): no engine
   field. Single production construction site: `crates/core/controller-runtime/src/server.rs:47`,
   with `cfg.app_state` in scope (which since M1.4a carries `access_engine`).
-- `uptrakit-mcp` already depends on `uptrakit-controller-core` and `uptrakit-shared-types`.
+- `uptrakit-mcp` already depends on `uptrakit-controller-core`; `uptrakit-shared-types` is
+  present only under `[dev-dependencies]` (zero `uptrakit_shared_types` uses in `mcp/src` today)
+  — the catalog consts need it promoted to `[dependencies]` (§Manifest changes).
 
 ### Engine surface consumed (M1.3/M1.4a, landed)
 
@@ -172,6 +175,9 @@ Permission::UpdateHosts.to_string())` (:258); `with_permission(Permission::Updat
     :390).
   - `crates/plugins/infrastructure/proxmox/src/plugin.rs` — `Permission::UpdateHosts`,
     `ManageGlobalSettings`, `ViewSoftware`, `UpdateSoftware` across ~25 sites (:90-:1129).
+  - `crates/plugins/infrastructure/proxmox/src/agent/plugin.rs` —
+    `.with_permission(uptrakit_shared_types::Permission::UpdateHosts)` on `AgentInteraction`s
+    (:41, :633) — the second (and last) `with_permission` feeder besides agent-ssh-runtime.
   - `crates/plugins/infrastructure/core/` — `AgentInteraction.permission: String`
     (`agent_interaction.rs:48`, `""` = none); `surface_form_authoring.rs` builder field
     `required_permission: String` (:22, setter :52).
@@ -192,8 +198,10 @@ Permission::UpdateHosts.to_string())` (:258); `with_permission(Permission::Updat
   `AccessAuthority` for this route — the handler must build its own context.
 - Inline `has_permission` handler-body sites (`crates/ui/web-api/src/`):
   `visibility.rs:63` (`is_plugin_visible_to_user` :49-74 — `enabled ||
-has_permission(ManageGlobalSettings)`, shared by route handlers and the surface-registry
-  visibility path); `routes/system_services.rs:475-481` (batch action string →
+has_permission(ManageGlobalSettings)`; sole callers `routes/plugin_type_settings.rs` +
+  `routes/plugin_configs/crud.rs` — the surface-registry provider filter is the separate,
+  permission-free `PluginEffectiveEnablement::plugin_provider_visible`, visibility.rs:100-114);
+  `routes/system_services.rs:475-481` (batch action string →
   `Approve/Reject/RemoveSystemServices` → check); `routes/services/batch.rs:70-76` (same shape,
   tenant tier); `routes/plugin_type_settings.rs:82-85` (`ViewSettings ||
 ManageGlobalSettings`); `routes/plugin_configs/crud.rs:100-105` (`ViewSoftware ||
@@ -291,6 +299,27 @@ across M1–M3 anyway).
   compile-checked against the catalog while the wire type is unchanged. (No `Option<Action>`
   field on the wire type: the "actions never cross the service wire as a type" property is
   load-bearing for the no-`Other` decision.)
+- **Version-skew guard on the renamed key** (contrarian finding, validated): the descriptor
+  types carry `#[serde(default)]` and no `deny_unknown_fields`, so a bare rename would make an
+  old-build satellite's registration (`required_permission: "update_hosts"`) deserialize with
+  `required_action = None` — **silently un-gating** its interactions on a newer controller.
+  The corpus's satellite version-lock is policy, not mechanism (separate binaries on separate
+  hosts; rolling-upgrade windows exist). Both renamed fields therefore add
+  `#[serde(alias = "required_permission")]`: a stale key lands in `required_action`, its legacy
+  value (`"update_hosts"`) then fails the admission `Action` parse, and the registration is
+  **loudly rejected** — exactly decision 3's fail-closed posture, with zero compat machinery
+  (no shim mapping; hard cutover stands). The reverse direction (new satellite registering
+  against an old controller: `required_action` is the unknown key there) cannot be fixed
+  retroactively — the documented upgrade order is **controller first**, stated in the doc
+  deliverables. A dual-key payload (both keys present) is not produced by any real build, and fails closed
+  anyway: with derived `Deserialize`, an alias and its field share one slot, so a second
+  occurrence triggers serde's `duplicate_field` error and the payload is rejected outright
+  (there is no last-wins). The alias is transitional protection only — its removal is
+  scheduled with M1.8's `Permission` deletion so it doesn't linger as an un-owned wire seam.
+  Sweep obligation: the plan asserts the **alias** (not merely the rename) on every
+  wire-**deserialized** descriptor type, and confirms the internal-only types
+  (`surface_form_authoring`, the `MethodNotAllowed` variant, `AgentInteraction` — verified
+  non-`Serialize`, in-process only) need none.
 - `uptrakit-wire` `WireValidate` impls: field rename only, same length caps.
 - `AgentInteraction.permission: String` (infrastructure-core) → `required_action:
 Option<Action>`; the `with_permission` builder method becomes `with_required_action(Action)`;
@@ -388,9 +417,14 @@ call belongs in them.
 In `routes/interactive_ws.rs`, after the bespoke token authentication and before any update
 lookup:
 
-- `state.access_engine.context(state.default_tenant_id, user_id, None).await` — the handler
-  builds its own context because `require_auth` never ran here. Failure → 500 (fail-closed,
-  same rule as everywhere).
+- The context build is extracted into one shared helper (e.g.
+  `build_access_authority(&AppState, user_id) -> AccessAuthority` beside the middleware code)
+  called by **both** `require_auth` (which today inlines
+  `engine.context(state.default_tenant_id, user_id, None)` at `require_auth.rs:201-212`) and
+  this handler — the WS path bypasses `require_auth`, and a second literal copy of the build
+  would silently fork when a future milestone changes the tenant source or scope plumbing
+  (contrarian finding, accepted). The handler maps `Unavailable` → 500 (fail-closed, same rule
+  as everywhere); `require_auth` keeps inserting the marker into extensions.
 - Gate: `engine.authorize(&ctx, &actions::UPDATES_TRIGGER, None)`; deny → the existing denied
   audit emission (`"permission_denied"`) + HTTP 403 `error_response` + deny counter. No
   credential → 401 as today. **HTTP pre-upgrade semantics preserved** (owner decision 1); no
@@ -414,12 +448,17 @@ the shared counter. Conversions:
 - `routes/services/batch.rs:70-76`: same shape with `SERVICES_APPROVE` / `SERVICES_REJECT` /
   `SERVICES_DELETE`.
 - `visibility.rs` `is_plugin_visible_to_user`: the predicate's permission input re-types from
-  `&AuthenticatedUser` to a caller-computed `caller_is_instance_admin: bool` — pinned over an
-  `AccessContext` parameter because the predicate is shared with the surface-registry visibility
-  path, which has no HTTP request; the fact is computed where a context exists. Route-handler
-  callers compute it via `authorize(ctx, SYSTEM_SETTINGS_MANAGE, None)`; the plan enumerates
-  every caller of the predicate and names each call site's source for the bool. The visibility
-  semantics (`enabled || instance-admin`) are unchanged.
+  `&AuthenticatedUser` to `(engine: &AccessEngine, ctx: &AccessContext)` and evaluates
+  `enabled || matches!(engine.authorize(ctx, &actions::SYSTEM_SETTINGS_MANAGE, None),
+  Decision::Allow)` internally — the `authorize` + `matches!`/match shape used everywhere else
+  in M1.4a/M1.5 (`middleware/action.rs:109-110`, `event_delivery.rs:626`); never `==` on
+  `Decision`. (An earlier draft
+  pinned a caller-computed `bool` on the premise that the predicate is shared with the
+  surface-registry visibility path — verified false: its only callers are the two HTTP route
+  files `plugin_type_settings.rs` and `plugin_configs/crud.rs`; the registry's provider filter
+  is the separate `PluginEffectiveEnablement::plugin_provider_visible`, which carries no
+  permission input and is untouched.) The visibility semantics (`enabled || instance-admin`)
+  are unchanged; the plan enumerates every call site.
 
 The batch-permission denial audit emissions at those sites keep their existing action types and
 reasons — only the decision source changes.
@@ -438,11 +477,30 @@ that record instead of re-running. A non-empty result triggers B0's backfill del
 M1.5's enforcement commits land. Same one-shot-validity caveat: a custom role created after the
 audit re-triggers it.
 
+Two scope notes (contrarian findings, accepted): B0 covers only the **grant-underflow**
+direction (a principal losing authority it legitimately holds) — it says nothing about the
+fail-open wire-skew direction, which §4's serde-alias guard closes independently; "B0 ran
+empty" must never be read as clearing the surface path. And B0's `is_built_in = false` filter
+assumes built-in role permission sets were never operator-edited (the M1.2 seed derived grants
+from the _original_ definitions); the M1.5 plan extends the audit with a comparison of
+built-in roles' current `role_permissions` rows against their seeded expectations — any drift
+is a finding handled like a B0 hit.
+
 ## Manifest changes
 
-`crates/core/mqtt-runtime/Cargo.toml` gains `uptrakit-shared-types = { workspace = true }`
-(already registered in `[workspace.dependencies]`; needed for the catalog consts). No other new
-edges expected: mcp/agent-ssh-runtime/notifications/docker/proxmox/infrastructure-core/
+Two manifest edits, both referencing the already-registered `[workspace.dependencies]` entry
+(no new workspace dependency, no version pins):
+
+- `crates/core/mqtt-runtime/Cargo.toml` gains `uptrakit-shared-types = { workspace = true }`
+  (needed for the catalog consts; the crate has no shared-types edge today).
+- `crates/ui/mcp/Cargo.toml` **promotes** `uptrakit-shared-types` from `[dev-dependencies]` to
+  `[dependencies]` (dev-only today; `ToolAuth`, `McpRequestContext`, and the catalog iteration
+  need it in production code). A `pub use` funnel through `uptrakit-controller-core::access` was
+  considered and rejected: the existing `Permission` funnel exists because `uptrakit-web-api-auth`
+  is a forbidden edge for mcp — `uptrakit-shared-types` is a leaf crate every other sweep crate
+  depends on directly.
+
+No other new edges: agent-ssh-runtime/notifications/docker/proxmox/infrastructure-core/
 surface-proxy all already depend on `uptrakit-shared-types`; web-api already depends on
 `uptrakit-surface-proxy` and `uptrakit-controller-core`. The plan verifies with
 `cargo check` per touched crate before freezing tasks.
@@ -468,6 +526,14 @@ not a zero-grant fixture.
   carries an unparseable `required_action` (`"update_hosts"`, `"not-an-action"`) is rejected on
   the service path and the plugin/built-in path; a parseable-but-unregistered dynamic action
   (`surface.ghost:use`) **admits** (registry membership is decision-time).
+- **Skew-guard (serde alias, §4)**: a raw registration payload using the legacy key
+  `required_permission` with a legacy value (`"update_hosts"`) deserializes into
+  `required_action` and is **rejected** at admission (never silently un-gated to `None`); the
+  same legacy key with a valid action string (`"hosts:update"`) is accepted and gates normally;
+  a dual-key payload (`required_action` + `required_permission` both present) fails
+  deserialization (`duplicate_field`) — locked by a test so the behavior survives any future
+  serde-impl change. Driven at the serde/admission layer with JSON payloads, since no current
+  builder emits the old key.
 - **Surface invoke deny (I3, invoke half)**: TestApp — surface/interaction gated by an action
   the caller lacks → read 403 and invoke 403; sibling-permission 403-before-405 order pinned
   (existing `surfaces_method_routes.rs` fixtures re-typed; the
@@ -521,7 +587,14 @@ action types — run to prove it); `bash ci/verify_handler_state_contract.sh`;
    surrounding prose: field rename, admission `Action` parse (rejection now possible), engine
    enforcement via `enforce_required_action`.
 3. `docs/development/surfaces.md` (:113 and siblings) — same rename in the authoring guidance;
-   builders now take catalog `Action` constants.
+   builders now take catalog `Action` constants; a short upgrade-order note: **controller
+   before satellites** across the M1.5 boundary (the serde alias makes an old satellite fail
+   loudly against a new controller; the reverse direction would silently drop the unknown
+   `required_action` key on an old controller — §4). The note states the blast radius
+   honestly: rejection is **whole-provider** (one bad value fails the whole registration —
+   all that provider's surfaces stay dark until the satellite upgrades), and only
+   **out-of-process** providers are affected (mqtt service, agent-side plugins via agents);
+   compiled-in plugins/built-ins ship inside the controller binary and have zero window.
 4. `docs/security/auth-and-authorization.md` — extend the M1.4a transition subsection: MCP,
    surfaces, interactive WS, and the inline sites now enforce through the engine; correct the
    close-frame description of the interactive WS to HTTP pre-upgrade semantics.
@@ -571,7 +644,8 @@ action types — run to prove it); `bash ci/verify_handler_state_contract.sh`;
 - **M1.7**: claims removal, `me` action list + `authority` field, frontend gating swap; MCP
   `get_current_user` follows `me`'s final dynamic-action expansion then.
 - **M1.8**: `Permission`, `AuthenticatedUser::has_permission`, `permission_extractor!`, shim
-  deletion; `rg`-clean.
+  deletion; `rg`-clean; removal of the transitional
+  `#[serde(alias = "required_permission")]` skew guard (§4).
 - **M1.9**: canonical doc rewrite + ADR.
 - **M2.3/M2.4**: WS attach-time fine check (D16/K11); surface listing + MCP list tools on
   visibility (I3 listing half).
