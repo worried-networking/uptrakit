@@ -10,8 +10,13 @@ Related: [ADR 0010](../adr/0010-mcp-oauth-authorization-server-placement.md) ·
 ## Adding an MCP Tool That Needs OAuth
 
 Every MCP tool declares a `ToolAuth` constant immediately next to its handler in
-`crates/ui/mcp/src/tools/`. The auth layer calls `require_scope` followed by the existing
-`has_permission` check; both must pass before the handler runs.
+`crates/ui/mcp/src/tools/`. The connection itself is already gated on the `mcp:use` action (both
+the API-token and OAuth JWT auth paths build an `AccessContext` and check it via the
+`AccessEngine` before any tool call is dispatched — see `crates/ui/mcp/src/auth.rs`). Per-tool
+authorization is a single call to `require_tool_auth(&self.state, &ctx, &MY_TOOL_AUTH)` at the top
+of the handler, which checks OAuth scopes and then runs one engine `authorize()` per declared
+catalog action (`crates/ui/mcp/src/oauth/tool_auth.rs`). Declaration = enforcement: listing an
+action in `ToolAuth.required_actions` is what makes the engine check happen.
 
 ### Step 1 — Pick the right scope
 
@@ -28,43 +33,47 @@ never valid to loosen it silently (see [scope migration policy](#scope-migration
 Follow the `TRIGGER_UPDATE_AUTH` pattern in `crates/ui/mcp/src/tools/update.rs`:
 
 ```rust
-use uptrakit_mcp::auth::{ToolAuth, McpScope};
-use uptrakit_web_api_types::Permission;
+use uptrakit_mcp::oauth::tool_auth::ToolAuth;
+use uptrakit_web_api_types::oauth::McpScope;
+use uptrakit_shared_types::access::actions;
 
 pub(crate) const MY_TOOL_AUTH: ToolAuth = ToolAuth {
     required_scopes: &[McpScope::Write],
-    required_permissions: &[Permission::TriggerUpdates],
+    required_actions: &[actions::UPDATES_TRIGGER],
 };
 ```
 
 `ToolAuth.required_scopes` is an all-of slice: every listed scope must be present. Same for
-`required_permissions`. An empty `required_permissions` slice means the tool only requires the
-`AccessMcp` permission that the auth layer already enforces for every authenticated request.
+`required_actions` (each a typed catalog `Action`, e.g. `actions::UPDATES_TRIGGER`,
+`actions::SOFTWARE_READ`). An empty `required_actions` slice means the tool needs no action beyond
+the `mcp:use` access already checked by the connection-level auth layer.
 
-### Step 3 — Call `require_scope` at the top of the handler
+### Step 3 — Call `require_tool_auth` at the top of the handler
 
 ```rust
 pub(crate) async fn my_tool_handler(
+    &self,
     ctx: McpRequestContext,
     params: MyToolParams,
-) -> Result<MyToolResponse, McpError> {
-    require_scope(&ctx, McpScope::Write)?;
+) -> Result<MyToolResponse, ErrorData> {
+    require_tool_auth(&self.state, &ctx, &MY_TOOL_AUTH)?;
     // ... handler body
 }
 ```
 
-`require_scope` returns `Err(McpError::InsufficientScope { required })` for OAuth callers missing the
-scope. API-token callers bypass scope checks (no scope concept at issuance) but still pass through the
-Permission check in the auth layer.
+`require_tool_auth` checks OAuth scopes first (an OAuth caller missing a required scope gets an
+`insufficient_scope` error; API-token callers bypass scope checks — no scope concept at issuance),
+then runs one engine `authorize()` call per action in `required_actions`, returning a "permission
+denied" error on the first `Decision::Deny`.
 
 ### v1 Tool Mapping
 
-| Tool                        | Required scopes | Required permissions |
-| --------------------------- | --------------- | -------------------- |
-| `list_update_history`       | `[Read]`        | `[ViewSoftware]`     |
-| `get_update_history_detail` | `[Read]`        | `[ViewSoftware]`     |
-| `trigger_update`            | `[Write]`       | `[TriggerUpdates]`   |
-| `get_current_user`          | `[Read]`        | `[]`                 |
+| Tool                        | Required scopes | Required actions    |
+| --------------------------- | --------------- | ------------------- |
+| `list_update_history`       | `[Read]`        | `[software:read]`   |
+| `get_update_history_detail` | `[Read]`        | `[software:read]`   |
+| `trigger_update`            | `[Write]`       | `[updates:trigger]` |
+| `get_current_user`          | `[Read]`        | `[]`                |
 
 ## Scope Migration Policy
 
@@ -79,7 +88,7 @@ The `mcp:*` namespace is reserved for the uptrakit MCP scope set. The migration 
   Granular scopes are "advisory least-privilege" for newly-minted tokens, not a hard authz floor that
   retroactively breaks existing tokens.
 - **No silent tightening.** A PR that changes an existing tool from `McpScope::Read` to
-  `McpScope::Write` (or adds a new required permission) is a breaking change for existing OAuth
+  `McpScope::Write` (or adds a new required action) is a breaking change for existing OAuth
   clients. It requires a deprecation notice and a migration window. File a phase-N spec entry.
 
 ## Token Validation Invariants

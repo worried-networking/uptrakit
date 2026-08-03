@@ -435,6 +435,11 @@ native OpenAPI security requirement, e.g. `security(("oauth2" = ["hosts:read"]),
 instead of the `x-required-permission` extension. The `hosts` route family (`crates/ui/web-api/src/routes/hosts.rs`)
 is the first converted family and serves as the reference conversion.
 
+MCP authorization has moved onto the same `AccessEngine` in parallel with the route-family sweep: both MCP auth paths
+(API token and OAuth JWT) build an `AccessContext` and gate the connection on the `mcp:use` action, and each MCP tool
+declares typed catalog actions in its `ToolAuth` that a single `require_tool_auth()` helper enforces — see the
+[OAuth MCP Development Guide](../development/oauth-mcp.md).
+
 Unconverted route families keep the `permission_extractor!` + `x-required-permission` model described
 above until the M1.4b sweep converts them. Which model a given handler uses is visible from its
 extractor import: `crate::middleware::action::CanXxx` (new) vs. `crate::middleware::permission::CanXxx`
