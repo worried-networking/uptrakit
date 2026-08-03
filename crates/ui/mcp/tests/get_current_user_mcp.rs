@@ -18,6 +18,7 @@ use uuid::Uuid;
 use uptrakit_audit_log::{
     AuditEmitter, AuditLogBackend, AuditLogDispatcher, DatabaseBackend, NoopBackend,
 };
+use uptrakit_controller_core::access::AccessEngine;
 use uptrakit_controller_core::auth::{
     AuthState, DeviceFlowStore, JwtManager, RateLimitStore, TokenDenylist,
 };
@@ -47,6 +48,11 @@ struct McpTestApp {
     db: DatabaseConnection,
     tenant_id: Uuid,
     cancel: CancellationToken,
+    #[expect(
+        dead_code,
+        reason = "used by app.engine.invalidate_subjects(...) in Task 4"
+    )]
+    engine: Arc<AccessEngine>,
 }
 
 impl McpTestApp {
@@ -98,6 +104,8 @@ impl McpTestApp {
 
         let cancel = CancellationToken::new();
 
+        let engine = Arc::new(AccessEngine::new(db.clone()));
+
         let state = McpState::new(
             DbState::new(db.clone()),
             AuthState::new(
@@ -106,6 +114,7 @@ impl McpTestApp {
                 RateLimitStore::new(db.clone()),
                 Arc::new(TokenDenylist::new()),
             ),
+            Arc::clone(&engine),
             settings,
             tenant_id,
             Uuid::nil(),
@@ -134,6 +143,7 @@ impl McpTestApp {
             db,
             tenant_id,
             cancel,
+            engine,
         }
     }
 }

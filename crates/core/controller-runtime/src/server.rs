@@ -47,6 +47,7 @@ pub(crate) async fn run(cfg: ServerOptions) -> Result<()> {
         let mcp_state = uptrakit_mcp::state::McpState::new(
             cfg.app_state.db_state(),
             cfg.app_state.auth_state(),
+            Arc::clone(&cfg.app_state.access_engine),
             cfg.app_state.settings.clone(),
             cfg.app_state.default_tenant_id,
             cfg.app_state.controller_id,

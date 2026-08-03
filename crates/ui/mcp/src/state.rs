@@ -20,11 +20,15 @@ use uptrakit_web_api_types::oauth::{CanonicalUrlConfig, McpOAuthJwtVerifier};
 ///
 /// `#[non_exhaustive]`: prevents external struct literal construction and forces
 /// exhaustive pattern match sites to add `..`. Callers use `McpState::new(…)`.
+///
+/// `access_engine` is the controller's engine instance — never construct a
+/// second one (one cache, one invalidation listener).
 #[non_exhaustive]
 #[derive(Clone)]
 pub struct McpState {
     pub db: DbState,
     pub auth: AuthState,
+    pub access_engine: Arc<uptrakit_controller_core::access::AccessEngine>,
     pub settings: Settings,
     pub default_tenant_id: Uuid,
     pub controller_id: Uuid,
@@ -46,6 +50,7 @@ impl McpState {
     pub fn new(
         db: DbState,
         auth: AuthState,
+        access_engine: Arc<uptrakit_controller_core::access::AccessEngine>,
         settings: Settings,
         default_tenant_id: Uuid,
         controller_id: Uuid,
@@ -59,6 +64,7 @@ impl McpState {
         Self {
             db,
             auth,
+            access_engine,
             settings,
             default_tenant_id,
             controller_id,
