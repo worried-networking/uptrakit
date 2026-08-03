@@ -352,9 +352,10 @@ security contract).
 
 - **B6 is serialized behind M1.5.** If M1.5 stalls, B1–B5 still land; the sweep's exit assertion
   simply waits. Accepted by owner (decision 3).
-- **Fixture churn in B2/B3** (largest batches): route tests that stage users with legacy
-  permissions need grant-insertion updates; bounded by the M1.4a precedent and the shared
-  fixtures.
+- **Fixture churn in B1–B3**: route tests that stage users with legacy permissions need
+  grant-insertion updates (the reduced-permission ephemeral-uuid JWT sites live in B1
+  `device_auth_oauth.rs` as well as the B2/B3 modules); bounded by the M1.4a precedent and the
+  shared fixtures.
 - **OR-declaration form depends on landed M1.5 semantics** — mitigated by deriving B6's
   alternative lists from the merged code at plan time; ongoing drift between OR declarations
   and inline enforcement is surfaced by the scope-map golden (§Tests), not by the CI script
