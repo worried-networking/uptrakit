@@ -18,10 +18,12 @@ oauth2/developer_token schemes, and the hosts reference family are live). M1.5 r
 M1.4b and M1.6a** per the task breakdown; the file-overlap rule applies — this task owns
 `routes/surfaces.rs`, `routes/system_services.rs`, `routes/plugin_type_settings.rs`,
 `routes/plugin_configs/crud.rs`, `routes/services/batch.rs`, `routes/interactive_ws.rs`, and the
-`visibility` module for its inline conversions; M1.4b sub-PRs touching those files sequence after
-M1.5 or hand the files to it (the M1.4b **extractor/declaration** work on those same files —
-`#[utoipa::path]` security blocks, `x-action-dynamic` on the seven surface wrappers — stays
-M1.4b's).
+`visibility` module for its inline conversions; the M1.4b spec
+(`2026-08-03-access-route-sweep-design.md`, decision 3) locks the resolution: its final batch B6
+carries the **extractor/declaration** work on these same files — `#[utoipa::path]` security
+blocks, `x-action-dynamic` on the dynamic surface wrappers (eight at spec time; the set is
+defined by the `dynamic:` extension grep, not a fixed count) — and lands only after M1.5
+merges.
 
 ## Problem / goal
 
@@ -86,10 +88,10 @@ route families and the machinery M1.7/M1.8 delete.
 - `Forbidden` renders 403 at `auth.rs:142-145`. `McpAuthError` (`context.rs:91-106`) carries
   `MissingCredentials / JwtNotAccepted / Unauthorized / Forbidden / Internal`.
 - `McpRequestContext` (`context.rs:33-66`): `{ user_id, token_id, tenant_id, permissions:
-  Vec<Permission>, auth_method }` + `has_permission()` (:63-65); inserted into request extensions
+Vec<Permission>, auth_method }` + `has_permission()` (:63-65); inserted into request extensions
   by the auth layer (:125), read by tools via `FromContextPart` (:72-84).
 - Per-tool declaration: `const ToolAuth { required_scopes: &'static [McpScope],
-  required_permissions: &'static [Permission] }` (`oauth/tool_auth.rs:10-15`);
+required_permissions: &'static [Permission] }` (`oauth/tool_auth.rs:10-15`);
   `require_scopes` (:31-55) enforces **only scopes** — the permission half is enforced by
   hand-written inline `ctx.has_permission(...)` per tool (`tools/history.rs:207,:283`,
   `tools/update.rs:59`; `get_current_user` declares `&[]` and checks nothing). Declared-but-
@@ -104,12 +106,12 @@ route families and the machinery M1.7/M1.8 delete.
 
 - `AccessEngine::context(tenant_id, user_id, scope) -> Result<AccessContext>` (async,
   `crates/ui/controller-core/src/access/mod.rs:149-173`); `authorize(&ctx, &Action,
-  Option<&TargetRef>) -> Decision` (pure/sync, :228); dynamic-action gate at :234-240 — a
+Option<&TargetRef>) -> Decision` (pure/sync, :228); dynamic-action gate at :234-240 — a
   `plugin.*`/`surface.*` action is `Deny(UnknownAction)` unless
   `registry.is_registered(action)`; `with_registry` builder (:135) — **no production registry
   injected yet** (`AccessEngine::new` comment: "every dynamic action denies until M1.5 injects
   one"). `pub trait DynamicActionRegistry: Send + Sync { fn is_registered(&self, action:
-  &Action) -> bool; }` (:78-81).
+&Action) -> bool; }` (:78-81).
 - Web-api side: `AccessState(pub Arc<AccessEngine>)` sub-state (`app_state.rs:152-153`, `FromRef`
   :1286-1289); `AccessAuthority::Ready(ctx) | Unavailable` marker built in `require_auth`
   (`middleware/require_auth.rs:201-212`) for every authenticated HTTP request; the
@@ -134,7 +136,7 @@ route families and the machinery M1.7/M1.8 delete.
 - **Admission parse site**: `validate_registration_basics`
   (`crates/ui/surface-proxy/src/registry.rs:634`, called from all three admission entry points
   :238/:307/:339) parses descriptor and interaction permissions to `Permission` at :786-794 /
-  :797-805 and rejects on failure. **Correction to the milestone text**: the parse does *not*
+  :797-805 and rejects on failure. **Correction to the milestone text**: the parse does _not_
   live in `validate_registration_admission_locked` (:965-994 — that fn does provider/binding
   conflict + contract-collision checks); the `Action` parse lands where the `Permission` parse
   is today, which is reached from the same admission choke points.
@@ -162,7 +164,7 @@ route families and the machinery M1.7/M1.8 delete.
 - **Declaration sites** (spec-time inventory; plan re-greps `required_permission` +
   `with_permission` workspace-wide):
   - `crates/core/agent-ssh-runtime/src/surface_runtime.rs` — `.required_permission(
-    Permission::UpdateHosts.to_string())` (:258); `with_permission(Permission::UpdateHosts)`
+Permission::UpdateHosts.to_string())` (:258); `with_permission(Permission::UpdateHosts)`
     on `AgentInteraction`s (:163-188, :912, :993); `permission_or_none(&action.permission)`
     (:660, fn :721-728) mapping `""`/`"none"` → `None`; read-back at :2484.
   - `crates/plugins/releases/docker/src/plugin.rs` — `Permission::UpdateSoftware` (:296, :320,
@@ -189,12 +191,12 @@ route families and the machinery M1.7/M1.8 delete.
   `AccessAuthority` for this route — the handler must build its own context.
 - Inline `has_permission` handler-body sites (`crates/ui/web-api/src/`):
   `visibility.rs:63` (`is_plugin_visible_to_user` :49-74 — `enabled ||
-  has_permission(ManageGlobalSettings)`, shared by route handlers and the surface-registry
+has_permission(ManageGlobalSettings)`, shared by route handlers and the surface-registry
   visibility path); `routes/system_services.rs:475-481` (batch action string →
   `Approve/Reject/RemoveSystemServices` → check); `routes/services/batch.rs:70-76` (same shape,
   tenant tier); `routes/plugin_type_settings.rs:82-85` (`ViewSettings ||
-  ManageGlobalSettings`); `routes/plugin_configs/crud.rs:100-105` (`ViewSoftware ||
-  ViewSettings || ManageGlobalSettings`); `routes/surfaces.rs:1519` (inside
+ManageGlobalSettings`); `routes/plugin_configs/crud.rs:100-105` (`ViewSoftware ||
+ViewSettings || ManageGlobalSettings`); `routes/surfaces.rs:1519` (inside
   `enforce_required_permission`, §Surfaces above).
 
 ## Scope
@@ -208,8 +210,9 @@ gate conversion; the five inline route files + `visibility` module; regen artifa
 (`./scripts/regen-api.sh`, `scripts/regen-asyncapi.sh`); tests per §Tests; doc touches per
 §Documentation deliverables.
 
-Out (deferred to the named tasks): the seven surface wrappers' OpenAPI declarations
-(`x-action-dynamic: true`) and all other route-family `#[utoipa::path]` conversions (M1.4b);
+Out (deferred to the named tasks): the dynamic surface wrappers' OpenAPI declarations
+(`x-action-dynamic: true`; eight at spec time) and all other route-family `#[utoipa::path]`
+conversions (M1.4b, `2026-08-03-access-route-sweep-design.md` — batch B6 lands after this task);
 surface **listing** filtered by held action + MCP list-tool visibility (M2.4); deny audit
 **Events** for `mcp:use` (M1.6b — the counter/trace tier ships here); claims/`me`/frontend
 (M1.7 — the SPA's generated types pick up the `required_action` field rename via the regen
@@ -235,7 +238,7 @@ today; M2.3 adds the attach-time fine check).
 - Both validators build the context after authentication succeeds:
   `state.access_engine.context(state.default_tenant_id, user_id, None).await`. Scope is `None`
   on **both** paths: `upk_` tokens carry no scopes until M4, and MCP OAuth JWT scopes are
-  `McpScope` values (`mcp:read`/`mcp:write`), which are *not* action patterns — feeding them to
+  `McpScope` values (`mcp:read`/`mcp:write`), which are _not_ action patterns — feeding them to
   the engine would mistranslate them into a deny-all action ceiling. `require_scopes` remains
   the sole `McpScope` enforcement until M3.3 re-scopes MCP.
 - Context-build failure → `McpAuthError::Internal` (renders 500) — fail-closed, matching the
@@ -255,11 +258,11 @@ today; M2.3 adds the attach-time fine check).
   (`Clone` since M1.4a); `has_permission()` is deleted. The constructor signature changes
   accordingly; `auth_method`, ids, and `FromContextPart` stay.
 - `ToolAuth.required_permissions: &'static [Permission]` → `required_actions: &'static
-  [Action]` (`GET_CURRENT_USER_AUTH` → `&[]`; history tools → `&[actions::SOFTWARE_READ]`;
+[Action]` (`GET_CURRENT_USER_AUTH` → `&[]`; history tools → `&[actions::SOFTWARE_READ]`;
   `TRIGGER_UPDATE_AUTH` → `&[actions::UPDATES_TRIGGER]`).
 - New helper beside `require_scopes` (same module, same error style):
   `require_tool_auth(state: &McpState, ctx: &McpRequestContext, auth: &ToolAuth) ->
-  Result<(), ErrorData>` — checks scopes via the existing `require_scopes` logic, then
+Result<(), ErrorData>` — checks scopes via the existing `require_scopes` logic, then
   `engine.authorize(&ctx.access, action, None)` for every entry in `required_actions`
   (deny → the same 403-shaped `ErrorData` the inline checks produce today + deny counter). Every
   tool calls this **one** helper; the hand-written per-tool `ctx.has_permission` lines are
@@ -289,7 +292,7 @@ across M1–M3 anyway).
   load-bearing for the no-`Other` decision.)
 - `uptrakit-wire` `WireValidate` impls: field rename only, same length caps.
 - `AgentInteraction.permission: String` (infrastructure-core) → `required_action:
-  Option<Action>`; the `with_permission` builder method becomes `with_required_action(Action)`;
+Option<Action>`; the `with_permission` builder method becomes `with_required_action(Action)`;
   `permission_or_none` in agent-ssh-runtime is deleted — the descriptor assignment (pinned)
   becomes `descriptor.required_action = action.required_action.map(|a| a.to_string())`.
   `surface_form_authoring.required_permission: String` → `required_action: Option<Action>` with
@@ -471,7 +474,7 @@ not a zero-grant fixture.
   HTTP-status-based per owner decision 1.
 - **Inline sites**: per converted file, one deny (403) + one allow through the new calls —
   batch system-services/services deny uses a principal missing the mapped action; the OR-logic
-  endpoints get an allow via the *weaker* arm (e.g. `settings:read` only) proving OR is
+  endpoints get an allow via the _weaker_ arm (e.g. `settings:read` only) proving OR is
   preserved.
 - **Unit**: `enforce_required_action` verdict table (None-action allow / allow / deny /
   `Unavailable` 500), mirroring its current unit tests (surfaces.rs:1636-1676).
@@ -541,10 +544,13 @@ action types — run to prove it); `bash ci/verify_handler_state_contract.sh`;
 
 ## Deferred / out of scope (verbatim carriers)
 
-- **M1.4b**: route-family `#[utoipa::path]` conversions incl. the seven surface wrappers'
-  empty-scoped requirement + `x-action-dynamic: true`; `bearer_token` scheme deletion; final
-  extension `rg` sweep. Files owned by M1.5 (listed in the sequencing note) hand their
-  declaration work back to M1.4b sub-PRs that land after it.
+- **M1.4b** (`2026-08-03-access-route-sweep-design.md`): route-family `#[utoipa::path]`
+  conversions incl. the dynamic surface wrappers' empty-scoped requirement +
+  `x-action-dynamic: true` (eight at spec time), as six commit batches; its exit `rg` sweep
+  asserts only the three M1.6-handed files (`users.rs`, `roles.rs`, `access_presets.rs`) retain
+  `x-required-permission`/`bearer_token`. Files owned by M1.5 (listed in the sequencing note)
+  receive their declaration work in M1.4b batch B6, which lands after this task. The
+  `bearer_token` scheme deregistration rides with M1.6b (last-reference rule), not M1.4b.
 - **M1.6a/b**: mutation-site invalidation publishing; deny audit **Events** (`mcp:use` among
   the four Event-tier actions); management API; catalog endpoint.
 - **M1.7**: claims removal, `me` action list + `authority` field, frontend gating swap; MCP
