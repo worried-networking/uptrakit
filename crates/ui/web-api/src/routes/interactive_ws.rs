@@ -20,6 +20,7 @@ use axum::response::{IntoResponse, Response};
 use futures_util::{SinkExt, StreamExt};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, RelationTrait};
 use uptrakit_shared_db::entity::{host, update_history, update_output_line};
+use uptrakit_shared_types::access::{Decision, actions};
 use uptrakit_web_api_types::update_history::{
     OutputLineSSE, StdinAttentionSSE, UpdateCompletedSSE,
 };
@@ -27,11 +28,11 @@ use uptrakit_wire::{ControllerMessage, UpdateStdinDataPayload};
 use uuid::Uuid;
 
 use crate::AppState;
-use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
+use crate::middleware::action::AccessAuthority;
 use crate::middleware::require_auth::{
     AuthFailure, AuthenticatedApiTokenId, AuthenticatedUser, authenticate_api_token,
-    authenticate_jwt, authenticated_user_audit_actor,
+    authenticate_jwt, authenticated_user_audit_actor, build_access_authority,
 };
 use crate::update_output_broadcaster::BroadcastEvent;
 
@@ -174,26 +175,76 @@ pub async fn interactive_ws(
     };
     let audit_actor = InteractiveAuditActor::from_authenticated(&auth_user, api_token_id);
 
-    // 3. Check TriggerUpdates permission.
+    // 3. Check the `updates:trigger` action through the AccessEngine.
     //
     // NOTE: This is an intentional approved exception to the standard Axum extractor pattern
-    // (e.g. `CanTriggerUpdates`). WebSocket connections from the browser cannot set custom
-    // HTTP headers, so the auth token arrives as a `?token=` query parameter. The custom
-    // extraction logic above (steps 1-2) handles both sources. The permission check must
-    // therefore live inline here rather than in a middleware extractor.
-    if !auth_user.has_permission(Permission::TriggerUpdates) {
-        emit_interactive_session_audit(
-            InteractiveAuditCtx {
-                state: &state,
-                actor: audit_actor,
-            },
-            record_id,
-            None,
-            uptrakit_audit_log::AuditOutcome::Denied,
-            Some("permission_denied"),
-            None,
-        );
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
+    // (e.g. an `action_extractor!`-generated type). WebSocket connections from the browser
+    // cannot set custom HTTP headers, so the auth token arrives as a `?token=` query
+    // parameter. The custom extraction logic above (steps 1-2) handles both sources, and
+    // `require_auth` never runs on this route — so the engine call must live inline here,
+    // built through the same `build_access_authority` path `require_auth` uses.
+    let authority = build_access_authority(&state, auth_user.user_id).await;
+    let access_ctx = match &authority {
+        AccessAuthority::Ready(ctx) => ctx,
+        // `Unavailable` still needs an audit row, but as `Failed` (not
+        // `Denied`) — mirrors this file's own 500-path convention (step 4
+        // below, `update_history_lookup_failed`): `Denied` would make
+        // deny-rate dashboards fire on an engine/DB outage and claim a
+        // policy refusal that never happened.
+        _ => {
+            emit_interactive_session_audit(
+                InteractiveAuditCtx {
+                    state: &state,
+                    actor: audit_actor,
+                },
+                record_id,
+                None,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                Some("authorization_unavailable"),
+                None,
+            );
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+    match state
+        .access_engine
+        .authorize(access_ctx, &actions::UPDATES_TRIGGER, None)
+    {
+        Decision::Allow => {}
+        Decision::Deny(reason) => {
+            metrics::counter!(
+                "uptrakit_access_denies_total",
+                "reason" => reason.as_str()
+            )
+            .increment(1);
+            emit_interactive_session_audit(
+                InteractiveAuditCtx {
+                    state: &state,
+                    actor: audit_actor,
+                },
+                record_id,
+                None,
+                uptrakit_audit_log::AuditOutcome::Denied,
+                Some("permission_denied"),
+                None,
+            );
+            return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
+        }
+        // `Decision` is #[non_exhaustive] in another crate.
+        _ => {
+            emit_interactive_session_audit(
+                InteractiveAuditCtx {
+                    state: &state,
+                    actor: audit_actor,
+                },
+                record_id,
+                None,
+                uptrakit_audit_log::AuditOutcome::Denied,
+                Some("permission_denied"),
+                None,
+            );
+            return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
+        }
     }
 
     // 4. Verify the update record exists (tenant-scoped) and is in-progress.
@@ -914,7 +965,11 @@ mod tests {
     #[cfg(feature = "db-sqlite")]
     use tokio_tungstenite::tungstenite::Message;
     #[cfg(feature = "db-sqlite")]
-    use uptrakit_shared_db::entity::{audit_log, software_item, update_history};
+    use uptrakit_shared_db::access_grants::{
+        GrantSubject, delete_grant, load_grants_for_principal,
+    };
+    #[cfg(feature = "db-sqlite")]
+    use uptrakit_shared_db::entity::{audit_log, role, software_item, update_history, user_role};
     #[cfg(feature = "db-sqlite")]
     use uptrakit_shared_types::UpdateStatus;
     #[cfg(feature = "db-sqlite")]
@@ -1803,5 +1858,193 @@ mod tests {
         );
         let (mut ws, _) = result.unwrap();
         ws.close(None).await.expect("close");
+    }
+
+    /// Discriminating regression test for the D15 conversion: stages a user
+    /// whose legacy `role_permissions` snapshot (baked into the JWT at login)
+    /// still grants `trigger_updates` via the built-in `operator` role, but
+    /// whose `AccessEngine` authority for `updates:trigger` has been revoked
+    /// (the covering `access_grants` row(s) deleted, cache invalidated).
+    /// Pre-conversion code (checking `auth_user.has_permission(..)`) answers
+    /// from the stale JWT claim and reaches 101 Switching Protocols; the
+    /// engine-gated code must reject with a plain 403 before any upgrade.
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn interactive_ws_engine_deny_overrides_legacy_permission_is_403_no_upgrade() {
+        let (base_url, app) = serve_app().await;
+        let client = app.client();
+
+        let owner_token = crate::test_harness::fixtures::register_and_get_token(&client).await;
+
+        // Re-open registration so a second user can sign up.
+        let reopen = client
+            .put_json(
+                "/api/v1/settings/access",
+                &serde_json::json!({ "mode": "open" }),
+            )
+            .bearer(&owner_token)
+            .header("if-match", "W/\"settings-v0\"")
+            .send_status()
+            .await;
+        assert_eq!(reopen, StatusCode::OK, "failed to re-open registration");
+
+        let (status, auth) = crate::test_harness::fixtures::register_user(
+            &client,
+            "trigger-legacy@test.local",
+            "TestPassword123!",
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let user_id = auth.user.id;
+
+        // Link *only* the `operator` role (it carries the legacy
+        // `trigger_updates` permission and a seed `updates:trigger` grant;
+        // `software_manager` also carries `updates:trigger` and must not be
+        // linked, `viewer`'s `*:read` doesn't cover it so it may stay).
+        let operator_role_id = role::Entity::find()
+            .filter(role::Column::Name.eq("operator"))
+            .one(&app.db)
+            .await
+            .expect("query roles")
+            .expect("seeded operator role")
+            .id;
+        user_role::ActiveModel {
+            tenant_id: Set(app.tenant_id),
+            user_id: Set(user_id),
+            role_id: Set(operator_role_id),
+            assigned_at: Set(time::OffsetDateTime::now_utc()),
+        }
+        .insert(&app.db)
+        .await
+        .expect("assign operator role");
+
+        // Delete every `access_grants` row for the operator role whose
+        // pattern set covers `updates:trigger` (a role may hold more than
+        // one seed grant row — the M1.2 seed row and the M1.5 `mcp:use`
+        // backfill row both exist for `operator`; never `.one()`).
+        let load =
+            load_grants_for_principal(&app.db, app.tenant_id, Uuid::nil(), &[operator_role_id])
+                .await
+                .expect("load operator grants");
+        let mut deleted_any = false;
+        for grant in load.grants {
+            if grant.subject == GrantSubject::Role(operator_role_id)
+                && grant
+                    .patterns
+                    .iter()
+                    .any(|pattern| pattern.matches(&actions::UPDATES_TRIGGER))
+            {
+                delete_grant(&app.db, grant.id)
+                    .await
+                    .expect("delete operator updates:trigger grant");
+                deleted_any = true;
+            }
+        }
+        assert!(
+            deleted_any,
+            "expected at least one operator grant row covering updates:trigger"
+        );
+        app.state
+            .access_engine
+            .invalidate_subjects(&[], &[operator_role_id]);
+
+        // Re-login so the legacy JWT claim snapshot picks up the newly
+        // assigned `operator` role's `trigger_updates` permission — the
+        // engine's authority was revoked above, but the legacy claim was
+        // never touched, so it still answers "yes".
+        let (login_status, login_auth) = crate::test_harness::fixtures::login_user(
+            &client,
+            "trigger-legacy@test.local",
+            "TestPassword123!",
+        )
+        .await;
+        assert_eq!(login_status, StatusCode::OK);
+        let token = login_auth.access_token.expose_secret().to_string();
+
+        let host = crate::test_harness::fixtures::insert_host(&app.db, app.tenant_id).await;
+        let software_item = insert_software_item(&app.db, app.tenant_id).await;
+        let service_id = Uuid::now_v7();
+        let (_service_rx, _handle) = app
+            .state
+            .service_connections
+            .register(service_id, BTreeSet::new(), None, None, None)
+            .await;
+        let update = insert_update_history_row(
+            &app.db,
+            app.tenant_id,
+            host.id,
+            software_item.id,
+            UpdateStatus::InProgress,
+            Some(service_id),
+        )
+        .await;
+        app.state
+            .broadcast
+            .update_output_broadcaster
+            .create_channel(update.id)
+            .await;
+
+        let err = tokio_tungstenite::connect_async(format!(
+            "{base_url}/api/v1/update-history/{}/interactive?token={token}",
+            update.id
+        ))
+        .await
+        .expect_err("connection must be rejected by the access engine");
+
+        let response = match err {
+            tokio_tungstenite::tungstenite::Error::Http(response) => response,
+            other => panic!("expected http error, got {other:?}"),
+        };
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        let row = latest_interactive_control_row(&app.db, "session_establish").await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("permission_denied")
+        );
+    }
+
+    /// `AccessAuthority::Unavailable` (engine context resolution failure)
+    /// must audit as `Failed` — not `Denied` — with reason
+    /// `"authorization_unavailable"`, mirroring this file's own 500-path
+    /// convention (`update_history_lookup_failed` above uses `Failed` too).
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn interactive_ws_engine_unavailable_writes_failed_session_establish_audit() {
+        let (base_url, app) = serve_app().await;
+        let token = crate::test_harness::fixtures::register_and_get_token(&app.client()).await;
+        let update_id = Uuid::now_v7();
+
+        app.db
+            .execute_unprepared("DROP TABLE user_roles")
+            .await
+            .expect("drop user_roles table");
+
+        let err = tokio_tungstenite::connect_async(format!(
+            "{base_url}/api/v1/update-history/{update_id}/interactive?token={token}"
+        ))
+        .await
+        .expect_err("connection should be rejected");
+
+        let response = match err {
+            tokio_tungstenite::tungstenite::Error::Http(response) => response,
+            other => panic!("expected http error, got {other:?}"),
+        };
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        let row = latest_interactive_control_row_matching(&app.db, "session_establish", |row| {
+            row.outcome == uptrakit_audit_log::AuditOutcome::Failed.as_str()
+        })
+        .await;
+        let details = row.details_json.expect("details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("authorization_unavailable")
+        );
     }
 }
