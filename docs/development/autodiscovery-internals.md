@@ -37,12 +37,15 @@ The `featured` flag controls visibility (individual entries vs. aggregated per-h
 see [Plugin Guidelines: Featured flag routing](plugin-guidelines.md#featured-flag-routing) for
 the full table of which plugins set which value.
 
-**Invariant:** periodic re-discovery (`find_or_create_software_item` Phase 1) only updates
-`installed_version` on `host_software_item` rows for items that were originally created by
-autodiscovery. Items with manually assigned plugin configs are skipped — their version detection
-is handled by the `DetectVersion` scheduled task using the user's assigned plugin config instead.
-This distinction matters when debugging why a re-discovery run did not refresh a version: check
-whether the assignment was manually created before assuming a bug in the rediscovery path.
+**Invariant:** re-discovery never overwrites a non-NULL `installed_version` on an active
+`host_software_item` row (`find_or_create_software_item`, both the Phase-1 matched-update and the
+pre-insert existing-row branches). Version fields are written only on fresh inserts, on
+link-level reactivation (the matched row had `deactivated_at` set), and when the stored version
+is NULL. Presence/provenance stamps (`last_discovered_at`, `discovery_source`,
+`missing_since = NULL`) are written on every pass. For active items the `DetectVersion` scheduled
+task is the sole version writer. This matters when debugging why a re-discovery run did not
+refresh a version: preservation is the designed behavior for any active registered item, not a
+bug in the rediscovery path.
 
 ## 3. Ignore list is separate from deletion
 

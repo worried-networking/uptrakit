@@ -265,8 +265,9 @@ Each stub below states the load-bearing invariants; follow the link for mechanic
 ### Autodiscovery
 
 Autodiscovery detects installed software on agent hosts and surfaces it as pending software items. Invariants: discovery is event-driven + periodic
-(every 6h); **no approval workflow** — items are created immediately with `enabled: true`; periodic re-discovery only updates versions for
-autodiscovery-created items; the ignore list is separate from deletion (name-based `software_ignores`, only `?ignore=true` creates one); targets are
+(every 6h); **no approval workflow** — items are created immediately with `enabled: true`; re-discovery never overwrites a non-NULL
+`installed_version` on an active item (creation, link-level reactivation, and NULL-fill still
+write); the ignore list is separate from deletion (name-based `software_ignores`, only `?ignore=true` creates one); targets are
 structured `DiscoveryTarget` values (not opaque `extra`); discovery capability and `package_identifier` validation both derive from `PluginCatalog`;
 `tenant_discovery_allowlist`/`host_discovery_allowlist` tables gate which plugin types run (host overrides tenant; unconfigured = all). Full catalog,
 PHS emissions, sudo/batch detail: [docs/development/autodiscovery-internals.md](docs/development/autodiscovery-internals.md).
