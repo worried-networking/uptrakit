@@ -240,10 +240,11 @@ These are non-negotiable design constraints. Do not violate them.
    matching `x-required-permission` OpenAPI extension; families converted to the AccessEngine model (M1.4a, starting with `hosts`) use
    `action_extractor!` (`crates/ui/web-api/src/middleware/action.rs`), declaring a native `security(...)` OpenAPI requirement instead. See
    [Authentication and Authorization](docs/security/auth-and-authorization.md).
-1. **Surface permissions are enforced at read/invoke time.** `required_permission` on surface descriptors and interactions is checked server-side
-   before dispatch, for both plugin- and service-backed surfaces; provider-origin (service-initiated) calls are denied for permission-gated
-   interactions unless the interaction opts in via `provider_invocable` — see
-   [Surface Security](docs/security/surfaces.md#provider-origin-invocation).
+1. **Surface permissions are enforced at read/invoke time.** `required_action` (a catalog `resource:verb` action
+   string, parsed to `Action` at registration admission) on surface descriptors and interactions is enforced
+   server-side via `AccessEngine` before dispatch, for both plugin- and service-backed surfaces; provider-origin
+   (service-initiated) calls are denied for action-gated interactions unless the interaction opts in via
+   `provider_invocable` — see [Surface Security](docs/security/surfaces.md#provider-origin-invocation).
 1. **Do not test upstream crate behavior.** Tests verify internal logic only, not dependency behavior (`thiserror` formatting, `serde` roundtrips
    on plain derives, `argon2` randomness). See the decision table in [Testing](docs/development/testing.md).
 1. **Time-dependent tests must use `start_paused = true` — never real sleeps.** A test is time-dependent when it calls a `tokio::time::*` API; use

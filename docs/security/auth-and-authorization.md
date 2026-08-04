@@ -342,11 +342,14 @@ the typed-permission-extractor rule — separate from both the `"self"` sentinel
 auth path` token-extraction exception used by handlers like the WebSocket upgrade route (see [Coding
 Standards](../development/coding-standards.md)).
 
-Surface descriptors and interactions carry their own `required_permission: Option<Permission>` as **registration
-data** supplied by the provider (plugin or service) at admission time, not a value known at route-definition time.
-No fixed `CanXxx` extractor can express "whatever permission this particular surface/interaction declares", so
-these handlers call `enforce_required_permission()` in the handler body against the resolved descriptor/interaction
-instead of a typed extractor, and the `#[utoipa::path]` annotation carries a literal, non-enum sentinel:
+Surface descriptors and interactions carry their own `required_action: Option<String>` as **registration data**
+supplied by the provider (plugin or service) — a canonical `resource:verb` catalog action string, not a value known
+at route-definition time. `SurfaceProxy` parses each declared value to a catalog `Action` at registration admission
+(an unparseable value rejects the whole registration); the registry stores the parsed `Action` index-aligned with
+the normalized registration. No fixed `CanXxx` extractor can express "whatever action this particular
+surface/interaction declares", so these handlers call `enforce_required_action()` in the handler body — running the
+resolved `Action` through `AccessEngine` against the resolved descriptor/interaction — instead of a typed
+extractor, and the `#[utoipa::path]` annotation carries a literal, non-enum sentinel:
 
 ```rust
 extensions(("x-required-permission" = json!("dynamic: declared by the surface descriptor / interaction")))

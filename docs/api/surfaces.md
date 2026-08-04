@@ -24,7 +24,7 @@ Response: `SurfaceResponse[]`
     "slot": "surface.page",
     "scope": "tenant",
     "targeting": "targeted",
-    "required_permission": "manage_hosts",
+    "required_action": "hosts:update",
     "provider_kind": "service",
     "required_capabilities": [
       "table_node",
@@ -152,15 +152,16 @@ an admission-time rejection.
 Every method-mapped route resolves in the same normative order:
 
 1. **404** — unknown surface ID or unknown interaction ID (`surface_not_found` / `interaction_not_found`).
-2. **403** — the descriptor's `required_permission`, then the interaction's `required_permission`
-   (`forbidden`).
+2. **403/500** — the descriptor's `required_action`, then the interaction's `required_action`, run through
+   `AccessEngine`: a deny decision is `403` (`forbidden`); an `Unavailable` authorization authority is `500`
+   (fail-closed) and is checked before the `405` sweep completes.
 3. **405** — the request's HTTP method does not match any registration for that interaction ID
    (`method_not_allowed`), with an `Allow` header listing every method actually registered for it.
 
-Permission is checked **before** the method-mismatch check, deliberately: an unauthorized caller must not be able
-to probe an interaction's registered method set (or kind) by comparing 403 vs. 405 responses across methods. This
-holds even when the interaction ID resolves to multiple method registrations with different required permissions —
-every candidate registration's permission is checked before any 405 is returned.
+The action check is run **before** the method-mismatch check, deliberately: an unauthorized caller must not be able
+to probe an interaction's registered method set (or kind) by comparing 403/500 vs. 405 responses across methods.
+This holds even when the interaction ID resolves to multiple method registrations with different required
+actions — every candidate registration's action is checked before any 405 is returned.
 
 405 responses use `StatusCode::METHOD_NOT_ALLOWED` with the platform `ErrorResponse` envelope and the new
 `method_not_allowed` error code (see [Error codes](#error-codes)).
@@ -210,9 +211,10 @@ _shape_, not actual caching — `no-store` remains the policy (see the ADR's hon
 ## Authorization
 
 `list`/`providers` are authenticated-only, with results filtered by descriptor visibility; `read`/every
-method-mapped interaction route enforce the dynamic permissions declared by the surface descriptor/interaction,
-advertised in OpenAPI via the human-readable `x-required-permission` extension. See [Shared Surface
-Security](../security/surfaces.md) for the full model, and [Authentication and
+method-mapped interaction route enforce the dynamic `required_action` declared by the surface descriptor/interaction
+through `AccessEngine`, advertised in OpenAPI via the human-readable `x-required-permission` extension (the
+extension key itself is unchanged). See [Shared Surface Security](../security/surfaces.md) for the full model, and
+[Authentication and
 Authorization](../security/auth-and-authorization.md#runtime-valued-permission-extension-surfaces) for the
 extractor-exception class this pattern belongs to.
 

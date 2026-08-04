@@ -15,35 +15,54 @@ by a fail-closed contract admission model plus per-request authorization and tra
 
 ## Permission model
 
-Permissions are evaluated at two levels:
+Authorization is evaluated at two levels, both carried on the wire as `required_action: Option<String>` — a
+canonical `resource:verb` catalog action string:
 
-- descriptor-level: `SurfaceDescriptor.required_permission`
-- interaction-level: `InteractionDescriptor.required_permission`
+- descriptor-level: `SurfaceDescriptor.required_action`
+- interaction-level: `InteractionDescriptor.required_action`
+
+Each value is parsed to a catalog `Action` by `SurfaceProxy` at **registration admission**, not at request time.
+An unparseable value rejects the whole registration (`SurfaceProviderRejectionCode::SchemaOrLimitFailure`) — every
+surface and interaction the provider registered in that call is absent, not just the offending one. A
+parseable-but-currently-unregistered action is admitted; whether it grants access is decided later, per request, by
+`AccessEngine`. The registry stores the parsed `Action` index-aligned with the normalized registration, so web-api
+never re-parses the string at request time.
 
 Enforcement points:
 
 - `GET /api/v1/surfaces` and `GET /api/v1/surfaces/{surface_id}/providers` — authenticated-only; no static permission
   variant exists for surface listing and inventing one is out of scope, so results are visibility-filtered per
   descriptor instead
-- `GET /api/v1/surfaces/{surface_id}` — descriptor permission check
+- `GET /api/v1/surfaces/{surface_id}` — descriptor action check
 - `GET|POST|PUT|DELETE /api/v1/surfaces/{surface_id}/interactions/{interaction_id}` and the
-  `.../{interaction_id}/{item_id}` variants — descriptor and interaction permission checks, on every method
+  `.../{interaction_id}/{item_id}` variants — descriptor and interaction action checks, on every method
 
 Every method-mapped interaction route resolves in the same order: unknown surface/interaction is `404`; then the
-descriptor permission, then the interaction permission (`403`); only then a method mismatch (`405`, with an `Allow`
-header). Permission is checked **before** the method-mismatch check specifically so an unauthorized caller cannot
-probe an interaction's registered method set by comparing `403` against `405` across methods. See [Shared Surface
-API](../api/surfaces.md#resolution-order-and-405-semantics) for the full resolution order and the two distinct
-`Allow`-header shapes.
+descriptor action, then the interaction action (`403` on deny, `500` if `AccessEngine`'s authority is
+`Unavailable` — fail-closed); only then a method mismatch (`405`, with an `Allow` header). So the full resolution
+order is **404 → 403/500 → 405**. The action check runs **before** the method-mismatch check specifically so an
+unauthorized caller cannot probe an interaction's registered method set by comparing `403` against `405` across
+methods. See [Shared Surface API](../api/surfaces.md#resolution-order-and-405-semantics) for the full resolution
+order and the two distinct `Allow`-header shapes.
 
-Read and invoke enforce the dynamic descriptor/interaction permissions in-handler via `enforce_required_permission` —
-this is a documented exception to the platform's typed-permission-extractor rule, because the required permission is
-runtime descriptor data no static extractor can carry; the OpenAPI operations advertise it via a human-readable
-dynamic `x-required-permission` extension. See [Authentication and
+Read and invoke enforce the dynamic descriptor/interaction actions in-handler via `enforce_required_action`, which
+runs the resolved `Action` through `AccessEngine`: `None` action allows; `Ready` authority + `Allow` decision
+allows; `Ready` + deny returns `403` and increments the `uptrakit_access_denies_total` counter; `Unavailable`
+authority returns `500` (fail-closed, never silently permissive). This is a documented exception to the platform's
+typed-permission-extractor rule, because the required action is runtime descriptor data no static extractor can
+carry; the OpenAPI operations advertise it via a human-readable dynamic `x-required-permission` extension (the
+OpenAPI extension key itself is unchanged — only the underlying descriptor field renamed). See [Authentication and
 Authorization](auth-and-authorization.md#runtime-valued-permission-extension-surfaces) for how this exception class
 is distinguished from the platform's other two documented extractor exceptions.
 
-Frontend filtering is convenience only; server checks are authoritative.
+Denied-audit entries record the failing value under the `required_action` key in `details_json` (renamed from
+`required_permission`); the `reason_code` literal `missing_required_permission` and the `permission_scope` key are
+deliberately unchanged.
+
+Frontend filtering is convenience only; server checks are authoritative. **Known regression (until M1.7):** the SPA's
+client-side filter still compares action strings against legacy permission names, so action-gated surfaces are
+hidden in the web UI for all users regardless of their actual access. Server-side enforcement via `AccessEngine` is
+unaffected — this is a display-only gap, not an authorization bypass.
 
 ### GET query strings and sensitive data
 
@@ -66,7 +85,7 @@ connection/registration logs show the rejection reason; end users see no trace o
 ### Provider-origin invocation
 
 Provider-origin (service-initiated) calls carry no user; they are gated by tenant scope plus the provider-permission
-gate: an interaction with `required_permission` is denied to `CallerOrigin::Provider` unless it sets
+gate: an interaction with `required_action` is denied to `CallerOrigin::Provider` unless it sets
 `provider_invocable`.
 
 `provider_invocable = true` means **any same-tenant provider with the `UiSurfaces` capability may invoke the

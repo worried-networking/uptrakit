@@ -105,13 +105,35 @@ In service handlers:
 4. Respond with `ServiceMessage::SurfaceActionResponse`.
 
 Service-initiated action calls are supported via `ServiceMessage::SurfaceActionRequest`, with
-correlated `ControllerMessage::SurfaceActionResponse` — but only when the target interaction is
-unpermissioned or opts in via `InteractionDescriptor.provider_invocable`. `provider_invocable` is
-a wire field with a fail-closed default: omitted on the wire, it deserializes to `false`, so a
-permissioned interaction stays closed to provider-origin calls until it explicitly opts in.
-Registration admission rejects the flag on permissioned interactions owned by `Service`-kind
-providers — only `Plugin`/`BuiltIn` providers may combine it with `required_permission`. See
+correlated `ControllerMessage::SurfaceActionResponse` — but only when the target interaction has no
+`required_action` or opts in via `InteractionDescriptor.provider_invocable`. `provider_invocable` is
+a wire field with a fail-closed default: omitted on the wire, it deserializes to `false`, so an
+action-gated interaction stays closed to provider-origin calls until it explicitly opts in.
+Registration admission rejects the flag on action-gated interactions owned by `Service`-kind
+providers — only `Plugin`/`BuiltIn` providers may combine it with `required_action`. See
 [Surface Security](../security/surfaces.md#provider-origin-invocation) for the caller-origin gate.
+
+Authoring: descriptors and interactions take catalog `Action` consts, not permission strings —
+`SurfaceDescriptorBuilder::required_action(Action)` and the equivalent field/builder on
+`InteractionDescriptor`/`AgentInteraction` (`.with_required_action(Action)`) accept a typed `Action`
+and stamp its canonical `resource:verb` string onto the wire `required_action: Option<String>` field.
+`SurfaceProxy` re-parses that string to `Action` at registration admission — a value that fails to
+parse rejects the **whole registration**, not just the offending surface or interaction: every
+surface a provider submitted in that `SurfaceRegistration`/bootstrap call is rejected together, with
+reason code `SchemaOrLimitFailure`.
+
+**Upgrade ordering across the M1.5 `required_action` boundary: controller before satellites.** Only
+out-of-process providers cross this boundary at different times — the MQTT service and agent-side
+plugins invoked through agents — because they register over the wire against whatever controller
+version they happen to connect to. Compiled-in plugins and built-ins ship inside the controller
+binary itself and have zero exposure window; they always match the controller's parser. Roll the
+controller out first: an old satellite that still sends the legacy `required_permission` key is
+still accepted (the field has `#[serde(default, alias = "required_permission", …)]`), so the
+controller-first order never disrupts an unupgraded satellite's registrations. The **rollback**
+direction is the opposite: it fails **open**. An old controller that predates this change simply
+does not recognize the `required_action` key; `#[serde(default)]` lands `None`, and the surface
+silently un-gates rather than erroring — so a controller rollback across this boundary requires
+rolling satellites back first.
 
 `ServiceSurfaceProxy` (`crates/shared/service-sdk/src/surface_proxy.rs`) implements the
 service-side oneshot-correlation pattern for these session-scoped messages: each outbound request

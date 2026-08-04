@@ -1834,7 +1834,7 @@ required — the field is `Option<String>`.
 ```rust
 AgentInteraction::new("sync", "Sync")
     .with_icon("refresh-cw")
-    .with_permission(Permission::UpdateHosts.to_string())
+    .with_required_action(actions::HOSTS_UPDATE)
     .placement(AgentInteractionPlacement::Row)
 ```
 
@@ -1850,7 +1850,7 @@ Agent-collected interactions (agent-ssh runtime built-ins, and infrastructure pl
 `#[cfg(feature = "agent-infra")]`) are authored through one builder,
 `AgentInteraction` (`crates/plugins/infrastructure/core/src/agent_interaction.rs`), instead of hand-written
 `SurfaceActionDescriptor`s (ADR-0028). `AgentInteraction::new(action_id, label)` accepts the same
-`with_icon`/`with_permission`/`with_timeout`/`destructive`/`with_confirm_entity_field`/`with_row_visible_when`
+`with_icon`/`with_required_action`/`with_timeout`/`destructive`/`with_confirm_entity_field`/`with_row_visible_when`
 builder calls as the controller-side descriptor, plus `.placement(AgentInteractionPlacement)`, which the wire
 `InteractionDescriptor` cannot express: `Internal` (wizard steps, data loads, select-source feeders — not
 placed in the action bar or rows), `Primary` (surface action bar), or `Row` (per-row table action). Behind
