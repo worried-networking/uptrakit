@@ -198,17 +198,7 @@ pub async fn require_auth(
     // extractors render it as a fail-closed 500; routes without an action
     // extractor (`me`, `logout`, unconverted families) keep their semantics.
     // `warn`, not `error`: nothing has failed for this request yet.
-    let authority = match state
-        .access_engine
-        .context(state.default_tenant_id, auth_user.user_id, None)
-        .await
-    {
-        Ok(ctx) => crate::middleware::action::AccessAuthority::Ready(ctx),
-        Err(report) => {
-            tracing::warn!(error = %report, "access context resolution failed");
-            crate::middleware::action::AccessAuthority::Unavailable
-        }
-    };
+    let authority = build_access_authority(&state, auth_user.user_id).await;
     req.extensions_mut().insert(authority);
 
     if let Some(api_token_id) = api_token_id {
@@ -220,6 +210,27 @@ pub async fn require_auth(
     req.extensions_mut().insert(SetupRequired(setup_required));
 
     next.run(req).await
+}
+
+/// Resolve the principal's grant authority for this request. The single
+/// build path for `AccessAuthority` — `require_auth` and the bespoke-auth
+/// interactive-WS handler both call it, so tenant-source or scope-plumbing
+/// changes cannot fork silently.
+pub(crate) async fn build_access_authority(
+    state: &AppState,
+    user_id: uuid::Uuid,
+) -> crate::middleware::action::AccessAuthority {
+    match state
+        .access_engine
+        .context(state.default_tenant_id, user_id, None)
+        .await
+    {
+        Ok(ctx) => crate::middleware::action::AccessAuthority::Ready(ctx),
+        Err(report) => {
+            tracing::warn!(error = %report, "access context resolution failed");
+            crate::middleware::action::AccessAuthority::Unavailable
+        }
+    }
 }
 
 /// Authenticate using a `upk_`-prefixed API token (requires DB lookup).
