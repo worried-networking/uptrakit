@@ -3,6 +3,7 @@
 //! `InteractionDescriptor` cannot express, and the agent handler.
 
 use crate::descriptor::{SurfaceActionUi, SurfaceRowCondition, SurfaceRowVisibleWhen};
+use uptrakit_shared_types::access::Action;
 
 /// Where the interaction appears on the owning agent surface.
 #[non_exhaustive]
@@ -44,8 +45,8 @@ pub struct AgentInteraction {
     pub icon: Option<String>,
     /// Optional form/wizard UI.
     pub ui: Option<SurfaceActionUi>,
-    /// Required permission ("" = none, mirrors the legacy descriptor).
-    pub permission: String,
+    /// Required catalog action (`None` = ungated).
+    pub required_action: Option<Action>,
     /// Destructive marker (with `confirm_entity_field` derives
     /// `ConfirmableAction`).
     pub destructive: bool,
@@ -75,7 +76,7 @@ impl AgentInteraction {
             label: label.into(),
             icon: None,
             ui: None,
-            permission: String::new(),
+            required_action: None,
             destructive: false,
             timeout_seconds: None,
             confirm_entity_field: None,
@@ -101,9 +102,9 @@ impl AgentInteraction {
         self
     }
 
-    /// Set the required permission.
-    pub fn with_permission(mut self, permission: impl Into<String>) -> Self {
-        self.permission = permission.into();
+    /// Set the required catalog action.
+    pub fn with_required_action(mut self, action: Action) -> Self {
+        self.required_action = Some(action);
         self
     }
 

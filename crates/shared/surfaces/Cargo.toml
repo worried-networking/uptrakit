@@ -25,6 +25,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
+uptrakit-shared-types = { workspace = true }
 utoipa = { workspace = true, optional = true }
 schemars = { workspace = true, features = ["uuid1"], optional = true }
 uuid = { workspace = true, features = ["serde", "v4"] }

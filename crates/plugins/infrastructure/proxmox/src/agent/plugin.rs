@@ -38,7 +38,7 @@ use super::db_ops;
 pub(crate) fn agent_interactions() -> Vec<AgentInteraction> {
     vec![
         AgentInteraction::new("discovered-guests", "List Discovered Guests")
-            .with_permission(uptrakit_shared_types::Permission::UpdateHosts)
+            .with_required_action(uptrakit_shared_types::access::actions::HOSTS_UPDATE)
             .with_timeout(15)
             .with_agent_handler(super::surface_actions::discovered_guests_dispatch),
         bootstrap_proxmox_guest_interaction(),
@@ -630,7 +630,7 @@ async fn reconcile_pve_config(
 fn bootstrap_proxmox_guest_interaction() -> AgentInteraction {
     AgentInteraction::new("bootstrap-proxmox-guest", "Bootstrap Discovered Guest")
         .with_icon("boxes")
-        .with_permission(uptrakit_shared_types::Permission::UpdateHosts)
+        .with_required_action(uptrakit_shared_types::access::actions::HOSTS_UPDATE)
         .with_timeout(300)
         .with_ui(SurfaceActionUi::Form(SurfaceFormDescriptor::new(vec![
             FormFieldDescriptor::new("discovered_guests", "Discovered Guests")

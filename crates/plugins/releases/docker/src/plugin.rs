@@ -9,7 +9,7 @@ use uptrakit_plugin_infrastructure_core::{
     ConfigModel, HostRequirements, HostRuntime, InteractionDelivery, PluginFamily, PluginSurface,
     PluginSurfaceRegistration, RegisteredInteraction, declare_plugin, surfaces,
 };
-use uptrakit_shared_types::Permission;
+use uptrakit_shared_types::access::actions;
 
 use crate::config::DockerConfig;
 use crate::docker_client::{DockerClient, NoopDockerClient};
@@ -293,7 +293,7 @@ pub(crate) fn docker_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
             .slot(surfaces::SLOT_SOFTWARE_ITEM_HOST_CONTEXT_MENU)
             .scope(surfaces::Scope::Global)
             .targeting(surfaces::Targeting::Universal)
-            .required_permission(Permission::UpdateSoftware.to_string())
+            .required_action(actions::SOFTWARE_UPDATE)
             .provider_kind(surfaces::ProviderKind::Plugin)
             .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                 surfaces::Capability::FormNode,
@@ -317,7 +317,7 @@ pub(crate) fn docker_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                         "Switch Tag",
                         surfaces::InteractionTransport::ControllerLocal,
                     );
-                    i.required_permission = Some(Permission::UpdateSoftware.to_string());
+                    i.required_action = Some(actions::SOFTWARE_UPDATE_STR.to_string());
                     i.input_schema = Some(surfaces::SchemaContract::Object);
                     i.result_schema = Some(surfaces::SchemaContract::Any);
                     i.form_ui = Some(surfaces::FormUiDescriptor {
@@ -387,7 +387,7 @@ pub(crate) fn docker_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                         "Load current tag",
                         surfaces::InteractionTransport::ControllerLocal,
                     );
-                    i.required_permission = Some(Permission::UpdateSoftware.to_string());
+                    i.required_action = Some(actions::SOFTWARE_UPDATE_STR.to_string());
                     i.result_schema = Some(surfaces::SchemaContract::Any);
                     i
                 },

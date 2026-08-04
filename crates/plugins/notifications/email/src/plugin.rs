@@ -13,6 +13,7 @@ use mail_send::SmtpClientBuilder;
 use rootcause::prelude::*;
 use serde::Deserialize;
 use uptrakit_shared_types::SecretString;
+use uptrakit_shared_types::access::actions;
 
 use uptrakit_notification_plugin_core::{
     DeliveryMessage, NotificationPluginError, Result, escape_html,
@@ -456,7 +457,7 @@ fn email_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                 .slot(surfaces::SLOT_SETTINGS_TABS)
                 .scope(surfaces::Scope::Global)
                 .targeting(surfaces::Targeting::Universal)
-                .required_permission("view_notifications")
+                .required_action(actions::NOTIFICATIONS_READ)
                 .provider_kind(surfaces::ProviderKind::Plugin)
                 .tab_group("notification-channels", "Notification Channels")
                 .required_capabilities(surfaces::CapabilitySet::from_capabilities([
@@ -544,7 +545,7 @@ fn email_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                             "Add Email Channel",
                             surfaces::InteractionTransport::ControllerLocal,
                         );
-                        i.required_permission = Some("manage_notifications".to_string());
+                        i.required_action = Some(actions::NOTIFICATIONS_MANAGE_STR.to_string());
                         i.input_schema = Some(surfaces::SchemaContract::Object);
                         i.result_schema = Some(surfaces::SchemaContract::Any);
                         i.form_ui = Some(surfaces::FormUiDescriptor {
@@ -610,7 +611,7 @@ fn email_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                             surfaces::InteractionTransport::ControllerLocal,
                         );
                         i.http_method = surfaces::InteractionHttpMethod::Put;
-                        i.required_permission = Some("manage_notifications".to_string());
+                        i.required_action = Some(actions::NOTIFICATIONS_MANAGE_STR.to_string());
                         i.input_schema = Some(surfaces::SchemaContract::Object);
                         i.result_schema = Some(surfaces::SchemaContract::Any);
                         i.form_ui = Some(surfaces::FormUiDescriptor {
@@ -689,7 +690,7 @@ fn email_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                             "Test",
                             surfaces::InteractionTransport::ControllerLocal,
                         );
-                        i.required_permission = Some("manage_notifications".to_string());
+                        i.required_action = Some(actions::NOTIFICATIONS_MANAGE_STR.to_string());
                         i.input_schema = Some(surfaces::SchemaContract::Object);
                         i.result_schema = Some(surfaces::SchemaContract::Any);
                         i
@@ -706,7 +707,7 @@ fn email_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                             surfaces::InteractionTransport::ControllerLocal,
                         );
                         i.http_method = surfaces::InteractionHttpMethod::Delete;
-                        i.required_permission = Some("manage_notifications".to_string());
+                        i.required_action = Some(actions::NOTIFICATIONS_MANAGE_STR.to_string());
                         i.input_schema = Some(surfaces::SchemaContract::Object);
                         i.result_schema = Some(surfaces::SchemaContract::Any);
                         i.confirmation = Some(surfaces::InteractionConfirmation {
@@ -730,7 +731,7 @@ fn email_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                             surfaces::InteractionTransport::ControllerLocal,
                         );
                         i.http_method = surfaces::InteractionHttpMethod::Put;
-                        i.required_permission = Some("manage_notifications".to_string());
+                        i.required_action = Some(actions::NOTIFICATIONS_MANAGE_STR.to_string());
                         i.input_schema = Some(surfaces::SchemaContract::Object);
                         i.result_schema = Some(surfaces::SchemaContract::Any);
                         i.sensitive_fields = vec!["password".to_string()];
@@ -908,7 +909,7 @@ fn email_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                 .slot(surfaces::SLOT_SETTINGS_BELOW_GLOBAL)
                 .scope(surfaces::Scope::Global)
                 .targeting(surfaces::Targeting::Universal)
-                .required_permission("manage_global_settings")
+                .required_action(actions::SYSTEM_SETTINGS_MANAGE)
                 .provider_kind(surfaces::ProviderKind::Plugin)
                 .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                     surfaces::Capability::SectionNode,
@@ -961,7 +962,7 @@ fn email_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                             "Send Test Email",
                             surfaces::InteractionTransport::ControllerLocal,
                         );
-                        i.required_permission = Some("manage_global_settings".to_string());
+                        i.required_action = Some(actions::SYSTEM_SETTINGS_MANAGE_STR.to_string());
                         i.result_schema = Some(surfaces::SchemaContract::Any);
                         i
                     },
@@ -978,7 +979,7 @@ fn email_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                             surfaces::InteractionTransport::ControllerLocal,
                         );
                         i.http_method = surfaces::InteractionHttpMethod::Put;
-                        i.required_permission = Some("manage_global_settings".to_string());
+                        i.required_action = Some(actions::SYSTEM_SETTINGS_MANAGE_STR.to_string());
                         i.result_schema = Some(surfaces::SchemaContract::Any);
                         i.sensitive_fields = vec!["password".to_string()];
                         i.form_ui = Some(surfaces::FormUiDescriptor {

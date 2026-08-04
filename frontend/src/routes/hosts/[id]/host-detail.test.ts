@@ -556,7 +556,7 @@ describe('Host Detail Page', () => {
 		>);
 
 		const gatedSurface = buildHostDetailSurface({
-			required_permission: Permission.VIEW_SETTINGS
+			required_action: Permission.VIEW_SETTINGS
 		});
 		vi.mocked(surfaceRegistry.getSurfacesBySlot).mockImplementation((slot: string) =>
 			slot === 'host_detail.tabs' ? [gatedSurface] : []
@@ -565,6 +565,35 @@ describe('Host Detail Page', () => {
 			...adminUser,
 			permissions: [Permission.UPDATE_HOSTS]
 		});
+
+		render(HostDetailPage);
+		await waitFor(() => expect(screen.getByRole('heading', { name: 'Production Server' })).toBeInTheDocument());
+
+		expect(document.querySelector('[data-parity-region="host_detail.tabs"]')).toBeInTheDocument();
+		expect(screen.getByText(gatedSurface.label)).toBeInTheDocument();
+		expect(screen.getByText('Access denied')).toBeInTheDocument();
+		expect(screen.getByText('You do not have permission to access this surface.')).toBeInTheDocument();
+		expect(vi.mocked(surfaceRegistry.loadSurfaceReadModels)).not.toHaveBeenCalled();
+	});
+
+	// Documents a known regression until M1.7: `required_action` is now a typed catalog
+	// action string (`resource:verb`), but `User.permissions` still carries legacy
+	// permission names. The SPA's client-side gate compares them literally, so an
+	// action-gated surface hides even from a fully-privileged admin fixture user until
+	// M1.7 aligns the client-side permission model with the action catalog. Server-side
+	// enforcement (AccessEngine) is unaffected by this client-side gap.
+	it('hides an action-gated surface even for the admin fixture user (known regression until M1.7)', async () => {
+		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
+			ReturnType<typeof api.getHost>
+		>);
+
+		const gatedSurface = buildHostDetailSurface({
+			required_action: 'hosts:update'
+		});
+		vi.mocked(surfaceRegistry.getSurfacesBySlot).mockImplementation((slot: string) =>
+			slot === 'host_detail.tabs' ? [gatedSurface] : []
+		);
+		vi.mocked(auth.getUser).mockReturnValue(adminUser);
 
 		render(HostDetailPage);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Production Server' })).toBeInTheDocument());

@@ -241,7 +241,7 @@
 
 	const surfacePageNavItems = $derived(
 		resolveSurfacePageNavItems(
-			getSurfacesBySlot('surface.page').filter((surface) => hasPermissionValue(getUser(), surface.required_permission))
+			getSurfacesBySlot('surface.page').filter((surface) => hasPermissionValue(getUser(), surface.required_action))
 		).map((item) => ({
 			id: item.id,
 			href: item.href,

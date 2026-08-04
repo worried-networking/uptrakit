@@ -154,7 +154,7 @@ pub(crate) struct StubInteraction {
     pub kind: uptrakit_wire::surfaces::InteractionKind,
     pub http_method: Option<uptrakit_wire::surfaces::InteractionHttpMethod>,
     pub params: Vec<uptrakit_wire::surfaces::ParamFieldDescriptor>,
-    pub required_permission: Option<String>,
+    pub required_action: Option<String>,
 }
 
 /// Requests recorded by [`RecordingSurfaceExecutor`], shared with the test
@@ -185,7 +185,7 @@ fn stub_surface_registration(
             )
             .with_http_method(declared_method)
             .with_params(stub.params);
-            descriptor.required_permission = stub.required_permission;
+            descriptor.required_action = stub.required_action;
             // Normalize before registering: `register_provider_for_test`
             // bypasses admission's `normalize_interaction_methods`, so do it
             // here instead — DataLoad stubs must carry `Get` like production

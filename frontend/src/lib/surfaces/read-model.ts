@@ -92,11 +92,11 @@ function collectNodeDataSourceUsage(
 	return out;
 }
 
-export function filterSurfacesByPermission<T extends { required_permission?: string }>(
+export function filterSurfacesByPermission<T extends { required_action?: string }>(
 	surfaces: T[],
 	canAccess: (requiredPermission: string | undefined) => boolean
 ): T[] {
-	return surfaces.filter((surface) => canAccess(surface.required_permission));
+	return surfaces.filter((surface) => canAccess(surface.required_action));
 }
 
 export function isSurfaceTabPending(options: {

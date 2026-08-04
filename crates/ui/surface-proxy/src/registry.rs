@@ -8,7 +8,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use parking_lot::Mutex;
 use uuid::Uuid;
 
-use uptrakit_shared_types::Permission;
+use uptrakit_shared_types::access::Action;
 use uptrakit_wire::surfaces;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -167,11 +167,86 @@ pub struct SurfaceProviderSummary {
     pub encryption_metadata: Option<surfaces::ProviderEncryptionMetadata>,
 }
 
+/// Typed `required_action`s parsed once at admission; index-aligned with
+/// `registration.surfaces` (outer) and each surface's `interactions` (inner).
+#[derive(Debug, Clone)]
+struct SurfaceActionSet {
+    descriptor: Option<Action>,
+    interactions: Vec<Option<Action>>,
+}
+
+/// Parses every surface's `required_action` string into a typed [`Action`],
+/// index-aligned with `registration.surfaces`/`interactions`. Defensive
+/// fail-closed: a parse failure here is unreachable after admission's Step 2
+/// validation, but this never silently downgrades to `None` — it maps to the
+/// same `SchemaOrLimitFailure` rejection admission would have produced.
+fn parse_surface_actions(
+    registration: &surfaces::SurfaceRegistration,
+) -> Result<Vec<SurfaceActionSet>, SurfaceRegistryError> {
+    let provider_id = registration.provider.provider_id.clone();
+    let mut reasons = Vec::new();
+    let mut surface_actions = Vec::with_capacity(registration.surfaces.len());
+
+    for surface in &registration.surfaces {
+        let surface_id = Some(surface.descriptor.surface_id.to_string());
+        let descriptor = match &surface.descriptor.required_action {
+            Some(value) => match value.parse::<Action>() {
+                Ok(action) => Some(action),
+                Err(_) => {
+                    reasons.push(SurfaceProviderRejectionReason {
+                        code: SurfaceProviderRejectionCode::SchemaOrLimitFailure,
+                        message: format!("invalid descriptor required_action `{value}`"),
+                        surface_id: surface_id.clone(),
+                    });
+                    None
+                }
+            },
+            None => None,
+        };
+
+        let mut interactions = Vec::with_capacity(surface.interactions.len());
+        for interaction in &surface.interactions {
+            let parsed = match &interaction.required_action {
+                Some(value) => match value.parse::<Action>() {
+                    Ok(action) => Some(action),
+                    Err(_) => {
+                        reasons.push(SurfaceProviderRejectionReason {
+                            code: SurfaceProviderRejectionCode::SchemaOrLimitFailure,
+                            message: format!("invalid interaction required_action `{value}`"),
+                            surface_id: surface_id.clone(),
+                        });
+                        None
+                    }
+                },
+                None => None,
+            };
+            interactions.push(parsed);
+        }
+
+        surface_actions.push(SurfaceActionSet {
+            descriptor,
+            interactions,
+        });
+    }
+
+    if reasons.is_empty() {
+        return Ok(surface_actions);
+    }
+
+    Err(SurfaceRegistryError::ProviderRejected(
+        SurfaceProviderRejection {
+            provider_id,
+            reasons,
+        },
+    ))
+}
+
 #[derive(Debug, Clone)]
 struct ProviderRegistration {
     registration: surfaces::SurfaceRegistration,
     service_id: Option<Uuid>,
     service_app_name: Option<String>,
+    surface_actions: Vec<SurfaceActionSet>,
 }
 
 #[derive(Default)]
@@ -277,6 +352,21 @@ impl SurfaceRegistry {
             return Err(error);
         }
 
+        // Computed after normalization (above) so indices align with the
+        // stored (normalized) registration.
+        let surface_actions = match parse_surface_actions(&registration) {
+            Ok(surface_actions) => surface_actions,
+            Err(error) => {
+                if let Some((existing_provider_id, entry)) = rotation_backup.clone() {
+                    upsert_provider(&mut inner, existing_provider_id.clone(), entry);
+                    inner
+                        .service_to_provider
+                        .insert(service_id, existing_provider_id);
+                }
+                return Err(error);
+            }
+        };
+
         if let Some(existing) = inner.providers.get(&provider_id)
             && existing.service_id != Some(service_id)
         {
@@ -295,6 +385,7 @@ impl SurfaceRegistry {
                 registration,
                 service_id: Some(service_id),
                 service_app_name: Some(service_app_name.to_string()),
+                surface_actions,
             },
         );
         Ok(())
@@ -311,6 +402,9 @@ impl SurfaceRegistry {
         normalize_interaction_methods(&mut registration);
         warn_dataloads_without_params(&registration);
         self.validate_registration_admission_locked(&inner, &registration, None, None)?;
+        // Computed after normalization (above) so indices align with the
+        // stored (normalized) registration.
+        let surface_actions = parse_surface_actions(&registration)?;
 
         if let Some(existing) = inner.providers.get(&provider_id)
             && existing.registration.provider.provider_kind != surfaces::ProviderKind::BuiltIn
@@ -327,6 +421,7 @@ impl SurfaceRegistry {
                 registration,
                 service_id: None,
                 service_app_name: None,
+                surface_actions,
             },
         );
         Ok(())
@@ -343,6 +438,9 @@ impl SurfaceRegistry {
         normalize_interaction_methods(&mut registration);
         warn_dataloads_without_params(&registration);
         self.validate_registration_admission_locked(&inner, &registration, None, None)?;
+        // Computed after normalization (above) so indices align with the
+        // stored (normalized) registration.
+        let surface_actions = parse_surface_actions(&registration)?;
 
         if let Some(existing) = inner.providers.get(&provider_id)
             && existing.registration.provider.provider_kind != surfaces::ProviderKind::Plugin
@@ -359,6 +457,7 @@ impl SurfaceRegistry {
                 registration,
                 service_id: None,
                 service_app_name: None,
+                surface_actions,
             },
         );
         Ok(())
@@ -539,42 +638,47 @@ impl SurfaceRegistry {
             .providers
             .get(&selected_provider.provider_id)
             .ok_or(SurfaceRegistryLookupError::SurfaceNotFound)?;
-        let surface = provider
+        let (surface_idx, surface) = provider
             .registration
             .surfaces
             .iter()
-            .find(|surface| surface.descriptor.surface_id.as_str() == surface_id)
+            .enumerate()
+            .find(|(_, surface)| surface.descriptor.surface_id.as_str() == surface_id)
             .ok_or(SurfaceRegistryLookupError::SurfaceNotFound)?;
 
-        let matching_interactions: Vec<&surfaces::InteractionDescriptor> = surface
+        let matching_interactions: Vec<(usize, &surfaces::InteractionDescriptor)> = surface
             .interactions
             .iter()
-            .filter(|interaction| interaction.interaction_id.as_str() == interaction_id)
+            .enumerate()
+            .filter(|(_, interaction)| interaction.interaction_id.as_str() == interaction_id)
             .collect();
 
-        let interaction = match method {
+        let action_set = provider.surface_actions.get(surface_idx);
+
+        let (interaction_idx, interaction) = match method {
             Some(requested_method) => matching_interactions
                 .iter()
-                .find(|interaction| &interaction.http_method == requested_method)
-                .map(|interaction| (*interaction).clone())
+                .find(|(_, interaction)| &interaction.http_method == requested_method)
+                .map(|(idx, interaction)| (*idx, (*interaction).clone()))
                 .ok_or_else(|| {
                     if matching_interactions.is_empty() {
                         SurfaceRegistryLookupError::InteractionNotFound
                     } else {
-                        method_not_allowed_error(&surface.descriptor, &matching_interactions)
+                        method_not_allowed_error(action_set, &matching_interactions)
                     }
                 })?,
             None => match matching_interactions.as_slice() {
                 [] => return Err(SurfaceRegistryLookupError::InteractionNotFound),
-                [single] => (*single).clone(),
+                [(idx, single)] => (*idx, (*single).clone()),
                 _ => {
-                    return Err(method_not_allowed_error(
-                        &surface.descriptor,
-                        &matching_interactions,
-                    ));
+                    return Err(method_not_allowed_error(action_set, &matching_interactions));
                 }
             },
         };
+
+        let descriptor_required_action = action_set.and_then(|s| s.descriptor.clone());
+        let interaction_required_action =
+            action_set.and_then(|s| s.interactions.get(interaction_idx).cloned().flatten());
 
         Ok(ResolvedSurfaceAction {
             provider_id: selected_provider.provider_id.clone(),
@@ -584,6 +688,8 @@ impl SurfaceRegistry {
             encryption_metadata: selected_provider.encryption_metadata.clone(),
             provider_kind: selected_provider.provider_kind,
             service_app_name: provider.service_app_name.clone(),
+            descriptor_required_action,
+            interaction_required_action,
         })
     }
 
@@ -609,17 +715,22 @@ impl SurfaceRegistry {
             .providers
             .get(&selected_provider_id)
             .ok_or(SurfaceRegistryLookupError::SurfaceNotFound)?;
-        let surface = provider
+        let (surface_idx, surface) = provider
             .registration
             .surfaces
             .iter()
-            .find(|surface| surface.descriptor.surface_id.as_str() == surface_id)
+            .enumerate()
+            .find(|(_, surface)| surface.descriptor.surface_id.as_str() == surface_id)
             .ok_or(SurfaceRegistryLookupError::SurfaceNotFound)?;
 
         Ok(ResolvedSurfaceRead {
             descriptor: surface.descriptor.clone(),
             interactions: surface.interactions.clone(),
             data_sources: surface.data_sources.clone(),
+            required_action: provider
+                .surface_actions
+                .get(surface_idx)
+                .and_then(|s| s.descriptor.clone()),
         })
     }
 
@@ -783,23 +894,33 @@ impl SurfaceRegistry {
                 });
             }
 
-            if let Some(permission) = &surface.descriptor.required_permission
-                && permission.parse::<Permission>().is_err()
+            if let Some(value) = &surface.descriptor.required_action
+                && value.parse::<Action>().is_err()
             {
+                tracing::warn!(
+                    provider_id = %provider_id,
+                    value = %value,
+                    "surface registration rejected: invalid descriptor required_action"
+                );
                 reasons.push(SurfaceProviderRejectionReason {
                     code: SurfaceProviderRejectionCode::SchemaOrLimitFailure,
-                    message: format!("invalid descriptor permission `{permission}`"),
+                    message: format!("invalid descriptor required_action `{value}`"),
                     surface_id: surface_id.clone(),
                 });
             }
 
             for interaction in &surface.interactions {
-                if let Some(permission) = &interaction.required_permission
-                    && permission.parse::<Permission>().is_err()
+                if let Some(value) = &interaction.required_action
+                    && value.parse::<Action>().is_err()
                 {
+                    tracing::warn!(
+                        provider_id = %provider_id,
+                        value = %value,
+                        "surface registration rejected: invalid interaction required_action"
+                    );
                     reasons.push(SurfaceProviderRejectionReason {
                         code: SurfaceProviderRejectionCode::SchemaOrLimitFailure,
-                        message: format!("invalid interaction permission `{permission}`"),
+                        message: format!("invalid interaction required_action `{value}`"),
                         surface_id: surface_id.clone(),
                     });
                 }
@@ -1011,6 +1132,8 @@ impl SurfaceRegistry {
         service_app_name: Option<&str>,
     ) {
         let provider_id = registration.provider.provider_id.clone();
+        let surface_actions = parse_surface_actions(&registration)
+            .expect("test-fixture registrations must carry parseable required_action values");
         let mut inner = self.inner.lock();
         if let Some(service_id) = service_id {
             inner
@@ -1024,6 +1147,7 @@ impl SurfaceRegistry {
                 registration,
                 service_id,
                 service_app_name: service_app_name.map(ToOwned::to_owned),
+                surface_actions,
             },
         );
     }
@@ -1039,6 +1163,16 @@ pub struct ResolvedSurfaceAction {
     pub descriptor: surfaces::SurfaceDescriptor,
     pub interaction: surfaces::InteractionDescriptor,
     pub encryption_metadata: Option<surfaces::ProviderEncryptionMetadata>,
+    /// Typed, parsed-at-admission `required_action` for `descriptor`.
+    /// Authoritative for enforcement; `descriptor.required_action` (the wire
+    /// string field) remains reachable but is display/wire data only — never
+    /// consult it for authorization.
+    pub descriptor_required_action: Option<Action>,
+    /// Typed, parsed-at-admission `required_action` for `interaction`.
+    /// Authoritative for enforcement; `interaction.required_action` (the
+    /// wire string field) remains reachable but is display/wire data only —
+    /// never consult it for authorization.
+    pub interaction_required_action: Option<Action>,
 }
 
 #[derive(Debug, Clone)]
@@ -1047,6 +1181,11 @@ pub struct ResolvedSurfaceRead {
     pub descriptor: surfaces::SurfaceDescriptor,
     pub interactions: Vec<surfaces::InteractionDescriptor>,
     pub data_sources: Vec<surfaces::DataSourceDescriptor>,
+    /// Typed, parsed-at-admission `required_action` for `descriptor`.
+    /// Authoritative for enforcement; `descriptor.required_action` (the wire
+    /// string field) remains reachable but is display/wire data only — never
+    /// consult it for authorization.
+    pub required_action: Option<Action>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1060,44 +1199,45 @@ pub enum SurfaceRegistryLookupError {
     /// The interaction id exists but none of its registered `(id, method)`
     /// registrations match the requested method. Carries every HTTP method
     /// currently registered for that interaction id (for building an `Allow`
-    /// header or a descriptive 405 message), plus the permission strings
-    /// needed to keep 403-before-405 ordering in the handler.
+    /// header or a descriptive 405 message), plus the typed actions needed
+    /// to keep 403-before-405 ordering in the handler.
     MethodNotAllowed {
         /// Every method registered for this interaction ID, in
         /// `KNOWN_INTERACTION_HTTP_METHODS` order (stable `Allow` header
         /// order), not registration/iteration order.
         allowed: Vec<surfaces::InteractionHttpMethod>,
-        /// The surface descriptor's `required_permission`.
-        descriptor_required_permission: Option<String>,
-        /// Each matching interaction's `required_permission`, aligned
+        /// The surface descriptor's typed `required_action`.
+        descriptor_required_action: Option<Action>,
+        /// Each matching interaction's typed `required_action`, aligned
         /// index-for-index with `allowed`.
-        interaction_required_permissions: Vec<Option<String>>,
+        interaction_required_actions: Vec<Option<Action>>,
     },
 }
 
 /// Builds the `MethodNotAllowed` payload for a set of same-id interaction
 /// candidates: `allowed` ordered by `KNOWN_INTERACTION_HTTP_METHODS` (stable
-/// `Allow` header order), with `interaction_required_permissions` aligned
+/// `Allow` header order), with `interaction_required_actions` aligned
 /// index-for-index to `allowed`.
 fn method_not_allowed_error(
-    descriptor: &surfaces::SurfaceDescriptor,
-    candidates: &[&surfaces::InteractionDescriptor],
+    action_set: Option<&SurfaceActionSet>,
+    candidates: &[(usize, &surfaces::InteractionDescriptor)],
 ) -> SurfaceRegistryLookupError {
     let mut allowed = Vec::new();
-    let mut interaction_required_permissions = Vec::new();
+    let mut interaction_required_actions = Vec::new();
     for known_method in surfaces::KNOWN_INTERACTION_HTTP_METHODS {
-        if let Some(candidate) = candidates
+        if let Some((idx, _candidate)) = candidates
             .iter()
-            .find(|candidate| &candidate.http_method == known_method)
+            .find(|(_, candidate)| &candidate.http_method == known_method)
         {
             allowed.push(known_method.clone());
-            interaction_required_permissions.push(candidate.required_permission.clone());
+            interaction_required_actions
+                .push(action_set.and_then(|s| s.interactions.get(*idx).cloned().flatten()));
         }
     }
     SurfaceRegistryLookupError::MethodNotAllowed {
         allowed,
-        descriptor_required_permission: descriptor.required_permission.clone(),
-        interaction_required_permissions,
+        descriptor_required_action: action_set.and_then(|s| s.descriptor.clone()),
+        interaction_required_actions,
     }
 }
 
@@ -1502,6 +1642,7 @@ fn surface_page_for_slot(slot: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uptrakit_shared_types::access::actions;
 
     fn tenant_a() -> Uuid {
         Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap()
@@ -1541,7 +1682,7 @@ mod tests {
                     .slot("software.tabs")
                     .scope(surfaces::Scope::Tenant)
                     .targeting(surfaces::Targeting::Targeted)
-                    .required_permission("view_software")
+                    .required_action(actions::SOFTWARE_READ)
                     .provider_kind(surfaces::ProviderKind::Service)
                     .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                         surfaces::Capability::TextBlockNode,
@@ -1559,7 +1700,7 @@ mod tests {
                         "Refresh",
                         surfaces::InteractionTransport::ProviderProxied,
                     );
-                    i.required_permission = Some("update_software".to_string());
+                    i.required_action = Some(actions::SOFTWARE_UPDATE.to_string());
                     i.input_schema = Some(surfaces::SchemaContract::Object);
                     i.result_schema = Some(surfaces::SchemaContract::Object);
                     i.sensitive_fields = vec!["token".to_string()];
@@ -1605,7 +1746,7 @@ mod tests {
                     .slot("software.tabs")
                     .scope(surfaces::Scope::Tenant)
                     .targeting(surfaces::Targeting::Universal)
-                    .required_permission("view_software")
+                    .required_action(actions::SOFTWARE_READ)
                     .provider_kind(surfaces::ProviderKind::Plugin)
                     .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                         surfaces::Capability::TextBlockNode,
@@ -1623,7 +1764,7 @@ mod tests {
                         "Save Global SMTP",
                         surfaces::InteractionTransport::ControllerLocal,
                     );
-                    i.required_permission = Some("update_software".to_string());
+                    i.required_action = Some(actions::SOFTWARE_UPDATE.to_string());
                     i.input_schema = Some(surfaces::SchemaContract::Object);
                     i.result_schema = Some(surfaces::SchemaContract::Object);
                     i.timeout_seconds = Some(30);
@@ -1881,14 +2022,14 @@ mod tests {
             "Mutate",
             surfaces::InteractionTransport::ProviderProxied,
         );
-        mutation.required_permission = Some("mutate_perm".to_string());
+        mutation.required_action = Some(actions::SOFTWARE_UPDATE.to_string());
         let mut data_load = surfaces::InteractionDescriptor::new(
             id,
             surfaces::InteractionKind::DataLoad,
             "Load",
             surfaces::InteractionTransport::ProviderProxied,
         );
-        data_load.required_permission = Some("load_perm".to_string());
+        data_load.required_action = Some(actions::SOFTWARE_READ.to_string());
 
         // Register MutationAction (POST) before DataLoad (GET) to prove
         // `allowed` is ordered by `KNOWN_INTERACTION_HTTP_METHODS`, not
@@ -1901,8 +2042,8 @@ mod tests {
             ],
             vec![mutation, data_load],
         );
-        registration.surfaces[0].descriptor.required_permission =
-            Some("descriptor_perm".to_string());
+        registration.surfaces[0].descriptor.required_action =
+            Some(actions::HOSTS_UPDATE.to_string());
 
         registry
             .bootstrap_plugin(registration)
@@ -1920,8 +2061,8 @@ mod tests {
         match result {
             Err(SurfaceRegistryLookupError::MethodNotAllowed {
                 allowed,
-                descriptor_required_permission,
-                interaction_required_permissions,
+                descriptor_required_action,
+                interaction_required_actions,
             }) => {
                 assert_eq!(
                     allowed,
@@ -1932,20 +2073,14 @@ mod tests {
                     "allowed must be ordered GET-before-POST (KNOWN_INTERACTION_HTTP_METHODS \
                      order), regardless that POST (MutationAction) was registered first"
                 );
+                assert_eq!(descriptor_required_action, Some(actions::HOSTS_UPDATE));
                 assert_eq!(
-                    descriptor_required_permission,
-                    Some("descriptor_perm".to_string())
-                );
-                assert_eq!(
-                    interaction_required_permissions,
-                    vec![
-                        Some("load_perm".to_string()),
-                        Some("mutate_perm".to_string())
-                    ],
-                    "interaction_required_permissions must align index-for-index with allowed"
+                    interaction_required_actions,
+                    vec![Some(actions::SOFTWARE_READ), Some(actions::SOFTWARE_UPDATE)],
+                    "interaction_required_actions must align index-for-index with allowed"
                 );
             }
-            other => panic!("expected MethodNotAllowed with permissions, got {other:?}"),
+            other => panic!("expected MethodNotAllowed with actions, got {other:?}"),
         }
     }
 
@@ -2063,6 +2198,216 @@ mod tests {
         assert_eq!(
             rejection.reasons[0].code,
             SurfaceProviderRejectionCode::UnsupportedGeneration
+        );
+    }
+
+    #[test]
+    fn register_service_rejects_unparseable_descriptor_required_action() {
+        let registry = registry();
+        let mut registration = registration_for_service("service.provider-a", tenant_a());
+        registration.surfaces[0].descriptor.required_action = Some("update_hosts".to_string());
+
+        let err = registry
+            .register_service(
+                Uuid::now_v7(),
+                "uptrakit-agent-ssh",
+                Some(tenant_a()),
+                registration,
+            )
+            .expect_err("unparseable descriptor required_action must be rejected");
+        let rejection = rejection(err);
+        assert!(
+            rejection.reasons.iter().any(|reason| reason.code
+                == SurfaceProviderRejectionCode::SchemaOrLimitFailure
+                && reason.message.contains("descriptor required_action")),
+            "rejection reasons: {:?}",
+            rejection.reasons
+        );
+    }
+
+    #[test]
+    fn bootstrap_plugin_rejects_unparseable_descriptor_required_action() {
+        let registry = registry();
+        let mut registration = registration_for_plugin_same_surface("plugin-a");
+        registration.surfaces[0].descriptor.required_action = Some("update_hosts".to_string());
+
+        let err = registry
+            .bootstrap_plugin(registration)
+            .expect_err("unparseable descriptor required_action must be rejected");
+        let rejection = rejection(err);
+        assert!(
+            rejection.reasons.iter().any(|reason| reason.code
+                == SurfaceProviderRejectionCode::SchemaOrLimitFailure
+                && reason.message.contains("descriptor required_action")),
+            "rejection reasons: {:?}",
+            rejection.reasons
+        );
+    }
+
+    #[test]
+    fn register_service_rejects_unparseable_interaction_required_action() {
+        let registry = registry();
+        let mut registration = registration_for_service("service.provider-a", tenant_a());
+        registration.surfaces[0].interactions[0].required_action =
+            Some("not-an-action".to_string());
+
+        let err = registry
+            .register_service(
+                Uuid::now_v7(),
+                "uptrakit-agent-ssh",
+                Some(tenant_a()),
+                registration,
+            )
+            .expect_err("unparseable interaction required_action must be rejected");
+        let rejection = rejection(err);
+        assert!(
+            rejection.reasons.iter().any(|reason| reason.code
+                == SurfaceProviderRejectionCode::SchemaOrLimitFailure
+                && reason.message.contains("interaction required_action")),
+            "rejection reasons: {:?}",
+            rejection.reasons
+        );
+    }
+
+    #[test]
+    fn bootstrap_plugin_rejects_unparseable_interaction_required_action() {
+        let registry = registry();
+        let mut registration = registration_for_plugin_same_surface("plugin-a");
+        registration.surfaces[0].interactions[0].required_action =
+            Some("not-an-action".to_string());
+
+        let err = registry
+            .bootstrap_plugin(registration)
+            .expect_err("unparseable interaction required_action must be rejected");
+        let rejection = rejection(err);
+        assert!(
+            rejection.reasons.iter().any(|reason| reason.code
+                == SurfaceProviderRejectionCode::SchemaOrLimitFailure
+                && reason.message.contains("interaction required_action")),
+            "rejection reasons: {:?}",
+            rejection.reasons
+        );
+    }
+
+    #[test]
+    fn registration_with_parseable_unregistered_dynamic_action_admits() {
+        let registry = registry();
+        let mut registration = registration_for_service("service.provider-a", tenant_a());
+        registration.surfaces[0].descriptor.required_action = Some("surface.ghost:use".to_string());
+
+        registry
+            .register_service(
+                Uuid::now_v7(),
+                "uptrakit-agent-ssh",
+                Some(tenant_a()),
+                registration,
+            )
+            .expect(
+                "a parseable dynamic-namespace action must admit even though no such \
+                 surface is registered — registry membership is a decision-time concern, \
+                 not an admission-time one",
+            );
+
+        let read = registry
+            .resolve_surface_read(tenant_a(), "ssh.guest.panel", &AllProvidersVisible)
+            .expect("read resolution should succeed");
+        assert_eq!(
+            read.required_action,
+            Some(
+                "surface.ghost:use"
+                    .parse::<Action>()
+                    .expect("dynamic surface action must parse")
+            )
+        );
+    }
+
+    #[test]
+    fn legacy_required_permission_key_deserializes_and_rejects_invalid_value() {
+        let registration = registration_for_service("service.provider-a", tenant_a());
+        let mut value = serde_json::to_value(&registration).expect("registration should serialize");
+        let interaction = &mut value["surfaces"][0]["interactions"][0];
+        let obj = interaction
+            .as_object_mut()
+            .expect("interaction is an object");
+        obj.remove("required_action");
+        obj.insert(
+            "required_permission".to_string(),
+            serde_json::Value::String("update_hosts".to_string()),
+        );
+
+        let registration: surfaces::SurfaceRegistration =
+            serde_json::from_value(value).expect("legacy key must deserialize via alias");
+        assert_eq!(
+            registration.surfaces[0].interactions[0].required_action,
+            Some("update_hosts".to_string()),
+            "legacy `required_permission` key must land in `required_action` via serde alias"
+        );
+
+        let registry = registry();
+        let err = registry
+            .register_service(
+                Uuid::now_v7(),
+                "uptrakit-agent-ssh",
+                Some(tenant_a()),
+                registration,
+            )
+            .expect_err("unparseable legacy-key value must be rejected");
+        let rejection = rejection(err);
+        assert!(
+            rejection
+                .reasons
+                .iter()
+                .any(|reason| reason.code == SurfaceProviderRejectionCode::SchemaOrLimitFailure),
+            "rejection reasons: {:?}",
+            rejection.reasons
+        );
+    }
+
+    #[test]
+    fn legacy_required_permission_key_admits_valid_value_and_stores_typed() {
+        let registration = registration_for_service("service.provider-a", tenant_a());
+        let mut value = serde_json::to_value(&registration).expect("registration should serialize");
+        let interaction = &mut value["surfaces"][0]["interactions"][0];
+        let obj = interaction
+            .as_object_mut()
+            .expect("interaction is an object");
+        obj.remove("required_action");
+        obj.insert(
+            "required_permission".to_string(),
+            serde_json::Value::String("hosts:update".to_string()),
+        );
+
+        let registration: surfaces::SurfaceRegistration =
+            serde_json::from_value(value).expect("legacy key must deserialize via alias");
+        assert_eq!(
+            registration.surfaces[0].interactions[0].required_action,
+            Some("hosts:update".to_string()),
+            "legacy `required_permission` key must land in `required_action` via serde alias"
+        );
+
+        let registry = registry();
+        registry
+            .register_service(
+                Uuid::now_v7(),
+                "uptrakit-agent-ssh",
+                Some(tenant_a()),
+                registration,
+            )
+            .expect("valid legacy-key value must admit");
+
+        let resolved = registry
+            .resolve_surface_action_for_method(
+                tenant_a(),
+                "ssh.guest.panel",
+                "refresh",
+                None,
+                Some("service.provider-a"),
+                &AllProvidersVisible,
+            )
+            .expect("resolve should succeed");
+        assert_eq!(
+            resolved.interaction_required_action,
+            Some(actions::HOSTS_UPDATE)
         );
     }
 
@@ -2554,7 +2899,7 @@ mod tests {
                     .slot(surfaces::SLOT_SOFTWARE_ITEM_HOST_CONTEXT_MENU)
                     .scope(surfaces::Scope::Tenant)
                     .targeting(surfaces::Targeting::Targeted)
-                    .required_permission("update_software")
+                    .required_action(actions::SOFTWARE_UPDATE)
                     .provider_kind(surfaces::ProviderKind::Plugin)
                     .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                         surfaces::Capability::TextBlockNode,

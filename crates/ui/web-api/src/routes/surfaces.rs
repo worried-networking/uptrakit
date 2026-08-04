@@ -1,8 +1,3 @@
-#![expect(
-    clippy::expect_used,
-    reason = "expect used for infallible parse; Permission::from_str uses Infallible error"
-)]
-
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,7 +10,8 @@ use axum::{
 };
 use sea_orm::EntityTrait;
 use serde_json::Value;
-use uptrakit_shared_types::Permission;
+use uptrakit_controller_core::access::AccessEngine;
+use uptrakit_shared_types::access::{Action, Decision};
 use uptrakit_web_api_types::surfaces::{
     InvokeSurfaceInteractionRequest, ListSurfacesQuery, ReadSurfaceInteractionQuery,
     SurfaceProviderAvailability, SurfaceProviderInfo, SurfaceReadResponse, SurfaceResponse,
@@ -27,6 +23,7 @@ use uptrakit_shared_db::entity::system_service;
 
 use crate::AppState;
 use crate::error_response::{error_response, error_response_with_code};
+use crate::middleware::action::AccessAuthority;
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, AuthenticatedUser};
 use crate::middleware::tenant_context::TenantContext;
 use crate::surface_proxy::entity_enrichment::enrich_entity_links;
@@ -75,8 +72,17 @@ fn with_private_no_store(mut response: Response) -> Response {
 fn group_surface_catalog(catalog: Vec<SurfaceCatalogItem>) -> Vec<SurfaceResponse> {
     let mut grouped: BTreeMap<(String, String), SurfaceResponse> = BTreeMap::new();
     for item in catalog {
-        let descriptor_key =
-            serde_json::to_string(&item.descriptor).expect("surface descriptor should serialize");
+        let descriptor_key = serde_json::to_string(&item.descriptor).unwrap_or_else(|error| {
+            // `SurfaceDescriptor` has no non-string map keys or non-finite
+            // floats, so this is infallible in practice; fail safe rather
+            // than panic by treating an unexpected failure as a unique
+            // (never-merged) key instead of an unwrap/expect.
+            tracing::error!(
+                ?error,
+                "surface descriptor failed to serialize for grouping key; treating as unique"
+            );
+            Uuid::now_v7().to_string()
+        });
         let entry = grouped
             .entry((item.surface_id, descriptor_key))
             .or_insert_with(|| SurfaceResponse {
@@ -214,7 +220,8 @@ pub async fn list_surface_providers(
 pub async fn get_surface_read(
     State(state): State<Arc<AppState>>,
     tenant_ctx: TenantContext,
-    axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
+    axum::Extension(_auth_user): axum::Extension<AuthenticatedUser>,
+    axum::Extension(authority): axum::Extension<AccessAuthority>,
     Path(surface_id): Path<String>,
 ) -> Response {
     let response = async {
@@ -227,9 +234,10 @@ pub async fn get_surface_read(
             Err(error) => return map_lookup_error(error),
         };
 
-        if let Some(response) = enforce_required_permission(
-            resolved.descriptor.required_permission.as_deref(),
-            &auth_user,
+        if let Some(response) = enforce_required_action(
+            resolved.required_action.as_ref(),
+            &authority,
+            &state.access_engine,
             &surface_id,
             "surface",
         ) {
@@ -259,6 +267,30 @@ struct InteractionCallCtx {
     tenant_ctx: TenantContext,
     auth_user: crate::middleware::require_auth::AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
+    authority: AccessAuthority,
+}
+
+/// Bundles the `Method` and raw-query extractors every GET-family
+/// wrapper handler needs, keeping their own argument list under clippy's
+/// `too_many_arguments` threshold now that `authority` joins the list.
+pub struct GetInteractionRequest {
+    is_head: bool,
+    raw_query: Vec<(String, String)>,
+}
+
+impl axum::extract::FromRequestParts<Arc<AppState>> for GetInteractionRequest {
+    type Rejection = Response;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &Arc<AppState>,
+    ) -> Result<Self, Self::Rejection> {
+        let is_head = parts.method == axum::http::Method::HEAD;
+        let Query(raw_query) = Query::<Vec<(String, String)>>::from_request_parts(parts, state)
+            .await
+            .map_err(IntoResponse::into_response)?;
+        Ok(Self { is_head, raw_query })
+    }
 }
 
 /// Per-method-family input to [`dispatch_surface_interaction`]: a JSON body
@@ -370,44 +402,46 @@ async fn dispatch_surface_interaction(
         Ok(resolved) => resolved,
         Err(SurfaceRegistryLookupError::MethodNotAllowed {
             allowed,
-            descriptor_required_permission,
-            interaction_required_permissions,
+            descriptor_required_action,
+            interaction_required_actions,
         }) => {
-            // Anti-probe ordering: check every candidate permission (descriptor,
+            // Anti-probe ordering: check every candidate action (descriptor,
             // then each sibling interaction registration) BEFORE disclosing the
             // 405/Allow set, so an unauthorized caller gets 403 instead of a
             // methods-that-exist leak.
-            if let Some(response) = enforce_required_permission(
-                descriptor_required_permission.as_deref(),
-                &ctx.auth_user,
+            if let Some(response) = enforce_required_action(
+                descriptor_required_action.as_ref(),
+                &ctx.authority,
+                &ctx.state.access_engine,
                 &surface_id,
                 "surface",
             ) {
                 if response.status() == StatusCode::FORBIDDEN
-                    && let Some(required_permission) = descriptor_required_permission.as_deref()
+                    && let Some(required) = descriptor_required_action.as_ref()
                 {
                     emit_surface_action_permission_denied_audit(
                         &audit_ctx,
                         "surface",
-                        required_permission,
+                        &required.to_string(),
                     );
                 }
                 return wrap(response);
             }
-            for candidate_permission in &interaction_required_permissions {
-                if let Some(response) = enforce_required_permission(
-                    candidate_permission.as_deref(),
-                    &ctx.auth_user,
+            for candidate_action in &interaction_required_actions {
+                if let Some(response) = enforce_required_action(
+                    candidate_action.as_ref(),
+                    &ctx.authority,
+                    &ctx.state.access_engine,
                     &surface_id,
                     "interaction",
                 ) {
                     if response.status() == StatusCode::FORBIDDEN
-                        && let Some(required_permission) = candidate_permission.as_deref()
+                        && let Some(required) = candidate_action.as_ref()
                     {
                         emit_surface_action_permission_denied_audit(
                             &audit_ctx,
                             "interaction",
-                            required_permission,
+                            &required.to_string(),
                         );
                     }
                     return wrap(response);
@@ -424,32 +458,38 @@ async fn dispatch_surface_interaction(
 
     // Step 3: descriptor then interaction permission checks (unchanged from
     // the legacy route, now method-aware via the audit `method` field).
-    if let Some(response) = enforce_required_permission(
-        resolved.descriptor.required_permission.as_deref(),
-        &ctx.auth_user,
+    if let Some(response) = enforce_required_action(
+        resolved.descriptor_required_action.as_ref(),
+        &ctx.authority,
+        &ctx.state.access_engine,
         &surface_id,
         "interaction",
     ) {
         if response.status() == StatusCode::FORBIDDEN
-            && let Some(required_permission) = resolved.descriptor.required_permission.as_deref()
+            && let Some(required) = resolved.descriptor_required_action.as_ref()
         {
-            emit_surface_action_permission_denied_audit(&audit_ctx, "surface", required_permission);
+            emit_surface_action_permission_denied_audit(
+                &audit_ctx,
+                "surface",
+                &required.to_string(),
+            );
         }
         return wrap(response);
     }
-    if let Some(response) = enforce_required_permission(
-        resolved.interaction.required_permission.as_deref(),
-        &ctx.auth_user,
+    if let Some(response) = enforce_required_action(
+        resolved.interaction_required_action.as_ref(),
+        &ctx.authority,
+        &ctx.state.access_engine,
         &surface_id,
         "interaction",
     ) {
         if response.status() == StatusCode::FORBIDDEN
-            && let Some(required_permission) = resolved.interaction.required_permission.as_deref()
+            && let Some(required) = resolved.interaction_required_action.as_ref()
         {
             emit_surface_action_permission_denied_audit(
                 &audit_ctx,
                 "interaction",
-                required_permission,
+                &required.to_string(),
             );
         }
         return wrap(response);
@@ -609,10 +649,10 @@ pub async fn read_surface_interaction(
     State(state): State<Arc<AppState>>,
     tenant_ctx: TenantContext,
     axum::Extension(auth_user): axum::Extension<crate::middleware::require_auth::AuthenticatedUser>,
+    axum::Extension(authority): axum::Extension<AccessAuthority>,
     api_token_id: Option<axum::Extension<AuthenticatedApiTokenId>>,
-    http_method: axum::http::Method,
     Path((surface_id, interaction_id)): Path<(String, String)>,
-    Query(raw_query): Query<Vec<(String, String)>>,
+    get_request: GetInteractionRequest,
 ) -> Response {
     dispatch_surface_interaction(
         InteractionCallCtx {
@@ -620,14 +660,15 @@ pub async fn read_surface_interaction(
             tenant_ctx,
             auth_user,
             api_token_id: api_token_id.map(|axum::Extension(id)| id),
+            authority,
         },
         surfaces::InteractionHttpMethod::Get,
         surface_id,
         interaction_id,
         None,
         InteractionInput::Get {
-            raw_query,
-            is_head: http_method == axum::http::Method::HEAD,
+            raw_query: get_request.raw_query,
+            is_head: get_request.is_head,
         },
     )
     .await
@@ -665,6 +706,7 @@ pub async fn invoke_surface_interaction(
     State(state): State<Arc<AppState>>,
     tenant_ctx: TenantContext,
     axum::Extension(auth_user): axum::Extension<crate::middleware::require_auth::AuthenticatedUser>,
+    axum::Extension(authority): axum::Extension<AccessAuthority>,
     api_token_id: Option<axum::Extension<AuthenticatedApiTokenId>>,
     Path((surface_id, interaction_id)): Path<(String, String)>,
     Json(body): Json<InvokeSurfaceInteractionRequest>,
@@ -675,6 +717,7 @@ pub async fn invoke_surface_interaction(
             tenant_ctx,
             auth_user,
             api_token_id: api_token_id.map(|axum::Extension(id)| id),
+            authority,
         },
         surfaces::InteractionHttpMethod::Post,
         surface_id,
@@ -717,6 +760,7 @@ pub async fn update_surface_interaction(
     State(state): State<Arc<AppState>>,
     tenant_ctx: TenantContext,
     axum::Extension(auth_user): axum::Extension<crate::middleware::require_auth::AuthenticatedUser>,
+    axum::Extension(authority): axum::Extension<AccessAuthority>,
     api_token_id: Option<axum::Extension<AuthenticatedApiTokenId>>,
     Path((surface_id, interaction_id)): Path<(String, String)>,
     body: Option<Json<InvokeSurfaceInteractionRequest>>,
@@ -727,6 +771,7 @@ pub async fn update_surface_interaction(
             tenant_ctx,
             auth_user,
             api_token_id: api_token_id.map(|axum::Extension(id)| id),
+            authority,
         },
         surfaces::InteractionHttpMethod::Put,
         surface_id,
@@ -768,6 +813,7 @@ pub async fn delete_surface_interaction(
     State(state): State<Arc<AppState>>,
     tenant_ctx: TenantContext,
     axum::Extension(auth_user): axum::Extension<crate::middleware::require_auth::AuthenticatedUser>,
+    axum::Extension(authority): axum::Extension<AccessAuthority>,
     api_token_id: Option<axum::Extension<AuthenticatedApiTokenId>>,
     Path((surface_id, interaction_id)): Path<(String, String)>,
     body: Option<Json<InvokeSurfaceInteractionRequest>>,
@@ -778,6 +824,7 @@ pub async fn delete_surface_interaction(
             tenant_ctx,
             auth_user,
             api_token_id: api_token_id.map(|axum::Extension(id)| id),
+            authority,
         },
         surfaces::InteractionHttpMethod::Delete,
         surface_id,
@@ -819,10 +866,10 @@ pub async fn read_surface_interaction_item(
     State(state): State<Arc<AppState>>,
     tenant_ctx: TenantContext,
     axum::Extension(auth_user): axum::Extension<crate::middleware::require_auth::AuthenticatedUser>,
+    axum::Extension(authority): axum::Extension<AccessAuthority>,
     api_token_id: Option<axum::Extension<AuthenticatedApiTokenId>>,
-    http_method: axum::http::Method,
     Path((surface_id, interaction_id, item_id)): Path<(String, String, String)>,
-    Query(raw_query): Query<Vec<(String, String)>>,
+    get_request: GetInteractionRequest,
 ) -> Response {
     dispatch_surface_interaction(
         InteractionCallCtx {
@@ -830,14 +877,15 @@ pub async fn read_surface_interaction_item(
             tenant_ctx,
             auth_user,
             api_token_id: api_token_id.map(|axum::Extension(id)| id),
+            authority,
         },
         surfaces::InteractionHttpMethod::Get,
         surface_id,
         interaction_id,
         Some(item_id),
         InteractionInput::Get {
-            raw_query,
-            is_head: http_method == axum::http::Method::HEAD,
+            raw_query: get_request.raw_query,
+            is_head: get_request.is_head,
         },
     )
     .await
@@ -903,6 +951,7 @@ pub async fn update_surface_interaction_item(
     State(state): State<Arc<AppState>>,
     tenant_ctx: TenantContext,
     axum::Extension(auth_user): axum::Extension<crate::middleware::require_auth::AuthenticatedUser>,
+    axum::Extension(authority): axum::Extension<AccessAuthority>,
     api_token_id: Option<axum::Extension<AuthenticatedApiTokenId>>,
     Path((surface_id, interaction_id, item_id)): Path<(String, String, String)>,
     body: Option<Json<InvokeSurfaceInteractionRequest>>,
@@ -913,6 +962,7 @@ pub async fn update_surface_interaction_item(
             tenant_ctx,
             auth_user,
             api_token_id: api_token_id.map(|axum::Extension(id)| id),
+            authority,
         },
         surfaces::InteractionHttpMethod::Put,
         surface_id,
@@ -955,6 +1005,7 @@ pub async fn delete_surface_interaction_item(
     State(state): State<Arc<AppState>>,
     tenant_ctx: TenantContext,
     axum::Extension(auth_user): axum::Extension<crate::middleware::require_auth::AuthenticatedUser>,
+    axum::Extension(authority): axum::Extension<AccessAuthority>,
     api_token_id: Option<axum::Extension<AuthenticatedApiTokenId>>,
     Path((surface_id, interaction_id, item_id)): Path<(String, String, String)>,
     body: Option<Json<InvokeSurfaceInteractionRequest>>,
@@ -965,6 +1016,7 @@ pub async fn delete_surface_interaction_item(
             tenant_ctx,
             auth_user,
             api_token_id: api_token_id.map(|axum::Extension(id)| id),
+            authority,
         },
         surfaces::InteractionHttpMethod::Delete,
         surface_id,
@@ -1257,7 +1309,7 @@ fn emit_surface_action_permission_denied_audit(
         "interaction_id": ctx.interaction_id,
         "target_provider_id": ctx.target_provider_id,
         "permission_scope": permission_scope,
-        "required_permission": required_permission,
+        "required_action": required_permission,
         "auth_method": auth_method_name(&ctx.auth_user.auth_method),
         "reason_code": "missing_required_permission",
         "http_method": ctx.method.as_str(),
@@ -1507,23 +1559,52 @@ fn action_error_code(code: &surfaces::SurfaceActionErrorCode) -> &'static str {
     }
 }
 
-fn enforce_required_permission(
-    required_permission: Option<&str>,
-    auth_user: &AuthenticatedUser,
-    _surface_id: &str,
+/// Engine-backed gate for the shared surface resolution path.
+///
+/// `None` action → allow. `Ready` + `Allow` → allow; `Ready` + deny → 403
+/// (+ deny counter). `Unavailable` → 500 fail-closed, mirroring the
+/// `action_extractor!` verdict set (`middleware/action.rs`).
+fn enforce_required_action(
+    required: Option<&Action>,
+    authority: &AccessAuthority,
+    engine: &AccessEngine,
+    surface_id: &str,
     access_kind: &'static str,
 ) -> Option<Response> {
-    let required_permission = required_permission?;
-    // Permission::from_str uses Infallible error; unwrap is always safe.
-    let permission = required_permission.parse::<Permission>().unwrap();
-    if auth_user.has_permission(permission) {
-        return None;
+    let required = required?;
+    match authority {
+        AccessAuthority::Ready(ctx) => match engine.authorize(ctx, required, None) {
+            Decision::Allow => None,
+            Decision::Deny(reason) => {
+                metrics::counter!(
+                    "uptrakit_access_denies_total",
+                    "reason" => reason.as_str()
+                )
+                .increment(1);
+                Some(error_response_with_code(
+                    StatusCode::FORBIDDEN,
+                    format!("Insufficient permissions for this {access_kind}"),
+                    "forbidden",
+                ))
+            }
+            // `Decision` is #[non_exhaustive] in another crate.
+            _ => Some(error_response_with_code(
+                StatusCode::FORBIDDEN,
+                format!("Insufficient permissions for this {access_kind}"),
+                "forbidden",
+            )),
+        },
+        _ => {
+            tracing::error!(
+                surface_id,
+                "authorization unavailable: access engine failed for this request"
+            );
+            Some(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ))
+        }
     }
-    Some(error_response_with_code(
-        StatusCode::FORBIDDEN,
-        format!("Insufficient permissions for this {access_kind}"),
-        "forbidden",
-    ))
 }
 
 #[cfg(test)]
@@ -1580,7 +1661,7 @@ mod tests {
                 .slot(surfaces::SLOT_SOFTWARE_TABS)
                 .scope(surfaces::Scope::Tenant)
                 .targeting(surfaces::Targeting::Targeted)
-                .required_permission("view_software")
+                .required_action(uptrakit_shared_types::access::actions::SOFTWARE_READ)
                 .provider_kind(surfaces::ProviderKind::Service)
                 .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                     surfaces::Capability::TextBlockNode,
@@ -1622,8 +1703,10 @@ mod tests {
     fn classify_surface_lookup_error_for_audit_maps_method_not_allowed_reason() {
         let error = SurfaceRegistryLookupError::MethodNotAllowed {
             allowed: vec![surfaces::InteractionHttpMethod::Get],
-            descriptor_required_permission: None,
-            interaction_required_permissions: vec![Some("view_software".to_string())],
+            descriptor_required_action: None,
+            interaction_required_actions: vec![Some(
+                uptrakit_shared_types::access::actions::SOFTWARE_READ,
+            )],
         };
 
         let (outcome, reason_code) = classify_surface_lookup_error_for_audit(&error);
@@ -1632,51 +1715,102 @@ mod tests {
         assert_eq!(reason_code, "method_not_allowed");
     }
 
-    #[test]
-    fn enforce_required_permission_accepts_missing_permission() {
-        let auth_user = auth_user_with_permissions(vec![]);
-        let response = enforce_required_permission(None, &auth_user, "surface.one", "surface");
-        assert!(response.is_none());
-    }
-
-    #[test]
-    fn enforce_required_permission_rejects_missing_user_permission() {
-        let auth_user = auth_user_with_permissions(vec![]);
-        let response = enforce_required_permission(
-            Some("view_software"),
-            &auth_user,
-            "surface.one",
-            "surface",
-        )
-        .expect("permission check should reject missing permission");
-        assert_eq!(response.status(), StatusCode::FORBIDDEN);
-    }
-
-    #[test]
-    fn enforce_required_permission_accepts_granted_permission() {
-        let auth_user = auth_user_with_permissions(vec![AuthPermission::ViewSoftware]);
-        let response = enforce_required_permission(
-            Some("view_software"),
-            &auth_user,
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn enforce_required_action_accepts_missing_action_without_engine_lookup() {
+        // `required = None` short-circuits before touching authority/engine, so an
+        // `Unavailable` authority (which would otherwise 500) must not matter here.
+        let db = crate::test_harness::setup_migrated_db().await;
+        let engine = AccessEngine::new(db);
+        let response = enforce_required_action(
+            None,
+            &AccessAuthority::Unavailable,
+            &engine,
             "surface.one",
             "surface",
         );
         assert!(response.is_none());
     }
 
-    #[test]
-    fn enforce_required_permission_rejects_invalid_permission_strings() {
-        let auth_user = auth_user_with_permissions(vec![AuthPermission::ViewSoftware]);
-        let response = enforce_required_permission(
-            Some("invalid_permission"),
-            &auth_user,
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn enforce_required_action_rejects_roleless_user() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let engine = AccessEngine::new(db);
+        let user_id = Uuid::now_v7();
+        let ctx = engine
+            .context(tenant_id, user_id, None)
+            .await
+            .expect("access context");
+        let response = enforce_required_action(
+            Some(&uptrakit_shared_types::access::actions::SOFTWARE_READ),
+            &AccessAuthority::Ready(ctx),
+            &engine,
             "surface.one",
             "surface",
         )
-        .expect("invalid permissions must be rejected");
-        // Unknown permission strings map to Permission::Other — user doesn't have it → 403.
-        // (Previously panicked → 500 before Permission gained an infallible FromStr.)
+        .expect("roleless user must be denied");
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn enforce_required_action_accepts_granted_action() {
+        use uptrakit_shared_db::access_grants::{GrantSubject, NewGrant, insert_grant};
+        use uptrakit_shared_types::access::{ActionPattern, Selector};
+
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let user_id = Uuid::now_v7();
+        let patterns = vec![
+            "*:read"
+                .parse::<ActionPattern>()
+                .expect("valid action pattern"),
+        ];
+        insert_grant(
+            &db,
+            NewGrant {
+                subject: GrantSubject::User(user_id),
+                tenant_id: Some(tenant_id),
+                patterns: &patterns,
+                selector: Selector::All,
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect("insert grant");
+
+        let engine = AccessEngine::new(db);
+        let ctx = engine
+            .context(tenant_id, user_id, None)
+            .await
+            .expect("access context");
+        let response = enforce_required_action(
+            Some(&uptrakit_shared_types::access::actions::SOFTWARE_READ),
+            &AccessAuthority::Ready(ctx),
+            &engine,
+            "surface.one",
+            "surface",
+        );
+        assert!(response.is_none());
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn enforce_required_action_unavailable_authority_is_500() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let engine = AccessEngine::new(db);
+        let response = enforce_required_action(
+            Some(&uptrakit_shared_types::access::actions::SOFTWARE_READ),
+            &AccessAuthority::Unavailable,
+            &engine,
+            "surface.one",
+            "surface",
+        )
+        .expect("unavailable authority must fail closed");
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
     #[cfg(feature = "db-sqlite")]
@@ -1731,7 +1865,7 @@ mod tests {
                     .slot(surfaces::SLOT_SOFTWARE_TABS)
                     .scope(surfaces::Scope::Tenant)
                     .targeting(surfaces::Targeting::Targeted)
-                    .required_permission("view_software")
+                    .required_action(uptrakit_shared_types::access::actions::SOFTWARE_READ)
                     .provider_kind(surfaces::ProviderKind::Service)
                     .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                         surfaces::Capability::TextBlockNode,
@@ -1749,7 +1883,9 @@ mod tests {
                         "Refresh",
                         surfaces::InteractionTransport::ProviderProxied,
                     );
-                    i.required_permission = Some("update_software".to_string());
+                    i.required_action = Some(
+                        uptrakit_shared_types::access::actions::SOFTWARE_UPDATE_STR.to_string(),
+                    );
                     i.input_schema = Some(surfaces::SchemaContract::Object);
                     i.result_schema = Some(surfaces::SchemaContract::Object);
                     i.timeout_seconds = Some(5);
@@ -1763,7 +1899,7 @@ mod tests {
 
     #[cfg(feature = "db-sqlite")]
     async fn build_surface_route_test_state_with_db_audit()
-    -> (Arc<AppState>, sea_orm::DatabaseConnection, Uuid) {
+    -> (Arc<AppState>, sea_orm::DatabaseConnection, Uuid, Uuid) {
         let ca_pem = "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n";
         let snapshot_data = CaPublicSnapshot {
             active_cert_pem: ca_pem.to_string(),
@@ -1810,6 +1946,53 @@ mod tests {
 
         let db = crate::test_harness::setup_migrated_db().await;
         let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+
+        // Stage a full-role admin principal: the direct-handler-call db-sqlite
+        // tests in this module build their `AccessAuthority` from a real
+        // engine context, not a synthetic zero-grant one, so allow legs need
+        // a user actually holding the software:read/software:update grants
+        // this module's fixtures gate on. `software_manager` seeds
+        // `software:*`, covering both.
+        let staged_admin_id = {
+            use sea_orm::{ActiveModelTrait, ColumnTrait, QueryFilter, Set};
+            let now = time::OffsetDateTime::now_utc();
+            let user = uptrakit_shared_db::entity::user::ActiveModel {
+                id: Set(Uuid::now_v7()),
+                email: Set(uptrakit_shared_types::MaskedEmail::new(
+                    "staged-admin@test.local",
+                )),
+                first_name: Set("Staged".to_string()),
+                last_name: Set("Admin".to_string()),
+                password_hash: Set(None),
+                is_active: Set(true),
+                deactivated_at: Set(None),
+                created_at: Set(now),
+                updated_at: Set(now),
+            }
+            .insert(&db)
+            .await
+            .expect("insert staged admin user");
+            let software_manager_role_id = uptrakit_shared_db::entity::role::Entity::find()
+                .filter(uptrakit_shared_db::entity::role::Column::Name.eq("software_manager"))
+                .one(&db)
+                .await
+                .expect("query roles")
+                .expect("seeded software_manager role")
+                .id;
+            uptrakit_shared_db::entity::user_role::Entity::insert(
+                uptrakit_shared_db::entity::user_role::ActiveModel {
+                    tenant_id: Set(tenant_id),
+                    user_id: Set(user.id),
+                    role_id: Set(software_manager_role_id),
+                    assigned_at: Set(now),
+                },
+            )
+            .exec(&db)
+            .await
+            .expect("assign software_manager role");
+            user.id
+        };
+
         let settings = crate::settings::Settings::new(
             RegistrationSettings {
                 mode: RegistrationMode::Open,
@@ -1955,6 +2138,7 @@ mod tests {
             }),
             db,
             tenant_id,
+            staged_admin_id,
         )
     }
 
@@ -1992,7 +2176,8 @@ mod tests {
     #[cfg(feature = "db-sqlite")]
     #[tokio::test]
     async fn invoke_surface_interaction_missing_surface_permission_emits_denied_audit_row() {
-        let (state, db, tenant_id) = build_surface_route_test_state_with_db_audit().await;
+        let (state, db, tenant_id, _staged_admin_id) =
+            build_surface_route_test_state_with_db_audit().await;
         state
             .surface_proxy_deps
             .registry
@@ -2006,6 +2191,13 @@ mod tests {
             State(Arc::clone(&state)),
             TenantContext { tenant_id },
             axum::Extension(auth_user_with_permissions(vec![])),
+            axum::Extension(AccessAuthority::Ready(
+                state
+                    .access_engine
+                    .context(tenant_id, Uuid::nil(), None)
+                    .await
+                    .expect("access context"),
+            )),
             None,
             Path(("ssh.guest.panel".to_string(), "refresh".to_string())),
             Json(InvokeSurfaceInteractionRequest {
@@ -2050,7 +2242,10 @@ mod tests {
         assert_eq!(details["interaction_id"], "refresh");
         assert_eq!(details["target_provider_id"], "service.provider-a");
         assert_eq!(details["permission_scope"], "surface");
-        assert_eq!(details["required_permission"], "view_software");
+        assert_eq!(
+            details["required_action"],
+            uptrakit_shared_types::access::actions::SOFTWARE_READ_STR
+        );
         assert_eq!(details["reason_code"], "missing_required_permission");
         assert!(details.get("params").is_none());
     }
@@ -2058,7 +2253,10 @@ mod tests {
     #[cfg(feature = "db-sqlite")]
     #[tokio::test]
     async fn invoke_surface_interaction_missing_interaction_permission_emits_denied_audit_row() {
-        let (state, db, tenant_id) = build_surface_route_test_state_with_db_audit().await;
+        use sea_orm::{ActiveModelTrait, ColumnTrait, QueryFilter};
+
+        let (state, db, tenant_id, _staged_admin_id) =
+            build_surface_route_test_state_with_db_audit().await;
         state
             .surface_proxy_deps
             .registry
@@ -2067,6 +2265,51 @@ mod tests {
                 Some(Uuid::now_v7()),
                 Some("uptrakit-agent-ssh"),
             );
+        // Stage the denied caller (Uuid::nil(), no pre-existing roles) as
+        // viewer-only. Viewer's seeded `*:read` grant keeps the descriptor's
+        // SOFTWARE_READ gate allowed while the interaction's SOFTWARE_UPDATE
+        // gate still denies — a single-privilege denial, not a zero-grant
+        // everything-denies state. `user_role.user_id` is FK-constrained to
+        // `users.id`, so the synthetic actor needs a real row of its own
+        // before it can hold a role (unlike the read-only access-context
+        // lookup, which tolerates a nonexistent user_id as authorized-but-
+        // grantless).
+        let now = time::OffsetDateTime::now_utc();
+        uptrakit_shared_db::entity::user::ActiveModel {
+            id: sea_orm::Set(Uuid::nil()),
+            email: sea_orm::Set(uptrakit_shared_types::MaskedEmail::new(
+                "denied-viewer@test.local",
+            )),
+            first_name: sea_orm::Set("Denied".to_string()),
+            last_name: sea_orm::Set("Viewer".to_string()),
+            password_hash: sea_orm::Set(None),
+            is_active: sea_orm::Set(true),
+            deactivated_at: sea_orm::Set(None),
+            created_at: sea_orm::Set(now),
+            updated_at: sea_orm::Set(now),
+        }
+        .insert(&db)
+        .await
+        .expect("insert denied-caller user row");
+        let viewer_role_id = uptrakit_shared_db::entity::role::Entity::find()
+            .filter(uptrakit_shared_db::entity::role::Column::Name.eq("viewer"))
+            .one(&db)
+            .await
+            .expect("query roles")
+            .expect("seeded viewer role")
+            .id;
+        uptrakit_shared_db::entity::user_role::Entity::insert(
+            uptrakit_shared_db::entity::user_role::ActiveModel {
+                tenant_id: sea_orm::Set(tenant_id),
+                user_id: sea_orm::Set(Uuid::nil()),
+                role_id: sea_orm::Set(viewer_role_id),
+                assigned_at: sea_orm::Set(time::OffsetDateTime::now_utc()),
+            },
+        )
+        .exec(&db)
+        .await
+        .expect("assign viewer role");
+        state.access_engine.invalidate_subjects(&[Uuid::nil()], &[]);
 
         let denied = invoke_surface_interaction(
             State(Arc::clone(&state)),
@@ -2074,6 +2317,13 @@ mod tests {
             axum::Extension(auth_user_with_permissions(vec![
                 AuthPermission::ViewSoftware,
             ])),
+            axum::Extension(AccessAuthority::Ready(
+                state
+                    .access_engine
+                    .context(tenant_id, Uuid::nil(), None)
+                    .await
+                    .expect("access context"),
+            )),
             None,
             Path(("ssh.guest.panel".to_string(), "refresh".to_string())),
             Json(InvokeSurfaceInteractionRequest {
@@ -2118,7 +2368,10 @@ mod tests {
         assert_eq!(details["interaction_id"], "refresh");
         assert_eq!(details["target_provider_id"], "service.provider-a");
         assert_eq!(details["permission_scope"], "interaction");
-        assert_eq!(details["required_permission"], "update_software");
+        assert_eq!(
+            details["required_action"],
+            uptrakit_shared_types::access::actions::SOFTWARE_UPDATE_STR
+        );
         assert_eq!(details["reason_code"], "missing_required_permission");
         assert!(details.get("params").is_none());
     }
@@ -2126,7 +2379,8 @@ mod tests {
     #[cfg(feature = "db-sqlite")]
     #[tokio::test]
     async fn invoke_surface_interaction_invalid_provider_emits_validation_failed_audit_row() {
-        let (state, db, tenant_id) = build_surface_route_test_state_with_db_audit().await;
+        let (state, db, tenant_id, staged_admin_id) =
+            build_surface_route_test_state_with_db_audit().await;
         let api_token_id = AuthenticatedApiTokenId(Uuid::now_v7());
         state
             .surface_proxy_deps
@@ -2144,6 +2398,13 @@ mod tests {
                 AuthPermission::ViewSoftware,
                 AuthPermission::UpdateSoftware,
             ])),
+            axum::Extension(AccessAuthority::Ready(
+                state
+                    .access_engine
+                    .context(tenant_id, staged_admin_id, None)
+                    .await
+                    .expect("access context"),
+            )),
             Some(axum::Extension(api_token_id)),
             Path(("ssh.guest.panel".to_string(), "refresh".to_string())),
             Json(InvokeSurfaceInteractionRequest {
@@ -2195,7 +2456,8 @@ mod tests {
     #[cfg(feature = "db-sqlite")]
     #[tokio::test]
     async fn invoke_surface_interaction_success_emits_success_audit_row_for_api_token_actor() {
-        let (state, db, tenant_id) = build_surface_route_test_state_with_db_audit().await;
+        let (state, db, tenant_id, staged_admin_id) =
+            build_surface_route_test_state_with_db_audit().await;
         let service_id = Uuid::now_v7();
         let api_token_id = AuthenticatedApiTokenId(Uuid::now_v7());
         state
@@ -2239,6 +2501,13 @@ mod tests {
                 AuthPermission::ViewSoftware,
                 AuthPermission::UpdateSoftware,
             ])),
+            axum::Extension(AccessAuthority::Ready(
+                state
+                    .access_engine
+                    .context(tenant_id, staged_admin_id, None)
+                    .await
+                    .expect("access context"),
+            )),
             Some(axum::Extension(api_token_id)),
             Path(("ssh.guest.panel".to_string(), "refresh".to_string())),
             Json(InvokeSurfaceInteractionRequest {
@@ -2288,7 +2557,8 @@ mod tests {
     #[cfg(feature = "db-sqlite")]
     #[tokio::test]
     async fn invoke_surface_interaction_provider_unavailable_emits_failed_audit_row() {
-        let (state, db, tenant_id) = build_surface_route_test_state_with_db_audit().await;
+        let (state, db, tenant_id, staged_admin_id) =
+            build_surface_route_test_state_with_db_audit().await;
         let service_id = Uuid::now_v7();
         state
             .surface_proxy_deps
@@ -2317,6 +2587,13 @@ mod tests {
                 AuthPermission::ViewSoftware,
                 AuthPermission::UpdateSoftware,
             ])),
+            axum::Extension(AccessAuthority::Ready(
+                state
+                    .access_engine
+                    .context(tenant_id, staged_admin_id, None)
+                    .await
+                    .expect("access context"),
+            )),
             None,
             Path(("ssh.guest.panel".to_string(), "refresh".to_string())),
             Json(InvokeSurfaceInteractionRequest {

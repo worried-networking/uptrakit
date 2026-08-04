@@ -125,7 +125,7 @@ describe('/surfaces/[id] canonical surface page', () => {
 	it('shows surface access denied without falling back to removed compatibility content', () => {
 		vi.mocked(getSurfaceById).mockReturnValue({
 			...buildSurfacePageParity().surface,
-			required_permission: 'view_settings'
+			required_action: 'view_settings'
 		});
 		vi.mocked(getUser).mockReturnValue({
 			id: 'user-1',

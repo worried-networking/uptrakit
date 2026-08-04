@@ -12,13 +12,70 @@
 )]
 #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
 
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use uptrakit_shared_db::entity::{role, user_role};
+
 use crate::test_harness::TestApp;
-use crate::test_harness::fixtures::register_and_get_token;
+use crate::test_harness::fixtures::{register_and_get_token, register_user};
 use crate::test_harness::{StubInteraction, StubSurfaceCalls};
 use uptrakit_web_api_types::error::ErrorResponse;
 use uptrakit_wire::surfaces::{
     InteractionHttpMethod, InteractionKind, ParamFieldDescriptor, SchemaContract,
 };
+
+/// Register a second (non-owner) user, strip its auto-assigned viewer role,
+/// then assign ONLY the viewer role directly in the DB (the role endpoint
+/// invalidates nothing until M1.6a). Mirrors `staged_zero_grant_user` +
+/// the single-role-assignment idiom in
+/// `integration_tests::access_rest_enforcement`, localized here since that
+/// module's helper is private to its own file.
+async fn staged_viewer_user(app: &TestApp) -> (uuid::Uuid, String) {
+    let client = app.client();
+    // Owner must exist first so the new user is a non-first registration.
+    let owner_token = register_and_get_token(&client).await;
+    // First-user setup closes registration; re-open it so a second user can
+    // sign up.
+    let reopen = client
+        .put_json(
+            "/api/v1/settings/access",
+            &serde_json::json!({ "mode": "open" }),
+        )
+        .bearer(&owner_token)
+        .header("if-match", "W/\"settings-v0\"")
+        .send_status()
+        .await;
+    assert_eq!(
+        reopen,
+        http::StatusCode::OK,
+        "failed to re-open registration"
+    );
+    let (status, auth) = register_user(&client, "viewer@test.local", "TestPassword123!").await;
+    assert_eq!(status, http::StatusCode::CREATED);
+    let user_id = auth.user.id;
+    user_role::Entity::delete_many()
+        .filter(user_role::Column::UserId.eq(user_id))
+        .exec(&app.db)
+        .await
+        .expect("strip auto-assigned roles");
+    let viewer_role_id = role::Entity::find()
+        .filter(role::Column::Name.eq("viewer"))
+        .one(&app.db)
+        .await
+        .expect("query roles")
+        .expect("seeded viewer role")
+        .id;
+    user_role::Entity::insert(user_role::ActiveModel {
+        tenant_id: sea_orm::Set(app.tenant_id),
+        user_id: sea_orm::Set(user_id),
+        role_id: sea_orm::Set(viewer_role_id),
+        assigned_at: sea_orm::Set(time::OffsetDateTime::now_utc()),
+    })
+    .exec(&app.db)
+    .await
+    .expect("assign viewer role");
+    app.state.access_engine.invalidate_subjects(&[user_id], &[]);
+    (user_id, auth.access_token.expose_secret().to_string())
+}
 
 /// Decodes a raw router response body as the standard [`ErrorResponse`]
 /// envelope. Mirrors the `error_body` idiom in `routes/surfaces.rs`'s test
@@ -71,7 +128,7 @@ async fn stub_provider_records_post_invoke_through_router() {
             kind: InteractionKind::MutationAction,
             http_method: None,
             params: vec![],
-            required_permission: None,
+            required_action: None,
         }])
         .await;
     let client = app.client();
@@ -139,7 +196,7 @@ async fn get_dataload_coerces_reserved_declared_and_passthrough() {
             kind: InteractionKind::DataLoad,
             http_method: Some(InteractionHttpMethod::Get),
             params: vec![ParamFieldDescriptor::new("count", SchemaContract::Integer)],
-            required_permission: None,
+            required_action: None,
         }])
         .await;
     let client = app.client();
@@ -183,7 +240,7 @@ async fn get_page_abc_is_422_schema_validation_failed() {
             kind: InteractionKind::DataLoad,
             http_method: Some(InteractionHttpMethod::Get),
             params: vec![],
-            required_permission: None,
+            required_action: None,
         }])
         .await;
     let client = app.client();
@@ -211,7 +268,7 @@ async fn post_on_dataload_only_id_is_405_allow_get() {
             kind: InteractionKind::DataLoad,
             http_method: Some(InteractionHttpMethod::Get),
             params: vec![],
-            required_permission: None,
+            required_action: None,
         }])
         .await;
     let client = app.client();
@@ -249,7 +306,7 @@ async fn get_on_post_only_id_is_405_allow_post() {
             kind: InteractionKind::MutationAction,
             http_method: Some(InteractionHttpMethod::Post),
             params: vec![],
-            required_permission: None,
+            required_action: None,
         }])
         .await;
     let client = app.client();
@@ -286,14 +343,14 @@ async fn same_id_two_methods_dispatch_to_distinct_handlers() {
             kind: InteractionKind::DataLoad,
             http_method: Some(InteractionHttpMethod::Get),
             params: vec![],
-            required_permission: None,
+            required_action: None,
         },
         StubInteraction {
             interaction_id: "items",
             kind: InteractionKind::MutationAction,
             http_method: Some(InteractionHttpMethod::Post),
             params: vec![],
-            required_permission: None,
+            required_action: None,
         },
     ])
     .await;
@@ -343,14 +400,14 @@ async fn put_item_segment_delivers_reserved_id_param() {
             kind: InteractionKind::DataLoad,
             http_method: Some(InteractionHttpMethod::Get),
             params: vec![],
-            required_permission: None,
+            required_action: None,
         },
         StubInteraction {
             interaction_id: "replace",
             kind: InteractionKind::MutationAction,
             http_method: Some(InteractionHttpMethod::Put),
             params: vec![],
-            required_permission: None,
+            required_action: None,
         },
     ])
     .await;
@@ -400,7 +457,7 @@ async fn unknown_interaction_is_404_on_every_method() {
             kind: InteractionKind::DataLoad,
             http_method: Some(InteractionHttpMethod::Get),
             params: vec![],
-            required_permission: None,
+            required_action: None,
         }])
         .await;
     let client = app.client();
@@ -430,11 +487,11 @@ async fn unknown_interaction_is_404_on_every_method() {
 
 /// Fail-first (Task 3, Step 0): anti-probe ordering. Registers the same
 /// `interaction_id` under two methods that do NOT include `GET`, one of
-/// which (`PUT`) is gated by a permission string that maps to
-/// `Permission::Other` (never granted to any role). A `GET` request against
-/// this interaction has no registered handler for that method, so the
-/// registry resolves `MethodNotAllowed`. The security property under test:
-/// the missing-permission check on candidate methods MUST run before the
+/// which (`PUT`) is gated by a valid-but-unheld action (`software:update`,
+/// staged for a viewer-only caller). A `GET` request against this
+/// interaction has no registered handler for that method, so the registry
+/// resolves `MethodNotAllowed`. The security property under test: the
+/// missing-permission check on candidate methods MUST run before the
 /// 405/Allow disclosure, so an unauthorized caller gets 403 — never a 405
 /// that would leak which methods exist.
 ///
@@ -451,19 +508,24 @@ async fn missing_permission_is_403_before_method_disclosure() {
             kind: InteractionKind::MutationAction,
             http_method: Some(InteractionHttpMethod::Put),
             params: vec![],
-            required_permission: Some("__nonexistent_test_permission__".to_string()),
+            required_action: Some(
+                uptrakit_shared_types::access::actions::SOFTWARE_UPDATE_STR.to_string(),
+            ),
         },
         StubInteraction {
             interaction_id: "gated",
             kind: InteractionKind::MutationAction,
             http_method: Some(InteractionHttpMethod::Delete),
             params: vec![],
-            required_permission: None,
+            required_action: None,
         },
     ])
     .await;
     let client = app.client();
-    let token = register_and_get_token(&client).await;
+    // Viewer's seeded `*:read` grant does not cover `software:update`, so
+    // this caller is denied the gated `PUT` candidate while still being a
+    // real, authorized principal (not a zero-grant everything-denies state).
+    let (_user_id, token) = staged_viewer_user(&app).await;
 
     let response = client
         .request(
@@ -532,7 +594,7 @@ async fn head_does_not_reach_provider() {
             kind: InteractionKind::DataLoad,
             http_method: Some(InteractionHttpMethod::Get),
             params: vec![],
-            required_permission: None,
+            required_action: None,
         }])
         .await;
     let client = app.client();
@@ -570,7 +632,7 @@ async fn get_responses_carry_private_no_store() {
             kind: InteractionKind::DataLoad,
             http_method: Some(InteractionHttpMethod::Get),
             params: vec![],
-            required_permission: None,
+            required_action: None,
         }])
         .await;
     let client = app.client();
@@ -620,7 +682,7 @@ async fn post_item_segment_is_enveloped_405() {
             kind: InteractionKind::DataLoad,
             http_method: Some(InteractionHttpMethod::Get),
             params: vec![],
-            required_permission: None,
+            required_action: None,
         }])
         .await;
     let client = app.client();

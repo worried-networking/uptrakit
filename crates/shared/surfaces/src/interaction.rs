@@ -77,8 +77,14 @@ pub struct InteractionDescriptor {
     #[serde(default)]
     pub http_method: InteractionHttpMethod,
     pub label: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub required_permission: Option<String>,
+    /// Canonical action string (`resource:verb`) required to view/use this
+    /// interaction; parsed to `Action` at admission.
+    #[serde(
+        default,
+        alias = "required_permission",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub required_action: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_schema: Option<SchemaContract>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -102,7 +108,7 @@ pub struct InteractionDescriptor {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub submit_label: Option<String>,
     /// Allows same-tenant provider-origin (service-initiated) invocation of
-    /// this interaction even when `required_permission` is set. Fail-closed:
+    /// this interaction even when `required_action` is set. Fail-closed:
     /// absent on the wire deserializes to `false`. Honored only for
     /// `Plugin`/`BuiltIn`-registered interactions — see `validate_for_provider`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -160,7 +166,7 @@ pub enum InteractionValidationError {
         reason: String,
     },
     #[error(
-        "interaction `{interaction_id}` sets provider_invocable with a required_permission — not allowed for service-registered surfaces"
+        "interaction `{interaction_id}` sets provider_invocable with a required_action — not allowed for service-registered surfaces"
     )]
     ProviderInvocableForbiddenForServiceProviders { interaction_id: InteractionId },
 }
@@ -179,7 +185,7 @@ impl InteractionDescriptor {
             http_method: InteractionHttpMethod::default(),
             label: label.into(),
             transport,
-            required_permission: None,
+            required_action: None,
             input_schema: None,
             result_schema: None,
             sensitive_fields: vec![],
@@ -238,13 +244,13 @@ impl InteractionDescriptor {
     /// Returns
     /// [`InteractionValidationError::ProviderInvocableForbiddenForServiceProviders`]
     /// when a `Service` provider sets `provider_invocable` on an interaction
-    /// that also declares `required_permission`.
+    /// that also declares `required_action`.
     pub fn validate_for_provider(
         &self,
         provider_kind: ProviderKind,
     ) -> Result<(), InteractionValidationError> {
         if self.provider_invocable
-            && self.required_permission.is_some()
+            && self.required_action.is_some()
             && provider_kind == ProviderKind::Service
         {
             return Err(
@@ -462,7 +468,7 @@ mod tests {
             "Act",
             InteractionTransport::ProviderProxied,
         );
-        descriptor.required_permission = Some("update_hosts".to_string());
+        descriptor.required_action = Some("update_hosts".to_string());
         descriptor.provider_invocable = true;
         let result = descriptor.validate_for_provider(ProviderKind::Service);
         assert!(matches!(
@@ -551,7 +557,7 @@ mod tests {
             "Act",
             InteractionTransport::ControllerLocal,
         );
-        plugin_owned.required_permission = Some("update_hosts".to_string());
+        plugin_owned.required_action = Some("update_hosts".to_string());
         plugin_owned.provider_invocable = true;
         // matches! form — clippy::assertions_on_result_states is denied and this
         // tests mod may not carry the #![expect] header sibling mods use.
@@ -571,5 +577,53 @@ mod tests {
             unpermissioned_service.validate_for_provider(ProviderKind::Service),
             Ok(())
         ));
+    }
+
+    #[test]
+    fn required_action_accepts_legacy_key_via_alias() {
+        // A stale-satellite payload lands in required_action; the (legacy)
+        // value then dies at the admission Action parse — never a silent None.
+        let json = serde_json::json!({
+            "interaction_id": "act",
+            "kind": "data_load",
+            "label": "Act",
+            "transport": { "mode": "controller_local" },
+            "required_permission": "update_hosts",
+        });
+        let descriptor: InteractionDescriptor =
+            serde_json::from_value(json).expect("alias must deserialize");
+        assert_eq!(descriptor.required_action.as_deref(), Some("update_hosts"));
+    }
+
+    #[test]
+    fn required_action_rejects_dual_key_payload() {
+        // serde derive: an alias shares the field's slot, so a second
+        // occurrence is duplicate_field — there is no last-wins.
+        let json = r#"{
+            "interaction_id": "act",
+            "kind": "data_load",
+            "label": "Act",
+            "transport": { "mode": "controller_local" },
+            "required_action": "hosts:update",
+            "required_permission": "update_hosts"
+        }"#;
+        // expect_err alone pins the semantics (dual key fails, no last-wins);
+        // do not assert serde_json's message text (upstream-behavior coupling).
+        serde_json::from_str::<InteractionDescriptor>(json).expect_err("dual key must fail");
+    }
+
+    #[test]
+    fn required_action_serializes_under_the_new_key_only() {
+        let mut descriptor = InteractionDescriptor::new(
+            InteractionId::new("act").unwrap(),
+            InteractionKind::DataLoad,
+            "Act",
+            InteractionTransport::ControllerLocal,
+        );
+        descriptor.required_action = Some("hosts:update".to_string());
+
+        let value = serde_json::to_value(&descriptor).expect("serialize");
+        assert!(value.get("required_action").is_some());
+        assert!(value.get("required_permission").is_none());
     }
 }

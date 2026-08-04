@@ -222,8 +222,11 @@ mod tests {
                 uptrakit_wire::surfaces::InteractionHttpMethod::Get,
                 uptrakit_wire::surfaces::InteractionHttpMethod::Post,
             ],
-            descriptor_required_permission: Some("view_software".to_string()),
-            interaction_required_permissions: vec![Some("view_software".to_string()), None],
+            descriptor_required_action: Some(uptrakit_shared_types::access::actions::SOFTWARE_READ),
+            interaction_required_actions: vec![
+                Some(uptrakit_shared_types::access::actions::SOFTWARE_READ),
+                None,
+            ],
         };
 
         let wire_error = surface_registry_lookup_error_to_wire(error);

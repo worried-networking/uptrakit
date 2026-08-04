@@ -149,11 +149,11 @@ describe('surface read model helpers', () => {
 		const surfaces: SurfaceResponse[] = [
 			{
 				...makeSurface('surface.public'),
-				required_permission: undefined
+				required_action: undefined
 			},
 			{
 				...makeSurface('surface.admin'),
-				required_permission: 'manage_settings'
+				required_action: 'manage_settings'
 			}
 		];
 

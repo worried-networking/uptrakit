@@ -126,7 +126,7 @@ function makeSurface(surfaceId: string, slot: string, label: string, requiredPer
 		slot,
 		scope: 'tenant',
 		targeting: 'universal',
-		required_permission: requiredPermission,
+		required_action: requiredPermission,
 		provider_kind: 'plugin',
 		required_capabilities: [],
 		root_node: {

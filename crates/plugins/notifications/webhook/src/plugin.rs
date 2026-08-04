@@ -17,6 +17,7 @@ use uptrakit_plugin_infrastructure_core::{
     PluginSurfaceRegistration, RegisteredInteraction, SsrfMode, build_plugin_http_client,
     declare_plugin, surfaces,
 };
+use uptrakit_shared_types::access::actions;
 
 use crate::config::{BLOCKED_HEADERS, WebhookChannelConfig};
 
@@ -209,7 +210,7 @@ fn webhook_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
             .slot(surfaces::SLOT_SETTINGS_TABS)
             .scope(surfaces::Scope::Global)
             .targeting(surfaces::Targeting::Universal)
-            .required_permission("view_notifications")
+            .required_action(actions::NOTIFICATIONS_READ)
             .provider_kind(surfaces::ProviderKind::Plugin)
             .tab_group("notification-channels", "Notification Channels")
             .required_capabilities(surfaces::CapabilitySet::from_capabilities([
@@ -290,7 +291,7 @@ fn webhook_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                         "Add Webhook",
                         surfaces::InteractionTransport::ControllerLocal,
                     );
-                    i.required_permission = Some("manage_notifications".to_string());
+                    i.required_action = Some(actions::NOTIFICATIONS_MANAGE_STR.to_string());
                     i.input_schema = Some(surfaces::SchemaContract::Object);
                     i.result_schema = Some(surfaces::SchemaContract::Any);
                     i.sensitive_fields = vec!["secret".to_string()];
@@ -371,7 +372,7 @@ fn webhook_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                         surfaces::InteractionTransport::ControllerLocal,
                     );
                     i.http_method = surfaces::InteractionHttpMethod::Put;
-                    i.required_permission = Some("manage_notifications".to_string());
+                    i.required_action = Some(actions::NOTIFICATIONS_MANAGE_STR.to_string());
                     i.input_schema = Some(surfaces::SchemaContract::Object);
                     i.result_schema = Some(surfaces::SchemaContract::Any);
                     i.sensitive_fields = vec!["secret".to_string()];
@@ -465,7 +466,7 @@ fn webhook_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                         "Test",
                         surfaces::InteractionTransport::ControllerLocal,
                     );
-                    i.required_permission = Some("manage_notifications".to_string());
+                    i.required_action = Some(actions::NOTIFICATIONS_MANAGE_STR.to_string());
                     i.input_schema = Some(surfaces::SchemaContract::Object);
                     i.result_schema = Some(surfaces::SchemaContract::Any);
                     i
@@ -482,7 +483,7 @@ fn webhook_plugin_surfaces() -> Vec<PluginSurfaceRegistration> {
                         surfaces::InteractionTransport::ControllerLocal,
                     );
                     i.http_method = surfaces::InteractionHttpMethod::Delete;
-                    i.required_permission = Some("manage_notifications".to_string());
+                    i.required_action = Some(actions::NOTIFICATIONS_MANAGE_STR.to_string());
                     i.input_schema = Some(surfaces::SchemaContract::Object);
                     i.result_schema = Some(surfaces::SchemaContract::Any);
                     i.confirmation = Some(surfaces::InteractionConfirmation {

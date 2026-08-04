@@ -534,9 +534,9 @@ fn validate_surface_interaction(
     interaction: &surfaces::InteractionDescriptor,
 ) -> Result<(), WireValidationError> {
     check_opt_string_len(
-        &interaction.required_permission,
+        &interaction.required_action,
         MAX_SHORT_STRING_LEN,
-        "surfaces[].interactions[].required_permission",
+        "surfaces[].interactions[].required_action",
     )?;
     check_vec_len(
         &interaction.sensitive_fields,
@@ -787,9 +787,9 @@ impl WireValidate for surfaces::SurfaceRegistration {
                 "surfaces[].descriptor.slot",
             )?;
             check_opt_string_len(
-                &surface.descriptor.required_permission,
+                &surface.descriptor.required_action,
                 MAX_SHORT_STRING_LEN,
-                "surfaces[].descriptor.required_permission",
+                "surfaces[].descriptor.required_action",
             )?;
             if let Some(nav_icon) = &surface.descriptor.nav_icon {
                 surfaces::validate_icon_name(nav_icon).map_err(|err| WireValidationError {

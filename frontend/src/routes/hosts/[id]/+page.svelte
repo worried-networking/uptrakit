@@ -115,7 +115,7 @@
 	const canViewSoftware = $derived(getUser()?.permissions.includes(Permission.VIEW_SOFTWARE) ?? false);
 	const hostDetailSlotSurfaces = $derived(getSurfacesBySlot('host_detail.tabs'));
 	const hostDetailSlotRenderableSurfaces = $derived(
-		hostDetailSlotSurfaces.filter((surface) => hasPermissionValue(getUser(), surface.required_permission))
+		hostDetailSlotSurfaces.filter((surface) => hasPermissionValue(getUser(), surface.required_action))
 	);
 	const hostDetailSlotReads = $derived.by(() => {
 		const result: Record<string, NonNullable<ReturnType<typeof getSurfaceReadModel>>> = {};
@@ -537,7 +537,7 @@
 					<div class="space-y-4">
 						{#each hostDetailSlotSurfaces as surface (surface.surface_id)}
 							<SectionCard title={surface.label}>
-								{#if hasPermissionValue(getUser(), surface.required_permission)}
+								{#if hasPermissionValue(getUser(), surface.required_action)}
 									<SurfaceReadPanel
 										{surface}
 										read={hostDetailSlotReads[surface.surface_id]}

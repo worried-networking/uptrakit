@@ -86,7 +86,7 @@ const paritySurfaces: SurfaceResponse[] = [
 		priority: 650,
 		slot: 'settings.below.global',
 		scope: 'global',
-		required_permission: 'manage_global_settings',
+		required_action: 'manage_global_settings',
 		provider_kind: 'service',
 		root_node: { kind: 'text_block', text: 'global-audit' }
 	}),

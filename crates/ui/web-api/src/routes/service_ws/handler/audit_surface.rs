@@ -466,8 +466,10 @@ mod tests {
     fn classify_surface_lookup_error_for_audit_maps_method_not_allowed_reason() {
         let error = crate::surface_registry::SurfaceRegistryLookupError::MethodNotAllowed {
             allowed: vec![surfaces::InteractionHttpMethod::Get],
-            descriptor_required_permission: None,
-            interaction_required_permissions: vec![Some("view_software".to_string())],
+            descriptor_required_action: None,
+            interaction_required_actions: vec![Some(
+                uptrakit_shared_types::access::actions::SOFTWARE_READ,
+            )],
         };
 
         let (outcome, reason_code) = classify_surface_lookup_error_for_audit(&error);

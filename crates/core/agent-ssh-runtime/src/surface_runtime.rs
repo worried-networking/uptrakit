@@ -28,7 +28,8 @@ use uptrakit_plugin_infrastructure_registry::{
     SurfaceRowVisibleWhen as PluginSurfaceRowVisibleWhen,
     SurfaceWorkflowStep as PluginSurfaceWorkflowStep,
 };
-use uptrakit_shared_types::{Permission, SecretString};
+use uptrakit_shared_types::SecretString;
+use uptrakit_shared_types::access::actions;
 use uptrakit_wire::{
     AuditEventPayload, ServiceMessage, ServiceTransport,
     surfaces::{
@@ -160,13 +161,13 @@ fn build_agent_interactions() -> Vec<AgentInteraction> {
     let mut interactions = vec![
         // Data-load action: populates the hosts table (GET hosts).
         AgentInteraction::new("hosts", "List Hosts")
-            .with_permission(Permission::UpdateHosts)
+            .with_required_action(actions::HOSTS_UPDATE)
             .with_timeout(15),
         sync_host_interaction().placement(AgentInteractionPlacement::Row),
         // DELETE hosts: shares the `hosts` wire id with the GET data-load
         // above, disambiguated by http_method (REST-noun convention).
         AgentInteraction::new("hosts", "Remove Host")
-            .with_permission(Permission::UpdateHosts)
+            .with_required_action(actions::HOSTS_UPDATE)
             .destructive()
             .with_confirm_entity_field("name")
             .with_timeout(30)
@@ -176,16 +177,16 @@ fn build_agent_interactions() -> Vec<AgentInteraction> {
         bootstrap_interaction().placement(AgentInteractionPlacement::Primary),
         // Internal wizard-step actions (not shown in UI directly).
         AgentInteraction::new("bootstrap-connect", "Bootstrap Connect")
-            .with_permission(Permission::UpdateHosts)
+            .with_required_action(actions::HOSTS_UPDATE)
             .with_timeout(60),
         AgentInteraction::new("bootstrap-execute", "Bootstrap Execute")
-            .with_permission(Permission::UpdateHosts)
+            .with_required_action(actions::HOSTS_UPDATE)
             .with_timeout(120),
         AgentInteraction::new("sync-connect", "Sync Connect")
-            .with_permission(Permission::UpdateHosts)
+            .with_required_action(actions::HOSTS_UPDATE)
             .with_timeout(60),
         AgentInteraction::new("sync-execute", "Sync Execute")
-            .with_permission(Permission::UpdateHosts)
+            .with_required_action(actions::HOSTS_UPDATE)
             .with_timeout(120),
     ];
     // Collect agent interactions from infrastructure plugin descriptors.
@@ -255,7 +256,7 @@ fn build_registered_surface(
             .slot(slot)
             .scope(surfaces::Scope::Tenant)
             .targeting(targeting)
-            .required_permission(Permission::UpdateHosts.to_string())
+            .required_action(actions::HOSTS_UPDATE)
             .provider_kind(surfaces::ProviderKind::Service)
             .required_capabilities(required_capabilities)
             .root_node(root_node)
@@ -657,7 +658,7 @@ fn build_interactions(
                 action.label.clone(),
                 InteractionTransport::ProviderProxied,
             );
-            descriptor.required_permission = permission_or_none(&action.permission);
+            descriptor.required_action = action.required_action.as_ref().map(ToString::to_string);
             descriptor.input_schema = Some(surfaces::SchemaContract::Object);
             descriptor.result_schema = Some(surfaces::SchemaContract::Any);
             descriptor.sensitive_fields = sensitive_fields.into_iter().collect();
@@ -716,15 +717,6 @@ fn action_kind_for_action(action: Option<&AgentInteraction>) -> InteractionKind 
         return InteractionKind::FormSubmit;
     }
     InteractionKind::MutationAction
-}
-
-fn permission_or_none(permission: &str) -> Option<String> {
-    let trimmed = permission.trim();
-    if trimmed.is_empty() || trimmed == "none" {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
 }
 
 fn compute_required_capabilities(
@@ -909,7 +901,7 @@ fn sync_host_interaction() -> AgentInteraction {
     .with_submit_action("sync-execute");
 
     AgentInteraction::new("sync", "Sync Host")
-        .with_permission(Permission::UpdateHosts)
+        .with_required_action(actions::HOSTS_UPDATE)
         .with_timeout(120)
         .with_ui(SurfaceActionUi::Wizard {
             steps: vec![connect_step, review_step, execute_step],
@@ -990,7 +982,7 @@ fn bootstrap_interaction() -> AgentInteraction {
     .with_submit_action("bootstrap-execute");
 
     AgentInteraction::new("bootstrap", "Bootstrap Host")
-        .with_permission(Permission::UpdateHosts)
+        .with_required_action(actions::HOSTS_UPDATE)
         .with_timeout(120)
         .with_ui(SurfaceActionUi::Wizard {
             steps: vec![connect_step, review_step, execute_step],
@@ -2481,8 +2473,8 @@ mod tests {
         assert_eq!(surface.descriptor.scope, surfaces::Scope::Tenant);
         assert_eq!(surface.descriptor.targeting, Targeting::Targeted);
         assert_eq!(
-            surface.descriptor.required_permission.as_deref(),
-            Some(Permission::UpdateHosts.as_str())
+            surface.descriptor.required_action.as_deref(),
+            Some(uptrakit_shared_types::access::actions::HOSTS_UPDATE_STR)
         );
 
         assert_eq!(surface.data_sources.len(), 1);

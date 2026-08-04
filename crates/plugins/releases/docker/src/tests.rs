@@ -171,8 +171,8 @@ fn docker_item_host_actions_surface_keeps_form_preload_contract() {
         surfaces::Targeting::Universal
     );
     assert_eq!(
-        docker_surface.descriptor.required_permission.as_deref(),
-        Some(uptrakit_shared_types::Permission::UpdateSoftware.as_str())
+        docker_surface.descriptor.required_action.as_deref(),
+        Some(uptrakit_shared_types::access::actions::SOFTWARE_UPDATE_STR)
     );
     assert!(docker_surface.data_sources.is_empty());
 
@@ -190,8 +190,8 @@ fn docker_item_host_actions_surface_keeps_form_preload_contract() {
         .expect("switch-tag interaction should exist");
     assert_eq!(switch_tag.kind, surfaces::InteractionKind::FormSubmit);
     assert_eq!(
-        switch_tag.required_permission.as_deref(),
-        Some(uptrakit_shared_types::Permission::UpdateSoftware.as_str())
+        switch_tag.required_action.as_deref(),
+        Some(uptrakit_shared_types::access::actions::SOFTWARE_UPDATE_STR)
     );
     assert_eq!(
         switch_tag.input_schema,
@@ -228,8 +228,8 @@ fn docker_item_host_actions_surface_keeps_form_preload_contract() {
         .expect("current-tag interaction should exist");
     assert_eq!(get_current_tag.kind, surfaces::InteractionKind::DataLoad);
     assert_eq!(
-        get_current_tag.required_permission.as_deref(),
-        Some(uptrakit_shared_types::Permission::UpdateSoftware.as_str())
+        get_current_tag.required_action.as_deref(),
+        Some(uptrakit_shared_types::access::actions::SOFTWARE_UPDATE_STR)
     );
     assert_eq!(get_current_tag.input_schema, None);
     assert_eq!(

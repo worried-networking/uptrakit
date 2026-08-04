@@ -137,7 +137,7 @@ export function buildSettingsTabsParityFixture(): ParityTabScenario {
 				slot: 'settings.tabs',
 				scope: 'tenant',
 				targeting: 'targeted',
-				required_permission: 'update_system_services',
+				required_action: 'update_system_services',
 				provider_kind: 'service',
 				root_node: { kind: 'text_block', text: 'mqtt' }
 			}),
@@ -145,7 +145,7 @@ export function buildSettingsTabsParityFixture(): ParityTabScenario {
 				priority: 101,
 				slot: 'settings.tabs',
 				scope: 'global',
-				required_permission: 'view_notifications',
+				required_action: 'view_notifications',
 				provider_kind: 'plugin',
 				root_node: { kind: 'text_block', text: 'email' }
 			})
@@ -159,7 +159,7 @@ export function buildSoftwareTabsParityFixture(): ParityTabScenario {
 		surfaceTabs: [
 			buildParitySurfaceTab('plugin.software-category', 'Plugin Category', {
 				slot: 'software.tabs',
-				required_permission: 'view_software',
+				required_action: 'view_software',
 				provider_kind: 'plugin',
 				root_node: { kind: 'text_block', text: 'plugin-category' }
 			})

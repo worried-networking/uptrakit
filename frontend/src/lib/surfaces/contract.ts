@@ -155,7 +155,7 @@ export interface SurfaceDescriptor {
 	slot: string;
 	scope: SurfaceScope;
 	targeting: SurfaceTargeting;
-	required_permission?: string;
+	required_action?: string;
 	provider_kind: SurfaceProviderKind;
 	required_capabilities: SurfaceCapability[];
 	root_node: SurfaceNode;
@@ -240,7 +240,7 @@ export interface InteractionDescriptor {
 	kind: InteractionKind;
 	label: string;
 	icon?: string;
-	required_permission?: string;
+	required_action?: string;
 	input_schema?: SchemaContract;
 	result_schema?: SchemaContract;
 	sensitive_fields?: string[];

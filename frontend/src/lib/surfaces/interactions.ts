@@ -50,7 +50,7 @@ export function getSurfaceDescriptorRenderKey(surface: SurfaceResponse): string 
 		slot: surface.slot,
 		scope: surface.scope,
 		targeting: surface.targeting,
-		required_permission: surface.required_permission ?? null,
+		required_action: surface.required_action ?? null,
 		provider_kind: surface.provider_kind,
 		required_capabilities: surface.required_capabilities,
 		root_node: surface.root_node

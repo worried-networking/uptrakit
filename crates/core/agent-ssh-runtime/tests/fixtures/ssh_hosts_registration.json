@@ -35,7 +35,7 @@
         "slot": "surface.page",
         "scope": "tenant",
         "targeting": "targeted",
-        "required_permission": "update_hosts",
+        "required_action": "hosts:update",
         "provider_kind": "service",
         "required_capabilities": [
           "section_node",
@@ -105,7 +105,7 @@
           "kind": "workflow",
           "http_method": "post",
           "label": "Bootstrap Host",
-          "required_permission": "update_hosts",
+          "required_action": "hosts:update",
           "input_schema": {
             "type": "object"
           },
@@ -274,7 +274,7 @@
           "kind": "mutation_action",
           "http_method": "post",
           "label": "Bootstrap Connect",
-          "required_permission": "update_hosts",
+          "required_action": "hosts:update",
           "input_schema": {
             "type": "object"
           },
@@ -295,7 +295,7 @@
           "kind": "mutation_action",
           "http_method": "post",
           "label": "Bootstrap Execute",
-          "required_permission": "update_hosts",
+          "required_action": "hosts:update",
           "input_schema": {
             "type": "object"
           },
@@ -316,7 +316,7 @@
           "kind": "form_submit",
           "http_method": "post",
           "label": "Bootstrap Discovered Guest",
-          "required_permission": "update_hosts",
+          "required_action": "hosts:update",
           "input_schema": {
             "type": "object"
           },
@@ -371,7 +371,7 @@
           "kind": "data_load",
           "http_method": "post",
           "label": "List Discovered Guests",
-          "required_permission": "update_hosts",
+          "required_action": "hosts:update",
           "input_schema": {
             "type": "object"
           },
@@ -388,7 +388,7 @@
           "kind": "data_load",
           "http_method": "post",
           "label": "List Hosts",
-          "required_permission": "update_hosts",
+          "required_action": "hosts:update",
           "input_schema": {
             "type": "object"
           },
@@ -405,7 +405,7 @@
           "kind": "confirmable_action",
           "http_method": "delete",
           "label": "Remove Host",
-          "required_permission": "update_hosts",
+          "required_action": "hosts:update",
           "input_schema": {
             "type": "object"
           },
@@ -428,7 +428,7 @@
           "kind": "workflow",
           "http_method": "post",
           "label": "Sync Host",
-          "required_permission": "update_hosts",
+          "required_action": "hosts:update",
           "input_schema": {
             "type": "object"
           },
@@ -570,7 +570,7 @@
           "kind": "mutation_action",
           "http_method": "post",
           "label": "Sync Connect",
-          "required_permission": "update_hosts",
+          "required_action": "hosts:update",
           "input_schema": {
             "type": "object"
           },
@@ -591,7 +591,7 @@
           "kind": "mutation_action",
           "http_method": "post",
           "label": "Sync Execute",
-          "required_permission": "update_hosts",
+          "required_action": "hosts:update",
           "input_schema": {
             "type": "object"
           },

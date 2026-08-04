@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use uptrakit_shared_types::access::Action;
 
 use crate::SurfaceId;
 
@@ -332,8 +333,14 @@ pub struct SurfaceDescriptor {
     pub slot: String,
     pub scope: Scope,
     pub targeting: Targeting,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub required_permission: Option<String>,
+    /// Canonical action string (`resource:verb`) required to view/use this surface;
+    /// parsed to `Action` at admission.
+    #[serde(
+        default,
+        alias = "required_permission",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub required_action: Option<String>,
     pub provider_kind: ProviderKind,
     pub required_capabilities: CapabilitySet,
     pub root_node: SurfaceNode,
@@ -378,7 +385,7 @@ impl SurfaceDescriptor {
 /// Builder for [`SurfaceDescriptor`].
 ///
 /// Obtain an instance via [`SurfaceDescriptor::builder`] and call [`build`](Self::build) to
-/// finalise the descriptor. Optional fields ([`required_permission`](Self::required_permission)
+/// finalise the descriptor. Optional fields ([`required_action`](Self::required_action)
 /// and [`context_selector`](Self::context_selector)) default to `None`.
 ///
 /// [`build`](Self::build) panics if any required field has not been set.
@@ -390,7 +397,7 @@ pub struct SurfaceDescriptorBuilder {
     slot: Option<String>,
     scope: Option<Scope>,
     targeting: Option<Targeting>,
-    required_permission: Option<String>,
+    required_action: Option<String>,
     provider_kind: Option<ProviderKind>,
     required_capabilities: Option<CapabilitySet>,
     root_node: Option<SurfaceNode>,
@@ -443,10 +450,12 @@ impl SurfaceDescriptorBuilder {
         self
     }
 
-    /// Sets the permission string required to view this surface (optional).
+    /// Sets the catalog action required to view this surface (optional).
+    /// Typed at the declaration site; stored as the canonical action string
+    /// (actions never cross the service wire as a type).
     #[must_use]
-    pub fn required_permission(mut self, permission: impl Into<String>) -> Self {
-        self.required_permission = Some(permission.into());
+    pub fn required_action(mut self, action: Action) -> Self {
+        self.required_action = Some(action.to_string());
         self
     }
 
@@ -521,7 +530,7 @@ impl SurfaceDescriptorBuilder {
             targeting: self
                 .targeting
                 .expect("SurfaceDescriptorBuilder: targeting not set"),
-            required_permission: self.required_permission,
+            required_action: self.required_action,
             provider_kind: self
                 .provider_kind
                 .expect("SurfaceDescriptorBuilder: provider_kind not set"),
@@ -673,6 +682,49 @@ impl SurfaceContextSelectorDescriptor {
 mod tests {
     use super::*;
 
+    /// Mirrors `SurfaceDescriptor::required_action` exactly (field name + serde
+    /// attrs) so the skew-guard tests below exercise the production serde
+    /// semantics without needing to populate every other `SurfaceDescriptor`
+    /// field for a minimal-valid fixture.
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    struct TestShim {
+        #[serde(
+            default,
+            alias = "required_permission",
+            skip_serializing_if = "Option::is_none"
+        )]
+        required_action: Option<String>,
+    }
+
+    #[test]
+    fn required_action_accepts_legacy_key_via_alias() {
+        // A stale-satellite payload lands in required_action; the (legacy)
+        // value then dies at the admission Action parse — never a silent None.
+        let json = serde_json::json!({ "required_permission": "update_hosts" });
+        let parsed: TestShim = serde_json::from_value(json).expect("alias must deserialize");
+        assert_eq!(parsed.required_action.as_deref(), Some("update_hosts"));
+    }
+
+    #[test]
+    fn required_action_rejects_dual_key_payload() {
+        // serde derive: an alias shares the field's slot, so a second
+        // occurrence is duplicate_field — there is no last-wins.
+        let json = r#"{"required_action":"hosts:update","required_permission":"update_hosts"}"#;
+        // expect_err alone pins the semantics (dual key fails, no last-wins);
+        // do not assert serde_json's message text (upstream-behavior coupling).
+        serde_json::from_str::<TestShim>(json).expect_err("dual key must fail");
+    }
+
+    #[test]
+    fn required_action_serializes_under_the_new_key_only() {
+        let value = serde_json::to_value(TestShim {
+            required_action: Some("hosts:update".to_string()),
+        })
+        .expect("serialize");
+        assert!(value.get("required_action").is_some());
+        assert!(value.get("required_permission").is_none());
+    }
+
     #[test]
     fn context_selector_capability_serializes_to_snake_case() {
         let cap = Capability::ContextSelector;
@@ -689,7 +741,7 @@ mod tests {
             slot: "surface.page".to_string(),
             scope: Scope::Global,
             targeting: Targeting::Universal,
-            required_permission: None,
+            required_action: None,
             provider_kind: ProviderKind::Plugin,
             required_capabilities: CapabilitySet::from_capabilities([Capability::ContextSelector]),
             root_node: SurfaceNode::section(None::<String>, vec![]),
@@ -728,7 +780,7 @@ mod tests {
             slot: "surface.page".to_string(),
             scope: Scope::Global,
             targeting: Targeting::Universal,
-            required_permission: None,
+            required_action: None,
             provider_kind: ProviderKind::Plugin,
             required_capabilities: CapabilitySet::default(),
             root_node: SurfaceNode::section(None::<String>, vec![]),

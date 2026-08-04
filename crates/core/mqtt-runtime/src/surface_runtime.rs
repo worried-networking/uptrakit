@@ -80,7 +80,7 @@ pub(crate) fn build_surface_registration_with_ids(
             .slot(surfaces::SLOT_SETTINGS_TABS)
             .scope(scope)
             .targeting(targeting)
-            .required_permission("update_system_services")
+            .required_action(uptrakit_shared_types::access::actions::SYSTEM_SERVICES_UPDATE)
             .provider_kind(surfaces::ProviderKind::Service)
             .required_capabilities(required_capabilities.clone())
             .root_node(SurfaceNode::section(
@@ -790,7 +790,9 @@ fn build_interactions() -> Vec<InteractionDescriptor> {
                 "List MQTT Clients",
                 InteractionTransport::ProviderProxied,
             );
-            i.required_permission = Some("update_system_services".to_string());
+            i.required_action = Some(
+                uptrakit_shared_types::access::actions::SYSTEM_SERVICES_UPDATE_STR.to_string(),
+            );
             i.input_schema = Some(surfaces::SchemaContract::Object);
             // merged list/item read — two result shapes (`SchemaContract` has
             // no union/oneOf variant).
@@ -805,7 +807,9 @@ fn build_interactions() -> Vec<InteractionDescriptor> {
                 "Add MQTT Client",
                 InteractionTransport::ProviderProxied,
             );
-            i.required_permission = Some("update_system_services".to_string());
+            i.required_action = Some(
+                uptrakit_shared_types::access::actions::SYSTEM_SERVICES_UPDATE_STR.to_string(),
+            );
             i.input_schema = Some(surfaces::SchemaContract::Object);
             i.result_schema = Some(surfaces::SchemaContract::Object);
             i.sensitive_fields = vec!["password".to_string(), "ca_pem".to_string()];
@@ -821,7 +825,9 @@ fn build_interactions() -> Vec<InteractionDescriptor> {
                 InteractionTransport::ProviderProxied,
             );
             i.http_method = surfaces::InteractionHttpMethod::Put;
-            i.required_permission = Some("update_system_services".to_string());
+            i.required_action = Some(
+                uptrakit_shared_types::access::actions::SYSTEM_SERVICES_UPDATE_STR.to_string(),
+            );
             i.input_schema = Some(surfaces::SchemaContract::Object);
             i.result_schema = Some(surfaces::SchemaContract::Null);
             i.sensitive_fields = vec!["password".to_string(), "ca_pem".to_string()];
@@ -837,7 +843,9 @@ fn build_interactions() -> Vec<InteractionDescriptor> {
                 InteractionTransport::ProviderProxied,
             );
             i.http_method = surfaces::InteractionHttpMethod::Delete;
-            i.required_permission = Some("update_system_services".to_string());
+            i.required_action = Some(
+                uptrakit_shared_types::access::actions::SYSTEM_SERVICES_UPDATE_STR.to_string(),
+            );
             i.input_schema = Some(surfaces::SchemaContract::Object);
             i.result_schema = Some(surfaces::SchemaContract::Null);
             i.timeout_seconds = Some(30);

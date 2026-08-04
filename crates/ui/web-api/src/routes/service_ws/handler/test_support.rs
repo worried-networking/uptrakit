@@ -86,7 +86,7 @@ pub(super) fn test_surface_registration(
                 .slot(surfaces::SLOT_SOFTWARE_TABS)
                 .scope(surfaces::Scope::Tenant)
                 .targeting(surfaces::Targeting::Targeted)
-                .required_permission("view_software")
+                .required_action(uptrakit_shared_types::access::actions::SOFTWARE_READ)
                 .provider_kind(surfaces::ProviderKind::Service)
                 .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                     surfaces::Capability::TextBlockNode,
@@ -104,7 +104,8 @@ pub(super) fn test_surface_registration(
                     "Refresh",
                     surfaces::InteractionTransport::ProviderProxied,
                 );
-                i.required_permission = Some("update_software".to_string());
+                i.required_action =
+                    Some(uptrakit_shared_types::access::actions::SOFTWARE_UPDATE_STR.to_string());
                 i.input_schema = Some(surfaces::SchemaContract::Object);
                 i.result_schema = Some(surfaces::SchemaContract::Object);
                 i.timeout_seconds = Some(30);

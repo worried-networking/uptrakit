@@ -469,7 +469,7 @@ async fn surface_action_lookup_failure_emits_validation_failed_tenant_audit_row(
     let service_id = Uuid::now_v7();
     insert_test_service_row(&db, tenant_id, service_id, "uptrakit-agent-ssh").await;
     let mut registration = test_surface_registration("service.provider-a", tenant_id);
-    registration.surfaces[0].interactions[0].required_permission = None;
+    registration.surfaces[0].interactions[0].required_action = None;
     state
         .surface_proxy_deps
         .registry
@@ -560,7 +560,7 @@ async fn surface_action_success_emits_success_tenant_audit_row() {
     let service_id = Uuid::now_v7();
     insert_test_service_row(&db, tenant_id, service_id, "uptrakit-agent-ssh").await;
     let mut registration = test_surface_registration("service.provider-a", tenant_id);
-    registration.surfaces[0].interactions[0].required_permission = None;
+    registration.surfaces[0].interactions[0].required_action = None;
     state
         .surface_proxy_deps
         .registry
@@ -680,7 +680,7 @@ async fn surface_action_provider_unavailable_emits_failed_tenant_audit_row() {
     let service_id = Uuid::now_v7();
     insert_test_service_row(&db, tenant_id, service_id, "uptrakit-agent-ssh").await;
     let mut registration = test_surface_registration("service.provider-a", tenant_id);
-    registration.surfaces[0].interactions[0].required_permission = None;
+    registration.surfaces[0].interactions[0].required_action = None;
     state
         .surface_proxy_deps
         .registry

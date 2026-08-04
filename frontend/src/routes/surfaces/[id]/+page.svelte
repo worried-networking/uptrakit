@@ -23,7 +23,7 @@
 	let surfaceRead = $derived(surface ? getSurfaceReadModel(surface.surface_id) : undefined);
 	let isReadRequested = $derived(surface ? getSurfaceReadRequested(surface.surface_id) : false);
 	let isReadLoading = $derived(surface ? getSurfaceReadLoading(surface.surface_id) : false);
-	let canViewSurface = $derived(surface ? hasPermissionValue(getUser(), surface.required_permission) : false);
+	let canViewSurface = $derived(surface ? hasPermissionValue(getUser(), surface.required_action) : false);
 	let isPendingSurfaceRead = $derived(
 		surface
 			? isSurfaceTabPending({

@@ -9,7 +9,7 @@ use uptrakit_plugin_infrastructure_core::{
     PluginFamily, PluginSurface, PluginSurfaceRegistration, RegisteredInteraction, declare_plugin,
     surfaces,
 };
-use uptrakit_shared_types::Permission;
+use uptrakit_shared_types::access::actions;
 
 use crate::config::ProxmoxConfig;
 use crate::update_protection::{DEFAULT_BACKUP_TIMEOUT_SECONDS, DEFAULT_SNAPSHOT_TIMEOUT_SECONDS};
@@ -87,7 +87,7 @@ fn proxmox_hosts_surface() -> PluginSurface {
             .slot(surfaces::SLOT_SURFACE_PAGE)
             .scope(surfaces::Scope::Global)
             .targeting(surfaces::Targeting::Universal)
-            .required_permission(Permission::UpdateHosts.to_string())
+            .required_action(actions::HOSTS_UPDATE)
             .provider_kind(surfaces::ProviderKind::Plugin)
             .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                 surfaces::Capability::SectionNode,
@@ -188,7 +188,7 @@ fn proxmox_hosts_surface() -> PluginSurface {
                         "List Hosts",
                         surfaces::InteractionTransport::ControllerLocal,
                     );
-                    i.required_permission = Some(Permission::UpdateHosts.to_string());
+                    i.required_action = Some(actions::HOSTS_UPDATE_STR.to_string());
                     i.result_schema = Some(surfaces::SchemaContract::Any);
                     i
                 },
@@ -202,7 +202,7 @@ fn proxmox_hosts_surface() -> PluginSurface {
                         "Discover",
                         surfaces::InteractionTransport::ControllerLocal,
                     );
-                    i.required_permission = Some(Permission::UpdateHosts.to_string());
+                    i.required_action = Some(actions::HOSTS_UPDATE_STR.to_string());
                     i.input_schema = Some(surfaces::SchemaContract::Object);
                     i.result_schema = Some(surfaces::SchemaContract::Any);
                     i.timeout_seconds = Some(120);
@@ -219,7 +219,7 @@ fn proxmox_hosts_surface() -> PluginSurface {
                         "Test Connection",
                         surfaces::InteractionTransport::ControllerLocal,
                     );
-                    i.required_permission = Some(Permission::UpdateHosts.to_string());
+                    i.required_action = Some(actions::HOSTS_UPDATE_STR.to_string());
                     i.input_schema = Some(surfaces::SchemaContract::Object);
                     i.result_schema = Some(surfaces::SchemaContract::Any);
                     i.timeout_seconds = Some(30);
@@ -236,7 +236,7 @@ fn proxmox_hosts_surface() -> PluginSurface {
                         "Approve Match",
                         surfaces::InteractionTransport::ControllerLocal,
                     );
-                    i.required_permission = Some(Permission::UpdateHosts.to_string());
+                    i.required_action = Some(actions::HOSTS_UPDATE_STR.to_string());
                     i.input_schema = Some(surfaces::SchemaContract::Object);
                     i.result_schema = Some(surfaces::SchemaContract::Any);
                     i.icon = Some("check".to_string());
@@ -252,7 +252,7 @@ fn proxmox_hosts_surface() -> PluginSurface {
                         "Manual Match",
                         surfaces::InteractionTransport::ControllerLocal,
                     );
-                    i.required_permission = Some(Permission::UpdateHosts.to_string());
+                    i.required_action = Some(actions::HOSTS_UPDATE_STR.to_string());
                     i.provider_invocable = true;
                     i.input_schema = Some(surfaces::SchemaContract::Object);
                     i.result_schema = Some(surfaces::SchemaContract::Any);
@@ -306,7 +306,7 @@ fn proxmox_hosts_surface() -> PluginSurface {
                         "Remove Match",
                         surfaces::InteractionTransport::ControllerLocal,
                     );
-                    i.required_permission = Some(Permission::UpdateHosts.to_string());
+                    i.required_action = Some(actions::HOSTS_UPDATE_STR.to_string());
                     i.input_schema = Some(surfaces::SchemaContract::Object);
                     i.result_schema = Some(surfaces::SchemaContract::Any);
                     i.confirmation = Some(surfaces::InteractionConfirmation {
@@ -329,7 +329,7 @@ fn proxmox_hosts_surface() -> PluginSurface {
                         "Unmatched Guests",
                         surfaces::InteractionTransport::ControllerLocal,
                     );
-                    i.required_permission = Some(Permission::UpdateHosts.to_string());
+                    i.required_action = Some(actions::HOSTS_UPDATE_STR.to_string());
                     i.result_schema = Some(surfaces::SchemaContract::Any);
                     i.provider_invocable = true;
                     i
@@ -373,7 +373,7 @@ fn proxmox_host_info_surface() -> PluginSurface {
             .slot(surfaces::SLOT_HOST_DETAIL_TABS)
             .scope(surfaces::Scope::Global)
             .targeting(surfaces::Targeting::Universal)
-            .required_permission(Permission::UpdateHosts.to_string())
+            .required_action(actions::HOSTS_UPDATE)
             .provider_kind(surfaces::ProviderKind::Plugin)
             .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                 surfaces::Capability::KeyValueNode,
@@ -393,7 +393,7 @@ fn proxmox_host_info_surface() -> PluginSurface {
                     "Get Info",
                     surfaces::InteractionTransport::ControllerLocal,
                 );
-                i.required_permission = Some(Permission::UpdateHosts.to_string());
+                i.required_action = Some(actions::HOSTS_UPDATE_STR.to_string());
                 i.result_schema = Some(surfaces::SchemaContract::Object);
                 i.timeout_seconds = Some(10);
                 i
@@ -431,7 +431,7 @@ fn proxmox_settings_update_protection_surface() -> PluginSurface {
             .slot(surfaces::SLOT_SETTINGS_TABS)
             .scope(surfaces::Scope::Global)
             .targeting(surfaces::Targeting::Universal)
-            .required_permission(Permission::ManageGlobalSettings.to_string())
+            .required_action(actions::SYSTEM_SETTINGS_MANAGE)
             .provider_kind(surfaces::ProviderKind::Plugin)
             .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                 surfaces::Capability::SectionNode,
@@ -467,7 +467,7 @@ fn proxmox_settings_update_protection_surface() -> PluginSurface {
                         "Preload Global Defaults",
                         surfaces::InteractionTransport::ControllerLocal,
                     );
-                    i.required_permission = Some(Permission::ManageGlobalSettings.to_string());
+                    i.required_action = Some(actions::SYSTEM_SETTINGS_MANAGE_STR.to_string());
                     i.input_schema = Some(surfaces::SchemaContract::Object);
                     i.result_schema = Some(surfaces::SchemaContract::Object);
                     i
@@ -485,7 +485,7 @@ fn proxmox_settings_update_protection_surface() -> PluginSurface {
                         "Load Backup Target Options",
                         surfaces::InteractionTransport::ControllerLocal,
                     );
-                    i.required_permission = Some(Permission::ManageGlobalSettings.to_string());
+                    i.required_action = Some(actions::SYSTEM_SETTINGS_MANAGE_STR.to_string());
                     i.input_schema = Some(surfaces::SchemaContract::Object);
                     i.result_schema = Some(surfaces::SchemaContract::Object);
                     i
@@ -504,7 +504,7 @@ fn proxmox_settings_update_protection_surface() -> PluginSurface {
                         surfaces::InteractionTransport::ControllerLocal,
                     );
                     i.http_method = surfaces::InteractionHttpMethod::Put;
-                    i.required_permission = Some(Permission::ManageGlobalSettings.to_string());
+                    i.required_action = Some(actions::SYSTEM_SETTINGS_MANAGE_STR.to_string());
                     i.input_schema = Some(surfaces::SchemaContract::Object);
                     i.result_schema = Some(surfaces::SchemaContract::Any);
                     i.form_ui = Some(surfaces::FormUiDescriptor {
@@ -645,7 +645,7 @@ fn proxmox_settings_resource_scaling_surface() -> PluginSurface {
             .slot(surfaces::SLOT_SETTINGS_TABS)
             .scope(surfaces::Scope::Global)
             .targeting(surfaces::Targeting::Universal)
-            .required_permission(Permission::ManageGlobalSettings.to_string())
+            .required_action(actions::SYSTEM_SETTINGS_MANAGE)
             .provider_kind(surfaces::ProviderKind::Plugin)
             .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                 surfaces::Capability::SectionNode,
@@ -674,7 +674,7 @@ fn proxmox_settings_resource_scaling_surface() -> PluginSurface {
                         "Preload Scaling Global Defaults",
                         surfaces::InteractionTransport::ControllerLocal,
                     );
-                    i.required_permission = Some(Permission::ManageGlobalSettings.to_string());
+                    i.required_action = Some(actions::SYSTEM_SETTINGS_MANAGE_STR.to_string());
                     i.input_schema = Some(surfaces::SchemaContract::Object);
                     i.result_schema = Some(surfaces::SchemaContract::Object);
                     i
@@ -693,7 +693,7 @@ fn proxmox_settings_resource_scaling_surface() -> PluginSurface {
                         surfaces::InteractionTransport::ControllerLocal,
                     );
                     i.http_method = surfaces::InteractionHttpMethod::Put;
-                    i.required_permission = Some(Permission::ManageGlobalSettings.to_string());
+                    i.required_action = Some(actions::SYSTEM_SETTINGS_MANAGE_STR.to_string());
                     i.input_schema = Some(surfaces::SchemaContract::Object);
                     i.result_schema = Some(surfaces::SchemaContract::Any);
                     i.form_ui = Some(surfaces::FormUiDescriptor {
@@ -856,7 +856,7 @@ fn proxmox_software_item_update_protection_surface() -> PluginSurface {
             .slot(surfaces::SLOT_SOFTWARE_ITEM_TABS)
             .scope(surfaces::Scope::Global)
             .targeting(surfaces::Targeting::Universal)
-            .required_permission(Permission::ViewSoftware.to_string())
+            .required_action(actions::SOFTWARE_READ)
             .provider_kind(surfaces::ProviderKind::Plugin)
             .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                 surfaces::Capability::SectionNode,
@@ -892,7 +892,7 @@ fn proxmox_software_item_update_protection_surface() -> PluginSurface {
                         "Preload Per-item Overrides",
                         surfaces::InteractionTransport::ControllerLocal,
                     );
-                    i.required_permission = Some(Permission::ViewSoftware.to_string());
+                    i.required_action = Some(actions::SOFTWARE_READ_STR.to_string());
                     i.input_schema = Some(surfaces::SchemaContract::Object);
                     i.result_schema = Some(surfaces::SchemaContract::Object);
                     i
@@ -910,7 +910,7 @@ fn proxmox_software_item_update_protection_surface() -> PluginSurface {
                         "Load Backup Target Options",
                         surfaces::InteractionTransport::ControllerLocal,
                     );
-                    i.required_permission = Some(Permission::ViewSoftware.to_string());
+                    i.required_action = Some(actions::SOFTWARE_READ_STR.to_string());
                     i.input_schema = Some(surfaces::SchemaContract::Object);
                     i.result_schema = Some(surfaces::SchemaContract::Object);
                     i
@@ -929,7 +929,7 @@ fn proxmox_software_item_update_protection_surface() -> PluginSurface {
                         surfaces::InteractionTransport::ControllerLocal,
                     );
                     i.http_method = surfaces::InteractionHttpMethod::Put;
-                    i.required_permission = Some(Permission::UpdateSoftware.to_string());
+                    i.required_action = Some(actions::SOFTWARE_UPDATE_STR.to_string());
                     i.input_schema = Some(surfaces::SchemaContract::Object);
                     i.result_schema = Some(surfaces::SchemaContract::Any);
                     i.form_ui = Some(surfaces::FormUiDescriptor {
@@ -1078,7 +1078,7 @@ fn proxmox_software_item_resource_scaling_surface() -> PluginSurface {
             .slot(surfaces::SLOT_SOFTWARE_ITEM_TABS)
             .scope(surfaces::Scope::Global)
             .targeting(surfaces::Targeting::Universal)
-            .required_permission(Permission::ViewSoftware.to_string())
+            .required_action(actions::SOFTWARE_READ)
             .provider_kind(surfaces::ProviderKind::Plugin)
             .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                 surfaces::Capability::SectionNode,
@@ -1107,7 +1107,7 @@ fn proxmox_software_item_resource_scaling_surface() -> PluginSurface {
                         "Preload Per-item Scaling Overrides",
                         surfaces::InteractionTransport::ControllerLocal,
                     );
-                    i.required_permission = Some(Permission::ViewSoftware.to_string());
+                    i.required_action = Some(actions::SOFTWARE_READ_STR.to_string());
                     i.input_schema = Some(surfaces::SchemaContract::Object);
                     i.result_schema = Some(surfaces::SchemaContract::Object);
                     i
@@ -1126,7 +1126,7 @@ fn proxmox_software_item_resource_scaling_surface() -> PluginSurface {
                         surfaces::InteractionTransport::ControllerLocal,
                     );
                     i.http_method = surfaces::InteractionHttpMethod::Put;
-                    i.required_permission = Some(Permission::UpdateSoftware.to_string());
+                    i.required_action = Some(actions::SOFTWARE_UPDATE_STR.to_string());
                     i.input_schema = Some(surfaces::SchemaContract::Object);
                     i.result_schema = Some(surfaces::SchemaContract::Any);
                     i.form_ui = Some(surfaces::FormUiDescriptor {
@@ -1554,8 +1554,8 @@ mod tests {
             .find(|surface| surface.descriptor.surface_id.as_str() == "proxmox.host-info")
             .expect("proxmox.host-info surface should be registered");
         assert_eq!(
-            host_info.descriptor.required_permission.as_deref(),
-            Some("update_hosts"),
+            host_info.descriptor.required_action.as_deref(),
+            Some(actions::HOSTS_UPDATE_STR),
             "host-detail surface visibility should be permission-gated"
         );
         let get_info = host_info
@@ -1564,8 +1564,8 @@ mod tests {
             .find(|interaction| interaction.interaction_id.as_str() == "info")
             .expect("host-info data-load interaction should be present");
         assert_eq!(
-            get_info.required_permission.as_deref(),
-            Some("update_hosts"),
+            get_info.required_action.as_deref(),
+            Some(actions::HOSTS_UPDATE_STR),
             "data-load interaction should preserve action permission metadata"
         );
 
@@ -1582,8 +1582,8 @@ mod tests {
             "settings policy surface should render in settings.tabs"
         );
         assert_eq!(
-            settings_policy.descriptor.required_permission.as_deref(),
-            Some("manage_global_settings")
+            settings_policy.descriptor.required_action.as_deref(),
+            Some(actions::SYSTEM_SETTINGS_MANAGE_STR)
         );
 
         let software_policy = registrations
@@ -1599,8 +1599,8 @@ mod tests {
             "software-item policy surface should render in software_item.tabs"
         );
         assert_eq!(
-            software_policy.descriptor.required_permission.as_deref(),
-            Some("view_software")
+            software_policy.descriptor.required_action.as_deref(),
+            Some(actions::SOFTWARE_READ_STR)
         );
     }
 
@@ -1747,8 +1747,8 @@ mod tests {
             .expect("unmatched-guests must be a registered interaction");
         assert!(unmatched.provider_invocable);
         assert_eq!(
-            unmatched.required_permission.as_deref(),
-            Some(Permission::UpdateHosts.to_string().as_str())
+            unmatched.required_action.as_deref(),
+            Some(actions::HOSTS_UPDATE_STR)
         );
 
         let match_interaction = hosts
@@ -1825,8 +1825,8 @@ mod tests {
             })
             .expect("overrides (PUT) interaction should exist");
         assert_eq!(
-            save_item.required_permission.as_deref(),
-            Some("update_software")
+            save_item.required_action.as_deref(),
+            Some(actions::SOFTWARE_UPDATE_STR)
         );
         assert_eq!(
             save_item

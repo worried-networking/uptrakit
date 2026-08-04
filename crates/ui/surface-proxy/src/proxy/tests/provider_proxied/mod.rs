@@ -13,6 +13,7 @@ use super::super::{
 use super::{TestPluginInvoker, tenant_id, user_id};
 use crate::registry::{AllProvidersVisible, SurfaceRegistry, SurfaceRegistryConfig};
 use uptrakit_service_connections::ServiceConnectionRegistry;
+use uptrakit_shared_types::access::actions;
 
 fn registration(provider_id: &str, service_tenant: Uuid) -> surfaces::SurfaceRegistration {
     surfaces::SurfaceRegistration {
@@ -41,7 +42,7 @@ fn registration(provider_id: &str, service_tenant: Uuid) -> surfaces::SurfaceReg
                 .slot("software.tabs")
                 .scope(surfaces::Scope::Tenant)
                 .targeting(surfaces::Targeting::Targeted)
-                .required_permission("view_software")
+                .required_action(actions::SOFTWARE_READ)
                 .provider_kind(surfaces::ProviderKind::Service)
                 .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                     surfaces::Capability::TextBlockNode,
@@ -59,7 +60,7 @@ fn registration(provider_id: &str, service_tenant: Uuid) -> surfaces::SurfaceReg
                     "Action",
                     surfaces::InteractionTransport::ProviderProxied,
                 );
-                i.required_permission = Some("update_software".to_string());
+                i.required_action = Some(actions::SOFTWARE_UPDATE.to_string());
                 i.input_schema = Some(surfaces::SchemaContract::Object);
                 i.result_schema = Some(surfaces::SchemaContract::Object);
                 i.sensitive_fields = vec!["token".to_string()];
@@ -76,15 +77,15 @@ fn registration(provider_id: &str, service_tenant: Uuid) -> surfaces::SurfaceReg
     }
 }
 
-/// A `Plugin`-kind registration with a permissioned, `ControllerLocal`
+/// A `Plugin`-kind registration with an action-gated, `ControllerLocal`
 /// interaction, used by the `provider_invocable` gate tests below.
 ///
 /// This module's shared `registration()` fixture above registers a
 /// `Service`-kind provider, which admission (task 1) forbids from setting
-/// `provider_invocable` alongside `required_permission` — that combination
+/// `provider_invocable` alongside `required_action` — that combination
 /// is currently allowed only for `Plugin`/`BuiltIn` providers. `ControllerLocal`
 /// transport lets the interaction resolve without a connected service.
-fn plugin_registration_with_permission(
+fn plugin_registration_with_required_action(
     provider_id: &str,
     provider_invocable: bool,
 ) -> surfaces::SurfaceRegistration {
@@ -129,7 +130,7 @@ fn plugin_registration_with_permission(
                     "Action",
                     surfaces::InteractionTransport::ControllerLocal,
                 );
-                i.required_permission = Some("update_hosts".to_string());
+                i.required_action = Some(actions::HOSTS_UPDATE.to_string());
                 i.provider_invocable = provider_invocable;
                 i.input_schema = Some(surfaces::SchemaContract::Object);
                 i.result_schema = Some(surfaces::SchemaContract::Object);
@@ -556,14 +557,14 @@ async fn invoke_provider_origin_can_route_to_another_provider() {
 
     let service_a = Uuid::now_v7();
     let mut reg_a = registration("service.provider-a", tenant_id());
-    reg_a.surfaces[0].interactions[0].required_permission = None;
+    reg_a.surfaces[0].interactions[0].required_action = None;
     registry
         .register_service(service_a, "uptrakit-agent-ssh", Some(tenant_id()), reg_a)
         .expect("service.provider-a registration should succeed");
 
     let service_b = Uuid::now_v7();
     let mut reg_b = registration("service.provider-b", tenant_id());
-    reg_b.surfaces[0].interactions[0].required_permission = None;
+    reg_b.surfaces[0].interactions[0].required_action = None;
     registry
         .register_service(service_b, "uptrakit-agent-ssh", Some(tenant_id()), reg_b)
         .expect("service.provider-b registration should succeed");
@@ -627,9 +628,9 @@ async fn invoke_provider_origin_can_route_to_another_provider() {
 /// `invoke_provider_origin_allowed_when_provider_invocable` below.
 ///
 /// Targets a `bootstrap_plugin`-registered interaction (see
-/// `plugin_registration_with_permission`) rather than reusing this module's
+/// `plugin_registration_with_required_action`) rather than reusing this module's
 /// shared `Service`-kind `registration()` fixture: admission (task 1) forbids
-/// `provider_invocable` together with `required_permission` on
+/// `provider_invocable` together with `required_action` on
 /// Service-registered interactions, so that combination cannot be expressed
 /// via `register_service`.
 #[tokio::test(start_paused = true)]
@@ -656,7 +657,10 @@ async fn invoke_provider_origin_denied_for_permission_gated_interaction() {
         .expect("service.provider-a registration should succeed");
 
     registry
-        .bootstrap_plugin(plugin_registration_with_permission("provider-b", false))
+        .bootstrap_plugin(plugin_registration_with_required_action(
+            "provider-b",
+            false,
+        ))
         .expect("provider-b registration should succeed");
 
     let request = SurfaceInvokeRequest {
@@ -715,7 +719,7 @@ async fn invoke_provider_origin_allowed_when_provider_invocable() {
         .expect("service.provider-a registration should succeed");
 
     registry
-        .bootstrap_plugin(plugin_registration_with_permission("provider-b", true))
+        .bootstrap_plugin(plugin_registration_with_required_action("provider-b", true))
         .expect("provider-b registration should succeed");
 
     let request = SurfaceInvokeRequest {
@@ -775,7 +779,7 @@ async fn invoke_provider_origin_resolves_target_from_surface_when_target_none() 
         .expect("service.provider-a registration should succeed");
 
     registry
-        .bootstrap_plugin(plugin_registration_with_permission("provider-b", true))
+        .bootstrap_plugin(plugin_registration_with_required_action("provider-b", true))
         .expect("provider-b registration should succeed");
 
     let request = SurfaceInvokeRequest {
@@ -815,7 +819,7 @@ async fn invoke_provider_origin_self_target_when_target_none() {
 
     let service_a = Uuid::now_v7();
     let mut reg_a = registration("service.provider-a", tenant_id());
-    reg_a.surfaces[0].interactions[0].required_permission = None;
+    reg_a.surfaces[0].interactions[0].required_action = None;
     registry
         .register_service(service_a, "uptrakit-agent-ssh", Some(tenant_id()), reg_a)
         .expect("service.provider-a registration should succeed");
@@ -869,14 +873,14 @@ async fn invoke_provider_origin_self_target_when_target_none() {
 async fn invoke_explicit_bogus_target_errors_with_named_provider() {
     let registry = registry();
     let service_connections = ServiceConnectionRegistry::new();
-    // This test registers a Plugin-kind provider (`plugin_registration_with_permission`)
+    // This test registers a Plugin-kind provider (`plugin_registration_with_required_action`)
     // and asserts on resolution behavior once that provider is a known candidate — it
     // needs the provider visible, or resolution short-circuits to `NoProvider` before
     // ever reaching the "unknown explicit target" branch this test targets.
     let proxy = SurfaceProxy::new().with_provider_visibility(Arc::new(AllProvidersVisible));
 
     registry
-        .bootstrap_plugin(plugin_registration_with_permission("provider-b", true))
+        .bootstrap_plugin(plugin_registration_with_required_action("provider-b", true))
         .expect("provider-b registration should succeed");
 
     let request = SurfaceInvokeRequest {

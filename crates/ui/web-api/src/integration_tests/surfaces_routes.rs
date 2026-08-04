@@ -15,7 +15,7 @@ use crate::test_harness::fixtures::register_and_get_token;
 use uptrakit_wire::surfaces;
 use uuid::Uuid;
 
-/// Minimal targeted surface registration with NO required_permission, so the
+/// Minimal targeted surface registration with NO required_action, so the
 /// assertions are independent of the registering user's permission set.
 fn test_surface_registration(tenant_id: Uuid) -> surfaces::SurfaceRegistration {
     surfaces::SurfaceRegistration {

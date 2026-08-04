@@ -4,6 +4,7 @@
 //! first-party providers authoring shared-surface actions and forms.
 
 use serde::{Deserialize, Serialize};
+use uptrakit_shared_types::access::Action;
 
 /// Root descriptor for a UI surface.
 #[non_exhaustive]
@@ -17,9 +18,10 @@ pub struct SurfaceManifest {
     pub priority: i32,
     /// Where this surface appears in the UI.
     pub placement: SurfacePlacement,
-    /// Permission required to see and use this surface.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub required_permission: String,
+    /// Catalog action required to see and use this surface (`None` = ungated).
+    /// Serializes as the canonical `resource:verb` string when set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required_action: Option<Action>,
     /// How actions should be routed to service instances.
     #[serde(default)]
     pub targeting: SurfaceTargeting,
@@ -41,15 +43,15 @@ impl SurfaceManifest {
             label: label.into(),
             priority,
             placement,
-            required_permission: String::new(),
+            required_action: None,
             targeting: SurfaceTargeting::default(),
             ui,
         }
     }
 
-    /// Set the required permission.
-    pub fn with_permission(mut self, permission: impl Into<String>) -> Self {
-        self.required_permission = permission.into();
+    /// Set the required catalog action.
+    pub fn with_required_action(mut self, action: Action) -> Self {
+        self.required_action = Some(action);
         self
     }
 
@@ -606,7 +608,7 @@ impl FormSelectOptionDescriptor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_shared_types::Permission;
+    use uptrakit_shared_types::access::actions;
 
     #[test]
     fn surface_manifest_roundtrip_page() {
@@ -618,7 +620,7 @@ mod tests {
                 nav_section: "management".to_string(),
                 icon: Some("server".to_string()),
             },
-            required_permission: Permission::UpdateHosts.into(),
+            required_action: Some(actions::HOSTS_UPDATE),
             targeting: SurfaceTargeting::Targeted,
             ui: SurfaceUiDefinition::DataTable {
                 columns: vec![SurfaceTableColumn {
@@ -649,7 +651,7 @@ mod tests {
                 target_entity: "host".to_string(),
                 group_label: "SSH Agent".to_string(),
             },
-            required_permission: String::new(),
+            required_action: None,
             targeting: SurfaceTargeting::Targeted,
             ui: SurfaceUiDefinition::Actions {
                 actions: vec!["bootstrap".to_string()],
@@ -839,13 +841,13 @@ mod tests {
                 nav_section: "test".to_string(),
                 icon: None,
             },
-            required_permission: String::new(),
+            required_action: None,
             targeting: SurfaceTargeting::Universal,
             ui: SurfaceUiDefinition::Actions { actions: vec![] },
         };
 
         let json = serde_json::to_string(&manifest).expect("serialize should succeed");
-        assert!(!json.contains("required_permission"));
+        assert!(!json.contains("required_action"));
         assert!(!json.contains("icon"));
     }
 
