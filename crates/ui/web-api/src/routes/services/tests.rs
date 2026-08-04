@@ -11,7 +11,7 @@ use crate::auth::permissions::Permission;
 use crate::auth::registration::{RegistrationMode, RegistrationSettings};
 use crate::cert_signer::{AgentCertSigner, CertSignerError, SignedCertBundle};
 use crate::middleware::action::{
-    CanApproveServices, CanDeleteServices, CanRejectServices, CanUpdateServices,
+    AccessAuthority, CanApproveServices, CanDeleteServices, CanRejectServices, CanUpdateServices,
 };
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, AuthenticatedUser};
 use crate::settings::Settings;
@@ -998,19 +998,26 @@ async fn batch_services_invalid_request_writes_validation_failed_audit_event() {
     insert_tenant(&db, tenant_id).await;
     let state = test_state(db.clone(), tenant_id).await;
 
+    let user_id = uuid::Uuid::now_v7();
     let auth_user = AuthenticatedUser::new(
-        uuid::Uuid::now_v7(),
+        user_id,
         AuthMethod::Password,
         vec![Permission::ApproveServices],
         None,
     );
     let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
+    let access_ctx = state
+        .access_engine
+        .context(tenant_id, user_id, None)
+        .await
+        .expect("build access context");
 
     let response = batch_services(
         State(Arc::clone(&state)),
         tenant_db,
         Extension(auth_user),
         None,
+        Extension(AccessAuthority::Ready(access_ctx)),
         Json(BatchActionRequest {
             action: "approve".to_string(),
             ids: vec![],
@@ -1042,19 +1049,26 @@ async fn batch_services_permission_denied_writes_denied_audit_event() {
     let state = test_state(db.clone(), tenant_id).await;
     let (target, _source) = insert_target_and_source(&db, tenant_id).await;
 
+    let user_id = uuid::Uuid::now_v7();
     let auth_user = AuthenticatedUser::new(
-        uuid::Uuid::now_v7(),
+        user_id,
         AuthMethod::Password,
         vec![Permission::ViewServices],
         None,
     );
     let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
+    let access_ctx = state
+        .access_engine
+        .context(tenant_id, user_id, None)
+        .await
+        .expect("build access context");
 
     let response = batch_services(
         State(Arc::clone(&state)),
         tenant_db,
         Extension(auth_user),
         None,
+        Extension(AccessAuthority::Ready(access_ctx)),
         Json(BatchActionRequest {
             action: "approve".to_string(),
             ids: vec![target.id],
@@ -1079,6 +1093,116 @@ async fn batch_services_permission_denied_writes_denied_audit_event() {
         serde_json::json!("insufficient_permissions")
     );
     assert_eq!(details["batch"], serde_json::json!(true));
+}
+
+#[tokio::test]
+async fn batch_services_approve_success_writes_success_audit_event() {
+    let db = setup_test_db().await;
+    let tenant_id = uuid::Uuid::now_v7();
+    insert_tenant(&db, tenant_id).await;
+    let state = test_state(db.clone(), tenant_id).await;
+    let (_target, source) = insert_target_and_source(&db, tenant_id).await;
+
+    let user_id = uuid::Uuid::now_v7();
+    let auth_user = AuthenticatedUser::new(
+        user_id,
+        AuthMethod::Password,
+        vec![Permission::ApproveServices],
+        None,
+    );
+    let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
+
+    let patterns = vec![
+        "services:approve"
+            .parse::<uptrakit_shared_types::access::ActionPattern>()
+            .expect("valid pattern"),
+    ];
+    uptrakit_shared_db::access_grants::insert_grant(
+        &db,
+        uptrakit_shared_db::access_grants::NewGrant {
+            subject: uptrakit_shared_db::access_grants::GrantSubject::User(user_id),
+            tenant_id: Some(tenant_id),
+            patterns: &patterns,
+            selector: uptrakit_shared_types::access::Selector::All,
+            description: None,
+            created_by: None,
+        },
+    )
+    .await
+    .expect("insert services:approve grant");
+
+    let access_ctx = state
+        .access_engine
+        .context(tenant_id, user_id, None)
+        .await
+        .expect("build access context");
+
+    let response = batch_services(
+        State(Arc::clone(&state)),
+        tenant_db,
+        Extension(auth_user),
+        None,
+        Extension(AccessAuthority::Ready(access_ctx)),
+        Json(BatchActionRequest {
+            action: "approve".to_string(),
+            ids: vec![source.id],
+        }),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let row = latest_tenant_audit_row(&db).await;
+    assert_eq!(
+        uptrakit_audit_log::AuditActionType::SERVICE_APPROVE,
+        row.action_type
+    );
+    assert_eq!(
+        row.outcome,
+        uptrakit_audit_log::AuditOutcome::Success.as_str()
+    );
+}
+
+#[tokio::test]
+async fn batch_services_authorization_unavailable_short_circuits_before_validate() {
+    let db = setup_test_db().await;
+    let tenant_id = uuid::Uuid::now_v7();
+    insert_tenant(&db, tenant_id).await;
+    let state = test_state(db.clone(), tenant_id).await;
+
+    let auth_user =
+        AuthenticatedUser::new(uuid::Uuid::now_v7(), AuthMethod::Password, vec![], None);
+    let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
+
+    // Over MAX_BATCH_SIZE (100): `body.validate()` would reject this with
+    // BAD_REQUEST if it ran. The Unavailable authority check must win first
+    // (infra failure over app-level validation), yielding 500.
+    let ids: Vec<uuid::Uuid> = (0..101).map(|_| uuid::Uuid::now_v7()).collect();
+
+    let response = batch_services(
+        State(Arc::clone(&state)),
+        tenant_db,
+        Extension(auth_user),
+        None,
+        Extension(AccessAuthority::Unavailable),
+        Json(BatchActionRequest {
+            action: "approve".to_string(),
+            ids,
+        }),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+    let row = latest_tenant_audit_row(&db).await;
+    assert_eq!(
+        uptrakit_audit_log::AuditActionType::SERVICE_APPROVE,
+        row.action_type
+    );
+    assert_eq!(
+        row.outcome,
+        uptrakit_audit_log::AuditOutcome::Failed.as_str()
+    );
 }
 
 /// Seed a single embedded service for merge-guard tests.

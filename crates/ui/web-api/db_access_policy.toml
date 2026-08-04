@@ -636,6 +636,8 @@ batch_services = "full-state"
 [routes."services/tests.rs"]
 approve_service_missing_service_writes_denied_audit_event = "ignore"
 approve_service_writes_service_approve_audit_event = "ignore"
+batch_services_approve_success_writes_success_audit_event = "ignore"
+batch_services_authorization_unavailable_short_circuits_before_validate = "ignore"
 batch_services_invalid_request_writes_validation_failed_audit_event = "ignore"
 batch_services_permission_denied_writes_denied_audit_event = "ignore"
 deactivate_service_missing_service_writes_denied_audit_event = "ignore"

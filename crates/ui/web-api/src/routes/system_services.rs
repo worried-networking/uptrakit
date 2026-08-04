@@ -1,8 +1,8 @@
 use crate::AppState;
 use crate::actions::system_services as ss_actions;
 use crate::api_error::ApiError;
-use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
+use crate::middleware::action::{AccessAuthority, authorize_any};
 use crate::middleware::permission::{
     CanApproveSystemServices, CanRejectSystemServices, CanRemoveSystemServices,
     CanUpdateSystemServices, CanViewSystemServices,
@@ -18,6 +18,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use std::sync::Arc;
+use uptrakit_shared_types::access::actions;
 use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
 
@@ -449,10 +450,33 @@ pub async fn batch_system_services(
     State(state): State<Arc<AppState>>,
     Extension(auth_user): Extension<AuthenticatedUser>,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
+    Extension(authority): Extension<AccessAuthority>,
     Json(body): Json<BatchActionRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let action_type = batch_action_to_audit_action(&body.action);
+
+    let access_ctx = match authority {
+        AccessAuthority::Ready(access_ctx) => access_ctx,
+        AccessAuthority::Unavailable => {
+            if let Some(action_type) = action_type {
+                emit_system_service_audit(
+                    &state,
+                    &auth_user,
+                    api_token_id,
+                    action_type,
+                    None,
+                    uptrakit_audit_log::AuditOutcome::Failed,
+                    serde_json::json!({
+                        "reason_code": "authorization_unavailable",
+                        "batch": true,
+                        "requested_count": body.ids.len(),
+                    }),
+                );
+            }
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
 
     if let Err(e) = body.validate() {
         if let Some(action_type) = action_type {
@@ -472,13 +496,18 @@ pub async fn batch_system_services(
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
-    let required = match body.action.as_str() {
-        "approve" => Permission::ApproveSystemServices,
-        "reject" => Permission::RejectSystemServices,
-        "deactivate" => Permission::RemoveSystemServices,
+    let required_actions = match body.action.as_str() {
+        "approve" => &[actions::SYSTEM_SERVICES_APPROVE][..],
+        "reject" => &[actions::SYSTEM_SERVICES_REJECT][..],
+        "deactivate" => &[actions::SYSTEM_SERVICES_DELETE][..],
         _ => return error_response(StatusCode::BAD_REQUEST, "Unknown batch action"),
     };
-    if !auth_user.has_permission(required) {
+    if let Err(reason) = authorize_any(&state.access_engine, &access_ctx, required_actions) {
+        metrics::counter!(
+            "uptrakit_access_denies_total",
+            "reason" => reason.as_str()
+        )
+        .increment(1);
         if let Some(action_type) = action_type {
             emit_system_service_audit(
                 &state,
@@ -640,6 +669,7 @@ mod tests {
 
     use super::*;
     use crate::auth::AuthMethod;
+    use crate::auth::permissions::Permission;
     use sea_orm::{
         ActiveModelTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryOrder, QuerySelect,
         Set,
@@ -779,17 +809,24 @@ mod tests {
         let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
         let service = insert_pending_system_service(&db).await;
 
+        let user_id = Uuid::now_v7();
         let auth_user = AuthenticatedUser::new(
-            Uuid::now_v7(),
+            user_id,
             AuthMethod::Password,
             vec![Permission::ViewSystemServices],
             None,
         );
+        let access_ctx = state
+            .access_engine
+            .context(tenant_id, user_id, None)
+            .await
+            .expect("build access context");
 
         let response = batch_system_services(
             State(Arc::clone(&state)),
             Extension(auth_user),
             None,
+            Extension(AccessAuthority::Ready(access_ctx)),
             Json(BatchActionRequest {
                 action: "approve".to_string(),
                 ids: vec![service.id],
@@ -808,6 +845,109 @@ mod tests {
         assert_eq!(
             row.outcome,
             uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+    }
+
+    #[tokio::test]
+    async fn batch_system_services_approve_success_writes_success_audit_event() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
+        let service = insert_pending_system_service(&db).await;
+
+        let user_id = Uuid::now_v7();
+        let auth_user = AuthenticatedUser::new(
+            user_id,
+            AuthMethod::Password,
+            vec![Permission::ApproveSystemServices],
+            None,
+        );
+
+        let patterns = vec![
+            "system.services:approve"
+                .parse::<uptrakit_shared_types::access::ActionPattern>()
+                .expect("valid pattern"),
+        ];
+        uptrakit_shared_db::access_grants::insert_grant(
+            &db,
+            uptrakit_shared_db::access_grants::NewGrant {
+                subject: uptrakit_shared_db::access_grants::GrantSubject::User(user_id),
+                tenant_id: None,
+                patterns: &patterns,
+                selector: uptrakit_shared_types::access::Selector::All,
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect("insert system.services:approve grant");
+
+        let access_ctx = state
+            .access_engine
+            .context(tenant_id, user_id, None)
+            .await
+            .expect("build access context");
+
+        let response = batch_system_services(
+            State(Arc::clone(&state)),
+            Extension(auth_user),
+            None,
+            Extension(AccessAuthority::Ready(access_ctx)),
+            Json(BatchActionRequest {
+                action: "approve".to_string(),
+                ids: vec![service.id],
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        wait_for_system_audit_rows(&db, 1).await;
+        let row = latest_system_audit_row(&db).await;
+        assert_eq!(
+            uptrakit_audit_log::AuditActionType::SERVICE_APPROVE,
+            row.action_type
+        );
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+    }
+
+    #[tokio::test]
+    async fn batch_system_services_authorization_unavailable_short_circuits_before_validate() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
+
+        let auth_user = AuthenticatedUser::new(Uuid::now_v7(), AuthMethod::Password, vec![], None);
+
+        // Over MAX_BATCH_SIZE (100): `body.validate()` would reject this with
+        // BAD_REQUEST if it ran. The Unavailable authority check must win
+        // first (infra failure over app-level validation), yielding 500.
+        let ids: Vec<Uuid> = (0..101).map(|_| Uuid::now_v7()).collect();
+
+        let response = batch_system_services(
+            State(Arc::clone(&state)),
+            Extension(auth_user),
+            None,
+            Extension(AccessAuthority::Unavailable),
+            Json(BatchActionRequest {
+                action: "approve".to_string(),
+                ids,
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        wait_for_system_audit_rows(&db, 1).await;
+        let row = latest_system_audit_row(&db).await;
+        assert_eq!(
+            uptrakit_audit_log::AuditActionType::SERVICE_APPROVE,
+            row.action_type
+        );
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Failed.as_str()
         );
     }
 

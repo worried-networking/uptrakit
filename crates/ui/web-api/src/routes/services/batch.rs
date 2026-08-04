@@ -4,8 +4,8 @@ use super::audit::{AuditContext, batch_action_to_audit_action, emit_service_batc
 use super::{BatchActionFailure, BatchActionRequest, BatchActionResponse, BatchActionSuccess};
 use crate::AppState;
 use crate::actions::services as svc_actions;
-use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
+use crate::middleware::action::{AccessAuthority, authorize_any};
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, AuthenticatedUser};
 use crate::tenant_db::TenantDb;
 use axum::{
@@ -15,6 +15,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use std::sync::Arc;
+use uptrakit_shared_types::access::actions;
 use uptrakit_web_api_types::validation::Validate;
 
 /// Perform a batch action on multiple services.
@@ -41,6 +42,7 @@ pub async fn batch_services(
     tenant_db: TenantDb,
     Extension(auth_user): Extension<AuthenticatedUser>,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
+    Extension(authority): Extension<AccessAuthority>,
     Json(body): Json<BatchActionRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
@@ -51,6 +53,25 @@ pub async fn batch_services(
         api_token_id,
     };
     let action_type = batch_action_to_audit_action(&body.action);
+
+    let access_ctx = match authority {
+        AccessAuthority::Ready(access_ctx) => access_ctx,
+        AccessAuthority::Unavailable => {
+            if let Some(action_type) = action_type {
+                emit_service_batch_audit(
+                    &audit_ctx,
+                    action_type,
+                    uptrakit_audit_log::AuditOutcome::Failed,
+                    serde_json::json!({
+                        "reason_code": "authorization_unavailable",
+                        "batch": true,
+                        "requested_count": body.ids.len(),
+                    }),
+                );
+            }
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
 
     if let Err(e) = body.validate() {
         if let Some(action_type) = action_type {
@@ -67,13 +88,18 @@ pub async fn batch_services(
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
-    let required = match body.action.as_str() {
-        "approve" => Permission::ApproveServices,
-        "reject" => Permission::RejectServices,
-        "deactivate" => Permission::RemoveServices,
+    let required_actions = match body.action.as_str() {
+        "approve" => &[actions::SERVICES_APPROVE][..],
+        "reject" => &[actions::SERVICES_REJECT][..],
+        "deactivate" => &[actions::SERVICES_DELETE][..],
         _ => return error_response(StatusCode::BAD_REQUEST, "Unknown batch action"),
     };
-    if !auth_user.has_permission(required) {
+    if let Err(reason) = authorize_any(&state.access_engine, &access_ctx, required_actions) {
+        metrics::counter!(
+            "uptrakit_access_denies_total",
+            "reason" => reason.as_str()
+        )
+        .increment(1);
         if let Some(action_type) = action_type {
             emit_service_batch_audit(
                 &audit_ctx,
