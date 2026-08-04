@@ -244,6 +244,11 @@ Each cycle, the controller sends a fresh `DiscoverSoftware` message to every act
 host. The agent runs all applicable discovery plugins and reports back the current state of
 installed packages.
 
+Re-discovery refreshes presence and provenance (last-seen timestamp, discovery source) but does
+**not** overwrite an already-recorded installed version on an active tracked item. That version
+comes from the registered detect-version plugin's own version check, so a rediscovery pass never
+clobbers it with a possibly stale or differently-formatted value reported by a discovery plugin.
+
 ### Disappeared packages
 
 If a package that previously appeared in a discovery run is absent from a subsequent run, the

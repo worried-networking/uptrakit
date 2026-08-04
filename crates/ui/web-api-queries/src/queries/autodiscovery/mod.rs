@@ -851,7 +851,7 @@ mod tests {
             "package managers no longer create plugin_configs"
         );
 
-        // Still exactly one host_software_items link, but with the updated version.
+        // Still exactly one host_software_items link, with the first-run version preserved.
         let hsi_links = HostSoftwareItem::find()
             .filter(host_software_item::Column::HostId.eq(host_id))
             .all(&db)
