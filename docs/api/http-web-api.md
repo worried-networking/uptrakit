@@ -349,8 +349,9 @@ Types are defined in `crates/shared/web-api-types/src/update_history.rs`:
 ## Interactive Update WebSocket
 
 `GET /api/v1/update-history/{id}/interactive` — WebSocket endpoint for bidirectional terminal I/O
-with an interactive update session. Requires the `TriggerUpdates` permission. Only available when
-the controller is compiled with the `interactive` feature.
+with an interactive update session. Gates on the `updates:trigger` action, enforced through
+`AccessEngine`; a denial is a plain HTTP `403 Forbidden` returned before the WebSocket upgrade. Only
+available when the controller is compiled with the `interactive` feature.
 
 This endpoint provides the same output streaming as the SSE endpoint above, plus the ability to
 send stdin data and signals to the update process. See [Interactive Updates API](interactive-updates.md)

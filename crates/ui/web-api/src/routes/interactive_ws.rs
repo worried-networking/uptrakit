@@ -1,7 +1,8 @@
 //! WebSocket endpoint for interactive update sessions.
 //!
 //! Provides bidirectional stdin/stdout forwarding between a browser terminal
-//! and the agent executing an update. Requires `ManageSoftware` permission.
+//! and the agent executing an update. Gates on the `updates:trigger` action, enforced through
+//! `AccessEngine`.
 //!
 //! This entire module is gated on the `interactive` feature.
 
@@ -102,7 +103,8 @@ enum ServerMessage {
 /// `token` query parameter (necessary for browser WebSocket connections
 /// which cannot set custom headers).
 ///
-/// Requires `ManageSoftware` permission (stdin implies code execution trust).
+/// Gates on the `updates:trigger` action, enforced through `AccessEngine` (stdin implies code
+/// execution trust).
 ///
 /// Single-writer: only one user can hold an interactive session per update.
 #[tracing::instrument(skip_all)]

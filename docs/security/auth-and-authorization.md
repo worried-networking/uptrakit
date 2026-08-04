@@ -443,6 +443,31 @@ MCP authorization has moved onto the same `AccessEngine` in parallel with the ro
 declares typed catalog actions in its `ToolAuth` that a single `require_tool_auth()` helper enforces — see the
 [OAuth MCP Development Guide](../development/oauth-mcp.md).
 
+Shared surfaces enforce on the same engine: `required_action` on surface descriptors and interactions is parsed to a
+catalog `Action` at registration admission and enforced by `enforce_required_action()` through `AccessEngine` before
+dispatch, for both plugin- and service-backed surfaces; provider-origin (service-initiated) calls are denied for
+action-gated interactions unless the interaction sets `provider_invocable`. See [Runtime-valued permission extension
+(surfaces)](#runtime-valued-permission-extension-surfaces) above for the full mechanism — this paragraph only
+cross-links it, the resolved-`Action` enforcement described there is the same one this transition covers.
+
+The interactive update WebSocket (`crates/ui/web-api/src/routes/interactive_ws.rs`) gates on the `updates:trigger`
+catalog action through `AccessEngine`, via `build_access_authority`. `require_auth` never runs on this route —
+browser WebSockets cannot set custom headers, so the auth token arrives as a `?token=` query parameter instead — so
+the check is an inline engine call rather than an extractor. A denial is a plain HTTP `403 Forbidden` returned
+**before** `ws.on_upgrade()`; there is no close-frame handshake. `AccessEngine`/DB unavailability fails closed as an
+HTTP `500` before upgrade, distinct from the `403` deny path.
+
+Five further inline (non-extractor) sites gate on the engine directly. Four share an `authorize_any()` OR-gate helper
+in `crates/ui/web-api/src/middleware/action.rs`, each incrementing `uptrakit_access_denies_total{reason=…}` exactly
+once on an overall deny: `routes/plugin_type_settings.rs::can_view_type_settings` (`settings:read` OR
+`system.settings:manage`), `routes/plugin_configs/crud.rs` (`software:read` OR `settings:read` OR
+`system.settings:manage`), the `routes/system_services.rs` batch handler (per action: `system.services:approve` /
+`system.services:reject` / `system.services:delete`), and the `routes/services/batch.rs` batch handler (per action:
+`services:approve` / `services:reject` / `services:delete`). The fifth, `visibility.rs::is_plugin_visible_to_user`,
+calls `AccessEngine::authorize()` directly for the single `system.settings:manage` action — it is a visibility
+predicate used to filter instance-scoped plugins out of listings, not a request-denying gate, so it returns a `bool`
+and does not increment the deny counter.
+
 Unconverted route families keep the `permission_extractor!` + `x-required-permission` model described
 above until the M1.4b sweep converts them. Which model a given handler uses is visible from its
 extractor import: `crate::middleware::action::CanXxx` (new) vs. `crate::middleware::permission::CanXxx`
