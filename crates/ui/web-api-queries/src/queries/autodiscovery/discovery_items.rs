@@ -1145,6 +1145,172 @@ mod tests {
         );
     }
 
+    /// An active link whose `installed_version` is NULL is filled by discovery:
+    /// writing into NULL overrides nothing.
+    #[tokio::test]
+    async fn process_one_discovery_fills_null_installed_version() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let pc_id = Uuid::now_v7();
+        let item_id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+
+        insert_tenant(&db, tenant_id).await;
+        insert_host(&db, host_id, tenant_id).await;
+        insert_plugin_config(&db, pc_id, tenant_id).await;
+        insert_software_item(&db, item_id, tenant_id, "wget", None).await;
+        insert_host_link(&db, host_id, item_id, pc_id, "wget").await;
+
+        // Clear the fixture's seeded version so the link starts NULL.
+        let hsi = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
+            .one(&db)
+            .await
+            .expect("query link")
+            .expect("link must exist");
+        let mut clear: host_software_item::ActiveModel = hsi.into();
+        clear.installed_version = Set(None);
+        clear.installed_version_detected_at = Set(None);
+        clear.update(&db).await.expect("clear installed_version");
+
+        let args = DiscoveredItemInfo {
+            package_identifier: "wget",
+            name: "wget",
+            installed_version: "2.0.0",
+            featured: false,
+            qualifier: None,
+            plugin_package_identifier: None,
+            installed_display_version: None,
+        };
+        let audit = real_emitter(&db);
+        let ctx = DiscoveryContext {
+            tenant_id,
+            host_id,
+            now,
+            discovery_source: "package-manager.homebrew",
+            audit: &audit,
+        };
+        process_one_discovery(&db, &ctx, pc_id, "package-manager.homebrew", args)
+            .await
+            .expect("process_one_discovery");
+
+        let link = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
+            .one(&db)
+            .await
+            .expect("link query")
+            .expect("link must exist");
+        assert_eq!(
+            link.installed_version.as_deref(),
+            Some("2.0.0"),
+            "a NULL installed_version must be filled by discovery"
+        );
+        assert!(
+            link.installed_version_detected_at.is_some(),
+            "installed_version_detected_at must be stamped on fill"
+        );
+    }
+
+    /// An active link with a non-NULL version keeps all three version fields
+    /// while discovery still stamps presence/provenance on every pass.
+    #[tokio::test]
+    async fn process_one_discovery_preserves_version_but_stamps_presence() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let pc_id = Uuid::now_v7();
+        let item_id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+
+        insert_tenant(&db, tenant_id).await;
+        insert_host(&db, host_id, tenant_id).await;
+        insert_plugin_config(&db, pc_id, tenant_id).await;
+        insert_software_item(&db, item_id, tenant_id, "wget", None).await;
+        // Seeds installed_version="1.0.0", NULL provenance, active.
+        insert_host_link(&db, host_id, item_id, pc_id, "wget").await;
+
+        // Seed missing_since so the clear-on-presence assertion below proves a
+        // real transition instead of restating the fixture default.
+        let hsi = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
+            .one(&db)
+            .await
+            .expect("query link")
+            .expect("link must exist");
+        let mut mark: host_software_item::ActiveModel = hsi.into();
+        mark.missing_since = Set(Some(now));
+        mark.update(&db).await.expect("seed missing_since");
+
+        // DB-roundtripped pre-discovery value, for the unchanged assertion below.
+        let detected_before = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
+            .one(&db)
+            .await
+            .expect("query link")
+            .expect("link must exist")
+            .installed_version_detected_at;
+
+        let args = DiscoveredItemInfo {
+            package_identifier: "wget",
+            name: "wget",
+            installed_version: "2.0.0",
+            featured: false,
+            qualifier: None,
+            plugin_package_identifier: None,
+            installed_display_version: Some("v2.0.0-display"),
+        };
+        let audit = real_emitter(&db);
+        let ctx = DiscoveryContext {
+            tenant_id,
+            host_id,
+            now,
+            discovery_source: "package-manager.homebrew",
+            audit: &audit,
+        };
+        process_one_discovery(&db, &ctx, pc_id, "package-manager.homebrew", args)
+            .await
+            .expect("process_one_discovery");
+
+        let link = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
+            .one(&db)
+            .await
+            .expect("link query")
+            .expect("link must exist");
+        assert_eq!(
+            link.installed_version.as_deref(),
+            Some("1.0.0"),
+            "non-NULL installed_version must be preserved"
+        );
+        assert!(
+            link.installed_display_version.is_none(),
+            "installed_display_version must not be written when the version is preserved"
+        );
+        assert_eq!(
+            link.installed_version_detected_at, detected_before,
+            "installed_version_detected_at must not be bumped when the version is preserved"
+        );
+        assert_eq!(
+            link.discovery_source.as_deref(),
+            Some("package-manager.homebrew"),
+            "discovery_source must still be stamped"
+        );
+        assert!(
+            link.last_discovered_at.is_some(),
+            "last_discovered_at must still be stamped"
+        );
+        assert!(
+            link.missing_since.is_none(),
+            "the seeded missing_since must be cleared on re-presence"
+        );
+    }
+
     /// `featured` is only a presentation flag: re-discovery of a featured item
     /// preserves its non-NULL `installed_version` (like any active link) while
     /// still stamping discovery provenance
