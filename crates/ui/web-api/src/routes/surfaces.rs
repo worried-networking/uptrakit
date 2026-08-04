@@ -220,7 +220,6 @@ pub async fn list_surface_providers(
 pub async fn get_surface_read(
     State(state): State<Arc<AppState>>,
     tenant_ctx: TenantContext,
-    axum::Extension(_auth_user): axum::Extension<AuthenticatedUser>,
     axum::Extension(authority): axum::Extension<AccessAuthority>,
     Path(surface_id): Path<String>,
 ) -> Response {

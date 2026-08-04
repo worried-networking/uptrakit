@@ -93,31 +93,43 @@ async fn error_body(response: http::Response<axum::body::Body>) -> ErrorResponse
     serde_json::from_slice(&bytes).expect("response body should deserialize as ErrorResponse")
 }
 
-/// Polls for the most recent audit row for `action_type`, retrying briefly
-/// since audit `Event` emission (`emit_event`) is async/fire-and-forget.
-/// Copied verbatim from `tenant_audit_row_for_action` in
+/// Polls for the audit row that `action_type` emitted for a specific
+/// `http_method`, retrying briefly since audit `Event` emission (`emit_event`)
+/// is async/fire-and-forget. Adapted from `tenant_audit_row_for_action` in
 /// `routes/surfaces.rs`'s test module (the canonical denied-audit idiom this
-/// task's brief asks to reuse).
+/// task's brief asks to reuse), with one deliberate divergence: a single
+/// request can now produce several denial rows under the same action, so the
+/// row is selected by its recorded `http_method` rather than by being the
+/// newest — `occurred_at` ties at this resolution and latest-wins would make
+/// the assertion order-dependent.
 async fn audit_row_for_action(
     db: &sea_orm::DatabaseConnection,
     action_type: uptrakit_audit_log::RegisteredAuditAction,
+    http_method: &str,
 ) -> uptrakit_shared_db::entity::audit_log::Model {
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
     for _ in 0..50 {
-        if let Some(row) = uptrakit_shared_db::entity::audit_log::Entity::find()
+        let rows = uptrakit_shared_db::entity::audit_log::Entity::find()
             .filter(uptrakit_shared_db::entity::audit_log::Column::ActionType.eq(action_type))
             .order_by_desc(uptrakit_shared_db::entity::audit_log::Column::OccurredAt)
-            .one(db)
+            .all(db)
             .await
-            .expect("query audit rows")
-        {
+            .expect("query audit rows");
+
+        if let Some(row) = rows.into_iter().find(|row| {
+            row.details_json
+                .as_ref()
+                .and_then(|details| details.get("http_method"))
+                .and_then(serde_json::Value::as_str)
+                == Some(http_method)
+        }) {
             return row;
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 
-    panic!("expected audit row for action {action_type}");
+    panic!("expected audit row for action {action_type} with http_method {http_method}");
 }
 
 #[tokio::test]
@@ -565,17 +577,26 @@ async fn missing_permission_is_403_before_method_disclosure() {
     let row = audit_row_for_action(
         &app.db,
         uptrakit_audit_log::AuditActionType::SURFACE_ACTION_INVOKE,
+        "post",
     )
     .await;
     assert_eq!(
         row.outcome,
         uptrakit_audit_log::AuditOutcome::Denied.as_str()
     );
+    // Selecting the row by `http_method` above already proves a denial was
+    // recorded against the *requested* method; these assert what that row
+    // says — the gate that denied it is the gated `PUT` candidate's action,
+    // reported under the permission-denied reason code.
     let details = row
         .details_json
         .as_ref()
         .expect("permission denial audit should include details");
-    assert_eq!(details["http_method"], "post");
+    assert_eq!(
+        details["required_action"],
+        uptrakit_shared_types::access::actions::SOFTWARE_UPDATE_STR
+    );
+    assert_eq!(details["reason_code"], "missing_required_permission");
 }
 
 /// Fail-first (Task 3, Step 0): HEAD must be auto-derived from the GET

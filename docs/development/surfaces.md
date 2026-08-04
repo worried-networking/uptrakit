@@ -113,10 +113,14 @@ Registration admission rejects the flag on action-gated interactions owned by `S
 providers — only `Plugin`/`BuiltIn` providers may combine it with `required_action`. See
 [Surface Security](../security/surfaces.md#provider-origin-invocation) for the caller-origin gate.
 
-Authoring: descriptors and interactions take catalog `Action` consts, not permission strings —
-`SurfaceDescriptorBuilder::required_action(Action)` and the equivalent field/builder on
-`InteractionDescriptor`/`AgentInteraction` (`.with_required_action(Action)`) accept a typed `Action`
-and stamp its canonical `resource:verb` string onto the wire `required_action: Option<String>` field.
+Authoring: gates are declared from catalog `Action` consts, not permission strings. Two authoring
+surfaces take a typed `Action` directly — `SurfaceDescriptorBuilder::required_action(Action)` and
+`AgentInteraction::with_required_action(Action)` — and stamp its canonical `resource:verb` string
+onto the wire `required_action: Option<String>` field. `InteractionDescriptor.required_action` is
+that wire field itself and is written as a string, so use the catalog's `*_STR` const
+(`i.required_action = Some(actions::HOSTS_UPDATE_STR.to_string())`) rather than a hand-typed
+literal; the guard tests in `crates/plugins/infrastructure/registry/tests/` parse every declared
+value of every compiled registration, so a typo there fails the suite rather than shipping.
 `SurfaceProxy` re-parses that string to `Action` at registration admission — a value that fails to
 parse rejects the **whole registration**, not just the offending surface or interaction: every
 surface a provider submitted in that `SurfaceRegistration`/bootstrap call is rejected together, with
@@ -127,9 +131,13 @@ out-of-process providers cross this boundary at different times — the MQTT ser
 plugins invoked through agents — because they register over the wire against whatever controller
 version they happen to connect to. Compiled-in plugins and built-ins ship inside the controller
 binary itself and have zero exposure window; they always match the controller's parser. Roll the
-controller out first: an old satellite that still sends the legacy `required_permission` key is
-still accepted (the field has `#[serde(default, alias = "required_permission", …)]`), so the
-controller-first order never disrupts an unupgraded satellite's registrations. The **rollback**
+controller out first, and expect an availability gap for every unupgraded satellite that gates
+anything: the `#[serde(default, alias = "required_permission", …)]` attribute accepts the legacy
+_key_, but not the legacy _value_ — `update_hosts`, `view_notifications` and friends are not
+`resource:verb` strings, so they fail the admission parse and reject that satellite's **whole
+registration** (`SchemaOrLimitFailure`). Only a satellite whose surfaces are entirely ungated
+registers unchanged against a newer controller; a gated one stays dark until it is upgraded. That
+direction fails **closed** — the surfaces disappear, they never appear unguarded. The **rollback**
 direction is the opposite: it fails **open**. An old controller that predates this change simply
 does not recognize the `required_action` key; `#[serde(default)]` lands `None`, and the surface
 silently un-gates rather than erroring — so a controller rollback across this boundary requires
