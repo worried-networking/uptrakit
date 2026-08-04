@@ -12,9 +12,11 @@
 //! The `PUT` and `DELETE` handlers are gated by `CanManageGlobalSettings`
 //! middleware *before* the visibility predicate runs.  A tenant viewer
 //! (ViewSettings only) receives 403 at the permission gate and never reaches
-//! the predicate.  An admin (ManageGlobalSettings) always passes the predicate
-//! because `is_plugin_visible_to_user` returns `true` when the user has that
-//! permission.  There is therefore no reachable code path in the harness
+//! the predicate.  An admin passes the predicate whenever the engine allows
+//! `system.settings:manage` — `is_plugin_visible_to_user` asks the
+//! `AccessEngine` for that action, not the JWT permission claim, so a role
+//! link alone is not enough: the covering grant must also be present.  There
+//! is therefore no reachable code path in the harness
 //! test matrix where the predicate would return `false` for upsert/delete —
 //! those tests would be vacuous duplicates of the existing permission-gate tests.
 
