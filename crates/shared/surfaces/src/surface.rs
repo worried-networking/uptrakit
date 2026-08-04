@@ -682,46 +682,73 @@ impl SurfaceContextSelectorDescriptor {
 mod tests {
     use super::*;
 
-    /// Mirrors `SurfaceDescriptor::required_action` exactly (field name + serde
-    /// attrs) so the skew-guard tests below exercise the production serde
-    /// semantics without needing to populate every other `SurfaceDescriptor`
-    /// field for a minimal-valid fixture.
-    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-    struct TestShim {
-        #[serde(
-            default,
-            alias = "required_permission",
-            skip_serializing_if = "Option::is_none"
-        )]
-        required_action: Option<String>,
+    /// Minimal-valid descriptor for the skew-guard tests below, so they
+    /// exercise `SurfaceDescriptor`'s own serde attributes rather than a
+    /// hand-copied mirror that could drift away from them.
+    fn skew_guard_descriptor(required_action: Option<&str>) -> SurfaceDescriptor {
+        SurfaceDescriptor {
+            surface_id: SurfaceId::new("test.surface").unwrap(),
+            label: "Test".to_string(),
+            priority: 100,
+            slot: "surface.page".to_string(),
+            scope: Scope::Global,
+            targeting: Targeting::Universal,
+            required_action: required_action.map(str::to_string),
+            provider_kind: ProviderKind::Plugin,
+            required_capabilities: CapabilitySet::default(),
+            root_node: SurfaceNode::section(None::<String>, vec![]),
+            context_selector: None,
+            nav_icon: None,
+            tab_group: None,
+            tab_group_label: None,
+        }
+    }
+
+    /// Adds the legacy key to an already-serialized descriptor payload.
+    fn with_legacy_key(mut json: serde_json::Value) -> serde_json::Value {
+        json.as_object_mut()
+            .expect("descriptor serializes to a JSON object")
+            .insert(
+                "required_permission".to_string(),
+                serde_json::Value::String("update_hosts".to_string()),
+            );
+        json
     }
 
     #[test]
     fn required_action_accepts_legacy_key_via_alias() {
         // A stale-satellite payload lands in required_action; the (legacy)
         // value then dies at the admission Action parse — never a silent None.
-        let json = serde_json::json!({ "required_permission": "update_hosts" });
-        let parsed: TestShim = serde_json::from_value(json).expect("alias must deserialize");
-        assert_eq!(parsed.required_action.as_deref(), Some("update_hosts"));
+        let json =
+            with_legacy_key(serde_json::to_value(skew_guard_descriptor(None)).expect("serialize"));
+
+        let descriptor: SurfaceDescriptor =
+            serde_json::from_value(json).expect("alias must deserialize");
+        assert_eq!(descriptor.required_action.as_deref(), Some("update_hosts"));
     }
 
     #[test]
     fn required_action_rejects_dual_key_payload() {
         // serde derive: an alias shares the field's slot, so a second
         // occurrence is duplicate_field — there is no last-wins.
-        let json = r#"{"required_action":"hosts:update","required_permission":"update_hosts"}"#;
+        let json = with_legacy_key(
+            serde_json::to_value(skew_guard_descriptor(Some("hosts:update"))).expect("serialize"),
+        );
         // expect_err alone pins the semantics (dual key fails, no last-wins);
         // do not assert serde_json's message text (upstream-behavior coupling).
-        serde_json::from_str::<TestShim>(json).expect_err("dual key must fail");
+        serde_json::from_value::<SurfaceDescriptor>(json).expect_err("dual key must fail");
     }
 
     #[test]
     fn required_action_serializes_under_the_new_key_only() {
-        let value = serde_json::to_value(TestShim {
-            required_action: Some("hosts:update".to_string()),
-        })
-        .expect("serialize");
-        assert!(value.get("required_action").is_some());
+        let value =
+            serde_json::to_value(skew_guard_descriptor(Some("hosts:update"))).expect("serialize");
+        assert_eq!(
+            value
+                .get("required_action")
+                .and_then(serde_json::Value::as_str),
+            Some("hosts:update")
+        );
         assert!(value.get("required_permission").is_none());
     }
 

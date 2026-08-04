@@ -54,7 +54,8 @@ pub(super) async fn prepare_invocation(
     let idem_key = build_idempotency_key(request, &caller_origin);
 
     if matches!(&caller_origin, surfaces::CallerOrigin::Provider { .. })
-        && resolved.interaction.required_action.is_some()
+        && resolved.interaction_required_action.is_some()
+        && !resolved.interaction.provider_invocable
     {
         return Err(SurfaceProxyError::PermissionDenied(
             "provider-initiated requests cannot satisfy user permission gates".to_string(),
