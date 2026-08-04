@@ -188,9 +188,14 @@ items"` (never hand-allocate the number; re-verify the allocated number against 
 4. **Inline comment** in `discovery_items.rs` (Phase-1 write block, currently "discovery is the
    source of truth for the installed version") — rewrite to state the preservation rule and cite
    the ADR.
+5. **`docs/end-user/autodiscovery.md`** — §Periodic Software Rediscovery: note that a
+   re-discovery pass refreshes presence and provenance but no longer applies its reported version
+   to an already-tracked link, so an operator can see a stale version until the next scheduled
+   version check.
 
 No README, wire-protocol, API-doc, or frontend-doc impact: the change is server-internal behavior
-with no surface, endpoint, or schema delta.
+with no surface, endpoint, or schema delta. The one end-user-visible consequence (deliverable 5)
+is a version-freshness delay, not a surface change.
 
 ## Out of scope (deferred by owner decision, 2026-08-03)
 

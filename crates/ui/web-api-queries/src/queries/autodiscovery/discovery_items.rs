@@ -262,6 +262,30 @@ async fn process_targets_discovery(
     Ok(())
 }
 
+/// Apply discovery's write to an already-existing `host_software_item` link.
+///
+/// Presence and provenance stamps are unconditional; the version triple is
+/// written only when `preserve_version` is false. Both existing-row write
+/// sites in `find_or_create_software_item` route through here so their gates
+/// cannot drift apart. See ADR-0037 (discovery version preservation).
+fn apply_discovery_link_write(
+    active: &mut host_software_item::ActiveModel,
+    preserve_version: bool,
+    item: &DiscoveredItemInfo<'_>,
+    now: OffsetDateTime,
+    discovery_source: &str,
+) {
+    if !preserve_version {
+        active.installed_version = Set(Some(item.installed_version.to_string()));
+        active.installed_version_detected_at = Set(Some(now));
+        active.installed_display_version = Set(item.installed_display_version.map(str::to_string));
+    }
+    active.last_discovered_at = Set(Some(now));
+    active.discovery_source = Set(Some(discovery_source.to_string()));
+    active.missing_since = Set(None);
+    active.deactivated_at = Set(None);
+}
+
 /// Find-or-create a software item + host link.
 ///
 /// Returns `Some((software_item_id, hsi_id))` when a new link was created (caller must then
@@ -446,16 +470,7 @@ async fn find_or_create_software_item(
             let preserve_version = !was_deactivated && hsi.installed_version.is_some();
             let mut active: host_software_item::ActiveModel = hsi.into();
             active.software_item_id = Set(effective_item.id);
-            if !preserve_version {
-                active.installed_version = Set(Some(installed_version.to_string()));
-                active.installed_version_detected_at = Set(Some(now));
-                active.installed_display_version =
-                    Set(item.installed_display_version.map(str::to_string));
-            }
-            active.last_discovered_at = Set(Some(now));
-            active.discovery_source = Set(Some(discovery_source.to_string()));
-            active.missing_since = Set(None);
-            active.deactivated_at = Set(None);
+            apply_discovery_link_write(&mut active, preserve_version, item, now, discovery_source);
             let updated_hsi = active.update(db).await.context_to()?;
             if was_deactivated {
                 emit_reactivation_event(
@@ -630,16 +645,7 @@ async fn find_or_create_software_item(
         let was_deactivated = hsi.deactivated_at.is_some();
         let preserve_version = !was_deactivated && hsi.installed_version.is_some();
         let mut active: host_software_item::ActiveModel = hsi.into();
-        if !preserve_version {
-            active.installed_version = Set(Some(installed_version.to_string()));
-            active.installed_version_detected_at = Set(Some(now));
-            active.installed_display_version =
-                Set(item.installed_display_version.map(str::to_string));
-        }
-        active.last_discovered_at = Set(Some(now));
-        active.discovery_source = Set(Some(discovery_source.to_string()));
-        active.missing_since = Set(None);
-        active.deactivated_at = Set(None);
+        apply_discovery_link_write(&mut active, preserve_version, item, now, discovery_source);
         let updated_hsi = active.update(db).await.context_to()?;
         if was_deactivated {
             emit_reactivation_event(
@@ -1312,8 +1318,8 @@ mod tests {
         );
     }
 
-    /// Phase-3's "preferred existing" write site (~line 631, distinct from
-    /// Phase 1's ~line 445) has its own `preserve_version` gate. Reach it via
+    /// Phase-3's "preferred existing" write site, distinct from Phase 1's
+    /// matched-update site, has its own `preserve_version` gate. Reach it via
     /// the `(tenant_id, name)` unique-constraint fallback: no
     /// `host_software_item_plugin` row exists anywhere for the package
     /// identifier used here, so both Phase 1 and Phase 2 miss; `insert`ing a
