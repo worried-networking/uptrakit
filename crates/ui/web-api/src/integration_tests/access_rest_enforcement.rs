@@ -484,35 +484,58 @@ async fn b3_no_credential_is_401_per_family() {
     let app = TestApp::new().await;
     let client = app.client();
     let dummy = "00000000-0000-0000-0000-000000000000";
-    for path in [
+    let mut get_paths = vec![
         "/api/v1/settings/access".to_string(),
         "/api/v1/settings/agent-certificates".to_string(),
         "/api/v1/settings".to_string(),
         "/api/v1/global-settings".to_string(),
-        "/api/v1/global-settings/nats".to_string(),
         "/api/v1/global-settings/network".to_string(),
         "/api/v1/global-settings/oauth".to_string(),
         "/api/v1/global-settings/providers/github".to_string(),
         "/api/v1/global-settings/zeroconf".to_string(),
-        "/api/v1/settings/oidc-providers".to_string(),
-        format!("/api/v1/settings/oidc-providers/{dummy}"),
         "/api/v1/instance/config-state".to_string(),
         "/api/v1/system/alerts".to_string(),
-    ] {
+    ];
+    // `/global-settings/nats` is mounted only under the `nats` feature
+    // (`routes/mod.rs` gates `settings_nats` on `#[cfg(feature = "nats")]`);
+    // without the feature the route is absent and returns 404, so the
+    // unauthenticated-401 assertion applies only when the feature is enabled.
+    if cfg!(feature = "nats") {
+        get_paths.push("/api/v1/global-settings/nats".to_string());
+    }
+    // The oidc-providers routes are gated on `#[cfg(feature = "oidc")]`
+    // (`routes/mod.rs`); absent (404) when the feature is off, so only assert
+    // the unauthenticated-401 contract when the feature is enabled.
+    if cfg!(feature = "oidc") {
+        get_paths.push("/api/v1/settings/oidc-providers".to_string());
+        get_paths.push(format!("/api/v1/settings/oidc-providers/{dummy}"));
+    }
+    for path in get_paths {
         assert_eq!(
             client.get(&path).send_status().await,
             http::StatusCode::UNAUTHORIZED,
             "{path}: D2 expected 401"
         );
     }
-    for path in [
+    let mut post_paths = vec![
         "/api/v1/global-settings/ca/rotate".to_string(),
-        "/api/v1/settings/reset-data".to_string(),
         "/api/v1/settings/renew-server-certificate".to_string(),
-        format!("/api/v1/settings/oidc-providers/{dummy}/activate"),
-        format!("/api/v1/settings/oidc-providers/{dummy}/deactivate"),
         "/api/v1/instance/config-reload/clear-degraded".to_string(),
-    ] {
+    ];
+    // `/settings/reset-data` is mounted only under the `reset-data` feature
+    // (`routes/mod.rs` gates `settings_reset` on `#[cfg(feature = "reset-data")]`);
+    // absent (404) when the feature is off.
+    if cfg!(feature = "reset-data") {
+        post_paths.push("/api/v1/settings/reset-data".to_string());
+    }
+    // Same `oidc`-feature gating as the GET oidc-providers routes above.
+    if cfg!(feature = "oidc") {
+        post_paths.push(format!("/api/v1/settings/oidc-providers/{dummy}/activate"));
+        post_paths.push(format!(
+            "/api/v1/settings/oidc-providers/{dummy}/deactivate"
+        ));
+    }
+    for path in post_paths {
         assert_eq!(
             client
                 .post_json(&path, &serde_json::json!({}))
