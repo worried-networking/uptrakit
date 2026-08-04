@@ -1,0 +1,206 @@
+//! Live [`DynamicActionRegistry`] over the surface registry (M1.5, spec §8).
+
+use std::sync::Arc;
+
+use uptrakit_controller_core::access::DynamicActionRegistry;
+use uptrakit_shared_types::access::{Action, Verb};
+
+use crate::surface_registry::SurfaceRegistry;
+
+/// `surface.<id>:use` is registered iff a surface with that id is currently
+/// registered; every other dynamic action (other verbs on `surface.*`,
+/// all of `plugin.*`) is unregistered and therefore denies — fail closed,
+/// no dangling authority (spec §8; `05` §Dynamic namespaces).
+///
+/// Tenant- and visibility-blind by trait shape: a surface registered by any
+/// provider makes the action decidable instance-wide, skipping the tenant
+/// binding and provider-visibility filters the listing path applies
+/// (accepted v1 residual — grants stay tenant-scoped).
+pub struct SurfaceActionRegistry(pub Arc<SurfaceRegistry>);
+
+impl DynamicActionRegistry for SurfaceActionRegistry {
+    fn is_registered(&self, action: &Action) -> bool {
+        if action.verb() != Verb::Use {
+            return false;
+        }
+        match action.resource().surface_id() {
+            Some(surface_id) => self.0.has_surface(surface_id),
+            None => false,
+        }
+    }
+}
+
+#[cfg(all(test, feature = "db-sqlite"))]
+mod tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "test fixture: panics on setup failure are acceptable"
+    )]
+
+    use std::sync::Arc;
+
+    use sea_orm::{ConnectOptions, Database, DatabaseConnection, EntityTrait};
+    use uuid::Uuid;
+
+    use uptrakit_controller_core::access::AccessEngine;
+    use uptrakit_shared_db::access_grants::{GrantSubject, NewGrant, insert_grant};
+    use uptrakit_shared_db::entity::tenant;
+    use uptrakit_shared_types::access::{Action, ActionPattern, Decision, DenyReason, Selector};
+    use uptrakit_wire::surfaces;
+
+    use super::SurfaceActionRegistry;
+    use crate::surface_registry::{SurfaceRegistry, SurfaceRegistryConfig};
+
+    async fn test_db() -> DatabaseConnection {
+        let mut opt = ConnectOptions::new("sqlite::memory:");
+        opt.max_connections(1).min_connections(1);
+        let db = Database::connect(opt).await.expect("connect test db");
+        uptrakit_shared_db::migration::run_migrations(&db)
+            .await
+            .expect("run migrations");
+        db
+    }
+
+    async fn default_tenant_id(db: &DatabaseConnection) -> Uuid {
+        tenant::Entity::find()
+            .one(db)
+            .await
+            .expect("query tenant")
+            .expect("seeded default tenant")
+            .id
+    }
+
+    fn registration_for_test_stub(
+        provider_id: &str,
+        tenant_id: Uuid,
+    ) -> surfaces::SurfaceRegistration {
+        surfaces::SurfaceRegistration {
+            provider: surfaces::ProviderIdentity {
+                provider_id: provider_id.to_string(),
+                provider_kind: surfaces::ProviderKind::Service,
+                provider_namespace: "service".to_string(),
+            },
+            framework_generation: surfaces::FrameworkGeneration::new(1, 0),
+            capabilities: surfaces::CapabilitySet::from_capabilities([
+                surfaces::Capability::TextBlockNode,
+                surfaces::Capability::TargetedTargeting,
+            ]),
+            effective_tenant_binding: surfaces::EffectiveTenantBinding {
+                scope: surfaces::Scope::Tenant,
+                tenant_id: Some(tenant_id.to_string()),
+            },
+            surfaces: vec![surfaces::RegisteredSurface {
+                descriptor: surfaces::SurfaceDescriptor::builder()
+                    .surface_id(surfaces::SurfaceId::new("test.stub").expect("valid surface id"))
+                    .label("Test Stub")
+                    .priority(100)
+                    .slot("software.tabs")
+                    .scope(surfaces::Scope::Tenant)
+                    .targeting(surfaces::Targeting::Targeted)
+                    .required_action(
+                        "surface.test.stub:use"
+                            .parse::<Action>()
+                            .expect("valid action"),
+                    )
+                    .provider_kind(surfaces::ProviderKind::Service)
+                    .required_capabilities(surfaces::CapabilitySet::from_capabilities([
+                        surfaces::Capability::TextBlockNode,
+                        surfaces::Capability::TargetedTargeting,
+                    ]))
+                    .root_node(surfaces::SurfaceNode::TextBlock {
+                        text: "ok".to_string(),
+                    })
+                    .build(),
+                interactions: vec![],
+                data_sources: vec![],
+            }],
+            encryption_metadata: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn surface_action_registry_flips_across_service_register_and_unregister() {
+        let db = test_db().await;
+        let tenant_id = default_tenant_id(&db).await;
+        let user_id = Uuid::now_v7();
+        let registry = Arc::new(SurfaceRegistry::new(SurfaceRegistryConfig::default()));
+        let engine = AccessEngine::new(db.clone())
+            .with_registry(Arc::new(SurfaceActionRegistry(Arc::clone(&registry))));
+
+        let patterns = vec![
+            "surface.test.stub:use"
+                .parse::<ActionPattern>()
+                .expect("valid pattern"),
+        ];
+        insert_grant(
+            &db,
+            NewGrant {
+                subject: GrantSubject::User(user_id),
+                tenant_id: Some(tenant_id),
+                patterns: &patterns,
+                selector: Selector::All,
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect("insert grant");
+
+        let stub_action = "surface.test.stub:use"
+            .parse::<Action>()
+            .expect("registered surface id must round-trip through the action grammar");
+
+        // Grants never change across this test — one context covers every
+        // `authorize()` call; only the registry's registration state moves.
+        let ctx = engine
+            .context(tenant_id, user_id, None)
+            .await
+            .expect("context");
+
+        // Before registration: the dynamic action is unregistered — fail
+        // closed even though the grant already exists.
+        assert_eq!(
+            engine.authorize(&ctx, &stub_action, None),
+            Decision::Deny(DenyReason::UnknownAction)
+        );
+
+        // After a service registers the surface: the same grant now allows.
+        let service_id = Uuid::now_v7();
+        registry
+            .register_service(
+                service_id,
+                "uptrakit-agent-ssh",
+                Some(tenant_id),
+                registration_for_test_stub("service.test-stub", tenant_id),
+            )
+            .expect("valid registration must admit");
+        assert_eq!(engine.authorize(&ctx, &stub_action, None), Decision::Allow);
+
+        // Everything-else-false leg: an unregistered `plugin.*` action denies
+        // even with the registry wired.
+        let plugin_action = "plugin.anything:use"
+            .parse::<Action>()
+            .expect("valid dynamic action");
+        assert_eq!(
+            engine.authorize(&ctx, &plugin_action, None),
+            Decision::Deny(DenyReason::UnknownAction)
+        );
+
+        // A non-`use` verb on `surface.*` denies even though `test.stub` is
+        // currently registered — the registry only ever decides `:use`.
+        let read_action = "surface.test.stub:read"
+            .parse::<Action>()
+            .expect("valid dynamic action");
+        assert_eq!(
+            engine.authorize(&ctx, &read_action, None),
+            Decision::Deny(DenyReason::UnknownAction)
+        );
+
+        // After the registering service unregisters: denies again.
+        registry.unregister_service(&service_id);
+        assert_eq!(
+            engine.authorize(&ctx, &stub_action, None),
+            Decision::Deny(DenyReason::UnknownAction)
+        );
+    }
+}

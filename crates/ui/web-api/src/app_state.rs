@@ -1032,9 +1032,19 @@ impl AppStateBuilder {
             .recent_reload_events_rx
             .unwrap_or_else(|| tokio::sync::watch::channel(Vec::new()).1);
 
-        let access_engine = Arc::new(uptrakit_controller_core::access::AccessEngine::new(
-            db.clone(),
-        ));
+        let surface_registry = self.surface_registry.unwrap_or_else(|| {
+            Arc::new(SurfaceRegistry::new(
+                crate::surface_registry::SurfaceRegistryConfig::default(),
+            ))
+        });
+
+        let access_engine = Arc::new(
+            uptrakit_controller_core::access::AccessEngine::new(db.clone()).with_registry(
+                Arc::new(crate::surface_action_registry::SurfaceActionRegistry(
+                    Arc::clone(&surface_registry),
+                )),
+            ),
+        );
 
         Ok(AppState {
             db: DbState::new(db),
@@ -1106,11 +1116,7 @@ impl AppStateBuilder {
             audit_log_dispatcher,
             audit_emitter,
             surface_proxy_deps: SurfaceProxyDeps::new(
-                self.surface_registry.unwrap_or_else(|| {
-                    Arc::new(SurfaceRegistry::new(
-                        crate::surface_registry::SurfaceRegistryConfig::default(),
-                    ))
-                }),
+                surface_registry,
                 self.surface_proxy
                     .unwrap_or_else(|| Arc::new(SurfaceProxy::new())),
                 self.surface_provider_visibility

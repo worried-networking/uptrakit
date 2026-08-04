@@ -47,6 +47,7 @@ pub mod surface_registry {
 pub use uptrakit_web_api_auth::settings_store;
 #[cfg(feature = "interactive")]
 pub mod interactive_sessions;
+pub mod surface_action_registry;
 pub mod tenant_db;
 pub mod update_output_broadcaster;
 pub mod update_reaper;

@@ -478,6 +478,7 @@ impl SurfaceRegistry {
         page_filter: Option<&str>,
         visibility: &dyn SurfaceProviderVisibility,
     ) -> Vec<SurfaceCatalogItem> {
+        // never call `AccessEngine::authorize` under this lock — it reads the registry (`has_surface`)
         let inner = self.inner.lock();
         let mut items = Vec::new();
 
@@ -534,6 +535,7 @@ impl SurfaceRegistry {
         tenant_id: Uuid,
         visibility: &dyn SurfaceProviderVisibility,
     ) -> Vec<SurfaceProviderSummary> {
+        // never call `AccessEngine::authorize` under this lock — it reads the registry (`has_surface`)
         let inner = self.inner.lock();
         let mut providers = Vec::new();
         let provider_ids = inner
@@ -740,6 +742,21 @@ impl SurfaceRegistry {
             .service_to_provider
             .get(service_id)
             .cloned()
+    }
+
+    /// Is any provider currently registered for this surface id? Narrow read
+    /// for the controller's dynamic-action registry seam (M1.5).
+    ///
+    /// Lock invariant: `AccessEngine::authorize` reaches this method, so
+    /// never call `authorize` (or anything that may) while holding
+    /// `inner.lock()` — parking_lot mutexes are non-reentrant and this
+    /// self-deadlocks.
+    pub fn has_surface(&self, surface_id: &str) -> bool {
+        self.inner
+            .lock()
+            .surface_to_providers
+            .get(surface_id)
+            .is_some_and(|providers| !providers.is_empty())
     }
 
     fn validate_registration_basics(
@@ -3707,5 +3724,36 @@ mod tests {
             reason.code == SurfaceProviderRejectionCode::SchemaOrLimitFailure
                 && reason.message.contains("page_size")
         }));
+    }
+
+    #[test]
+    fn has_surface_flips_across_service_register_and_unregister() {
+        let registry = registry();
+        let service_id = Uuid::now_v7();
+        let registration = registration_for_service("service.provider-a", tenant_a());
+
+        assert!(
+            !registry.has_surface("ssh.guest.panel"),
+            "surface must be absent before any registration"
+        );
+
+        registry
+            .register_service(
+                service_id,
+                "uptrakit-agent-ssh",
+                Some(tenant_a()),
+                registration,
+            )
+            .expect("valid registration must admit");
+        assert!(
+            registry.has_surface("ssh.guest.panel"),
+            "surface must be present once a service registers it"
+        );
+
+        registry.unregister_service(&service_id);
+        assert!(
+            !registry.has_surface("ssh.guest.panel"),
+            "surface must be absent again after the registering service unregisters"
+        );
     }
 }
