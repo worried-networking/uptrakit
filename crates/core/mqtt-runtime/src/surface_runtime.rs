@@ -700,6 +700,45 @@ mod tests {
         assert!(handle_clients_action(&request, tenant_a, &configs).is_none());
     }
 
+    /// Guard: every declared `required_action` on the MQTT registration
+    /// (surface-level and interaction-level) parses against the catalog
+    /// `Action` type — catches field-write string seams
+    /// (`Some(actions::X.to_string())` refactors gone wrong), not presence.
+    #[test]
+    fn declared_required_action_values_parse_against_the_catalog() {
+        let registration = build_surface_registration_with_ids(None, None, Some(Uuid::now_v7()))
+            .expect("registration");
+        let mut checked = 0usize;
+        for surface in &registration.surfaces {
+            let surface_id = surface.descriptor.surface_id.as_str();
+            if let Some(required_action) = surface.descriptor.required_action.as_deref() {
+                checked += 1;
+                assert!(
+                    required_action
+                        .parse::<uptrakit_shared_types::access::Action>()
+                        .is_ok(),
+                    "surface `{surface_id}` declares invalid required_action `{required_action}`"
+                );
+            }
+            for interaction in &surface.interactions {
+                if let Some(required_action) = interaction.required_action.as_deref() {
+                    checked += 1;
+                    let interaction_id = interaction.interaction_id.as_str();
+                    assert!(
+                        required_action
+                            .parse::<uptrakit_shared_types::access::Action>()
+                            .is_ok(),
+                        "interaction `{interaction_id}` on `{surface_id}` declares invalid required_action `{required_action}`"
+                    );
+                }
+            }
+        }
+        assert!(
+            checked > 0,
+            "no required_action values found in the MQTT registration — guard is vacuous"
+        );
+    }
+
     /// REST-noun convention guard: surface/interaction/data-source ids stay
     /// kebab-case, and every `ProviderQuery` data source's `operation_id`
     /// resolves to a GET interaction sharing the data source's id.

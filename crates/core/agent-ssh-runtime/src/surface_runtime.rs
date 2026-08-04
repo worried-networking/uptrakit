@@ -2533,6 +2533,44 @@ mod tests {
         assert_eq!(row_action_ids, expected_row_action_ids);
     }
 
+    /// Guard: every declared `required_action` on the ssh-agent registration
+    /// (surface-level and interaction-level) parses against the catalog
+    /// `Action` type — catches field-write string seams
+    /// (`Some(actions::X.to_string())` refactors gone wrong), not presence.
+    #[test]
+    fn declared_required_action_values_parse_against_the_catalog() {
+        let registration = build_surface_registration(None, &test_catalog(), None, None);
+        let mut checked = 0usize;
+        for surface in &registration.surfaces {
+            let surface_id = surface.descriptor.surface_id.as_str();
+            if let Some(required_action) = surface.descriptor.required_action.as_deref() {
+                checked += 1;
+                assert!(
+                    required_action
+                        .parse::<uptrakit_shared_types::access::Action>()
+                        .is_ok(),
+                    "surface `{surface_id}` declares invalid required_action `{required_action}`"
+                );
+            }
+            for interaction in &surface.interactions {
+                if let Some(required_action) = interaction.required_action.as_deref() {
+                    checked += 1;
+                    let interaction_id = interaction.interaction_id.as_str();
+                    assert!(
+                        required_action
+                            .parse::<uptrakit_shared_types::access::Action>()
+                            .is_ok(),
+                        "interaction `{interaction_id}` on `{surface_id}` declares invalid required_action `{required_action}`"
+                    );
+                }
+            }
+        }
+        assert!(
+            checked > 0,
+            "no required_action values found in the ssh-agent registration — guard is vacuous"
+        );
+    }
+
     #[test]
     fn dynamic_primary_action_is_included_in_action_bar_when_available() {
         let interactions = build_agent_interactions();
