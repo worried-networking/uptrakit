@@ -374,7 +374,7 @@ impl<'ast> Visit<'ast> for ExecutorCollector {
         }
 
         // Check the trait name ends with "Executor".
-        let trait_ends_with_executor = node.trait_.as_ref().is_some_and(|(_, trait_path, _)| {
+        let trait_ends_with_executor = node.trait_.as_ref().is_some_and(|(trait_path, _)| {
             trait_path
                 .segments
                 .last()

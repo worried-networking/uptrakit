@@ -17,7 +17,6 @@ plugin-ops = ["uptrakit-plugin-infrastructure-registry/plugin-ops"]
 
 [dependencies]
 async-trait = { workspace = true }
-base64 = { workspace = true }
 parking_lot = { workspace = true }
 rand = { workspace = true }
 rootcause = { workspace = true }

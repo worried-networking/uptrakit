@@ -9,7 +9,7 @@
 
 use aws_lc_rs::aead::{AES_256_GCM, Aad, LessSafeKey, Nonce, UnboundKey};
 #[cfg(test)]
-use rand::RngCore;
+use rand::Rng;
 use rootcause::prelude::*;
 use zeroize::Zeroizing;
 

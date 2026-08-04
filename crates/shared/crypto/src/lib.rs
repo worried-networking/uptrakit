@@ -37,7 +37,7 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use aws_lc_rs::aead::{AES_256_GCM, Aad, LessSafeKey, Nonce, UnboundKey};
-use rand::RngCore;
+use rand::Rng;
 use rootcause::prelude::*;
 use sha2::{Digest, Sha256};
 use thiserror::Error;

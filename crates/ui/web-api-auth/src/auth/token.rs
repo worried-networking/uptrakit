@@ -1,7 +1,7 @@
 use super::Result;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use rand::Rng;
+use rand::RngExt;
 use sha2::{Digest, Sha256};
 
 /// Generate a cryptographically secure random token (32 bytes, base64url encoded)

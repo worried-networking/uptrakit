@@ -558,7 +558,7 @@ pub async fn load_or_generate_oauth_signing_secret(db: &impl ConnectionTrait) ->
     }
 
     let mut bytes = vec![0u8; OAUTH_JWT_SECRET_LENGTH];
-    rand::Rng::fill(&mut rand::rng(), &mut bytes[..]);
+    rand::RngExt::fill(&mut rand::rng(), &mut bytes[..]);
     let b64 = b64_engine.encode(&bytes);
     let encrypted = encrypt_str(&b64, OAUTH_JWT_SECRET_AAD).map_err(|e| {
         report!(AuthError::Internal(format!(
@@ -624,7 +624,7 @@ pub async fn load_or_generate_jwt_key(db: &DatabaseConnection) -> Result<Vec<u8>
 
     // Generate new random key
     let mut bytes = vec![0u8; JWT_KEY_LENGTH];
-    rand::Rng::fill(&mut rand::rng(), &mut bytes[..]);
+    rand::RngExt::fill(&mut rand::rng(), &mut bytes[..]);
     let b64 = b64_engine.encode(&bytes);
 
     // Encrypt before storing (context-bound ENC:v2: format)

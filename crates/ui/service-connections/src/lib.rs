@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::RwLock;
-use rand::Rng;
+use rand::RngExt;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use uptrakit_wire::Capability;

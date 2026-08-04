@@ -43,13 +43,6 @@ exclude = [
     # stringmetrics has no SPDX `license` field (only license-file) and triggers a non-actionable warning.
     # It is used only through `httpmock` in CLI test support (`uptrakit-openapi-client/mock`).
     "stringmetrics@2.2.2",
-    # proc-macro-error2 v2.0.1 — unmaintained (RUSTSEC-2026-0173). Pulled transitively by sea-orm
-    # 2.0.0-rc.40 via sea-orm-macros → sea-bae. No safe upgrade; waiting for sea-bae to migrate to
-    # manyhow/proc-macro2-diagnostics. Proc-macro dep — compile-time only, no runtime exposure.
-    # cargo-deny advisory ignores cannot scope by dependency tree (only by advisory ID), so we prune
-    # this specific version from the graph instead — narrower than a global `id = "RUSTSEC-2026-0173"`
-    # ignore, and goes stale automatically when sea-bae updates its proc-macro-error2 version.
-    "proc-macro-error2@2.0.1",
 ]
 # If true, metadata will be collected with `--all-features`. Note that this can't
 # be toggled off if true, if you want to conditionally enable `--all-features` it

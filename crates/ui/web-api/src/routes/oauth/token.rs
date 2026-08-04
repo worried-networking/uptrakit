@@ -826,7 +826,7 @@ mod mcp_token_tests {
 
         // Generate a upc_-prefixed raw code.
         let mut bytes = [0u8; 32];
-        use rand::Rng;
+        use rand::RngExt;
         rand::rng().fill(&mut bytes);
         let raw = format!("upc_{}", URL_SAFE_NO_PAD.encode(bytes));
         let code_hash = hash_token(&raw);

@@ -5,7 +5,7 @@
 use axum::response::Response;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use rand::Rng;
+use rand::RngExt;
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set, SqliteTransactionMode,

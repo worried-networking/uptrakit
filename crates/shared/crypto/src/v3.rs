@@ -8,7 +8,7 @@
 //! Wire format: `ENC:v3:<key_id>:<hex(nonce || ciphertext || tag)>`
 
 use aws_lc_rs::aead::{AES_256_GCM, Aad, LessSafeKey, Nonce, UnboundKey};
-use rand::RngCore;
+use rand::Rng;
 use rootcause::prelude::*;
 
 use crate::data_key_ring::DataKeyRing;

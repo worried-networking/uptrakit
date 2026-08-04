@@ -1,4 +1,4 @@
-use rand::Rng;
+use rand::RngExt;
 use time::OffsetDateTime;
 
 /// Compute the next run time from `now`, adding `interval_seconds` plus random

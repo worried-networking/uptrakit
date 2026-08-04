@@ -56,13 +56,15 @@ sea-orm = { version = "2.0", default-features = false, features = ["runtime-toki
 sea-orm-migration = { version = "2.0", default-features = false, features = ["runtime-tokio"] }
 url = "2"
 uuid = { version = "1" }
-# rand stays at 0.9 — testcontainers 0.27 pins bollard ^0.20 (bollard-stubs exact-version conflict
-# blocks bollard 0.21); bollard 0.20 uses rand 0.9. Workspace aligns to avoid a dual-rand-version graph.
-rand = "0.9"
+# rand 0.10 is already in the graph via async-nats 0.50, russh 0.62 and sqlx-postgres 0.9, so the
+# workspace pin tracks it rather than adding a duplicate. rand 0.9 remains for bollard/totp-rs/
+# tungstenite and rand 0.8 for openidconnect; neither is reachable from first-party code.
+rand = "0.10"
 totp-rs = { version = "5", features = ["gen_secret", "otpauth"] }
 hostname = "0.4"
-# sha2/hmac stay at 0.10/0.12 — blocked by openidconnect 4.x hardcoding sha2 = "0.10.6";
-# bumping would produce two incompatible sha2 versions in the graph
+# sha2/hmac stay at 0.10/0.12 (latest: 0.11/0.13) — gated at four independent points, each already
+# at its newest release: openidconnect 4.0.1 (sha2 ^0.10.6, hmac ^0.12.1), sqlx-core 0.9,
+# ssh-key 0.6.7, totp-rs 5.7.2. Bumping would fork the graph into two incompatible Digest stacks.
 sha2 = "0.10"
 hex = "0.4"
 subtle = "2"
@@ -73,15 +75,17 @@ metrics-util = "0.20"
 moka = "0.12"
 utoipa = { version = "5.5", features = ["uuid"] }
 x509-ocsp = "0.2"
-# der/const-oid/spki stay at 0.7/0.9/0.7 — blocked by openidconnect 4.x pulling ecdsa/rsa → pkcs8 0.10 → spki 0.7 chain
+# der/spki/const-oid/x509-cert move as one RustCrypto unit and stay at 0.7/0.7/0.9/0.2
+# (latest: 0.8/0.8/0.10/0.3). Two independent gates, both already at their newest release:
+#   - x509-ocsp 0.2.1 requires der ^0.7.8, spki ^0.7.2, x509-cert ^0.2.4
+#   - openidconnect 4.0.1 → rsa/ecdsa → pkcs8 0.10 → spki 0.7 → der 0.7
 der = { version = "0.7", features = ["alloc", "derive", "oid", "pem"] }
 spki = { version = "0.7", features = ["alloc"] }
-# x509-cert stays at 0.2 — x509-ocsp 0.2 (latest) requires x509-cert ^0.2; 0.3 also needs der 0.8 (same crypto chain)
 x509-cert = { version = "0.2", default-features = false, features = ["pem"] }
 const-oid = { version = "0.9", features = ["db"] }
 aws-lc-rs = "1"
 strum = { version = "0.28", features = ["derive"] }
-syn = { version = "2", features = ["full", "extra-traits"] }
+syn = { version = "3", features = ["full", "extra-traits"] }
 quote = "1"
 proc-macro2 = { version = "1" }
 regex = "1"
@@ -91,17 +95,22 @@ tokio-util = "0.7"
 toml = { version = "1", default-features = false, features = ["parse", "serde"] }
 async-stream = "0.3"
 async-trait = "0.1"
+# bollard held at 0.20 (latest: 0.21) — testcontainers 0.27.3 (latest) requires ^0.20.0, so bumping
+# the docker plugin alone would fork the graph into prod-0.21 / dev-0.20. Revisit when
+# testcontainers supports 0.21.
 bollard = { version = "0.20", default-features = false, features = ["http", "pipe"] }
 tempfile = "3"
 cargo_metadata = "0.23.1"
-# tokio-tungstenite stays at 0.29 — axum 0.8 (latest) pins tokio-tungstenite ^0.29;
-# bumping to 0.30 would fork the graph into two incompatible tungstenite stacks
+# tokio-tungstenite stays at 0.29 (latest: 0.30) — axum 0.8.9 (latest) depends on ^0.29.0;
+# bumping would fork the graph into two incompatible tungstenite stacks. The type is also viral:
+# service-sdk's public EnrollmentError wraps tungstenite::Error, so a bump recompiles 11 crates.
 tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect"] }
 zeroize = { version = "1", features = ["derive"] }
 async-nats = { version = "0.50", default-features = false, features = ["server_2_10", "server_2_11", "server_2_12", "aws-lc-rs", "jetstream"] }
+# base64 held at 0.22 (latest: 0.23) — no breaking API change, but 0.23 would add a third copy to
+# the graph (openidconnect 4.0.1 pulls 0.21 regardless) and enables a default `simd-unsafe` feature.
 base64 = "0.22"
 rustix = { version = "1", default-features = false }
-libc = "0.2"
 rumqttc = { version = "0.25.1", default-features = false, features = ["use-rustls-no-provider"] }
 serde_yaml_ng = "0.10"
 uptrakit-frontend = { path = "frontend", version = "0.0.4" }
@@ -175,14 +184,11 @@ uptrakit-plugin-enhancement-dashboard-icons = { path = "crates/plugins/enhanceme
 uptrakit-plugin-discovery-proxmox-helper-scripts = { path = "crates/plugins/discovery/proxmox-helper-scripts", version = "0.0.1" }
 uptrakit-plugin-discovery-uptrakit-self-update = { path = "crates/plugins/discovery/uptrakit-self-update", version = "0.0.1" }
 # External deps used by a single crate — declared here so all versions are pinned in one place
-dirs = "6"
-rpassword = "7"
 russh = { version = "0.62" }
 russh-sftp = { version = "2" }
 ssh-key = { version = "0.6", default-features = false }
-ssh2-config = "0.7"
-# tower-http stays at 0.6 — reqwest 0.13 (latest) pins tower-http ^0.6;
-# bumping to 0.7 would fork the graph into two tower-http versions for no gain
+# tower-http stays at 0.6 (latest: 0.7) — reqwest 0.13.4 (latest) depends on ^0.6.8;
+# bumping would fork the graph into two tower-http versions for no gain
 tower-http = { version = "0.6", default-features = false }
 nix = { version = "0.31", default-features = false }
 notify-debouncer-full = "0.7"
@@ -208,7 +214,6 @@ testcontainers = { version = "0.27", default-features = false, features = ["aws-
 tracing-test = { version = "0.2", default-features = false }
 testcontainers-modules = { version = "0.15", default-features = false, features = ["aws-lc-rs", "postgres"] }
 paste = "1"
-sha1 = "0.10"
 httpmock = "0.8"
 tame-index = "0.26"
 serde_urlencoded = "0.7"

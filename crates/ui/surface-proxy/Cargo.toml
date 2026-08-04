@@ -26,7 +26,6 @@ testing = []
 async-trait = { workspace = true }
 metrics     = { workspace = true }
 parking_lot = { workspace = true }
-rand        = { workspace = true }
 rootcause   = { workspace = true }
 sea-orm     = { workspace = true }
 serde       = { workspace = true }

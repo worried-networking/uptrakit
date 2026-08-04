@@ -113,7 +113,7 @@ fn compute_next_run_at(
     jitter_seconds: i32,
 ) -> OffsetDateTime {
     let jitter = if jitter_seconds > 0 {
-        rand::Rng::random_range(&mut rand::rng(), 0..=jitter_seconds)
+        rand::RngExt::random_range(&mut rand::rng(), 0..=jitter_seconds)
     } else {
         0
     };

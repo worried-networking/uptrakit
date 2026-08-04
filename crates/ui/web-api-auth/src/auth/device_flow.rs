@@ -1,4 +1,4 @@
-use rand::Rng;
+use rand::RngExt;
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter,

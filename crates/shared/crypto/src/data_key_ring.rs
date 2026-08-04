@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use aws_lc_rs::aead::{AES_256_GCM, Aad, LessSafeKey, Nonce, UnboundKey};
-use rand::RngCore;
+use rand::Rng;
 use rootcause::prelude::*;
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;

@@ -30,7 +30,7 @@
 
 use aws_lc_rs::aead::{AES_256_GCM, Aad, LessSafeKey, Nonce, UnboundKey};
 use aws_lc_rs::agreement::{self, EphemeralPrivateKey, UnparsedPublicKey};
-use rand::RngCore;
+use rand::Rng;
 use rootcause::prelude::*;
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
