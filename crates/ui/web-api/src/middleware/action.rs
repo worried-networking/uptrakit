@@ -10,8 +10,8 @@ use axum::extract::{FromRef, FromRequestParts};
 use axum::http::request::Parts;
 use axum::response::Response;
 use http::StatusCode;
-use uptrakit_controller_core::access::AccessContext;
-use uptrakit_shared_types::access::{Decision, actions};
+use uptrakit_controller_core::access::{AccessContext, AccessEngine};
+use uptrakit_shared_types::access::{Action, Decision, DenyReason, actions};
 
 use crate::app_state::AccessState;
 use crate::error_response::error_response;
@@ -198,6 +198,32 @@ action_extractor! {
     CanReadNotifications => actions::NOTIFICATIONS_READ,
     /// `notifications:manage` — create/modify notification channels and rules.
     CanManageNotifications => actions::NOTIFICATIONS_MANAGE,
+}
+
+/// Authorize the first allowed action of `actions` (OR-gate). On overall
+/// deny, returns the first non-`NoGrant` reason seen (`NoGrant` never masks
+/// a scope/ceiling deny from another arm). One deny shape for every inline
+/// site converted in M1.5.
+pub(crate) fn authorize_any(
+    engine: &AccessEngine,
+    ctx: &AccessContext,
+    actions: &[Action],
+) -> Result<(), DenyReason> {
+    let mut deny = None;
+    for action in actions {
+        match engine.authorize(ctx, action, None) {
+            Decision::Allow => return Ok(()),
+            Decision::Deny(reason) => {
+                if matches!(deny, None | Some(DenyReason::NoGrant)) {
+                    deny = Some(reason);
+                }
+            }
+            // `Decision` is #[non_exhaustive] in another crate: unknown
+            // variants deny, fail-closed.
+            _ => {}
+        }
+    }
+    Err(deny.unwrap_or(DenyReason::NoGrant))
 }
 
 #[cfg(test)]

@@ -1,12 +1,10 @@
 use crate::AppState;
-use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
 use crate::extract::Validated;
 use crate::extractors::{IfMatch, SettingsVersion};
+use crate::middleware::action::{AccessAuthority, authorize_any};
 use crate::middleware::permission::{CanManageCommands, CanViewSoftware};
-use crate::middleware::require_auth::{
-    AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
-};
+use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::queries::plugin_configs as pc_queries;
 use crate::queries::plugin_configs::PluginConfigView;
 use crate::tenant_db::TenantDb;
@@ -21,6 +19,7 @@ use std::sync::Arc;
 use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, AuditView, Event, Stateful};
 use uptrakit_plugin_infrastructure_registry::{ConfigModel, PluginDescriptor};
 use uptrakit_shared_types::PluginTypeId;
+use uptrakit_shared_types::access::actions;
 use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 use uptrakit_web_api_types::plugin_configs::{
     CreatePluginConfigRequest, PluginConfigResponse, PluginTypeInfo, UpdatePluginConfigRequest,
@@ -95,12 +94,26 @@ pub(super) fn reject_config_model_none_plugin_type(
 #[tracing::instrument(skip_all)]
 pub async fn list_plugin_types(
     State(state): State<Arc<AppState>>,
-    Extension(auth_user): Extension<AuthenticatedUser>,
+    Extension(authority): Extension<AccessAuthority>,
 ) -> Response {
-    if !auth_user.has_permission(Permission::ViewSoftware)
-        && !auth_user.has_permission(Permission::ViewSettings)
-        && !auth_user.has_permission(Permission::ManageGlobalSettings)
-    {
+    let access_ctx = match authority {
+        AccessAuthority::Ready(access_ctx) => access_ctx,
+        _ => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
+    };
+    if let Err(reason) = authorize_any(
+        &state.access_engine,
+        &access_ctx,
+        &[
+            actions::SOFTWARE_READ,
+            actions::SETTINGS_READ,
+            actions::SYSTEM_SETTINGS_MANAGE,
+        ],
+    ) {
+        metrics::counter!(
+            "uptrakit_access_denies_total",
+            "reason" => reason.as_str()
+        )
+        .increment(1);
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -120,7 +133,8 @@ pub async fn list_plugin_types(
                         d,
                         state.plugin.plugin_ops.as_ref(),
                         snapshot.as_ref(),
-                        &auth_user,
+                        &state.access_engine,
+                        &access_ctx,
                     )
                 })
                 .unwrap_or(false)

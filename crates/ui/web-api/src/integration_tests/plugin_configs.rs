@@ -9,20 +9,21 @@
 )]
 
 use crate::test_harness::TestApp;
-#[cfg(feature = "dashboard-icons")]
-use crate::test_harness::fixtures::register_user;
-use crate::test_harness::fixtures::{insert_host, link_service_host, register_and_get_token};
+use crate::test_harness::fixtures::{
+    insert_host, link_service_host, login_user, register_and_get_token, register_user,
+};
 #[cfg(feature = "dashboard-icons")]
 use sea_orm::{ActiveModelTrait, Set};
 #[cfg(not(feature = "dashboard-icons"))]
 use sea_orm::{ActiveModelTrait, Set};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use std::collections::BTreeSet;
+use uptrakit_shared_db::access_grants::{GrantSubject, delete_grant, load_grants_for_principal};
 use uptrakit_shared_db::entity::audit_log;
 #[cfg(feature = "dashboard-icons")]
 use uptrakit_shared_db::entity::plugin_config;
-use uptrakit_shared_db::entity::service;
-use uptrakit_web_api_types::permissions::Permission;
+use uptrakit_shared_db::entity::{role, service, user_role};
+use uptrakit_shared_types::access::actions;
 use uptrakit_wire::{ControllerMessage, TestPluginConfigResultPayload};
 use uuid::Uuid;
 
@@ -46,6 +47,106 @@ async fn tenant_audit_row_for_action(
     panic!("expected tenant audit row");
 }
 
+// ── M1.5 fixtures ────────────────────────────────────────────────────────────
+
+/// Register the first user (owner) and re-open registration so a second
+/// user can sign up. Returns the owner's access token.
+async fn open_registration(app: &TestApp) -> String {
+    let client = app.client();
+    let owner_token = register_and_get_token(&client).await;
+    let reopen = client
+        .put_json(
+            "/api/v1/settings/access",
+            &serde_json::json!({ "mode": "open" }),
+        )
+        .bearer(&owner_token)
+        .header("if-match", "W/\"settings-v0\"")
+        .send_status()
+        .await;
+    assert_eq!(
+        reopen,
+        http::StatusCode::OK,
+        "failed to re-open registration"
+    );
+    owner_token
+}
+
+/// Register a fresh user (registration must already be open), strip its
+/// auto-assigned `viewer` role, link ONLY `role_name`, invalidate the engine
+/// cache, then re-login so the legacy JWT claim snapshot reflects the newly
+/// linked role's legacy permission set. Returns `(user_id, access_token)`.
+async fn register_user_with_only_role(
+    app: &TestApp,
+    email: &str,
+    role_name: &str,
+) -> (Uuid, String) {
+    let client = app.client();
+    let (status, auth) = register_user(&client, email, "TestPassword123!").await;
+    assert_eq!(
+        status,
+        http::StatusCode::CREATED,
+        "user registration failed"
+    );
+    let user_id = auth.user.id;
+
+    user_role::Entity::delete_many()
+        .filter(user_role::Column::UserId.eq(user_id))
+        .exec(&app.db)
+        .await
+        .expect("strip auto-assigned viewer role");
+
+    let role_id = role::Entity::find()
+        .filter(role::Column::Name.eq(role_name))
+        .one(&app.db)
+        .await
+        .expect("query roles")
+        .unwrap_or_else(|| panic!("seeded `{role_name}` role must exist"))
+        .id;
+    user_role::ActiveModel {
+        tenant_id: Set(app.tenant_id),
+        user_id: Set(user_id),
+        role_id: Set(role_id),
+        assigned_at: Set(time::OffsetDateTime::now_utc()),
+    }
+    .insert(&app.db)
+    .await
+    .expect("assign role");
+    app.state.access_engine.invalidate_subjects(&[user_id], &[]);
+
+    let (login_status, login_auth) = login_user(&client, email, "TestPassword123!").await;
+    assert_eq!(login_status, http::StatusCode::OK, "re-login failed");
+    (user_id, login_auth.access_token.expose_secret().to_string())
+}
+
+/// Owner + a fresh second user holding ONLY `role_name`. Returns
+/// `(user_id, access_token)` for the second user.
+async fn stage_user_with_only_role(app: &TestApp, role_name: &str) -> (Uuid, String) {
+    open_registration(app).await;
+    let email = format!("{role_name}-only@test.local");
+    register_user_with_only_role(app, &email, role_name).await
+}
+
+/// Owner + a fresh second user with its auto-assigned `viewer` role
+/// stripped and no replacement linked. Returns `(user_id, access_token)`.
+async fn stage_zero_role_user(app: &TestApp) -> (Uuid, String) {
+    let client = app.client();
+    open_registration(app).await;
+    let (status, auth) = register_user(&client, "zero-role@test.local", "TestPassword123!").await;
+    assert_eq!(
+        status,
+        http::StatusCode::CREATED,
+        "user registration failed"
+    );
+    let user_id = auth.user.id;
+    user_role::Entity::delete_many()
+        .filter(user_role::Column::UserId.eq(user_id))
+        .exec(&app.db)
+        .await
+        .expect("strip auto-assigned roles");
+    app.state.access_engine.invalidate_subjects(&[user_id], &[]);
+    (user_id, auth.access_token.expose_secret().to_string())
+}
+
 #[tokio::test]
 async fn list_plugin_types_returns_200() {
     let app = TestApp::new().await;
@@ -67,23 +168,16 @@ async fn list_plugin_types_returns_200() {
     );
 }
 
+/// M1.5 OR-gate weaker arm: a `settings_manager`-only principal (seed grant
+/// covers only `settings:read`, never `software:read` or
+/// `system.settings:manage`) must still be able to list plugin types.
 #[tokio::test]
 async fn list_plugin_types_allows_view_settings_without_view_software() {
     let app = TestApp::new().await;
-    let client = app.client();
+    let (_user_id, token) = stage_user_with_only_role(&app, "settings_manager").await;
 
-    let token = app
-        .jwt
-        .create_access_token(
-            uuid::Uuid::now_v7(),
-            &[Permission::ViewSettings],
-            "password",
-            None,
-            None,
-        )
-        .expect("mint settings-only token");
-
-    let (status, body): (_, serde_json::Value) = client
+    let (status, body): (_, serde_json::Value) = app
+        .client()
         .get("/api/v1/plugin-types")
         .bearer(&token)
         .send_json()
@@ -96,23 +190,16 @@ async fn list_plugin_types_allows_view_settings_without_view_software() {
     );
 }
 
+/// A `system_administrator`-only principal (seed grant `system.*:*`, which
+/// covers `system.settings:manage` but neither `settings:read` nor
+/// `software:read`) must still be able to list plugin types.
 #[tokio::test]
 async fn list_plugin_types_allows_manage_global_settings() {
     let app = TestApp::new().await;
-    let client = app.client();
+    let (_user_id, token) = stage_user_with_only_role(&app, "system_administrator").await;
 
-    let token = app
-        .jwt
-        .create_access_token(
-            uuid::Uuid::now_v7(),
-            &[Permission::ManageGlobalSettings],
-            "password",
-            None,
-            None,
-        )
-        .expect("mint global-settings token");
-
-    let (status, body): (_, serde_json::Value) = client
+    let (status, body): (_, serde_json::Value) = app
+        .client()
         .get("/api/v1/plugin-types")
         .bearer(&token)
         .send_json()
@@ -125,23 +212,15 @@ async fn list_plugin_types_allows_manage_global_settings() {
     );
 }
 
+/// Same OR-gate arm proof as above, for the `/api/v1/plugin-type-settings`
+/// list route.
 #[tokio::test]
 async fn list_plugin_type_settings_allows_manage_global_settings() {
     let app = TestApp::new().await;
-    let client = app.client();
+    let (_user_id, token) = stage_user_with_only_role(&app, "system_administrator").await;
 
-    let token = app
-        .jwt
-        .create_access_token(
-            uuid::Uuid::now_v7(),
-            &[Permission::ManageGlobalSettings],
-            "password",
-            None,
-            None,
-        )
-        .expect("mint global-settings token");
-
-    let (status, body): (_, serde_json::Value) = client
+    let (status, body): (_, serde_json::Value) = app
+        .client()
         .get("/api/v1/plugin-type-settings")
         .bearer(&token)
         .send_json()
@@ -151,6 +230,100 @@ async fn list_plugin_type_settings_allows_manage_global_settings() {
     assert!(
         body.as_array().is_some(),
         "plugin type settings response should be array"
+    );
+}
+
+/// A principal holding zero role links (and therefore zero `access_grants`
+/// coverage) must be denied.
+#[tokio::test]
+async fn zero_role_user_cannot_list_plugin_types() {
+    let app = TestApp::new().await;
+    let (_user_id, token) = stage_zero_role_user(&app).await;
+
+    let status = app
+        .client()
+        .get("/api/v1/plugin-types")
+        .bearer(&token)
+        .send_status()
+        .await;
+
+    assert_eq!(
+        status,
+        http::StatusCode::FORBIDDEN,
+        "zero-role user must be denied the plugin types list"
+    );
+}
+
+/// Discriminating regression test for the M1.5 conversion: stages a `viewer`
+/// principal whose legacy `role_permissions` snapshot (baked into the JWT at
+/// login) still grants `view_software` and `view_settings`, but whose
+/// `AccessEngine` authority for `software:read` / `settings:read` /
+/// `system.settings:manage` has been revoked (every covering `access_grants`
+/// row deleted, cache invalidated — a role may hold more than one seed grant
+/// row, so this loops rather than calling `.one()`). Pre-conversion code
+/// (checking the legacy permission claim) answers from the stale JWT and
+/// returns 200; the engine-gated code must reject with a plain 403.
+#[tokio::test]
+async fn viewer_engine_deny_overrides_legacy_permission_for_plugin_types_list() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    open_registration(&app).await;
+
+    let (status, auth) =
+        register_user(&client, "viewer-stripped@test.local", "TestPassword123!").await;
+    assert_eq!(
+        status,
+        http::StatusCode::CREATED,
+        "user registration failed"
+    );
+    let token = auth.access_token.expose_secret().to_string();
+
+    let viewer_role_id = role::Entity::find()
+        .filter(role::Column::Name.eq("viewer"))
+        .one(&app.db)
+        .await
+        .expect("query roles")
+        .expect("seeded viewer role")
+        .id;
+
+    let load = load_grants_for_principal(&app.db, app.tenant_id, Uuid::nil(), &[viewer_role_id])
+        .await
+        .expect("load viewer grants");
+    let mut deleted_any = false;
+    for grant in load.grants {
+        if grant.subject == GrantSubject::Role(viewer_role_id)
+            && grant.patterns.iter().any(|pattern| {
+                pattern.matches(&actions::SOFTWARE_READ)
+                    || pattern.matches(&actions::SETTINGS_READ)
+                    || pattern.matches(&actions::SYSTEM_SETTINGS_MANAGE)
+            })
+        {
+            delete_grant(&app.db, grant.id)
+                .await
+                .expect("delete viewer software/settings-covering grant");
+            deleted_any = true;
+        }
+    }
+    assert!(
+        deleted_any,
+        "expected at least one viewer grant row covering software:read/settings:read"
+    );
+    app.state
+        .access_engine
+        .invalidate_subjects(&[], &[viewer_role_id]);
+
+    let status = app
+        .client()
+        .get("/api/v1/plugin-types")
+        .bearer(&token)
+        .send_status()
+        .await;
+
+    assert_eq!(
+        status,
+        http::StatusCode::FORBIDDEN,
+        "engine must deny the plugin types list once the covering grant is revoked, even \
+         though the legacy view_software/view_settings JWT claim is still present"
     );
 }
 

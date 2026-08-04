@@ -5,13 +5,12 @@
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
+use uptrakit_controller_core::access::{AccessContext, AccessEngine};
 use uptrakit_plugin_infrastructure_registry::{
     PluginDescriptor, PluginOps, PluginScope, PluginTypeId,
 };
+use uptrakit_shared_types::access::{Decision, actions};
 use uptrakit_web_api_queries::instance_plugin_settings::InstancePluginSnapshot;
-use uptrakit_web_api_types::permissions::Permission;
-
-use crate::middleware::require_auth::AuthenticatedUser;
 
 /// Effective enablement of a plugin's runtime functionality (ADR-0033):
 /// `Tenant` scope is always effective; `Instance` scope is effective only
@@ -40,7 +39,7 @@ pub fn effective_instance_enabled(
 /// - `Instance`-scoped + **effectively** enabled (boot ∧ live): visible to
 ///   everyone.
 /// - `Instance`-scoped + not effectively enabled: visible only to users with
-///   `ManageGlobalSettings` (instance owners).
+///   `system.settings:manage` authority (instance owners).
 ///
 /// `PluginScope` is `#[non_exhaustive]`; the wildcard arm logs a warning
 /// and defaults to visible — the safer side for instance owners
@@ -50,7 +49,8 @@ pub fn is_plugin_visible_to_user(
     descriptor: &PluginDescriptor,
     plugin_ops: &dyn PluginOps,
     snapshot: &InstancePluginSnapshot,
-    user: &AuthenticatedUser,
+    engine: &AccessEngine,
+    ctx: &AccessContext,
 ) -> bool {
     match descriptor.scope {
         PluginScope::Tenant => true,
@@ -60,7 +60,11 @@ pub fn is_plugin_visible_to_user(
                 snapshot,
                 &PluginTypeId::from_static(descriptor.type_id),
             );
-            enabled || user.has_permission(Permission::ManageGlobalSettings)
+            enabled
+                || matches!(
+                    engine.authorize(ctx, &actions::SYSTEM_SETTINGS_MANAGE, None),
+                    Decision::Allow
+                )
         }
         _ => {
             tracing::warn!(
@@ -114,14 +118,18 @@ impl crate::surface_proxy::SurfaceProviderVisibility for PluginEffectiveEnableme
     }
 }
 
+/// Shared fixtures for both the ungated `effective_instance_enabled` tests
+/// and the `db-sqlite`-gated `is_plugin_visible_to_user` engine tests below —
+/// neither touches a database, so this module carries no feature gate.
 #[cfg(test)]
-mod tests {
-    use super::*;
+mod test_support {
     use std::sync::OnceLock;
-    use uptrakit_controller_core::auth::AuthMethod;
+
     use uptrakit_plugin_infrastructure_registry::{
         ConfigModel, ConfigOps, PluginFamily, RoleCreators,
     };
+
+    use super::*;
 
     /// Noop functions for test descriptor.
     fn noop_validate(
@@ -148,7 +156,7 @@ mod tests {
     /// Test fixture for a Tenant-scoped plugin.
     static TENANT_PLUGIN_DESCRIPTOR: OnceLock<PluginDescriptor> = OnceLock::new();
 
-    fn tenant_plugin_descriptor() -> &'static PluginDescriptor {
+    pub(super) fn tenant_plugin_descriptor() -> &'static PluginDescriptor {
         TENANT_PLUGIN_DESCRIPTOR.get_or_init(|| PluginDescriptor {
             type_id: "test.tenant.scoped",
             display_name: "Test Tenant Plugin",
@@ -196,7 +204,7 @@ mod tests {
     /// Test fixture for an Instance-scoped plugin.
     static INSTANCE_PLUGIN_DESCRIPTOR: OnceLock<PluginDescriptor> = OnceLock::new();
 
-    fn instance_plugin_descriptor() -> &'static PluginDescriptor {
+    pub(super) fn instance_plugin_descriptor() -> &'static PluginDescriptor {
         INSTANCE_PLUGIN_DESCRIPTOR.get_or_init(|| PluginDescriptor {
             type_id: "test.instance.scoped",
             display_name: "Test Instance Plugin",
@@ -241,30 +249,10 @@ mod tests {
         })
     }
 
-    /// Create a tenant-level user with no admin permissions.
-    fn tenant_user() -> AuthenticatedUser {
-        AuthenticatedUser::new(
-            uuid::Uuid::nil(),
-            AuthMethod::Password,
-            vec![Permission::ViewSoftware],
-            None,
-        )
-    }
-
-    /// Create an instance owner with ManageGlobalSettings permission.
-    fn admin_user() -> AuthenticatedUser {
-        AuthenticatedUser::new(
-            uuid::Uuid::nil(),
-            AuthMethod::Password,
-            vec![Permission::ManageGlobalSettings],
-            None,
-        )
-    }
-
     /// Catalog over the two local fixture descriptors with the Instance
     /// fixture's boot state set to `boot_enabled`. Returns the fallible
     /// build so `expect` stays inside `#[test]` bodies.
-    fn test_plugin_ops(
+    pub(super) fn test_plugin_ops(
         boot_enabled: bool,
     ) -> uptrakit_plugin_infrastructure_core::Result<
         uptrakit_plugin_infrastructure_registry::PluginCatalog,
@@ -279,21 +267,55 @@ mod tests {
         )
     }
 
+    /// A `db-sqlite`-only helper (an unused-function warning in a
+    /// postgres-only test build is the tell that this boundary slipped) —
+    /// kept here so both gated and ungated sibling modules share one fixture
+    /// surface without duplicating the descriptor plumbing above.
+    #[cfg(feature = "db-sqlite")]
+    pub(super) fn enabled_instance_snapshot() -> InstancePluginSnapshot {
+        InstancePluginSnapshot::empty().with_upserted(
+            "test.instance.scoped".to_string(),
+            uptrakit_web_api_queries::instance_plugin_settings::InstancePluginRow {
+                enabled: true,
+                config: serde_json::json!({}),
+                updated_at: time::OffsetDateTime::now_utc(),
+            },
+        )
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    pub(super) fn disabled_instance_snapshot() -> InstancePluginSnapshot {
+        InstancePluginSnapshot::empty().with_upserted(
+            "test.instance.scoped".to_string(),
+            uptrakit_web_api_queries::instance_plugin_settings::InstancePluginRow {
+                enabled: false,
+                config: serde_json::json!({}),
+                updated_at: time::OffsetDateTime::now_utc(),
+            },
+        )
+    }
+}
+
+/// Pure `effective_instance_enabled` coverage — no DB, must keep running in
+/// a postgres-only build.
+#[cfg(test)]
+mod tests {
+    use super::test_support::*;
+    use super::*;
+
     #[test]
-    fn tenant_scoped_always_visible() {
+    fn effective_instance_enabled_tenant_scope_always_true() {
         let ops = test_plugin_ops(false).expect("test catalog builds");
         let snapshot = InstancePluginSnapshot::empty();
-        let user = tenant_user();
-        assert!(is_plugin_visible_to_user(
-            tenant_plugin_descriptor(),
+        assert!(effective_instance_enabled(
             &ops,
             &snapshot,
-            &user
+            &PluginTypeId::from_static(tenant_plugin_descriptor().type_id),
         ));
     }
 
     #[test]
-    fn instance_scoped_enabled_visible_to_tenant_user() {
+    fn effective_instance_enabled_boot_and_live_enabled_true() {
         let ops = test_plugin_ops(true).expect("test catalog builds");
         let snapshot = InstancePluginSnapshot::empty().with_upserted(
             "test.instance.scoped".to_string(),
@@ -303,17 +325,15 @@ mod tests {
                 updated_at: time::OffsetDateTime::now_utc(),
             },
         );
-        let user = tenant_user();
-        assert!(is_plugin_visible_to_user(
-            instance_plugin_descriptor(),
+        assert!(effective_instance_enabled(
             &ops,
             &snapshot,
-            &user
+            &PluginTypeId::from_static(instance_plugin_descriptor().type_id),
         ));
     }
 
     #[test]
-    fn instance_scoped_disabled_hidden_from_tenant_user() {
+    fn effective_instance_enabled_live_disabled_false() {
         let ops = test_plugin_ops(true).expect("test catalog builds");
         let snapshot = InstancePluginSnapshot::empty().with_upserted(
             "test.instance.scoped".to_string(),
@@ -323,60 +343,18 @@ mod tests {
                 updated_at: time::OffsetDateTime::now_utc(),
             },
         );
-        let user = tenant_user();
-        assert!(!is_plugin_visible_to_user(
-            instance_plugin_descriptor(),
+        assert!(!effective_instance_enabled(
             &ops,
             &snapshot,
-            &user
-        ));
-    }
-
-    #[test]
-    fn instance_scoped_disabled_visible_to_admin_user() {
-        let ops = test_plugin_ops(true).expect("test catalog builds");
-        let snapshot = InstancePluginSnapshot::empty().with_upserted(
-            "test.instance.scoped".to_string(),
-            uptrakit_web_api_queries::instance_plugin_settings::InstancePluginRow {
-                enabled: false,
-                config: serde_json::json!({}),
-                updated_at: time::OffsetDateTime::now_utc(),
-            },
-        );
-        let user = admin_user();
-        assert!(is_plugin_visible_to_user(
-            instance_plugin_descriptor(),
-            &ops,
-            &snapshot,
-            &user
-        ));
-    }
-
-    #[test]
-    fn instance_scoped_enabled_visible_to_admin_user() {
-        let ops = test_plugin_ops(true).expect("test catalog builds");
-        let snapshot = InstancePluginSnapshot::empty().with_upserted(
-            "test.instance.scoped".to_string(),
-            uptrakit_web_api_queries::instance_plugin_settings::InstancePluginRow {
-                enabled: true,
-                config: serde_json::json!({}),
-                updated_at: time::OffsetDateTime::now_utc(),
-            },
-        );
-        let user = admin_user();
-        assert!(is_plugin_visible_to_user(
-            instance_plugin_descriptor(),
-            &ops,
-            &snapshot,
-            &user
+            &PluginTypeId::from_static(instance_plugin_descriptor().type_id),
         ));
     }
 
     /// ADR-0033: boot-disabled catalog (pending restart) means the plugin was
-    /// never constructed at boot, so it stays hidden from tenant users even
-    /// though the live row now says enabled.
+    /// never constructed at boot, so it is not effective even though the
+    /// live row now says enabled.
     #[test]
-    fn pending_restart_enabled_hidden_from_tenant_user() {
+    fn effective_instance_enabled_boot_disabled_pending_restart_false() {
         let ops = test_plugin_ops(false).expect("test catalog builds");
         let snapshot = InstancePluginSnapshot::empty().with_upserted(
             "test.instance.scoped".to_string(),
@@ -386,34 +364,216 @@ mod tests {
                 updated_at: time::OffsetDateTime::now_utc(),
             },
         );
-        let user = tenant_user();
-        assert!(!is_plugin_visible_to_user(
-            instance_plugin_descriptor(),
+        assert!(!effective_instance_enabled(
             &ops,
             &snapshot,
-            &user
+            &PluginTypeId::from_static(instance_plugin_descriptor().type_id),
         ));
     }
 
-    /// ADR-0033: admin override still applies to a pending-restart-enabled
-    /// plugin — instance owners can see it to trigger the restart.
     #[test]
-    fn pending_restart_enabled_visible_to_admin_user() {
-        let ops = test_plugin_ops(false).expect("test catalog builds");
-        let snapshot = InstancePluginSnapshot::empty().with_upserted(
-            "test.instance.scoped".to_string(),
-            uptrakit_web_api_queries::instance_plugin_settings::InstancePluginRow {
-                enabled: true,
-                config: serde_json::json!({}),
-                updated_at: time::OffsetDateTime::now_utc(),
+    fn effective_instance_enabled_unknown_type_false() {
+        let ops = test_plugin_ops(true).expect("test catalog builds");
+        let snapshot = InstancePluginSnapshot::empty();
+        assert!(!effective_instance_enabled(
+            &ops,
+            &snapshot,
+            &PluginTypeId::new("test.unknown.type"),
+        ));
+    }
+}
+
+/// `is_plugin_visible_to_user` engine-backed coverage — needs a real
+/// [`AccessEngine`] + [`AccessContext`] over an in-memory sqlite DB
+/// (idiom shared with `middleware/action.rs`'s test module).
+#[cfg(all(test, feature = "db-sqlite"))]
+#[expect(
+    clippy::expect_used,
+    reason = "test code: panics on failure are acceptable"
+)]
+mod engine_tests {
+    use sea_orm::{ConnectOptions, Database, DatabaseConnection, EntityTrait};
+    use uptrakit_shared_db::access_grants::{GrantSubject, NewGrant, insert_grant};
+    use uptrakit_shared_db::entity::tenant;
+    use uptrakit_shared_types::access::{ActionPattern, Selector};
+
+    use super::test_support::*;
+    use super::*;
+
+    async fn test_db() -> DatabaseConnection {
+        let mut opt = ConnectOptions::new("sqlite::memory:");
+        opt.max_connections(1).min_connections(1);
+        let db = Database::connect(opt).await.expect("connect test db");
+        uptrakit_shared_db::migration::run_migrations(&db)
+            .await
+            .expect("run migrations");
+        db
+    }
+
+    async fn default_tenant_id(db: &DatabaseConnection) -> uuid::Uuid {
+        tenant::Entity::find()
+            .one(db)
+            .await
+            .expect("query tenant")
+            .expect("seeded default tenant")
+            .id
+    }
+
+    async fn grant_system_settings_manage(db: &DatabaseConnection, user_id: uuid::Uuid) {
+        let patterns = vec![
+            "system.settings:manage"
+                .parse::<ActionPattern>()
+                .expect("valid pattern"),
+        ];
+        insert_grant(
+            db,
+            NewGrant {
+                subject: GrantSubject::User(user_id),
+                // System-plane grants (e.g. `system.settings:manage`) must encode
+                // tenant_id = NULL — see `access_grants::validate_write`'s
+                // `(Plane::System, _, Some(_))` rejection.
+                tenant_id: None,
+                patterns: &patterns,
+                selector: Selector::All,
+                description: None,
+                created_by: None,
             },
-        );
-        let user = admin_user();
+        )
+        .await
+        .expect("insert grant");
+    }
+
+    #[tokio::test]
+    async fn tenant_scoped_always_visible_without_authority() {
+        let db = test_db().await;
+        let engine = AccessEngine::new(db.clone());
+        let tenant_id = default_tenant_id(&db).await;
+        let user_id = uuid::Uuid::now_v7();
+        let ctx = engine
+            .context(tenant_id, user_id, None)
+            .await
+            .expect("context");
+        let ops = test_plugin_ops(false).expect("test catalog builds");
+        let snapshot = InstancePluginSnapshot::empty();
+        assert!(is_plugin_visible_to_user(
+            tenant_plugin_descriptor(),
+            &ops,
+            &snapshot,
+            &engine,
+            &ctx,
+        ));
+    }
+
+    #[tokio::test]
+    async fn instance_scoped_enabled_visible_without_authority() {
+        let db = test_db().await;
+        let engine = AccessEngine::new(db.clone());
+        let tenant_id = default_tenant_id(&db).await;
+        let user_id = uuid::Uuid::now_v7();
+        let ctx = engine
+            .context(tenant_id, user_id, None)
+            .await
+            .expect("context");
+        let ops = test_plugin_ops(true).expect("test catalog builds");
+        let snapshot = enabled_instance_snapshot();
         assert!(is_plugin_visible_to_user(
             instance_plugin_descriptor(),
             &ops,
             &snapshot,
-            &user
+            &engine,
+            &ctx,
+        ));
+    }
+
+    #[tokio::test]
+    async fn instance_scoped_disabled_hidden_without_system_settings_manage_grant() {
+        let db = test_db().await;
+        let engine = AccessEngine::new(db.clone());
+        let tenant_id = default_tenant_id(&db).await;
+        let user_id = uuid::Uuid::now_v7();
+        let ctx = engine
+            .context(tenant_id, user_id, None)
+            .await
+            .expect("context");
+        let ops = test_plugin_ops(true).expect("test catalog builds");
+        let snapshot = disabled_instance_snapshot();
+        assert!(!is_plugin_visible_to_user(
+            instance_plugin_descriptor(),
+            &ops,
+            &snapshot,
+            &engine,
+            &ctx,
+        ));
+    }
+
+    #[tokio::test]
+    async fn instance_scoped_disabled_visible_with_system_settings_manage_grant() {
+        let db = test_db().await;
+        let engine = AccessEngine::new(db.clone());
+        let tenant_id = default_tenant_id(&db).await;
+        let user_id = uuid::Uuid::now_v7();
+        grant_system_settings_manage(&db, user_id).await;
+        let ctx = engine
+            .context(tenant_id, user_id, None)
+            .await
+            .expect("context");
+        let ops = test_plugin_ops(true).expect("test catalog builds");
+        let snapshot = disabled_instance_snapshot();
+        assert!(is_plugin_visible_to_user(
+            instance_plugin_descriptor(),
+            &ops,
+            &snapshot,
+            &engine,
+            &ctx,
+        ));
+    }
+
+    /// ADR-0033: boot-disabled catalog (pending restart) means the plugin was
+    /// never constructed at boot, so it stays hidden even though the live
+    /// row now says enabled, absent `system.settings:manage` authority.
+    #[tokio::test]
+    async fn pending_restart_enabled_hidden_without_grant() {
+        let db = test_db().await;
+        let engine = AccessEngine::new(db.clone());
+        let tenant_id = default_tenant_id(&db).await;
+        let user_id = uuid::Uuid::now_v7();
+        let ctx = engine
+            .context(tenant_id, user_id, None)
+            .await
+            .expect("context");
+        let ops = test_plugin_ops(false).expect("test catalog builds");
+        let snapshot = enabled_instance_snapshot();
+        assert!(!is_plugin_visible_to_user(
+            instance_plugin_descriptor(),
+            &ops,
+            &snapshot,
+            &engine,
+            &ctx,
+        ));
+    }
+
+    /// ADR-0033: `system.settings:manage` authority still overrides a
+    /// pending-restart-enabled plugin — instance owners can see it to
+    /// trigger the restart.
+    #[tokio::test]
+    async fn pending_restart_enabled_visible_with_grant() {
+        let db = test_db().await;
+        let engine = AccessEngine::new(db.clone());
+        let tenant_id = default_tenant_id(&db).await;
+        let user_id = uuid::Uuid::now_v7();
+        grant_system_settings_manage(&db, user_id).await;
+        let ctx = engine
+            .context(tenant_id, user_id, None)
+            .await
+            .expect("context");
+        let ops = test_plugin_ops(false).expect("test catalog builds");
+        let snapshot = enabled_instance_snapshot();
+        assert!(is_plugin_visible_to_user(
+            instance_plugin_descriptor(),
+            &ops,
+            &snapshot,
+            &engine,
+            &ctx,
         ));
     }
 }
