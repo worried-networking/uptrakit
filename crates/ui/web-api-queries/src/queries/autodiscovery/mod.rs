@@ -774,7 +774,7 @@ mod tests {
     }
 
     /// Repeated discoveries with the same target are idempotent:
-    /// the plugin config is reused and the host_software_items version is updated in place.
+    /// the plugin config is reused and the first-run version is preserved.
     #[tokio::test]
     async fn target_based_idempotent_on_second_run() {
         let db = setup_db().await;
@@ -864,8 +864,8 @@ mod tests {
         );
         assert_eq!(
             hsi_links[0].installed_version.as_deref(),
-            Some("1.24.5"),
-            "installed version must be updated on second run"
+            Some("1.24.4"),
+            "the first-run version must be preserved on the second run"
         );
     }
 }

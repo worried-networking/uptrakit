@@ -397,12 +397,15 @@ async fn find_or_create_software_item(
             linked_item
         };
 
-        // Update installed version + discovery provenance for the matched link.
-        // `featured` is only a presentation flag (individual list entry vs
-        // aggregated per-host summary), not an approval/version-ownership signal,
-        // so it must NOT gate this write: discovery is the source of truth for the
-        // installed version and for reconciliation provenance
-        // (`last_discovered_at`/`discovery_source`) on every discovered item.
+        // Refresh discovery provenance for the matched link on every pass, but
+        // preserve a non-NULL `installed_version` on links that were already
+        // active: for registered items the `DetectVersion` scheduled task is
+        // the sole version writer, so discovery must not clobber a value it
+        // may disagree with. Version fields are still written on fresh
+        // inserts, on link-level reactivation (`was_deactivated`), and when
+        // the stored version is NULL. `featured` is only a presentation flag
+        // (individual list entry vs aggregated per-host summary) and never
+        // gates any of these writes.
         //
         // Collision rule 1: prefer an ACTIVE link row for the *target*
         // (host, effective_item, qualifier) key over repointing/reactivating
@@ -439,12 +442,15 @@ async fn find_or_create_software_item(
         if let Some(hsi) = hsi_to_update {
             let target_hsi_id = hsi.id;
             let was_deactivated = hsi.deactivated_at.is_some();
+            let preserve_version = !was_deactivated && hsi.installed_version.is_some();
             let mut active: host_software_item::ActiveModel = hsi.into();
             active.software_item_id = Set(effective_item.id);
-            active.installed_version = Set(Some(installed_version.to_string()));
-            active.installed_version_detected_at = Set(Some(now));
-            active.installed_display_version =
-                Set(item.installed_display_version.map(str::to_string));
+            if !preserve_version {
+                active.installed_version = Set(Some(installed_version.to_string()));
+                active.installed_version_detected_at = Set(Some(now));
+                active.installed_display_version =
+                    Set(item.installed_display_version.map(str::to_string));
+            }
             active.last_discovered_at = Set(Some(now));
             active.discovery_source = Set(Some(discovery_source.to_string()));
             active.missing_since = Set(None);
@@ -621,10 +627,14 @@ async fn find_or_create_software_item(
     if let Some(hsi) = preferred_existing_hsi {
         let existing_id = hsi.id;
         let was_deactivated = hsi.deactivated_at.is_some();
+        let preserve_version = !was_deactivated && hsi.installed_version.is_some();
         let mut active: host_software_item::ActiveModel = hsi.into();
-        active.installed_version = Set(Some(installed_version.to_string()));
-        active.installed_version_detected_at = Set(Some(now));
-        active.installed_display_version = Set(item.installed_display_version.map(str::to_string));
+        if !preserve_version {
+            active.installed_version = Set(Some(installed_version.to_string()));
+            active.installed_version_detected_at = Set(Some(now));
+            active.installed_display_version =
+                Set(item.installed_display_version.map(str::to_string));
+        }
         active.last_discovered_at = Set(Some(now));
         active.discovery_source = Set(Some(discovery_source.to_string()));
         active.missing_since = Set(None);
@@ -886,6 +896,8 @@ mod tests {
     /// deactivated software item (with no active same-name collision), rediscovery
     /// must reactivate the item in place -- not delete the link and create a
     /// fresh pending item (spec §3: reactivation is update-in-place).
+    /// The link itself was never deactivated, so its non-NULL version is
+    /// preserved (link-level rule): only the item-level flag flips back.
     #[tokio::test]
     async fn process_one_discovery_deactivated_item_reactivates_in_place() {
         let db = setup_db().await;
@@ -957,8 +969,8 @@ mod tests {
             .expect("link must exist");
         assert_eq!(
             link.installed_version.as_deref(),
-            Some("8.0.0"),
-            "installed_version must be refreshed on reactivation"
+            Some("1.0.0"),
+            "an always-active link keeps its version through item-level reactivation"
         );
 
         let plugin_link_count = HostSoftwareItemPlugin::find()
@@ -1070,10 +1082,11 @@ mod tests {
         assert_eq!(row.target_id.as_deref(), Some(hsi_id.to_string().as_str()));
     }
 
-    /// `process_one_discovery` must update `installed_version` in place when the
-    /// existing host link points to an active software item.
+    /// `process_one_discovery` must preserve a non-NULL `installed_version` when
+    /// the existing host link is already active: for registered items the
+    /// `DetectVersion` scheduled task is the sole version writer.
     #[tokio::test]
-    async fn process_one_discovery_active_link_updates_version() {
+    async fn process_one_discovery_active_link_preserves_version() {
         let db = setup_db().await;
         let tenant_id = Uuid::now_v7();
         let host_id = Uuid::now_v7();
@@ -1127,17 +1140,17 @@ mod tests {
             .expect("link must exist");
         assert_eq!(
             link.installed_version.as_deref(),
-            Some("2.0.0"),
-            "installed_version must be updated to the new value"
+            Some("1.0.0"),
+            "installed_version must be preserved on an active link"
         );
     }
 
-    /// `featured` is only a presentation flag, not an approval/version-ownership
-    /// signal: re-discovery of a featured item must update `installed_version`
-    /// AND stamp discovery provenance (`last_discovered_at`/`discovery_source`),
-    /// exactly like a non-featured item, so reconciliation can track it.
+    /// `featured` is only a presentation flag: re-discovery of a featured item
+    /// preserves its non-NULL `installed_version` (like any active link) while
+    /// still stamping discovery provenance
+    /// (`last_discovered_at`/`discovery_source`) so reconciliation can track it.
     #[tokio::test]
-    async fn process_one_discovery_featured_item_updates_version_and_provenance() {
+    async fn process_one_discovery_featured_item_preserves_version_stamps_provenance() {
         let db = setup_db().await;
         let tenant_id = Uuid::now_v7();
         let host_id = Uuid::now_v7();
@@ -1209,8 +1222,8 @@ mod tests {
             .expect("link must exist");
         assert_eq!(
             link.installed_version.as_deref(),
-            Some("2.0.0"),
-            "installed_version must be updated from discovery for featured items"
+            Some("1.0.0"),
+            "installed_version must be preserved for active featured items"
         );
         assert!(
             link.last_discovered_at.is_some(),
@@ -1223,10 +1236,10 @@ mod tests {
         );
     }
 
-    /// A manually-created featured item is likewise updated by re-discovery:
-    /// `featured` never suppresses the version/provenance write.
+    /// A manually-created featured item likewise keeps its non-NULL version on
+    /// re-discovery; provenance is still stamped.
     #[tokio::test]
-    async fn process_one_discovery_manual_featured_item_updates_version_and_provenance() {
+    async fn process_one_discovery_manual_featured_item_preserves_version_stamps_provenance() {
         let db = setup_db().await;
         let tenant_id = Uuid::now_v7();
         let host_id = Uuid::now_v7();
@@ -1289,8 +1302,8 @@ mod tests {
             .expect("link must exist");
         assert_eq!(
             link.installed_version.as_deref(),
-            Some("2.0.0"),
-            "installed_version must be updated from discovery for manual featured items"
+            Some("1.0.0"),
+            "installed_version must be preserved for active manually-created items"
         );
         assert!(
             link.last_discovered_at.is_some(),
@@ -2320,8 +2333,8 @@ mod tests {
         );
         assert_eq!(
             active_after.installed_version.as_deref(),
-            Some("2.0.0"),
-            "the active row must be updated with the new discovery"
+            Some("1.0.0"),
+            "the preferred active row keeps its non-NULL version"
         );
 
         let deactivated_after = links
@@ -2592,8 +2605,8 @@ mod tests {
             .expect("active hsi must still exist");
         assert_eq!(
             active_hsi_after.installed_version.as_deref(),
-            Some("3.0.0"),
-            "the pre-existing active hsi must be updated with the fresh discovery data"
+            Some("1.0.0"),
+            "the pre-existing active hsi keeps its version through the cascade repoint"
         );
 
         // Every plugin_link row for this host must now reference the live
