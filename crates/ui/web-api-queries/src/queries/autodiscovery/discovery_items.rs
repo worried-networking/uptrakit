@@ -1312,6 +1312,111 @@ mod tests {
         );
     }
 
+    /// Phase-3's "preferred existing" write site (~line 631, distinct from
+    /// Phase 1's ~line 445) has its own `preserve_version` gate. Reach it via
+    /// the `(tenant_id, name)` unique-constraint fallback: no
+    /// `host_software_item_plugin` row exists anywhere for the package
+    /// identifier used here, so both Phase 1 and Phase 2 miss; `insert`ing a
+    /// fresh `software_item` with the same name as the pre-existing active one
+    /// then hits the unique-index violation and falls back to a by-name
+    /// lookup, landing on the pre-existing ACTIVE `host_software_item` row at
+    /// the Phase-3 pre-insert "preferred existing" branch. Asserts that site
+    /// preserves a stored version that differs from what discovery reports.
+    #[tokio::test]
+    async fn process_one_discovery_phase3_preferred_existing_preserves_version() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let pc_id = Uuid::now_v7();
+        let item_id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+
+        insert_tenant(&db, tenant_id).await;
+        insert_host(&db, host_id, tenant_id).await;
+        insert_plugin_config(&db, pc_id, tenant_id).await;
+        // Active software_item; no host_software_item_plugin rows are created
+        // for it below, so Phase 1 (host-scoped) and Phase 2 (tenant-scoped)
+        // both miss and the write path falls through to Phase 3.
+        insert_software_item(&db, item_id, tenant_id, "curl", None).await;
+
+        // Insert the host_software_item row directly (bypassing
+        // insert_host_link, which would also create host_software_item_plugin
+        // rows that Phase 1 would then match, defeating the point of this test).
+        let hsi_id = Uuid::now_v7();
+        host_software_item::ActiveModel {
+            id: Set(hsi_id),
+            host_id: Set(host_id),
+            software_item_id: Set(item_id),
+            qualifier: Set(None),
+            plugin_config_id: Set(None),
+            package_identifier: Set(None),
+            installed_version: Set(Some("1.0.0".to_string())),
+            installed_version_detected_at: Set(Some(now)),
+            installed_display_version: Set(None),
+            latest_version: Set(None),
+            latest_version_fetched_at: Set(None),
+            latest_release_metadata: Set(None),
+            last_updated_at: Set(None),
+            linked_at: Set(now),
+            update_category: Set("unknown".to_string()),
+            deactivated_at: Set(None),
+            last_discovered_at: Set(None),
+            discovery_source: Set(None),
+            missing_since: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert host_software_item");
+
+        let args = DiscoveredItemInfo {
+            package_identifier: "curl",
+            name: "curl",
+            installed_version: "9.0.0",
+            featured: false,
+            qualifier: None,
+            plugin_package_identifier: None,
+            installed_display_version: None,
+        };
+        let audit = real_emitter(&db);
+        let ctx = DiscoveryContext {
+            tenant_id,
+            host_id,
+            now,
+            discovery_source: "package-manager.homebrew",
+            audit: &audit,
+        };
+        process_one_discovery(&db, &ctx, pc_id, "package-manager.homebrew", args)
+            .await
+            .expect("process_one_discovery");
+
+        // No new software_item was created: the unique-constraint fallback
+        // reused the pre-existing active one.
+        let items = SoftwareItem::find()
+            .filter(software_item::Column::TenantId.eq(tenant_id))
+            .all(&db)
+            .await
+            .expect("items");
+        assert_eq!(items.len(), 1, "no new software_item should be created");
+        assert_eq!(items[0].id, item_id, "the original item must be reused");
+
+        // No new host_software_item row was created: the pre-existing active
+        // row was reused via the Phase-3 preferred-existing path.
+        let links = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
+            .all(&db)
+            .await
+            .expect("links");
+        assert_eq!(links.len(), 1, "the existing active link must be reused");
+        assert_eq!(links[0].id, hsi_id);
+        assert_eq!(
+            links[0].installed_version.as_deref(),
+            Some("1.0.0"),
+            "the Phase-3 preferred-existing write site must preserve a non-NULL \
+             stored version already set on an active link"
+        );
+    }
+
     /// `featured` is only a presentation flag: re-discovery of a featured item
     /// preserves its non-NULL `installed_version` (like any active link) while
     /// still stamping discovery provenance
