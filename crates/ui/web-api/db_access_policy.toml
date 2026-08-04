@@ -262,6 +262,7 @@ list_plugin_type_settings = "full-state"
 get_plugin_type_settings = "full-state"
 upsert_plugin_type_settings = "full-state"
 delete_plugin_type_settings = "full-state"
+from_request_parts = "ignore"
 
 [routes."roles.rs"]
 build_role_response = "ignore"

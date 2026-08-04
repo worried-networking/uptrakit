@@ -340,6 +340,19 @@ async fn viewer_engine_deny_overrides_legacy_permission_for_plugin_type_settings
         .expect("seeded viewer role")
         .id;
 
+    let user_has_viewer_role = user_role::Entity::find()
+        .filter(user_role::Column::UserId.eq(auth.user.id))
+        .filter(user_role::Column::RoleId.eq(viewer_role_id))
+        .one(&app.db)
+        .await
+        .expect("query user_role")
+        .is_some();
+    assert!(
+        user_has_viewer_role,
+        "staged user must actually be linked to the viewer role for this test's grant-deletion \
+         to be a meaningful denial, not a 403 for the wrong reason"
+    );
+
     let load = load_grants_for_principal(&app.db, app.tenant_id, Uuid::nil(), &[viewer_role_id])
         .await
         .expect("load viewer grants");

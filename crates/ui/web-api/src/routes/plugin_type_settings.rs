@@ -10,7 +10,7 @@ use crate::queries::plugin_type_settings::PluginTypeSettingsView;
 use crate::tenant_db::TenantDb;
 use axum::{
     Extension, Json,
-    extract::{Path, State},
+    extract::{FromRequestParts, Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
@@ -217,6 +217,36 @@ pub async fn get_plugin_type_settings(
     }
 }
 
+/// Bundles the API-token identity and access-authority extensions needed by
+/// state-mutating plugin-type-settings handlers, keeping the handler's own
+/// argument list under clippy's `too_many_arguments` threshold — same
+/// technique as `routes/surfaces.rs`'s `GetInteractionRequest` bundling.
+pub struct WriteAuthContext {
+    api_token_id: Option<AuthenticatedApiTokenId>,
+    authority: AccessAuthority,
+}
+
+impl FromRequestParts<Arc<AppState>> for WriteAuthContext {
+    type Rejection = Response;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &Arc<AppState>,
+    ) -> Result<Self, Self::Rejection> {
+        let api_token_id = Extension::<AuthenticatedApiTokenId>::from_request_parts(parts, state)
+            .await
+            .ok()
+            .map(|Extension(id)| id);
+        let Extension(authority) = Extension::<AccessAuthority>::from_request_parts(parts, state)
+            .await
+            .map_err(IntoResponse::into_response)?;
+        Ok(Self {
+            api_token_id,
+            authority,
+        })
+    }
+}
+
 /// Create or update plugin type settings for a specific plugin type.
 ///
 /// If settings already exist for the given plugin type, they are updated.
@@ -237,25 +267,23 @@ pub async fn get_plugin_type_settings(
     security(("bearer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "all parameters are required; decomposing into structs would add complexity without clarity"
-)]
 pub async fn upsert_plugin_type_settings(
     State(state): State<Arc<AppState>>,
     State(plugin_ops): State<PluginOpsState>,
     tenant_db: TenantDb,
     Path(plugin_type): Path<String>,
     CanManageGlobalSettings(user): CanManageGlobalSettings,
-    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
-    Extension(authority): Extension<AccessAuthority>,
+    write_ctx: WriteAuthContext,
     Validated(req): Validated<UpsertPluginTypeSettingsRequest>,
 ) -> Response {
+    let WriteAuthContext {
+        api_token_id,
+        authority,
+    } = write_ctx;
     let access_ctx = match authority {
         AccessAuthority::Ready(access_ctx) => access_ctx,
         _ => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
     };
-    let api_token_id = api_token_id.map(|value| value.0);
     let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
     let tenant_id = tenant_db.tenant_id();
     let plugin_type_id = PluginTypeId::new(&plugin_type);

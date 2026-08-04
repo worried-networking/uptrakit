@@ -155,6 +155,35 @@ def _oauth2_scopes(attr: str) -> list[str] | None:
     return re.findall(r"\"([^\"]+)\"", m.group(1))
 
 
+def _action_module_imports(source: str) -> set[str]:
+    """Names actually imported (or fully-qualified-referenced) from
+    `middleware::action` in this file.
+
+    Handles both spellings that appear in this codebase:
+      - a braced, optionally-aliased `use ...::action::{A, B as C, ...};`
+        list — each entry is recorded under its PRE-alias name (the
+        identifier `extractor_actions` keys off; if a name is aliased, the
+        literal text appearing at its use sites is the alias instead, so
+        the pre-alias name simply won't be found there by the `\\bname\\b`
+        signature scan below — recording it here is harmless either way);
+      - an unbraced `use ...::action::Name;` import, or a fully-qualified
+        `middleware::action::Name` call/type site with no `use` at all —
+        both look identical after the `middleware::action::` marker, so
+        one branch covers them.
+    """
+    imported: set[str] = set()
+    for m in re.finditer(r"middleware::action::(\{[^}]*\}|\w+)", source):
+        group = m.group(1)
+        if group.startswith("{"):
+            for entry in group[1:-1].split(","):
+                name = entry.strip().split(" as ")[0].strip()
+                if name:
+                    imported.add(name)
+        else:
+            imported.add(group)
+    return imported
+
+
 def _check_file(
     path: str,
     source: str,
@@ -162,15 +191,23 @@ def _check_file(
 ) -> tuple[list[str], int]:
     """Return (violations, converted_operation_count) for one route file.
 
-    Extractor names are attributed ONLY in files importing
-    `middleware::action`: the legacy `middleware::permission` module has
-    same-named extractors (`CanUpdateHosts`, `CanTriggerChecks`) still used
-    by unconverted files (host_tags.rs, software_items/version_check.rs,
-    plugin_configs/discover.rs today) — a bare name scan there would
-    false-positive R1. A file cannot import the same unqualified name from
-    both modules (compile error), so the import line disambiguates fully.
+    Extractor names are attributed ONLY when that SAME name is actually
+    imported from `middleware::action` in this file (see
+    `_action_module_imports`) — the legacy `middleware::permission` module
+    defines same-named extractors (`CanManageCommands`, `CanUpdateHosts`,
+    `CanTriggerChecks`) still used by unconverted files (host_tags.rs,
+    software_items/version_check.rs, plugin_configs/discover.rs today). A
+    file cannot import the same unqualified name from both modules (compile
+    error), but it CAN import *different* names from each module in the
+    same file — e.g. `action::{AccessAuthority, authorize_any}` alongside
+    `permission::CanManageCommands` — which a bare `"middleware::action" in
+    source` file-level flag mis-set as "uses the action module" for every
+    bare-name match, misattributing the legacy extractor's action to the
+    file. Keying attribution on the actual per-name import list closes that
+    hole while still attributing every genuinely converted extractor.
     """
-    uses_action_module = "middleware::action" in source
+    imported = _action_module_imports(source)
+    uses_action_module = bool(imported)
     violations: list[str] = []
     converted = 0
     for attr, signature in _iter_operations(source):
@@ -186,7 +223,7 @@ def _check_file(
             {
                 extractor_actions[name]
                 for name in extractor_actions
-                if re.search(rf"\b{name}\b", signature)
+                if name in imported and re.search(rf"\b{name}\b", signature)
             }
         )
         if scopes is not None and has_ext:
