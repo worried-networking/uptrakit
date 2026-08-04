@@ -37,3 +37,4 @@
 - [0034 — Plugin Provider Identity](0034-plugin-provider-identity.md)
 - [0035 — Shared Zeroconf Crate](0035-shared-zeroconf-crate.md)
 - [0036 — Manage ADRs with adrs](0036-manage-adrs-with-adrs.md)
+- [0037 — Discovery never overwrites detected versions of active items](0037-discovery-never-overwrites-detected-versions-of-active-items.md)

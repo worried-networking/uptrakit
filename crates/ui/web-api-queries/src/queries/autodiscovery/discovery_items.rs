@@ -406,6 +406,7 @@ async fn find_or_create_software_item(
         // the stored version is NULL. `featured` is only a presentation flag
         // (individual list entry vs aggregated per-host summary) and never
         // gates any of these writes.
+        // See ADR-0037 (discovery version preservation).
         //
         // Collision rule 1: prefer an ACTIVE link row for the *target*
         // (host, effective_item, qualifier) key over repointing/reactivating
