@@ -46,6 +46,7 @@ uptrakit-web-api-auth = { workspace = true }
 testcontainers-modules = { workspace = true }
 paste = { workspace = true }
 uptrakit-shared-db = { workspace = true, features = ["migration", "db-sqlite", "db-postgres"] }
+uptrakit-shared-types = { workspace = true }
 uptrakit-web-api-types = { workspace = true }
 uptrakit-audit-log = { workspace = true }
 uptrakit-wire = { workspace = true }

@@ -7611,6 +7611,7 @@ dependencies = [
  "uptrakit-openapi-client",
  "uptrakit-plugin-infrastructure-registry",
  "uptrakit-shared-db",
+ "uptrakit-shared-types",
  "uptrakit-tracing-init",
  "uptrakit-web-api",
  "uptrakit-web-api-auth",
