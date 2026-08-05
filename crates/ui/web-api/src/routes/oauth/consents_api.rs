@@ -613,22 +613,17 @@ mod tests {
             .create_access_token(user_id, &[], "password", None, None)
             .expect("create_access_token");
 
-        let req = Request::builder()
-            .method("GET")
-            .uri("/api/oauth/consents")
-            .header("authorization", format!("Bearer {token}"))
-            .body(Body::empty())
-            .expect("build request");
+        let client = crate::test_harness::http_client::TestClient::new(app.router);
+        let (status, items): (http::StatusCode, Vec<serde_json::Value>) = client
+            .get("/api/oauth/consents")
+            .bearer(&token)
+            .send_json()
+            .await;
 
-        let resp = app.router.oneshot(req).await.expect("oneshot");
-        assert_eq!(resp.status(), http::StatusCode::OK);
+        assert_eq!(status, http::StatusCode::OK);
+        assert_eq!(items.len(), 2);
 
-        let body_bytes = resp.into_body().collect().await.expect("body").to_bytes();
-        let items: serde_json::Value = serde_json::from_slice(&body_bytes).expect("parse json");
-        let arr = items.as_array().expect("response must be array");
-        assert_eq!(arr.len(), 2);
-
-        let first = arr.first().expect("first item");
+        let first = items.first().expect("first item");
         // Newest-granted first.
         assert_eq!(
             first["id"].as_str().expect("id string"),
