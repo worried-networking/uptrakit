@@ -28,26 +28,6 @@ async function oauthRequest<T>(path: string, options: RequestInit = {}): Promise
 	return res.json();
 }
 
-// Exported (not currently called within this module) as part of the browser consent-flow
-// escape hatch this module retains — see frontend/AGENTS.md rule 1.
-export async function oauthRequestVoid(path: string, options: RequestInit = {}): Promise<void> {
-	let res: Response;
-	try {
-		res = await authenticatedFetch(path, options);
-	} catch (err) {
-		if (err instanceof DOMException && (err.name === 'AbortError' || err.name === 'TimeoutError')) {
-			throw new Error('Request timed out. Please try again.');
-		} else if (err instanceof TypeError) {
-			throw new Error('Network error: Unable to connect to the server. Check your network connection.');
-		}
-		throw err;
-	}
-	if (!res.ok) {
-		const message = await extractErrorMessage(res);
-		throw new Error(message);
-	}
-}
-
 export interface MetadataDiff {
 	redirect_uris?: { from: string[]; to: string[] };
 	client_name?: { from: string; to: string };
