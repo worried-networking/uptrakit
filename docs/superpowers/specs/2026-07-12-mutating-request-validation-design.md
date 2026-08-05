@@ -4,7 +4,7 @@
 **Status:** Design (pending plan)
 **Scope:** `crates/shared/web-api-types/src/*` (add `Validate` impls + unit tests),
 `crates/ui/web-api/src/routes/*` (wire validation into the handlers that skip it entirely),
-`ci/verify_mutating_requests_validated.sh` (+ allowlist) + its wiring. No new deps, no wire change.
+`xtask/src/request_validation_check/` (new `cargo xtask` gate + allowlist) + its wiring. No new deps, no wire change.
 
 ## Problem
 
@@ -25,7 +25,11 @@ path. The defensive `provider.issuer_url.is_empty()` guard at `oidc_providers.rs
 coding-standard rule exists ("HTTP request types accepting user input must implement `Validate`") but nothing checks
 it, so the gap recurs. Fixing only the audit-named instances is symptom-patching; the fix must also close the class.
 
-## Verified current reality (grounded 2026-07-12)
+## Verified current reality (grounded 2026-07-12; re-verified 2026-08-05)
+
+> **Re-grounding 2026-08-05:** all claims re-checked against the current tree. Line numbers below drifted by ≤15 lines
+> (non-material; the plan regenerates the exact bypass list via the per-fn scan). One material change: the
+> surface-interaction route family grew from 1 to 5 bypass handlers (see the `InvokeSurfaceInteractionRequest` row).
 
 - **`Validate` trait** (`validation.rs:18-21`): `fn validate(&self) -> Result<(), ValidationError>`. **`Validated<T>`**
   (`extract.rs:302-322`) invokes it and returns `error_response(StatusCode::BAD_REQUEST, e.to_string())` on failure —
@@ -44,36 +48,38 @@ it, so the gap recurs. Fixing only the audit-named instances is symptom-patching
   `Validated<T>` would **silently drop `ValidationFailed` audit coverage** (a security-audit regression against the
   repo's audit invariant). **These ~21 handlers are already correct and are OUT OF SCOPE.**
 
-- **The actual bug = handlers that validate *not at all*** (`Json<*Request>` body, and the fn body contains **no**
+- **The actual bug = handlers that validate _not at all_** (`Json<*Request>` body, and the fn body contains **no**
   `.validate()` call). Grounded via a per-`fn` scan of `crates/ui/web-api/src/routes/`. Two groups:
 
   **Group A — the `*Request` type has no `Validate` impl at all** (absent from the `impl Validate for …` set in
   `web-api-types`). The 9 audit-named types plus 5 the audit missed:
 
-  | Type | Handler | Fields → invariant |
-  | --- | --- | --- |
-  | `UpdateOidcProviderRequest` | `oidc_providers.rs:430` | `Option` name/slug/logo_url/issuer_url/client_id/… |
-  | `UpdateHostRequest` | `hosts.rs:128` | `friendly_name: Option<String>` |
-  | `UpdatePluginConfigRequest` | `plugin_configs/crud.rs:474` | `name: Option<String>`, `config`, `enabled` |
-  | `TriggerUpdateRequest` | `software_items/updates.rs:44` | `to_version: String`, `release_info`, `interactive` |
-  | `AssignHostsRequest` | `software_items/host_assignments.rs:56` | `host_assignments: Vec<HostSoftwareAssignment>` |
-  | `UpdateHostAssignmentRequest` | `software_items/host_assignments.rs:433` | `role`, `ordinal:i32`, 3 mutually-exclusive config sources, `package_identifier`, `execution_site` |
-  | `UpdateUserActiveRequest` | `users.rs:735` | `is_active: bool` |
-  | `MergeAgentRequest` | `services/merge.rs:50` | `source_id: Uuid` |
-  | `CreateDiscoveryAllowlistEntryRequest` | `discovery_allowlist.rs:96,450` | `plugin_type: PluginTypeId` |
-  | `UpdateAgentCertificateSettingsRequest` | `settings_agent_certs.rs:100` | swept-in — plan inventories |
-  | `MergeSoftwareItemsExecuteRequest` | `software_items/merge.rs:63` | swept-in |
-  | `InvokeSurfaceInteractionRequest` | `surfaces.rs:210` | swept-in |
-  | `OidcExchangeRequest` | `oidc_auth.rs:1351` | swept-in |
-  | `OidcCompleteRegistrationRequest` | `oidc_auth.rs:1421` | swept-in |
+  | Type                                    | Handler                                                                                                                                                                                                               | Fields → invariant                                                                                 |
+  | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+  | `UpdateOidcProviderRequest`             | `oidc_providers.rs:430`                                                                                                                                                                                               | `Option` name/slug/logo_url/issuer_url/client_id/…                                                 |
+  | `UpdateHostRequest`                     | `hosts.rs:128`                                                                                                                                                                                                        | `friendly_name: Option<String>`                                                                    |
+  | `UpdatePluginConfigRequest`             | `plugin_configs/crud.rs:474`                                                                                                                                                                                          | `name: Option<String>`, `config`, `enabled`                                                        |
+  | `TriggerUpdateRequest`                  | `software_items/updates.rs:44`                                                                                                                                                                                        | `to_version: String`, `release_info`, `interactive`                                                |
+  | `AssignHostsRequest`                    | `software_items/host_assignments.rs:56`                                                                                                                                                                               | `host_assignments: Vec<HostSoftwareAssignment>`                                                    |
+  | `UpdateHostAssignmentRequest`           | `software_items/host_assignments.rs:433`                                                                                                                                                                              | `role`, `ordinal:i32`, 3 mutually-exclusive config sources, `package_identifier`, `execution_site` |
+  | `UpdateUserActiveRequest`               | `users.rs:735`                                                                                                                                                                                                        | `is_active: bool`                                                                                  |
+  | `MergeAgentRequest`                     | `services/merge.rs:50`                                                                                                                                                                                                | `source_id: Uuid`                                                                                  |
+  | `CreateDiscoveryAllowlistEntryRequest`  | `discovery_allowlist.rs:96,450`                                                                                                                                                                                       | `plugin_type: PluginTypeId`                                                                        |
+  | `UpdateAgentCertificateSettingsRequest` | `settings_agent_certs.rs:100`                                                                                                                                                                                         | swept-in — plan inventories                                                                        |
+  | `MergeSoftwareItemsExecuteRequest`      | `software_items/merge.rs:63`                                                                                                                                                                                          | swept-in                                                                                           |
+  | `InvokeSurfaceInteractionRequest`       | `surfaces.rs` — **5 handlers** (grew 1→5 post-grounding, commit `8b695e4a5`): `invoke_surface_interaction` (POST, `Json<T>`) + 4 method-mapped PUT/DELETE handlers binding `Option<Json<T>>` + `.unwrap_or_default()` | swept-in                                                                                           |
+  | `OidcExchangeRequest`                   | `oidc_auth.rs:1351`                                                                                                                                                                                                   | swept-in                                                                                           |
+  | `OidcCompleteRegistrationRequest`       | `oidc_auth.rs:1421`                                                                                                                                                                                                   | swept-in                                                                                           |
 
-  **Group B — the type *has* a `Validate` impl but the handler never calls it** (plain `Json`, no `Validated`, no
+  **Group B — the type _has_ a `Validate` impl but the handler never calls it** (plain `Json`, no `Validated`, no
   manual `.validate()`): `DeviceAuthApproveRequest` (`device_auth.rs:72`), `UpdateSoftwareItemRequest`
   (`software_items/crud.rs:271`). Fix is wiring-only; no new impl.
 
-- **No CI gate** enforces this. But the repo **does** have a per-handler grep-gate idiom to model on:
-  `ci/verify_handler_state_contract.sh` uses `perl -0777` to extract full `async fn` spans and inspect each; sibling
-  gates (`verify_no_inline_query_params.sh`, `verify_typed_audit_actions.sh`) ship `*_allowlist.txt` companions.
+- **No CI gate** enforces this. The repo has two enforcement idioms: text-level `ci/verify_*.sh` gates
+  (`verify_handler_state_contract.sh` uses `perl -0777` to extract `async fn` **signatures** — not full bodies; sibling
+  gates ship `*_allowlist.txt` companions) and **`syn`-based `cargo xtask` checks** (`audit_coverage_check`,
+  `contribution_monotonicity_check`, `openapi_client_check`; `xtask` depends on `syn` with `full`/`visit`). This gate
+  needs full fn _bodies_, so the xtask idiom is the right model — see Part 3.
 - **`to_version` reaches a shell command** — `apt` `update.rs:68` builds `format!("{package_identifier}={to_version}")`
   (`validate_version(to_version)` at `:51`). So a length cap on `to_version` is grounded defense-in-depth, not
   speculative.
@@ -87,7 +93,7 @@ when the field is `Some`.**
 
 `Some("")` **must fail for required, non-clearable fields.** Justification: `name`/`slug`/`issuer_url`/`client_id` map
 to non-`Option` DB columns the update writes unconditionally (`Set(...)`) — there is no "clear to empty" semantics, so
-`Some("")` is always malformed, never an intentional clear. (A genuinely *clearable* optional string would need a typed
+`Some("")` is always malformed, never an intentional clear. (A genuinely _clearable_ optional string would need a typed
 patch enum — `Set`/`Clear`/`Keep` — not `Some("")`; **no such field exists among these**, so that idiom is out of
 scope, noted only so a future clearable field is not modeled as `Some("")`.)
 
@@ -99,15 +105,20 @@ scope, noted only so a future clearable field is not modeled as `Some("")`.)
 - **`UpdateHostRequest`**: `friendly_name` `Some`→non-empty. Length cap only if the host name DB column bounds it.
 - **`TriggerUpdateRequest`**: `to_version` non-empty **and** length-capped via
   `uptrakit_shared_types::command_validation::validate_command_length` (grounded: interpolated into an `apt` command).
-- **`AssignHostsRequest`**: `host_assignments` non-empty **and** len ≤ 100 (mirror the `BatchActionRequest` cap). If
-  `HostSoftwareAssignment` carries string fields (`package_identifier`, `execution_site`), give it its own `Validate`
-  and iterate.
+  Note: `validate_command_length` returns `Result<(), String>` — map into the trait's error with
+  `.map_err(|message| ValidationError { field: "to_version".into(), message })` (or equivalent); do not invent a second
+  error type.
+- **`AssignHostsRequest`**: `host_assignments` non-empty **and** len ≤ 100 (mirror the `BatchActionRequest` cap).
+  `HostSoftwareAssignment` itself carries no strings (`{ host_id: Uuid, plugins: Vec<HostPluginRoleAssignment> }`);
+  the string fields (`package_identifier`, `execution_site`, nested `plugin_config`) live on the nested
+  `HostPluginRoleAssignment` — give **that** type the `Validate` impl and iterate two levels deep
+  (`host_assignments[].plugins[]`).
 - **`UpdateHostAssignmentRequest`**: enforce the **mutual exclusivity** its field comments document — exactly one of
   `plugin_config_id`/`plugin_config`/`plugin_type` (no "exactly one of N" helper exists — code the count inline:
   `[a.is_some(), b.is_some(), c.is_some()].into_iter().filter(|x| *x).count() == 1`); `execution_site` `Some`→known
   value if a shared type defines the set; `package_identifier` `Some`→non-empty; nested `plugin_config` `Some`→its
   `CreatePluginConfigRequest::validate()`. See Behavior changes for the 404→400 shift. **No `ordinal` rule** — `ordinal:
-  i32` has no DB constraint and no downstream break on negatives, so a `>= 0` check would be invented policy, not a
+i32` has no DB constraint and no downstream break on negatives, so a `>= 0` check would be invented policy, not a
   parity fix; omitted (YAGNI).
 - **Typed-only — `UpdateUserActiveRequest` (`bool`), `MergeAgentRequest` (`Uuid`),
   `CreateDiscoveryAllowlistEntryRequest` (`PluginTypeId`)**: no checkable invariant in the pure `web-api-types` crate
@@ -123,7 +134,8 @@ validation existed; orthogonal to input validation.
 
 ### Part 2 — wire validation into the bypass handlers (Groups A + B), matching each handler's local idiom
 
-For each of the ~17 bypass handlers, invoke validation using the pattern its **sibling** mutations already use:
+For each of the ~21 bypass handlers (count grew from ~17 at re-grounding: the 4 method-mapped surface-interaction
+handlers added post-grounding), invoke validation using the pattern its **sibling** mutations already use:
 
 - **Auditable-entity mutations whose Create/sibling handler emits `ValidationFailed`** (e.g. `update_provider` beside
   `create_provider`; `update_host`; `update_plugin_config`; `update_user_active` beside `update_user_roles`;
@@ -132,41 +144,63 @@ For each of the ~17 bypass handlers, invoke validation using the pattern its **s
 - **Handlers with no `ValidationFailed`-audit family** (plan determines per handler; likely `trigger_update`,
   `device_auth` approve, the OIDC exchange/register bodies, surface invoke) → switch to the `Validated<T>` extractor
   (simplest; generic 400 is acceptable where no sibling audits validation failure).
+- **`Option<Json<T>>` bodies** (the 4 method-mapped surface-interaction handlers): `Validated<T>` does not fit — it
+  errors on a missing body instead of defaulting. Keep the `Option<Json<T>>` extraction and validate manually on
+  `Some`: `if let Some(body) = &body { body.validate()… }` (an absent body defaults and needs no validation).
 
-The plan classifies each of the ~17 handlers by inspecting its sibling pattern and picks per handler. **Do not touch
+The plan classifies each of the ~21 handlers by inspecting its sibling pattern and picks per handler. **Do not touch
 the ~21 already-validated Bucket-B1 manual-validate handlers** — they are correct.
 
 ### Part 3 — the CI gate (root-cause regression guard)
 
-Add `ci/verify_mutating_requests_validated.sh`, modeled on `ci/verify_handler_state_contract.sh` (perl `-0777` extracts
-each `async fn` span under `crates/ui/web-api/src/routes/`). **Invariant enforced:** every handler whose signature takes
-a typed `*Request` body via **`Json` or `Form`** must **invoke validation** — i.e. the fn body contains a `.validate()`
-call, **or** the body is extracted via `Validated<…Request>` instead. Fail otherwise. `Form` is included because OAuth
-token/device handlers (`token.rs:57,238`, `device_authorization.rs:40`) take `Form<*Request>` bodies — a `Json`-only
-gate would silently miss them (contrarian MAJOR).
+Add a **`syn`-based `cargo xtask` check** — `cargo xtask request-validation-check`
+(`xtask/src/request_validation_check/`), modeled on the existing xtask checks (`audit_coverage_check`,
+`contribution_monotonicity_check`, `openapi_client_check`; `xtask` already depends on `syn` with
+`features = ["full", "visit", "extra-traits"]`). A text-level perl/grep gate was the original design and was rejected
+after contrarian review — see Alternatives.
 
-**Canonical detection pattern (used for both the one-off enumeration *and* the gate) — match all four binding shapes so
-neither over- nor under-counts:** namespace-optional extractor + either binding style —
-`(axum::)?(extract::)?(Json|Form)\s*<\s*([A-Za-z0-9_]+Request)\s*>` for the type-position form, plus the destructured
-form `(Json|Form)\s*\(\s*[a-z_]+\s*\)\s*:\s*(Json|Form)\s*<\s*…Request\s*>`. The gate applies this to each extracted fn
-span, then checks the span for `.validate()` or a `Validated<` extraction of the same type.
+**Invariant enforced:** every fn under `crates/ui/web-api/src/routes/` with a body parameter whose type is or contains
+**`Json<T>` or `Form<T>`** (including `Option<Json<T>>`, namespace-qualified forms, and both binding styles —
+**any `T`, name-independent**) must **invoke validation**: the fn body calls `.validate()` **on the binding bound from
+that body parameter** (receiver-checked, not any-`.validate()`-anywhere), **or** the body is extracted via
+`Validated<T>` instead, **or** `T` is allowlisted. Fail otherwise. `Form` is included because OAuth token/device
+handlers (`token.rs:57,238`, `device_authorization.rs:40`) take `Form<*Request>` bodies — a `Json`-only gate would
+silently miss them (contrarian MAJOR). Keying on the **extractor** rather than a `*Request` naming convention means
+non-`Request`-named bodies (e.g. `Json<ConsentDecision>`) cannot silently evade the gate — an unchecked naming
+convention would reinstate the spec's own root cause (contrarian CRITICAL). `syn` visitation skips `#[cfg(test)]`
+modules and gives real fn bodies — no brace-balancing or span-bleed false negatives a text scanner would carry.
 
-Ship a `ci/verify_mutating_requests_validated_allowlist.txt` companion (repo idiom) for any typed `*Request` body that is
-legitimately non-mutating, **seeded with `MergeSoftwareItemsPreviewRequest`** (`software_items/merge.rs` preview handler
-— a read-only dry-run, no state change, so no validation required). `command -v perl`/`rg` guard as siblings.
+Ship an allowlist companion `ci/request_validation_allowlist.txt` (repo `_allowlist.txt` idiom; read by the xtask
+check). **Entries are keyed on the handler, not the bare type** — `file::fn` (+ body type), because both seeded
+justifications are properties of a _handler_ (a type-keyed entry would silently exempt every future handler taking the
+same body — contrarian pass 2). One per line with a justification comment. **Seeded with two entries:**
+`software_items/merge.rs::preview_software_item_merge` / `MergeSoftwareItemsPreviewRequest` (read-only dry-run, no
+state change) and
+`oauth/consent.rs::approve_consent` / `ConsentDecision` (an **empty struct**; the handler binds `Json(_body)` and
+discards it, so there is nothing to validate. Note: the spec previously claimed this handler "already validates" —
+wrong; corrected at re-review. The plan may add a cheap tripwire test asserting `ConsentDecision` stays field-free, so
+the exemption's premise fails loudly if fields are ever added).
 
-**Scope of the guarantee (stated honestly):** the gate covers typed `Json`/`Form` bodies whose type ends in `Request`.
-It does **not** cover raw-`Bytes`/`serde_json::Value` bodies (no type to key on) nor mutating bodies not named
-`*Request`. Two documented consequences: (1) `Json<ConsentDecision>` (`oauth/consent.rs:202`, already validates) evades
-detection by name — so document in the gate header + coding standard that **mutating request bodies must be named
-`*Request`**; (2) the OAuth DCR (`Json`) and token/device (`Form`) handlers keep their **manual** `.validate()` calls —
-the gate *accepts* them (it enforces "validation invoked", not a specific extractor), which is required: those handlers
-return RFC-shaped `oauth_400` error bodies (not the generic `Validated<T>` 400) and order rate-limiting before
-validation, both of which `Validated<T>` would break.
+**Future-extractor tripwire:** the same `syn` pass also flags any `impl FromRequest` under `crates/ui/web-api/src/`
+outside a known set (today exactly one: `Validated<T>`, `extract.rs:304`). Otherwise a future custom body extractor
+(`Signed<T>`, size-limiting wrapper, …) would carry user input invisibly to a `Json`/`Form`-keyed gate — the same
+unchecked-convention hole the `*Request`-naming rejection closed, one level down. ~10 lines in the visitor already
+being written; a new body extractor must then be explicitly reasoned about (added to the known set or gated).
 
-Wire the gate into `.github/workflows/ci.yml`, `AGENTS.md` quick-start (Rust block), and
-`docs/development/quality-gates.md` (canonical) in the **same commit** (quality-gate-authoring invariant). Husky
-pre-commit inclusion optional (grep-only, fast).
+**Scope of the guarantee (stated honestly):** the check covers typed `Json`/`Form` bodies. It does **not** cover
+raw-`Bytes`/`serde_json::Value` bodies (no type to key on), and it enforces that validation is **invoked** — not that
+the result is propagated nor that a `ValidationFailed` audit event is emitted; those remain review-time concerns
+(extending `audit-catalog.toml` coverage to validation events is out of scope). Propagation is partly
+compiler-enforced already: `Result` is `#[must_use]` and the workspace denies warnings, so a bare `body.validate();`
+fails the build — only an explicit `let _ =` silences it, and that is visible in review. The
+OAuth DCR (`Json`) and token/device (`Form`) handlers keep their **manual** `.validate()` calls — the check _accepts_
+them (it enforces "validation invoked", not a specific extractor), which is required: those handlers return RFC-shaped
+`oauth_400` error bodies (not the generic `Validated<T>` 400) and order rate-limiting before validation, both of which
+`Validated<T>` would break.
+
+Wire the check into `.github/workflows/ci.yml`, `AGENTS.md` quick-start (Rust block), and
+`docs/development/quality-gates.md` (canonical) in the **same commit** (quality-gate-authoring invariant). No husky
+pre-commit wiring (compiling `xtask` is too heavy for a commit hook; CI + on-demand, like the sibling xtask checks).
 
 ## Behavior changes (call out — not silent)
 
@@ -179,7 +213,7 @@ pre-commit inclusion optional (grep-only, fast).
   precedence at `:516`; **not** order-dependent "first-wins"); enforcing "exactly one" in `Validate` returns **400** — a
   stricter, more correct contract that rejects the ambiguous combination at the boundary instead of silently dropping a
   field. Note in OpenAPI + test.
-- **No audit regression.** Bucket B1 is untouched; the newly-wired bypass handlers *gain* `ValidationFailed` audit
+- **No audit regression.** Bucket B1 is untouched; the newly-wired bypass handlers _gain_ `ValidationFailed` audit
   coverage (pattern-1 handlers gain a generic 400 with no audit, matching their sibling family which also does not
   audit validation failures).
 
@@ -194,32 +228,37 @@ pre-commit inclusion optional (grep-only, fast).
 - **Handler (TestApp harness):** `PATCH /api/v1/oidc-providers/{id}` with `issuer_url:"ftp://x"` → 400 **and** assert a
   `ValidationFailed` audit event is emitted (proves the manual-validate+audit wiring, not just a bare 400); one
   `UpdateHostAssignmentRequest` two-sources-set → 400 (proves the 404→400 shift).
-- **Gate self-check:** the gate exits 0 after the fix; add a negative fixture (temporarily add a `Json<XRequest>`
-  handler with no `.validate()` → gate exits non-zero) to prove it bites.
+- **Gate self-check:** `cargo xtask request-validation-check` exits 0 after the fix; the xtask module gets unit tests
+  parsing fixture snippets (a `Json<X>` handler with no `.validate()` → violation reported; a `query.validate()` on a
+  _different_ binding → still a violation, proving the receiver check; an allowlisted type → pass) to prove it bites.
 - No `start_paused` (no `tokio::time`). **Do not test** the `Validated` extractor machinery or serde deserialization
   (framework behavior).
 
 ## Deliverables
 
-- `crates/shared/web-api-types/src/*` — 14 `impl Validate` (9 rich + 5 minimal) + `HostSoftwareAssignment` if it carries
-  string fields; unit tests for the rich/moderate ones.
-- `crates/ui/web-api/src/routes/*` — wire validation into the ~17 bypass handlers (Groups A+B), each matching its
+- `crates/shared/web-api-types/src/*` — 14 `impl Validate` (9 rich + 5 minimal) + `HostPluginRoleAssignment` (the
+  nested type carrying the string fields); unit tests for the rich/moderate ones.
+- `crates/ui/web-api/src/routes/*` — wire validation into the ~21 bypass handlers (Groups A+B), each matching its
   sibling idiom (manual `body.validate()` + `ValidationFailed` audit, **or** `Validated<T>`); the two handler tests.
   **Leave the ~21 Bucket-B1 manual-validate handlers untouched.** The plan regenerates the exact bypass list via the
   per-fn scan.
-- `ci/verify_mutating_requests_validated.sh` + `_allowlist.txt` — new gate; wire into `.github/workflows/ci.yml`.
+- `xtask/src/request_validation_check/` (new `cargo xtask request-validation-check` subcommand) +
+  `ci/request_validation_allowlist.txt` — new gate; wire into `.github/workflows/ci.yml`.
 
 ### Documentation deliverables
 
-- `docs/development/coding-standards.md` — request-type-validation section: rule is now **CI-enforced** (name the
-  gate); document that a mutating body must **invoke validation** via one of the two accepted patterns (`Validated<T>`,
-  or manual `body.validate()` + `ValidationFailed` audit); document the Update/PATCH `Some("")` idiom and the
-  **`*Request` naming requirement** the gate depends on.
+- `docs/development/coding-standards.md` — request-type-validation section: rule is now **CI-enforced** (name
+  `cargo xtask request-validation-check`); document that a mutating body must **invoke validation** via one of the two
+  accepted patterns (`Validated<T>`, or manual `body.validate()` + `ValidationFailed` audit); document the Update/PATCH
+  `Some("")` idiom. (`*Request` naming stays a soft convention — the gate keys on the extractor and does not depend on
+  it.) Draw the line between the two escape hatches so they don't overlap: the **allowlist** is only for handlers that
+  perform **no state change**; every mutating body type gets an `impl Validate` — `Ok(())` if there is genuinely
+  nothing to check.
 - `AGENTS.md` quick-start Rust block **and** `docs/development/quality-gates.md` (canonical) — add the gate command,
   same commit.
 - **OpenAPI:** wiring validation adds a `400` response to the bypass paths. Add `(status = 400, …)` to any bypass
   handler's `#[utoipa::path(responses(...))]` that lacks it (grounded: `update_provider`, `update_host`,
-  `update_plugin_config`, `update_user_active` lack it; plan audits all ~17), then run `./scripts/regen-api.sh` and
+  `update_plugin_config`, `update_user_active` lack it; plan audits all ~21), then run `./scripts/regen-api.sh` and
   commit `crates/ui/web-api/openapi.json` + `frontend/src/lib/api/generated/`. Body **shapes** unchanged, so
   `uptrakit-openapi-client` needs no signature change.
 - **No ADR** (internal validation mechanics). **No wire/dependency change.**
@@ -233,16 +272,34 @@ pre-commit inclusion optional (grep-only, fast).
   the repo's audit invariant; (2) several deliberately return **422** on semantic-validation failure
   (`settings_access.rs:85`, `users.rs:679/904/1099`), not the extractor's generic **400** — a wire-contract change; (3)
   some run **authorization before validation** (`users.rs:672`) so an unauthorized caller never reaches validation —
-  `Validated<T>` (a `FromRequest` extractor) runs *before* the handler body, inverting that order and leaking
+  `Validated<T>` (a `FromRequest` extractor) runs _before_ the handler body, inverting that order and leaking
   input-validity signal to unauthorized callers. The manual-validate pattern is idiomatic here, not an anti-pattern; the
   gate must accept it. This is why the gate enforces "validation is invoked," not "the extractor is `Validated`."
 - **Fix only `UpdateOidcProviderRequest` / only the 9, skip the gate** — rejected: leaves the class open (the audit
   flags the missing enforcement as the root cause).
 - **Gate on "type impls `Validate`" instead of "handler invokes validation"** — rejected: misses Group B (types that
-  *have* a `Validate` impl the handler never calls). The invariant is the *call*, not the *impl*.
+  _have_ a `Validate` impl the handler never calls). The invariant is the _call_, not the _impl_.
 - **Gate with a typed-only allowlist instead of per-type `Validate`** — rejected for Group A: per-entry judgment that
-  rots; the 3 typed-only `Ok(())` impls are the cheap price of the missing-rule fix. (An allowlist for genuinely
-  non-mutating `*Request` bodies is a separate, repo-idiomatic escape hatch, seeded empty.)
+  rots; the 3 typed-only `Ok(())` impls are the cheap price of the missing-rule fix. (An allowlist for bodies genuinely
+  needing no validation is a separate, repo-idiomatic escape hatch, seeded with 2 entries — see Part 3.) Residual risk,
+  stated: an `Ok(())` impl also rots — a new `String` field on such a type passes the gate with zero rules. Mitigation:
+  the impl + its `// No format/length invariants…` comment sit adjacent to the struct, so a field-adding diff shows
+  them; neither an allowlist nor an impl can force rules onto future fields, and the impl at least keeps the decision
+  in the same file.
+- **Text-level perl/grep gate (`ci/verify_mutating_requests_validated.sh`, modeled on
+  `verify_handler_state_contract.sh`)** — the original Part 3 design; **rejected at contrarian review.** The sibling
+  gate extracts only fn _signatures_ (first brace); this gate needs full _bodies_, which a text scanner gets wrong in
+  ways that produce **false negatives**: naive fn-start→fn-start spans let the last handler in a file absorb the
+  `#[cfg(test)]` module (a `.validate()` in tests grants a false pass), and a substring check is receiver-agnostic
+  (`query.validate()` satisfies it for an unvalidated body). A gate whose failure mode is false-negative is worse than
+  no gate. The repo's closer precedent for body-level analysis is `xtask` + `syn` (already used by
+  `audit_coverage_check` et al.) — adopted instead.
+- **`Body<T>` type-state extractor (deserialize-only wrapper; handler must call a consuming `require_valid()` to reach
+  the fields — bypass becomes a compile error)** — genuinely stronger (compile-time, no gate needed) but **rejected as
+  disproportionate for this fix**: it touches every `Json`/`Form` body site in `routes/` (~50+, including the ~21
+  correct Bucket-B1 handlers this spec deliberately leaves untouched), needs a new extractor with its own
+  utoipa/OpenAPI schema integration, and converts a targeted bug-fix into a cross-cutting migration. Noted as a
+  possible future hardening that would supersede the xtask check; not this change.
 - **Validate `plugin_type` capability inside `Validate`** — rejected: `PluginCatalog` is not in `web-api-types`; the
   check stays handler-side (where it already is).
 - **Remove the `oidc_providers.rs:929` defensive guard** — rejected: protects reads of legacy rows; keep both.
@@ -253,4 +310,4 @@ The ~21 already-validated Bucket-B1 manual-validate handlers (correct as-is). Ot
 (short-term-backlog tier) — separate specs. No change to `Create`-type validation, the `PluginCatalog` capability
 check, merge-time plugin-config validation, or PATCH clear-semantics (`null` vs `Some("")`) beyond `Some("")` failing
 for required fields. No new request fields, no request-body shape change. `Query`/`Path` params and raw
-`Bytes`/`serde_json::Value` bodies are out of scope — the gate targets typed `Json`/`Form` `*Request` bodies only.
+`Bytes`/`serde_json::Value` bodies are out of scope — the gate targets typed `Json`/`Form` bodies only.
