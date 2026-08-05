@@ -664,6 +664,12 @@ struct Assignment {
 /// When both planes would be stripped by one mutation, the verdict is
 /// [`LockoutVerdict::SystemLockout`] (the less recoverable plane wins).
 ///
+/// CALLER OBLIGATION: on any verdict other than [`LockoutVerdict::Permitted`],
+/// the caller MUST abort the guarded mutation — never write it — and drop or
+/// roll back the transaction rather than commit. This function only
+/// evaluates the post-state in memory; it never itself applies or rejects
+/// the mutation against the database.
+///
 /// PROHIBITION: this guard must never call `AccessEngine` — its cache and
 /// pool-connection reads escape the transaction and under-count holders.
 ///
@@ -681,18 +687,38 @@ pub async fn check_lockout(
     // spec decision 7). ponytail: three flat full-table loads; switch to
     // subject-scoped queries if authority data ever outgrows admin scale.
     let grant_rows = access_grant::Entity::find().all(txn).await.context_to()?;
-    let mut grants: Vec<ResolvedGrant> = grant_rows
-        .into_iter()
-        .filter_map(|row| resolve_row(row).ok()) // corrupt rows never count as holders (fail-closed)
-        .collect();
+    let mut grants: Vec<ResolvedGrant> = Vec::with_capacity(grant_rows.len());
+    // Corrupt rows never count as holders (fail-closed), but the module's
+    // LOUD-SKIP contract still applies — same shape as
+    // `load_grants_for_principal`/`list_grants`.
+    for row in grant_rows {
+        let (id, subject_type, subject_id) = (row.id, row.subject_type, row.subject_id);
+        match resolve_row(row) {
+            Ok(grant) => grants.push(grant),
+            Err(reason) => {
+                tracing::error!(
+                    grant_id = %id,
+                    subject_type = ?subject_type,
+                    subject_id = %subject_id,
+                    reason,
+                    "skipping corrupt access_grants row during resolution"
+                );
+            }
+        }
+    }
     let mut active_users: HashSet<Uuid> = crate::entity::user::Entity::find()
         .filter(crate::entity::user::Column::IsActive.eq(true))
+        .select_only()
+        .column(crate::entity::user::Column::Id)
+        .into_tuple::<Uuid>()
         .all(txn)
         .await
         .context_to()?
         .into_iter()
-        .map(|u| u.id)
         .collect();
+    // Cross-tenant by design: the lockout invariant spans every tenant a
+    // role is assigned in, so this deliberately does not filter by tenant —
+    // do not copy this shape for tenant-scoped queries (use `TenantDb`).
     let mut assignments: Vec<Assignment> = crate::entity::user_role::Entity::find()
         .all(txn)
         .await
@@ -920,6 +946,28 @@ mod tests {
         .insert(db)
         .await
         .expect("insert active user");
+        id
+    }
+
+    /// Insert a second, non-default tenant row. `user_role.tenant_id` and
+    /// `access_grants.tenant_id` both carry an FK to `tenants.id`, so tests
+    /// that need a genuinely separate tenant bucket (not a bare
+    /// `Uuid::now_v7()`, which would fail the FK) go through this.
+    async fn insert_tenant(db: &DatabaseConnection, slug: &str) -> Uuid {
+        let id = Uuid::now_v7();
+        let now = OffsetDateTime::now_utc();
+        tenant::ActiveModel {
+            id: Set(id),
+            name: Set(slug.to_string()),
+            slug: Set(slug.to_string()),
+            is_default: Set(false),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert second tenant");
         id
     }
 
@@ -1640,7 +1688,7 @@ mod tests {
         // Swap coverage: a second holder via user-subject grant → role
         // delete becomes Permitted.
         let second = active_user(&db).await;
-        insert_grant(
+        let second_grant_id = insert_grant(
             &db,
             NewGrant {
                 subject: GrantSubject::User(second),
@@ -1663,6 +1711,65 @@ mod tests {
         .await
         .expect("guard");
         assert_eq!(verdict, LockoutVerdict::Permitted);
+
+        // PER-TENANT GROUPING, actually staged: a second, real tenant with
+        // its OWN independent covering holder. If `covering_holders` ever
+        // collapsed its `HashMap<Uuid, HashSet<Uuid>>` into one flat
+        // `HashSet`, tenant B's holder would silently "rescue" tenant A's
+        // count below (and vice versa), and both assertions here would flip
+        // to `Permitted`.
+        let tenant_b = insert_tenant(&db, "tenant-b-lockout-guard-test").await;
+        let holder_b = active_user(&db).await;
+        insert_grant(
+            &db,
+            NewGrant {
+                subject: GrantSubject::User(holder_b),
+                tenant_id: Some(tenant_b),
+                patterns: &pats(&["access:manage"]),
+                selector: Selector::All,
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect("tenant b's own independent holder");
+
+        // Drop tenant A's non-role holder so `holder`'s role assignment is
+        // once again tenant A's only covering path.
+        delete_grant(&db, second_grant_id)
+            .await
+            .expect("remove tenant A's second holder");
+
+        let verdict = verdict_of(
+            &db,
+            tenant,
+            &GuardedMutation::DeleteRole {
+                role_id: settings_manager,
+            },
+        )
+        .await
+        .expect("guard");
+        assert_eq!(
+            verdict,
+            LockoutVerdict::TenantLockout,
+            "tenant A loses its only holder even though tenant B has its own, unrelated holder"
+        );
+
+        // Reverse direction: tenant B losing its only holder must ALSO be a
+        // lockout, even though tenant A's holder (the role assignment,
+        // still intact — the previous check never committed) is untouched.
+        let verdict = verdict_of(
+            &db,
+            tenant,
+            &GuardedMutation::DeactivateUser { user_id: holder_b },
+        )
+        .await
+        .expect("guard");
+        assert_eq!(
+            verdict,
+            LockoutVerdict::TenantLockout,
+            "tenant B loses its only holder even though tenant A's holder is untouched"
+        );
     }
 
     /// Swapping covering role A for covering role B in one full-replace
@@ -1876,9 +1983,12 @@ mod tests {
             .expect("delete inside the guard txn");
         txn.commit().await.expect("commit");
 
+        let err = load_grant(&db, grant_a)
+            .await
+            .expect_err("deletion committed");
         assert!(
-            load_grant(&db, grant_a).await.is_err(),
-            "deletion committed"
+            matches!(err.current_context(), AccessGrantError::NotFound),
+            "expected NotFound after committed delete, got: {err}"
         );
         let verdict = verdict_of(
             &db,
