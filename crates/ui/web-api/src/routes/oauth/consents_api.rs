@@ -12,9 +12,10 @@ use axum::Extension;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use uptrakit_audit_log::{AuditActionType, AuditEntry, AuditOutcome, Event};
-use uptrakit_shared_db::entity::oauth_consent;
+use uptrakit_shared_db::entity::{oauth_client, oauth_consent};
+use uptrakit_web_api_types::oauth::responses::OAuthConsentResponse;
 use uuid::Uuid;
 
 use crate::AppState;
@@ -36,11 +37,12 @@ use crate::oauth::services::consent::OAuthConsentService;
     get,
     path = "/api/oauth/consents",
     responses(
-        (status = 200, description = "List of active consents"),
+        (status = 200, description = "List of active consents", body = Vec<OAuthConsentResponse>),
         (status = 401, description = "Unauthenticated"),
         (status = 404, description = "OAuth disabled"),
     ),
-    tag = "OAuth"
+    tag = "OAuth",
+    security(("oauth2" = []), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub(crate) async fn list_consents(
@@ -54,6 +56,8 @@ pub(crate) async fn list_consents(
     let rows = match oauth_consent::Entity::find()
         .filter(oauth_consent::Column::UserId.eq(auth_user.user_id))
         .filter(oauth_consent::Column::RevokedAt.is_null())
+        .order_by_desc(oauth_consent::Column::GrantedAt)
+        .find_also_related(oauth_client::Entity)
         .all(state.db())
         .await
     {
@@ -65,17 +69,22 @@ pub(crate) async fn list_consents(
     };
 
     // Serialize safe fields only — internal hashes are never exposed.
-    let items: Vec<serde_json::Value> = rows
-        .into_iter()
-        .map(|row| {
-            serde_json::json!({
-                "id": row.id,
-                "client_id": row.client_id,
-                "scopes": row.scopes,
-                "granted_at": row.granted_at,
-            })
-        })
-        .collect();
+    let mut items = Vec::with_capacity(rows.len());
+    for (consent, client) in rows {
+        // FK-unreachable: fk_oauth_consents_client is ON DELETE RESTRICT and
+        // client revocation is a soft delete, so the client row always exists.
+        let Some(client) = client else {
+            tracing::error!(consent_id = %consent.id, "oauth consent references missing client row");
+            return oauth_500();
+        };
+        items.push(OAuthConsentResponse::new(
+            consent.id,
+            consent.client_id,
+            client.client_name,
+            consent.scopes,
+            consent.granted_at,
+        ));
+    }
 
     (StatusCode::OK, axum::Json(items)).into_response()
 }
@@ -99,7 +108,8 @@ pub(crate) async fn list_consents(
         (status = 403, description = "Consent belongs to a different user"),
         (status = 404, description = "Consent not found or OAuth disabled"),
     ),
-    tag = "OAuth"
+    tag = "OAuth",
+    security(("oauth2" = []), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub(crate) async fn revoke_consent(
@@ -284,8 +294,8 @@ mod tests {
         user_id: uuid::Uuid,
         client_id: &str,
         revoked: bool,
+        granted_at: OffsetDateTime,
     ) -> uuid::Uuid {
-        let now = OffsetDateTime::now_utc();
         let id = uuid::Uuid::now_v7();
         oauth_consent::ActiveModel {
             id: Set(id),
@@ -294,8 +304,8 @@ mod tests {
             scopes: Set("openid mcp:read".to_string()),
             cimd_content_hash_at_grant: Set(None),
             revalidation_required_at: Set(None),
-            granted_at: Set(now),
-            revoked_at: Set(if revoked { Some(now) } else { None }),
+            granted_at: Set(granted_at),
+            revoked_at: Set(if revoked { Some(granted_at) } else { None }),
         }
         .insert(db)
         .await
@@ -319,9 +329,30 @@ mod tests {
         // on active (user_id, client_id). Use separate clients for the two
         // user-A rows.
         let client_id2 = insert_oauth_client_row(&app.db).await;
-        insert_consent_row(&app.db, user_a, &client_id, false).await;
-        insert_consent_row(&app.db, user_a, &client_id2, false).await;
-        insert_consent_row(&app.db, user_b, &client_id, false).await;
+        insert_consent_row(
+            &app.db,
+            user_a,
+            &client_id,
+            false,
+            OffsetDateTime::now_utc(),
+        )
+        .await;
+        insert_consent_row(
+            &app.db,
+            user_a,
+            &client_id2,
+            false,
+            OffsetDateTime::now_utc(),
+        )
+        .await;
+        insert_consent_row(
+            &app.db,
+            user_b,
+            &client_id,
+            false,
+            OffsetDateTime::now_utc(),
+        )
+        .await;
 
         let token = app
             .jwt
@@ -363,8 +394,22 @@ mod tests {
         let client_id1 = insert_oauth_client_row(&app.db).await;
         let client_id2 = insert_oauth_client_row(&app.db).await;
 
-        insert_consent_row(&app.db, user_id, &client_id1, false).await;
-        insert_consent_row(&app.db, user_id, &client_id2, true).await;
+        insert_consent_row(
+            &app.db,
+            user_id,
+            &client_id1,
+            false,
+            OffsetDateTime::now_utc(),
+        )
+        .await;
+        insert_consent_row(
+            &app.db,
+            user_id,
+            &client_id2,
+            true,
+            OffsetDateTime::now_utc(),
+        )
+        .await;
 
         let token = app
             .jwt
@@ -396,7 +441,14 @@ mod tests {
         let app = setup_with_oauth(enabled_oauth_state()).await;
         let user_id = insert_test_user(&app.db).await;
         let client_id = insert_oauth_client_row(&app.db).await;
-        let consent_id = insert_consent_row(&app.db, user_id, &client_id, false).await;
+        let consent_id = insert_consent_row(
+            &app.db,
+            user_id,
+            &client_id,
+            false,
+            OffsetDateTime::now_utc(),
+        )
+        .await;
 
         let token = app
             .jwt
@@ -435,7 +487,14 @@ mod tests {
         let user_a = insert_test_user(&app.db).await;
         let user_b = insert_test_user(&app.db).await;
         let client_id = insert_oauth_client_row(&app.db).await;
-        let consent_id = insert_consent_row(&app.db, user_a, &client_id, false).await;
+        let consent_id = insert_consent_row(
+            &app.db,
+            user_a,
+            &client_id,
+            false,
+            OffsetDateTime::now_utc(),
+        )
+        .await;
 
         // User B tries to revoke user A's consent.
         let token_b = app
@@ -531,5 +590,60 @@ mod tests {
             .expect("build request");
         let resp = router.oneshot(req).await.expect("oneshot");
         assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 7 — list_consents is enriched with client_name, RFC 3339, newest first
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn list_consents_enriched_with_client_name_rfc3339_ordered() {
+        let app = setup_with_oauth(enabled_oauth_state()).await;
+        let user_id = insert_test_user(&app.db).await;
+        let client_id1 = insert_oauth_client_row(&app.db).await;
+        let client_id2 = insert_oauth_client_row(&app.db).await;
+
+        let older = OffsetDateTime::now_utc() - time::Duration::hours(2);
+        let newer = OffsetDateTime::now_utc();
+        insert_consent_row(&app.db, user_id, &client_id1, false, older).await;
+        let newest_id = insert_consent_row(&app.db, user_id, &client_id2, false, newer).await;
+
+        let token = app
+            .jwt
+            .create_access_token(user_id, &[], "password", None, None)
+            .expect("create_access_token");
+
+        let req = Request::builder()
+            .method("GET")
+            .uri("/api/oauth/consents")
+            .header("authorization", format!("Bearer {token}"))
+            .body(Body::empty())
+            .expect("build request");
+
+        let resp = app.router.oneshot(req).await.expect("oneshot");
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let body_bytes = resp.into_body().collect().await.expect("body").to_bytes();
+        let items: serde_json::Value = serde_json::from_slice(&body_bytes).expect("parse json");
+        let arr = items.as_array().expect("response must be array");
+        assert_eq!(arr.len(), 2);
+
+        let first = arr.first().expect("first item");
+        // Newest-granted first.
+        assert_eq!(
+            first["id"].as_str().expect("id string"),
+            newest_id.to_string(),
+            "list must be ordered granted_at DESC"
+        );
+        // Enrichment: client_name comes from the joined oauth_client row.
+        assert_eq!(
+            first["client_name"].as_str().expect("client_name string"),
+            "Test Client",
+            "client_name must be populated from the join"
+        );
+        // RFC 3339 pin — the old json! path emitted a component array.
+        let granted_at = first["granted_at"].as_str().expect("granted_at string");
+        time::OffsetDateTime::parse(granted_at, &time::format_description::well_known::Rfc3339)
+            .expect("granted_at parses as RFC 3339");
     }
 }
