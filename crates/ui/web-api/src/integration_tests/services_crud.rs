@@ -1,36 +1,11 @@
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
-use uptrakit_shared_db::access_grants::{GrantSubject, delete_grant, load_grants_for_principal};
 use uptrakit_shared_db::entity::service::ServiceStatus;
-use uptrakit_shared_db::entity::{role, user_role};
 use uptrakit_shared_types::access::actions;
-use uuid::Uuid;
 
 use crate::test_harness::TestApp;
 use crate::test_harness::fixtures::{
-    insert_embedded_service, insert_service, login_user, register_and_get_token, register_user,
+    insert_embedded_service, insert_service, link_role, login_user, open_registration,
+    register_and_get_token, register_user, revoke_role_grants_covering, role_id_by_name,
 };
-
-/// Register the first user (owner) and re-open registration so a second
-/// user can sign up. Returns the owner's access token.
-async fn open_registration(app: &TestApp) -> String {
-    let client = app.client();
-    let owner_token = register_and_get_token(&client).await;
-    let reopen = client
-        .put_json(
-            "/api/v1/settings/access",
-            &serde_json::json!({ "mode": "open" }),
-        )
-        .bearer(&owner_token)
-        .header("if-match", "W/\"settings-v0\"")
-        .send_status()
-        .await;
-    assert_eq!(
-        reopen,
-        http::StatusCode::OK,
-        "failed to re-open registration"
-    );
-    owner_token
-}
 
 #[tokio::test]
 async fn list_services_empty_returns_200() {
@@ -213,54 +188,9 @@ async fn batch_services_engine_deny_overrides_legacy_permission_is_403() {
     );
     let user_id = auth.user.id;
 
-    let service_manager_role_id = role::Entity::find()
-        .filter(role::Column::Name.eq("service_manager"))
-        .one(&app.db)
-        .await
-        .expect("query roles")
-        .expect("seeded service_manager role")
-        .id;
-
-    user_role::ActiveModel {
-        tenant_id: Set(app.tenant_id),
-        user_id: Set(user_id),
-        role_id: Set(service_manager_role_id),
-        assigned_at: Set(time::OffsetDateTime::now_utc()),
-    }
-    .insert(&app.db)
-    .await
-    .expect("assign service_manager role");
-    app.state.access_engine.invalidate_subjects(&[user_id], &[]);
-
-    let load = load_grants_for_principal(
-        &app.db,
-        app.tenant_id,
-        Uuid::nil(),
-        &[service_manager_role_id],
-    )
-    .await
-    .expect("load service_manager grants");
-    let mut deleted_any = false;
-    for grant in load.grants {
-        if grant.subject == GrantSubject::Role(service_manager_role_id)
-            && grant
-                .patterns
-                .iter()
-                .any(|pattern| pattern.matches(&actions::SERVICES_APPROVE))
-        {
-            delete_grant(&app.db, grant.id)
-                .await
-                .expect("delete service_manager services:approve grant");
-            deleted_any = true;
-        }
-    }
-    assert!(
-        deleted_any,
-        "expected at least one service_manager grant row covering services:approve"
-    );
-    app.state
-        .access_engine
-        .invalidate_subjects(&[], &[service_manager_role_id]);
+    let service_manager_role_id = role_id_by_name(&app, "service_manager").await;
+    link_role(&app, user_id, service_manager_role_id).await;
+    revoke_role_grants_covering(&app, service_manager_role_id, &[actions::SERVICES_APPROVE]).await;
 
     let (login_status, login_auth) =
         login_user(&client, "batch-legacy@test.local", "TestPassword123!").await;

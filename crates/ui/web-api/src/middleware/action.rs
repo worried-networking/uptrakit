@@ -33,6 +33,24 @@ pub enum AccessAuthority {
     Unavailable,
 }
 
+impl AccessAuthority {
+    /// The resolved context, or `None` when no authority is available.
+    ///
+    /// Inline enforcement sites (M1.5) use this instead of matching the
+    /// variant directly: `AccessAuthority` is `#[non_exhaustive]`, so a
+    /// hand-written match needs a wildcard arm at every call site and a
+    /// future variant would silently take the wildcard's verdict. Callers
+    /// render their own `None` response — the interactive-WS route also
+    /// emits an audit row there, so the response cannot be shared.
+    #[must_use]
+    pub(crate) fn ready(&self) -> Option<&AccessContext> {
+        match self {
+            Self::Ready(ctx) => Some(ctx),
+            _ => None,
+        }
+    }
+}
+
 /// Generates a concrete Axum extractor struct for a single catalog action.
 ///
 /// Same ergonomic shape as `permission_extractor!` (`middleware/permission.rs`)
@@ -204,6 +222,10 @@ action_extractor! {
 /// deny, returns the first non-`NoGrant` reason seen (`NoGrant` never masks
 /// a scope/ceiling deny from another arm). One deny shape for every inline
 /// site converted in M1.5.
+///
+/// Increments `uptrakit_access_denies_total` on deny, exactly as
+/// `action_extractor!` does for the single-action case — callers render the
+/// 403 (and any audit row) but never have to remember the counter.
 pub(crate) fn authorize_any(
     engine: &AccessEngine,
     ctx: &AccessContext,
@@ -223,7 +245,13 @@ pub(crate) fn authorize_any(
             _ => {}
         }
     }
-    Err(deny.unwrap_or(DenyReason::NoGrant))
+    let reason = deny.unwrap_or(DenyReason::NoGrant);
+    metrics::counter!(
+        "uptrakit_access_denies_total",
+        "reason" => reason.as_str()
+    )
+    .increment(1);
+    Err(reason)
 }
 
 #[cfg(test)]

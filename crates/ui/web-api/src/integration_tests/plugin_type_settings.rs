@@ -1,9 +1,3 @@
-#![expect(
-    clippy::expect_used,
-    reason = "test code: panics on failure are acceptable"
-)]
-#![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
-
 //! Integration tests for the visibility predicate on
 //! `GET /api/v1/plugin-type-settings/{plugin_type}`.
 //!
@@ -20,123 +14,18 @@
 //! test matrix where the predicate would return `false` for upsert/delete —
 //! those tests would be vacuous duplicates of the existing permission-gate tests.
 
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
-use uptrakit_shared_db::access_grants::{GrantSubject, delete_grant, load_grants_for_principal};
-use uptrakit_shared_db::entity::{role, user_role};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use uptrakit_shared_db::entity::user_role;
 use uptrakit_shared_types::access::actions;
-use uuid::Uuid;
 
 use crate::test_harness::TestApp;
+use crate::test_harness::fixtures::{
+    open_registration, register_user, revoke_role_grants_covering, role_id_by_name,
+    stage_user_with_only_role, stage_zero_role_user,
+};
 #[cfg(feature = "dashboard-icons")]
-use crate::test_harness::fixtures::register_admin_and_tenant_user;
-use crate::test_harness::fixtures::{login_user, register_and_get_token, register_user};
+use crate::test_harness::fixtures::{register_admin_and_tenant_user, register_user_with_only_role};
 
-// ── M1.5 fixtures ────────────────────────────────────────────────────────────
-
-/// Register the first user (owner) and re-open registration so a second
-/// user can sign up. Returns the owner's access token.
-async fn open_registration(app: &TestApp) -> String {
-    let client = app.client();
-    let owner_token = register_and_get_token(&client).await;
-    let reopen = client
-        .put_json(
-            "/api/v1/settings/access",
-            &serde_json::json!({ "mode": "open" }),
-        )
-        .bearer(&owner_token)
-        .header("if-match", "W/\"settings-v0\"")
-        .send_status()
-        .await;
-    assert_eq!(
-        reopen,
-        http::StatusCode::OK,
-        "failed to re-open registration"
-    );
-    owner_token
-}
-
-/// Register a fresh user (registration must already be open), strip its
-/// auto-assigned `viewer` role, link ONLY `role_name`, invalidate the engine
-/// cache, then re-login so the legacy JWT claim snapshot reflects the newly
-/// linked role's legacy permission set. Returns `(user_id, access_token)`.
-async fn register_user_with_only_role(
-    app: &TestApp,
-    email: &str,
-    role_name: &str,
-) -> (Uuid, String) {
-    let client = app.client();
-    let (status, auth) = register_user(&client, email, "TestPassword123!").await;
-    assert_eq!(
-        status,
-        http::StatusCode::CREATED,
-        "user registration failed"
-    );
-    let user_id = auth.user.id;
-
-    user_role::Entity::delete_many()
-        .filter(user_role::Column::UserId.eq(user_id))
-        .exec(&app.db)
-        .await
-        .expect("strip auto-assigned viewer role");
-
-    let role_id = role::Entity::find()
-        .filter(role::Column::Name.eq(role_name))
-        .one(&app.db)
-        .await
-        .expect("query roles")
-        .unwrap_or_else(|| panic!("seeded `{role_name}` role must exist"))
-        .id;
-    user_role::ActiveModel {
-        tenant_id: Set(app.tenant_id),
-        user_id: Set(user_id),
-        role_id: Set(role_id),
-        assigned_at: Set(time::OffsetDateTime::now_utc()),
-    }
-    .insert(&app.db)
-    .await
-    .expect("assign role");
-    app.state.access_engine.invalidate_subjects(&[user_id], &[]);
-
-    let (login_status, login_auth) = login_user(&client, email, "TestPassword123!").await;
-    assert_eq!(login_status, http::StatusCode::OK, "re-login failed");
-    (user_id, login_auth.access_token.expose_secret().to_string())
-}
-
-/// Owner + a fresh second user holding ONLY `role_name`. Returns
-/// `(user_id, access_token)` for the second user.
-async fn stage_user_with_only_role(app: &TestApp, role_name: &str) -> (Uuid, String) {
-    open_registration(app).await;
-    let email = format!("{role_name}-only@test.local");
-    register_user_with_only_role(app, &email, role_name).await
-}
-
-/// Owner + a fresh second user with its auto-assigned `viewer` role
-/// stripped and no replacement linked. Returns `(user_id, access_token)`.
-async fn stage_zero_role_user(app: &TestApp) -> (Uuid, String) {
-    let client = app.client();
-    open_registration(app).await;
-    let (status, auth) = register_user(&client, "zero-role@test.local", "TestPassword123!").await;
-    assert_eq!(
-        status,
-        http::StatusCode::CREATED,
-        "user registration failed"
-    );
-    let user_id = auth.user.id;
-    user_role::Entity::delete_many()
-        .filter(user_role::Column::UserId.eq(user_id))
-        .exec(&app.db)
-        .await
-        .expect("strip auto-assigned roles");
-    app.state.access_engine.invalidate_subjects(&[user_id], &[]);
-    (user_id, auth.access_token.expose_secret().to_string())
-}
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
-
-/// A tenant user (ViewSettings, no ManageGlobalSettings) GETting settings for
-/// a disabled Instance-scoped plugin must receive 404 — the predicate hides
-/// the plugin, returning the same "not found" response regardless of whether
-/// a settings row exists, to prevent existence leakage.
 #[cfg(feature = "dashboard-icons")]
 #[tokio::test]
 async fn tenant_user_get_plugin_type_settings_for_disabled_instance_plugin_returns_404() {
@@ -334,13 +223,7 @@ async fn viewer_engine_deny_overrides_legacy_permission_for_plugin_type_settings
     );
     let token = auth.access_token.expose_secret().to_string();
 
-    let viewer_role_id = role::Entity::find()
-        .filter(role::Column::Name.eq("viewer"))
-        .one(&app.db)
-        .await
-        .expect("query roles")
-        .expect("seeded viewer role")
-        .id;
+    let viewer_role_id = role_id_by_name(&app, "viewer").await;
 
     let user_has_viewer_role = user_role::Entity::find()
         .filter(user_role::Column::UserId.eq(auth.user.id))
@@ -355,30 +238,12 @@ async fn viewer_engine_deny_overrides_legacy_permission_for_plugin_type_settings
          to be a meaningful denial, not a 403 for the wrong reason"
     );
 
-    let load = load_grants_for_principal(&app.db, app.tenant_id, Uuid::nil(), &[viewer_role_id])
-        .await
-        .expect("load viewer grants");
-    let mut deleted_any = false;
-    for grant in load.grants {
-        if grant.subject == GrantSubject::Role(viewer_role_id)
-            && grant.patterns.iter().any(|pattern| {
-                pattern.matches(&actions::SETTINGS_READ)
-                    || pattern.matches(&actions::SYSTEM_SETTINGS_MANAGE)
-            })
-        {
-            delete_grant(&app.db, grant.id)
-                .await
-                .expect("delete viewer settings-covering grant");
-            deleted_any = true;
-        }
-    }
-    assert!(
-        deleted_any,
-        "expected at least one viewer grant row covering settings:read"
-    );
-    app.state
-        .access_engine
-        .invalidate_subjects(&[], &[viewer_role_id]);
+    revoke_role_grants_covering(
+        &app,
+        viewer_role_id,
+        &[actions::SETTINGS_READ, actions::SYSTEM_SETTINGS_MANAGE],
+    )
+    .await;
 
     let status = app
         .client()

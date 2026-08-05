@@ -107,16 +107,10 @@ pub async fn list_plugin_type_settings(
     tenant_db: TenantDb,
     Extension(authority): Extension<AccessAuthority>,
 ) -> Response {
-    let access_ctx = match authority {
-        AccessAuthority::Ready(access_ctx) => access_ctx,
-        _ => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
+    let Some(access_ctx) = authority.ready() else {
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     };
-    if let Err(reason) = can_view_type_settings(&state.access_engine, &access_ctx) {
-        metrics::counter!(
-            "uptrakit_access_denies_total",
-            "reason" => reason.as_str()
-        )
-        .increment(1);
+    if can_view_type_settings(&state.access_engine, access_ctx).is_err() {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -135,7 +129,7 @@ pub async fn list_plugin_type_settings(
                                 plugin_ops.0.as_ref(),
                                 snapshot.as_ref(),
                                 &state.access_engine,
-                                &access_ctx,
+                                access_ctx,
                             )
                         })
                         .unwrap_or(false)
@@ -174,16 +168,10 @@ pub async fn get_plugin_type_settings(
     Path(plugin_type): Path<String>,
     Extension(authority): Extension<AccessAuthority>,
 ) -> Response {
-    let access_ctx = match authority {
-        AccessAuthority::Ready(access_ctx) => access_ctx,
-        _ => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
+    let Some(access_ctx) = authority.ready() else {
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     };
-    if let Err(reason) = can_view_type_settings(&state.access_engine, &access_ctx) {
-        metrics::counter!(
-            "uptrakit_access_denies_total",
-            "reason" => reason.as_str()
-        )
-        .increment(1);
+    if can_view_type_settings(&state.access_engine, access_ctx).is_err() {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -194,7 +182,7 @@ pub async fn get_plugin_type_settings(
             plugin_ops.0.as_ref(),
             state.instance_plugin_snapshot.load().as_ref(),
             &state.access_engine,
-            &access_ctx,
+            access_ctx,
         )
     {
         return error_response(
@@ -219,8 +207,11 @@ pub async fn get_plugin_type_settings(
 
 /// Bundles the API-token identity and access-authority extensions needed by
 /// state-mutating plugin-type-settings handlers, keeping the handler's own
-/// argument list under clippy's `too_many_arguments` threshold — same
-/// technique as `routes/surfaces.rs`'s `GetInteractionRequest` bundling.
+/// argument list under clippy's `too_many_arguments` threshold.
+///
+/// Same technique as `routes/surfaces.rs`'s `GetInteractionRequest` — a
+/// `FromRequestParts` bundle standing in for several extractors — though
+/// that one groups `Method` + raw query rather than the auth extensions.
 pub struct WriteAuthContext {
     api_token_id: Option<AuthenticatedApiTokenId>,
     authority: AccessAuthority,
@@ -280,9 +271,8 @@ pub async fn upsert_plugin_type_settings(
         api_token_id,
         authority,
     } = write_ctx;
-    let access_ctx = match authority {
-        AccessAuthority::Ready(access_ctx) => access_ctx,
-        _ => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
+    let Some(access_ctx) = authority.ready() else {
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     };
     let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
     let tenant_id = tenant_db.tenant_id();
@@ -294,7 +284,7 @@ pub async fn upsert_plugin_type_settings(
             plugin_ops.0.as_ref(),
             state.instance_plugin_snapshot.load().as_ref(),
             &state.access_engine,
-            &access_ctx,
+            access_ctx,
         )
     {
         return error_response(StatusCode::NOT_FOUND, "Unknown plugin type");
@@ -438,9 +428,8 @@ pub async fn delete_plugin_type_settings(
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Extension(authority): Extension<AccessAuthority>,
 ) -> Response {
-    let access_ctx = match authority {
-        AccessAuthority::Ready(access_ctx) => access_ctx,
-        _ => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
+    let Some(access_ctx) = authority.ready() else {
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     };
     let api_token_id = api_token_id.map(|value| value.0);
     let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
@@ -453,7 +442,7 @@ pub async fn delete_plugin_type_settings(
             plugin_ops.0.as_ref(),
             state.instance_plugin_snapshot.load().as_ref(),
             &state.access_engine,
-            &access_ctx,
+            access_ctx,
         )
     {
         return error_response(

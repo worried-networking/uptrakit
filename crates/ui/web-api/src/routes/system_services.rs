@@ -502,12 +502,7 @@ pub async fn batch_system_services(
         "deactivate" => &[actions::SYSTEM_SERVICES_DELETE][..],
         _ => return error_response(StatusCode::BAD_REQUEST, "Unknown batch action"),
     };
-    if let Err(reason) = authorize_any(&state.access_engine, &access_ctx, required_actions) {
-        metrics::counter!(
-            "uptrakit_access_denies_total",
-            "reason" => reason.as_str()
-        )
-        .increment(1);
+    if authorize_any(&state.access_engine, &access_ctx, required_actions).is_err() {
         if let Some(action_type) = action_type {
             emit_system_service_audit(
                 &state,

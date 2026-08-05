@@ -21,7 +21,7 @@ use axum::response::{IntoResponse, Response};
 use futures_util::{SinkExt, StreamExt};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, RelationTrait};
 use uptrakit_shared_db::entity::{host, update_history, update_output_line};
-use uptrakit_shared_types::access::{Decision, actions};
+use uptrakit_shared_types::access::actions;
 use uptrakit_web_api_types::update_history::{
     OutputLineSSE, StdinAttentionSSE, UpdateCompletedSSE,
 };
@@ -30,7 +30,7 @@ use uuid::Uuid;
 
 use crate::AppState;
 use crate::error_response::error_response;
-use crate::middleware::action::AccessAuthority;
+use crate::middleware::action::authorize_any;
 use crate::middleware::require_auth::{
     AuthFailure, AuthenticatedApiTokenId, AuthenticatedUser, authenticate_api_token,
     authenticate_jwt, authenticated_user_audit_actor, build_access_authority,
@@ -186,67 +186,47 @@ pub async fn interactive_ws(
     // `require_auth` never runs on this route — so the engine call must live inline here,
     // built through the same `build_access_authority` path `require_auth` uses.
     let authority = build_access_authority(&state, auth_user.user_id).await;
-    let access_ctx = match &authority {
-        AccessAuthority::Ready(ctx) => ctx,
-        // `Unavailable` still needs an audit row, but as `Failed` (not
-        // `Denied`) — mirrors this file's own 500-path convention (step 4
-        // below, `update_history_lookup_failed`): `Denied` would make
-        // deny-rate dashboards fire on an engine/DB outage and claim a
-        // policy refusal that never happened.
-        _ => {
-            emit_interactive_session_audit(
-                InteractiveAuditCtx {
-                    state: &state,
-                    actor: audit_actor,
-                },
-                record_id,
-                None,
-                uptrakit_audit_log::AuditOutcome::Failed,
-                Some("authorization_unavailable"),
-                None,
-            );
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
+    // `Unavailable` still needs an audit row, but as `Failed` (not
+    // `Denied`) — mirrors this file's own 500-path convention (step 4
+    // below, `update_history_lookup_failed`): `Denied` would make
+    // deny-rate dashboards fire on an engine/DB outage and claim a
+    // policy refusal that never happened.
+    let Some(access_ctx) = authority.ready() else {
+        emit_interactive_session_audit(
+            InteractiveAuditCtx {
+                state: &state,
+                actor: audit_actor,
+            },
+            record_id,
+            None,
+            uptrakit_audit_log::AuditOutcome::Failed,
+            Some("authorization_unavailable"),
+            None,
+        );
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     };
-    match state
-        .access_engine
-        .authorize(access_ctx, &actions::UPDATES_TRIGGER, None)
+    // Single-action OR-gate: `authorize_any` owns the deny-reason precedence,
+    // the `uptrakit_access_denies_total` increment, and the fail-closed
+    // handling of `Decision`'s non-exhaustive variants.
+    if authorize_any(
+        &state.access_engine,
+        access_ctx,
+        &[actions::UPDATES_TRIGGER],
+    )
+    .is_err()
     {
-        Decision::Allow => {}
-        Decision::Deny(reason) => {
-            metrics::counter!(
-                "uptrakit_access_denies_total",
-                "reason" => reason.as_str()
-            )
-            .increment(1);
-            emit_interactive_session_audit(
-                InteractiveAuditCtx {
-                    state: &state,
-                    actor: audit_actor,
-                },
-                record_id,
-                None,
-                uptrakit_audit_log::AuditOutcome::Denied,
-                Some("permission_denied"),
-                None,
-            );
-            return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-        }
-        // `Decision` is #[non_exhaustive] in another crate.
-        _ => {
-            emit_interactive_session_audit(
-                InteractiveAuditCtx {
-                    state: &state,
-                    actor: audit_actor,
-                },
-                record_id,
-                None,
-                uptrakit_audit_log::AuditOutcome::Denied,
-                Some("permission_denied"),
-                None,
-            );
-            return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-        }
+        emit_interactive_session_audit(
+            InteractiveAuditCtx {
+                state: &state,
+                actor: audit_actor,
+            },
+            record_id,
+            None,
+            uptrakit_audit_log::AuditOutcome::Denied,
+            Some("permission_denied"),
+            None,
+        );
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     // 4. Verify the update record exists (tenant-scoped) and is in-progress.
@@ -967,11 +947,7 @@ mod tests {
     #[cfg(feature = "db-sqlite")]
     use tokio_tungstenite::tungstenite::Message;
     #[cfg(feature = "db-sqlite")]
-    use uptrakit_shared_db::access_grants::{
-        GrantSubject, delete_grant, load_grants_for_principal,
-    };
-    #[cfg(feature = "db-sqlite")]
-    use uptrakit_shared_db::entity::{audit_log, role, software_item, update_history, user_role};
+    use uptrakit_shared_db::entity::{audit_log, software_item, update_history};
     #[cfg(feature = "db-sqlite")]
     use uptrakit_shared_types::UpdateStatus;
     #[cfg(feature = "db-sqlite")]
@@ -1867,8 +1843,8 @@ mod tests {
     /// still grants `trigger_updates` via the built-in `operator` role, but
     /// whose `AccessEngine` authority for `updates:trigger` has been revoked
     /// (the covering `access_grants` row(s) deleted, cache invalidated).
-    /// Pre-conversion code (checking `auth_user.has_permission(..)`) answers
-    /// from the stale JWT claim and reaches 101 Switching Protocols; the
+    /// Pre-conversion code (a legacy permission-claim check on `auth_user`)
+    /// answers from the stale JWT claim and reaches 101 Switching Protocols; the
     /// engine-gated code must reject with a plain 403 before any upgrade.
     #[cfg(feature = "db-sqlite")]
     #[tokio::test]
@@ -1876,19 +1852,7 @@ mod tests {
         let (base_url, app) = serve_app().await;
         let client = app.client();
 
-        let owner_token = crate::test_harness::fixtures::register_and_get_token(&client).await;
-
-        // Re-open registration so a second user can sign up.
-        let reopen = client
-            .put_json(
-                "/api/v1/settings/access",
-                &serde_json::json!({ "mode": "open" }),
-            )
-            .bearer(&owner_token)
-            .header("if-match", "W/\"settings-v0\"")
-            .send_status()
-            .await;
-        assert_eq!(reopen, StatusCode::OK, "failed to re-open registration");
+        crate::test_harness::fixtures::open_registration(&app).await;
 
         let (status, auth) = crate::test_harness::fixtures::register_user(
             &client,
@@ -1903,52 +1867,21 @@ mod tests {
         // `trigger_updates` permission and a seed `updates:trigger` grant;
         // `software_manager` also carries `updates:trigger` and must not be
         // linked, `viewer`'s `*:read` doesn't cover it so it may stay).
-        let operator_role_id = role::Entity::find()
-            .filter(role::Column::Name.eq("operator"))
-            .one(&app.db)
-            .await
-            .expect("query roles")
-            .expect("seeded operator role")
-            .id;
-        user_role::ActiveModel {
-            tenant_id: Set(app.tenant_id),
-            user_id: Set(user_id),
-            role_id: Set(operator_role_id),
-            assigned_at: Set(time::OffsetDateTime::now_utc()),
-        }
-        .insert(&app.db)
-        .await
-        .expect("assign operator role");
+        let operator_role_id =
+            crate::test_harness::fixtures::role_id_by_name(&app, "operator").await;
+        crate::test_harness::fixtures::link_role(&app, user_id, operator_role_id).await;
 
-        // Delete every `access_grants` row for the operator role whose
+        // Revoke every `access_grants` row for the operator role whose
         // pattern set covers `updates:trigger` (a role may hold more than
         // one seed grant row — the M1.2 seed row and the M1.5 `mcp:use`
-        // backfill row both exist for `operator`; never `.one()`).
-        let load =
-            load_grants_for_principal(&app.db, app.tenant_id, Uuid::nil(), &[operator_role_id])
-                .await
-                .expect("load operator grants");
-        let mut deleted_any = false;
-        for grant in load.grants {
-            if grant.subject == GrantSubject::Role(operator_role_id)
-                && grant
-                    .patterns
-                    .iter()
-                    .any(|pattern| pattern.matches(&actions::UPDATES_TRIGGER))
-            {
-                delete_grant(&app.db, grant.id)
-                    .await
-                    .expect("delete operator updates:trigger grant");
-                deleted_any = true;
-            }
-        }
-        assert!(
-            deleted_any,
-            "expected at least one operator grant row covering updates:trigger"
-        );
-        app.state
-            .access_engine
-            .invalidate_subjects(&[], &[operator_role_id]);
+        // backfill row both exist for `operator`; the fixture never
+        // stops at the first match).
+        crate::test_harness::fixtures::revoke_role_grants_covering(
+            &app,
+            operator_role_id,
+            &[actions::UPDATES_TRIGGER],
+        )
+        .await;
 
         // Re-login so the legacy JWT claim snapshot picks up the newly
         // assigned `operator` role's `trigger_updates` permission — the

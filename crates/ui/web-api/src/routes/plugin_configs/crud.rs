@@ -96,24 +96,20 @@ pub async fn list_plugin_types(
     State(state): State<Arc<AppState>>,
     Extension(authority): Extension<AccessAuthority>,
 ) -> Response {
-    let access_ctx = match authority {
-        AccessAuthority::Ready(access_ctx) => access_ctx,
-        _ => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
+    let Some(access_ctx) = authority.ready() else {
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     };
-    if let Err(reason) = authorize_any(
+    if authorize_any(
         &state.access_engine,
-        &access_ctx,
+        access_ctx,
         &[
             actions::SOFTWARE_READ,
             actions::SETTINGS_READ,
             actions::SYSTEM_SETTINGS_MANAGE,
         ],
-    ) {
-        metrics::counter!(
-            "uptrakit_access_denies_total",
-            "reason" => reason.as_str()
-        )
-        .increment(1);
+    )
+    .is_err()
+    {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -134,7 +130,7 @@ pub async fn list_plugin_types(
                         state.plugin.plugin_ops.as_ref(),
                         snapshot.as_ref(),
                         &state.access_engine,
-                        &access_ctx,
+                        access_ctx,
                     )
                 })
                 .unwrap_or(false)

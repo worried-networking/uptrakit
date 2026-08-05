@@ -8,10 +8,15 @@
     clippy::string_slice,
     reason = "test code: slice indexes are at validated boundaries"
 )]
+#![expect(
+    clippy::panic,
+    reason = "test fixture: panics on setup failure are acceptable"
+)]
 
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
+use uptrakit_shared_db::access_grants::{GrantSubject, delete_grant, load_grants_for_principal};
 use uptrakit_shared_db::entity::{
-    host, oauth_client, permission, role, role_permission, service, service_host,
+    host, oauth_client, permission, role, role_permission, service, service_host, user_role,
 };
 use uptrakit_web_api_types::SecretString;
 use uptrakit_web_api_types::auth::{AuthResponse, LoginRequest, RefreshResponse, RegisterRequest};
@@ -364,4 +369,153 @@ pub(crate) async fn insert_oauth_client(
     .expect("insert oauth_client");
 
     client_id
+}
+
+// ── M1.5 access-engine fixtures ─────────────────────────────────────────
+
+/// Register the first user (owner) and re-open registration so a second
+/// user can sign up. Returns the owner's access token.
+pub(crate) async fn open_registration(app: &super::TestApp) -> String {
+    let client = app.client();
+    let owner_token = register_and_get_token(&client).await;
+    let reopen = client
+        .put_json(
+            "/api/v1/settings/access",
+            &serde_json::json!({ "mode": "open" }),
+        )
+        .bearer(&owner_token)
+        .header("if-match", "W/\"settings-v0\"")
+        .send_status()
+        .await;
+    assert_eq!(
+        reopen,
+        http::StatusCode::OK,
+        "failed to re-open registration"
+    );
+    owner_token
+}
+
+/// Id of a seeded built-in role, by name.
+pub(crate) async fn role_id_by_name(app: &super::TestApp, role_name: &str) -> uuid::Uuid {
+    role::Entity::find()
+        .filter(role::Column::Name.eq(role_name))
+        .one(&app.db)
+        .await
+        .expect("query roles")
+        .unwrap_or_else(|| panic!("seeded `{role_name}` role must exist"))
+        .id
+}
+
+/// Link `role_id` to `user_id` and invalidate the user's cached authority.
+pub(crate) async fn link_role(app: &super::TestApp, user_id: uuid::Uuid, role_id: uuid::Uuid) {
+    user_role::ActiveModel {
+        tenant_id: Set(app.tenant_id),
+        user_id: Set(user_id),
+        role_id: Set(role_id),
+        assigned_at: Set(time::OffsetDateTime::now_utc()),
+    }
+    .insert(&app.db)
+    .await
+    .expect("assign role");
+    app.state.access_engine.invalidate_subjects(&[user_id], &[]);
+}
+
+/// Register a fresh user (registration must already be open), strip its
+/// auto-assigned `viewer` role, link ONLY `role_name`, invalidate the engine
+/// cache, then re-login so the legacy JWT claim snapshot reflects the newly
+/// linked role's legacy permission set. Returns `(user_id, access_token)`.
+pub(crate) async fn register_user_with_only_role(
+    app: &super::TestApp,
+    email: &str,
+    role_name: &str,
+) -> (uuid::Uuid, String) {
+    let client = app.client();
+    let (status, auth) = register_user(&client, email, "TestPassword123!").await;
+    assert_eq!(
+        status,
+        http::StatusCode::CREATED,
+        "user registration failed"
+    );
+    let user_id = auth.user.id;
+
+    user_role::Entity::delete_many()
+        .filter(user_role::Column::UserId.eq(user_id))
+        .exec(&app.db)
+        .await
+        .expect("strip auto-assigned viewer role");
+
+    let role_id = role_id_by_name(app, role_name).await;
+    link_role(app, user_id, role_id).await;
+
+    let (login_status, login_auth) = login_user(&client, email, "TestPassword123!").await;
+    assert_eq!(login_status, http::StatusCode::OK, "re-login failed");
+    (user_id, login_auth.access_token.expose_secret().to_string())
+}
+
+/// Owner + a fresh second user holding ONLY `role_name`. Returns
+/// `(user_id, access_token)` for the second user.
+pub(crate) async fn stage_user_with_only_role(
+    app: &super::TestApp,
+    role_name: &str,
+) -> (uuid::Uuid, String) {
+    open_registration(app).await;
+    let email = format!("{role_name}-only@test.local");
+    register_user_with_only_role(app, &email, role_name).await
+}
+
+/// Owner + a fresh second user with its auto-assigned `viewer` role
+/// stripped and no replacement linked. Returns `(user_id, access_token)`.
+pub(crate) async fn stage_zero_role_user(app: &super::TestApp) -> (uuid::Uuid, String) {
+    let client = app.client();
+    open_registration(app).await;
+    let (status, auth) = register_user(&client, "zero-role@test.local", "TestPassword123!").await;
+    assert_eq!(
+        status,
+        http::StatusCode::CREATED,
+        "user registration failed"
+    );
+    let user_id = auth.user.id;
+    user_role::Entity::delete_many()
+        .filter(user_role::Column::UserId.eq(user_id))
+        .exec(&app.db)
+        .await
+        .expect("strip auto-assigned roles");
+    app.state.access_engine.invalidate_subjects(&[user_id], &[]);
+    (user_id, auth.access_token.expose_secret().to_string())
+}
+
+/// Delete every `access_grants` row held by `role_id` whose patterns cover
+/// any of `covered`, then invalidate the role's cached authority.
+///
+/// Deleting all matching rows (not `.one()`) is what makes the
+/// engine-vs-legacy-claim tests discriminating: a seeded role carries an
+/// M1.2 grant plus later backfills, and one surviving row would keep the
+/// action allowed while the JWT claim stayed identical.
+pub(crate) async fn revoke_role_grants_covering(
+    app: &super::TestApp,
+    role_id: uuid::Uuid,
+    covered: &[uptrakit_shared_types::access::Action],
+) {
+    let load = load_grants_for_principal(&app.db, app.tenant_id, uuid::Uuid::nil(), &[role_id])
+        .await
+        .expect("load role grants");
+    let mut deleted_any = false;
+    for grant in load.grants {
+        if grant.subject == GrantSubject::Role(role_id)
+            && grant
+                .patterns
+                .iter()
+                .any(|pattern| covered.iter().any(|action| pattern.matches(action)))
+        {
+            delete_grant(&app.db, grant.id)
+                .await
+                .expect("delete covering grant");
+            deleted_any = true;
+        }
+    }
+    assert!(
+        deleted_any,
+        "expected at least one grant row covering {covered:?}"
+    );
+    app.state.access_engine.invalidate_subjects(&[], &[role_id]);
 }
