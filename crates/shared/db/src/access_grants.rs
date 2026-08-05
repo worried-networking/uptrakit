@@ -215,6 +215,16 @@ fn grant_plane(patterns: &[ActionPattern]) -> Result<Plane> {
     Ok(plane.unwrap_or(Plane::Tenant))
 }
 
+/// Whether the pattern set reaches the `system.` plane.
+///
+/// Public wrapper over this module's plane classifier for the M1.6a
+/// handler-side `system.access:manage` fine check — callers must never
+/// re-derive the dotted-prefix rule outside this module. Propagates
+/// [`AccessGrantError::PlaneMixing`] / [`AccessGrantError::UnclassifiablePattern`].
+pub fn patterns_reach_system_plane(patterns: &[ActionPattern]) -> Result<bool> {
+    Ok(grant_plane(patterns)? == Plane::System)
+}
+
 /// The write-path validation chain (module docs; shared by insert + update).
 fn validate_write(
     subject: GrantSubject,
@@ -543,6 +553,22 @@ mod tests {
             description: None,
             created_by: None,
         }
+    }
+
+    #[test]
+    fn patterns_reach_system_plane_classifies_by_dotted_prefix() {
+        assert!(!patterns_reach_system_plane(&pats(&["hosts:read"])).expect("tenant"));
+        assert!(patterns_reach_system_plane(&pats(&["system.*:*"])).expect("system"));
+        assert!(
+            patterns_reach_system_plane(&pats(&["system.access:manage"])).expect("system exact")
+        );
+        // Plane mixing propagates the module's own error, never a silent pick.
+        let err = patterns_reach_system_plane(&pats(&["hosts:read", "system.*:*"]))
+            .expect_err("mixed planes must be rejected");
+        assert!(
+            matches!(err.current_context(), AccessGrantError::PlaneMixing),
+            "expected PlaneMixing, got: {err}"
+        );
     }
 
     /// B1: valid user-subject tenant grant and role-subject global grant
