@@ -59,9 +59,11 @@
 
 use rootcause::prelude::*;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, EntityTrait, PaginatorTrait,
-    QueryFilter, QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DatabaseConnection,
+    DatabaseTransaction, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set,
+    SqliteTransactionMode, TransactionOptions, TransactionTrait,
 };
+use std::collections::{HashMap, HashSet};
 use time::OffsetDateTime;
 use uptrakit_shared_types::access::bounds::{
     MAX_GRANT_DESCRIPTION_LEN, MAX_GRANTS_PER_SUBJECT, PatternSetError, validate_patterns,
@@ -110,6 +112,11 @@ pub enum AccessGrantError {
     /// No grant row with the given id.
     #[error("grant not found")]
     NotFound,
+    /// The default-tenant sentinel row was missing at lock time. Hard
+    /// error: a zero-row `FOR UPDATE` locks nothing (Postgres), so a
+    /// missing sentinel must never pass through as "guard ran".
+    #[error("lockout-guard sentinel row missing")]
+    SentinelMissing,
     /// The single-row load found the grant but its stored JSON is
     /// unparseable. Distinct from [`Self::NotFound`] by design.
     #[error("grant row is corrupt: {0}")]
@@ -559,13 +566,309 @@ pub fn core_table_descriptor() -> crate::migrate_core_tables::CoreTableDescripto
     )
 }
 
+// ── M1.6a lockout guard ─────────────────────────────────────────────────
+
+/// A shrinking authority mutation the lockout guard must evaluate.
+///
+/// `#[non_exhaustive]`: the rustdoc on [`check_lockout`] names future
+/// guarded mutations (user hard-delete, tenant deactivation, credential
+/// resets) — cross-crate callers construct variants but must not match
+/// exhaustively. (Cross-crate construction of a non_exhaustive ENUM's
+/// variants is allowed; only exhaustive matching is restricted.)
+#[non_exhaustive]
+#[derive(Debug, Clone)]
+pub enum GuardedMutation<'a> {
+    /// Delete the grant row.
+    DeleteGrant { grant_id: Uuid },
+    /// Replace the grant row's patterns/selector.
+    UpdateGrant {
+        grant_id: Uuid,
+        new_patterns: &'a [ActionPattern],
+        new_selector: &'a Selector,
+    },
+    /// Delete the role, its assignments, and its role-subject grants.
+    DeleteRole { role_id: Uuid },
+    /// Full-replace the user's role set in `tenant_id` (post-state
+    /// evaluation — a swap of covering role A for covering role B is legal).
+    SetUserRoles {
+        tenant_id: Uuid,
+        user_id: Uuid,
+        new_role_ids: &'a [Uuid],
+    },
+    /// Deactivate the user.
+    DeactivateUser { user_id: Uuid },
+}
+
+/// Outcome of [`check_lockout`].
+///
+/// Deliberately NOT `#[non_exhaustive]`: a closed verdict set (exactly two
+/// planes plus pass) that callers must handle exhaustively — a new verdict
+/// kind is a semantic change every caller must see, per the
+/// closed-enum exception in coding-standards.md.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LockoutVerdict {
+    /// Every plane keeps at least one covering active holder.
+    Permitted,
+    /// A tenant would lose its last active user whose resolved authority
+    /// covers `access:manage` @ selector `All`.
+    TenantLockout,
+    /// The global plane would lose its last active user whose global
+    /// authority covers `system.access:manage`.
+    SystemLockout,
+}
+
+/// In-memory assignment triple (post-state simulation needs no timestamps).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Assignment {
+    tenant_id: Uuid,
+    user_id: Uuid,
+    role_id: Uuid,
+}
+
+/// Lockout guard for shrinking authority mutations (M1.6a).
+///
+/// Invariant: no mutation may leave zero active users whose resolved
+/// authority covers `access:manage` @ `All` in any tenant that had one
+/// (tenant plane, checked PER TENANT), nor zero active users whose global
+/// authority covers `system.access:manage` (global plane) — evaluated as a
+/// pre-state vs simulated post-state holder comparison inside the caller's
+/// transaction.
+///
+/// Guarded (shrinking) mutations: grant update, grant delete, role delete,
+/// role-set replace (always, post-state), user deactivation, OIDC role
+/// sync when the post-state does not cover the pre-state. Adding-only
+/// mutations (grant create, role create, rename/description update, user
+/// activation) must NOT call this — under allow-only union they cannot
+/// shrink authority.
+///
+/// Serialization: one `SELECT … FOR UPDATE` on the DEFAULT tenant's
+/// `tenants` row — a single global sentinel for both planes (role-subject
+/// grants are tenant-NULL and a role can be assigned in multiple tenants;
+/// per-tenant sentinels would let two related shrinks slip past each
+/// other). The `&DatabaseTransaction` parameter rules out running the
+/// guard on a pooled autocommit connection (where `FOR UPDATE` releases
+/// per-statement); it CANNOT express the SQLite `Immediate` mode, which
+/// remains a caller obligation: obtain the transaction via
+/// [`begin_guarded`], or reuse an existing `Immediate` one — a Deferred
+/// `begin()` compiles but serializes nothing on SQLite (sea_query drops
+/// the lock clause there; on Postgres the row lock is the serialization
+/// point regardless). A missing sentinel row is a hard error
+/// ([`AccessGrantError::SentinelMissing`]) — a zero-row `FOR UPDATE`
+/// locks nothing.
+///
+/// `sentinel_tenant_id` MUST be the deployment-wide DEFAULT tenant id
+/// (`AppState.default_tenant_id`), never a request-derived active tenant —
+/// two shrinks locking different rows would both pass, and single-tenant
+/// deployments make the mistake untestable.
+///
+/// When both planes would be stripped by one mutation, the verdict is
+/// [`LockoutVerdict::SystemLockout`] (the less recoverable plane wins).
+///
+/// PROHIBITION: this guard must never call `AccessEngine` — its cache and
+/// pool-connection reads escape the transaction and under-count holders.
+///
+/// Future obligations (each becomes a guarded mutation the day it is
+/// built; none exist today): user hard-delete, tenant deactivation, admin
+/// credential-reset endpoints.
+pub async fn check_lockout(
+    txn: &DatabaseTransaction,
+    sentinel_tenant_id: Uuid,
+    mutation: &GuardedMutation<'_>,
+) -> Result<LockoutVerdict> {
+    lock_sentinel(txn, sentinel_tenant_id).await?;
+
+    // Typed-column loads only — no JSON operators (JSONB has no LIKE;
+    // spec decision 7). ponytail: three flat full-table loads; switch to
+    // subject-scoped queries if authority data ever outgrows admin scale.
+    let grant_rows = access_grant::Entity::find().all(txn).await.context_to()?;
+    let mut grants: Vec<ResolvedGrant> = grant_rows
+        .into_iter()
+        .filter_map(|row| resolve_row(row).ok()) // corrupt rows never count as holders (fail-closed)
+        .collect();
+    let mut active_users: HashSet<Uuid> = crate::entity::user::Entity::find()
+        .filter(crate::entity::user::Column::IsActive.eq(true))
+        .all(txn)
+        .await
+        .context_to()?
+        .into_iter()
+        .map(|u| u.id)
+        .collect();
+    let mut assignments: Vec<Assignment> = crate::entity::user_role::Entity::find()
+        .all(txn)
+        .await
+        .context_to()?
+        .into_iter()
+        .map(|a| Assignment {
+            tenant_id: a.tenant_id,
+            user_id: a.user_id,
+            role_id: a.role_id,
+        })
+        .collect();
+
+    let (pre_tenant, pre_global) = covering_holders(&grants, &assignments, &active_users);
+    apply_mutation(mutation, &mut grants, &mut assignments, &mut active_users);
+    let (post_tenant, post_global) = covering_holders(&grants, &assignments, &active_users);
+
+    // System plane first: when one mutation strips both planes, report the
+    // less recoverable one.
+    if !pre_global.is_empty() && post_global.is_empty() {
+        return Ok(LockoutVerdict::SystemLockout);
+    }
+    for tenant_id in pre_tenant.keys() {
+        if post_tenant.get(tenant_id).is_none_or(HashSet::is_empty) {
+            return Ok(LockoutVerdict::TenantLockout);
+        }
+    }
+    Ok(LockoutVerdict::Permitted)
+}
+
+/// Open the guard's serialization transaction: `Immediate` on SQLite (the
+/// write lock is taken at BEGIN — sea_query drops `FOR UPDATE` there); on
+/// Postgres the sentinel row lock inside [`check_lockout`] serializes.
+///
+/// MANDATORY for any NEW transaction opened for the guard — handlers that
+/// already hold an `Immediate` transaction reuse it instead (the two
+/// sanctioned cases: the users.rs role/active handlers and the OIDC sync
+/// callers).
+///
+/// PROHIBITION: never call while another transaction is open on the same
+/// pool — reuse that transaction. On SQLite's single writer a second
+/// `BEGIN IMMEDIATE` returns `SQLITE_BUSY` or deadlocks against the outer
+/// transaction.
+pub async fn begin_guarded(db: &DatabaseConnection) -> Result<DatabaseTransaction> {
+    db.begin_with_options(TransactionOptions {
+        sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+        ..Default::default()
+    })
+    .await
+    .context_to()
+}
+
+/// Lock the global sentinel row. Zero rows ⇒ hard error, never pass-through.
+async fn lock_sentinel(txn: &DatabaseTransaction, sentinel_tenant_id: Uuid) -> Result<()> {
+    let row = crate::entity::tenant::Entity::find_by_id(sentinel_tenant_id)
+        .lock_exclusive()
+        .one(txn)
+        .await
+        .context_to()?;
+    if row.is_none() {
+        bail!(AccessGrantError::SentinelMissing);
+    }
+    Ok(())
+}
+
+/// Covering-holder sets: per-tenant `access:manage` holders and global
+/// `system.access:manage` holders. Only selector-`All` rows count; coverage
+/// is decided by the production matcher (`ActionPattern::matches`), which
+/// for the dot-free `access` resource admits exactly
+/// {`access`, `*`} × {`manage`, `*`} and for `system.access` exactly
+/// {`system.access`, `system.*`} × {`manage`, `*`} — the closed sets the
+/// design's completeness argument names (pinned by
+/// `covering_pattern_forms_are_the_closed_sets`).
+fn covering_holders(
+    grants: &[ResolvedGrant],
+    assignments: &[Assignment],
+    active_users: &HashSet<Uuid>,
+) -> (HashMap<Uuid, HashSet<Uuid>>, HashSet<Uuid>) {
+    use uptrakit_shared_types::access::actions;
+    let mut per_tenant: HashMap<Uuid, HashSet<Uuid>> = HashMap::new();
+    let mut global: HashSet<Uuid> = HashSet::new();
+    for grant in grants {
+        if grant.selector != Selector::All {
+            continue;
+        }
+        let covers_tenant = grant
+            .patterns
+            .iter()
+            .any(|p| p.matches(&actions::ACCESS_MANAGE));
+        let covers_system = grant
+            .patterns
+            .iter()
+            .any(|p| p.matches(&actions::SYSTEM_ACCESS_MANAGE));
+        if !covers_tenant && !covers_system {
+            continue;
+        }
+        match grant.subject {
+            GrantSubject::User(user_id) => {
+                if !active_users.contains(&user_id) {
+                    continue;
+                }
+                if covers_system {
+                    global.insert(user_id);
+                }
+                if covers_tenant && let Some(tenant_id) = grant.tenant_id {
+                    per_tenant.entry(tenant_id).or_default().insert(user_id);
+                }
+            }
+            GrantSubject::Role(role_id) => {
+                for a in assignments.iter().filter(|a| a.role_id == role_id) {
+                    if !active_users.contains(&a.user_id) {
+                        continue;
+                    }
+                    if covers_system {
+                        global.insert(a.user_id);
+                    }
+                    if covers_tenant {
+                        per_tenant.entry(a.tenant_id).or_default().insert(a.user_id);
+                    }
+                }
+            }
+        }
+    }
+    (per_tenant, global)
+}
+
+/// Simulate the mutation's post-state over the in-memory copies.
+fn apply_mutation(
+    mutation: &GuardedMutation<'_>,
+    grants: &mut Vec<ResolvedGrant>,
+    assignments: &mut Vec<Assignment>,
+    active_users: &mut HashSet<Uuid>,
+) {
+    match mutation {
+        GuardedMutation::DeleteGrant { grant_id } => {
+            grants.retain(|g| g.id != *grant_id);
+        }
+        GuardedMutation::UpdateGrant {
+            grant_id,
+            new_patterns,
+            new_selector,
+        } => {
+            for g in grants.iter_mut().filter(|g| g.id == *grant_id) {
+                g.patterns = new_patterns.to_vec();
+                g.selector = (*new_selector).clone();
+            }
+        }
+        GuardedMutation::DeleteRole { role_id } => {
+            grants.retain(|g| g.subject != GrantSubject::Role(*role_id));
+            assignments.retain(|a| a.role_id != *role_id);
+        }
+        GuardedMutation::SetUserRoles {
+            tenant_id,
+            user_id,
+            new_role_ids,
+        } => {
+            assignments.retain(|a| !(a.tenant_id == *tenant_id && a.user_id == *user_id));
+            assignments.extend(new_role_ids.iter().map(|role_id| Assignment {
+                tenant_id: *tenant_id,
+                user_id: *user_id,
+                role_id: *role_id,
+            }));
+        }
+        GuardedMutation::DeactivateUser { user_id } => {
+            active_users.remove(user_id);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use sea_orm::{ConnectOptions, Database, DatabaseConnection, QueryFilter};
+    use uptrakit_shared_types::MaskedEmail;
     use uptrakit_shared_types::access::bounds::MAX_GRANTS_PER_SUBJECT;
 
     use super::*;
-    use crate::entity::{role, tenant};
+    use crate::entity::{role, tenant, user, user_role};
 
     async fn test_db() -> DatabaseConnection {
         let mut opt = ConnectOptions::new("sqlite::memory:");
@@ -594,6 +897,60 @@ mod tests {
             .expect("query roles")
             .expect("seed role exists")
             .id
+    }
+
+    /// Insert an active user row; returns its id. Generates a UNIQUE email
+    /// per call from a fresh `Uuid::now_v7()` — `users.email` carries
+    /// `#[sea_orm(unique)]` and several tests below call this helper
+    /// multiple times.
+    async fn active_user(db: &DatabaseConnection) -> Uuid {
+        let id = Uuid::now_v7();
+        let now = OffsetDateTime::now_utc();
+        user::ActiveModel {
+            id: Set(id),
+            email: Set(MaskedEmail::new(format!("{id}@lockout-guard.test"))),
+            first_name: Set("Guard".to_string()),
+            last_name: Set("Holder".to_string()),
+            password_hash: Set(None),
+            is_active: Set(true),
+            deactivated_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(db)
+        .await
+        .expect("insert active user");
+        id
+    }
+
+    /// Test shim: run the guard on its own [`begin_guarded`] transaction
+    /// (dropped ⇒ rolled back; the guard itself never mutates). This is
+    /// the production call shape — `check_lockout` requires a real
+    /// `DatabaseTransaction` by type.
+    ///
+    /// NEVER call while another transaction handle is alive: `test_db()`
+    /// pools a SINGLE connection, so a second open txn starves the pool
+    /// and the test hangs with no diagnostic.
+    async fn verdict_of(
+        db: &DatabaseConnection,
+        sentinel: Uuid,
+        mutation: &GuardedMutation<'_>,
+    ) -> Result<LockoutVerdict> {
+        let txn = begin_guarded(db).await?;
+        check_lockout(&txn, sentinel, mutation).await
+    }
+
+    /// Assign `role_id` to `user_id` in `tenant`.
+    async fn assign(db: &DatabaseConnection, tenant: Uuid, user_id: Uuid, role_id: Uuid) {
+        user_role::ActiveModel {
+            tenant_id: Set(tenant),
+            user_id: Set(user_id),
+            role_id: Set(role_id),
+            assigned_at: Set(OffsetDateTime::now_utc()),
+        }
+        .insert(db)
+        .await
+        .expect("assign role");
     }
 
     fn pat(s: &str) -> ActionPattern {
@@ -1142,5 +1499,512 @@ mod tests {
             !operator_rows.grants.is_empty(),
             "sibling role rows untouched"
         );
+    }
+
+    #[tokio::test]
+    async fn deleting_last_tenant_covering_grant_is_tenant_lockout() {
+        let db = test_db().await;
+        let tenant = default_tenant_id(&db).await;
+        let holder = active_user(&db).await;
+        let grant_id = insert_grant(
+            &db,
+            NewGrant {
+                subject: GrantSubject::User(holder),
+                tenant_id: Some(tenant),
+                patterns: &pats(&["access:manage"]),
+                selector: Selector::All,
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect("insert");
+
+        let verdict = verdict_of(&db, tenant, &GuardedMutation::DeleteGrant { grant_id })
+            .await
+            .expect("guard");
+        assert_eq!(verdict, LockoutVerdict::TenantLockout);
+    }
+
+    /// E4: each of the four tenant forms alone makes its holder count —
+    /// deleting that grant is a lockout. A fresh `test_db()` per form keeps
+    /// iterations isolated (this module's sibling tests each build their
+    /// own `test_db()`, rather than sharing one across cases).
+    #[tokio::test]
+    async fn every_covering_pattern_form_counts_and_non_all_selector_does_not() {
+        for form in ["access:manage", "access:*", "*:manage", "*:*"] {
+            let db = test_db().await;
+            let tenant = default_tenant_id(&db).await;
+            let holder = active_user(&db).await;
+            let grant_id = insert_grant(
+                &db,
+                NewGrant {
+                    subject: GrantSubject::User(holder),
+                    tenant_id: Some(tenant),
+                    patterns: &pats(&[form]),
+                    selector: Selector::All,
+                    description: None,
+                    created_by: None,
+                },
+            )
+            .await
+            .expect("insert");
+            let verdict = verdict_of(&db, tenant, &GuardedMutation::DeleteGrant { grant_id })
+                .await
+                .expect("guard");
+            assert_eq!(
+                verdict,
+                LockoutVerdict::TenantLockout,
+                "form {form} must cover"
+            );
+        }
+    }
+
+    /// Directly write a non-`All` selector row via the entity (the B9 gate
+    /// makes `insert_grant` reject it), then verify a second, `All`
+    /// covering grant's deletion is still a lockout — i.e. the non-`All`
+    /// row did not count as surviving coverage.
+    #[tokio::test]
+    async fn non_all_selector_never_counts_as_holder() {
+        let db = test_db().await;
+        let tenant = default_tenant_id(&db).await;
+        let non_all_holder = active_user(&db).await;
+        let now = OffsetDateTime::now_utc();
+        access_grant::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            tenant_id: Set(Some(tenant)),
+            subject_type: Set(GrantSubjectType::User),
+            subject_id: Set(non_all_holder),
+            patterns: Set(patterns_json(&pats(&["access:manage"]))),
+            selector: Set(selector_json(&Selector::Hosts {
+                ids: vec![Uuid::now_v7()],
+            })
+            .expect("encode selector")),
+            description: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            created_by: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("hand-insert non-All selector row");
+
+        let covering_holder = active_user(&db).await;
+        let grant_id = insert_grant(
+            &db,
+            NewGrant {
+                subject: GrantSubject::User(covering_holder),
+                tenant_id: Some(tenant),
+                patterns: &pats(&["access:manage"]),
+                selector: Selector::All,
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect("insert covering grant");
+
+        let verdict = verdict_of(&db, tenant, &GuardedMutation::DeleteGrant { grant_id })
+            .await
+            .expect("guard");
+        assert_eq!(
+            verdict,
+            LockoutVerdict::TenantLockout,
+            "the non-All selector row must never count as a surviving holder"
+        );
+    }
+
+    #[tokio::test]
+    async fn role_subject_coverage_and_per_tenant_grouping() {
+        // A role-subject `access:manage` grant covers via assignment; the
+        // invariant is PER TENANT: with the role assigned in the default
+        // tenant only, deleting the role's grant is a lockout even though
+        // a *different* tenant has no holders at all (vacuous there).
+        let db = test_db().await;
+        let tenant = default_tenant_id(&db).await;
+        let holder = active_user(&db).await;
+        let settings_manager = role_id(&db, "settings_manager").await; // seed grant covers access:manage
+        assign(&db, tenant, holder, settings_manager).await;
+
+        let verdict = verdict_of(
+            &db,
+            tenant,
+            &GuardedMutation::DeleteRole {
+                role_id: settings_manager,
+            },
+        )
+        .await
+        .expect("guard");
+        assert_eq!(verdict, LockoutVerdict::TenantLockout);
+
+        // Swap coverage: a second holder via user-subject grant → role
+        // delete becomes Permitted.
+        let second = active_user(&db).await;
+        insert_grant(
+            &db,
+            NewGrant {
+                subject: GrantSubject::User(second),
+                tenant_id: Some(tenant),
+                patterns: &pats(&["access:manage"]),
+                selector: Selector::All,
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect("insert");
+        let verdict = verdict_of(
+            &db,
+            tenant,
+            &GuardedMutation::DeleteRole {
+                role_id: settings_manager,
+            },
+        )
+        .await
+        .expect("guard");
+        assert_eq!(verdict, LockoutVerdict::Permitted);
+    }
+
+    /// Swapping covering role A for covering role B in one full-replace
+    /// request is Permitted (post-state evaluation, never per-removal);
+    /// stripping every role is a lockout.
+    #[tokio::test]
+    async fn set_user_roles_evaluates_post_state_swap_is_legal() {
+        let db = test_db().await;
+        let tenant = default_tenant_id(&db).await;
+        let holder = active_user(&db).await;
+        let settings_manager = role_id(&db, "settings_manager").await; // seed grant covers access:manage
+        let operator = role_id(&db, "operator").await;
+        assign(&db, tenant, holder, settings_manager).await;
+        insert_grant(
+            &db,
+            NewGrant {
+                subject: GrantSubject::Role(operator),
+                tenant_id: None,
+                patterns: &pats(&["access:manage"]),
+                selector: Selector::All,
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect("operator covering grant");
+
+        let swapped = verdict_of(
+            &db,
+            tenant,
+            &GuardedMutation::SetUserRoles {
+                tenant_id: tenant,
+                user_id: holder,
+                new_role_ids: &[operator],
+            },
+        )
+        .await
+        .expect("guard");
+        assert_eq!(
+            swapped,
+            LockoutVerdict::Permitted,
+            "swapping to another covering role is legal"
+        );
+
+        let stripped = verdict_of(
+            &db,
+            tenant,
+            &GuardedMutation::SetUserRoles {
+                tenant_id: tenant,
+                user_id: holder,
+                new_role_ids: &[],
+            },
+        )
+        .await
+        .expect("guard");
+        assert_eq!(
+            stripped,
+            LockoutVerdict::TenantLockout,
+            "stripping every role removes the last holder"
+        );
+    }
+
+    #[tokio::test]
+    async fn deactivating_last_system_holder_is_system_lockout_independent_of_tenant_plane() {
+        // E6: global plane checked independently — tenant plane fully
+        // covered by a second user, yet deactivating the only
+        // system.*:*-holder is SystemLockout.
+        let db = test_db().await;
+        let tenant = default_tenant_id(&db).await;
+        let sys_holder = active_user(&db).await;
+        insert_grant(
+            &db,
+            NewGrant {
+                subject: GrantSubject::User(sys_holder),
+                tenant_id: None,
+                patterns: &pats(&["system.*:*"]),
+                selector: Selector::All,
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect("system grant");
+        let tenant_holder = active_user(&db).await;
+        insert_grant(
+            &db,
+            NewGrant {
+                subject: GrantSubject::User(tenant_holder),
+                tenant_id: Some(tenant),
+                patterns: &pats(&["access:manage"]),
+                selector: Selector::All,
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect("tenant grant");
+
+        let verdict = verdict_of(
+            &db,
+            tenant,
+            &GuardedMutation::DeactivateUser {
+                user_id: sys_holder,
+            },
+        )
+        .await
+        .expect("guard");
+        assert_eq!(verdict, LockoutVerdict::SystemLockout);
+    }
+
+    #[tokio::test]
+    async fn both_planes_stripped_reports_system_lockout() {
+        // Verdict precedence: one user is simultaneously the last tenant
+        // access:manage holder AND the last system.*:* holder — deactivating
+        // them must report SystemLockout (the less recoverable plane), not
+        // TenantLockout.
+        let db = test_db().await;
+        let tenant = default_tenant_id(&db).await;
+        let only_admin = active_user(&db).await;
+        insert_grant(
+            &db,
+            NewGrant {
+                subject: GrantSubject::User(only_admin),
+                tenant_id: Some(tenant),
+                patterns: &pats(&["access:manage"]),
+                selector: Selector::All,
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect("tenant grant");
+        insert_grant(
+            &db,
+            NewGrant {
+                subject: GrantSubject::User(only_admin),
+                tenant_id: None,
+                patterns: &pats(&["system.*:*"]),
+                selector: Selector::All,
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect("system grant");
+
+        let verdict = verdict_of(
+            &db,
+            tenant,
+            &GuardedMutation::DeactivateUser {
+                user_id: only_admin,
+            },
+        )
+        .await
+        .expect("guard");
+        assert_eq!(verdict, LockoutVerdict::SystemLockout);
+    }
+
+    #[tokio::test]
+    async fn guard_then_mutate_then_commit_is_atomic_and_observable() {
+        // Commit-path coverage in the fast tier (verdict_of always rolls
+        // back; the E10 integration legs are #[ignore]d): guard Permitted →
+        // mutate in the SAME transaction → commit → the mutation stuck and
+        // a re-run guard sees the post-commit world.
+        let db = test_db().await;
+        let tenant = default_tenant_id(&db).await;
+        let user_a = active_user(&db).await;
+        let user_b = active_user(&db).await;
+        let grant_a = insert_grant(
+            &db,
+            NewGrant {
+                subject: GrantSubject::User(user_a),
+                tenant_id: Some(tenant),
+                patterns: &pats(&["access:manage"]),
+                selector: Selector::All,
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect("grant a");
+        let grant_b = insert_grant(
+            &db,
+            NewGrant {
+                subject: GrantSubject::User(user_b),
+                tenant_id: Some(tenant),
+                patterns: &pats(&["access:manage"]),
+                selector: Selector::All,
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect("grant b");
+
+        let txn = begin_guarded(&db).await.expect("begin");
+        let verdict = check_lockout(
+            &txn,
+            tenant,
+            &GuardedMutation::DeleteGrant { grant_id: grant_a },
+        )
+        .await
+        .expect("guard");
+        assert_eq!(
+            verdict,
+            LockoutVerdict::Permitted,
+            "a second holder remains"
+        );
+        delete_grant(&txn, grant_a)
+            .await
+            .expect("delete inside the guard txn");
+        txn.commit().await.expect("commit");
+
+        assert!(
+            load_grant(&db, grant_a).await.is_err(),
+            "deletion committed"
+        );
+        let verdict = verdict_of(
+            &db,
+            tenant,
+            &GuardedMutation::DeleteGrant { grant_id: grant_b },
+        )
+        .await
+        .expect("guard");
+        assert_eq!(
+            verdict,
+            LockoutVerdict::TenantLockout,
+            "post-commit world: b is now the last holder"
+        );
+    }
+
+    /// E3's "narrow the covering pattern" kind, at guard level.
+    #[tokio::test]
+    async fn narrowing_covering_pattern_via_update_is_lockout() {
+        let db = test_db().await;
+        let tenant = default_tenant_id(&db).await;
+        let holder = active_user(&db).await;
+        let grant_id = insert_grant(
+            &db,
+            NewGrant {
+                subject: GrantSubject::User(holder),
+                tenant_id: Some(tenant),
+                patterns: &pats(&["access:manage"]),
+                selector: Selector::All,
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect("insert");
+
+        let narrowed = pats(&["hosts:read"]);
+        let verdict = verdict_of(
+            &db,
+            tenant,
+            &GuardedMutation::UpdateGrant {
+                grant_id,
+                new_patterns: &narrowed,
+                new_selector: &Selector::All,
+            },
+        )
+        .await
+        .expect("guard");
+        assert_eq!(verdict, LockoutVerdict::TenantLockout);
+
+        let kept = pats(&["access:manage"]);
+        let verdict = verdict_of(
+            &db,
+            tenant,
+            &GuardedMutation::UpdateGrant {
+                grant_id,
+                new_patterns: &kept,
+                new_selector: &Selector::All,
+            },
+        )
+        .await
+        .expect("guard");
+        assert_eq!(verdict, LockoutVerdict::Permitted);
+    }
+
+    #[tokio::test]
+    async fn missing_sentinel_row_is_a_hard_error() {
+        let db = test_db().await;
+        let err = verdict_of(
+            &db,
+            Uuid::now_v7(), // no such tenants row
+            &GuardedMutation::DeactivateUser {
+                user_id: Uuid::now_v7(),
+            },
+        )
+        .await
+        .expect_err("must be a hard error, never a pass-through");
+        assert!(matches!(
+            err.current_context(),
+            AccessGrantError::SentinelMissing
+        ));
+    }
+
+    #[test]
+    fn covering_pattern_forms_are_the_closed_sets() {
+        use uptrakit_shared_types::access::actions;
+        // The guard's coverage predicate is ActionPattern::matches. Pin the
+        // exact pattern forms that cover each guarded action, so a grammar
+        // extension or resource rename fails here loudly (guard is the
+        // dependent).
+        let tenant_forms = ["access:manage", "access:*", "*:manage", "*:*"];
+        let system_forms = [
+            "system.access:manage",
+            "system.access:*",
+            "system.*:manage",
+            "system.*:*",
+        ];
+        for f in tenant_forms {
+            assert!(
+                pat(f).matches(&actions::ACCESS_MANAGE),
+                "{f} must cover tenant plane"
+            );
+            assert!(
+                !pat(f).matches(&actions::SYSTEM_ACCESS_MANAGE),
+                "{f} must not cover system"
+            );
+        }
+        for f in system_forms {
+            assert!(
+                pat(f).matches(&actions::SYSTEM_ACCESS_MANAGE),
+                "{f} must cover system plane"
+            );
+        }
+        for f in [
+            "access.sub:manage",
+            "hosts:manage",
+            "system:manage",
+            "system.settings:manage",
+        ] {
+            assert!(
+                !pat(f).matches(&actions::ACCESS_MANAGE),
+                "{f} must not cover tenant"
+            );
+            assert!(
+                !pat(f).matches(&actions::SYSTEM_ACCESS_MANAGE),
+                "{f} must not cover system"
+            );
+        }
     }
 }
