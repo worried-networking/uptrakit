@@ -14,10 +14,12 @@ use axum::Extension;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use sea_orm::{EntityTrait, PaginatorTrait};
+use sea_orm::{EntityTrait, PaginatorTrait, QueryOrder};
 use uptrakit_audit_log::{AuditActionType, AuditEntry, AuditOutcome, Event};
 use uptrakit_shared_db::entity::oauth_client;
-use uptrakit_web_api_types::oauth::responses::{DcrRegistrationRequest, DcrRegistrationResponse};
+use uptrakit_web_api_types::oauth::responses::{
+    DcrRegistrationRequest, DcrRegistrationResponse, OAuthClientResponse,
+};
 use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 use uptrakit_web_api_types::validation::Validate;
 
@@ -53,7 +55,7 @@ fn build_client_service(state: &AppState) -> OAuthClientService {
     path = "/api/oauth/clients",
     params(PaginationParams),
     responses(
-        (status = 200, description = "Paginated client list"),
+        (status = 200, description = "Paginated client list", body = PaginatedResponse<OAuthClientResponse>),
         (status = 401, description = "Unauthenticated"),
         (status = 403, description = "Insufficient permission"),
         (status = 404, description = "OAuth disabled"),
@@ -73,7 +75,10 @@ pub(crate) async fn list_clients(
 
     let pag = pagination.resolve();
 
-    let paginator = oauth_client::Entity::find().paginate(state.db(), pag.per_page);
+    let paginator = oauth_client::Entity::find()
+        .order_by_desc(oauth_client::Column::CreatedAt)
+        .order_by_asc(oauth_client::Column::Id)
+        .paginate(state.db(), pag.per_page);
 
     let total = match paginator.num_items().await {
         Ok(n) => n,
@@ -91,27 +96,27 @@ pub(crate) async fn list_clients(
         }
     };
 
-    let client_jsons: Vec<serde_json::Value> = items
+    let client_rows: Vec<OAuthClientResponse> = items
         .into_iter()
         .map(|row| {
-            serde_json::json!({
-                "id": row.id,
-                "client_name": row.client_name,
-                "client_uri": row.client_uri,
-                "redirect_uris": serde_json::from_str::<serde_json::Value>(&row.redirect_uris)
-                    .unwrap_or(serde_json::Value::Array(vec![])),
-                "created_via": row.created_via,
-                "created_at": row.created_at,
-                "last_used_at": row.last_used_at,
-                "revoked_at": row.revoked_at,
-                "trusted_at": row.trusted_at,
-            })
+            let redirect_uris =
+                serde_json::from_str::<Vec<String>>(&row.redirect_uris).unwrap_or_default();
+            OAuthClientResponse::new(
+                row.id,
+                row.client_name,
+                row.client_uri,
+                redirect_uris,
+                row.created_via,
+                row.created_at,
+                row.revoked_at,
+                row.trusted_at,
+            )
         })
         .collect();
 
     (
         StatusCode::OK,
-        axum::Json(PaginatedResponse::new(client_jsons, total, pag)),
+        axum::Json(PaginatedResponse::new(client_rows, total, pag)),
     )
         .into_response()
 }
@@ -592,5 +597,61 @@ mod tests {
             .await;
 
         assert_eq!(status, http::StatusCode::FORBIDDEN);
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 8 — list_clients returns typed rows, RFC 3339 timestamps, newest first
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn list_clients_typed_rows_rfc3339_newest_first() {
+        let (router, _db) = app_with_oauth(enabled_oauth_state()).await;
+        let client = crate::test_harness::http_client::TestClient::new(router);
+        let token = register_and_get_token(&client).await;
+
+        for name in ["First Client", "Second Client"] {
+            let mut body = minimal_dcr_body();
+            body["client_name"] = serde_json::Value::String(name.to_string());
+            let (status, _resp): (http::StatusCode, serde_json::Value) = client
+                .post_json("/api/oauth/clients", &body)
+                .bearer(&token)
+                .send_json()
+                .await;
+            assert_eq!(status, http::StatusCode::CREATED);
+        }
+
+        let (status, body): (http::StatusCode, PaginatedResponse<serde_json::Value>) = client
+            .get("/api/oauth/clients")
+            .bearer(&token)
+            .send_json()
+            .await;
+
+        assert_eq!(status, http::StatusCode::OK);
+        assert_eq!(body.total, 2);
+        let first = body.items.first().expect("first item");
+        // created_at must be an RFC 3339 STRING — the old json! path emitted a
+        // time-crate component array; this is the assertion that pins the fix.
+        let created_at = first["created_at"].as_str().expect("created_at string");
+        time::OffsetDateTime::parse(created_at, &time::format_description::well_known::Rfc3339)
+            .expect("created_at parses as RFC 3339");
+        assert!(first["client_name"].is_string(), "client_name present");
+        assert!(first["redirect_uris"].is_array(), "redirect_uris present");
+        assert!(
+            first.get("last_used_at").is_none(),
+            "never-written last_used_at must not be published"
+        );
+        // Deterministic order pin: created_at DESC — the two sequential
+        // registrations get distinct sub-second timestamps, so the second
+        // client lists first. Deleting the order_by_* lines turns this red.
+        let names: Vec<&str> = body
+            .items
+            .iter()
+            .filter_map(|i| i["client_name"].as_str())
+            .collect();
+        assert_eq!(
+            names,
+            ["Second Client", "First Client"],
+            "list must be ordered created_at DESC"
+        );
     }
 }
