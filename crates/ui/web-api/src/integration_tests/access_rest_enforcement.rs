@@ -803,7 +803,7 @@ async fn b6_services_batch_or_alternatives() {
             &app.db,
             NewGrant {
                 subject: GrantSubject::User(user_id),
-                tenant_id: Some(app.tenant_id),
+                tenant_id: action_grant_tenant_id(&app, action),
                 patterns: &patterns,
                 selector: Selector::All,
                 description: None,
@@ -870,7 +870,7 @@ async fn b6_system_services_batch_or_alternatives() {
             &app.db,
             NewGrant {
                 subject: GrantSubject::User(user_id),
-                tenant_id: None,
+                tenant_id: action_grant_tenant_id(&app, action),
                 patterns: &patterns,
                 selector: Selector::All,
                 description: None,
@@ -889,6 +889,21 @@ async fn b6_system_services_batch_or_alternatives() {
                 .await,
             http::StatusCode::OK,
             "{action}: its own batch action must be authorized"
+        );
+        let sibling = if batch_action == "approve" {
+            "reject"
+        } else {
+            "approve"
+        };
+        let sibling_body = serde_json::json!({ "action": sibling, "ids": [uuid::Uuid::now_v7()] });
+        assert_eq!(
+            client
+                .post_json("/api/v1/system-services/batch", &sibling_body)
+                .bearer(&token)
+                .send_status()
+                .await,
+            http::StatusCode::FORBIDDEN,
+            "{action}: a sibling batch action must stay denied"
         );
         delete_grant(&app.db, grant_id).await.expect("delete grant");
         app.state.access_engine.invalidate_subjects(&[user_id], &[]);

@@ -179,6 +179,8 @@ pub async fn interactive_ws(
 
     // 3. Check the `updates:trigger` action through the AccessEngine.
     //
+    // APPROVED: custom auth path
+    //
     // NOTE: This is an intentional approved exception to the standard Axum extractor pattern
     // (e.g. an `action_extractor!`-generated type). WebSocket connections from the browser
     // cannot set custom HTTP headers, so the auth token arrives as a `?token=` query

@@ -71,8 +71,8 @@ enforce inline via `authorize_any` and declare one single-scope `oauth2` require
 The legacy `src/middleware/permission.rs` `permission_extractor!` model (`x-required-permission` extension +
 `security(("bearer_token" = []))`) survives only in `users.rs`, `roles.rs`, and `access_presets.rs` until
 M1.6a/M1.6b. The sole exception in either model is handlers with a custom auth path (e.g. WebSocket handlers
-reading a `?token=` query parameter before the normal extractor chain runs) — these resolve the principal
-themselves and must carry a `// APPROVED: custom auth path` comment. Full rationale in
+reading a `?token=` query parameter before the normal extractor chain runs) — these gate inline through the
+engine and must carry a `// APPROVED: custom auth path` comment. Full rationale in
 [`docs/security/auth-and-authorization.md`](../../../docs/security/auth-and-authorization.md).
 
 ## OpenAPI rules
