@@ -370,6 +370,183 @@
         "x-required-permission": "manage_users"
       }
     },
+    "/api/v1/access/grants": {
+      "get": {
+        "tags": [
+          "Access"
+        ],
+        "summary": "List grants (active tenant plus global rows), optionally one subject's.",
+        "operationId": "list_access_grants",
+        "parameters": [
+          {
+            "name": "subject_type",
+            "in": "query",
+            "description": "Filter to one subject (requires `subject_id`).",
+            "required": false,
+            "schema": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/components/schemas/GrantSubjectTypeParam"
+                }
+              ]
+            }
+          },
+          {
+            "name": "subject_id",
+            "in": "query",
+            "description": "Filter to one subject (requires `subject_type`).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Grants for the active tenant plus global rows",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AccessGrantResponse"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "subject_type and subject_id must be supplied together"
+          },
+          "401": {
+            "description": "Not authenticated"
+          },
+          "403": {
+            "description": "Not authorized"
+          }
+        },
+        "security": [
+          {
+            "oauth2": [
+              "access:manage"
+            ]
+          },
+          {
+            "developer_token": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Access"
+        ],
+        "summary": "Create a grant.",
+        "operationId": "create_access_grant",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAccessGrantRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Grant created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessGrantResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation, pattern-parse, or encoding error"
+          },
+          "401": {
+            "description": "Not authenticated"
+          },
+          "403": {
+            "description": "Not authorized. System-plane patterns additionally require system.access:manage (evaluated against the request body at runtime)."
+          },
+          "409": {
+            "description": "Per-subject grant limit reached"
+          }
+        },
+        "security": [
+          {
+            "oauth2": [
+              "access:manage"
+            ]
+          },
+          {
+            "developer_token": []
+          }
+        ]
+      }
+    },
+    "/api/v1/access/grants/{id}": {
+      "get": {
+        "tags": [
+          "Access"
+        ],
+        "summary": "Get a single grant.",
+        "operationId": "get_access_grant",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Grant id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Grant details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessGrantResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated"
+          },
+          "403": {
+            "description": "Not authorized"
+          },
+          "404": {
+            "description": "Grant not found"
+          }
+        },
+        "security": [
+          {
+            "oauth2": [
+              "access:manage"
+            ]
+          },
+          {
+            "developer_token": []
+          }
+        ]
+      }
+    },
     "/api/v1/audit-logs": {
       "get": {
         "tags": [
@@ -10386,6 +10563,53 @@
   },
   "components": {
     "schemas": {
+      "AccessGrantResponse": {
+        "type": "object",
+        "description": "A stored grant row.",
+        "required": [
+          "id",
+          "subject_type",
+          "subject_id",
+          "patterns",
+          "selector"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "patterns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "selector": {
+            "$ref": "#/components/schemas/Selector"
+          },
+          "subject_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "subject_type": {
+            "$ref": "#/components/schemas/GrantSubjectTypeParam"
+          },
+          "tenant_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "`null` for global rows (system-plane and role-subject grants)."
+          }
+        }
+      },
       "AccessPresetResponse": {
         "type": "object",
         "description": "An access preset definition with its role composition.",
@@ -11041,6 +11265,41 @@
           },
           "sections": {
             "description": "Redacted snapshot of the active config sections (secrets shown as `\"<redacted>\"`)."
+          }
+        }
+      },
+      "CreateAccessGrantRequest": {
+        "type": "object",
+        "description": "Body for `POST /api/v1/access/grants`.\n\nSubject and tenant encoding are fixed at creation: user-subject\ntenant-plane grants are stored under the caller's active tenant;\nsystem-plane and role-subject grants are global rows. Re-subject or\nre-scope is delete + create.",
+        "required": [
+          "subject_type",
+          "subject_id",
+          "patterns"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "patterns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Action patterns in string form (`\"hosts:read\"`, `\"settings.*:manage\"`)."
+          },
+          "selector": {
+            "$ref": "#/components/schemas/Selector",
+            "description": "Defaults to `All`; non-`All` selectors are rejected until M2."
+          },
+          "subject_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "subject_type": {
+            "$ref": "#/components/schemas/GrantSubjectTypeParam"
           }
         }
       },
@@ -11930,6 +12189,14 @@
             "$ref": "#/components/schemas/NetworkSettingsResponse"
           }
         }
+      },
+      "GrantSubjectTypeParam": {
+        "type": "string",
+        "description": "Grant subject discriminator.",
+        "enum": [
+          "user",
+          "role"
+        ]
       },
       "HostAgentSummary": {
         "type": "object",
@@ -15958,6 +16225,118 @@
         "type": "string",
         "description": "A newtype wrapper for strings that contain sensitive data (secrets, tokens,\npasswords).\n\n# Security properties\n\n- **`Debug`** and **`Display`** implementations redact the value, preventing\n  accidental exposure in logs, error chains, and tracing output.\n- **`ZeroizeOnDrop`** overwrites the backing heap allocation with zeros when\n  the value is dropped.\n- **`Serialize`** is **transparent** (`#[serde(transparent)]`): serializing a\n  `SecretString` emits the plaintext value. Never serialize structs containing\n  `SecretString` to logs or debug output — use `Debug` formatting instead.\n- **`Clone`** creates a new heap allocation containing the secret. Each clone\n  must be properly dropped (not leaked or stored in a non-zeroizing container)\n  to ensure the zeroize guarantee is upheld.\n- **`PartialEq`** uses the standard `String` comparison, which short-circuits\n  on the first mismatched byte. Do not use `PartialEq` for authentication\n  comparisons where timing side channels are a concern; use a constant-time\n  comparison function instead (e.g., `subtle::ConstantTimeEq` or\n  `argon2::password_hash::PasswordVerifier`)."
       },
+      "Selector": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Whole tenant scope (today's behavior).",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "all"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Host axis: hosts carrying ANY of these tags (`host_tags.id`).",
+            "required": [
+              "ids",
+              "type"
+            ],
+            "properties": {
+              "ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "tags"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Host axis: explicit host set (`hosts.id`).",
+            "required": [
+              "ids",
+              "type"
+            ],
+            "properties": {
+              "ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "hosts"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Software axis: these software items on any host (`software_items.id`).",
+            "required": [
+              "ids",
+              "type"
+            ],
+            "properties": {
+              "ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "software"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Exact (host, software item) pairs (`host_software_items.id`).",
+            "required": [
+              "ids",
+              "type"
+            ],
+            "properties": {
+              "ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "items"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Resource selector on a grant: which hosts / software items a\nselector-capable action may target. `All` is the M1 default; write-path\nacceptance of the narrowing variants lands in M2 (grant validation, not\nthis type).\n\nSerialized form is the `access_grants.selector` storage JSON\n(`06-grant-model.md` §Storage schema): `{\"type\":\"all\"}`,\n`{\"type\":\"tags\",\"ids\":[…]}`, … — uniform `ids` field. Unknown extra\nkeys are ignored on deserialize (serde internally-tagged enums cannot\n`deny_unknown_fields`); that is safe because an ignored key can never\nbroaden authority and a missing/mistyped `ids` still fails as a\nmissing field."
+      },
       "ServiceResponse": {
         "type": "object",
         "description": "Unified response for any service (agent or MQTT).",
@@ -17163,6 +17542,30 @@
           "message": {
             "type": "string",
             "description": "Human-readable status message."
+          }
+        }
+      },
+      "UpdateAccessGrantRequest": {
+        "type": "object",
+        "description": "Body for `PUT /api/v1/access/grants/{id}` (patterns/selector/description\nonly — subject and tenant encoding are immutable).",
+        "required": [
+          "patterns"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "patterns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "selector": {
+            "$ref": "#/components/schemas/Selector"
           }
         }
       },

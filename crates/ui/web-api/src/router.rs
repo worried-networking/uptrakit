@@ -193,6 +193,10 @@ use crate::extractors::{GlobalSettingsVersion, SettingsVersion};
         // Access presets
         crate::routes::access_presets::list_access_presets,
         crate::routes::access_presets::apply_preset,
+        // Access grants
+        crate::routes::access_grants::create_access_grant,
+        crate::routes::access_grants::list_access_grants,
+        crate::routes::access_grants::get_access_grant,
         // MFA — unauthenticated challenge completion
         crate::routes::mfa::mfa_verify,
         crate::routes::mfa::mfa_send_email,
@@ -355,6 +359,10 @@ use crate::extractors::{GlobalSettingsVersion, SettingsVersion};
             uptrakit_web_api_types::profile::ChangePasswordRequest,
             crate::routes::roles::RoleResponse,
             crate::routes::access_presets::AccessPresetResponse,
+            crate::routes::access_grants::AccessGrantResponse,
+            crate::routes::access_grants::CreateAccessGrantRequest,
+            crate::routes::access_grants::UpdateAccessGrantRequest,
+            crate::routes::access_grants::GrantSubjectTypeParam,
             // Update batches
             crate::routes::update_batches::BatchUpdateResponse,
             crate::routes::update_batches::BatchUpdateItem,
@@ -805,6 +813,12 @@ pub fn build_router_with_openapi(state: Arc<AppState>) -> (Router, utoipa::opena
         // Access presets
         .routes(routes!(crate::routes::access_presets::list_access_presets))
         .routes(routes!(crate::routes::access_presets::apply_preset))
+        // Access grants
+        .routes(routes!(
+            crate::routes::access_grants::create_access_grant,
+            crate::routes::access_grants::list_access_grants
+        ))
+        .routes(routes!(crate::routes::access_grants::get_access_grant))
         // Admin events SSE stream
         .route(
             "/api/v1/events/stream",

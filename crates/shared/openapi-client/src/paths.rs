@@ -460,6 +460,18 @@ pub(crate) mod access_presets {
     pub(crate) const BASE: &str = "/api/v1/access-presets";
 }
 
+pub(crate) mod access_grants {
+    use uuid::Uuid;
+
+    /// `GET /api/v1/access/grants` · `POST /api/v1/access/grants`
+    pub(crate) const BASE: &str = "/api/v1/access/grants";
+
+    /// `GET /api/v1/access/grants/{id}`
+    pub(crate) fn by_id(id: &Uuid) -> String {
+        format!("/api/v1/access/grants/{id}")
+    }
+}
+
 pub(crate) mod audit_logs {
     /// `GET /api/v1/audit-logs`
     pub(crate) const BASE: &str = "/api/v1/audit-logs";

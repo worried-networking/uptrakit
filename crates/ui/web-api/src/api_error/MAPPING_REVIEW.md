@@ -265,6 +265,32 @@ Serves the admin OAuth endpoint `DELETE /api/oauth/consents/{id}`.
 
 ---
 
+## AccessGrantError
+
+Serves `/api/v1/access/grants` create/list/get (M1.6a Task 3). `TooManyGrants`
+deliberately gets the bare `too_many_grants` code (no `access_grant.` prefix)
+per the M1.6a Global Constraints reason-code set — the message is reason-code
+only, never holder identities or counts.
+
+| Variant | Status | Message Strategy | Code |
+| --- | --- | --- | --- |
+| `AccessGrantError::NotFound` | 404 | static | `access_grant.not_found` |
+| `AccessGrantError::Patterns` | 400 | static | `access_grant.invalid_patterns` |
+| `AccessGrantError::PlaneMixing` | 400 | static | `access_grant.plane_mixing` |
+| `AccessGrantError::TenantEncoding` | 400 | static | `access_grant.invalid_tenant_encoding` |
+| `AccessGrantError::SelectorPhaseGate` | 400 | static | `access_grant.selector_phase_gate` |
+| `AccessGrantError::Selector` | 400 | static | `access_grant.invalid_selector` |
+| `AccessGrantError::DescriptionTooLong` | 400 | static | `access_grant.description_too_long` |
+| `AccessGrantError::TooManyGrants` | 409 | static | `too_many_grants` |
+| `AccessGrantError::UnclassifiablePattern` | 400 | static | `access_grant.unclassifiable_pattern` |
+| `AccessGrantError::SelectorEncode` | 500 | static | `access_grant.selector_encode_error` |
+| `AccessGrantError::SentinelMissing` | 500 | static | `access_grant.sentinel_missing` |
+| `AccessGrantError::Corrupt` | 500 | static | `access_grant.corrupt` |
+| `AccessGrantError::Db` | 500 | static | `access_grant.database_error` |
+| non_exhaustive wildcard | 500 | static | `access_grant.unknown_error` |
+
+---
+
 ## Intentional Pre-migration Deltas
 
 | Variant | Old Status | New Status | Rationale |

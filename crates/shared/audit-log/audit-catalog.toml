@@ -31,6 +31,14 @@ site = "uptrakit_web_api::router::ocsp_post"
 skip = "OCSP certificate status responder; no user-driven state change"
 
 # ---------------------------------------------------------------------------
+# Access grants
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::access_grants::create_access_grant"
+action = "access_grant.create"
+
+# ---------------------------------------------------------------------------
 # Access presets
 # ---------------------------------------------------------------------------
 

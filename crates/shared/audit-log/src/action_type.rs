@@ -137,6 +137,8 @@ impl AuditActionType {
         RegisteredAuditAction::new("user.update", AuditActionKind::Stateful);
     // USER_DELETE intentionally omitted: no hard-delete handler exists yet.
     // Re-add when a delete-user feature is implemented and the emit site is present.
+    pub const ACCESS_GRANT_CREATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("access_grant.create", AuditActionKind::Stateful);
     pub const OIDC_PROVIDER_CREATE: RegisteredAuditAction =
         RegisteredAuditAction::new("oidc_provider.create", AuditActionKind::Stateful);
     pub const OIDC_PROVIDER_UPDATE: RegisteredAuditAction =
@@ -467,6 +469,7 @@ const V1_ACTIONS: &[RegisteredAuditAction] = &[
     AuditActionType::ENROLLMENT_TOKEN_REVOKE,
     AuditActionType::USER_CREATE,
     AuditActionType::USER_UPDATE,
+    AuditActionType::ACCESS_GRANT_CREATE,
     AuditActionType::OIDC_PROVIDER_CREATE,
     AuditActionType::OIDC_PROVIDER_UPDATE,
     AuditActionType::OIDC_PROVIDER_DELETE,
@@ -734,6 +737,9 @@ uptrakit_audit_log_derive::audit_actions! {
     // users — Stateful
     user_create => USER_CREATE, Stateful;
     user_update => USER_UPDATE, Stateful;
+
+    // access grants — Stateful
+    access_grant_create => ACCESS_GRANT_CREATE, Stateful;
 
     // oidc providers — Stateful
     oidc_provider_create => OIDC_PROVIDER_CREATE, Stateful;

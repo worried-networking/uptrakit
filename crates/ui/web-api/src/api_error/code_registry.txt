@@ -1,3 +1,16 @@
+access_grant.corrupt
+access_grant.database_error
+access_grant.description_too_long
+access_grant.invalid_patterns
+access_grant.invalid_selector
+access_grant.invalid_tenant_encoding
+access_grant.not_found
+access_grant.plane_mixing
+access_grant.selector_encode_error
+access_grant.selector_phase_gate
+access_grant.sentinel_missing
+access_grant.unclassifiable_pattern
+access_grant.unknown_error
 allowlist.database_error
 allowlist.invalid_plugin_type
 audit_log.database_error
@@ -83,6 +96,7 @@ system_service.embedded_service
 system_service.not_approved
 system_service.not_found
 system_service.not_pending
+too_many_grants
 trigger_update.agent_not_approved
 trigger_update.agent_unavailable
 trigger_update.database_error

@@ -42,6 +42,8 @@ use uptrakit_web_api_queries::queries::{
     update_dispatch::TriggerUpdateError,
 };
 
+use uptrakit_shared_db::access_grants::AccessGrantError;
+
 use crate::auth::{
     device_flow::DeviceFlowError, error::AuthError, registration::RegistrationValidationError,
 };
@@ -263,6 +265,105 @@ async fn service_query_error_all_variants() {
         report!(ServiceQueryError::Db(sea_orm::DbErr::Custom("test".into()))),
         500,
         "service.database_error",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn access_grant_error_all_variants() {
+    async fn check(report: Report<AccessGrantError>, expected_status: u16, expected_code: &str) {
+        let (status, json) = read_response(ApiError::from(report).into_response()).await;
+        assert_eq!(status.as_u16(), expected_status, "code={expected_code}");
+        assert_eq!(code_of(&json), expected_code);
+    }
+
+    check(
+        report!(AccessGrantError::NotFound),
+        404,
+        "access_grant.not_found",
+    )
+    .await;
+    check(
+        report!(AccessGrantError::Patterns(
+            uptrakit_shared_types::access::bounds::PatternSetError::TooMany { max: 1, actual: 2 }
+        )),
+        400,
+        "access_grant.invalid_patterns",
+    )
+    .await;
+    check(
+        report!(AccessGrantError::PlaneMixing),
+        400,
+        "access_grant.plane_mixing",
+    )
+    .await;
+    check(
+        report!(AccessGrantError::TenantEncoding("test")),
+        400,
+        "access_grant.invalid_tenant_encoding",
+    )
+    .await;
+    check(
+        report!(AccessGrantError::SelectorPhaseGate),
+        400,
+        "access_grant.selector_phase_gate",
+    )
+    .await;
+    check(
+        report!(AccessGrantError::Selector(
+            uptrakit_shared_types::access::SelectorValidationError::TooManyIds {
+                kind: "tag",
+                max: 1,
+                actual: 2,
+            }
+        )),
+        400,
+        "access_grant.invalid_selector",
+    )
+    .await;
+    check(
+        report!(AccessGrantError::DescriptionTooLong { max: 200 }),
+        400,
+        "access_grant.description_too_long",
+    )
+    .await;
+    check(
+        report!(AccessGrantError::TooManyGrants {
+            max: 10,
+            actual: 11
+        }),
+        409,
+        "too_many_grants",
+    )
+    .await;
+    check(
+        report!(AccessGrantError::UnclassifiablePattern),
+        400,
+        "access_grant.unclassifiable_pattern",
+    )
+    .await;
+    check(
+        report!(AccessGrantError::SelectorEncode("test".to_string())),
+        500,
+        "access_grant.selector_encode_error",
+    )
+    .await;
+    check(
+        report!(AccessGrantError::SentinelMissing),
+        500,
+        "access_grant.sentinel_missing",
+    )
+    .await;
+    check(
+        report!(AccessGrantError::Corrupt("test")),
+        500,
+        "access_grant.corrupt",
+    )
+    .await;
+    check(
+        report!(AccessGrantError::Db(sea_orm::DbErr::Custom("test".into()))),
+        500,
+        "access_grant.database_error",
     )
     .await;
 }
@@ -1176,6 +1277,19 @@ async fn four_xx_emits_no_error_events() {
 /// All codes emitted by the From impls.  Kept in sync manually; the test
 /// catches both missing-from-file and missing-from-impl cases.
 const ALL_IMPL_CODES: &[&str] = &[
+    "access_grant.corrupt",
+    "access_grant.database_error",
+    "access_grant.description_too_long",
+    "access_grant.invalid_patterns",
+    "access_grant.invalid_selector",
+    "access_grant.invalid_tenant_encoding",
+    "access_grant.not_found",
+    "access_grant.plane_mixing",
+    "access_grant.selector_encode_error",
+    "access_grant.selector_phase_gate",
+    "access_grant.sentinel_missing",
+    "access_grant.unclassifiable_pattern",
+    "access_grant.unknown_error",
     "allowlist.database_error",
     "allowlist.invalid_plugin_type",
     "audit_log.database_error",
@@ -1261,6 +1375,7 @@ const ALL_IMPL_CODES: &[&str] = &[
     "system_service.not_approved",
     "system_service.not_found",
     "system_service.not_pending",
+    "too_many_grants",
     "trigger_update.agent_not_approved",
     "trigger_update.agent_unavailable",
     "trigger_update.database_error",
@@ -1354,6 +1469,7 @@ fn mapping_review_md_exists_and_has_all_variant_names() {
         "AuthError",
         "OAuthClientError",
         "OAuthConsentError",
+        "AccessGrantError",
     ];
     for section in required_sections {
         assert!(

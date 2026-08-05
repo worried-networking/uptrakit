@@ -10,6 +10,11 @@
 # Validated by ci/verify_db_access_policy.py on every CI run.
 # Updated atomically with handler signature changes during migration.
 
+[routes."access_grants.rs"]
+create_access_grant = "full-state"
+list_access_grants = "full-state"
+get_access_grant = "full-state"
+
 [routes."access_presets.rs"]
 list_access_presets = "no-db"
 apply_preset = "full-state"

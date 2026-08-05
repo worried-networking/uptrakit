@@ -5,6 +5,22 @@ export type ClientOptions = {
 };
 
 /**
+ * A stored grant row.
+ */
+export type AccessGrantResponse = {
+    description?: string | null;
+    id: string;
+    patterns: Array<string>;
+    selector: Selector;
+    subject_id: string;
+    subject_type: GrantSubjectTypeParam;
+    /**
+     * `null` for global rows (system-plane and role-subject grants).
+     */
+    tenant_id?: string | null;
+};
+
+/**
  * An access preset definition with its role composition.
  */
 export type AccessPresetResponse = {
@@ -323,6 +339,28 @@ export type ConfigStateResponse = {
      * Redacted snapshot of the active config sections (secrets shown as `"<redacted>"`).
      */
     sections: unknown;
+};
+
+/**
+ * Body for `POST /api/v1/access/grants`.
+ *
+ * Subject and tenant encoding are fixed at creation: user-subject
+ * tenant-plane grants are stored under the caller's active tenant;
+ * system-plane and role-subject grants are global rows. Re-subject or
+ * re-scope is delete + create.
+ */
+export type CreateAccessGrantRequest = {
+    description?: string | null;
+    /**
+     * Action patterns in string form (`"hosts:read"`, `"settings.*:manage"`).
+     */
+    patterns: Array<string>;
+    /**
+     * Defaults to `All`; non-`All` selectors are rejected until M2.
+     */
+    selector?: Selector;
+    subject_id: string;
+    subject_type: GrantSubjectTypeParam;
 };
 
 export type CreateApiTokenRequest = {
@@ -720,6 +758,16 @@ export type GlobalSettingsCombinedResponse = {
     nats?: null | NatsSettingsResponse;
     network: NetworkSettingsResponse;
 };
+
+/**
+ * Grant subject discriminator.
+ */
+export const GrantSubjectTypeParam = { USER: 'user', ROLE: 'role' } as const;
+
+/**
+ * Grant subject discriminator.
+ */
+export type GrantSubjectTypeParam = typeof GrantSubjectTypeParam[keyof typeof GrantSubjectTypeParam];
 
 export type HostAgentSummary = {
     friendly_name: string;
@@ -2379,6 +2427,36 @@ export type ScheduledTaskResponse = {
 export type SecretString = string;
 
 /**
+ * Resource selector on a grant: which hosts / software items a
+ * selector-capable action may target. `All` is the M1 default; write-path
+ * acceptance of the narrowing variants lands in M2 (grant validation, not
+ * this type).
+ *
+ * Serialized form is the `access_grants.selector` storage JSON
+ * (`06-grant-model.md` §Storage schema): `{"type":"all"}`,
+ * `{"type":"tags","ids":[…]}`, … — uniform `ids` field. Unknown extra
+ * keys are ignored on deserialize (serde internally-tagged enums cannot
+ * `deny_unknown_fields`); that is safe because an ignored key can never
+ * broaden authority and a missing/mistyped `ids` still fails as a
+ * missing field.
+ */
+export type Selector = {
+    type: 'all';
+} | {
+    ids: Array<string>;
+    type: 'tags';
+} | {
+    ids: Array<string>;
+    type: 'hosts';
+} | {
+    ids: Array<string>;
+    type: 'software';
+} | {
+    ids: Array<string>;
+    type: 'items';
+};
+
+/**
  * Unified response for any service (agent or MQTT).
  */
 export type ServiceResponse = {
@@ -3019,6 +3097,16 @@ export type TriggerVersionCheckResponse = {
      * Human-readable status message.
      */
     message: string;
+};
+
+/**
+ * Body for `PUT /api/v1/access/grants/{id}` (patterns/selector/description
+ * only — subject and tenant encoding are immutable).
+ */
+export type UpdateAccessGrantRequest = {
+    description?: string | null;
+    patterns: Array<string>;
+    selector?: Selector;
 };
 
 export type UpdateAccessSettingsRequest = {
@@ -3800,6 +3888,117 @@ export type ListAccessPresetsResponses = {
 };
 
 export type ListAccessPresetsResponse = ListAccessPresetsResponses[keyof ListAccessPresetsResponses];
+
+export type ListAccessGrantsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Filter to one subject (requires `subject_id`).
+         */
+        subject_type?: null | GrantSubjectTypeParam;
+        /**
+         * Filter to one subject (requires `subject_type`).
+         */
+        subject_id?: string | null;
+    };
+    url: '/api/v1/access/grants';
+};
+
+export type ListAccessGrantsErrors = {
+    /**
+     * subject_type and subject_id must be supplied together
+     */
+    400: unknown;
+    /**
+     * Not authenticated
+     */
+    401: unknown;
+    /**
+     * Not authorized
+     */
+    403: unknown;
+};
+
+export type ListAccessGrantsResponses = {
+    /**
+     * Grants for the active tenant plus global rows
+     */
+    200: Array<AccessGrantResponse>;
+};
+
+export type ListAccessGrantsResponse = ListAccessGrantsResponses[keyof ListAccessGrantsResponses];
+
+export type CreateAccessGrantData = {
+    body: CreateAccessGrantRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/access/grants';
+};
+
+export type CreateAccessGrantErrors = {
+    /**
+     * Validation, pattern-parse, or encoding error
+     */
+    400: unknown;
+    /**
+     * Not authenticated
+     */
+    401: unknown;
+    /**
+     * Not authorized. System-plane patterns additionally require system.access:manage (evaluated against the request body at runtime).
+     */
+    403: unknown;
+    /**
+     * Per-subject grant limit reached
+     */
+    409: unknown;
+};
+
+export type CreateAccessGrantResponses = {
+    /**
+     * Grant created
+     */
+    201: AccessGrantResponse;
+};
+
+export type CreateAccessGrantResponse = CreateAccessGrantResponses[keyof CreateAccessGrantResponses];
+
+export type GetAccessGrantData = {
+    body?: never;
+    path: {
+        /**
+         * Grant id
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/api/v1/access/grants/{id}';
+};
+
+export type GetAccessGrantErrors = {
+    /**
+     * Not authenticated
+     */
+    401: unknown;
+    /**
+     * Not authorized
+     */
+    403: unknown;
+    /**
+     * Grant not found
+     */
+    404: unknown;
+};
+
+export type GetAccessGrantResponses = {
+    /**
+     * Grant details
+     */
+    200: AccessGrantResponse;
+};
+
+export type GetAccessGrantResponse = GetAccessGrantResponses[keyof GetAccessGrantResponses];
 
 export type ListAuditLogsData = {
     body?: never;

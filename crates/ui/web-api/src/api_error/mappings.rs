@@ -33,6 +33,8 @@ use uptrakit_web_api_queries::queries::{
 
 use uptrakit_controller_core::update::UpdateDispatchError;
 
+use uptrakit_shared_db::access_grants::AccessGrantError;
+
 use crate::auth::{
     device_flow::DeviceFlowError, error::AuthError, registration::RegistrationValidationError,
 };
@@ -1087,6 +1089,108 @@ impl From<Report<OAuthConsentError>> for ApiError {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "An internal error occurred.",
                 "oauth.consent.database_error",
+                Some(format_report_summary(&report)),
+            ),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AccessGrantError
+// ---------------------------------------------------------------------------
+
+impl From<Report<AccessGrantError>> for ApiError {
+    fn from(report: Report<AccessGrantError>) -> Self {
+        use AccessGrantError::*;
+        let ctx = report.current_context();
+        match ctx {
+            NotFound => ApiError::new(
+                StatusCode::NOT_FOUND,
+                "Grant not found.",
+                "access_grant.not_found",
+                None,
+            ),
+            Patterns(_) => ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "One or more grant patterns are invalid.",
+                "access_grant.invalid_patterns",
+                None,
+            ),
+            PlaneMixing => ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "A grant may not mix system-plane and tenant-plane patterns.",
+                "access_grant.plane_mixing",
+                None,
+            ),
+            TenantEncoding(_) => ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "Invalid tenant encoding for this grant.",
+                "access_grant.invalid_tenant_encoding",
+                None,
+            ),
+            SelectorPhaseGate => ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "Non-All selectors are not accepted until M2.1.",
+                "access_grant.selector_phase_gate",
+                None,
+            ),
+            Selector(_) => ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "The grant selector is invalid.",
+                "access_grant.invalid_selector",
+                None,
+            ),
+            DescriptionTooLong { max } => ApiError::new(
+                StatusCode::BAD_REQUEST,
+                format!("Description exceeds {max} characters."),
+                "access_grant.description_too_long",
+                None,
+            ),
+            // Reason-code-only 409 per Global Constraints: never holder
+            // identities or counts in the client-visible message.
+            TooManyGrants { .. } => ApiError::new(
+                StatusCode::CONFLICT,
+                "Per-subject grant limit reached.",
+                "too_many_grants",
+                None,
+            ),
+            UnclassifiablePattern => ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "Grant pattern shape is not recognized.",
+                "access_grant.unclassifiable_pattern",
+                None,
+            ),
+            SelectorEncode(_) => ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "An internal error occurred.",
+                "access_grant.selector_encode_error",
+                Some(format_report_summary(&report)),
+            ),
+            SentinelMissing => ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "An internal error occurred.",
+                "access_grant.sentinel_missing",
+                Some(format_report_summary(&report)),
+            ),
+            Corrupt(_) => ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "An internal error occurred.",
+                "access_grant.corrupt",
+                Some(format_report_summary(&report)),
+            ),
+            Db(_) => ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "An internal error occurred.",
+                "access_grant.database_error",
+                Some(format_report_summary(&report)),
+            ),
+            // AccessGrantError is #[non_exhaustive] in uptrakit-shared-db, so this
+            // wildcard is required for forward-compatibility and is genuinely
+            // reachable (not dead code) — no #[expect] needed.
+            _ => ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "An internal error occurred.",
+                "access_grant.unknown_error",
                 Some(format_report_summary(&report)),
             ),
         }

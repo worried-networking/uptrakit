@@ -15,7 +15,7 @@ use uptrakit_controller_core::access::{AccessContext, AccessEngine};
 use uptrakit_shared_types::access::{Action, Decision, DenyReason, actions};
 
 use crate::app_state::AccessState;
-use crate::error_response::error_response;
+use crate::error_response::{error_response, error_response_with_code};
 use crate::middleware::require_auth::AuthenticatedUser;
 
 /// Per-request authorization state, inserted by `require_auth`.
@@ -276,6 +276,41 @@ pub(crate) fn authorize_any(
     Err(reason)
 }
 
+/// Engine-backed `system.access:manage` fine check for request-dependent
+/// system-plane requirements (M1.6a): minting/removing system-plane grant
+/// rows, deleting roles that hold them, or assigning roles that reach the
+/// system plane. Verdicts mirror `action_extractor!`: authority
+/// `Unavailable`/absent → 500 fail-closed; engine deny → 403 + deny counter.
+pub(crate) fn require_system_access(
+    engine: &AccessEngine,
+    authority: &AccessAuthority,
+) -> Option<Response> {
+    let Some(ctx) = authority.ready() else {
+        return Some(error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Authorization authority unavailable",
+        ));
+    };
+    match engine.authorize(ctx, &actions::SYSTEM_ACCESS_MANAGE, None) {
+        Decision::Allow => None,
+        Decision::Deny(reason) => {
+            record_access_deny(&reason);
+            Some(error_response_with_code(
+                StatusCode::FORBIDDEN,
+                "This operation confers system-plane authority and requires system.access:manage",
+                "forbidden",
+            ))
+        }
+        // `Decision` is #[non_exhaustive] in another crate: unknown
+        // variants deny, fail-closed.
+        _ => Some(error_response_with_code(
+            StatusCode::FORBIDDEN,
+            "This operation confers system-plane authority and requires system.access:manage",
+            "forbidden",
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![expect(
@@ -423,5 +458,61 @@ mod tests {
         let mut parts = parts_with(user_id, Some(AccessAuthority::Ready(ctx)));
         let result = CanReadHosts::from_request_parts(&mut parts, &state).await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn require_system_access_unavailable_authority_is_500() {
+        let db = test_db().await;
+        let engine = AccessEngine::new(db);
+        let response =
+            require_system_access(&engine, &AccessAuthority::Unavailable).expect("must reject");
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn require_system_access_denies_without_grant() {
+        let db = test_db().await;
+        let engine = AccessEngine::new(db.clone());
+        let tenant_id = default_tenant_id(&db).await;
+        let user_id = uuid::Uuid::now_v7();
+        let ctx = engine
+            .context(tenant_id, user_id, None)
+            .await
+            .expect("context");
+        let response =
+            require_system_access(&engine, &AccessAuthority::Ready(ctx)).expect("must reject");
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn require_system_access_allows_system_plane_grant() {
+        let db = test_db().await;
+        let engine = AccessEngine::new(db.clone());
+        let tenant_id = default_tenant_id(&db).await;
+        let user_id = uuid::Uuid::now_v7();
+        let patterns = vec![
+            "system.access:manage"
+                .parse::<ActionPattern>()
+                .expect("valid pattern"),
+        ];
+        insert_grant(
+            &db,
+            NewGrant {
+                subject: GrantSubject::User(user_id),
+                tenant_id: None,
+                patterns: &patterns,
+                selector: Selector::All,
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect("insert grant");
+        let ctx = engine
+            .context(tenant_id, user_id, None)
+            .await
+            .expect("context");
+        let response = require_system_access(&engine, &AccessAuthority::Ready(ctx));
+        assert!(response.is_none());
     }
 }

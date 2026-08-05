@@ -1,3 +1,4 @@
+pub mod access_grants;
 pub mod access_presets;
 pub(crate) mod agent_operations;
 pub(crate) mod agents;

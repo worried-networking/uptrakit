@@ -3,6 +3,7 @@ pub mod mock;
 
 pub(crate) mod paths;
 
+pub mod access_grants;
 pub mod access_presets;
 pub mod api_tokens;
 pub mod audit_logs;
