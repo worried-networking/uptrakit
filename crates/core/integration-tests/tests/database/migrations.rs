@@ -95,9 +95,14 @@ async fn test_access_grant_storage_migrated(harness: &TestHarness) {
     use sea_orm::sea_query::{Alias, Expr, ExprTrait, Query};
     use sea_orm::{ActiveModelTrait, ConnectionTrait, EntityTrait, Set};
 
-    // Seed grants present: exactly eight role-subject rows (content equality
-    // is covered by the shared-db suite; the engine-owned entity must not be
-    // used here — builders only).
+    // Seed grants present: exactly eight role-subject rows from the M1.2 seed
+    // migration (content equality is covered by the shared-db suite; the
+    // engine-owned entity must not be used here — builders only). Scoped to
+    // `description IS NULL`, the same discriminator the seed migration's own
+    // test uses: later additive backfills mark their rows (the M1.5 `mcp:use`
+    // backfill adds one marked row per access_mcp role), so an unscoped count
+    // grows with every backfill and this assertion stops meaning "the M1.2
+    // seed landed".
     let rows = harness
         .db
         .query_all(
@@ -106,11 +111,12 @@ async fn test_access_grant_storage_migrated(harness: &TestHarness) {
                 .from(Alias::new("access_grants"))
                 .and_where(Expr::col(Alias::new("subject_type")).eq("role"))
                 .and_where(Expr::col(Alias::new("created_by")).is_null())
+                .and_where(Expr::col(Alias::new("description")).is_null())
                 .to_owned(),
         )
         .await
         .expect("query access_grants");
-    assert_eq!(rows.len(), 8, "eight seed grants must exist");
+    assert_eq!(rows.len(), 8, "eight M1.2 seed grants must exist");
 
     // Per-scope role-name uniqueness on the live backend.
     let tenants = uptrakit_shared_db::entity::tenant::Entity::find()
