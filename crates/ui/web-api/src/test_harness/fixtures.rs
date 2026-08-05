@@ -23,6 +23,19 @@ use uptrakit_web_api_types::auth::{AuthResponse, LoginRequest, RefreshResponse, 
 
 use super::http_client::TestClient;
 
+/// The id of the tenant seeded by the migrations.
+///
+/// Pairs with [`super::setup_migrated_db`] for engine-level tests that need
+/// a tenant id but not the full [`super::TestApp`] HTTP stack.
+pub(crate) async fn default_tenant_id(db: &DatabaseConnection) -> uuid::Uuid {
+    uptrakit_shared_db::entity::tenant::Entity::find()
+        .one(db)
+        .await
+        .expect("query tenant")
+        .expect("seeded default tenant")
+        .id
+}
+
 // ── HTTP helpers ────────────────────────────────────────────────────────
 
 /// Register a user via HTTP and return the full [`AuthResponse`].

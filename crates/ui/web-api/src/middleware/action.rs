@@ -51,6 +51,20 @@ impl AccessAuthority {
     }
 }
 
+/// Record one policy deny on `uptrakit_access_denies_total{reason}`.
+///
+/// Single owner for the counter: the `action_extractor!` single-action arm,
+/// the [`authorize_any`] OR-gate, and the surface read/invoke gate
+/// (`routes/surfaces.rs`) all funnel through here, so the metric name and
+/// label shape cannot drift apart across the three deny paths.
+pub(crate) fn record_access_deny(reason: &DenyReason) {
+    metrics::counter!(
+        "uptrakit_access_denies_total",
+        "reason" => reason.as_str()
+    )
+    .increment(1);
+}
+
 /// Generates a concrete Axum extractor struct for a single catalog action.
 ///
 /// Same ergonomic shape as `permission_extractor!` (`middleware/permission.rs`)
@@ -132,11 +146,7 @@ macro_rules! action_extractor {
                                 reason = reason.as_str(),
                                 "action denied"
                             );
-                            metrics::counter!(
-                                "uptrakit_access_denies_total",
-                                "reason" => reason.as_str()
-                            )
-                            .increment(1);
+                            record_access_deny(&reason);
                             Err(error_response(
                                 StatusCode::FORBIDDEN,
                                 "Insufficient permissions",
@@ -246,11 +256,7 @@ pub(crate) fn authorize_any(
         }
     }
     let reason = deny.unwrap_or(DenyReason::NoGrant);
-    metrics::counter!(
-        "uptrakit_access_denies_total",
-        "reason" => reason.as_str()
-    )
-    .increment(1);
+    record_access_deny(&reason);
     Err(reason)
 }
 

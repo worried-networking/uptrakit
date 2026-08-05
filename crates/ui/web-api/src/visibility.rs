@@ -392,32 +392,14 @@ mod tests {
     reason = "test code: panics on failure are acceptable"
 )]
 mod engine_tests {
-    use sea_orm::{ConnectOptions, Database, DatabaseConnection, EntityTrait};
+    use sea_orm::DatabaseConnection;
     use uptrakit_shared_db::access_grants::{GrantSubject, NewGrant, insert_grant};
-    use uptrakit_shared_db::entity::tenant;
     use uptrakit_shared_types::access::{ActionPattern, Selector};
 
     use super::test_support::*;
     use super::*;
-
-    async fn test_db() -> DatabaseConnection {
-        let mut opt = ConnectOptions::new("sqlite::memory:");
-        opt.max_connections(1).min_connections(1);
-        let db = Database::connect(opt).await.expect("connect test db");
-        uptrakit_shared_db::migration::run_migrations(&db)
-            .await
-            .expect("run migrations");
-        db
-    }
-
-    async fn default_tenant_id(db: &DatabaseConnection) -> uuid::Uuid {
-        tenant::Entity::find()
-            .one(db)
-            .await
-            .expect("query tenant")
-            .expect("seeded default tenant")
-            .id
-    }
+    use crate::test_harness::fixtures::default_tenant_id;
+    use crate::test_harness::setup_migrated_db;
 
     async fn grant_system_settings_manage(db: &DatabaseConnection, user_id: uuid::Uuid) {
         let patterns = vec![
@@ -445,7 +427,7 @@ mod engine_tests {
 
     #[tokio::test]
     async fn tenant_scoped_always_visible_without_authority() {
-        let db = test_db().await;
+        let db = setup_migrated_db().await;
         let engine = AccessEngine::new(db.clone());
         let tenant_id = default_tenant_id(&db).await;
         let user_id = uuid::Uuid::now_v7();
@@ -466,7 +448,7 @@ mod engine_tests {
 
     #[tokio::test]
     async fn instance_scoped_enabled_visible_without_authority() {
-        let db = test_db().await;
+        let db = setup_migrated_db().await;
         let engine = AccessEngine::new(db.clone());
         let tenant_id = default_tenant_id(&db).await;
         let user_id = uuid::Uuid::now_v7();
@@ -487,7 +469,7 @@ mod engine_tests {
 
     #[tokio::test]
     async fn instance_scoped_disabled_hidden_without_system_settings_manage_grant() {
-        let db = test_db().await;
+        let db = setup_migrated_db().await;
         let engine = AccessEngine::new(db.clone());
         let tenant_id = default_tenant_id(&db).await;
         let user_id = uuid::Uuid::now_v7();
@@ -508,7 +490,7 @@ mod engine_tests {
 
     #[tokio::test]
     async fn instance_scoped_disabled_visible_with_system_settings_manage_grant() {
-        let db = test_db().await;
+        let db = setup_migrated_db().await;
         let engine = AccessEngine::new(db.clone());
         let tenant_id = default_tenant_id(&db).await;
         let user_id = uuid::Uuid::now_v7();
@@ -533,7 +515,7 @@ mod engine_tests {
     /// row now says enabled, absent `system.settings:manage` authority.
     #[tokio::test]
     async fn pending_restart_enabled_hidden_without_grant() {
-        let db = test_db().await;
+        let db = setup_migrated_db().await;
         let engine = AccessEngine::new(db.clone());
         let tenant_id = default_tenant_id(&db).await;
         let user_id = uuid::Uuid::now_v7();
@@ -557,7 +539,7 @@ mod engine_tests {
     /// trigger the restart.
     #[tokio::test]
     async fn pending_restart_enabled_visible_with_grant() {
-        let db = test_db().await;
+        let db = setup_migrated_db().await;
         let engine = AccessEngine::new(db.clone());
         let tenant_id = default_tenant_id(&db).await;
         let user_id = uuid::Uuid::now_v7();

@@ -39,36 +39,17 @@ mod tests {
 
     use std::sync::Arc;
 
-    use sea_orm::{ConnectOptions, Database, DatabaseConnection, EntityTrait};
     use uuid::Uuid;
 
     use uptrakit_controller_core::access::AccessEngine;
     use uptrakit_shared_db::access_grants::{GrantSubject, NewGrant, insert_grant};
-    use uptrakit_shared_db::entity::tenant;
     use uptrakit_shared_types::access::{Action, ActionPattern, Decision, DenyReason, Selector};
     use uptrakit_wire::surfaces;
 
     use super::SurfaceActionRegistry;
     use crate::surface_registry::{SurfaceRegistry, SurfaceRegistryConfig};
-
-    async fn test_db() -> DatabaseConnection {
-        let mut opt = ConnectOptions::new("sqlite::memory:");
-        opt.max_connections(1).min_connections(1);
-        let db = Database::connect(opt).await.expect("connect test db");
-        uptrakit_shared_db::migration::run_migrations(&db)
-            .await
-            .expect("run migrations");
-        db
-    }
-
-    async fn default_tenant_id(db: &DatabaseConnection) -> Uuid {
-        tenant::Entity::find()
-            .one(db)
-            .await
-            .expect("query tenant")
-            .expect("seeded default tenant")
-            .id
-    }
+    use crate::test_harness::fixtures::default_tenant_id;
+    use crate::test_harness::setup_migrated_db;
 
     fn registration_for_test_stub(
         provider_id: &str,
@@ -120,7 +101,7 @@ mod tests {
 
     #[tokio::test]
     async fn surface_action_registry_flips_across_service_register_and_unregister() {
-        let db = test_db().await;
+        let db = setup_migrated_db().await;
         let tenant_id = default_tenant_id(&db).await;
         let user_id = Uuid::now_v7();
         let registry = Arc::new(SurfaceRegistry::new(SurfaceRegistryConfig::default()));

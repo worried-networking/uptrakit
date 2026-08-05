@@ -23,7 +23,7 @@ use uptrakit_shared_db::entity::system_service;
 
 use crate::AppState;
 use crate::error_response::{error_response, error_response_with_code};
-use crate::middleware::action::AccessAuthority;
+use crate::middleware::action::{AccessAuthority, record_access_deny};
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, AuthenticatedUser};
 use crate::middleware::tenant_context::TenantContext;
 use crate::surface_proxy::entity_enrichment::enrich_entity_links;
@@ -1575,11 +1575,7 @@ fn enforce_required_action(
         AccessAuthority::Ready(ctx) => match engine.authorize(ctx, required, None) {
             Decision::Allow => None,
             Decision::Deny(reason) => {
-                metrics::counter!(
-                    "uptrakit_access_denies_total",
-                    "reason" => reason.as_str()
-                )
-                .increment(1);
+                record_access_deny(&reason);
                 Some(error_response_with_code(
                     StatusCode::FORBIDDEN,
                     format!("Insufficient permissions for this {access_kind}"),
