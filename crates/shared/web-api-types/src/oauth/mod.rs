@@ -27,7 +27,10 @@ pub use grant_type::{CodeChallengeMethod, OAuthGrantType, ResponseType, TokenEnd
 pub use jwt_verifier::{JwtError, McpOAuthJwtVerifier};
 pub use metadata::{AuthorizationServerMetadata, ProtectedResourceMetadata};
 pub use requests::{AuthorizeRequest, ConsentDecision, TokenRequest};
-pub use responses::{DcrRegistrationRequest, DcrRegistrationResponse, TokenResponse};
+pub use responses::{
+    DcrRegistrationRequest, DcrRegistrationResponse, OAuthClientResponse, OAuthConsentResponse,
+    TokenResponse,
+};
 pub use scope::McpScope;
 pub use tokens::{AuthorizationCode, McpAccessTokenClaims, OpaqueRefreshToken, TokenParseError};
 

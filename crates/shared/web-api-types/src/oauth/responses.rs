@@ -6,6 +6,8 @@
 //! envelopes; the request is `Validate`d per the project rule.
 
 use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
+use uuid::Uuid;
 
 use crate::oauth::grant_type::{OAuthGrantType, ResponseType, TokenEndpointAuthMethod};
 use crate::validation::{Validate, ValidationError};
@@ -201,6 +203,117 @@ impl DcrRegistrationResponse {
             response_types,
             token_endpoint_auth_method,
             scope,
+        }
+    }
+}
+
+/// Operator-facing OAuth client row (`GET /api/oauth/clients` items).
+///
+/// `last_used_at` is intentionally absent: `oauth_clients.last_used_at` is
+/// never written by any production path; the field re-enters this contract
+/// once a token-issuance write site exists.
+#[non_exhaustive]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct OAuthClientResponse {
+    pub id: String,
+    pub client_name: String,
+    pub client_uri: Option<String>,
+    pub redirect_uris: Vec<String>,
+    pub created_via: String,
+    #[serde(with = "time::serde::rfc3339")]
+    #[cfg_attr(
+        feature = "openapi",
+        schema(value_type = String, format = DateTime)
+    )]
+    pub created_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339::option")]
+    #[cfg_attr(
+        feature = "openapi",
+        schema(value_type = Option<String>, format = DateTime)
+    )]
+    pub revoked_at: Option<OffsetDateTime>,
+    #[serde(with = "time::serde::rfc3339::option")]
+    #[cfg_attr(
+        feature = "openapi",
+        schema(value_type = Option<String>, format = DateTime)
+    )]
+    pub trusted_at: Option<OffsetDateTime>,
+}
+
+impl OAuthClientResponse {
+    /// Construct a new client response row.
+    ///
+    /// Required because `#[non_exhaustive]` prevents struct-literal
+    /// construction outside the defining crate.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "flat response row; a builder would not reduce the footprint"
+    )]
+    #[must_use]
+    pub fn new(
+        id: String,
+        client_name: String,
+        client_uri: Option<String>,
+        redirect_uris: Vec<String>,
+        created_via: String,
+        created_at: OffsetDateTime,
+        revoked_at: Option<OffsetDateTime>,
+        trusted_at: Option<OffsetDateTime>,
+    ) -> Self {
+        Self {
+            id,
+            client_name,
+            client_uri,
+            redirect_uris,
+            created_via,
+            created_at,
+            revoked_at,
+            trusted_at,
+        }
+    }
+}
+
+/// End-user consent row (`GET /api/oauth/consents` items).
+///
+/// `client_name` is non-optional: `fk_oauth_consents_client` is
+/// `ON DELETE RESTRICT` and client revocation is a soft delete, so a
+/// consent's client row always exists.
+#[non_exhaustive]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct OAuthConsentResponse {
+    pub id: Uuid,
+    pub client_id: String,
+    pub client_name: String,
+    pub scopes: String,
+    #[serde(with = "time::serde::rfc3339")]
+    #[cfg_attr(
+        feature = "openapi",
+        schema(value_type = String, format = DateTime)
+    )]
+    pub granted_at: OffsetDateTime,
+}
+
+impl OAuthConsentResponse {
+    /// Construct a new consent response row.
+    ///
+    /// Required because `#[non_exhaustive]` prevents struct-literal
+    /// construction outside the defining crate.
+    #[must_use]
+    pub fn new(
+        id: Uuid,
+        client_id: String,
+        client_name: String,
+        scopes: String,
+        granted_at: OffsetDateTime,
+    ) -> Self {
+        Self {
+            id,
+            client_id,
+            client_name,
+            scopes,
+            granted_at,
         }
     }
 }
