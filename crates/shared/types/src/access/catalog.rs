@@ -194,6 +194,9 @@ access_catalog! {
     SystemSettings, "system.settings", {
         Manage => ("manage", None, SYSTEM_SETTINGS_MANAGE, SYSTEM_SETTINGS_MANAGE_STR, "Manage global infrastructure settings"),
     };
+    SystemAccess, "system.access", {
+        Manage => ("manage", None, SYSTEM_ACCESS_MANAGE, SYSTEM_ACCESS_MANAGE_STR, "Manage system-plane grants and role assignments conferring system-plane authority"),
+    };
     Commands, "commands", {
         Manage => ("manage", None, COMMANDS_MANAGE, COMMANDS_MANAGE_STR, "Modify command-bearing plugin config fields (code execution authority)"),
     };
@@ -438,5 +441,18 @@ mod tests {
         assert!(Resource::surface("").is_err(), "empty remainder");
         assert!(Resource::plugin("Bad").is_err(), "uppercase segment");
         assert!(Resource::surface("a..b").is_err(), "empty middle segment");
+    }
+
+    #[test]
+    fn system_access_manage_row_present_with_no_selector_support() {
+        let entry = CATALOG
+            .iter()
+            .find(|e| e.resource_str == "system.access")
+            .expect("system.access catalog row");
+        assert_eq!(entry.verbs.len(), 1);
+        let verb = &entry.verbs[0];
+        assert_eq!(verb.action_str, "system.access:manage");
+        assert_eq!(verb.selector_support, SelectorSupport::None);
+        assert!(actions::SYSTEM_ACCESS_MANAGE.resource().is_system());
     }
 }

@@ -18279,6 +18279,7 @@
               "software:delete": "Delete software items and plugin configs",
               "software:read": "View software items, plugin configs, history",
               "software:update": "Edit software items and plugin configs",
+              "system.access:manage": "Manage system-plane grants and role assignments conferring system-plane authority",
               "system.audit:read": "View system-level audit log entries",
               "system.config-state:manage": "Manage instance config reload state (clear degraded)",
               "system.config-state:read": "View instance config reload state",
