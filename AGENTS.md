@@ -226,7 +226,8 @@ These are non-negotiable design constraints. Do not violate them.
 1. **Use `FromStr` for all string-to-type conversions.** No ad-hoc `parse(&str)` methods: define a typed `Parse{TypeName}Error`, `impl FromStr`,
    call `s.parse::<MyType>()`. UUID path params use `Path<Uuid>`. See [Coding Standards](docs/development/coding-standards.md).
 1. **Keep the openapi-client in sync with web-api endpoints.** Any endpoint addition/change/removal must be reflected in `uptrakit-openapi-client`
-   (excluding WebSocket, OIDC browser callback, OCSP). See [OpenAPI Client](docs/development/openapi-client.md).
+   (excluding WebSocket, OIDC browser callback, OCSP, and the RFC-discovered OAuth protocol + browser consent-flow endpoints).
+   See [OpenAPI Client](docs/development/openapi-client.md).
 1. **Do not use `unsafe`, `unwrap` or `panic!`.** Prefer typed errors with `thiserror`, context via `rootcause`. Use `parking_lot::Mutex`/`RwLock`
    in all async code (never `std`/`tokio` variants); drop guards before any `.await`. See [Synchronous Locks in Async
    Code](docs/development/coding-standards.md#synchronous-locks-in-async-code).

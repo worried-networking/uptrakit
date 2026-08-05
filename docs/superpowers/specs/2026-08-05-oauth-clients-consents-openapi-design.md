@@ -1,6 +1,6 @@
 # OAuth Clients/Consents API — OpenAPI Exposure Design
 
-Date: 2026-08-05. Status: approved, unimplemented.
+Date: 2026-08-05. Status: implemented (2026-08-05 plan).
 
 ## Problem
 

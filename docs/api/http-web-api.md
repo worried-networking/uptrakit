@@ -84,6 +84,22 @@ When a check fails, its value is `"unavailable"` and `status` becomes `"unavaila
 
 Access tokens are short-lived, refresh tokens rotate on each use, and logout adds entries to the in-memory `TokenDenylist`.
 
+## OAuth Client and Consent Management
+
+Operator endpoints (require the `settings.auth:manage` action; 404 when MCP OAuth is disabled):
+
+- `GET /api/oauth/clients`: paginated list of registered OAuth clients, newest first.
+- `POST /api/oauth/clients`: manually register a client (RFC 7591 request shape). Distinct from RFC 7591 dynamic
+  registration at `POST /oauth/register`, which is a protocol endpoint discovered via RFC 8414 metadata and is not
+  part of the product API. Returns the one-time `registration_access_token`.
+- `DELETE /api/oauth/clients/{client_id}`: revoke a client; cascades to its consents and refresh tokens.
+- `POST /api/oauth/clients/{client_id}/trust`: promote a client to trusted.
+
+End-user endpoints (authenticated only — each user manages their own consents):
+
+- `GET /api/oauth/consents`: the caller's active consents, newest-granted first, enriched with `client_name`.
+- `DELETE /api/oauth/consents/{id}`: revoke one of the caller's consents (cross-user attempts return 403).
+
 ## Settings Endpoints
 
 - GET/PUT `/api/v1/settings/network`

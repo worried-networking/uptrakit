@@ -121,7 +121,7 @@ src/routes/
    operation. The one sanctioned escape hatch left is in that function's GET branch: the generated query type
    is closed to reserved keys, but DataLoad params are dynamic string-passthrough by contract, so the params
    object is cast to the generated query type (`as ReadSurfaceInteraction(Item)?Data['query']`), marked with a
-   `// Sanctioned escape hatch` comment. Other escape hatches (raw-Response, OAuth) live in the hand-written
+   `// Sanctioned escape hatch` comment. Other escape hatches (raw-Response, the OAuth browser consent flow) live in the hand-written
    `api/*` modules listed in the tree above. The source of truth for the frontend client is the committed spec
    `crates/ui/web-api/openapi.json`; after any backend route change run `./scripts/regen-api.sh` and
    commit both `openapi.json` and `src/lib/api/generated/`.
