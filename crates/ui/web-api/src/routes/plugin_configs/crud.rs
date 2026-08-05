@@ -2,8 +2,9 @@ use crate::AppState;
 use crate::error_response::error_response;
 use crate::extract::Validated;
 use crate::extractors::{IfMatch, SettingsVersion};
-use crate::middleware::action::{AccessAuthority, authorize_any};
-use crate::middleware::permission::{CanManageCommands, CanViewSoftware};
+use crate::middleware::action::{
+    AccessAuthority, CanManageCommands, CanReadSoftware, authorize_any,
+};
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::queries::plugin_configs as pc_queries;
 use crate::queries::plugin_configs::PluginConfigView;
@@ -84,12 +85,16 @@ pub(super) fn reject_config_model_none_plugin_type(
 #[utoipa::path(
     get,
     path = "/api/v1/plugin-types",
-    extensions(("x-required-permission" = json!(["view_software", "view_settings", "manage_global_settings"]))),
     responses(
         (status = 200, description = "List of known plugin types", body = Vec<PluginTypeInfo>),
     ),
     tag = "Plugin Configs",
-    security(("bearer_token" = []))
+    security(
+        ("oauth2" = ["software:read"]),
+        ("oauth2" = ["settings:read"]),
+        ("oauth2" = ["system.settings:manage"]),
+        ("developer_token" = [])
+    )
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_plugin_types(
@@ -197,14 +202,13 @@ pub async fn list_plugin_types(
     post,
     path = "/api/v1/plugin-configs",
     request_body = CreatePluginConfigRequest,
-    extensions(("x-required-permission" = json!("manage_commands"))),
     responses(
         (status = 201, description = "Plugin config created", body = PluginConfigResponse),
         (status = 400, description = "Invalid input"),
         (status = 409, description = "A plugin config with this name already exists")
     ),
     tag = "Plugin Configs",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["commands:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn create_plugin_config(
@@ -394,18 +398,17 @@ impl From<&ListPluginConfigsParams> for PaginationParams {
     get,
     path = "/api/v1/plugin-configs",
     params(ListPluginConfigsParams),
-    extensions(("x-required-permission" = json!("view_software"))),
     responses(
         (status = 200, description = "Paginated list of plugin configs", body = PaginatedResponse<PluginConfigResponse>),
     ),
     tag = "Plugin Configs",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["software:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_plugin_configs(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanViewSoftware(_user): CanViewSoftware,
+    CanReadSoftware(_user): CanReadSoftware,
     Query(params): Query<ListPluginConfigsParams>,
 ) -> Response {
     let pagination = PaginationParams::from(&params);
@@ -430,20 +433,19 @@ pub async fn list_plugin_configs(
     get,
     path = "/api/v1/plugin-configs/{id}",
     params(("id" = Uuid, Path, description = "Plugin config ID")),
-    extensions(("x-required-permission" = json!("view_software"))),
     responses(
         (status = 200, description = "Plugin config details", body = PluginConfigResponse),
         (status = 404, description = "Plugin config not found")
     ),
     tag = "Plugin Configs",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["software:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_plugin_config(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     Path(config_id): Path<Uuid>,
-    CanViewSoftware(_user): CanViewSoftware,
+    CanReadSoftware(_user): CanReadSoftware,
 ) -> Response {
     match pc_queries::get_plugin_config(state.plugin.plugin_ops.as_ref(), &tenant_db, config_id)
         .await
@@ -466,13 +468,12 @@ pub async fn get_plugin_config(
     path = "/api/v1/plugin-configs/{id}",
     params(("id" = Uuid, Path, description = "Plugin config ID")),
     request_body = UpdatePluginConfigRequest,
-    extensions(("x-required-permission" = json!("manage_commands"))),
     responses(
         (status = 200, description = "Plugin config updated", body = PluginConfigResponse),
         (status = 404, description = "Plugin config not found")
     ),
     tag = "Plugin Configs",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["commands:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 #[expect(
@@ -696,13 +697,12 @@ pub async fn update_plugin_config(
     delete,
     path = "/api/v1/plugin-configs/{id}",
     params(("id" = Uuid, Path, description = "Plugin config ID")),
-    extensions(("x-required-permission" = json!("manage_commands"))),
     responses(
         (status = 204, description = "Plugin config deleted"),
         (status = 404, description = "Plugin config not found")
     ),
     tag = "Plugin Configs",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["commands:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn delete_plugin_config(

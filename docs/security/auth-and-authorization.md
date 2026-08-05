@@ -314,33 +314,34 @@ with HTTP 409 Conflict.
    `crates/ui/web-api/src/middleware/permission.rs` using a macro that generates one concrete struct per permission.
    If the user lacks the permission the extractor short-circuits with `403 Forbidden` before the handler body runs.
    No DB round-trip is needed.
-1. Every protected endpoint also carries an `x-required-permission` OpenAPI extension (set in the `#[utoipa::path]`
-   annotation, e.g. `extensions(("x-required-permission" = json!("view_hosts")))`). This makes the required
-   permission machine-readable in the generated OpenAPI spec.
+1. Endpoints still on the legacy model (only `users.rs`, `roles.rs`, `access_presets.rs` after the M1.4b sweep) also
+   carry an `x-required-permission` OpenAPI extension (set in the `#[utoipa::path]` annotation, e.g.
+   `extensions(("x-required-permission" = json!("view_hosts")))`). This makes the required permission
+   machine-readable in the generated OpenAPI spec.
 1. The frontend receives permissions as `string[]` (e.g. `["view_settings", "view_services"]`) and uses the `Permission`
    TypeScript enum for checks.
 
-### Self-authenticated endpoints and the `"self"` sentinel
+### Self-authenticated endpoints
 
 Some endpoints -- `create_api_token`, `list_api_tokens`, `revoke_api_token`, `logout`, and `me` -- are
 authenticated (require a valid Bearer token) but not governed by the RBAC permission model. Any authenticated
 user may call them regardless of their assigned roles. These endpoints use `Extension<AuthenticatedUser>`
-directly rather than a typed permission extractor, and carry:
+directly rather than a typed permission extractor, and carry only the authenticated-only security declaration:
 
 ```rust
-extensions(("x-required-permission" = json!("self")))
+security(("oauth2" = []), ("developer_token" = []))
 ```
 
-The sentinel value `"self"` is distinct from the named `Permission` variants. It signals to automated
-permission-audit tooling that the endpoint requires only **authentication** (a valid token), not any specific
-RBAC permission. Tools must treat `"self"` as "any authenticated user is authorized".
+No permission or action scope is listed, and no `x-required-permission`/`x-action-dynamic` extension is present —
+the empty scope list itself signals to automated permission-audit tooling that the endpoint requires only
+**authentication** (a valid token), not any specific RBAC permission or catalog action.
 
 ### Runtime-valued permission extension (surfaces)
 
 Shared-surface interaction routes (`crates/ui/web-api/src/routes/surfaces.rs`) are a second, distinct exception to
-the typed-permission-extractor rule — separate from both the `"self"` sentinel above and the `// APPROVED: custom
-auth path` token-extraction exception used by handlers like the WebSocket upgrade route (see [Coding
-Standards](../development/coding-standards.md)).
+the typed-permission-extractor rule — separate from both the self-authenticated endpoints above and the
+`// APPROVED: custom auth path` token-extraction exception used by handlers like the WebSocket upgrade route (see
+[Coding Standards](../development/coding-standards.md)).
 
 Surface descriptors and interactions carry their own `required_action: Option<String>` as **registration data**
 supplied by the provider (plugin or service) — a canonical `resource:verb` catalog action string, not a value known
@@ -349,25 +350,31 @@ at route-definition time. `SurfaceProxy` parses each declared value to a catalog
 the normalized registration. No fixed `CanXxx` extractor can express "whatever action this particular
 surface/interaction declares", so these handlers call `enforce_required_action()` in the handler body — running the
 resolved `Action` through `AccessEngine` against the resolved descriptor/interaction — instead of a typed
-extractor, and the `#[utoipa::path]` annotation carries a literal, non-enum sentinel:
+extractor, and the `#[utoipa::path]` annotation declares the authenticated-only security form
+(`security(("oauth2" = []), ("developer_token" = []))`) plus a boolean marker instead of a fixed scope list:
 
 ```rust
-extensions(("x-required-permission" = json!("dynamic: declared by the surface descriptor / interaction")))
+extensions(("x-action-dynamic" = json!(true)))
 ```
+
+The `x-action-dynamic: true` extension tells automated tooling that this operation's OpenAPI security requirement is
+intentionally authenticated-only — the real, enforced requirement is not statically expressible and lives in
+registration data (the surface descriptor's or interaction's `required_action`), not in the spec.
 
 This is checked at both the descriptor level and the interaction level, and — per [Shared Surface
 Security](surfaces.md#permission-model) — happens for every method (`GET`/`POST`/`PUT`/`DELETE`) on the interaction
 route family, before any `405` method-mismatch response, so a caller cannot fingerprint an interaction's registered
 methods by comparing `403` against `405`.
 
-| Exception class                 | Permission source                                     | OpenAPI marker                          |
-| ------------------------------- | ----------------------------------------------------- | --------------------------------------- |
-| `"self"` sentinel               | None — any authenticated user is authorized           | `x-required-permission: "self"`         |
-| `// APPROVED: custom auth path` | Not RBAC — bespoke auth (token extraction, WebSocket) | handler-specific, documented inline     |
-| Runtime-valued (surfaces)       | Registration data on the surface/interaction          | `x-required-permission: "dynamic: ..."` |
+| Exception class                 | Permission source                                     | OpenAPI marker                                 |
+| ------------------------------- | ----------------------------------------------------- | ---------------------------------------------- |
+| Self-authenticated endpoints    | None — any authenticated user is authorized           | none — empty-scope `security(...)` declaration |
+| `// APPROVED: custom auth path` | Not RBAC — bespoke auth (token extraction, WebSocket) | handler-specific, documented inline            |
+| Runtime-valued (surfaces)       | Registration data on the surface/interaction          | `x-action-dynamic: true`                       |
 
-Automated permission-audit tooling must treat the `"dynamic: ..."` prefix the same way it treats `"self"`: a marker
-that a fixed enum value cannot be extracted statically, not a defect in the generated OpenAPI spec.
+Automated permission-audit tooling must treat `x-action-dynamic: true` as a marker that the operation's declared
+`security(...)` scopes are not the real, enforced requirement — a fixed catalog action cannot be extracted
+statically from the spec for these operations — not a defect in the generated OpenAPI spec.
 
 ### Permission extractor reference
 
@@ -415,6 +422,9 @@ for the permission pattern conventions.
 
 ### Adding a new permission
 
+Legacy model only. After the M1.4b sweep this applies solely to `users.rs`, `roles.rs`, and `access_presets.rs`; new
+authorization work declares a catalog action and an `action_extractor!` type instead (see the next section).
+
 1. Add a variant to the `Permission` enum in `crates/shared/types/src/permissions.rs` (with `as_str` / `from_str` /
    `description` arms).
 1. Write a DB migration to insert it into the `permissions` table and assign it to the appropriate built-in
@@ -426,7 +436,7 @@ for the permission pattern conventions.
    and add `extensions(("x-required-permission" = json!("xxx")))` to the corresponding `#[utoipa::path]` annotation.
 1. Add the variant to the `Permission` TypeScript enum in `frontend/src/lib/types.ts`.
 
-### Transition: action extractors (M1.4a)
+### Transition: action extractors (M1.4a/M1.4b)
 
 A second, parallel authorization model is being rolled out route family by route family. Converted
 families enforce through `action_extractor!`-generated types (`crates/ui/web-api/src/middleware/action.rs`),
@@ -437,6 +447,14 @@ grant/revoke, no re-login required), and denial always returns a fixed, generic 
 native OpenAPI security requirement, e.g. `security(("oauth2" = ["hosts:read"]), ("developer_token" = []))`,
 instead of the `x-required-permission` extension. The `hosts` route family (`crates/ui/web-api/src/routes/hosts.rs`)
 is the first converted family and serves as the reference conversion.
+
+The M1.4b sweep (batches B1–B6) converted **all** route families except the M1.6a/M1.6b handoffs
+(`users.rs`, `roles.rs`, `access_presets.rs`). OR-of-alternatives operations (batch actions,
+`list_plugin_types`, plugin-type-settings reads) declare one single-scope `oauth2` requirement per
+alternative and enforce inline via `authorize_any`, with no action extractor. Dynamic surface wrappers
+carry `x-action-dynamic: true` alongside the authenticated-only security form. The operator OAuth clients
+API and the admin events SSE stream also enforce through action extractors (`settings.auth:manage`,
+`services:read` respectively).
 
 MCP authorization has moved onto the same `AccessEngine` in parallel with the route-family sweep: both MCP auth paths
 (API token and OAuth JWT) build an `AccessContext` and gate the connection on the `mcp:use` action, and each MCP tool
@@ -468,11 +486,11 @@ calls `AccessEngine::authorize()` directly for the single `system.settings:manag
 predicate used to filter instance-scoped plugins out of listings, not a request-denying gate, so it returns a `bool`
 and does not increment the deny counter.
 
-Unconverted route families keep the `permission_extractor!` + `x-required-permission` model described
-above until the M1.4b sweep converts them. Which model a given handler uses is visible from its
-extractor import: `crate::middleware::action::CanXxx` (new) vs. `crate::middleware::permission::CanXxx`
-(legacy) — the two macros generate similarly-named but distinct types, never mix them in the same
-handler.
+Only `users.rs`, `roles.rs`, and `access_presets.rs` remain on the legacy `permission_extractor!` +
+`x-required-permission` model described above, until M1.6a/M1.6b converts them. Which model a given
+handler uses is visible from its extractor import: `crate::middleware::action::CanXxx` (new) vs.
+`crate::middleware::permission::CanXxx` (legacy) — the two macros generate similarly-named but distinct
+types, never mix them in the same handler.
 
 ## System Service Credential Guard
 

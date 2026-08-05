@@ -50,8 +50,9 @@ runs the resolved `Action` through `AccessEngine`: `None` action allows; `Ready`
 allows; `Ready` + deny returns `403` and increments the `uptrakit_access_denies_total` counter; `Unavailable`
 authority returns `500` (fail-closed, never silently permissive). This is a documented exception to the platform's
 typed-permission-extractor rule, because the required action is runtime descriptor data no static extractor can
-carry; the OpenAPI operations advertise it via a human-readable dynamic `x-required-permission` extension (the
-OpenAPI extension key itself is unchanged — only the underlying descriptor field renamed). See [Authentication and
+carry; the OpenAPI operations advertise the runtime-valued requirement via the boolean `x-action-dynamic: true`
+extension, paired with an authenticated-only security declaration — the enforced requirement itself lives in the
+registered descriptor/interaction, not in the spec. See [Authentication and
 Authorization](auth-and-authorization.md#runtime-valued-permission-extension-surfaces) for how this exception class
 is distinguished from the platform's other two documented extractor exceptions.
 

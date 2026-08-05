@@ -23,7 +23,7 @@ use uptrakit_web_api_types::validation::Validate;
 
 use crate::AppState;
 use crate::api_error::ApiError;
-use crate::middleware::permission::CanManageAuthSettings;
+use crate::middleware::action::CanManageSettingsAuth;
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::oauth::http_responses::{oauth_400, oauth_500};
 use crate::oauth::services::client::OAuthClientService;
@@ -58,12 +58,13 @@ fn build_client_service(state: &AppState) -> OAuthClientService {
         (status = 403, description = "Insufficient permission"),
         (status = 404, description = "OAuth disabled"),
     ),
-    tag = "OAuth"
+    tag = "OAuth",
+    security(("oauth2" = ["settings.auth:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub(crate) async fn list_clients(
     State(state): State<Arc<AppState>>,
-    CanManageAuthSettings(_user): CanManageAuthSettings,
+    CanManageSettingsAuth(_user): CanManageSettingsAuth,
     Query(pagination): Query<PaginationParams>,
 ) -> Response {
     if !state.oauth.enabled {
@@ -134,12 +135,13 @@ pub(crate) async fn list_clients(
         (status = 403, description = "Insufficient permission"),
         (status = 404, description = "OAuth disabled"),
     ),
-    tag = "OAuth"
+    tag = "OAuth",
+    security(("oauth2" = ["settings.auth:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub(crate) async fn manual_register_client(
     State(state): State<Arc<AppState>>,
-    CanManageAuthSettings(user): CanManageAuthSettings,
+    CanManageSettingsAuth(user): CanManageSettingsAuth,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     axum::Json(body): axum::Json<DcrRegistrationRequest>,
 ) -> Response {
@@ -199,12 +201,13 @@ pub(crate) async fn manual_register_client(
         (status = 403, description = "Insufficient permission"),
         (status = 404, description = "Client not found or OAuth disabled"),
     ),
-    tag = "OAuth"
+    tag = "OAuth",
+    security(("oauth2" = ["settings.auth:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub(crate) async fn revoke_client(
     State(state): State<Arc<AppState>>,
-    CanManageAuthSettings(user): CanManageAuthSettings,
+    CanManageSettingsAuth(user): CanManageSettingsAuth,
     Path(client_id): Path<String>,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
 ) -> Result<Response, ApiError> {
@@ -253,12 +256,13 @@ pub(crate) async fn revoke_client(
         (status = 403, description = "Insufficient permission"),
         (status = 404, description = "Client not found or OAuth disabled"),
     ),
-    tag = "OAuth"
+    tag = "OAuth",
+    security(("oauth2" = ["settings.auth:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub(crate) async fn trust_client(
     State(state): State<Arc<AppState>>,
-    CanManageAuthSettings(user): CanManageAuthSettings,
+    CanManageSettingsAuth(user): CanManageSettingsAuth,
     Path(client_id): Path<String>,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
 ) -> Result<Response, ApiError> {
@@ -537,29 +541,20 @@ mod tests {
     async fn oauth_disabled_returns_404() {
         let db = setup_migrated_db().await;
         let tenant_id = insert_default_tenant(&db).await;
-        let (state, jwt) = build_test_state(db.clone(), tenant_id).await;
+        let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
         // Default state has oauth.enabled = false.
         assert!(
             !state.oauth.enabled,
             "oauth must be disabled in default test state"
         );
 
-        // Mint a token with ManageAuthSettings so we can reach the handler.
-        // Use a nil user_id — the auth middleware validates the JWT signature
-        // but does not verify the user exists in DB for permission extractors.
-        let user_id = uuid::Uuid::nil();
-        let token = jwt
-            .create_access_token(
-                user_id,
-                &[crate::auth::permissions::Permission::ManageAuthSettings],
-                "password",
-                None,
-                None,
-            )
-            .expect("create access token");
-
         let router = build_router(Arc::clone(&state));
         let client = crate::test_harness::http_client::TestClient::new(router);
+
+        // First-registered user gets all built-in roles; settings_manager's
+        // `settings.*:manage` seed grant covers the extractor's
+        // `settings.auth:manage` action through the engine.
+        let token = register_and_get_token(&client).await;
 
         let status = client
             .get("/api/oauth/clients")
@@ -584,7 +579,7 @@ mod tests {
         let router = build_router(Arc::new(patched));
         let client = crate::test_harness::http_client::TestClient::new(router);
 
-        // Mint a token with NO ManageAuthSettings permission.
+        // Mint a token for a principal with no engine grants.
         let user_id = uuid::Uuid::nil();
         let token = jwt
             .create_access_token(user_id, &[], "password", None, None)

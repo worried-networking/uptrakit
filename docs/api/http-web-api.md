@@ -16,10 +16,12 @@ Types are imported via `uptrakit_openapi_client::types::*` (re-exported from `up
   hardcoded string identifiers. This ensures UUID validation at the serialization boundary.
 - Rate limiting applies per-IP via the `api_rate_limits` table (see `crates/ui/web-api-auth/src/auth/rate_limit.rs`). Rate limited endpoints return `429`
   with a message describing the limit window.
-- Route handlers enforce permissions via typed Axum extractors (e.g. `CanViewHosts`, `CanApproveServices`) defined in
-  `crates/ui/web-api/src/middleware/permission.rs`. The required permission is declared once in the extractor and
-  reflected in the OpenAPI spec via the `x-required-permission` extension on every protected endpoint.
-  See [Authentication and Authorization](../security/auth-and-authorization.md) for the full permission model.
+- Route handlers enforce permissions via typed Axum extractors. Converted operations (`CanReadHosts`, and the rest of
+  `crates/ui/web-api/src/middleware/action.rs`) declare a native `oauth2`/`developer_token` OpenAPI security
+  requirement. The `x-required-permission` extension survives only on the legacy `permission_extractor!` operations
+  (`crates/ui/web-api/src/middleware/permission.rs`) in `users.rs`, `roles.rs`, and `access_presets.rs`, until
+  M1.6a/M1.6b converts them. See [Authentication and Authorization](../security/auth-and-authorization.md) for the
+  full permission model.
 
 ## Error Response Shape
 

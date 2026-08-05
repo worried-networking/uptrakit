@@ -68,6 +68,10 @@ EXTRACTOR_ACTIONS = {
     "CanUpdateHosts": "hosts:update",
 }
 
+# Catalog action-string set, as `main()` would derive it from
+# _parse_catalog_map(...).values().
+CATALOG_ACTIONS = {"hosts:read", "hosts:update"}
+
 
 class ParseExtractorMapTests(unittest.TestCase):
     def test_parses_name_to_const_pairs(self) -> None:
@@ -117,7 +121,7 @@ pub async fn list_hosts(CanReadHosts(_user): CanReadHosts) -> Response {
     todo!()
 }
 """
-        violations, converted = vasd._check_file("routes/hosts.rs", source, EXTRACTOR_ACTIONS)
+        violations, converted = vasd._check_file("routes/hosts.rs", source, EXTRACTOR_ACTIONS, CATALOG_ACTIONS)
         self.assertEqual(violations, [])
         self.assertEqual(converted, 1)
 
@@ -140,7 +144,7 @@ pub async fn list_hosts(CanUpdateHosts(_user): CanUpdateHosts) -> Response {
     todo!()
 }
 """
-        violations, converted = vasd._check_file("routes/hosts.rs", source, EXTRACTOR_ACTIONS)
+        violations, converted = vasd._check_file("routes/hosts.rs", source, EXTRACTOR_ACTIONS, CATALOG_ACTIONS)
         self.assertEqual(len(violations), 1)
         self.assertIn("R1", violations[0])
         self.assertIn("['hosts:read']", violations[0])
@@ -163,7 +167,7 @@ pub async fn list_hosts(CanReadHosts(_user): CanReadHosts) -> Response {
     todo!()
 }
 """
-        violations, converted = vasd._check_file("routes/hosts.rs", source, EXTRACTOR_ACTIONS)
+        violations, converted = vasd._check_file("routes/hosts.rs", source, EXTRACTOR_ACTIONS, CATALOG_ACTIONS)
         self.assertEqual(len(violations), 1)
         self.assertIn("R1", violations[0])
         self.assertIn("declares no oauth2 requirement", violations[0])
@@ -186,7 +190,7 @@ pub async fn list_hosts(CanReadHosts(_user): CanReadHosts) -> Response {
     todo!()
 }
 """
-        violations, converted = vasd._check_file("routes/hosts.rs", source, EXTRACTOR_ACTIONS)
+        violations, converted = vasd._check_file("routes/hosts.rs", source, EXTRACTOR_ACTIONS, CATALOG_ACTIONS)
         self.assertEqual(len(violations), 1)
         self.assertIn("R2", violations[0])
         self.assertIn("must not use action extractors", violations[0])
@@ -210,7 +214,7 @@ pub async fn list_hosts(CanReadHosts(_user): CanReadHosts) -> Response {
     todo!()
 }
 """
-        violations, converted = vasd._check_file("routes/hosts.rs", source, EXTRACTOR_ACTIONS)
+        violations, converted = vasd._check_file("routes/hosts.rs", source, EXTRACTOR_ACTIONS, CATALOG_ACTIONS)
         r3 = [v for v in violations if "R3" in v]
         self.assertEqual(len(r3), 1)
         self.assertIn("mixes x-required-permission with oauth2", r3[0])
@@ -234,7 +238,7 @@ pub async fn list_host_tags(CanViewHosts(_user): CanViewHosts) -> Response {
     todo!()
 }
 """
-        violations, converted = vasd._check_file("routes/host_tags.rs", source, EXTRACTOR_ACTIONS)
+        violations, converted = vasd._check_file("routes/host_tags.rs", source, EXTRACTOR_ACTIONS, CATALOG_ACTIONS)
         self.assertEqual(len(violations), 1)
         self.assertIn("R3", violations[0])
         self.assertEqual(converted, 0)
@@ -256,7 +260,7 @@ pub async fn list_hosts(CanReadHosts(_user): CanReadHosts) -> Response {
     todo!()
 }
 """
-        violations, converted = vasd._check_file("routes/hosts.rs", source, EXTRACTOR_ACTIONS)
+        violations, converted = vasd._check_file("routes/hosts.rs", source, EXTRACTOR_ACTIONS, CATALOG_ACTIONS)
         self.assertEqual(len(violations), 1)
         self.assertIn("R4", violations[0])
         self.assertIn("without developer_token pairing", violations[0])
@@ -290,7 +294,7 @@ pub async fn list_host_tags(CanViewHosts(_user): CanViewHosts) -> Response {
     todo!()
 }
 """
-        violations, converted = vasd._check_file("routes/host_tags.rs", source, EXTRACTOR_ACTIONS)
+        violations, converted = vasd._check_file("routes/host_tags.rs", source, EXTRACTOR_ACTIONS, CATALOG_ACTIONS)
         self.assertEqual(violations, [])
         self.assertEqual(converted, 0)
 
@@ -316,25 +320,144 @@ pub async fn update_host_tag(CanUpdateHosts(_user): CanUpdateHosts) -> Response 
     todo!()
 }
 """
-        violations, converted = vasd._check_file("routes/host_tags.rs", source, EXTRACTOR_ACTIONS)
+        violations, converted = vasd._check_file("routes/host_tags.rs", source, EXTRACTOR_ACTIONS, CATALOG_ACTIONS)
         r1 = [v for v in violations if "R1" in v]
         self.assertEqual(r1, [])
         self.assertEqual(violations, [])
         self.assertEqual(converted, 0)
 
 
-class OAuth2ScopesTests(unittest.TestCase):
+class OAuth2GroupsTests(unittest.TestCase):
     def test_none_when_no_oauth2_key(self) -> None:
-        self.assertIsNone(vasd._oauth2_scopes('security(("bearer_token" = []))'))
+        self.assertIsNone(vasd._oauth2_groups('security(("bearer_token" = []))'))
 
-    def test_empty_list_when_declared_empty(self) -> None:
-        self.assertEqual(vasd._oauth2_scopes('security(("oauth2" = []))'), [])
+    def test_single_empty_group(self) -> None:
+        self.assertEqual(vasd._oauth2_groups('security(("oauth2" = []))'), [[]])
 
     def test_scopes_extracted_in_order(self) -> None:
         self.assertEqual(
-            vasd._oauth2_scopes('security(("oauth2" = ["hosts:read", "hosts:update"]))'),
-            ["hosts:read", "hosts:update"],
+            vasd._oauth2_groups('security(("oauth2" = ["hosts:read", "hosts:update"]))'),
+            [["hosts:read", "hosts:update"]],
         )
+
+    def test_multiple_groups_in_declaration_order(self) -> None:
+        self.assertEqual(
+            vasd._oauth2_groups(
+                'security(("oauth2" = ["hosts:read"]), ("oauth2" = ["hosts:update"]), ("developer_token" = []))'
+            ),
+            [["hosts:read"], ["hosts:update"]],
+        )
+
+
+class CheckFileR5Tests(unittest.TestCase):
+    OR_OP_TEMPLATE = """
+use crate::middleware::action::{{AccessAuthority, authorize_any}};
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/hosts/batch",
+    tag = "Hosts",
+    security({security})
+)]
+#[tracing::instrument(skip_all)]
+pub async fn batch_hosts(
+    State(state): State<Arc<AppState>>,
+    Extension(authority): Extension<AccessAuthority>,
+    Json(body): Json<BatchActionRequest>,
+) -> Response {{
+    authorize_any(&state.access_engine, &ctx, required_actions);
+    todo!()
+}}
+"""
+
+    def _check(self, security: str, source: str | None = None):
+        src = source if source is not None else self.OR_OP_TEMPLATE.format(security=security)
+        return vasd._check_file("routes/hosts.rs", src, EXTRACTOR_ACTIONS, CATALOG_ACTIONS)
+
+    def test_clean_or_operation(self) -> None:
+        violations, converted = self._check(
+            '("oauth2" = ["hosts:read"]), ("oauth2" = ["hosts:update"]), ("developer_token" = [])'
+        )
+        self.assertEqual(violations, [])
+        self.assertEqual(converted, 1)
+
+    def test_or_operation_with_extractor_is_flagged(self) -> None:
+        source = """
+use crate::middleware::action::{AccessAuthority, CanReadHosts, authorize_any};
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/hosts/batch",
+    tag = "Hosts",
+    security(("oauth2" = ["hosts:read"]), ("oauth2" = ["hosts:update"]), ("developer_token" = []))
+)]
+#[tracing::instrument(skip_all)]
+pub async fn batch_hosts(
+    CanReadHosts(_user): CanReadHosts,
+    Extension(authority): Extension<AccessAuthority>,
+) -> Response {
+    authorize_any(&engine, &ctx, actions);
+    todo!()
+}
+"""
+        violations, _ = self._check("", source=source)
+        self.assertTrue(any("must not use action extractors" in v for v in violations))
+
+    def test_multi_scope_alternative_is_flagged(self) -> None:
+        violations, _ = self._check(
+            '("oauth2" = ["hosts:read", "hosts:update"]), ("oauth2" = ["hosts:update"]), ("developer_token" = [])'
+        )
+        self.assertTrue(any("exactly one scope" in v for v in violations))
+
+    def test_off_catalog_scope_is_flagged(self) -> None:
+        violations, _ = self._check(
+            '("oauth2" = ["hosts:read"]), ("oauth2" = ["hosts:reed"]), ("developer_token" = [])'
+        )
+        self.assertTrue(any("not in the action catalog" in v for v in violations))
+
+    def test_duplicate_alternatives_are_flagged(self) -> None:
+        violations, _ = self._check(
+            '("oauth2" = ["hosts:read"]), ("oauth2" = ["hosts:read"]), ("developer_token" = [])'
+        )
+        self.assertTrue(any("duplicate OR alternatives" in v for v in violations))
+
+    def test_or_without_access_authority_is_flagged(self) -> None:
+        source = """
+use crate::middleware::action::authorize_any;
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/hosts/batch",
+    tag = "Hosts",
+    security(("oauth2" = ["hosts:read"]), ("oauth2" = ["hosts:update"]), ("developer_token" = []))
+)]
+#[tracing::instrument(skip_all)]
+pub async fn batch_hosts(State(state): State<Arc<AppState>>) -> Response {
+    authorize_any(&engine, &ctx, actions);
+    todo!()
+}
+"""
+        violations, _ = self._check("", source=source)
+        self.assertTrue(any("Extension<AccessAuthority>" in v for v in violations))
+
+    def test_dynamic_operation_with_scoped_group_is_flagged(self) -> None:
+        source = """
+use crate::middleware::action::AccessAuthority;
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/surfaces/{surface_id}",
+    tag = "Surfaces",
+    extensions(("x-action-dynamic" = json!(true))),
+    security(("oauth2" = ["hosts:read"]), ("developer_token" = []))
+)]
+#[tracing::instrument(skip_all)]
+pub async fn get_surface_read(Extension(authority): Extension<AccessAuthority>) -> Response {
+    todo!()
+}
+"""
+        violations, _ = self._check("", source=source)
+        self.assertTrue(any("x-action-dynamic" in v for v in violations))
 
 
 if __name__ == "__main__":

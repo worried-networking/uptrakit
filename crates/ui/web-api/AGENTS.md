@@ -60,18 +60,19 @@ Common typed extractors live in `src/extract.rs`: `Validated<T>` (JSON body dese
 plain `Json<T>` extraction), `ClientIp` / `ProxyIp`, `ServiceIdentity`, and `SessionSvc` /
 `ApiTokenSvc` (eliminate manual `Service::new()` construction in handlers).
 
-Authorization uses typed extractors, never inline checks. Two models coexist during the M1.4a/b
-transition. Unconverted route families use `src/middleware/permission.rs`'s `permission_extractor!`
-macro, which generates types like `CanApproveServices`, `CanTriggerUpdates`, etc., each tied to a
-`Permission` variant; declare the required permission in the handler signature — e.g.
-`CanApproveServices(_user): CanApproveServices` — instead of calling `user.has_permission(...)` in the
-body, and carry the matching `x-required-permission` extension on the `#[utoipa::path]` annotation.
-Families converted to the AccessEngine model (starting with `hosts`) instead use `src/middleware/action.rs`'s
-`action_extractor!` macro (e.g. `CanReadHosts`), and declare a native `security(("oauth2" = ["hosts:read"]),
-("developer_token" = []))` OpenAPI requirement in place of `x-required-permission`. The sole exception in
-either model is handlers with a custom auth path (e.g. WebSocket handlers reading a `?token=` query
-parameter before the normal extractor chain runs) — these may call `has_permission()` inline but must
-carry a `// APPROVED: custom auth path` comment. Full rationale in
+Authorization uses typed extractors, never inline checks. Route families enforce through
+`src/middleware/action.rs`'s `action_extractor!` macro (e.g. `CanReadHosts`), backed by the
+`AccessEngine`, and declare a native `security(("oauth2" = ["hosts:read"]), ("developer_token" = []))`
+OpenAPI requirement — gated by `ci/verify_action_security_declarations.py` (rules R1–R5). Operations whose
+authorization is an OR of alternatives (batch actions, `list_plugin_types`, plugin-type-settings reads)
+enforce inline via `authorize_any` and declare one single-scope `oauth2` requirement per alternative, with
+**no** action extractor; dynamic surface wrappers declare the authenticated-only form
+(`security(("oauth2" = []), ("developer_token" = []))`) plus `extensions(("x-action-dynamic" = json!(true)))`.
+The legacy `src/middleware/permission.rs` `permission_extractor!` model (`x-required-permission` extension +
+`security(("bearer_token" = []))`) survives only in `users.rs`, `roles.rs`, and `access_presets.rs` until
+M1.6a/M1.6b. The sole exception in either model is handlers with a custom auth path (e.g. WebSocket handlers
+reading a `?token=` query parameter before the normal extractor chain runs) — these resolve the principal
+themselves and must carry a `// APPROVED: custom auth path` comment. Full rationale in
 [`docs/security/auth-and-authorization.md`](../../../docs/security/auth-and-authorization.md).
 
 ## OpenAPI rules

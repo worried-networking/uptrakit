@@ -2,10 +2,9 @@ use crate::AppState;
 use crate::actions::system_services as ss_actions;
 use crate::api_error::ApiError;
 use crate::error_response::error_response;
-use crate::middleware::action::{AccessAuthority, authorize_any};
-use crate::middleware::permission::{
-    CanApproveSystemServices, CanRejectSystemServices, CanRemoveSystemServices,
-    CanUpdateSystemServices, CanViewSystemServices,
+use crate::middleware::action::{
+    AccessAuthority, CanApproveSystemServices, CanDeleteSystemServices, CanReadSystemServices,
+    CanRejectSystemServices, CanUpdateSystemServices, authorize_any,
 };
 use crate::middleware::require_auth::{
     AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
@@ -79,13 +78,12 @@ fn batch_action_to_audit_action(action: &str) -> Option<uptrakit_audit_log::Regi
         (status = 403, description = "Not authorized")
     ),
     tag = "System Services",
-    extensions(("x-required-permission" = json!("view_system_services"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.services:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_system_services(
     State(state): State<Arc<AppState>>,
-    CanViewSystemServices(_user): CanViewSystemServices,
+    CanReadSystemServices(_user): CanReadSystemServices,
     Query(query): Query<ListSystemServicesQuery>,
 ) -> Response {
     match ss_queries::list_system_services(state.db(), &query).await {
@@ -111,13 +109,12 @@ pub async fn list_system_services(
         (status = 404, description = "System service not found")
     ),
     tag = "System Services",
-    extensions(("x-required-permission" = json!("view_system_services"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.services:read"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_system_service(
     State(state): State<Arc<AppState>>,
-    CanViewSystemServices(_user): CanViewSystemServices,
+    CanReadSystemServices(_user): CanReadSystemServices,
     Path(service_id): Path<Uuid>,
 ) -> Response {
     match ss_queries::get_active_system_service(state.db(), service_id).await {
@@ -146,8 +143,7 @@ pub async fn get_system_service(
         (status = 404, description = "System service not found")
     ),
     tag = "System Services",
-    extensions(("x-required-permission" = json!("update_system_services"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.services:update"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_system_service(
@@ -244,8 +240,7 @@ pub async fn update_system_service(
         (status = 404, description = "System service not found")
     ),
     tag = "System Services",
-    extensions(("x-required-permission" = json!("approve_system_services"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.services:approve"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn approve_system_service(
@@ -303,8 +298,7 @@ pub async fn approve_system_service(
         (status = 404, description = "System service not found")
     ),
     tag = "System Services",
-    extensions(("x-required-permission" = json!("reject_system_services"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.services:reject"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn reject_system_service(
@@ -362,13 +356,12 @@ pub async fn reject_system_service(
         (status = 404, description = "System service not found")
     ),
     tag = "System Services",
-    extensions(("x-required-permission" = json!("remove_system_services"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.services:delete"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn deactivate_system_service(
     State(state): State<Arc<AppState>>,
-    CanRemoveSystemServices(user): CanRemoveSystemServices,
+    CanDeleteSystemServices(user): CanDeleteSystemServices,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(service_id): Path<Uuid>,
 ) -> Result<impl IntoResponse, ApiError> {
@@ -442,8 +435,12 @@ pub async fn deactivate_system_service(
         (status = 403, description = "Not authorized")
     ),
     tag = "System Services",
-    extensions(("x-required-permission" = json!("approve_system_services, reject_system_services, or remove_system_services"))),
-    security(("bearer_token" = []))
+    security(
+        ("oauth2" = ["system.services:approve"]),
+        ("oauth2" = ["system.services:reject"]),
+        ("oauth2" = ["system.services:delete"]),
+        ("developer_token" = [])
+    )
 )]
 #[tracing::instrument(skip_all)]
 pub async fn batch_system_services(
@@ -1115,7 +1112,7 @@ mod tests {
 
         let response = deactivate_system_service(
             State(Arc::clone(&state)),
-            CanRemoveSystemServices::new(auth_user),
+            CanDeleteSystemServices::new(auth_user),
             None,
             Path(service.id),
         )

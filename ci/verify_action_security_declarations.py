@@ -8,6 +8,16 @@ action extractors (M1.4a). Rules:
   R3  no operation carries BOTH x-required-permission and an oauth2
       requirement (mixed worlds).
   R4  every oauth2 requirement is paired with ("developer_token" = []).
+  R5  multiple ("oauth2" = [...]) groups on one operation encode OR
+      alternatives (inline authorize_any enforcement): the handler must use
+      NO action extractor but must take Extension<AccessAuthority> (and the
+      file must call authorize_any); each group carries exactly one scope;
+      no duplicate alternatives; and every declared scope (single- or
+      multi-group) must exist in the built-in catalog map. Operations
+      carrying x-action-dynamic must declare exactly one empty oauth2 group
+      (their requirement is registration data, enforced at runtime).
+      The catalog check covers the closed built-in catalog only — dynamic
+      plugin/surface scopes never appear in route declarations.
 
 Unconverted operations (bearer_token + x-required-permission) are ignored
 except by R3 — transition tolerance for the M1.4b window. Non-vacuity:
@@ -147,12 +157,15 @@ def _iter_operations(source: str):
         idx = cursor
 
 
-def _oauth2_scopes(attr: str) -> list[str] | None:
-    """Scope list if the attr declares ("oauth2" = [...]), else None."""
-    m = re.search(r"\"oauth2\"\s*=\s*\[([^\]]*)\]", attr)
-    if not m:
-        return None
-    return re.findall(r"\"([^\"]+)\"", m.group(1))
+def _oauth2_groups(attr: str) -> list[list[str]] | None:
+    """One scope list per ("oauth2" = [...]) requirement group, in
+    declaration order; None when the attr declares no oauth2 requirement
+    at all. Multiple groups encode OR alternatives (rule R5)."""
+    groups = [
+        re.findall(r"\"([^\"]+)\"", m.group(1))
+        for m in re.finditer(r"\"oauth2\"\s*=\s*\[([^\]]*)\]", attr)
+    ]
+    return groups if groups else None
 
 
 def _action_module_imports(source: str) -> set[str]:
@@ -188,6 +201,7 @@ def _check_file(
     path: str,
     source: str,
     extractor_actions: dict[str, str],
+    catalog_actions: set[str],
 ) -> tuple[list[str], int]:
     """Return (violations, converted_operation_count) for one route file.
 
@@ -195,8 +209,8 @@ def _check_file(
     imported from `middleware::action` in this file (see
     `_action_module_imports`) — the legacy `middleware::permission` module
     defines same-named extractors (`CanManageCommands`, `CanUpdateHosts`,
-    `CanTriggerChecks`) still used by unconverted files (host_tags.rs,
-    software_items/version_check.rs, plugin_configs/discover.rs today). A
+    `CanTriggerChecks`) still used by unconverted files (users.rs, roles.rs,
+    access_presets.rs after the M1.4b sweep). A
     file cannot import the same unqualified name from both modules (compile
     error), but it CAN import *different* names from each module in the
     same file — e.g. `action::{AccessAuthority, authorize_any}` alongside
@@ -212,13 +226,14 @@ def _check_file(
     converted = 0
     for attr, signature in _iter_operations(source):
         if not uses_action_module:
-            if "x-required-permission" in attr and _oauth2_scopes(attr) is not None:
+            if "x-required-permission" in attr and _oauth2_groups(attr) is not None:
                 violations.append(
                     f"{path}: R3 operation mixes x-required-permission with oauth2"
                 )
             continue
-        scopes = _oauth2_scopes(attr)
+        groups = _oauth2_groups(attr)
         has_ext = "x-required-permission" in attr
+        dynamic = '"x-action-dynamic"' in attr
         used = sorted(
             {
                 extractor_actions[name]
@@ -226,9 +241,13 @@ def _check_file(
                 if name in imported and re.search(rf"\b{name}\b", signature)
             }
         )
-        if scopes is not None and has_ext:
+        if groups is not None and has_ext:
             violations.append(f"{path}: R3 operation mixes x-required-permission with oauth2")
-        if scopes is None:
+        if dynamic and groups != [[]]:
+            violations.append(
+                f"{path}: R5 x-action-dynamic operation must declare exactly one empty oauth2 group"
+            )
+        if groups is None:
             if used:
                 violations.append(
                     f"{path}: R1 handler uses action extractor(s) {used} but declares no oauth2 requirement"
@@ -237,15 +256,40 @@ def _check_file(
         converted += 1
         if '"developer_token"' not in attr:
             violations.append(f"{path}: R4 oauth2 requirement without developer_token pairing")
-        if scopes:
-            if sorted(scopes) != used:
+        for scope in (scope for group in groups for scope in group):
+            if scope not in catalog_actions:
+                violations.append(f"{path}: R5 declared scope {scope!r} not in the action catalog")
+        if len(groups) == 1:
+            scopes = groups[0]
+            if scopes:
+                if sorted(scopes) != used:
+                    violations.append(
+                        f"{path}: R1 oauth2 scopes {sorted(scopes)} != extractor actions {used}"
+                    )
+            elif used:
                 violations.append(
-                    f"{path}: R1 oauth2 scopes {sorted(scopes)} != extractor actions {used}"
+                    f"{path}: R2 empty-scope operation must not use action extractors ({used})"
                 )
-        elif used:
-            violations.append(
-                f"{path}: R2 empty-scope operation must not use action extractors ({used})"
-            )
+        else:
+            if used:
+                violations.append(
+                    f"{path}: R5 OR-declared operation must not use action extractors ({used})"
+                )
+            if len({tuple(group) for group in groups}) != len(groups):
+                violations.append(f"{path}: R5 duplicate OR alternatives declared")
+            for group in groups:
+                if len(group) != 1:
+                    violations.append(
+                        f"{path}: R5 each OR alternative must carry exactly one scope (got {group})"
+                    )
+            if not re.search(r"\bAccessAuthority\b", signature):
+                violations.append(
+                    f"{path}: R5 OR-declared operation must take Extension<AccessAuthority> for inline enforcement"
+                )
+            if "authorize_any" not in source:
+                violations.append(
+                    f"{path}: R5 file declares OR operations but never calls authorize_any"
+                )
     return violations, converted
 
 
@@ -265,10 +309,13 @@ def main() -> int:
         print(f"verify_action_security_declarations: extractor consts not in catalog: {sorted(unknown)}", file=sys.stderr)
         return 1
     extractor_actions = {n: const_to_action[c] for n, c in name_to_const.items()}
+    catalog_actions = set(const_to_action.values())
     violations: list[str] = []
     converted_total = 0
     for rs in sorted(ROUTES_DIR.rglob("*.rs")):
-        vs, converted = _check_file(str(rs.relative_to(ROOT)), rs.read_text(encoding="utf-8"), extractor_actions)
+        vs, converted = _check_file(
+            str(rs.relative_to(ROOT)), rs.read_text(encoding="utf-8"), extractor_actions, catalog_actions
+        )
         violations.extend(vs)
         converted_total += converted
     if converted_total == 0:

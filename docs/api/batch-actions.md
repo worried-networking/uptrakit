@@ -44,18 +44,20 @@ fail. Callers must inspect both arrays to determine the outcome of each item.
 
 ## Endpoints
 
-| Endpoint                                   | Actions                           | Permission                                                                                    |
-| ------------------------------------------ | --------------------------------- | --------------------------------------------------------------------------------------------- |
-| `POST /api/v1/services/batch`              | `approve`, `reject`, `deactivate` | Per-action (`CanApproveServices`, `CanRejectServices`, `CanRemoveServices`)                   |
-| `POST /api/v1/system-services/batch`       | `approve`, `reject`, `deactivate` | Per-action (`CanApproveSystemServices`, `CanRejectSystemServices`, `CanRemoveSystemServices`) |
-| `POST /api/v1/software-items/batch`        | `approve`, `delete`               | `CanDeleteSoftware`                                                                           |
-| `POST /api/v1/hosts/batch`                 | `deactivate`                      | `CanDeactivateHosts`                                                                          |
-| `POST /api/v1/autodiscovery/ignores/batch` | `delete`                          | `CanManageIgnores`                                                                            |
-| `POST /api/v1/plugin-configs/batch`        | `delete`                          | `CanManageCommands`                                                                           |
-| `POST /api/v1/host-tags/batch`             | `delete`                          | `CanUpdateHosts`                                                                              |
+| Endpoint                                   | Actions                           | Required action                                                                           |
+| ------------------------------------------ | --------------------------------- | ----------------------------------------------------------------------------------------- |
+| `POST /api/v1/services/batch`              | `approve`, `reject`, `deactivate` | Per-action: `services:approve`, `services:reject`, `services:delete`                      |
+| `POST /api/v1/system-services/batch`       | `approve`, `reject`, `deactivate` | Per-action: `system.services:approve`, `system.services:reject`, `system.services:delete` |
+| `POST /api/v1/software-items/batch`        | `approve`, `delete`               | `software:delete`                                                                         |
+| `POST /api/v1/hosts/batch`                 | `deactivate`                      | `hosts:delete`                                                                            |
+| `POST /api/v1/autodiscovery/ignores/batch` | `delete`                          | `discovery.ignores:manage`                                                                |
+| `POST /api/v1/plugin-configs/batch`        | `delete`                          | `commands:manage`                                                                         |
+| `POST /api/v1/host-tags/batch`             | `delete`                          | `hosts.tags:manage`                                                                       |
 
-All endpoints require a valid Bearer token. Permission extractors are declared on each route
-handler and reflected in the OpenAPI spec via `x-required-permission`.
+All endpoints require a valid Bearer token. The two per-action endpoints enforce inline via `authorize_any` and
+declare one single-scope `oauth2` requirement per permitted alternative (OR semantics); the single-action endpoints
+use the matching `action_extractor!` type and declare that one scope. Neither form carries an
+`x-required-permission` extension.
 
 ## Side Effects
 

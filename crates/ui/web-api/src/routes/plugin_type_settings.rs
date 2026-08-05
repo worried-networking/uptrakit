@@ -2,8 +2,7 @@ use crate::AppState;
 use crate::app_state::PluginOpsState;
 use crate::error_response::error_response;
 use crate::extract::Validated;
-use crate::middleware::action::{AccessAuthority, authorize_any};
-use crate::middleware::permission::CanManageGlobalSettings;
+use crate::middleware::action::{AccessAuthority, CanManageSystemSettings, authorize_any};
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::queries::plugin_type_settings as pts_queries;
 use crate::queries::plugin_type_settings::PluginTypeSettingsView;
@@ -91,14 +90,17 @@ fn can_view_type_settings(engine: &AccessEngine, ctx: &AccessContext) -> Result<
 #[utoipa::path(
     get,
     path = "/api/v1/plugin-type-settings",
-    extensions(("x-required-permission" = json!(["view_settings", "manage_global_settings"]))),
     responses(
         (status = 200, description = "List of plugin type settings", body = Vec<PluginTypeSettingsResponse>),
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Not authorized"),
     ),
     tag = "Plugin Type Settings",
-    security(("bearer_token" = []))
+    security(
+        ("oauth2" = ["settings:read"]),
+        ("oauth2" = ["system.settings:manage"]),
+        ("developer_token" = [])
+    )
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_plugin_type_settings(
@@ -150,7 +152,6 @@ pub async fn list_plugin_type_settings(
     get,
     path = "/api/v1/plugin-type-settings/{plugin_type}",
     params(("plugin_type" = String, Path, description = "Plugin type identifier")),
-    extensions(("x-required-permission" = json!(["view_settings", "manage_global_settings"]))),
     responses(
         (status = 200, description = "Plugin type settings", body = PluginTypeSettingsResponse),
         (status = 404, description = "No settings found for this plugin type"),
@@ -158,7 +159,11 @@ pub async fn list_plugin_type_settings(
         (status = 403, description = "Not authorized"),
     ),
     tag = "Plugin Type Settings",
-    security(("bearer_token" = []))
+    security(
+        ("oauth2" = ["settings:read"]),
+        ("oauth2" = ["system.settings:manage"]),
+        ("developer_token" = [])
+    )
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_plugin_type_settings(
@@ -247,7 +252,6 @@ impl FromRequestParts<Arc<AppState>> for WriteAuthContext {
     path = "/api/v1/plugin-type-settings/{plugin_type}",
     params(("plugin_type" = String, Path, description = "Plugin type identifier")),
     request_body = UpsertPluginTypeSettingsRequest,
-    extensions(("x-required-permission" = json!("manage_global_settings"))),
     responses(
         (status = 200, description = "Plugin type settings created or updated", body = PluginTypeSettingsResponse),
         (status = 400, description = "Invalid input"),
@@ -255,7 +259,7 @@ impl FromRequestParts<Arc<AppState>> for WriteAuthContext {
         (status = 403, description = "Not authorized"),
     ),
     tag = "Plugin Type Settings",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.settings:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn upsert_plugin_type_settings(
@@ -263,7 +267,7 @@ pub async fn upsert_plugin_type_settings(
     State(plugin_ops): State<PluginOpsState>,
     tenant_db: TenantDb,
     Path(plugin_type): Path<String>,
-    CanManageGlobalSettings(user): CanManageGlobalSettings,
+    CanManageSystemSettings(user): CanManageSystemSettings,
     write_ctx: WriteAuthContext,
     Validated(req): Validated<UpsertPluginTypeSettingsRequest>,
 ) -> Response {
@@ -408,7 +412,6 @@ pub async fn upsert_plugin_type_settings(
     delete,
     path = "/api/v1/plugin-type-settings/{plugin_type}",
     params(("plugin_type" = String, Path, description = "Plugin type identifier")),
-    extensions(("x-required-permission" = json!("manage_global_settings"))),
     responses(
         (status = 204, description = "Plugin type settings deleted (reset to defaults)"),
         (status = 404, description = "No settings found for this plugin type"),
@@ -416,7 +419,7 @@ pub async fn upsert_plugin_type_settings(
         (status = 403, description = "Not authorized"),
     ),
     tag = "Plugin Type Settings",
-    security(("bearer_token" = []))
+    security(("oauth2" = ["system.settings:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn delete_plugin_type_settings(
@@ -424,7 +427,7 @@ pub async fn delete_plugin_type_settings(
     State(plugin_ops): State<PluginOpsState>,
     tenant_db: TenantDb,
     Path(plugin_type): Path<String>,
-    CanManageGlobalSettings(user): CanManageGlobalSettings,
+    CanManageSystemSettings(user): CanManageSystemSettings,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Extension(authority): Extension<AccessAuthority>,
 ) -> Response {

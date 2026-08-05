@@ -236,10 +236,10 @@ These are non-negotiable design constraints. Do not violate them.
    `.dns_resolver(Arc::new(SsrfSafeResolver::new()))` (or `::permissive()` for self-hosted; in `uptrakit_shared_types::ssrf` behind `http-ssrf`).
    See [SSRF Protection](docs/security/secure-development.md#ssrf-protection).
 1. **Use typed permission extractors for route authorization.** Never call `user.has_permission(...)` in handler bodies; declare the requirement
-   via an Axum extractor. Unconverted route families use `permission_extractor!` (`crates/ui/web-api/src/middleware/permission.rs`), carrying the
-   matching `x-required-permission` OpenAPI extension; families converted to the AccessEngine model (M1.4a, starting with `hosts`) use
-   `action_extractor!` (`crates/ui/web-api/src/middleware/action.rs`), declaring a native `security(...)` OpenAPI requirement instead. See
-   [Authentication and Authorization](docs/security/auth-and-authorization.md).
+   via an Axum extractor. Route families default to `action_extractor!` (`crates/ui/web-api/src/middleware/action.rs`), backed by the
+   `AccessEngine`, declaring a native `security(...)` OpenAPI requirement. Only `users.rs`, `roles.rs`, and `access_presets.rs` remain on the
+   legacy `permission_extractor!` (`crates/ui/web-api/src/middleware/permission.rs`) model, carrying the matching `x-required-permission` OpenAPI
+   extension, until M1.6a/M1.6b converts them. See [Authentication and Authorization](docs/security/auth-and-authorization.md).
 1. **Surface permissions are enforced at read/invoke time.** `required_action` (a catalog `resource:verb` action
    string, parsed to `Action` at registration admission) on surface descriptors and interactions is enforced
    server-side via `AccessEngine` before dispatch, for both plugin- and service-backed surfaces; provider-origin

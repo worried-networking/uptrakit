@@ -700,3 +700,318 @@ async fn d5_authenticated_only_endpoints_zero_grant_ok() {
         "2fa totp enroll must 401 without credentials"
     );
 }
+
+#[tokio::test]
+async fn b6_system_services_family_enforcement() {
+    assert_family_enforcement(
+        "/api/v1/system-services",
+        "system.services:read",
+        "services:read",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn b6_plugin_configs_family_enforcement() {
+    assert_family_enforcement("/api/v1/plugin-configs", "software:read", "commands:manage").await;
+}
+
+/// D2 on every B6 file (spec §Tests), one path per file. `events.rs` (SSE)
+/// and `oauth/clients_api.rs` are the exit-sweep stragglers; the two batch
+/// endpoints are POST-only.
+#[tokio::test]
+async fn b6_no_credential_is_401_per_family() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    for path in [
+        "/api/v1/surfaces",
+        "/api/v1/system-services",
+        "/api/v1/plugin-configs",
+        "/api/v1/plugin-types",
+        "/api/v1/plugin-type-settings",
+        "/api/oauth/clients",
+        "/api/v1/events/stream",
+    ] {
+        assert_eq!(
+            client.get(path).send_status().await,
+            http::StatusCode::UNAUTHORIZED,
+            "{path}: D2 expected 401"
+        );
+    }
+    for path in [
+        "/api/v1/services/batch",
+        "/api/v1/system-services/batch",
+        // The declaration-only 405 stub: require_auth still runs first.
+        "/api/v1/surfaces/s/interactions/i/x",
+    ] {
+        assert_eq!(
+            client
+                .post_json(path, &serde_json::json!({}))
+                .send_status()
+                .await,
+            http::StatusCode::UNAUTHORIZED,
+            "{path}: D2 expected 401"
+        );
+    }
+}
+
+/// `events.rs` conversion: the SSE stream is gated on `services:read`
+/// through the engine. Only the deny leg is probed — a granted request
+/// answers 200 with an unbounded SSE body that a body-collecting test
+/// request would hang on; the allow behavior of the `CanReadServices`
+/// extractor itself is already pinned by the B1 services family test.
+#[tokio::test]
+async fn b6_events_stream_zero_grant_is_403() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let (_user_id, token) = staged_zero_grant_user(&app).await;
+    assert_eq!(
+        client
+            .get("/api/v1/events/stream")
+            .bearer(&token)
+            .send_status()
+            .await,
+        http::StatusCode::FORBIDDEN
+    );
+}
+
+/// B6 OR gate (`services/batch.rs`): each alternative individually
+/// authorizes exactly its own batch action; zero grants deny; holding one
+/// alternative does not authorize a sibling action.
+#[tokio::test]
+async fn b6_services_batch_or_alternatives() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let (user_id, token) = staged_zero_grant_user(&app).await;
+    let approve = serde_json::json!({ "action": "approve", "ids": [uuid::Uuid::now_v7()] });
+    assert_eq!(
+        client
+            .post_json("/api/v1/services/batch", &approve)
+            .bearer(&token)
+            .send_status()
+            .await,
+        http::StatusCode::FORBIDDEN,
+        "zero grants must deny the batch endpoint"
+    );
+    for (action, batch_action) in [
+        ("services:approve", "approve"),
+        ("services:reject", "reject"),
+        ("services:delete", "deactivate"),
+    ] {
+        let patterns = vec![action.parse::<ActionPattern>().expect("pattern")];
+        let grant_id = insert_grant(
+            &app.db,
+            NewGrant {
+                subject: GrantSubject::User(user_id),
+                tenant_id: Some(app.tenant_id),
+                patterns: &patterns,
+                selector: Selector::All,
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect("insert grant");
+        app.state.access_engine.invalidate_subjects(&[user_id], &[]);
+        let body = serde_json::json!({ "action": batch_action, "ids": [uuid::Uuid::now_v7()] });
+        assert_eq!(
+            client
+                .post_json("/api/v1/services/batch", &body)
+                .bearer(&token)
+                .send_status()
+                .await,
+            http::StatusCode::OK,
+            "{action}: its own batch action must be authorized"
+        );
+        let sibling = if batch_action == "approve" {
+            "reject"
+        } else {
+            "approve"
+        };
+        let sibling_body = serde_json::json!({ "action": sibling, "ids": [uuid::Uuid::now_v7()] });
+        assert_eq!(
+            client
+                .post_json("/api/v1/services/batch", &sibling_body)
+                .bearer(&token)
+                .send_status()
+                .await,
+            http::StatusCode::FORBIDDEN,
+            "{action}: a sibling batch action must stay denied"
+        );
+        delete_grant(&app.db, grant_id).await.expect("delete grant");
+        app.state.access_engine.invalidate_subjects(&[user_id], &[]);
+    }
+}
+
+/// Same OR shape for `system_services.rs`'s batch op — system-plane grants
+/// (`tenant_id: None`, see `action_grant_tenant_id`).
+#[tokio::test]
+async fn b6_system_services_batch_or_alternatives() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let (user_id, token) = staged_zero_grant_user(&app).await;
+    let approve = serde_json::json!({ "action": "approve", "ids": [uuid::Uuid::now_v7()] });
+    assert_eq!(
+        client
+            .post_json("/api/v1/system-services/batch", &approve)
+            .bearer(&token)
+            .send_status()
+            .await,
+        http::StatusCode::FORBIDDEN,
+        "zero grants must deny the system batch endpoint"
+    );
+    for (action, batch_action) in [
+        ("system.services:approve", "approve"),
+        ("system.services:reject", "reject"),
+        ("system.services:delete", "deactivate"),
+    ] {
+        let patterns = vec![action.parse::<ActionPattern>().expect("pattern")];
+        let grant_id = insert_grant(
+            &app.db,
+            NewGrant {
+                subject: GrantSubject::User(user_id),
+                tenant_id: None,
+                patterns: &patterns,
+                selector: Selector::All,
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect("insert grant");
+        app.state.access_engine.invalidate_subjects(&[user_id], &[]);
+        let body = serde_json::json!({ "action": batch_action, "ids": [uuid::Uuid::now_v7()] });
+        assert_eq!(
+            client
+                .post_json("/api/v1/system-services/batch", &body)
+                .bearer(&token)
+                .send_status()
+                .await,
+            http::StatusCode::OK,
+            "{action}: its own batch action must be authorized"
+        );
+        delete_grant(&app.db, grant_id).await.expect("delete grant");
+        app.state.access_engine.invalidate_subjects(&[user_id], &[]);
+    }
+}
+
+/// Landed M1.5 tests pin the `settings:read` and `system.settings:manage`
+/// alternatives of the plugin-types OR (`integration_tests/plugin_configs.rs`);
+/// this adds the remaining `software:read`-alone leg.
+#[tokio::test]
+async fn b6_plugin_types_software_read_only_allows() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let (user_id, token) = staged_zero_grant_user(&app).await;
+    assert_eq!(
+        client
+            .get("/api/v1/plugin-types")
+            .bearer(&token)
+            .send_status()
+            .await,
+        http::StatusCode::FORBIDDEN
+    );
+    let patterns = vec!["software:read".parse::<ActionPattern>().expect("pattern")];
+    insert_grant(
+        &app.db,
+        NewGrant {
+            subject: GrantSubject::User(user_id),
+            tenant_id: Some(app.tenant_id),
+            patterns: &patterns,
+            selector: Selector::All,
+            description: None,
+            created_by: None,
+        },
+    )
+    .await
+    .expect("insert grant");
+    app.state.access_engine.invalidate_subjects(&[user_id], &[]);
+    assert_eq!(
+        client
+            .get("/api/v1/plugin-types")
+            .bearer(&token)
+            .send_status()
+            .await,
+        http::StatusCode::OK,
+        "software:read alone must clear the plugin-types OR gate"
+    );
+}
+
+/// Surfaces list stays authenticated-only after the declaration change, and
+/// the POST item-addressed stub keeps its unconditional 405.
+#[tokio::test]
+async fn b6_surfaces_authenticated_only_zero_grant_ok() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let (_user_id, token) = staged_zero_grant_user(&app).await;
+    assert_eq!(
+        client
+            .get("/api/v1/surfaces")
+            .bearer(&token)
+            .send_status()
+            .await,
+        http::StatusCode::OK,
+        "surfaces list must stay authenticated-only"
+    );
+    assert_eq!(
+        client
+            .post_json(
+                "/api/v1/surfaces/s/interactions/i/x",
+                &serde_json::json!({})
+            )
+            .bearer(&token)
+            .send_status()
+            .await,
+        http::StatusCode::METHOD_NOT_ALLOWED,
+        "item-addressed POST stub must keep its 405"
+    );
+}
+
+/// `oauth/clients_api.rs` conversion: `settings.auth:manage` clears the
+/// extractor. `TestApp` ships with oauth disabled, so cleared authz shows as
+/// the handler's own 404, never 403 (same assert_ne pattern as the B4
+/// divergence pins).
+#[tokio::test]
+async fn b6_oauth_clients_extractor_enforcement() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let (user_id, token) = staged_zero_grant_user(&app).await;
+    assert_eq!(
+        client
+            .get("/api/oauth/clients")
+            .bearer(&token)
+            .send_status()
+            .await,
+        http::StatusCode::FORBIDDEN,
+        "zero grants must be denied by the extractor"
+    );
+    let patterns = vec![
+        "settings.auth:manage"
+            .parse::<ActionPattern>()
+            .expect("pattern"),
+    ];
+    insert_grant(
+        &app.db,
+        NewGrant {
+            subject: GrantSubject::User(user_id),
+            tenant_id: Some(app.tenant_id),
+            patterns: &patterns,
+            selector: Selector::All,
+            description: None,
+            created_by: None,
+        },
+    )
+    .await
+    .expect("insert grant");
+    app.state.access_engine.invalidate_subjects(&[user_id], &[]);
+    let status = client
+        .get("/api/oauth/clients")
+        .bearer(&token)
+        .send_status()
+        .await;
+    assert_ne!(
+        status,
+        http::StatusCode::FORBIDDEN,
+        "settings.auth:manage must clear the extractor"
+    );
+}

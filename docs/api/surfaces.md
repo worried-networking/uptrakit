@@ -212,9 +212,9 @@ _shape_, not actual caching — `no-store` remains the policy (see the ADR's hon
 
 `list`/`providers` are authenticated-only, with results filtered by descriptor visibility; `read`/every
 method-mapped interaction route enforce the dynamic `required_action` declared by the surface descriptor/interaction
-through `AccessEngine`, advertised in OpenAPI via the human-readable `x-required-permission` extension (the
-extension key itself is unchanged). See [Shared Surface Security](../security/surfaces.md) for the full model, and
-[Authentication and
+through `AccessEngine`. The wrapper operations carry `x-action-dynamic: true` with an authenticated-only security
+declaration in OpenAPI — the runtime-valued requirement itself lives in the registered descriptor/interaction, not
+in the spec. See [Shared Surface Security](../security/surfaces.md) for the full model, and [Authentication and
 Authorization](../security/auth-and-authorization.md#runtime-valued-permission-extension-surfaces) for the
 extractor-exception class this pattern belongs to.
 

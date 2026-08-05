@@ -2,9 +2,10 @@
 //!
 //! Converted route families declare authorization with these extractors +
 //! native `security(("oauth2" = ["<action>"]), ("developer_token" = []))`
-//! requirements; unconverted families keep `permission_extractor!` +
-//! `x-required-permission` until the M1.4b sweep. Verdicts: 401 no
-//! principal, 403 `Decision::Deny`, 500 engine unavailable (fail-closed).
+//! requirements; only `users.rs`, `roles.rs`, `access_presets.rs` keep the
+//! legacy `permission_extractor!` + `x-required-permission` model until
+//! M1.6a/M1.6b. Verdicts: 401 no principal, 403 `Decision::Deny`, 500 engine
+//! unavailable (fail-closed).
 
 use axum::extract::{FromRef, FromRequestParts};
 use axum::http::request::Parts;
@@ -226,6 +227,16 @@ action_extractor! {
     CanReadNotifications => actions::NOTIFICATIONS_READ,
     /// `notifications:manage` — create/modify notification channels and rules.
     CanManageNotifications => actions::NOTIFICATIONS_MANAGE,
+    /// `system.services:read` — list/get system services.
+    CanReadSystemServices => actions::SYSTEM_SERVICES_READ,
+    /// `system.services:approve` — approve pending system services.
+    CanApproveSystemServices => actions::SYSTEM_SERVICES_APPROVE,
+    /// `system.services:reject` — reject pending system services.
+    CanRejectSystemServices => actions::SYSTEM_SERVICES_REJECT,
+    /// `system.services:delete` — deactivate system services.
+    CanDeleteSystemServices => actions::SYSTEM_SERVICES_DELETE,
+    /// `system.services:update` — update system service settings.
+    CanUpdateSystemServices => actions::SYSTEM_SERVICES_UPDATE,
 }
 
 /// Authorize the first allowed action of `actions` (OR-gate). On overall

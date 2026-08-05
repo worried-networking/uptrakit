@@ -6,12 +6,12 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 
 use crate::AppState;
-use crate::middleware::permission::CanViewServices;
+use crate::middleware::action::CanReadServices;
 use crate::middleware::tenant_context::TenantContext;
 
 /// SSE stream for real-time admin events.
 ///
-/// Authenticated endpoint. Any authenticated user can subscribe.
+/// Requires the `services:read` action.
 /// Pushes lightweight invalidation signals for the user's tenant so the
 /// frontend can fetch fresh data on demand.
 ///
@@ -23,7 +23,7 @@ use crate::middleware::tenant_context::TenantContext;
 #[tracing::instrument(skip_all)]
 pub async fn stream_events(
     State(state): State<Arc<AppState>>,
-    CanViewServices(_auth_user): CanViewServices,
+    CanReadServices(_auth_user): CanReadServices,
     tenant: TenantContext,
 ) -> Response {
     let tenant_id = tenant.tenant_id;

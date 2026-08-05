@@ -234,8 +234,10 @@ Two dedicated permissions govern access to the notification subsystem:
 | `ViewNotifications`   | `view_notifications`   | Read channels, rules, and delivery log                           |
 | `ManageNotifications` | `manage_notifications` | Create, update, delete channels and rules; test channel delivery |
 
-These permissions use the standard typed-extractor pattern (`CanViewNotifications`, `CanManageNotifications`)
-and carry `x-required-permission` OpenAPI extensions. See
+These permissions enforce through the `action_extractor!` pattern (`CanReadNotifications`,
+`CanManageNotifications`, `notifications:read` / `notifications:manage`) and declare a native
+`security(("oauth2" = [...]), ("developer_token" = []))` OpenAPI requirement rather than an
+`x-required-permission` extension. See
 [Auth and Authorization -- Permissions Model](auth-and-authorization.md#permissions-model---detailed) for the
 full RBAC architecture.
 

@@ -40,8 +40,7 @@ use crate::surface_registry::{SurfaceCatalogItem, SurfaceRegistryLookupError};
         (status = 401, description = "Not authenticated")
     ),
     tag = "Surfaces",
-    extensions(("x-required-permission" = json!("authenticated-only: results filtered by descriptor visibility"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = []), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_surfaces(
@@ -105,8 +104,7 @@ fn group_surface_catalog(catalog: Vec<SurfaceCatalogItem>) -> Vec<SurfaceRespons
         (status = 404, description = "Surface not found")
     ),
     tag = "Surfaces",
-    extensions(("x-required-permission" = json!("authenticated-only: results filtered by descriptor visibility"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = []), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_surface_providers(
@@ -213,8 +211,8 @@ pub async fn list_surface_providers(
         (status = 404, description = "Surface not found")
     ),
     tag = "Surfaces",
-    extensions(("x-required-permission" = json!("dynamic: declared by the surface descriptor / interaction"))),
-    security(("bearer_token" = []))
+    extensions(("x-action-dynamic" = json!(true))),
+    security(("oauth2" = []), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_surface_read(
@@ -640,8 +638,8 @@ async fn dispatch_surface_interaction(
         (status = 504, description = "Surface action timed out")
     ),
     tag = "Surfaces",
-    extensions(("x-required-permission" = json!("dynamic: declared by the surface descriptor / interaction"))),
-    security(("bearer_token" = []))
+    extensions(("x-action-dynamic" = json!(true))),
+    security(("oauth2" = []), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn read_surface_interaction(
@@ -697,8 +695,8 @@ pub async fn read_surface_interaction(
         (status = 504, description = "Surface action timed out")
     ),
     tag = "Surfaces",
-    extensions(("x-required-permission" = json!("dynamic: declared by the surface descriptor / interaction"))),
-    security(("bearer_token" = []))
+    extensions(("x-action-dynamic" = json!(true))),
+    security(("oauth2" = []), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn invoke_surface_interaction(
@@ -751,8 +749,8 @@ pub async fn invoke_surface_interaction(
         (status = 504, description = "Surface action timed out")
     ),
     tag = "Surfaces",
-    extensions(("x-required-permission" = json!("dynamic: declared by the surface descriptor / interaction"))),
-    security(("bearer_token" = []))
+    extensions(("x-action-dynamic" = json!(true))),
+    security(("oauth2" = []), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_surface_interaction(
@@ -804,8 +802,8 @@ pub async fn update_surface_interaction(
         (status = 504, description = "Surface action timed out")
     ),
     tag = "Surfaces",
-    extensions(("x-required-permission" = json!("dynamic: declared by the surface descriptor / interaction"))),
-    security(("bearer_token" = []))
+    extensions(("x-action-dynamic" = json!(true))),
+    security(("oauth2" = []), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn delete_surface_interaction(
@@ -857,8 +855,8 @@ pub async fn delete_surface_interaction(
         (status = 504, description = "Surface action timed out")
     ),
     tag = "Surfaces",
-    extensions(("x-required-permission" = json!("dynamic: declared by the surface descriptor / interaction"))),
-    security(("bearer_token" = []))
+    extensions(("x-action-dynamic" = json!(true))),
+    security(("oauth2" = []), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn read_surface_interaction_item(
@@ -904,8 +902,7 @@ pub async fn read_surface_interaction_item(
         (status = 405, description = "POST is not valid on an item-addressed interaction (Allow: GET, PUT, DELETE)")
     ),
     tag = "Surfaces",
-    extensions(("x-required-permission" = json!("none: always 405"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = []), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn invoke_surface_interaction_item(
@@ -942,8 +939,8 @@ pub async fn invoke_surface_interaction_item(
         (status = 504, description = "Surface action timed out")
     ),
     tag = "Surfaces",
-    extensions(("x-required-permission" = json!("dynamic: declared by the surface descriptor / interaction"))),
-    security(("bearer_token" = []))
+    extensions(("x-action-dynamic" = json!(true))),
+    security(("oauth2" = []), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_surface_interaction_item(
@@ -996,8 +993,8 @@ pub async fn update_surface_interaction_item(
         (status = 504, description = "Surface action timed out")
     ),
     tag = "Surfaces",
-    extensions(("x-required-permission" = json!("dynamic: declared by the surface descriptor / interaction"))),
-    security(("bearer_token" = []))
+    extensions(("x-action-dynamic" = json!(true))),
+    security(("oauth2" = []), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn delete_surface_interaction_item(

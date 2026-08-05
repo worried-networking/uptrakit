@@ -4428,10 +4428,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "software:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_software"
+        ]
       },
       "post": {
         "tags": [
@@ -4470,10 +4474,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "commands:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_commands"
+        ]
       }
     },
     "/api/v1/plugin-configs/batch": {
@@ -4614,10 +4622,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "software:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_software"
+        ]
       },
       "put": {
         "tags": [
@@ -4665,10 +4677,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "commands:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_commands"
+        ]
       },
       "delete": {
         "tags": [
@@ -4698,10 +4714,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "commands:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_commands"
+        ]
       }
     },
     "/api/v1/plugin-configs/{id}/discover": {
@@ -4784,12 +4804,18 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "settings:read"
+            ]
+          },
+          {
+            "oauth2": [
+              "system.settings:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": [
-          "view_settings",
-          "manage_global_settings"
         ]
       }
     },
@@ -4834,12 +4860,18 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "settings:read"
+            ]
+          },
+          {
+            "oauth2": [
+              "system.settings:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": [
-          "view_settings",
-          "manage_global_settings"
         ]
       },
       "put": {
@@ -4893,10 +4925,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.settings:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_global_settings"
+        ]
       },
       "delete": {
         "tags": [
@@ -4931,10 +4967,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.settings:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_global_settings"
+        ]
       }
     },
     "/api/v1/plugin-types": {
@@ -4962,13 +5002,23 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "software:read"
+            ]
+          },
+          {
+            "oauth2": [
+              "settings:read"
+            ]
+          },
+          {
+            "oauth2": [
+              "system.settings:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": [
-          "view_software",
-          "view_settings",
-          "manage_global_settings"
         ]
       }
     },
@@ -5387,10 +5437,24 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "services:approve"
+            ]
+          },
+          {
+            "oauth2": [
+              "services:reject"
+            ]
+          },
+          {
+            "oauth2": [
+              "services:delete"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "approve_services, reject_services, or remove_services"
+        ]
       }
     },
     "/api/v1/services/{id}": {
@@ -7459,10 +7523,12 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": []
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "authenticated-only: results filtered by descriptor visibility"
+        ]
       }
     },
     "/api/v1/surfaces/{surface_id}": {
@@ -7506,10 +7572,13 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": []
+          },
+          {
+            "developer_token": []
           }
         ],
-        "x-required-permission": "dynamic: declared by the surface descriptor / interaction"
+        "x-action-dynamic": true
       }
     },
     "/api/v1/surfaces/{surface_id}/interactions/{interaction_id}": {
@@ -7614,10 +7683,13 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": []
+          },
+          {
+            "developer_token": []
           }
         ],
-        "x-required-permission": "dynamic: declared by the surface descriptor / interaction"
+        "x-action-dynamic": true
       },
       "put": {
         "tags": [
@@ -7697,10 +7769,13 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": []
+          },
+          {
+            "developer_token": []
           }
         ],
-        "x-required-permission": "dynamic: declared by the surface descriptor / interaction"
+        "x-action-dynamic": true
       },
       "post": {
         "tags": [
@@ -7780,10 +7855,13 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": []
+          },
+          {
+            "developer_token": []
           }
         ],
-        "x-required-permission": "dynamic: declared by the surface descriptor / interaction"
+        "x-action-dynamic": true
       },
       "delete": {
         "tags": [
@@ -7864,10 +7942,13 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": []
+          },
+          {
+            "developer_token": []
           }
         ],
-        "x-required-permission": "dynamic: declared by the surface descriptor / interaction"
+        "x-action-dynamic": true
       }
     },
     "/api/v1/surfaces/{surface_id}/interactions/{interaction_id}/{item_id}": {
@@ -7981,10 +8062,13 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": []
+          },
+          {
+            "developer_token": []
           }
         ],
-        "x-required-permission": "dynamic: declared by the surface descriptor / interaction"
+        "x-action-dynamic": true
       },
       "put": {
         "tags": [
@@ -8073,10 +8157,13 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": []
+          },
+          {
+            "developer_token": []
           }
         ],
-        "x-required-permission": "dynamic: declared by the surface descriptor / interaction"
+        "x-action-dynamic": true
       },
       "post": {
         "tags": [
@@ -8120,10 +8207,12 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": []
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "none: always 405"
+        ]
       },
       "delete": {
         "tags": [
@@ -8213,10 +8302,13 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": []
+          },
+          {
+            "developer_token": []
           }
         ],
-        "x-required-permission": "dynamic: declared by the surface descriptor / interaction"
+        "x-action-dynamic": true
       }
     },
     "/api/v1/surfaces/{surface_id}/providers": {
@@ -8260,10 +8352,12 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": []
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "authenticated-only: results filtered by descriptor visibility"
+        ]
       }
     },
     "/api/v1/system-audit-logs": {
@@ -8753,10 +8847,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.services:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_system_services"
+        ]
       }
     },
     "/api/v1/system-services/batch": {
@@ -8800,10 +8898,24 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.services:approve"
+            ]
+          },
+          {
+            "oauth2": [
+              "system.services:reject"
+            ]
+          },
+          {
+            "oauth2": [
+              "system.services:delete"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "approve_system_services, reject_system_services, or remove_system_services"
+        ]
       }
     },
     "/api/v1/system-services/{id}": {
@@ -8848,10 +8960,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.services:read"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "view_system_services"
+        ]
       },
       "put": {
         "tags": [
@@ -8907,10 +9023,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.services:update"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "update_system_services"
+        ]
       },
       "delete": {
         "tags": [
@@ -8946,10 +9066,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.services:delete"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "remove_system_services"
+        ]
       }
     },
     "/api/v1/system-services/{id}/approve": {
@@ -8997,10 +9121,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.services:approve"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "approve_system_services"
+        ]
       }
     },
     "/api/v1/system-services/{id}/reject": {
@@ -9048,10 +9176,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "system.services:reject"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "reject_system_services"
+        ]
       }
     },
     "/api/v1/system/alerts": {

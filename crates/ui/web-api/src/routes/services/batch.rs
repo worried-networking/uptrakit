@@ -33,8 +33,12 @@ use uptrakit_web_api_types::validation::Validate;
         (status = 403, description = "Not authorized")
     ),
     tag = "Services",
-    extensions(("x-required-permission" = json!("approve_services, reject_services, or remove_services"))),
-    security(("bearer_token" = []))
+    security(
+        ("oauth2" = ["services:approve"]),
+        ("oauth2" = ["services:reject"]),
+        ("oauth2" = ["services:delete"]),
+        ("developer_token" = [])
+    )
 )]
 #[tracing::instrument(skip_all)]
 pub async fn batch_services(
