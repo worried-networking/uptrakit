@@ -25,6 +25,7 @@ pub mod oidc_providers;
 pub mod plugin_configs;
 pub mod plugin_type_settings;
 pub mod reset_data;
+pub mod roles;
 pub mod scheduled_tasks;
 pub mod service_config;
 pub mod services;
