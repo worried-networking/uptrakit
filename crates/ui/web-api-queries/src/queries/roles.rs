@@ -167,8 +167,16 @@ pub async fn delete_role_rows<C: ConnectionTrait>(
     role_id: Uuid,
 ) -> Result<()> {
     let role = get_own_role(db, tenant_id, role_id).await?;
+    // `user_role` is `TenantScoped`, so its writes carry the tenant filter by rule.
+    // The filter is not load-bearing here and no test can discriminate it:
+    // `fk_user_roles_role` is `ON DELETE CASCADE`, so the `roles` delete below
+    // removes every remaining assignment anyway — including any row whose
+    // `tenant_id` disagrees with its role's (no composite FK ties the two). The
+    // explicit delete stays so the intent is visible at the query layer and does
+    // not silently depend on cascade configuration.
     user_role::Entity::delete_many()
         .filter(user_role::Column::RoleId.eq(role.id))
+        .filter(user_role::Column::TenantId.eq(tenant_id))
         .exec(db)
         .await
         .context_to()?;
