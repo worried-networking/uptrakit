@@ -19,10 +19,6 @@ skip = "integration-test OCSP responder stub; infrastructure only, no security e
 # ---------------------------------------------------------------------------
 
 [[entries]]
-site = "uptrakit_web_api::router::manual_register_client"
-skip = "router:: alias for routes::oauth::clients_api::manual_register_client; audit emitted by handler"
-
-[[entries]]
 site = "uptrakit_web_api::router::notification_callback"
 action = "notification.callback"
 
@@ -33,18 +29,6 @@ skip = "test-utils endpoint (#[cfg(feature = \"test-utils\")]); UPTRAKIT_TEST_UT
 [[entries]]
 site = "uptrakit_web_api::router::ocsp_post"
 skip = "OCSP certificate status responder; no user-driven state change"
-
-[[entries]]
-site = "uptrakit_web_api::router::revoke_client"
-skip = "router:: alias for routes::oauth::clients_api::revoke_client; audit emitted by handler"
-
-[[entries]]
-site = "uptrakit_web_api::router::revoke_consent"
-skip = "router:: alias for routes::oauth::consents_api::revoke_consent; audit emitted by handler"
-
-[[entries]]
-site = "uptrakit_web_api::router::trust_client"
-skip = "router:: alias for routes::oauth::clients_api::trust_client; audit emitted by handler"
 
 # ---------------------------------------------------------------------------
 # Access presets

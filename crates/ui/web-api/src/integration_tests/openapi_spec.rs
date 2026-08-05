@@ -61,6 +61,11 @@ async fn openapi_spec_eligible_endpoints_present() {
         "/api/v1/auth/email-change/confirm",
         "/api/v1/surfaces",
         "/api/v1/surfaces/{surface_id}",
+        "/api/oauth/clients",
+        "/api/oauth/clients/{client_id}",
+        "/api/oauth/clients/{client_id}/trust",
+        "/api/oauth/consents",
+        "/api/oauth/consents/{id}",
     ] {
         assert!(
             api.paths.paths.contains_key(required),

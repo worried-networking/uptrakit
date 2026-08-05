@@ -38,6 +38,302 @@
         }
       }
     },
+    "/api/oauth/clients": {
+      "get": {
+        "tags": [
+          "OAuth"
+        ],
+        "summary": "List all registered OAuth clients (paginated).",
+        "description": "Returns 404 when `oauth.enabled = false`.\nRequires `ManageAuthSettings`.",
+        "operationId": "list_clients",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "description": "Page number (1-indexed). Defaults to 1.",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "description": "Items per page. Defaults to 20, max 1000.",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated client list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse_OAuthClientResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Insufficient permission"
+          },
+          "404": {
+            "description": "OAuth disabled"
+          }
+        },
+        "security": [
+          {
+            "oauth2": [
+              "settings.auth:manage"
+            ]
+          },
+          {
+            "developer_token": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "OAuth"
+        ],
+        "summary": "Manually register a new OAuth client (operator-initiated, no cap check).",
+        "description": "Returns 404 when `oauth.enabled = false`.\nRequires `ManageAuthSettings`.",
+        "operationId": "manual_register_client",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DcrRegistrationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Client registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DcrRegistrationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Insufficient permission"
+          },
+          "404": {
+            "description": "OAuth disabled"
+          }
+        },
+        "security": [
+          {
+            "oauth2": [
+              "settings.auth:manage"
+            ]
+          },
+          {
+            "developer_token": []
+          }
+        ]
+      }
+    },
+    "/api/oauth/clients/{client_id}": {
+      "delete": {
+        "tags": [
+          "OAuth"
+        ],
+        "summary": "Revoke an OAuth client and cascade-revoke all its consents and refresh tokens.",
+        "description": "Returns 404 when the client does not exist or when `oauth.enabled = false`.\nReturns 204 on success.\nRequires `ManageAuthSettings`.",
+        "operationId": "revoke_client",
+        "parameters": [
+          {
+            "name": "client_id",
+            "in": "path",
+            "description": "OAuth client ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Insufficient permission"
+          },
+          "404": {
+            "description": "Client not found or OAuth disabled"
+          }
+        },
+        "security": [
+          {
+            "oauth2": [
+              "settings.auth:manage"
+            ]
+          },
+          {
+            "developer_token": []
+          }
+        ]
+      }
+    },
+    "/api/oauth/clients/{client_id}/trust": {
+      "post": {
+        "tags": [
+          "OAuth"
+        ],
+        "summary": "Promote an OAuth client to trusted status by setting `trusted_at = now`.",
+        "description": "Returns 404 when the client does not exist or when `oauth.enabled = false`.\nReturns 204 on success.\nRequires `ManageAuthSettings`.",
+        "operationId": "trust_client",
+        "parameters": [
+          {
+            "name": "client_id",
+            "in": "path",
+            "description": "OAuth client ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Promoted to trusted"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Insufficient permission"
+          },
+          "404": {
+            "description": "Client not found or OAuth disabled"
+          }
+        },
+        "security": [
+          {
+            "oauth2": [
+              "settings.auth:manage"
+            ]
+          },
+          {
+            "developer_token": []
+          }
+        ]
+      }
+    },
+    "/api/oauth/consents": {
+      "get": {
+        "tags": [
+          "OAuth"
+        ],
+        "summary": "List the authenticated user's active (non-revoked) OAuth consent rows.",
+        "description": "Returns 404 when `oauth.enabled = false`.",
+        "operationId": "list_consents",
+        "responses": {
+          "200": {
+            "description": "List of active consents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OAuthConsentResponse"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "404": {
+            "description": "OAuth disabled"
+          }
+        },
+        "security": [
+          {
+            "oauth2": []
+          },
+          {
+            "developer_token": []
+          }
+        ]
+      }
+    },
+    "/api/oauth/consents/{id}": {
+      "delete": {
+        "tags": [
+          "OAuth"
+        ],
+        "summary": "Revoke a specific consent by UUID.",
+        "description": "Enforces ownership — a cross-user attempt returns 403.\nReturns 404 when the consent does not exist or `oauth.enabled = false`.\nReturns 204 on success.",
+        "operationId": "revoke_consent",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Consent UUID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Consent belongs to a different user"
+          },
+          "404": {
+            "description": "Consent not found or OAuth disabled"
+          }
+        },
+        "security": [
+          {
+            "oauth2": []
+          },
+          {
+            "developer_token": []
+          }
+        ]
+      }
+    },
     "/api/v1/access-presets": {
       "get": {
         "tags": [
@@ -11079,6 +11375,133 @@
           }
         }
       },
+      "DcrRegistrationRequest": {
+        "type": "object",
+        "description": "Dynamic client registration request body (RFC 7591 §2).",
+        "required": [
+          "client_name",
+          "redirect_uris",
+          "grant_types",
+          "response_types",
+          "token_endpoint_auth_method"
+        ],
+        "properties": {
+          "client_name": {
+            "type": "string"
+          },
+          "client_uri": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "grant_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "logo_uri": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "redirect_uris": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "response_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "scope": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "token_endpoint_auth_method": {
+            "type": "string"
+          }
+        }
+      },
+      "DcrRegistrationResponse": {
+        "type": "object",
+        "description": "Dynamic client registration response body (RFC 7591 §3.2.1).",
+        "required": [
+          "client_id",
+          "client_id_issued_at",
+          "registration_client_uri",
+          "client_name",
+          "redirect_uris",
+          "grant_types",
+          "response_types",
+          "token_endpoint_auth_method",
+          "scope"
+        ],
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "client_id_issued_at": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "client_name": {
+            "type": "string"
+          },
+          "client_uri": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "grant_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "logo_uri": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "redirect_uris": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "registration_access_token": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "registration_client_uri": {
+            "type": "string"
+          },
+          "response_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "scope": {
+            "type": "string"
+          },
+          "token_endpoint_auth_method": {
+            "type": "string"
+          }
+        }
+      },
       "DegradedInfoView": {
         "type": "object",
         "description": "View of the coordinator's degraded state.",
@@ -12758,6 +13181,88 @@
           }
         }
       },
+      "OAuthClientResponse": {
+        "type": "object",
+        "description": "Operator-facing OAuth client row (`GET /api/oauth/clients` items).\n\n`last_used_at` is intentionally absent: `oauth_clients.last_used_at` is\nnever written by any production path; the field re-enters this contract\nonce a token-issuance write site exists.",
+        "required": [
+          "id",
+          "client_name",
+          "redirect_uris",
+          "created_via",
+          "created_at"
+        ],
+        "properties": {
+          "client_name": {
+            "type": "string"
+          },
+          "client_uri": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_via": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "redirect_uris": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "trusted_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "OAuthConsentResponse": {
+        "type": "object",
+        "description": "End-user consent row (`GET /api/oauth/consents` items).\n\n`client_name` is non-optional: `fk_oauth_consents_client` is\n`ON DELETE RESTRICT` and client revocation is a soft delete, so a\nconsent's client row always exists.",
+        "required": [
+          "id",
+          "client_id",
+          "client_name",
+          "scopes",
+          "granted_at"
+        ],
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "client_name": {
+            "type": "string"
+          },
+          "granted_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scopes": {
+            "type": "string"
+          }
+        }
+      },
       "OAuthErrorCode": {
         "type": "string",
         "enum": [
@@ -13733,6 +14238,94 @@
                     "null"
                   ],
                   "format": "uuid"
+                }
+              }
+            }
+          },
+          "page": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "per_page": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total_pages": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "PaginatedResponse_OAuthClientResponse": {
+        "type": "object",
+        "description": "Paginated response wrapper.",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "Operator-facing OAuth client row (`GET /api/oauth/clients` items).\n\n`last_used_at` is intentionally absent: `oauth_clients.last_used_at` is\nnever written by any production path; the field re-enters this contract\nonce a token-issuance write site exists.",
+              "required": [
+                "id",
+                "client_name",
+                "redirect_uris",
+                "created_via",
+                "created_at"
+              ],
+              "properties": {
+                "client_name": {
+                  "type": "string"
+                },
+                "client_uri": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "created_via": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "redirect_uris": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "revoked_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "trusted_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
                 }
               }
             }
@@ -17779,7 +18372,7 @@
     },
     {
       "name": "OAuth",
-      "description": "OAuth 2.0 device authorization grant (RFC 8628) and server metadata (RFC 8414)"
+      "description": "OAuth 2.0 device authorization grant (RFC 8628), server metadata (RFC 8414), operator client management, and end-user consent management"
     },
     {
       "name": "Surfaces",

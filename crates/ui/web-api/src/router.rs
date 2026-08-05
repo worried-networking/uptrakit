@@ -37,7 +37,7 @@ use crate::extractors::{GlobalSettingsVersion, SettingsVersion};
         (name = "Global Settings", description = "Infrastructure-scoped settings requiring global administrator access"),
         (name = "Audit Logs", description = "Tenant and system-level audit log access"),
         (name = "Users", description = "User management, roles, and access presets"),
-        (name = "OAuth", description = "OAuth 2.0 device authorization grant (RFC 8628) and server metadata (RFC 8414)"),
+        (name = "OAuth", description = "OAuth 2.0 device authorization grant (RFC 8628), server metadata (RFC 8414), operator client management, and end-user consent management"),
         (name = "Surfaces", description = "Shared surface read models, providers, and interactions")
     ),
     paths(
@@ -379,6 +379,11 @@ use crate::extractors::{GlobalSettingsVersion, SettingsVersion};
             uptrakit_web_api_types::mfa::DisableTotpRequest,
             uptrakit_web_api_types::mfa::RegenerateRecoveryCodesRequest,
             uptrakit_web_api_types::mfa::RegenerateRecoveryCodesResponse,
+            uptrakit_web_api_types::oauth::OAuthClientResponse,
+            uptrakit_web_api_types::oauth::OAuthConsentResponse,
+            uptrakit_web_api_types::oauth::DcrRegistrationRequest,
+            uptrakit_web_api_types::oauth::DcrRegistrationResponse,
+            uptrakit_web_api_types::pagination::PaginatedResponse<uptrakit_web_api_types::oauth::OAuthClientResponse>,
         )
     ),
     info(
@@ -860,30 +865,17 @@ pub fn build_router_with_openapi(state: Arc<AppState>) -> (Router, utoipa::opena
 
     // Operator OAuth Clients API (spec §11.4) — authenticated, ManageAuthSettings required.
     let auth_routes = auth_routes
-        .route(
-            "/api/oauth/clients",
-            get(crate::routes::oauth::clients_api::list_clients)
-                .post(crate::routes::oauth::clients_api::manual_register_client),
-        )
-        .route(
-            "/api/oauth/clients/{client_id}",
-            axum::routing::delete(crate::routes::oauth::clients_api::revoke_client),
-        )
-        .route(
-            "/api/oauth/clients/{client_id}/trust",
-            axum::routing::post(crate::routes::oauth::clients_api::trust_client),
-        );
+        .routes(routes!(
+            crate::routes::oauth::clients_api::list_clients,
+            crate::routes::oauth::clients_api::manual_register_client
+        ))
+        .routes(routes!(crate::routes::oauth::clients_api::revoke_client))
+        .routes(routes!(crate::routes::oauth::clients_api::trust_client));
 
     // End-user Authorized Apps API (spec §12.5) — authenticated, no special permission required.
     let auth_routes = auth_routes
-        .route(
-            "/api/oauth/consents",
-            get(crate::routes::oauth::consents_api::list_consents),
-        )
-        .route(
-            "/api/oauth/consents/{id}",
-            axum::routing::delete(crate::routes::oauth::consents_api::revoke_consent),
-        );
+        .routes(routes!(crate::routes::oauth::consents_api::list_consents))
+        .routes(routes!(crate::routes::oauth::consents_api::revoke_consent));
 
     // MFA enrollment and management (authenticated).
     let auth_routes = auth_routes

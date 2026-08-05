@@ -485,6 +485,38 @@ export type CreateSystemEnrollmentTokenRequest = {
 };
 
 /**
+ * Dynamic client registration request body (RFC 7591 §2).
+ */
+export type DcrRegistrationRequest = {
+    client_name: string;
+    client_uri?: string | null;
+    grant_types: Array<string>;
+    logo_uri?: string | null;
+    redirect_uris: Array<string>;
+    response_types: Array<string>;
+    scope?: string | null;
+    token_endpoint_auth_method: string;
+};
+
+/**
+ * Dynamic client registration response body (RFC 7591 §3.2.1).
+ */
+export type DcrRegistrationResponse = {
+    client_id: string;
+    client_id_issued_at: number;
+    client_name: string;
+    client_uri?: string | null;
+    grant_types: Array<string>;
+    logo_uri?: string | null;
+    redirect_uris: Array<string>;
+    registration_access_token?: string | null;
+    registration_client_uri: string;
+    response_types: Array<string>;
+    scope: string;
+    token_endpoint_auth_method: string;
+};
+
+/**
  * View of the coordinator's degraded state.
  */
 export type DegradedInfoView = {
@@ -1197,6 +1229,39 @@ export type OAuthAuthorizationServerMetadata = {
     token_endpoint_auth_methods_supported: Array<string>;
 };
 
+/**
+ * Operator-facing OAuth client row (`GET /api/oauth/clients` items).
+ *
+ * `last_used_at` is intentionally absent: `oauth_clients.last_used_at` is
+ * never written by any production path; the field re-enters this contract
+ * once a token-issuance write site exists.
+ */
+export type OAuthClientResponse = {
+    client_name: string;
+    client_uri?: string | null;
+    created_at: string;
+    created_via: string;
+    id: string;
+    redirect_uris: Array<string>;
+    revoked_at?: string | null;
+    trusted_at?: string | null;
+};
+
+/**
+ * End-user consent row (`GET /api/oauth/consents` items).
+ *
+ * `client_name` is non-optional: `fk_oauth_consents_client` is
+ * `ON DELETE RESTRICT` and client revocation is a soft delete, so a
+ * consent's client row always exists.
+ */
+export type OAuthConsentResponse = {
+    client_id: string;
+    client_name: string;
+    granted_at: string;
+    id: string;
+    scopes: string;
+};
+
 export const OAuthErrorCode = {
     AUTHORIZATION_PENDING: 'authorization_pending',
     SLOW_DOWN: 'slow_down',
@@ -1535,6 +1600,26 @@ export type PaginatedResponseNotificationRuleResponse = {
         id: string;
         plugin_type?: string | null;
         software_item_id?: string | null;
+    }>;
+    page: number;
+    per_page: number;
+    total: number;
+    total_pages: number;
+};
+
+/**
+ * Paginated response wrapper.
+ */
+export type PaginatedResponseOAuthClientResponse = {
+    items: Array<{
+        client_name: string;
+        client_uri?: string | null;
+        created_at: string;
+        created_via: string;
+        id: string;
+        redirect_uris: Array<string>;
+        revoked_at?: string | null;
+        trusted_at?: string | null;
     }>;
     page: number;
     per_page: number;
@@ -3478,6 +3563,216 @@ export type GetAsMetadataResponses = {
 };
 
 export type GetAsMetadataResponse = GetAsMetadataResponses[keyof GetAsMetadataResponses];
+
+export type ListClientsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Page number (1-indexed). Defaults to 1.
+         */
+        page?: number | null;
+        /**
+         * Items per page. Defaults to 20, max 1000.
+         */
+        per_page?: number | null;
+    };
+    url: '/api/oauth/clients';
+};
+
+export type ListClientsErrors = {
+    /**
+     * Unauthenticated
+     */
+    401: unknown;
+    /**
+     * Insufficient permission
+     */
+    403: unknown;
+    /**
+     * OAuth disabled
+     */
+    404: unknown;
+};
+
+export type ListClientsResponses = {
+    /**
+     * Paginated client list
+     */
+    200: PaginatedResponseOAuthClientResponse;
+};
+
+export type ListClientsResponse = ListClientsResponses[keyof ListClientsResponses];
+
+export type ManualRegisterClientData = {
+    body: DcrRegistrationRequest;
+    path?: never;
+    query?: never;
+    url: '/api/oauth/clients';
+};
+
+export type ManualRegisterClientErrors = {
+    /**
+     * Invalid request
+     */
+    400: unknown;
+    /**
+     * Unauthenticated
+     */
+    401: unknown;
+    /**
+     * Insufficient permission
+     */
+    403: unknown;
+    /**
+     * OAuth disabled
+     */
+    404: unknown;
+};
+
+export type ManualRegisterClientResponses = {
+    /**
+     * Client registered
+     */
+    201: DcrRegistrationResponse;
+};
+
+export type ManualRegisterClientResponse = ManualRegisterClientResponses[keyof ManualRegisterClientResponses];
+
+export type RevokeClientData = {
+    body?: never;
+    path: {
+        /**
+         * OAuth client ID
+         */
+        client_id: string;
+    };
+    query?: never;
+    url: '/api/oauth/clients/{client_id}';
+};
+
+export type RevokeClientErrors = {
+    /**
+     * Unauthenticated
+     */
+    401: unknown;
+    /**
+     * Insufficient permission
+     */
+    403: unknown;
+    /**
+     * Client not found or OAuth disabled
+     */
+    404: unknown;
+};
+
+export type RevokeClientResponses = {
+    /**
+     * Revoked
+     */
+    204: void;
+};
+
+export type RevokeClientResponse = RevokeClientResponses[keyof RevokeClientResponses];
+
+export type TrustClientData = {
+    body?: never;
+    path: {
+        /**
+         * OAuth client ID
+         */
+        client_id: string;
+    };
+    query?: never;
+    url: '/api/oauth/clients/{client_id}/trust';
+};
+
+export type TrustClientErrors = {
+    /**
+     * Unauthenticated
+     */
+    401: unknown;
+    /**
+     * Insufficient permission
+     */
+    403: unknown;
+    /**
+     * Client not found or OAuth disabled
+     */
+    404: unknown;
+};
+
+export type TrustClientResponses = {
+    /**
+     * Promoted to trusted
+     */
+    204: void;
+};
+
+export type TrustClientResponse = TrustClientResponses[keyof TrustClientResponses];
+
+export type ListConsentsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/oauth/consents';
+};
+
+export type ListConsentsErrors = {
+    /**
+     * Unauthenticated
+     */
+    401: unknown;
+    /**
+     * OAuth disabled
+     */
+    404: unknown;
+};
+
+export type ListConsentsResponses = {
+    /**
+     * List of active consents
+     */
+    200: Array<OAuthConsentResponse>;
+};
+
+export type ListConsentsResponse = ListConsentsResponses[keyof ListConsentsResponses];
+
+export type RevokeConsentData = {
+    body?: never;
+    path: {
+        /**
+         * Consent UUID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/api/oauth/consents/{id}';
+};
+
+export type RevokeConsentErrors = {
+    /**
+     * Unauthenticated
+     */
+    401: unknown;
+    /**
+     * Consent belongs to a different user
+     */
+    403: unknown;
+    /**
+     * Consent not found or OAuth disabled
+     */
+    404: unknown;
+};
+
+export type RevokeConsentResponses = {
+    /**
+     * Revoked
+     */
+    204: void;
+};
+
+export type RevokeConsentResponse = RevokeConsentResponses[keyof RevokeConsentResponses];
 
 export type ListAccessPresetsData = {
     body?: never;
