@@ -543,6 +543,14 @@ pub async fn list_grants(
 /// Role-delete orphan cleanup: delete every role-subject grant row for
 /// `role_id`. `access_grants.subject_id` carries no FK, so nothing
 /// cascades — the role-delete transaction (Plan 2) calls this explicitly.
+///
+/// CALLER OBLIGATION: this takes no tenant argument and performs no
+/// ownership check — it deletes the grants of whatever `role_id` it is
+/// handed. Call it only after the caller has proved, in the same
+/// transaction, that the acting tenant owns the role (Plan 2 does that via
+/// `queries::roles::delete_role_rows`, which resolves the role OWN-tenant
+/// scoped first). Calling it standalone, or before the ownership check,
+/// erases another tenant's grants.
 pub async fn delete_grants_for_role(db: &impl ConnectionTrait, role_id: Uuid) -> Result<u64> {
     let res = access_grant::Entity::delete_many()
         .filter(access_grant::Column::SubjectType.eq(GrantSubjectType::Role))
@@ -1579,7 +1587,7 @@ mod tests {
     /// iterations isolated (this module's sibling tests each build their
     /// own `test_db()`, rather than sharing one across cases).
     #[tokio::test]
-    async fn every_covering_pattern_form_counts_and_non_all_selector_does_not() {
+    async fn every_covering_pattern_form_counts() {
         for form in ["access:manage", "access:*", "*:manage", "*:*"] {
             let db = test_db().await;
             let tenant = default_tenant_id(&db).await;

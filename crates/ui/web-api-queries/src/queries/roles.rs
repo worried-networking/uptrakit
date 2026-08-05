@@ -160,7 +160,9 @@ pub async fn update_role<C: ConnectionTrait>(
 /// Delete an OWN-tenant custom role row and its `user_roles` assignments
 /// (same backstop scoping as [`update_role`]). Grant cleanup
 /// (`access_grants::delete_grants_for_role`) is the caller's obligation in
-/// the same transaction.
+/// the same transaction, and must run AFTER this call: that function takes
+/// no tenant argument and checks no ownership, so the OWN-tenant resolution
+/// performed here is what makes it safe.
 pub async fn delete_role_rows<C: ConnectionTrait>(
     db: &C,
     tenant_id: Uuid,
