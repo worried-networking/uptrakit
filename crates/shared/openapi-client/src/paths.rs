@@ -488,4 +488,27 @@ pub(crate) mod oauth {
     pub(crate) const TOKEN: &str = "/api/v1/oauth/token";
     /// `GET /.well-known/oauth-authorization-server` — RFC 8414 §3
     pub(crate) const METADATA: &str = "/.well-known/oauth-authorization-server";
+
+    /// `GET`/`POST /api/oauth/clients` — operator client management
+    pub(crate) const CLIENTS: &str = "/api/oauth/clients";
+    /// `DELETE /api/oauth/clients/{client_id}`
+    pub(crate) fn client_by_id(client_id: &str) -> String {
+        format!("/api/oauth/clients/{}", encode_segment(client_id))
+    }
+    /// `POST /api/oauth/clients/{client_id}/trust`
+    pub(crate) fn client_trust(client_id: &str) -> String {
+        format!("/api/oauth/clients/{}/trust", encode_segment(client_id))
+    }
+    /// `GET /api/oauth/consents` — end-user authorized apps
+    pub(crate) const CONSENTS: &str = "/api/oauth/consents";
+    /// `DELETE /api/oauth/consents/{id}`
+    pub(crate) fn consent_by_id(id: &uuid::Uuid) -> String {
+        format!("/api/oauth/consents/{id}")
+    }
+
+    /// Percent-encode a path segment. OAuth client ids may be full HTTPS
+    /// URLs (CIMD), which must travel as a single encoded segment.
+    fn encode_segment(s: &str) -> String {
+        percent_encoding::utf8_percent_encode(s, percent_encoding::NON_ALPHANUMERIC).to_string()
+    }
 }

@@ -7819,6 +7819,7 @@ dependencies = [
  "futures-util",
  "http",
  "httpmock",
+ "percent-encoding",
  "reqwest",
  "rootcause",
  "serde",

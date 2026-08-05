@@ -38,6 +38,7 @@ zeroize = { workspace = true }
 url = { workspace = true }
 time = { workspace = true, features = ["serde"] }
 async-trait = { workspace = true }
+percent-encoding = { workspace = true }
 
 [dev-dependencies]
 cargo_metadata = { workspace = true }

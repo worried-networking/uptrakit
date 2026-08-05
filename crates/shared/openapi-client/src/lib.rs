@@ -17,6 +17,8 @@ pub mod health;
 pub mod host_tags;
 pub mod hosts;
 pub mod notifications;
+pub mod oauth_clients;
+pub mod oauth_consents;
 pub mod oidc_auth;
 pub mod oidc_providers;
 pub mod permissions;
@@ -423,6 +425,14 @@ impl UptrakitClient {
     async fn delete(&self, path: &str) -> Result<()> {
         let url = format!("{}{}", self.base_url, path);
         let req = self.http.delete(&url).bearer_auth(self.token_or_err()?);
+        let resp = self.send_with_retry(req).await?;
+        self.handle_empty_response(resp).await
+    }
+
+    /// POST with no body, expecting `204 No Content`.
+    async fn post_empty_no_content(&self, path: &str) -> Result<()> {
+        let url = format!("{}{}", self.base_url, path);
+        let req = self.http.post(&url).bearer_auth(self.token_or_err()?);
         let resp = self.send_with_retry(req).await?;
         self.handle_empty_response(resp).await
     }
