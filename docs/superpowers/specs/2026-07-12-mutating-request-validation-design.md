@@ -258,8 +258,11 @@ tripwire alike. Add one more alternation to the same signature scan: flag `Reque
 `routes/` — **anchored to param type position** (`:\s*(axum::extract::)?Request\s*[,)]`, likewise `Bytes`), never a
 bare token: `Request` is a substring of every `*Request` body type (71 in `web-api-types`), so an unanchored pattern
 would fire on the very `Unvalidated<UpdateHostRequest>` params Part 3 just produced. Allowlist the known-legitimate
-sites (the auth pair — a natural `Option<Unvalidated<T>>` shape to convert in Stage 2; `ocsp.rs` DER payload; the
-`notifications.rs` raw-body site). The third door becomes **enumerated**, not invisible.
+sites (the auth pair and `oidc_auth.rs::oidc_link` — natural `Option<Unvalidated<T>>` shapes to convert in Stage 2;
+`ocsp.rs` DER payload; the `notifications.rs` raw-body site — `oidc_link` was found at plan review, missing from the
+earlier enumeration; the gate's stale-entry check keeps the list honest). Exempt axum middleware signatures
+(`next: Next` param — body passes through untouched; `oauth/mod.rs::optional_oauth_auth` would otherwise
+false-positive). The third door becomes **enumerated**, not invisible.
 
 **Residual check for frozen entries:** an allowlisted fn is exempt from the raw-extractor flag — so a later refactor
 that drops its manual `.validate()` call would go unseen by both compiler and gate. For **allowlisted fns only**, the
