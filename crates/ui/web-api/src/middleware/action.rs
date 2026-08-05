@@ -237,6 +237,11 @@ action_extractor! {
     CanDeleteSystemServices => actions::SYSTEM_SERVICES_DELETE,
     /// `system.services:update` — update system service settings.
     CanUpdateSystemServices => actions::SYSTEM_SERVICES_UPDATE,
+    /// `access:manage` — manage grants, roles, and role assignments
+    /// (authority administration).
+    CanManageAccess => actions::ACCESS_MANAGE,
+    /// `users:manage` — user lifecycle (activate/deactivate, lifecycle reads).
+    CanManageUsers => actions::USERS_MANAGE,
 }
 
 /// Authorize the first allowed action of `actions` (OR-gate). On overall
