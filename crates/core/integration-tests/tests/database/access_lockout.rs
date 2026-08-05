@@ -78,6 +78,14 @@ async fn guarded_delete(
     Ok(verdict)
 }
 
+/// Only the `_postgres` leg discriminates the *serialization* mechanism. SeaORM
+/// forces `max_connections(1)` on SQLite pools, so under the `_sqlite` leg the
+/// second `guarded_delete` cannot begin until the first has committed — the two
+/// tasks never genuinely overlap, and the leg passes identically whether
+/// `begin_guarded` opens the transaction `Immediate` or `Deferred`. A green
+/// `_sqlite` leg is therefore evidence that `check_lockout`'s covering-holder
+/// arithmetic is right, NOT that the sentinel lock still serializes concurrent
+/// shrinks. Treat the `_postgres` leg as the load-bearing one.
 async fn test_concurrent_shrinks_serialize_one_gets_lockout(harness: &TestHarness) {
     // Two users, each holding a covering grant: deleting either ALONE is
     // Permitted; deleting both would strip the last holder.
