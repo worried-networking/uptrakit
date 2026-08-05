@@ -60,7 +60,7 @@
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, EntityTrait, PaginatorTrait,
-    QueryFilter, Set,
+    QueryFilter, QueryOrder, Set,
 };
 use time::OffsetDateTime;
 use uptrakit_shared_types::access::bounds::{
@@ -161,6 +161,7 @@ pub struct ResolvedGrant {
     pub subject: GrantSubject,
     pub patterns: Vec<ActionPattern>,
     pub selector: Selector,
+    pub description: Option<String>,
 }
 
 /// Result of [`load_grants_for_principal`]. `corrupt_skipped` exists so
@@ -325,6 +326,7 @@ fn resolve_row(row: access_grant::Model) -> std::result::Result<ResolvedGrant, &
         subject,
         patterns,
         selector,
+        description: row.description,
     })
 }
 
@@ -480,6 +482,68 @@ pub async fn load_grants_for_principal(
         grants,
         corrupt_skipped,
     })
+}
+
+/// Management listing: the tenant's rows plus every global (`tenant_id
+/// NULL`) row, optionally filtered to one exact subject. Bounded by
+/// `MAX_GRANTS_PER_SUBJECT` per subject and the deployment's scale — no
+/// pagination in M1 (spec §Grant CRUD).
+pub async fn list_grants(
+    db: &impl ConnectionTrait,
+    tenant_id: Uuid,
+    subject: Option<GrantSubject>,
+) -> Result<GrantLoad> {
+    let mut query = access_grant::Entity::find().filter(
+        Condition::any()
+            .add(access_grant::Column::TenantId.eq(tenant_id))
+            .add(access_grant::Column::TenantId.is_null()),
+    );
+    if let Some(subject) = subject {
+        let (subject_type, subject_id) = split_subject(subject);
+        query = query
+            .filter(access_grant::Column::SubjectType.eq(subject_type))
+            .filter(access_grant::Column::SubjectId.eq(subject_id));
+    }
+    let rows = query
+        .order_by_asc(access_grant::Column::CreatedAt)
+        .all(db)
+        .await
+        .context_to()?;
+    let mut grants = Vec::with_capacity(rows.len());
+    let mut corrupt_skipped = 0usize;
+    for row in rows {
+        let (id, subject_type, subject_id) = (row.id, row.subject_type, row.subject_id);
+        match resolve_row(row) {
+            Ok(grant) => grants.push(grant),
+            Err(reason) => {
+                corrupt_skipped += 1;
+                tracing::error!(
+                    grant_id = %id,
+                    subject_type = ?subject_type,
+                    subject_id = %subject_id,
+                    reason,
+                    "skipping corrupt access_grants row during resolution"
+                );
+            }
+        }
+    }
+    Ok(GrantLoad {
+        grants,
+        corrupt_skipped,
+    })
+}
+
+/// Role-delete orphan cleanup: delete every role-subject grant row for
+/// `role_id`. `access_grants.subject_id` carries no FK, so nothing
+/// cascades — the role-delete transaction (Plan 2) calls this explicitly.
+pub async fn delete_grants_for_role(db: &impl ConnectionTrait, role_id: Uuid) -> Result<u64> {
+    let res = access_grant::Entity::delete_many()
+        .filter(access_grant::Column::SubjectType.eq(GrantSubjectType::Role))
+        .filter(access_grant::Column::SubjectId.eq(role_id))
+        .exec(db)
+        .await
+        .context_to()?;
+    Ok(res.rows_affected)
 }
 
 /// `db-migrate` table descriptor for `access_grants`. This module is the
@@ -1002,6 +1066,81 @@ mod tests {
         assert!(
             matches!(err.current_context(), AccessGrantError::NotFound),
             "expected NotFound, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_grants_returns_tenant_and_global_rows_with_subject_filter() {
+        let db = test_db().await;
+        let tenant = default_tenant_id(&db).await;
+        let user_a = Uuid::now_v7();
+        let viewer = role_id(&db, "viewer").await;
+        // one tenant-plane user grant + the seeded global role grants exist
+        insert_grant(
+            &db,
+            NewGrant {
+                subject: GrantSubject::User(user_a),
+                tenant_id: Some(tenant),
+                patterns: &pats(&["hosts:read"]),
+                selector: Selector::All,
+                description: Some("probe".to_string()),
+                created_by: None,
+            },
+        )
+        .await
+        .expect("insert");
+
+        let all = list_grants(&db, tenant, None).await.expect("list");
+        assert!(
+            all.grants
+                .iter()
+                .any(|g| g.subject == GrantSubject::User(user_a))
+        );
+        assert!(
+            all.grants
+                .iter()
+                .any(|g| g.subject == GrantSubject::Role(viewer)),
+            "global role rows must be included"
+        );
+
+        let filtered = list_grants(&db, tenant, Some(GrantSubject::User(user_a)))
+            .await
+            .expect("filtered");
+        assert!(
+            filtered
+                .grants
+                .iter()
+                .all(|g| g.subject == GrantSubject::User(user_a))
+        );
+        assert_eq!(
+            filtered
+                .grants
+                .first()
+                .and_then(|g| g.description.as_deref()),
+            Some("probe")
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_grants_for_role_removes_only_that_roles_rows() {
+        let db = test_db().await;
+        let tenant = default_tenant_id(&db).await;
+        let viewer = role_id(&db, "viewer").await;
+        let operator = role_id(&db, "operator").await;
+
+        let deleted = delete_grants_for_role(&db, viewer).await.expect("delete");
+        assert!(deleted >= 1, "viewer seed grant should be deleted");
+
+        let remaining = list_grants(&db, tenant, Some(GrantSubject::Role(viewer)))
+            .await
+            .expect("list viewer");
+        assert!(remaining.grants.is_empty());
+        let operator_rows = list_grants(&db, tenant, Some(GrantSubject::Role(operator)))
+            .await
+            .expect("list operator");
+        assert!(
+            !operator_rows.grants.is_empty(),
+            "sibling role rows untouched"
         );
     }
 }

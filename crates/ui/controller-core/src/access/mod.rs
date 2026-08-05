@@ -465,6 +465,7 @@ mod tests {
             subject: GrantSubject::User(Uuid::nil()),
             patterns: vec![pattern.parse().expect("valid pattern")],
             selector: Selector::All,
+            description: None,
         }
     }
 
