@@ -2,8 +2,13 @@ import { authenticatedFetch, extractErrorMessage } from '$lib/api';
 import { getOauthSettings, updateOauthSettings } from './generated';
 import type { OAuthSettingsResponse, UpdateOAuthSettingsRequest } from './generated';
 
-// Internal helper — OAuth paths are NOT under /api/v1/, so we use authenticatedFetch
-// directly with absolute paths instead of the BASE-prefixed request() helper.
+// This module covers only the browser OAuth consent flow (paths outside /api/v1) plus
+// the /api/v1 OAuth settings passthroughs below. Operator client management and end-user
+// consent management now go through the generated SDK ($lib/api) — see McpAccessTab.svelte
+// and routes/settings/account/authorized-apps/+page.svelte.
+//
+// Internal helper — OAuth consent-flow paths are NOT under /api/v1/, so we use
+// authenticatedFetch directly with absolute paths instead of the BASE-prefixed request() helper.
 async function oauthRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
 	let res: Response;
 	try {
@@ -23,7 +28,9 @@ async function oauthRequest<T>(path: string, options: RequestInit = {}): Promise
 	return res.json();
 }
 
-async function oauthRequestVoid(path: string, options: RequestInit = {}): Promise<void> {
+// Exported (not currently called within this module) as part of the browser consent-flow
+// escape hatch this module retains — see frontend/AGENTS.md rule 1.
+export async function oauthRequestVoid(path: string, options: RequestInit = {}): Promise<void> {
 	let res: Response;
 	try {
 		res = await authenticatedFetch(path, options);
@@ -75,68 +82,6 @@ export async function approveConsent(requestId: string): Promise<{ redirect_to: 
 export async function denyConsent(requestId: string): Promise<{ redirect_to: string }> {
 	return oauthRequest(`/oauth/consent/${encodeURIComponent(requestId)}/deny`, {
 		method: 'POST'
-	});
-}
-
-export interface OAuthClient {
-	id: string;
-	client_name: string;
-	client_uri: string | null;
-	created_via: 'dcr' | 'cimd_cache' | 'manual';
-	created_at: string;
-	last_used_at: string | null;
-	revoked_at: string | null;
-	trusted_at: string | null;
-	redirect_uris: string[];
-}
-
-export async function listOAuthClients(): Promise<OAuthClient[]> {
-	return oauthRequest('/api/oauth/clients');
-}
-
-export async function revokeOAuthClient(clientId: string): Promise<void> {
-	return oauthRequestVoid(`/api/oauth/clients/${encodeURIComponent(clientId)}`, {
-		method: 'DELETE'
-	});
-}
-
-export async function trustOAuthClient(clientId: string): Promise<void> {
-	return oauthRequestVoid(`/api/oauth/clients/${encodeURIComponent(clientId)}/trust`, {
-		method: 'POST'
-	});
-}
-
-export interface ManualRegisterClientRequest {
-	client_name: string;
-	client_uri: string | null;
-	redirect_uris: string[];
-	default_scope: string;
-	token_endpoint_auth_method: 'none' | 'client_secret_basic';
-}
-
-export async function manualRegisterClient(body: ManualRegisterClientRequest): Promise<OAuthClient> {
-	return oauthRequest('/api/oauth/clients', {
-		method: 'POST',
-		body: JSON.stringify(body)
-	});
-}
-
-export interface OAuthConsent {
-	id: string;
-	client_id: string;
-	client_name: string;
-	scopes: string[];
-	granted_at: string;
-	last_used_at: string | null;
-}
-
-export async function listMyConsents(): Promise<OAuthConsent[]> {
-	return oauthRequest('/api/oauth/consents');
-}
-
-export async function revokeMyConsent(consentId: string): Promise<void> {
-	return oauthRequestVoid(`/api/oauth/consents/${encodeURIComponent(consentId)}`, {
-		method: 'DELETE'
 	});
 }
 

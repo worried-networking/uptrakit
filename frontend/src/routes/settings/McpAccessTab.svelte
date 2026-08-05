@@ -1,14 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { KeyRound } from '@lucide/svelte';
-	import {
-		listOAuthClients,
-		revokeOAuthClient,
-		trustOAuthClient,
-		getOAuthSettings,
-		updateOAuthSettings
-	} from '$lib/api/oauth';
-	import type { OAuthClient, OAuthSettingsResponse } from '$lib/api/oauth';
+	import { getOAuthSettings, updateOAuthSettings } from '$lib/api/oauth';
+	import type { OAuthSettingsResponse } from '$lib/api/oauth';
+	import { listClients, revokeClient, trustClient } from '$lib/api';
+	import type { OAuthClientResponse } from '$lib/api';
 	import { getUser } from '$lib/auth.svelte';
 	import { hasPermissionValue, Permission } from '$lib/api';
 	import {
@@ -22,6 +18,7 @@
 	} from '$lib/components/ui';
 	import { Checkbox, FormFieldRow, Input } from '$lib/components/forms';
 	import Button from '$lib/components/Button.svelte';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { createFormDraft } from '$lib/forms/draft.svelte';
 	import RegisterClientDialog from './RegisterClientDialog.svelte';
 
@@ -29,13 +26,14 @@
 	const canManage = hasPermissionValue(user, Permission.MANAGE_AUTH_SETTINGS);
 	const canManageGlobalSettings = hasPermissionValue(user, Permission.MANAGE_GLOBAL_SETTINGS);
 
-	let clients: OAuthClient[] = $state([]);
+	let clients: OAuthClientResponse[] = $state([]);
 	let loading: boolean = $state(true);
 	let loadError: string | null = $state(null);
 	let actionError: string | null = $state(null);
 	let processing: string | null = $state(null);
 	let showRegisterDialog: boolean = $state(false);
-	let detailClient = $state<OAuthClient | null>(null);
+	let detailClient = $state<OAuthClientResponse | null>(null);
+	let confirmRevoke = $state<{ id: string; name: string } | null>(null);
 
 	// OAuth settings state
 	let oauthSettings = $state<OAuthSettingsResponse | null>(null);
@@ -63,7 +61,6 @@
 		{ key: 'source', label: 'Source' },
 		{ key: 'status', label: 'Status' },
 		{ key: 'created', label: 'Created' },
-		{ key: 'last_used', label: 'Last used' },
 		{ key: 'actions', label: '' }
 	];
 
@@ -76,7 +73,9 @@
 		loading = true;
 		loadError = null;
 		try {
-			clients = await listOAuthClients();
+			// ponytail: fixed per_page 100, add pagination UI when a deployment exceeds it
+			const { data } = await listClients({ query: { page: 1, per_page: 100 } });
+			clients = data.items;
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Failed to load OAuth clients';
 		} finally {
@@ -88,7 +87,7 @@
 		processing = id;
 		actionError = null;
 		try {
-			await trustOAuthClient(id);
+			await trustClient({ path: { client_id: id } });
 			clients = clients.map((c) => (c.id === id ? { ...c, trusted_at: new Date().toISOString() } : c));
 		} catch (e) {
 			actionError = e instanceof Error ? e.message : 'Failed to trust client';
@@ -101,32 +100,29 @@
 		processing = id;
 		actionError = null;
 		try {
-			await revokeOAuthClient(id);
+			await revokeClient({ path: { client_id: id } });
 			clients = clients.map((c) => (c.id === id ? { ...c, revoked_at: new Date().toISOString() } : c));
 		} catch (e) {
 			actionError = e instanceof Error ? e.message : 'Failed to revoke client';
 		} finally {
 			processing = null;
+			confirmRevoke = null;
 		}
-	}
-
-	function handleRegistered(client: OAuthClient) {
-		clients = [client, ...clients];
 	}
 
 	function formatDate(iso: string): string {
 		return new Date(iso).toLocaleDateString();
 	}
 
-	function clientStatus(client: OAuthClient): { tone: 'neutral' | 'danger' | 'warning'; label: string } {
-		if (client.revoked_at !== null) return { tone: 'neutral', label: 'Revoked' };
-		if (client.trusted_at === null) return { tone: 'danger', label: 'Unverified' };
+	function clientStatus(client: OAuthClientResponse): { tone: 'neutral' | 'danger' | 'warning'; label: string } {
+		if (client.revoked_at) return { tone: 'neutral', label: 'Revoked' };
+		if (!client.trusted_at) return { tone: 'danger', label: 'Unverified' };
 		if (client.created_via === 'dcr') return { tone: 'warning', label: 'DCR' };
 		if (client.created_via === 'cimd_cache') return { tone: 'neutral', label: 'CIMD' };
 		return { tone: 'neutral', label: 'Manual' };
 	}
 
-	function sourceLabel(via: OAuthClient['created_via']): string {
+	function sourceLabel(via: string): string {
 		if (via === 'dcr') return 'Dynamic Registration';
 		if (via === 'cimd_cache') return 'CIMD Cache';
 		return 'Manual';
@@ -205,10 +201,10 @@
 			<DataTable
 				{columns}
 				rows={clients as unknown as Record<string, unknown>[]}
-				rowKey={(row) => (row as unknown as OAuthClient).id}
+				rowKey={(row) => (row as unknown as OAuthClientResponse).id}
 			>
 				{#snippet row(rowValue, _index)}
-					{@const client = rowValue as unknown as OAuthClient}
+					{@const client = rowValue as unknown as OAuthClientResponse}
 					{@const status = clientStatus(client)}
 					<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
 						<td class="table-cell-pad text-[var(--text-primary)]">
@@ -230,9 +226,6 @@
 							<StatusBadge tone={status.tone} label={status.label} />
 						</td>
 						<td class="table-cell-pad text-[var(--text-primary)]">{formatDate(client.created_at)}</td>
-						<td class="table-cell-pad text-[var(--text-primary)]">
-							{client.last_used_at ? formatDate(client.last_used_at) : 'Never'}
-						</td>
 						<td class="table-cell-pad">
 							<div class="flex flex-wrap gap-2">
 								<Button
@@ -242,7 +235,7 @@
 										detailClient = client;
 									}}>View details</Button
 								>
-								{#if client.trusted_at === null && client.revoked_at === null}
+								{#if !client.trusted_at && !client.revoked_at}
 									<Button
 										variant="secondary"
 										size="sm"
@@ -253,13 +246,15 @@
 										Trust
 									</Button>
 								{/if}
-								{#if client.revoked_at === null}
+								{#if !client.revoked_at}
 									<Button
 										variant="danger"
 										size="sm"
 										loading={processing === client.id}
 										disabled={processing !== null}
-										onclick={() => void handleRevoke(client.id)}
+										onclick={() => {
+											confirmRevoke = { id: client.id, name: client.client_name };
+										}}
 									>
 										Revoke
 									</Button>
@@ -396,7 +391,21 @@
 	onClose={() => {
 		showRegisterDialog = false;
 	}}
-	onSuccess={(client) => {
-		handleRegistered(client);
-	}}
+	onSuccess={() => void loadClients()}
 />
+
+{#if confirmRevoke}
+	<ConfirmDialog
+		title="Revoke OAuth Client"
+		messagePrefix="Are you sure you want to revoke"
+		entityName={confirmRevoke.name}
+		confirmLabel="Revoke"
+		confirmDisabled={processing !== null}
+		onconfirm={() => {
+			if (confirmRevoke) void handleRevoke(confirmRevoke.id);
+		}}
+		oncancel={() => {
+			confirmRevoke = null;
+		}}
+	/>
+{/if}

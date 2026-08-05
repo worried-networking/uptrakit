@@ -1,6 +1,5 @@
 <script lang="ts">
-	import { manualRegisterClient } from '$lib/api/oauth';
-	import type { OAuthClient } from '$lib/api/oauth';
+	import { manualRegisterClient } from '$lib/api';
 	import { ModalShell, Callout } from '$lib/components/ui';
 	import { FormFieldRow, Input, Select, Textarea } from '$lib/components/forms';
 	import Button from '$lib/components/Button.svelte';
@@ -12,7 +11,7 @@
 	}: {
 		open: boolean;
 		onClose: () => void;
-		onSuccess: (client: OAuthClient) => void;
+		onSuccess: () => void;
 	} = $props();
 
 	let clientName: string = $state('');
@@ -89,15 +88,19 @@
 		submitting = true;
 		submitError = null;
 		try {
-			const client = await manualRegisterClient({
-				client_name: clientName.trim(),
-				client_uri: clientUri.trim() || null,
-				redirect_uris: parseRedirectUris(redirectUrisRaw),
-				default_scope: defaultScope,
-				token_endpoint_auth_method: tokenEndpointAuthMethod
+			await manualRegisterClient({
+				body: {
+					client_name: clientName.trim(),
+					client_uri: clientUri.trim() || undefined,
+					redirect_uris: parseRedirectUris(redirectUrisRaw),
+					grant_types: ['authorization_code'],
+					response_types: ['code'],
+					token_endpoint_auth_method: tokenEndpointAuthMethod,
+					scope: defaultScope
+				}
 			});
 			resetForm();
-			onSuccess(client);
+			onSuccess();
 			onClose();
 		} catch (e) {
 			submitError = e instanceof Error ? e.message : 'Failed to register client';
