@@ -197,6 +197,8 @@ use crate::extractors::{GlobalSettingsVersion, SettingsVersion};
         crate::routes::access_grants::create_access_grant,
         crate::routes::access_grants::list_access_grants,
         crate::routes::access_grants::get_access_grant,
+        crate::routes::access_grants::update_access_grant,
+        crate::routes::access_grants::delete_access_grant,
         // MFA — unauthenticated challenge completion
         crate::routes::mfa::mfa_verify,
         crate::routes::mfa::mfa_send_email,
@@ -818,7 +820,11 @@ pub fn build_router_with_openapi(state: Arc<AppState>) -> (Router, utoipa::opena
             crate::routes::access_grants::create_access_grant,
             crate::routes::access_grants::list_access_grants
         ))
-        .routes(routes!(crate::routes::access_grants::get_access_grant))
+        .routes(routes!(
+            crate::routes::access_grants::get_access_grant,
+            crate::routes::access_grants::update_access_grant,
+            crate::routes::access_grants::delete_access_grant
+        ))
         // Admin events SSE stream
         .route(
             "/api/v1/events/stream",

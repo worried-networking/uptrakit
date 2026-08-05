@@ -139,6 +139,10 @@ impl AuditActionType {
     // Re-add when a delete-user feature is implemented and the emit site is present.
     pub const ACCESS_GRANT_CREATE: RegisteredAuditAction =
         RegisteredAuditAction::new("access_grant.create", AuditActionKind::Stateful);
+    pub const ACCESS_GRANT_UPDATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("access_grant.update", AuditActionKind::Stateful);
+    pub const ACCESS_GRANT_DELETE: RegisteredAuditAction =
+        RegisteredAuditAction::new("access_grant.delete", AuditActionKind::Stateful);
     pub const OIDC_PROVIDER_CREATE: RegisteredAuditAction =
         RegisteredAuditAction::new("oidc_provider.create", AuditActionKind::Stateful);
     pub const OIDC_PROVIDER_UPDATE: RegisteredAuditAction =
@@ -470,6 +474,8 @@ const V1_ACTIONS: &[RegisteredAuditAction] = &[
     AuditActionType::USER_CREATE,
     AuditActionType::USER_UPDATE,
     AuditActionType::ACCESS_GRANT_CREATE,
+    AuditActionType::ACCESS_GRANT_UPDATE,
+    AuditActionType::ACCESS_GRANT_DELETE,
     AuditActionType::OIDC_PROVIDER_CREATE,
     AuditActionType::OIDC_PROVIDER_UPDATE,
     AuditActionType::OIDC_PROVIDER_DELETE,
@@ -740,6 +746,8 @@ uptrakit_audit_log_derive::audit_actions! {
 
     // access grants — Stateful
     access_grant_create => ACCESS_GRANT_CREATE, Stateful;
+    access_grant_update => ACCESS_GRANT_UPDATE, Stateful;
+    access_grant_delete => ACCESS_GRANT_DELETE, Stateful;
 
     // oidc providers — Stateful
     oidc_provider_create => OIDC_PROVIDER_CREATE, Stateful;

@@ -545,6 +545,120 @@
             "developer_token": []
           }
         ]
+      },
+      "put": {
+        "tags": [
+          "Access"
+        ],
+        "summary": "Update a grant's patterns/selector/description. Subject and tenant\nencoding are immutable — re-subject/re-scope is delete + create.",
+        "description": "The stored-row state, the plane classification, and the lockout guard's\ninputs are ALL loaded inside the same `begin_guarded` transaction as the\nmutation, so a concurrent write cannot be classified against stale data\n(the role-name-collision TOCTOU class fixed by commit 41732f20e).",
+        "operationId": "update_access_grant",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Grant id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAccessGrantRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Grant updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessGrantResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation, pattern-parse, or encoding error"
+          },
+          "401": {
+            "description": "Not authenticated"
+          },
+          "403": {
+            "description": "Not authorized. Additionally requires system.access:manage when the stored row's patterns or the new patterns reach the system plane (evaluated at runtime)."
+          },
+          "404": {
+            "description": "Grant not found"
+          },
+          "409": {
+            "description": "This change would remove the last remaining access administrator (tenant plane) or the last system.access:manage holder (system plane)"
+          }
+        },
+        "security": [
+          {
+            "oauth2": [
+              "access:manage"
+            ]
+          },
+          {
+            "developer_token": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Access"
+        ],
+        "summary": "Delete a grant.",
+        "description": "Cross-instance revocation latency is bounded by the 60 s cache TTL\nbackstop (spec §Invalidation): an in-flight authority load elsewhere may\nbriefly re-observe the pre-deletion authority until that backstop\nexpires, even though this instance invalidates and publishes immediately\non commit.",
+        "operationId": "delete_access_grant",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Grant id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Grant deleted"
+          },
+          "401": {
+            "description": "Not authenticated"
+          },
+          "403": {
+            "description": "Not authorized. Deleting a system-plane grant additionally requires system.access:manage (evaluated against the stored row at runtime)."
+          },
+          "404": {
+            "description": "Grant not found"
+          },
+          "409": {
+            "description": "This change would remove the last remaining access administrator (tenant plane) or the last system.access:manage holder (system plane)"
+          }
+        },
+        "security": [
+          {
+            "oauth2": [
+              "access:manage"
+            ]
+          },
+          {
+            "developer_token": []
+          }
+        ]
       }
     },
     "/api/v1/audit-logs": {

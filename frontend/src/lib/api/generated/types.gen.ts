@@ -3964,6 +3964,46 @@ export type CreateAccessGrantResponses = {
 
 export type CreateAccessGrantResponse = CreateAccessGrantResponses[keyof CreateAccessGrantResponses];
 
+export type DeleteAccessGrantData = {
+    body?: never;
+    path: {
+        /**
+         * Grant id
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/api/v1/access/grants/{id}';
+};
+
+export type DeleteAccessGrantErrors = {
+    /**
+     * Not authenticated
+     */
+    401: unknown;
+    /**
+     * Not authorized. Deleting a system-plane grant additionally requires system.access:manage (evaluated against the stored row at runtime).
+     */
+    403: unknown;
+    /**
+     * Grant not found
+     */
+    404: unknown;
+    /**
+     * This change would remove the last remaining access administrator (tenant plane) or the last system.access:manage holder (system plane)
+     */
+    409: unknown;
+};
+
+export type DeleteAccessGrantResponses = {
+    /**
+     * Grant deleted
+     */
+    204: void;
+};
+
+export type DeleteAccessGrantResponse = DeleteAccessGrantResponses[keyof DeleteAccessGrantResponses];
+
 export type GetAccessGrantData = {
     body?: never;
     path: {
@@ -3999,6 +4039,50 @@ export type GetAccessGrantResponses = {
 };
 
 export type GetAccessGrantResponse = GetAccessGrantResponses[keyof GetAccessGrantResponses];
+
+export type UpdateAccessGrantData = {
+    body: UpdateAccessGrantRequest;
+    path: {
+        /**
+         * Grant id
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/api/v1/access/grants/{id}';
+};
+
+export type UpdateAccessGrantErrors = {
+    /**
+     * Validation, pattern-parse, or encoding error
+     */
+    400: unknown;
+    /**
+     * Not authenticated
+     */
+    401: unknown;
+    /**
+     * Not authorized. Additionally requires system.access:manage when the stored row's patterns or the new patterns reach the system plane (evaluated at runtime).
+     */
+    403: unknown;
+    /**
+     * Grant not found
+     */
+    404: unknown;
+    /**
+     * This change would remove the last remaining access administrator (tenant plane) or the last system.access:manage holder (system plane)
+     */
+    409: unknown;
+};
+
+export type UpdateAccessGrantResponses = {
+    /**
+     * Grant updated
+     */
+    200: AccessGrantResponse;
+};
+
+export type UpdateAccessGrantResponse = UpdateAccessGrantResponses[keyof UpdateAccessGrantResponses];
 
 export type ListAuditLogsData = {
     body?: never;

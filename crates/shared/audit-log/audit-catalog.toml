@@ -38,6 +38,14 @@ skip = "OCSP certificate status responder; no user-driven state change"
 site = "uptrakit_web_api::routes::access_grants::create_access_grant"
 action = "access_grant.create"
 
+[[entries]]
+site = "uptrakit_web_api::routes::access_grants::update_access_grant"
+action = "access_grant.update"
+
+[[entries]]
+site = "uptrakit_web_api::routes::access_grants::delete_access_grant"
+action = "access_grant.delete"
+
 # ---------------------------------------------------------------------------
 # Access presets
 # ---------------------------------------------------------------------------

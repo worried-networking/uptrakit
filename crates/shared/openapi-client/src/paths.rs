@@ -466,7 +466,8 @@ pub(crate) mod access_grants {
     /// `GET /api/v1/access/grants` · `POST /api/v1/access/grants`
     pub(crate) const BASE: &str = "/api/v1/access/grants";
 
-    /// `GET /api/v1/access/grants/{id}`
+    /// `GET /api/v1/access/grants/{id}` · `PUT /api/v1/access/grants/{id}` ·
+    /// `DELETE /api/v1/access/grants/{id}`
     pub(crate) fn by_id(id: &Uuid) -> String {
         format!("/api/v1/access/grants/{id}")
     }

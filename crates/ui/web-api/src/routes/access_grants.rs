@@ -13,7 +13,7 @@
 
 use crate::AppState;
 use crate::api_error::ApiError;
-use crate::error_response::error_response;
+use crate::error_response::{error_response, error_response_with_code};
 use crate::extract::Validated;
 use crate::middleware::action::{AccessAuthority, CanManageAccess, require_system_access};
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
@@ -25,10 +25,13 @@ use axum::{
 };
 use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
 use std::sync::Arc;
-use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, Stateful};
+use uptrakit_audit_log::{
+    AbsentView, AuditActionType, AuditActorType, AuditEntry, AuditOutcome, Event, Stateful,
+};
 use uptrakit_shared_db::access_grants::{
-    GrantSubject, NewGrant, ResolvedGrant, insert_grant, list_grants, load_grant,
-    patterns_reach_system_plane,
+    GrantSubject, GrantUpdate, GuardedMutation, LockoutVerdict, NewGrant, ResolvedGrant,
+    begin_guarded, check_lockout, delete_grant, insert_grant, list_grants, load_grant,
+    patterns_reach_system_plane, update_grant,
 };
 use uptrakit_shared_types::access::ActionPattern;
 use uuid::Uuid;
@@ -265,7 +268,419 @@ pub async fn get_access_grant(
     Ok((StatusCode::OK, Json(resolved_to_response(&resolved))).into_response())
 }
 
+/// Update a grant's patterns/selector/description. Subject and tenant
+/// encoding are immutable — re-subject/re-scope is delete + create.
+///
+/// The stored-row state, the plane classification, and the lockout guard's
+/// inputs are ALL loaded inside the same `begin_guarded` transaction as the
+/// mutation, so a concurrent write cannot be classified against stale data
+/// (the role-name-collision TOCTOU class fixed by commit 41732f20e).
+#[utoipa::path(
+    put,
+    path = "/api/v1/access/grants/{id}",
+    params(
+        ("id" = Uuid, Path, description = "Grant id")
+    ),
+    request_body = UpdateAccessGrantRequest,
+    responses(
+        (status = 200, description = "Grant updated", body = AccessGrantResponse),
+        (status = 400, description = "Validation, pattern-parse, or encoding error"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized. Additionally requires system.access:manage when the stored row's patterns or the new patterns reach the system plane (evaluated at runtime)."),
+        (status = 404, description = "Grant not found"),
+        (status = 409, description = "This change would remove the last remaining access administrator (tenant plane) or the last system.access:manage holder (system plane)")
+    ),
+    tag = "Access",
+    security(("oauth2" = ["access:manage"]), ("developer_token" = []))
+)]
+#[tracing::instrument(skip_all)]
+pub async fn update_access_grant(
+    State(state): State<Arc<AppState>>,
+    CanManageAccess(caller): CanManageAccess,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
+    Extension(authority): Extension<AccessAuthority>,
+    Path(id): Path<Uuid>,
+    Validated(body): Validated<UpdateAccessGrantRequest>,
+) -> Result<Response, ApiError> {
+    let api_token_id = api_token_id.map(|v| v.0);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&caller, api_token_id);
+
+    let patterns: Vec<ActionPattern> = match body.patterns.iter().map(|p| p.parse()).collect() {
+        Ok(p) => p,
+        Err(e) => {
+            return Ok(error_response(
+                StatusCode::BAD_REQUEST,
+                format!("Invalid pattern: {e}"),
+            ));
+        }
+    };
+
+    let tx = match begin_guarded(state.db()).await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!("Failed to begin transaction for grant update: {e}");
+            return Ok(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
+        }
+    };
+
+    let before = match load_grant(&tx, id).await {
+        Ok(g) => g,
+        Err(e) => {
+            drop(tx);
+            return Err(e.into());
+        }
+    };
+    if before.tenant_id.is_some() && before.tenant_id != Some(state.default_tenant_id) {
+        drop(tx);
+        return Ok(error_response(StatusCode::NOT_FOUND, "Grant not found"));
+    }
+
+    // Update checks BOTH the stored row and the written patterns: narrowing
+    // away from the system plane still requires the caller to hold
+    // system.access:manage on the stored (pre-mutation) authority, and
+    // minting new system-plane authority requires it on the write.
+    let stored_system_plane = match patterns_reach_system_plane(&before.patterns) {
+        Ok(v) => v,
+        Err(e) => {
+            drop(tx);
+            return Err(e.into());
+        }
+    };
+    let new_system_plane = match patterns_reach_system_plane(&patterns) {
+        Ok(v) => v,
+        Err(e) => {
+            drop(tx);
+            return Err(e.into());
+        }
+    };
+    if stored_system_plane || new_system_plane {
+        // APPROVED: body-dependent fine check (corpus 07, restated invariant)
+        if let Some(denied) = require_system_access(&state.access_engine, &authority) {
+            drop(tx);
+            return Ok(denied);
+        }
+    }
+
+    let verdict = match check_lockout(
+        &tx,
+        state.default_tenant_id,
+        &GuardedMutation::UpdateGrant {
+            grant_id: id,
+            new_patterns: &patterns,
+            new_selector: &body.selector,
+        },
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            drop(tx);
+            return Err(e.into());
+        }
+    };
+    if !matches!(verdict, LockoutVerdict::Permitted) {
+        drop(tx);
+        return Ok(lockout_denial_response(
+            &state,
+            AuditActionType::ACCESS_GRANT_UPDATE.into(),
+            (actor_type, actor_id),
+            "access_grant",
+            id.to_string(),
+            verdict,
+        ));
+    }
+
+    if let Err(e) = update_grant(
+        &tx,
+        id,
+        GrantUpdate {
+            patterns: &patterns,
+            selector: body.selector.clone(),
+            description: body.description.clone(),
+        },
+    )
+    .await
+    {
+        drop(tx);
+        return Err(e.into());
+    }
+
+    let after = match load_grant(&tx, id).await {
+        Ok(g) => g,
+        Err(e) => {
+            drop(tx);
+            return Err(e.into());
+        }
+    };
+
+    let before_view = AccessGrantView::from(&before);
+    let after_view = AccessGrantView::from(&after);
+    let hook = state.audit_emitter.commit_hook();
+    let mut audit_builder = AuditEntry::<Stateful>::access_grant_update(&before_view, &after_view)
+        .actor(actor_type, actor_id)
+        .outcome(AuditOutcome::Success);
+    audit_builder = match before.tenant_id {
+        Some(t) => audit_builder.tenant_scope(t),
+        None => audit_builder.system_scope(),
+    };
+    let audit_entry = match audit_builder.build() {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!("Failed to build audit entry for grant update: {e}");
+            drop(tx);
+            return Ok(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
+        }
+    };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!("Failed to emit audit entry for grant update: {e}");
+        drop(tx);
+        return Ok(error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal server error",
+        ));
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!("Failed to commit grant update: {e}");
+        return Ok(error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal server error",
+        ));
+    }
+    hook.flush_after_commit().await;
+
+    let (user_ids, role_ids) = subject_invalidation_ids(before.subject);
+    state
+        .access_engine
+        .invalidate_subjects(&user_ids, &role_ids);
+    state
+        .notification
+        .notification_service
+        .publish_controller_event(uptrakit_wire::ControllerMessage::AccessInvalidated(
+            uptrakit_wire::AccessInvalidatedPayload::new(user_ids, role_ids),
+        ))
+        .await;
+    Ok((StatusCode::OK, Json(resolved_to_response(&after))).into_response())
+}
+
+/// Delete a grant.
+///
+/// Cross-instance revocation latency is bounded by the 60 s cache TTL
+/// backstop (spec §Invalidation): an in-flight authority load elsewhere may
+/// briefly re-observe the pre-deletion authority until that backstop
+/// expires, even though this instance invalidates and publishes immediately
+/// on commit.
+#[utoipa::path(
+    delete,
+    path = "/api/v1/access/grants/{id}",
+    params(
+        ("id" = Uuid, Path, description = "Grant id")
+    ),
+    responses(
+        (status = 204, description = "Grant deleted"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized. Deleting a system-plane grant additionally requires system.access:manage (evaluated against the stored row at runtime)."),
+        (status = 404, description = "Grant not found"),
+        (status = 409, description = "This change would remove the last remaining access administrator (tenant plane) or the last system.access:manage holder (system plane)")
+    ),
+    tag = "Access",
+    security(("oauth2" = ["access:manage"]), ("developer_token" = []))
+)]
+#[tracing::instrument(skip_all)]
+pub async fn delete_access_grant(
+    State(state): State<Arc<AppState>>,
+    CanManageAccess(caller): CanManageAccess,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
+    Extension(authority): Extension<AccessAuthority>,
+    Path(id): Path<Uuid>,
+) -> Result<Response, ApiError> {
+    let api_token_id = api_token_id.map(|v| v.0);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(&caller, api_token_id);
+
+    let tx = match begin_guarded(state.db()).await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!("Failed to begin transaction for grant delete: {e}");
+            return Ok(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
+        }
+    };
+
+    let stored = match load_grant(&tx, id).await {
+        Ok(g) => g,
+        Err(e) => {
+            drop(tx);
+            return Err(e.into());
+        }
+    };
+    if stored.tenant_id.is_some() && stored.tenant_id != Some(state.default_tenant_id) {
+        drop(tx);
+        return Ok(error_response(StatusCode::NOT_FOUND, "Grant not found"));
+    }
+
+    let system_plane = match patterns_reach_system_plane(&stored.patterns) {
+        Ok(v) => v,
+        Err(e) => {
+            drop(tx);
+            return Err(e.into());
+        }
+    };
+    if system_plane {
+        // APPROVED: body-dependent fine check (corpus 07, restated invariant)
+        if let Some(denied) = require_system_access(&state.access_engine, &authority) {
+            drop(tx);
+            return Ok(denied);
+        }
+    }
+
+    let verdict = match check_lockout(
+        &tx,
+        state.default_tenant_id,
+        &GuardedMutation::DeleteGrant { grant_id: id },
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            drop(tx);
+            return Err(e.into());
+        }
+    };
+    if !matches!(verdict, LockoutVerdict::Permitted) {
+        drop(tx);
+        return Ok(lockout_denial_response(
+            &state,
+            AuditActionType::ACCESS_GRANT_DELETE.into(),
+            (actor_type, actor_id),
+            "access_grant",
+            id.to_string(),
+            verdict,
+        ));
+    }
+
+    if let Err(e) = delete_grant(&tx, id).await {
+        drop(tx);
+        return Err(e.into());
+    }
+
+    let view = AccessGrantView::from(&stored);
+    let hook = state.audit_emitter.commit_hook();
+    let mut audit_builder = AuditEntry::<Stateful>::access_grant_delete(&view, &AbsentView(&view))
+        .actor(actor_type, actor_id)
+        .outcome(AuditOutcome::Success);
+    audit_builder = match stored.tenant_id {
+        Some(t) => audit_builder.tenant_scope(t),
+        None => audit_builder.system_scope(),
+    };
+    let audit_entry = match audit_builder.build() {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!("Failed to build audit entry for grant delete: {e}");
+            drop(tx);
+            return Ok(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
+        }
+    };
+
+    if let Err(e) = state
+        .audit_emitter
+        .emit_stateful(&tx, &hook, audit_entry)
+        .await
+    {
+        tracing::error!("Failed to emit audit entry for grant delete: {e}");
+        drop(tx);
+        return Ok(error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal server error",
+        ));
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!("Failed to commit grant delete: {e}");
+        return Ok(error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal server error",
+        ));
+    }
+    hook.flush_after_commit().await;
+
+    let (user_ids, role_ids) = subject_invalidation_ids(stored.subject);
+    state
+        .access_engine
+        .invalidate_subjects(&user_ids, &role_ids);
+    state
+        .notification
+        .notification_service
+        .publish_controller_event(uptrakit_wire::ControllerMessage::AccessInvalidated(
+            uptrakit_wire::AccessInvalidatedPayload::new(user_ids, role_ids),
+        ))
+        .await;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
 // --- Helpers ---
+
+/// Denial response for a shrinking mutation the lockout guard rejected.
+///
+/// Roll back is the caller's job (drop the txn BEFORE calling). Emits the
+/// Denied audit Event and returns the client-visible 409. Reason codes
+/// only — never holder identities or counts (a `users:manage`-only caller
+/// may receive this and must not learn access-plane state).
+pub(crate) fn lockout_denial_response(
+    state: &AppState,
+    action: AuditActionType,
+    actor: (AuditActorType, Option<Uuid>),
+    target_type: &'static str,
+    target_id: String,
+    verdict: LockoutVerdict,
+) -> Response {
+    let reason_code = match verdict {
+        LockoutVerdict::TenantLockout => "lockout_access_manage",
+        LockoutVerdict::SystemLockout => "lockout_system_access",
+        LockoutVerdict::Permitted => {
+            // Callers only invoke this on a lockout verdict.
+            tracing::error!("lockout_denial_response called with Permitted");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+    match AuditEntry::<Event>::builder_event(action)
+        .tenant_scope(state.default_tenant_id)
+        .actor(actor.0, actor.1)
+        .target(target_type, target_id, None)
+        .outcome(AuditOutcome::Denied)
+        .details(serde_json::json!({ "reason_code": reason_code }))
+        .build()
+    {
+        Ok(entry) => state.audit_emitter.emit_event(entry),
+        Err(err) => {
+            tracing::error!(
+                ?err,
+                reason_code,
+                "failed to build lockout-denied audit entry"
+            );
+        }
+    }
+    error_response_with_code(
+        StatusCode::CONFLICT,
+        "This change would remove the last remaining access administrator",
+        reason_code,
+    )
+}
 
 fn subject_invalidation_ids(subject: GrantSubject) -> (Vec<Uuid>, Vec<Uuid>) {
     match subject {
@@ -334,21 +749,20 @@ mod tests {
     use super::*;
     use crate::test_harness::TestApp;
     use crate::test_harness::fixtures::{
-        open_registration, stage_user_with_grant, stage_zero_role_user,
+        open_registration, revoke_role_grants_covering, role_id_by_name, stage_user_with_grant,
+        stage_zero_role_user,
     };
     use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
     use uptrakit_shared_db::entity::audit_log;
 
-    async fn latest_grant_create_audit_row_for_target(
+    async fn latest_grant_audit_row_for_target(
         db: &sea_orm::DatabaseConnection,
+        action: uptrakit_audit_log::RegisteredAuditAction,
         target_grant_id: Uuid,
     ) -> audit_log::Model {
         for _ in 0..50 {
             if let Some(row) = audit_log::Entity::find()
-                .filter(
-                    audit_log::Column::ActionType
-                        .eq(uptrakit_audit_log::AuditActionType::ACCESS_GRANT_CREATE),
-                )
+                .filter(audit_log::Column::ActionType.eq(action))
                 .filter(audit_log::Column::TargetType.eq("access_grant"))
                 .filter(audit_log::Column::TargetId.eq(target_grant_id.to_string()))
                 .order_by_desc(audit_log::Column::OccurredAt)
@@ -361,7 +775,7 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
 
-        panic!("expected access_grant.create audit row");
+        panic!("expected {action:?} audit row");
     }
 
     #[tokio::test]
@@ -541,7 +955,12 @@ mod tests {
             .await;
         assert_eq!(status, http::StatusCode::CREATED);
 
-        let row = latest_grant_create_audit_row_for_target(&app.db, created.id).await;
+        let row = latest_grant_audit_row_for_target(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::ACCESS_GRANT_CREATE,
+            created.id,
+        )
+        .await;
         assert_eq!(
             uptrakit_audit_log::AuditActionType::ACCESS_GRANT_CREATE,
             row.action_type
@@ -619,5 +1038,345 @@ mod tests {
             http::StatusCode::NOT_FOUND,
             "a grant belonging to another tenant must not be visible"
         );
+    }
+
+    #[tokio::test]
+    async fn deleting_last_covering_grant_is_409_with_reason_code_and_state_unchanged() {
+        // Owner bootstrap seeds `settings_manager`, whose seed grant already
+        // covers tenant-wide `access:manage` — strip it first (mirrors
+        // `insert_active_user`'s doc comment in
+        // `access_lockout.rs`), so the staged grant below is the ONLY
+        // remaining covering holder and the guard has something real to
+        // discriminate.
+        let app = TestApp::new().await;
+        let client = app.client();
+        open_registration(&app).await;
+        let settings_manager_role_id = role_id_by_name(&app, "settings_manager").await;
+        revoke_role_grants_covering(
+            &app,
+            settings_manager_role_id,
+            &[uptrakit_shared_types::access::actions::ACCESS_MANAGE],
+        )
+        .await;
+
+        let (user_id, token) = stage_user_with_grant(
+            &app,
+            "sole-tenant-holder@test.local",
+            &["access:manage"],
+            Some(app.tenant_id),
+        )
+        .await;
+        let (_, listed): (_, Vec<AccessGrantResponse>) = client
+            .get(&format!(
+                "/api/v1/access/grants?subject_type=user&subject_id={user_id}"
+            ))
+            .bearer(&token)
+            .send_json()
+            .await;
+        let grant_id = listed.first().expect("staged grant present").id;
+
+        let (status, body): (
+            http::StatusCode,
+            uptrakit_web_api_types::error::ErrorResponse,
+        ) = client
+            .delete(&format!("/api/v1/access/grants/{grant_id}"))
+            .bearer(&token)
+            .send_json()
+            .await;
+        assert_eq!(status, http::StatusCode::CONFLICT);
+        assert_eq!(body.code, Some("lockout_access_manage".to_string()));
+        // Reason code only — never holder identities or counts.
+        assert!(!body.error.contains(&user_id.to_string()));
+
+        let (status, fetched): (_, AccessGrantResponse) = client
+            .get(&format!("/api/v1/access/grants/{grant_id}"))
+            .bearer(&token)
+            .send_json()
+            .await;
+        assert_eq!(
+            status,
+            http::StatusCode::OK,
+            "grant must survive the denial"
+        );
+        assert_eq!(fetched.patterns, vec!["access:manage".to_string()]);
+
+        // `lockout_denial_response`'s emit path: a Denied audit Event was
+        // written, carrying the same reason code as the HTTP body.
+        let row = latest_grant_audit_row_for_target(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::ACCESS_GRANT_DELETE,
+            grant_id,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        let details = row.details_json.expect("details_json present");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("lockout_access_manage")
+        );
+    }
+
+    #[tokio::test]
+    async fn narrowing_last_covering_grant_via_update_is_409() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        open_registration(&app).await;
+        let settings_manager_role_id = role_id_by_name(&app, "settings_manager").await;
+        revoke_role_grants_covering(
+            &app,
+            settings_manager_role_id,
+            &[uptrakit_shared_types::access::actions::ACCESS_MANAGE],
+        )
+        .await;
+
+        let (user_id, token) = stage_user_with_grant(
+            &app,
+            "sole-tenant-holder-narrow@test.local",
+            &["access:manage"],
+            Some(app.tenant_id),
+        )
+        .await;
+        let (_, listed): (_, Vec<AccessGrantResponse>) = client
+            .get(&format!(
+                "/api/v1/access/grants?subject_type=user&subject_id={user_id}"
+            ))
+            .bearer(&token)
+            .send_json()
+            .await;
+        let grant_id = listed.first().expect("staged grant present").id;
+
+        let (status, body): (
+            http::StatusCode,
+            uptrakit_web_api_types::error::ErrorResponse,
+        ) = client
+            .put_json(
+                &format!("/api/v1/access/grants/{grant_id}"),
+                &serde_json::json!({ "patterns": ["hosts:read"] }),
+            )
+            .bearer(&token)
+            .send_json()
+            .await;
+        assert_eq!(status, http::StatusCode::CONFLICT);
+        assert_eq!(body.code, Some("lockout_access_manage".to_string()));
+
+        let (status, fetched): (_, AccessGrantResponse) = client
+            .get(&format!("/api/v1/access/grants/{grant_id}"))
+            .bearer(&token)
+            .send_json()
+            .await;
+        assert_eq!(
+            status,
+            http::StatusCode::OK,
+            "grant must survive the denial"
+        );
+        assert_eq!(
+            fetched.patterns,
+            vec!["access:manage".to_string()],
+            "the narrowing write must not have applied"
+        );
+
+        // Second leg: a PUT that KEEPS the covering `access:manage` pattern
+        // (while also adding an unrelated one) must be Permitted — proves
+        // the guard's permitted-on-a-covering-grant branch at the API
+        // level, not just via the Plan-1 unit test.
+        let (status, updated): (http::StatusCode, AccessGrantResponse) = client
+            .put_json(
+                &format!("/api/v1/access/grants/{grant_id}"),
+                &serde_json::json!({ "patterns": ["access:manage", "hosts:read"] }),
+            )
+            .bearer(&token)
+            .send_json()
+            .await;
+        assert_eq!(status, http::StatusCode::OK);
+        assert_eq!(
+            updated.patterns,
+            vec!["access:manage".to_string(), "hosts:read".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn deleting_last_system_grant_is_409_lockout_system_access_independent_of_tenant_holders()
+    {
+        // `system_administrator`'s seed grant (`system.*:*`) already covers
+        // `system.access:manage` — strip it so the staged system-plane grant
+        // below is the sole system-plane holder. Tenant-plane holders are
+        // deliberately left intact (owner's `settings_manager` grant plus
+        // this principal's own tenant `access:manage` grant): the system
+        // lockout must fire regardless.
+        let app = TestApp::new().await;
+        let client = app.client();
+        open_registration(&app).await;
+        let system_administrator_role_id = role_id_by_name(&app, "system_administrator").await;
+        revoke_role_grants_covering(
+            &app,
+            system_administrator_role_id,
+            &[uptrakit_shared_types::access::actions::SYSTEM_ACCESS_MANAGE],
+        )
+        .await;
+
+        let (user_id, token) = stage_user_with_grant(
+            &app,
+            "sole-system-holder@test.local",
+            &["access:manage"],
+            Some(app.tenant_id),
+        )
+        .await;
+        let system_grant_id = insert_grant(
+            &app.db,
+            NewGrant {
+                subject: GrantSubject::User(user_id),
+                tenant_id: None,
+                patterns: &["system.access:manage".parse().expect("test pattern")],
+                selector: uptrakit_shared_types::access::Selector::All,
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect("stage sole system grant");
+        app.state.access_engine.invalidate_subjects(&[user_id], &[]);
+
+        let (status, body): (
+            http::StatusCode,
+            uptrakit_web_api_types::error::ErrorResponse,
+        ) = client
+            .delete(&format!("/api/v1/access/grants/{system_grant_id}"))
+            .bearer(&token)
+            .send_json()
+            .await;
+        assert_eq!(status, http::StatusCode::CONFLICT);
+        assert_eq!(body.code, Some("lockout_system_access".to_string()));
+    }
+
+    #[tokio::test]
+    async fn deleting_system_plane_grant_without_system_access_manage_is_403() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        open_registration(&app).await;
+        let (_id, tenant_only) = stage_user_with_grant(
+            &app,
+            "tenant-only-caller@test.local",
+            &["access:manage"],
+            Some(app.tenant_id),
+        )
+        .await;
+        let (victim_id, _) = stage_zero_role_user(&app).await;
+        let system_grant_id = insert_grant(
+            &app.db,
+            NewGrant {
+                subject: GrantSubject::User(victim_id),
+                tenant_id: None,
+                patterns: &["system.*:*".parse().expect("test pattern")],
+                selector: uptrakit_shared_types::access::Selector::All,
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect("stage system grant");
+
+        let status = client
+            .delete(&format!("/api/v1/access/grants/{system_grant_id}"))
+            .bearer(&tenant_only)
+            .send_status()
+            .await;
+        assert_eq!(
+            status,
+            http::StatusCode::FORBIDDEN,
+            "tenant-plane access:manage alone must not authorize deleting a system-plane grant"
+        );
+    }
+
+    #[tokio::test]
+    async fn grant_update_and_delete_write_stateful_audit_rows() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        open_registration(&app).await;
+        let (_admin_id, token) = stage_user_with_grant(
+            &app,
+            "update-delete-audit-admin@test.local",
+            &["access:manage"],
+            Some(app.tenant_id),
+        )
+        .await;
+        let (subject_id, _) = stage_zero_role_user(&app).await;
+
+        let (status, created): (http::StatusCode, AccessGrantResponse) = client
+            .post_json(
+                "/api/v1/access/grants",
+                &serde_json::json!({
+                    "subject_type": "user",
+                    "subject_id": subject_id,
+                    "patterns": ["hosts:read"],
+                    "description": "pre-update"
+                }),
+            )
+            .bearer(&token)
+            .send_json()
+            .await;
+        assert_eq!(status, http::StatusCode::CREATED);
+
+        let (status, updated): (http::StatusCode, AccessGrantResponse) = client
+            .put_json(
+                &format!("/api/v1/access/grants/{}", created.id),
+                &serde_json::json!({
+                    "patterns": ["hosts:read", "hosts:update"],
+                    "description": "post-update"
+                }),
+            )
+            .bearer(&token)
+            .send_json()
+            .await;
+        assert_eq!(status, http::StatusCode::OK);
+        assert_eq!(
+            updated.patterns,
+            vec!["hosts:read".to_string(), "hosts:update".to_string()]
+        );
+
+        let update_row = latest_grant_audit_row_for_target(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::ACCESS_GRANT_UPDATE,
+            created.id,
+        )
+        .await;
+        assert_eq!(
+            update_row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        let before = update_row.before_snapshot.expect("before_snapshot");
+        assert_eq!(before["patterns"], serde_json::json!(["hosts:read"]));
+        let after = update_row.after_snapshot.expect("after_snapshot");
+        assert_eq!(
+            after["patterns"],
+            serde_json::json!(["hosts:read", "hosts:update"])
+        );
+
+        let status = client
+            .delete(&format!("/api/v1/access/grants/{}", created.id))
+            .bearer(&token)
+            .send_status()
+            .await;
+        assert_eq!(status, http::StatusCode::NO_CONTENT);
+
+        let delete_row = latest_grant_audit_row_for_target(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::ACCESS_GRANT_DELETE,
+            created.id,
+        )
+        .await;
+        assert_eq!(
+            delete_row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        let before = delete_row.before_snapshot.expect("before_snapshot");
+        assert_eq!(
+            before["patterns"],
+            serde_json::json!(["hosts:read", "hosts:update"])
+        );
+        let after = delete_row.after_snapshot.expect("after_snapshot");
+        assert_eq!(after, serde_json::json!({}));
     }
 }
