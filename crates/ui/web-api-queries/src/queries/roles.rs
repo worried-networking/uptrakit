@@ -78,6 +78,20 @@ pub async fn get_role<C: ConnectionTrait>(
 
 /// Name-collision probe for create/rename. `exclude_role_id` skips the
 /// role being renamed (rename-to-own-name is legal).
+///
+/// # Accepted risk (recorded)
+///
+/// This probe is a separate statement from the [`create_role`] insert and
+/// the [`update_role`] update, so it is not atomic (TOCTOU): two concurrent
+/// creates/renames of the same name can both see "no collision", and the
+/// loser's write then trips `uix_roles_global_name`/`uix_roles_tenant_name`
+/// and arrives as an untyped [`RoleQueryError::Db`] — there is deliberately
+/// no typed collision variant, because the unique index carries no scope
+/// information a caller could map back to [`RoleNameCollision`]. Callers
+/// must not treat a clean probe as a guarantee that the following write
+/// succeeds. Role writes are an infrequent admin path; the index, not this
+/// probe, is the correctness boundary. Plan 2 owns the HTTP mapping (409 on
+/// a probe hit, 500 on the racing-write path) — do not build locking here.
 pub async fn find_role_name_collision<C: ConnectionTrait>(
     db: &C,
     tenant_id: Uuid,
@@ -170,12 +184,13 @@ pub async fn delete_role_rows<C: ConnectionTrait>(
 ) -> Result<()> {
     let role = get_own_role(db, tenant_id, role_id).await?;
     // `user_role` is `TenantScoped`, so its writes carry the tenant filter by rule.
-    // The filter is not load-bearing here and no test can discriminate it:
-    // `fk_user_roles_role` is `ON DELETE CASCADE`, so the `roles` delete below
-    // removes every remaining assignment anyway — including any row whose
-    // `tenant_id` disagrees with its role's (no composite FK ties the two). The
-    // explicit delete stays so the intent is visible at the query layer and does
-    // not silently depend on cascade configuration.
+    // The filter is not load-bearing here and no test can discriminate it: the
+    // (unnamed) `user_roles.role_id -> roles.id` foreign key is `ON DELETE CASCADE`
+    // (`m20260209_000001_initial.rs`, the `UserRoles` table create), so the `roles`
+    // delete below removes every remaining assignment anyway — including any row
+    // whose `tenant_id` disagrees with its role's (no composite FK ties the two).
+    // The explicit delete stays so the intent is visible at the query layer and
+    // does not silently depend on cascade configuration.
     user_role::Entity::delete_many()
         .filter(user_role::Column::RoleId.eq(role.id))
         .filter(user_role::Column::TenantId.eq(tenant_id))
