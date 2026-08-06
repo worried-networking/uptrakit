@@ -2,6 +2,10 @@ use rootcause::prelude::*;
 use thiserror::Error;
 use uptrakit_shared_macros::impl_report_conversion;
 
+/// Source-carrying variants deliberately omit `#[from]`: every conversion into
+/// `AuthError` goes through `.context_to()` via the `impl_report_conversion!`
+/// blocks below, so a derived `From` impl would be dead code (error-handling.md
+/// bans carrying both).
 #[derive(Debug, Error)]
 pub enum AuthError {
     #[error("invalid credentials")]
@@ -17,19 +21,19 @@ pub enum AuthError {
     UserDeactivated,
 
     #[error("password hashing error: {0}")]
-    PasswordHash(#[from] argon2::password_hash::Error),
+    PasswordHash(argon2::password_hash::Error),
 
     #[error("token generation failed: {0}")]
     TokenGeneration(String),
 
     #[error("database error: {0}")]
-    Database(#[from] sea_orm::DbErr),
+    Database(sea_orm::DbErr),
 
     #[error("UUID parsing error: {0}")]
-    UuidParse(#[from] uuid::Error),
+    UuidParse(uuid::Error),
 
     #[error("time error: {0}")]
-    TimeError(#[from] time::error::ComponentRange),
+    TimeError(time::error::ComponentRange),
 
     #[error("OIDC provider not found or inactive")]
     OidcProviderNotFound,
@@ -92,7 +96,7 @@ pub enum AuthError {
     DeviceFlowAlreadyAuthorized,
 
     #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
+    Io(std::io::Error),
 
     #[error("invalid session: auth method data is corrupted or inconsistent")]
     InvalidSession,
@@ -116,11 +120,6 @@ pub enum AuthError {
     EmailDeliveryUnavailable,
 
     /// Lockout-guard failure during OIDC role sync.
-    ///
-    /// No `#[from]`: conversions route through `.context_to()` via the
-    /// `impl_report_conversion!` below, and error-handling.md bans carrying
-    /// both (the derived `From` impl would be dead code) — same rule the
-    /// source type's own `AccessGrantError::Db` variant follows.
     #[error("access guard error: {0}")]
     AccessGuard(uptrakit_shared_db::access_grants::AccessGrantError),
 }
