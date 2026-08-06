@@ -1,7 +1,7 @@
 use crate::AppState;
 use crate::auth::token::generate_uuid;
 use crate::error_response::error_response;
-use crate::extract::Validated;
+use crate::extract::{Unvalidated, Validated};
 use crate::middleware::action::{CanManageSettingsAuth, CanReadSettings};
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::tenant_db::TenantDb;
@@ -423,11 +423,30 @@ pub async fn update_provider(
     Path(provider_id): Path<Uuid>,
     CanManageSettingsAuth(user): CanManageSettingsAuth,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
-    Json(req): Json<UpdateOidcProviderRequest>,
+    body: Unvalidated<UpdateOidcProviderRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
     let tenant_id = tenant_db.tenant_id();
+
+    let req = match body.require_valid() {
+        Ok(req) => req,
+        Err(e) => {
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
+                uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("oidc_provider", provider_id.to_string(), None)
+            .outcome(AuditOutcome::ValidationFailed)
+            .details(serde_json::json!({ "reason_code": "invalid_request" }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            return error_response(StatusCode::BAD_REQUEST, e.to_string());
+        }
+    };
 
     let mut updated_fields: Vec<&'static str> = Vec::new();
     if req.name.is_some() {
@@ -1633,6 +1652,53 @@ mod audit_tests {
         assert_eq!(delete_row.target_id.as_deref(), Some(provider_id));
         let delete_details = delete_row.details_json.expect("delete details");
         assert!(delete_details.get("was_active").is_some());
+    }
+
+    #[tokio::test]
+    async fn update_provider_rejects_invalid_issuer_url_and_audits() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let token = fixtures::register_and_get_token(&client).await;
+
+        let (create_status, created): (http::StatusCode, serde_json::Value) = client
+            .post_json(
+                "/api/v1/settings/oidc-providers",
+                &serde_json::json!({
+                    "name": "Invalid Update Target",
+                    "slug": "invalid-update-target",
+                    "issuer_url": "https://auth.example.com",
+                    "client_id": "uptrakit",
+                    "client_secret": "initial-secret",
+                    "allow_private_network_issuers": false
+                }),
+            )
+            .bearer(&token)
+            .send_json()
+            .await;
+        assert_eq!(create_status, http::StatusCode::CREATED);
+        let provider_id = created["id"].as_str().expect("provider id in response");
+
+        let status = client
+            .put_json(
+                &format!("/api/v1/settings/oidc-providers/{provider_id}"),
+                &serde_json::json!({ "issuer_url": "ftp://x" }),
+            )
+            .bearer(&token)
+            .send_status()
+            .await;
+        assert_eq!(status, http::StatusCode::BAD_REQUEST);
+
+        let row = tenant_audit_row_for_action(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed.as_str()
+        );
+        assert_eq!(row.target_type.as_deref(), Some("oidc_provider"));
+        assert_eq!(row.target_id.as_deref(), Some(provider_id));
     }
 
     #[tokio::test]
