@@ -643,11 +643,18 @@ struct Assignment {
 /// transaction.
 ///
 /// Guarded (shrinking) mutations: grant update, grant delete, role delete,
-/// role-set replace (always, post-state), user deactivation, OIDC role
-/// sync when the post-state does not cover the pre-state. Adding-only
+/// role-set replace (always, post-state), user deactivation. Adding-only
 /// mutations (grant create, role create, rename/description update, user
 /// activation) must NOT call this — under allow-only union they cannot
 /// shrink authority.
+///
+/// NOT guarded, and deliberately out of M1.6a's scope: OIDC role sync
+/// (`sync_oidc_roles`, `crates/ui/web-api-auth/src/auth/authentication.rs`)
+/// replaces a linked user's whole role set on every login from the
+/// provider's claim mapping, without this guard and without engine cache
+/// invalidation. A claim mapping that drops the sole covering holder's
+/// role can therefore still lock a tenant out of `access:manage` through
+/// a path no API endpoint permits. M1.6b owns closing it.
 ///
 /// Serialization: one `SELECT … FOR UPDATE` on the DEFAULT tenant's
 /// `tenants` row — a single global sentinel for both planes (role-subject

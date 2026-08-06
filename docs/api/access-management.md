@@ -107,7 +107,10 @@ Creating or renaming a custom role rejects a name collision with `409`:
 
 `DELETE /api/v1/roles/{id}` cascades: it deletes the role's own grants (role-subject
 grants targeting it) and its user assignments in the same transaction as the role row,
-then invalidates and publishes for every affected user/role id.
+then invalidates the authority cache and publishes an `AccessInvalidated` event naming
+the affected user and role ids. Invalidation is all-or-nothing -- the ids are carried for
+observability, not as a selective flush -- so no holder of the deleted role can retain
+cached authority.
 
 ## Assignment endpoint
 
@@ -172,6 +175,16 @@ either, since it never changes what the role grants.
 
 Grant-limit rejection is a separate, unguarded 409: creating a grant for a subject that
 already holds 200 grants returns `409` with reason code `too_many_grants`.
+
+### Known gap: OIDC role sync
+
+The guard covers the API surface only. OIDC login replaces a linked user's entire role set
+from the identity provider's claim mapping on every sign-in, and that path runs neither the
+lockout guard nor cache invalidation. A claim mapping that stops resolving to a covering
+role therefore removes the last `access:manage` holder in a way no endpoint documented here
+would permit, and leaves the downgraded principal on cached authority until the TTL below
+expires. Operators relying on OIDC role mapping should keep at least one local (non-OIDC)
+account holding `access:manage`. Closing this is M1.6b's scope.
 
 ## Revocation latency
 
