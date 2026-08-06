@@ -1049,10 +1049,32 @@ The full error handling reference (20 patterns, anti-patterns, decision table, a
 
 ## Request Type Validation
 
-All HTTP request types in `uptrakit-web-api-types` that accept user input must implement the `Validate` trait (defined in `validation.rs`). Route
-handlers call `req.validate()` at entry and return HTTP 400 on failure.
+Route handlers never take a request body as a raw extractor. They take one of two typed extractors, both defined in
+`crates/ui/web-api/src/extract.rs`:
+
+- **`Unvalidated<T>`** (JSON) and its form-borne counterpart **`UnvalidatedForm<T>`** deserialize the body without running validation. The inner
+  value is private — the only way to reach it is `require_valid()`, which runs `Validate::validate()` and returns `Result<T, ValidationError>`. This
+  puts the handler in control of what happens on failure: which status code to return, whether to emit a `ValidationFailed` audit event, and whether
+  to validate before or after authorization has run.
+- **`Validated<T>`** deserializes and validates in the extractor itself, rejecting with a generic `400 Bad Request` before the handler body runs.
+
+These two are not co-equal defaults. `Unvalidated<T>` is the default for mutations on an audited entity family — only it can emit the family's
+`ValidationFailed` audit event, return a non-400 status, or defer validation until after an authorization check. Reach for `Validated<T>` only when
+the entity family does not audit validation failures.
+
+### Raw body extractors are banned
+
+A raw `Json<T>`/`Form<T>` body parameter (or a raw `Request`/`Bytes` body read) in `crates/ui/web-api/src/routes/` is banned, CI-enforced by
+`bash ci/verify_no_raw_body_extractors.sh`. The gate carries an allowlist (`ci/verify_no_raw_body_extractors_allowlist.txt`) covering the legacy
+handlers that still call `.validate()` manually plus a small set of enumerated raw-body reads. What the script actually enforces is a shrink-only
+row-_count_ ceiling (`MAX_ALLOWLIST_ENTRIES`), not a frozen row _set_ — it cannot detect a commit that deletes one legacy row while adding a
+different, unconverted handler's row, since the count stays flat. Adding a new handler to the allowlist is prohibited by convention and code review,
+not by the script; see [ADR-0038](../adr/0038-type-state-request-body-validation-via-unvalidated-extractor.md) for the full boundary.
 
 ### Validate trait
+
+Every request body type implements `Validate` — the extractor bounds on `Unvalidated<T>`/`UnvalidatedForm<T>`/`Validated<T>` compile-force it, so
+there is no path to a handler that skips it.
 
 ```rust
 use uptrakit_web_api_types::validation::{Validate, ValidationError};
@@ -1062,7 +1084,15 @@ pub trait Validate {
 }
 ```
 
-`ValidationError` carries a `field: &'static str` and `message: String`, providing structured field-level error reporting to API consumers.
+`ValidationError` carries a `field: &'static str` and `message: String`, providing structured field-level error reporting to API consumers. When a
+type genuinely has no format/length invariants to check, the implementation is still required — return `Ok(())` with a comment explaining why:
+
+```rust
+fn validate(&self) -> Result<(), ValidationError> {
+    // No format/length invariants beyond field types; capability/existence checks are handler-side.
+    Ok(())
+}
+```
 
 ### Implementation pattern
 
@@ -1080,31 +1110,35 @@ impl Validate for CreateSoftwareItemRequest {
 }
 ```
 
+### Validating `Option`-wrapped update fields
+
+Update/PATCH request types wrap mutable fields in `Option<T>` so "omitted" and "explicitly set" are distinguishable; validate only when the field is
+`Some`. A field that is required whenever present (i.e. not clearable) must reject `Some("")` — see `UpdateHostRequest::validate()` in
+`crates/shared/web-api-types/src/hosts.rs`, which rejects `friendly_name: Some("")` but allows `None` (keep current value). A field that can
+genuinely be cleared must not overload the empty string for that — it needs an unambiguous tri-state representation instead. The established idiom
+is `Option<serde_json::Value>`, where absence keeps the current value, `null` clears it, and any other JSON value sets it; see
+`UpdateNatsSettingsRequest`, `UpdateHostTagRequest`, and `UpdateScheduledTaskRequest` in `crates/shared/web-api-types/src/`.
+
 ### Route handler wiring
 
 ```rust
-if let Err(e) = req.validate() {
-    return error_response(StatusCode::BAD_REQUEST, &e.to_string());
+body: Unvalidated<UpdateHostRequest>,
+) -> Response {
+    let body = match body.require_valid() {
+        Ok(body) => body,
+        Err(e) => return error_response(StatusCode::BAD_REQUEST, e.to_string()),
+    };
+    // ... use `body`
 }
 ```
 
-### Currently validated request types
+Handlers on an audited entity family wrap the `Err` arm with the family's `ValidationFailed` audit emission before returning the error response —
+see `update_host` in `crates/ui/web-api/src/routes/hosts.rs` for the pattern: build an `AuditEntry::<Event>` with
+`.outcome(AuditOutcome::ValidationFailed)`, call `state.audit_emitter.emit_event(entry)`, then return `error_response(StatusCode::BAD_REQUEST,
+e.to_string())`.
 
-| Type                           | Key validations                                                                                      |
-| ------------------------------ | ---------------------------------------------------------------------------------------------------- |
-| `RegisterRequest`              | email format (contains `@`, max 254 chars), `first_name` non-empty, password 8–1024 chars            |
-| `LoginRequest`                 | email format, password non-empty                                                                     |
-| `CreateOidcProviderRequest`    | name non-empty, slug format (lowercase+digits+hyphens, 1–64), issuer_url scheme, client_id non-empty |
-| `UpdateScheduledTaskRequest`   | interval_seconds > 0, jitter_seconds >= 0                                                            |
-| `UpdateNetworkSettingsRequest` | trusted_proxies items non-empty, real_ip_header non-empty, pki_addr URL format                       |
-| `CreateSoftwareItemRequest`    | name non-empty, exactly one of plugin_config_id/plugin_config                                        |
-| `CreatePluginConfigRequest`    | name non-empty                                                                                       |
-| `CreateApiTokenRequest`        | `name` non-empty (after trim)                                                                        |
-| `CreateEnrollmentTokenRequest` | `name` non-empty; `max_uses` if present must be > 0; `expires_in_seconds` if present must be > 0     |
-| `UpdateServiceRequest`         | `ping_interval_seconds` if present must be 0 (sentinel: clear override) or ≥ 5                       |
-| `CreateSoftwareIgnoreRequest`  | `name` or `package_identifier` non-empty (after trim) depending on rule type                         |
-
-See also: the `update_hooks.rs` module provides a similar validation pattern (`HookValidationError`) for hook configuration types.
+Coverage of which request types are validated is compile-enforced by the extractor bound and CI-enforced by `verify_no_raw_body_extractors.sh`; a
+hand-maintained inventory here would only drift out of sync. The `*Request` naming convention remains a soft convention, not an enforced one.
 
 ## Route Authorization Pattern
 
