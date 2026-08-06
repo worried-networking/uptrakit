@@ -38,3 +38,4 @@
 - [0035 — Shared Zeroconf Crate](0035-shared-zeroconf-crate.md)
 - [0036 — Manage ADRs with adrs](0036-manage-adrs-with-adrs.md)
 - [0037 — Discovery never overwrites detected versions of active items](0037-discovery-never-overwrites-detected-versions-of-active-items.md)
+- [0038 — Type-state request body validation via Unvalidated extractor](0038-type-state-request-body-validation-via-unvalidated-extractor.md)
