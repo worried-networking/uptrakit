@@ -63,6 +63,14 @@ site = "uptrakit_web_api::routes::roles::delete_role"
 action = "role.delete"
 
 # ---------------------------------------------------------------------------
+# Access deny observability (M1.6b) — central web-api funnel helper.
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::middleware::action::record_access_denied"
+action = "access.denied"
+
+# ---------------------------------------------------------------------------
 # Access presets
 # ---------------------------------------------------------------------------
 

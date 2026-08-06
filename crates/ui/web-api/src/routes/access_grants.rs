@@ -87,7 +87,9 @@ pub async fn create_access_grant(
     let system_plane = patterns_reach_system_plane(&patterns)?;
     if system_plane {
         // APPROVED: body-dependent fine check (corpus 07, restated invariant)
-        if let Some(denied) = require_system_access(&state.access_engine, &authority) {
+        if let Some(denied) =
+            require_system_access(&state.access_engine, &state.audit_emitter, &authority)
+        {
             return Ok(denied);
         }
     }
@@ -364,7 +366,9 @@ pub async fn update_access_grant(
     };
     if stored_system_plane || new_system_plane {
         // APPROVED: body-dependent fine check (corpus 07, restated invariant)
-        if let Some(denied) = require_system_access(&state.access_engine, &authority) {
+        if let Some(denied) =
+            require_system_access(&state.access_engine, &state.audit_emitter, &authority)
+        {
             drop(tx);
             return Ok(denied);
         }
@@ -546,7 +550,9 @@ pub async fn delete_access_grant(
     };
     if system_plane {
         // APPROVED: body-dependent fine check (corpus 07, restated invariant)
-        if let Some(denied) = require_system_access(&state.access_engine, &authority) {
+        if let Some(denied) =
+            require_system_access(&state.access_engine, &state.audit_emitter, &authority)
+        {
             drop(tx);
             return Ok(denied);
         }

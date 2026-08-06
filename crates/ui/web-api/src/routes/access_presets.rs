@@ -427,9 +427,11 @@ pub async fn apply_preset(
     };
     if reaches_system_plane {
         // APPROVED: body-dependent fine check (corpus 07, restated invariant)
-        if let Some(denied) =
-            crate::middleware::action::require_system_access(&state.access_engine, &authority)
-        {
+        if let Some(denied) = crate::middleware::action::require_system_access(
+            &state.access_engine,
+            &state.audit_emitter,
+            &authority,
+        ) {
             drop(txn);
             return denied;
         }

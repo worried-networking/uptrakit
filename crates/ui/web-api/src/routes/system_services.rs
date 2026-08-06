@@ -499,7 +499,14 @@ pub async fn batch_system_services(
         "deactivate" => &[actions::SYSTEM_SERVICES_DELETE][..],
         _ => return error_response(StatusCode::BAD_REQUEST, "Unknown batch action"),
     };
-    if authorize_any(&state.access_engine, &access_ctx, required_actions).is_err() {
+    if authorize_any(
+        &state.access_engine,
+        &access_ctx,
+        &state.audit_emitter,
+        required_actions,
+    )
+    .is_err()
+    {
         if let Some(action_type) = action_type {
             emit_system_service_audit(
                 &state,
@@ -663,8 +670,8 @@ mod tests {
     use crate::auth::AuthMethod;
     use crate::auth::permissions::Permission;
     use sea_orm::{
-        ActiveModelTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryOrder, QuerySelect,
-        Set,
+        ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait,
+        QueryFilter, QueryOrder, QuerySelect, Set,
     };
     use uptrakit_shared_db::entity::{system_audit_log, system_service};
 
@@ -700,6 +707,29 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
         panic!("expected {expected} system audit rows");
+    }
+
+    /// Polls for a system audit row keyed by `action_type`, since a qualifying
+    /// deny (M1.6b) additionally emits an `access.denied` Event via
+    /// `record_access_denied` alongside this route's own domain-specific
+    /// denied audit row — both rows are expected on this path.
+    async fn system_audit_row_for_action(
+        db: &DatabaseConnection,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
+    ) -> system_audit_log::Model {
+        for _ in 0..40 {
+            if let Some(row) = system_audit_log::Entity::find()
+                .filter(system_audit_log::Column::ActionType.eq(action_type))
+                .order_by_desc(system_audit_log::Column::OccurredAt)
+                .one(db)
+                .await
+                .expect("query system audit rows")
+            {
+                return row;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("expected a system audit row for action {action_type}");
     }
 
     async fn insert_pending_system_service(db: &DatabaseConnection) -> system_service::Model {
@@ -827,16 +857,29 @@ mod tests {
         .await;
 
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
-        wait_for_system_audit_rows(&db, 1).await;
-        let row = latest_system_audit_row(&db).await;
+        // The route's own domain-specific denied audit row, plus the M1.6b
+        // deny-Event funnel's `access.denied` row (`system.services:approve`
+        // qualifies as a system-plane action) — both are expected.
+        wait_for_system_audit_rows(&db, 2).await;
+        let row =
+            system_audit_row_for_action(&db, uptrakit_audit_log::AuditActionType::SERVICE_APPROVE)
+                .await;
 
-        assert_eq!(
-            uptrakit_audit_log::AuditActionType::SERVICE_APPROVE,
-            row.action_type
-        );
         assert_eq!(
             row.outcome,
             uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+
+        let deny_event_row =
+            system_audit_row_for_action(&db, uptrakit_audit_log::AuditActionType::ACCESS_DENIED)
+                .await;
+        assert_eq!(
+            deny_event_row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        assert_eq!(
+            deny_event_row.target_id.as_deref(),
+            Some("system.services:approve")
         );
     }
 

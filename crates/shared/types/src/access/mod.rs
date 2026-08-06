@@ -54,6 +54,19 @@ pub(crate) fn is_valid_segment_path(s: &str) -> bool {
     !s.is_empty() && s.split('.').all(is_valid_segment)
 }
 
+/// Deny-audit policy (M1.6b): denials of these actions produce an
+/// `access.denied` audit Event; every other denial is a debug trace plus
+/// the `uptrakit_access_denies_total` counter only. One definition shared
+/// by the web-api and MCP enforcement crates — never duplicate this
+/// classification.
+#[must_use]
+pub fn deny_event_worthy(action: &Action) -> bool {
+    action.resource().is_system()
+        || *action == actions::COMMANDS_MANAGE
+        || *action == actions::ACCESS_MANAGE
+        || *action == actions::MCP_USE
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,6 +103,29 @@ mod tests {
                 *expected,
                 "segment path grammar for {input:?}"
             );
+        }
+    }
+
+    #[test]
+    fn deny_event_worthy_covers_exactly_the_policy_set() {
+        for worthy in [
+            "system.settings:manage",
+            "system.audit:read",
+            "commands:manage",
+            "access:manage",
+            "mcp:use",
+        ] {
+            let action = worthy.parse::<Action>().expect("valid action");
+            assert!(deny_event_worthy(&action), "{worthy} must qualify");
+        }
+        for ordinary in [
+            "hosts:read",
+            "updates:trigger",
+            "users:manage",
+            "settings.auth:manage",
+        ] {
+            let action = ordinary.parse::<Action>().expect("valid action");
+            assert!(!deny_event_worthy(&action), "{ordinary} must not qualify");
         }
     }
 }

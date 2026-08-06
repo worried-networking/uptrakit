@@ -11,10 +11,13 @@ use axum::extract::{FromRef, FromRequestParts};
 use axum::http::request::Parts;
 use axum::response::Response;
 use http::StatusCode;
+use uptrakit_audit_log::{
+    AuditActionType, AuditActorType, AuditEmitter, AuditEntry, AuditOutcome, Event,
+};
 use uptrakit_controller_core::access::{AccessContext, AccessEngine};
 use uptrakit_shared_types::access::{Action, Decision, DenyReason, actions};
 
-use crate::app_state::AccessState;
+use crate::app_state::{AccessState, AuditEmitterState};
 use crate::error_response::{error_response, error_response_with_code};
 use crate::middleware::require_auth::AuthenticatedUser;
 
@@ -58,13 +61,71 @@ impl AccessAuthority {
 /// the [`authorize_any`] OR-gate, the surface read/invoke gate
 /// (`routes/surfaces.rs`), and the self-or-`users:manage` fine check in
 /// `routes/users.rs::update_profile` all funnel through here, so the metric
-/// name and label shape cannot drift apart across the deny paths.
+/// name and label shape cannot drift apart across the deny paths. Every one
+/// of those sites reaches this fn only through [`record_access_denied`],
+/// which additionally emits the `access.denied` audit Event for qualifying
+/// denials (M1.6b) — never call this fn directly from a new site; funnel
+/// through the Event helper.
 pub(crate) fn record_access_deny(reason: &DenyReason) {
     metrics::counter!(
         "uptrakit_access_denies_total",
         "reason" => reason.as_str()
     )
     .increment(1);
+}
+
+/// One deny through the funnel: counter increment plus, when EVERY denied
+/// action qualifies under `deny_event_worthy`, an `access.denied` audit
+/// Event (spec §4). Single-action sites pass a one-element slice; OR-gates
+/// pass every alternative — a mixed gate (any non-qualifying alternative)
+/// emits no Event by design (an ordinary operation with a sensitive
+/// allow-alternative is an ordinary denial).
+///
+/// Scope follows the first action's plane: `system.*` → system scope,
+/// otherwise the caller's tenant. Never called on the engine-unavailable
+/// (500) paths — outages are `Failed`, not `Denied`, and must not fire
+/// deny dashboards.
+///
+/// Not a route handler: the audit-coverage walker sees it only through
+/// this marker (catalog row keys this fn).
+#[uptrakit_audit_log::audit_required]
+pub(crate) fn record_access_denied(
+    emitter: &AuditEmitter,
+    ctx: &AccessContext,
+    denied_actions: &[&Action],
+    reason: &DenyReason,
+) {
+    record_access_deny(reason);
+    let Some(first) = denied_actions.first() else {
+        return;
+    };
+    if !denied_actions
+        .iter()
+        .all(|action| uptrakit_shared_types::access::deny_event_worthy(action))
+    {
+        return;
+    }
+    let builder = AuditEntry::<Event>::builder_event(AuditActionType::ACCESS_DENIED);
+    let builder = if first.resource().is_system() {
+        builder.system_scope()
+    } else {
+        builder.tenant_scope(ctx.tenant_id)
+    };
+    if let Ok(entry) = builder
+        .actor(AuditActorType::User, Some(ctx.user_id))
+        .target("action", first.to_string(), None)
+        .outcome(AuditOutcome::Denied)
+        .details(serde_json::json!({
+            "actions": denied_actions
+                .iter()
+                .map(|action| action.to_string())
+                .collect::<Vec<_>>(),
+            "reason": reason.as_str(),
+        }))
+        .build()
+    {
+        emitter.emit_event(entry);
+    }
 }
 
 /// Generates a concrete Axum extractor struct for a single catalog action.
@@ -94,6 +155,7 @@ macro_rules! action_extractor {
             where
                 S: Send + Sync,
                 AccessState: FromRef<S>,
+                AuditEmitterState: FromRef<S>,
             {
                 type Rejection = Response;
 
@@ -141,24 +203,27 @@ macro_rules! action_extractor {
                     let engine = AccessState::from_ref(state).0;
                     match engine.authorize(&ctx, &$action, None) {
                         Decision::Allow => Ok($name(user)),
-                        Decision::Deny(reason) => {
+                        decision => {
+                            let reason = match decision {
+                                Decision::Deny(reason) => reason,
+                                // `Decision` is #[non_exhaustive] in another
+                                // crate: unknown variants deny fail-closed,
+                                // counted/audited as no_grant.
+                                _ => DenyReason::NoGrant,
+                            };
                             tracing::debug!(
                                 action = %$action,
                                 user_id = %user.user_id,
                                 reason = reason.as_str(),
                                 "action denied"
                             );
-                            record_access_deny(&reason);
+                            let emitter = AuditEmitterState::from_ref(state).0;
+                            record_access_denied(&emitter, &ctx, &[&$action], &reason);
                             Err(error_response(
                                 StatusCode::FORBIDDEN,
                                 "Insufficient permissions",
                             ))
                         }
-                        // `Decision` is #[non_exhaustive] in another crate.
-                        _ => Err(error_response(
-                            StatusCode::FORBIDDEN,
-                            "Insufficient permissions",
-                        )),
                     }
                 }
             }
@@ -252,10 +317,13 @@ action_extractor! {
 ///
 /// Increments `uptrakit_access_denies_total` on deny, exactly as
 /// `action_extractor!` does for the single-action case — callers render the
-/// 403 (and any audit row) but never have to remember the counter.
+/// 403 (and any audit row) but never have to remember the counter. Also
+/// funnels through [`record_access_denied`]: an all-qualifying gate (spec
+/// §4 OR-gate rule) emits an `access.denied` Event; a mixed gate does not.
 pub(crate) fn authorize_any(
     engine: &AccessEngine,
     ctx: &AccessContext,
+    emitter: &AuditEmitter,
     actions: &[Action],
 ) -> Result<(), DenyReason> {
     let mut deny = None;
@@ -273,7 +341,8 @@ pub(crate) fn authorize_any(
         }
     }
     let reason = deny.unwrap_or(DenyReason::NoGrant);
-    record_access_deny(&reason);
+    let refs: Vec<&Action> = actions.iter().collect();
+    record_access_denied(emitter, ctx, &refs, &reason);
     Err(reason)
 }
 
@@ -282,8 +351,11 @@ pub(crate) fn authorize_any(
 /// rows, deleting roles that hold them, or assigning roles that reach the
 /// system plane. Verdicts mirror `action_extractor!`: authority
 /// `Unavailable`/absent → 500 fail-closed; engine deny → 403 + deny counter.
+/// The `Unavailable` branch is the engine-outage 500 path (spec §4 wildcard
+/// rule) and never reaches the deny funnel.
 pub(crate) fn require_system_access(
     engine: &AccessEngine,
+    emitter: &AuditEmitter,
     authority: &AccessAuthority,
 ) -> Option<Response> {
     let Some(ctx) = authority.ready() else {
@@ -294,21 +366,20 @@ pub(crate) fn require_system_access(
     };
     match engine.authorize(ctx, &actions::SYSTEM_ACCESS_MANAGE, None) {
         Decision::Allow => None,
-        Decision::Deny(reason) => {
-            record_access_deny(&reason);
+        decision => {
+            let reason = match decision {
+                Decision::Deny(reason) => reason,
+                // `Decision` is #[non_exhaustive] in another crate: unknown
+                // variants deny fail-closed, counted/audited as no_grant.
+                _ => DenyReason::NoGrant,
+            };
+            record_access_denied(emitter, ctx, &[&actions::SYSTEM_ACCESS_MANAGE], &reason);
             Some(error_response_with_code(
                 StatusCode::FORBIDDEN,
                 "This operation confers system-plane authority and requires system.access:manage",
                 "forbidden",
             ))
         }
-        // `Decision` is #[non_exhaustive] in another crate: unknown
-        // variants deny, fail-closed.
-        _ => Some(error_response_with_code(
-            StatusCode::FORBIDDEN,
-            "This operation confers system-plane authority and requires system.access:manage",
-            "forbidden",
-        )),
     }
 }
 
@@ -334,12 +405,24 @@ mod tests {
 
     use crate::auth::AuthMethod;
 
-    struct TestState(AccessState);
+    struct TestState(AccessState, AuditEmitterState);
 
     impl FromRef<TestState> for AccessState {
         fn from_ref(state: &TestState) -> Self {
             state.0.clone()
         }
+    }
+
+    impl FromRef<TestState> for AuditEmitterState {
+        fn from_ref(state: &TestState) -> Self {
+            state.1.clone()
+        }
+    }
+
+    fn noop_emitter() -> uptrakit_audit_log::AuditEmitter {
+        uptrakit_audit_log::AuditEmitter::new(uptrakit_audit_log::AuditLogDispatcher::new(
+            std::sync::Arc::new(uptrakit_audit_log::NoopBackend),
+        ))
     }
 
     async fn test_db() -> DatabaseConnection {
@@ -378,7 +461,10 @@ mod tests {
     #[tokio::test]
     async fn missing_user_extension_is_401() {
         let db = test_db().await;
-        let state = TestState(AccessState(Arc::new(AccessEngine::new(db))));
+        let state = TestState(
+            AccessState(Arc::new(AccessEngine::new(db))),
+            AuditEmitterState(noop_emitter()),
+        );
         let mut parts = Request::new(Body::empty()).into_parts().0;
         let result = CanReadHosts::from_request_parts(&mut parts, &state).await;
         assert_eq!(
@@ -390,7 +476,10 @@ mod tests {
     #[tokio::test]
     async fn missing_marker_with_user_is_500() {
         let db = test_db().await;
-        let state = TestState(AccessState(Arc::new(AccessEngine::new(db))));
+        let state = TestState(
+            AccessState(Arc::new(AccessEngine::new(db))),
+            AuditEmitterState(noop_emitter()),
+        );
         let mut parts = parts_with(uuid::Uuid::now_v7(), None);
         let result = CanReadHosts::from_request_parts(&mut parts, &state).await;
         assert_eq!(
@@ -402,7 +491,10 @@ mod tests {
     #[tokio::test]
     async fn unavailable_marker_is_500() {
         let db = test_db().await;
-        let state = TestState(AccessState(Arc::new(AccessEngine::new(db))));
+        let state = TestState(
+            AccessState(Arc::new(AccessEngine::new(db))),
+            AuditEmitterState(noop_emitter()),
+        );
         let mut parts = parts_with(uuid::Uuid::now_v7(), Some(AccessAuthority::Unavailable));
         let result = CanReadHosts::from_request_parts(&mut parts, &state).await;
         assert_eq!(
@@ -421,7 +513,7 @@ mod tests {
             .context(tenant_id, user_id, None)
             .await
             .expect("context");
-        let state = TestState(AccessState(engine));
+        let state = TestState(AccessState(engine), AuditEmitterState(noop_emitter()));
         let mut parts = parts_with(user_id, Some(AccessAuthority::Ready(ctx)));
         let result = CanReadHosts::from_request_parts(&mut parts, &state).await;
         assert_eq!(result.expect_err("rejects").status(), StatusCode::FORBIDDEN);
@@ -455,7 +547,7 @@ mod tests {
             .context(tenant_id, user_id, None)
             .await
             .expect("context");
-        let state = TestState(AccessState(engine));
+        let state = TestState(AccessState(engine), AuditEmitterState(noop_emitter()));
         let mut parts = parts_with(user_id, Some(AccessAuthority::Ready(ctx)));
         let result = CanReadHosts::from_request_parts(&mut parts, &state).await;
         assert!(result.is_ok());
@@ -466,7 +558,8 @@ mod tests {
         let db = test_db().await;
         let engine = AccessEngine::new(db);
         let response =
-            require_system_access(&engine, &AccessAuthority::Unavailable).expect("must reject");
+            require_system_access(&engine, &noop_emitter(), &AccessAuthority::Unavailable)
+                .expect("must reject");
         assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
@@ -481,7 +574,8 @@ mod tests {
             .await
             .expect("context");
         let response =
-            require_system_access(&engine, &AccessAuthority::Ready(ctx)).expect("must reject");
+            require_system_access(&engine, &noop_emitter(), &AccessAuthority::Ready(ctx))
+                .expect("must reject");
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 
@@ -513,7 +607,22 @@ mod tests {
             .context(tenant_id, user_id, None)
             .await
             .expect("context");
-        let response = require_system_access(&engine, &AccessAuthority::Ready(ctx));
+        let response =
+            require_system_access(&engine, &noop_emitter(), &AccessAuthority::Ready(ctx));
         assert!(response.is_none());
+    }
+
+    #[tokio::test]
+    async fn require_system_access_unavailable_does_not_reach_the_deny_funnel() {
+        // Unavailable returns 500 before any authorize call or funnel entry —
+        // the emitter is not consulted. The deny funnel's Event emission for
+        // this site is covered end-to-end in integration_tests; this pins the
+        // arm classification: outage → 500, never a deny Event.
+        let db = test_db().await;
+        let engine = AccessEngine::new(db);
+        let response =
+            require_system_access(&engine, &noop_emitter(), &AccessAuthority::Unavailable)
+                .expect("must reject");
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 }

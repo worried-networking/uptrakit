@@ -1,3 +1,4 @@
+mod access_deny_events;
 mod access_management;
 mod access_rest_enforcement;
 mod auth_flow;

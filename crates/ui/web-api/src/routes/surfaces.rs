@@ -11,7 +11,7 @@ use axum::{
 use sea_orm::EntityTrait;
 use serde_json::Value;
 use uptrakit_controller_core::access::AccessEngine;
-use uptrakit_shared_types::access::{Action, Decision};
+use uptrakit_shared_types::access::{Action, Decision, DenyReason};
 use uptrakit_web_api_types::surfaces::{
     InvokeSurfaceInteractionRequest, ListSurfacesQuery, ReadSurfaceInteractionQuery,
     SurfaceProviderAvailability, SurfaceProviderInfo, SurfaceReadResponse, SurfaceResponse,
@@ -25,7 +25,7 @@ use uptrakit_shared_db::entity::system_service;
 use crate::AppState;
 use crate::error_response::{error_response, error_response_with_code};
 use crate::extract::Unvalidated;
-use crate::middleware::action::{AccessAuthority, record_access_deny};
+use crate::middleware::action::{AccessAuthority, record_access_denied};
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, AuthenticatedUser};
 use crate::middleware::tenant_context::TenantContext;
 use crate::surface_proxy::entity_enrichment::enrich_entity_links;
@@ -237,6 +237,7 @@ pub async fn get_surface_read(
             resolved.required_action.as_ref(),
             &authority,
             &state.access_engine,
+            &state.audit_emitter,
             &surface_id,
             "surface",
         ) {
@@ -412,6 +413,7 @@ async fn dispatch_surface_interaction(
                 descriptor_required_action.as_ref(),
                 &ctx.authority,
                 &ctx.state.access_engine,
+                &ctx.state.audit_emitter,
                 &surface_id,
                 "surface",
             ) {
@@ -431,6 +433,7 @@ async fn dispatch_surface_interaction(
                     candidate_action.as_ref(),
                     &ctx.authority,
                     &ctx.state.access_engine,
+                    &ctx.state.audit_emitter,
                     &surface_id,
                     "interaction",
                 ) {
@@ -461,6 +464,7 @@ async fn dispatch_surface_interaction(
         resolved.descriptor_required_action.as_ref(),
         &ctx.authority,
         &ctx.state.access_engine,
+        &ctx.state.audit_emitter,
         &surface_id,
         "interaction",
     ) {
@@ -479,6 +483,7 @@ async fn dispatch_surface_interaction(
         resolved.interaction_required_action.as_ref(),
         &ctx.authority,
         &ctx.state.access_engine,
+        &ctx.state.audit_emitter,
         &surface_id,
         "interaction",
     ) {
@@ -1619,12 +1624,16 @@ fn action_error_code(code: &surfaces::SurfaceActionErrorCode) -> &'static str {
 /// Engine-backed gate for the shared surface resolution path.
 ///
 /// `None` action → allow. `Ready` + `Allow` → allow; `Ready` + deny → 403
-/// (+ deny counter). `Unavailable` → 500 fail-closed, mirroring the
-/// `action_extractor!` verdict set (`middleware/action.rs`).
+/// (+ deny counter, funnelled through [`record_access_denied`]).
+/// `Unavailable` → 500 fail-closed, mirroring the `action_extractor!`
+/// verdict set (`middleware/action.rs`); that outer arm is the
+/// engine-unavailable path and never reaches the deny funnel (spec §4
+/// wildcard rule).
 fn enforce_required_action(
     required: Option<&Action>,
     authority: &AccessAuthority,
     engine: &AccessEngine,
+    emitter: &uptrakit_audit_log::AuditEmitter,
     surface_id: &str,
     access_kind: &'static str,
 ) -> Option<Response> {
@@ -1632,20 +1641,21 @@ fn enforce_required_action(
     match authority {
         AccessAuthority::Ready(ctx) => match engine.authorize(ctx, required, None) {
             Decision::Allow => None,
-            Decision::Deny(reason) => {
-                record_access_deny(&reason);
+            decision => {
+                let reason = match decision {
+                    Decision::Deny(reason) => reason,
+                    // `Decision` is #[non_exhaustive] in another crate:
+                    // unknown variants deny fail-closed, counted/audited as
+                    // no_grant.
+                    _ => DenyReason::NoGrant,
+                };
+                record_access_denied(emitter, ctx, &[required], &reason);
                 Some(error_response_with_code(
                     StatusCode::FORBIDDEN,
                     format!("Insufficient permissions for this {access_kind}"),
                     "forbidden",
                 ))
             }
-            // `Decision` is #[non_exhaustive] in another crate.
-            _ => Some(error_response_with_code(
-                StatusCode::FORBIDDEN,
-                format!("Insufficient permissions for this {access_kind}"),
-                "forbidden",
-            )),
         },
         _ => {
             tracing::error!(
@@ -1768,6 +1778,15 @@ mod tests {
         assert_eq!(reason_code, "method_not_allowed");
     }
 
+    /// Noop-backed emitter for tests exercising `enforce_required_action`
+    /// directly (mirrors `middleware::action`'s test-module helper).
+    #[cfg(feature = "db-sqlite")]
+    fn noop_emitter() -> uptrakit_audit_log::AuditEmitter {
+        uptrakit_audit_log::AuditEmitter::new(uptrakit_audit_log::AuditLogDispatcher::new(
+            std::sync::Arc::new(uptrakit_audit_log::NoopBackend),
+        ))
+    }
+
     #[cfg(feature = "db-sqlite")]
     #[tokio::test]
     async fn enforce_required_action_accepts_missing_action_without_engine_lookup() {
@@ -1779,6 +1798,7 @@ mod tests {
             None,
             &AccessAuthority::Unavailable,
             &engine,
+            &noop_emitter(),
             "surface.one",
             "surface",
         );
@@ -1800,6 +1820,7 @@ mod tests {
             Some(&uptrakit_shared_types::access::actions::SOFTWARE_READ),
             &AccessAuthority::Ready(ctx),
             &engine,
+            &noop_emitter(),
             "surface.one",
             "surface",
         )
@@ -1844,6 +1865,7 @@ mod tests {
             Some(&uptrakit_shared_types::access::actions::SOFTWARE_READ),
             &AccessAuthority::Ready(ctx),
             &engine,
+            &noop_emitter(),
             "surface.one",
             "surface",
         );
@@ -1859,6 +1881,7 @@ mod tests {
             Some(&uptrakit_shared_types::access::actions::SOFTWARE_READ),
             &AccessAuthority::Unavailable,
             &engine,
+            &noop_emitter(),
             "surface.one",
             "surface",
         )

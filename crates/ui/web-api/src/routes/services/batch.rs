@@ -98,7 +98,14 @@ pub async fn batch_services(
         "deactivate" => &[actions::SERVICES_DELETE][..],
         _ => return error_response(StatusCode::BAD_REQUEST, "Unknown batch action"),
     };
-    if authorize_any(&state.access_engine, &access_ctx, required_actions).is_err() {
+    if authorize_any(
+        &state.access_engine,
+        &access_ctx,
+        &state.audit_emitter,
+        required_actions,
+    )
+    .is_err()
+    {
         if let Some(action_type) = action_type {
             emit_service_batch_audit(
                 &audit_ctx,

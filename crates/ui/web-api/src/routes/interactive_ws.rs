@@ -213,6 +213,7 @@ pub async fn interactive_ws(
     if authorize_any(
         &state.access_engine,
         access_ctx,
+        &state.audit_emitter,
         &[actions::UPDATES_TRIGGER],
     )
     .is_err()

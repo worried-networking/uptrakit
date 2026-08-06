@@ -107,6 +107,7 @@ pub async fn list_plugin_types(
     if authorize_any(
         &state.access_engine,
         access_ctx,
+        &state.audit_emitter,
         &[
             actions::SOFTWARE_READ,
             actions::SETTINGS_READ,

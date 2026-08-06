@@ -31,11 +31,11 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::AppState;
-use crate::app_state::{AccessState, DbState};
+use crate::app_state::{AccessState, AuditEmitterState, DbState};
 use crate::error_response::error_response;
 use crate::extract::Unvalidated;
 use crate::middleware::action::{
-    AccessAuthority, CanManageAccess, CanManageUsers, record_access_deny, require_system_access,
+    AccessAuthority, CanManageAccess, CanManageUsers, record_access_denied, require_system_access,
 };
 use crate::middleware::require_auth::{
     AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
@@ -426,7 +426,9 @@ pub async fn update_user_roles(
     };
     if reaches_system_plane {
         // APPROVED: body-dependent fine check (corpus 07, restated invariant)
-        if let Some(denied) = require_system_access(&state.access_engine, &authority) {
+        if let Some(denied) =
+            require_system_access(&state.access_engine, &state.audit_emitter, &authority)
+        {
             drop(txn);
             return denied;
         }
@@ -594,6 +596,7 @@ pub async fn update_user_roles(
 pub async fn update_profile(
     State(db): State<DbState>,
     State(access): State<AccessState>,
+    State(audit): State<AuditEmitterState>,
     Extension(authority): Extension<AccessAuthority>,
     Extension(auth_user): Extension<AuthenticatedUser>,
     Path(user_id): Path<Uuid>,
@@ -611,16 +614,15 @@ pub async fn update_profile(
         // APPROVED: body-dependent fine check (corpus 07, restated invariant)
         match access.0.authorize(ctx, &actions::USERS_MANAGE, None) {
             Decision::Allow => {}
-            Decision::Deny(reason) => {
-                record_access_deny(&reason);
-                return error_response(
-                    StatusCode::FORBIDDEN,
-                    "Cannot update another user's profile",
-                );
-            }
-            // `Decision` is #[non_exhaustive] in another crate: unknown
-            // variants deny, fail-closed.
-            _ => {
+            decision => {
+                let reason = match decision {
+                    Decision::Deny(reason) => reason,
+                    // `Decision` is #[non_exhaustive] in another crate:
+                    // unknown variants deny fail-closed, counted/audited as
+                    // no_grant.
+                    _ => uptrakit_shared_types::access::DenyReason::NoGrant,
+                };
+                record_access_denied(&audit.0, ctx, &[&actions::USERS_MANAGE], &reason);
                 return error_response(
                     StatusCode::FORBIDDEN,
                     "Cannot update another user's profile",

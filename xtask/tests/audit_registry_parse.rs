@@ -12,8 +12,7 @@ fn registry_load_finds_known_actions() {
         .get("plugin_config.update")
         .expect("plugin_config.update");
     assert_eq!(pcu.kind, registry::Kind::Stateful);
-    // Total should be 147 actions (146 + 1 new variant:
-    // user_role.sync_lockout_prevented, added for the M1.6a OIDC role-sync
-    // lockout guard).
-    assert_eq!(reg.actions.len(), 147);
+    // Total should be 148 actions (147 + 1 new variant: access.denied,
+    // added for the M1.6b deny-audit Event funnel).
+    assert_eq!(reg.actions.len(), 148);
 }

@@ -423,7 +423,9 @@ pub async fn delete_role(
     }
     if system_plane {
         // APPROVED: body-dependent fine check (corpus 07, restated invariant)
-        if let Some(denied) = require_system_access(&state.access_engine, &authority) {
+        if let Some(denied) =
+            require_system_access(&state.access_engine, &state.audit_emitter, &authority)
+        {
             drop(tx);
             return Ok(denied);
         }

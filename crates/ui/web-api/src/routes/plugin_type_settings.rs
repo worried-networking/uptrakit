@@ -78,10 +78,15 @@ fn validate_type_settings_payload(
     Ok(())
 }
 
-fn can_view_type_settings(engine: &AccessEngine, ctx: &AccessContext) -> Result<(), DenyReason> {
+fn can_view_type_settings(
+    engine: &AccessEngine,
+    ctx: &AccessContext,
+    emitter: &uptrakit_audit_log::AuditEmitter,
+) -> Result<(), DenyReason> {
     authorize_any(
         engine,
         ctx,
+        emitter,
         &[actions::SETTINGS_READ, actions::SYSTEM_SETTINGS_MANAGE],
     )
 }
@@ -112,7 +117,7 @@ pub async fn list_plugin_type_settings(
     let Some(access_ctx) = authority.ready() else {
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     };
-    if can_view_type_settings(&state.access_engine, access_ctx).is_err() {
+    if can_view_type_settings(&state.access_engine, access_ctx, &state.audit_emitter).is_err() {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -176,7 +181,7 @@ pub async fn get_plugin_type_settings(
     let Some(access_ctx) = authority.ready() else {
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     };
-    if can_view_type_settings(&state.access_engine, access_ctx).is_err() {
+    if can_view_type_settings(&state.access_engine, access_ctx, &state.audit_emitter).is_err() {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
