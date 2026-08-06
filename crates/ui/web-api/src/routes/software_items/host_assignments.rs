@@ -4,6 +4,7 @@
 
 use crate::AppState;
 use crate::error_response::error_response;
+use crate::extract::Unvalidated;
 use crate::middleware::action::CanUpdateSoftware;
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::queries::autodiscovery as autodiscovery_queries;
@@ -52,29 +53,29 @@ pub async fn assign_hosts(
     CanUpdateSoftware(user): CanUpdateSoftware,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(item_id): Path<Uuid>,
-    Json(req): Json<AssignHostsRequest>,
+    body: Unvalidated<AssignHostsRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
     let tenant_id = tenant_db.tenant_id();
 
-    if req.host_assignments.is_empty() {
-        if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
-            SOFTWARE_ITEM_ASSIGN_HOSTS_AUDIT_ACTION,
-        )
-        .tenant_scope(tenant_id)
-        .actor(actor_type, actor_id)
-        .outcome(AuditOutcome::ValidationFailed)
-        .details(serde_json::json!({ "reason_code": "software_item.host_assignments_empty" }))
-        .build()
-        {
-            state.audit_emitter.emit_event(entry);
+    let req = match body.require_valid() {
+        Ok(req) => req,
+        Err(e) => {
+            if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+                SOFTWARE_ITEM_ASSIGN_HOSTS_AUDIT_ACTION,
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::ValidationFailed)
+            .details(serde_json::json!({ "reason_code": "invalid_request" }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            return error_response(StatusCode::BAD_REQUEST, e.to_string());
         }
-        return error_response(
-            StatusCode::BAD_REQUEST,
-            "host_assignments must not be empty",
-        );
-    }
+    };
 
     // Pre-read the item to build the AuditView (before snapshot).
     let item_model = match item_queries::find_active_item(tenant_db.db(), tenant_id, item_id).await
@@ -427,11 +428,32 @@ pub async fn update_host_assignment(
     CanUpdateSoftware(user): CanUpdateSoftware,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path((item_id, host_id)): Path<(Uuid, Uuid)>,
-    Json(req): Json<UpdateHostAssignmentRequest>,
+    body: Unvalidated<UpdateHostAssignmentRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
     let tenant_id = tenant_db.tenant_id();
+
+    let req = match body.require_valid() {
+        Ok(req) => req,
+        Err(e) => {
+            if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+                SOFTWARE_ITEM_UPDATE_HOST_ASSIGNMENT_AUDIT_ACTION,
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::ValidationFailed)
+            .details(serde_json::json!({
+                "host_id": host_id,
+                "reason_code": "invalid_request",
+            }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            return error_response(StatusCode::BAD_REQUEST, e.to_string());
+        }
+    };
     let role_str = req.role.as_str().to_string();
     let ordinal = req.ordinal;
 

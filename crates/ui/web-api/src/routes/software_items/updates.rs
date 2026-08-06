@@ -1,5 +1,6 @@
 use crate::AppState;
 use crate::api_error::ApiError;
+use crate::extract::Unvalidated;
 use crate::middleware::action::CanTriggerUpdates;
 use crate::middleware::require_auth::AuthenticatedApiTokenId;
 use crate::queries::update_types::ActorType;
@@ -40,8 +41,19 @@ pub async fn trigger_update(
     CanTriggerUpdates(user): CanTriggerUpdates,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path((item_id, host_id)): Path<(Uuid, Uuid)>,
-    Json(req): Json<TriggerUpdateRequest>,
+    body: Unvalidated<TriggerUpdateRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let req = match body.require_valid() {
+        Ok(req) => req,
+        Err(e) => {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                e.to_string(),
+                "validation_error",
+                None,
+            ));
+        }
+    };
     let api_token_id = api_token_id.map(|value| value.0);
     let (update_actor_type, update_actor_id) = match api_token_id {
         Some(token_id) => (ActorType::ApiToken, token_id.0.to_string()),

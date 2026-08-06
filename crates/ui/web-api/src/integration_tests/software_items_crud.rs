@@ -677,6 +677,53 @@ async fn assign_hosts_with_empty_list_returns_400() {
 }
 
 #[tokio::test]
+async fn update_host_assignment_rejects_two_config_sources() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let item_id = Uuid::now_v7();
+    let host_id = Uuid::now_v7();
+    let link_id = Uuid::now_v7();
+    let plugin_row_id = Uuid::now_v7();
+
+    insert_software_item(&app, item_id, "Two Config Sources App").await;
+    insert_host_for_merge_test(&app, host_id, "two-config-sources-host").await;
+    insert_host_link(&app, link_id, host_id, item_id, None).await;
+    insert_plugin_row(
+        &app,
+        plugin_row_id,
+        host_id,
+        item_id,
+        link_id,
+        "detect_version",
+        0,
+    )
+    .await;
+
+    // Ambiguous request: both `plugin_config_id` and `plugin_type` are set.
+    // `UpdateHostAssignmentRequest::validate()` requires exactly one config
+    // source; previously this reached the query layer, which resolved the
+    // two sources by precedence (TOCTOU) instead of rejecting the request.
+    let status = client
+        .put_json(
+            &format!("/api/v1/software-items/{item_id}/hosts/{host_id}"),
+            &serde_json::json!({
+                "role": "detect_version",
+                "ordinal": 0,
+                "plugin_config_id": Uuid::nil(),
+                "plugin_type": "apt",
+                "package_identifier": "pkg",
+            }),
+        )
+        .bearer(&token)
+        .send_status()
+        .await;
+
+    assert_eq!(status, http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn merge_execute_missing_survivor_candidate_returns_400() {
     let app = TestApp::new().await;
     let client = app.client();

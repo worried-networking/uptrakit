@@ -6,7 +6,7 @@
 
 use crate::AppState;
 use crate::error_response::error_response;
-use crate::extract::Validated;
+use crate::extract::{Unvalidated, Validated};
 use crate::middleware::action::{
     CanCreateSoftware, CanDeleteSoftware, CanReadSoftware, CanUpdateSoftware,
 };
@@ -264,8 +264,14 @@ pub async fn update_software_item(
     CanUpdateSoftware(user): CanUpdateSoftware,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(item_id): Path<Uuid>,
-    Json(req): Json<UpdateSoftwareItemRequest>,
+    body: Unvalidated<UpdateSoftwareItemRequest>,
 ) -> Response {
+    let req = match body.require_valid() {
+        Ok(req) => req,
+        Err(e) => {
+            return error_response(StatusCode::BAD_REQUEST, e.to_string());
+        }
+    };
     let api_token_id = api_token_id.map(|value| value.0);
     let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
     let tenant_id = tenant_db.tenant_id();

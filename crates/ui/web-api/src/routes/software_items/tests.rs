@@ -17,7 +17,7 @@ use crate::AppState;
 use crate::app_state::AuditEmitterState;
 use crate::auth::AuthMethod;
 use crate::auth::permissions::Permission;
-use crate::extract::Validated;
+use crate::extract::{Unvalidated, Validated};
 use crate::middleware::action::{
     CanCreateSoftware, CanDeleteSoftware, CanTriggerChecks, CanTriggerUpdates, CanUpdateSoftware,
 };
@@ -29,7 +29,7 @@ use crate::test_harness::{
 };
 use async_trait::async_trait;
 use axum::{
-    Extension, Json,
+    Extension,
     extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
@@ -454,7 +454,7 @@ async fn update_software_item_missing_item_writes_denied_audit_event() {
         CanUpdateSoftware::new(auth_user_with(Permission::UpdateSoftware)),
         None,
         Path(missing_item_id),
-        Json(UpdateSoftwareItemRequest {
+        Unvalidated::new_for_test(UpdateSoftwareItemRequest {
             name: Some("Nope".to_string()),
             featured: None,
             icon_url: Default::default(),
@@ -541,7 +541,7 @@ async fn assign_hosts_empty_payload_writes_validation_failed_audit_event() {
         CanUpdateSoftware::new(auth_user_with(Permission::UpdateSoftware)),
         None,
         Path(item_id),
-        Json(AssignHostsRequest {
+        Unvalidated::new_for_test(AssignHostsRequest {
             host_assignments: vec![],
         }),
     )
@@ -554,10 +554,7 @@ async fn assign_hosts_empty_payload_writes_validation_failed_audit_event() {
         uptrakit_audit_log::AuditOutcome::ValidationFailed.as_str()
     );
     let details = row.details_json.expect("details");
-    assert_eq!(
-        details["reason_code"],
-        serde_json::json!("software_item.host_assignments_empty")
-    );
+    assert_eq!(details["reason_code"], serde_json::json!("invalid_request"));
 }
 
 #[tokio::test]
@@ -604,10 +601,10 @@ async fn update_host_assignment_missing_item_writes_denied_audit_event() {
         CanUpdateSoftware::new(auth_user_with(Permission::UpdateSoftware)),
         None,
         Path((item_id, host_id)),
-        Json(UpdateHostAssignmentRequest {
+        Unvalidated::new_for_test(UpdateHostAssignmentRequest {
             role: PluginRole::DetectVersion,
             ordinal: 0,
-            plugin_config_id: None,
+            plugin_config_id: Some(Uuid::now_v7()),
             plugin_config: None,
             plugin_type: None,
             package_identifier: Some("pkg".to_string()),
@@ -666,7 +663,7 @@ async fn execute_merge_invalid_request_writes_validation_failed_audit_event() {
         CanUpdateSoftware::new(auth_user_with(Permission::UpdateSoftware)),
         CanDeleteSoftware::new(auth_user_with(Permission::DeleteSoftware)),
         None,
-        Json(MergeSoftwareItemsExecuteRequest {
+        Unvalidated::new_for_test(MergeSoftwareItemsExecuteRequest {
             candidate_ids: vec![only_id],
             survivor_id: only_id,
         }),
@@ -796,7 +793,7 @@ async fn trigger_update_writes_software_update_triggered_audit_event() {
         CanTriggerUpdates::new(auth_user),
         None,
         Path((item_id, host.id)),
-        Json(TriggerUpdateRequest {
+        Unvalidated::new_for_test(TriggerUpdateRequest {
             to_version: "1.1.0".to_string(),
             release_info: None,
             interactive: false,
@@ -872,7 +869,7 @@ async fn trigger_update_host_not_assigned_writes_validation_failed_audit_event()
         CanTriggerUpdates::new(auth_user),
         None,
         Path((item_id, host.id)),
-        Json(TriggerUpdateRequest {
+        Unvalidated::new_for_test(TriggerUpdateRequest {
             to_version: "1.1.0".to_string(),
             release_info: None,
             interactive: false,
@@ -941,7 +938,7 @@ async fn trigger_update_missing_item_writes_denied_audit_event() {
         CanTriggerUpdates::new(auth_user),
         None,
         Path((missing_item_id, host.id)),
-        Json(TriggerUpdateRequest {
+        Unvalidated::new_for_test(TriggerUpdateRequest {
             to_version: "1.1.0".to_string(),
             release_info: None,
             interactive: true,
@@ -1017,7 +1014,7 @@ async fn trigger_update_with_api_token_actor_writes_api_token_actor_id() {
         CanTriggerUpdates::new(auth_user),
         Some(Extension(AuthenticatedApiTokenId(token_id))),
         Path((item_id, host.id)),
-        Json(TriggerUpdateRequest {
+        Unvalidated::new_for_test(TriggerUpdateRequest {
             to_version: "1.1.0".to_string(),
             release_info: None,
             interactive: false,

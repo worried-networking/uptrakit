@@ -4,6 +4,7 @@ use axum::{Extension, Json, extract::State, http::StatusCode, response::IntoResp
 
 use crate::api_error::ApiError;
 use crate::app_state::AuditEmitterState;
+use crate::extract::Unvalidated;
 use crate::middleware::action::{CanDeleteSoftware, CanUpdateSoftware};
 use crate::middleware::require_auth::AuthenticatedApiTokenId;
 use crate::queries::software_items as item_queries;
@@ -33,8 +34,19 @@ use super::{
 pub async fn preview_software_item_merge(
     tenant_db: TenantDb,
     CanUpdateSoftware(_user): CanUpdateSoftware,
-    Json(req): Json<MergeSoftwareItemsPreviewRequest>,
+    body: Unvalidated<MergeSoftwareItemsPreviewRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let req = match body.require_valid() {
+        Ok(req) => req,
+        Err(e) => {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                e.to_string(),
+                "validation_error",
+                None,
+            ));
+        }
+    };
     let resp = item_queries::preview_merge_software_items(&tenant_db, &req).await?;
     Ok((StatusCode::OK, Json(resp)).into_response())
 }
@@ -58,8 +70,19 @@ pub async fn execute_software_item_merge(
     CanUpdateSoftware(update_user): CanUpdateSoftware,
     CanDeleteSoftware(_delete_user): CanDeleteSoftware,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
-    Json(req): Json<MergeSoftwareItemsExecuteRequest>,
+    body: Unvalidated<MergeSoftwareItemsExecuteRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let req = match body.require_valid() {
+        Ok(req) => req,
+        Err(e) => {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                e.to_string(),
+                "validation_error",
+                None,
+            ));
+        }
+    };
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         audit_emitter: &audit_emitter_state.0,
