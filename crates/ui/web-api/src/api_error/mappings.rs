@@ -968,6 +968,12 @@ impl From<Report<AuthError>> for ApiError {
                 "auth.mfa_code_invalid",
                 None,
             ),
+            AccessGuard(_) => ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "An internal error occurred.",
+                "auth.internal",
+                Some(format_report_summary(&report)),
+            ),
             EmailDeliveryUnavailable => ApiError::new(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "Email delivery is currently unavailable.",

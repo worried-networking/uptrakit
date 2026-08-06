@@ -36,7 +36,10 @@ atomic delete-on-consume semantics that are HA-safe. The one active finding from
 - `resolve_oidc_user` rejects `email_verified != Some(true)` before any DB lookup, preventing
   account takeover via an IdP that omits or falsifies the claim.
 - OIDC role sync (`sync_oidc_roles`) uses a replace-all strategy (delete then insert) which is
-  correct for idempotent role mapping from IdP claims.
+  correct for idempotent role mapping from IdP claims. M1.6a added a lockout guard in front of the
+  write: a mapped replace that would strip the tenant's last `access:manage` holder (or the last
+  global `system.access:manage` holder) is skipped (`RoleSyncOutcome::SkippedLockout`) rather than
+  applied, and the login still succeeds.
 - Test coverage is comprehensive: password, session, token, OIDC flow, device flow, rate limiting,
   token denylist (in-memory and DB-backed), authentication settings, and role extraction are all
   covered.

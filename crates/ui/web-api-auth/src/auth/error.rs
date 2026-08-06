@@ -114,6 +114,10 @@ pub enum AuthError {
 
     #[error("Email delivery unavailable")]
     EmailDeliveryUnavailable,
+
+    /// Lockout-guard failure during OIDC role sync.
+    #[error("access guard error: {0}")]
+    AccessGuard(uptrakit_shared_db::access_grants::AccessGrantError),
 }
 
 pub type Result<T> = std::result::Result<T, Report<AuthError>>;
@@ -125,5 +129,7 @@ impl_report_conversion! {
     time::error::ComponentRange => AuthError::TimeError,
     std::io::Error              => AuthError::Io,
 }
+
+impl_report_conversion!(uptrakit_shared_db::access_grants::AccessGrantError => AuthError::AccessGuard);
 
 impl_report_conversion!(argon2::Error => AuthError, |_| AuthError::Internal("argon2 error".to_string()));

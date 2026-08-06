@@ -1,11 +1,13 @@
 use crate::SettingKey;
 use crate::auth::Result;
+#[cfg(feature = "oidc")]
+use crate::auth::error::AuthError;
 use crate::settings_store::{RawSettings, RawSettingsExt, upsert_setting};
 #[cfg(feature = "oidc")]
 use rootcause::prelude::*;
 use sea_orm::ConnectionTrait;
 #[cfg(feature = "oidc")]
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set, TransactionTrait};
 #[cfg(feature = "oidc")]
 use time::OffsetDateTime;
 #[cfg(feature = "oidc")]
@@ -264,36 +266,71 @@ pub async fn resolve_oidc_user<C: ConnectionTrait>(
     Ok(OidcUserResolution::NewUser(user_id))
 }
 
-/// Sync OIDC roles for a user based on provider configuration and ID token claims.
+/// Outcome of a guarded OIDC role sync. Deliberately NOT `#[non_exhaustive]`:
+/// a closed outcome set callers must handle exhaustively — mirrors the
+/// `LockoutVerdict` precedent (`access_grants.rs`) and the closed-enum
+/// exception in coding-standards.md (a new outcome kind is a semantic
+/// change every caller must see).
+#[cfg(feature = "oidc")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RoleSyncOutcome {
+    /// Assignment replaced. Caller must invalidate + publish post-commit.
+    Applied,
+    /// The lockout guard kept the existing assignment unchanged; the login
+    /// proceeds. Caller emits the `user_role.sync_lockout_prevented` Event.
+    SkippedLockout { attempted_role_names: Vec<String> },
+    /// No mapping configured / mapped set equals current — nothing written.
+    NoChange,
+}
+
+/// Sync OIDC roles for a user based on provider configuration and ID token
+/// claims.
+///
+/// Guarded (M1.6a): any role-set change runs the shrinking-mutation lockout
+/// guard ([`uptrakit_shared_db::access_grants::check_lockout`]) before
+/// writing — a mapped replace that would strip the tenant's last
+/// `access:manage` holder (or the last global `system.access:manage`
+/// holder) is skipped rather than applied; the login still succeeds
+/// ([`RoleSyncOutcome::SkippedLockout`]). The early "nothing mapped" returns
+/// below are unguarded by design (no write, nothing to lock); a set that
+/// resolves equal to the current one also skips the guard (steady-state
+/// login stays lock-free).
+///
+/// `txn` must be a real `DatabaseTransaction` obtained in SQLite `Immediate`
+/// mode (e.g. via `uptrakit_shared_db::access_grants::begin_guarded`, or an
+/// existing `Immediate` transaction) — a Deferred `begin()` compiles but
+/// serializes nothing on SQLite; the concrete transaction type only rules
+/// out pooled-autocommit misuse, it cannot express the mode itself.
 #[cfg(feature = "oidc")]
 pub async fn sync_oidc_roles(
-    db: &impl ConnectionTrait,
+    txn: &sea_orm::DatabaseTransaction,
     tenant_id: uuid::Uuid,
+    default_tenant_id: uuid::Uuid,
     user_id: uuid::Uuid,
     provider: &oidc_provider::Model,
     claims: &serde_json::Value,
-) -> Result<()> {
+) -> Result<RoleSyncOutcome> {
     let role_claim_path = match &provider.role_claim_path {
         Some(path) if !path.is_empty() => path,
-        _ => return Ok(()),
+        _ => return Ok(RoleSyncOutcome::NoChange),
     };
 
     let mapping = &provider.role_mapping.0;
     if mapping.is_empty() {
-        return Ok(());
+        return Ok(RoleSyncOutcome::NoChange);
     }
 
     // Navigate the claims JSON to find the role values
     let claim_value = match navigate_json_path(claims, role_claim_path) {
         Some(v) => v,
-        None => return Ok(()),
+        None => return Ok(RoleSyncOutcome::NoChange),
     };
 
     // Extract claim values as strings
     let claim_strings: Vec<&str> = match claim_value {
         serde_json::Value::Array(arr) => arr.iter().filter_map(|v| v.as_str()).collect(),
         serde_json::Value::String(s) => vec![s.as_str()],
-        _ => return Ok(()),
+        _ => return Ok(RoleSyncOutcome::NoChange),
     };
 
     // Map OIDC claim values to local role names via the provider's role_mapping
@@ -303,41 +340,105 @@ pub async fn sync_oidc_roles(
         .collect();
 
     if local_role_names.is_empty() {
-        return Ok(());
+        return Ok(RoleSyncOutcome::NoChange);
     }
 
     // Look up matching local roles
     let local_roles = Role::find()
         .filter(role::Column::Name.is_in(local_role_names))
-        .all(db)
+        .all(txn)
         .await
         .context_to()?;
 
     if local_roles.is_empty() {
-        return Ok(());
+        return Ok(RoleSyncOutcome::NoChange);
     }
 
-    // Delete existing user_role rows for this user within this tenant
-    UserRole::delete_many()
+    let new_role_ids: std::collections::BTreeSet<uuid::Uuid> =
+        local_roles.iter().map(|r| r.id).collect();
+    let current_role_ids: std::collections::BTreeSet<uuid::Uuid> = UserRole::find()
         .filter(user_role::Column::TenantId.eq(tenant_id))
         .filter(user_role::Column::UserId.eq(user_id))
-        .exec(db)
+        .all(txn)
         .await
-        .context_to()?;
+        .context_to()?
+        .into_iter()
+        .map(|ur| ur.role_id)
+        .collect();
 
-    // Insert mapped roles
-    let now = OffsetDateTime::now_utc();
-    for local_role in &local_roles {
-        let user_role_model = user_role::ActiveModel {
-            tenant_id: Set(tenant_id),
-            user_id: Set(user_id),
-            role_id: Set(local_role.id),
-            assigned_at: Set(now),
-        };
-        user_role_model.insert(db).await.context_to()?;
+    if new_role_ids == current_role_ids {
+        // Steady-state login (mapped set == current): no guard, no sentinel
+        // lock, no write — the common path stays lock-free via this return.
+        return Ok(RoleSyncOutcome::NoChange);
+    }
+    // Any set change runs the guard. No pre-lock superset shortcut: deciding
+    // whether-to-lock from a read taken before the lock is an unguarded-shrink
+    // hole the moment the serialization property is the deployment's (SQLite
+    // Immediate) rather than the code's. The guard re-reads all authority
+    // state after taking the sentinel lock; pure-add sets verdict Permitted.
+    let ids: Vec<uuid::Uuid> = new_role_ids.iter().copied().collect();
+    let verdict = uptrakit_shared_db::access_grants::check_lockout(
+        txn,
+        default_tenant_id,
+        &uptrakit_shared_db::access_grants::GuardedMutation::SetUserRoles {
+            tenant_id,
+            user_id,
+            new_role_ids: &ids,
+        },
+    )
+    .await
+    .context_to()?;
+    if verdict != uptrakit_shared_db::access_grants::LockoutVerdict::Permitted {
+        return Ok(RoleSyncOutcome::SkippedLockout {
+            attempted_role_names: local_roles.iter().map(|r| r.name.clone()).collect(),
+        });
     }
 
-    Ok(())
+    // Write phase inside a savepoint: a mid-write failure must not leave a
+    // partial set for the caller's swallow-and-commit to persist. Roll back
+    // EXPLICITLY on error — never lean on drop: DatabaseTransaction's Drop
+    // only QUEUES the rollback (flushed on some later async op, an sqlx
+    // internal, not a contract) and its lock-contention branch panics,
+    // which under panic = "abort" kills the process.
+    let sp = txn.begin().await.context_to()?; // SAVEPOINT on the outer txn
+    let write_result = async {
+        // Delete existing user_role rows for this user within this tenant
+        UserRole::delete_many()
+            .filter(user_role::Column::TenantId.eq(tenant_id))
+            .filter(user_role::Column::UserId.eq(user_id))
+            .exec(&sp)
+            .await
+            .context_to()?;
+
+        // Insert mapped roles
+        let now = OffsetDateTime::now_utc();
+        for local_role in &local_roles {
+            let user_role_model = user_role::ActiveModel {
+                tenant_id: Set(tenant_id),
+                user_id: Set(user_id),
+                role_id: Set(local_role.id),
+                assigned_at: Set(now),
+            };
+            user_role_model.insert(&sp).await.context_to()?;
+        }
+
+        Ok::<(), Report<AuthError>>(())
+    }
+    .await;
+    match write_result {
+        Ok(()) => sp.commit().await.context_to()?, // RELEASE
+        Err(e) => {
+            // Immediate ROLLBACK TO SAVEPOINT. Never `let _ =` here:
+            // let_underscore_must_use is deny at the workspace root, and a
+            // failed rollback is the one case the atomicity guarantee breaks.
+            if let Err(rollback_err) = sp.rollback().await {
+                tracing::error!(error = ?rollback_err, "savepoint rollback failed after OIDC role-sync write error");
+            }
+            return Err(e);
+        }
+    }
+
+    Ok(RoleSyncOutcome::Applied)
 }
 
 /// Extract mapped local role names from OIDC claims without touching the DB.

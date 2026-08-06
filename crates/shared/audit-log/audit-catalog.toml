@@ -383,6 +383,10 @@ action = "auth.oidc.exchange"
 site = "uptrakit_web_api::routes::oidc_auth::oidc_link"
 action = "auth.oidc.link"
 
+[[entries]]
+site = "uptrakit_web_api::routes::oidc_auth::handle_role_sync_outcome"
+action = "user_role.sync_lockout_prevented"
+
 # ---------------------------------------------------------------------------
 # OIDC providers
 # ---------------------------------------------------------------------------

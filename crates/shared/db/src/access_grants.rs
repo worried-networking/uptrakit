@@ -643,18 +643,24 @@ struct Assignment {
 /// transaction.
 ///
 /// Guarded (shrinking) mutations: grant update, grant delete, role delete,
-/// role-set replace (always, post-state), user deactivation. Adding-only
-/// mutations (grant create, role create, rename/description update, user
-/// activation) must NOT call this — under allow-only union they cannot
-/// shrink authority.
+/// role-set replace (always, post-state), user deactivation, OIDC role-set
+/// replace. Adding-only mutations (grant create, role create,
+/// rename/description update, user activation) must NOT call this — under
+/// allow-only union they cannot shrink authority.
 ///
-/// NOT guarded, and deliberately out of M1.6a's scope: OIDC role sync
-/// (`sync_oidc_roles`, `crates/ui/web-api-auth/src/auth/authentication.rs`)
-/// replaces a linked user's whole role set on every login from the
-/// provider's claim mapping, without this guard and without engine cache
-/// invalidation. A claim mapping that drops the sole covering holder's
-/// role can therefore still lock a tenant out of `access:manage` through
-/// a path no API endpoint permits. M1.6b owns closing it.
+/// OIDC role sync (`sync_oidc_roles`,
+/// `crates/ui/web-api-auth/src/auth/authentication.rs`) is now guarded
+/// (M1.6a) against covering shrinks: a mapped replace that would strip the
+/// sole `access:manage`/`system.access:manage` covering holder is skipped,
+/// not applied (`RoleSyncOutcome::SkippedLockout` in that module), and the
+/// login proceeds with the pre-sync role set. Do not over-claim this closes
+/// the whole gap: the sync's five fail-open early returns (no
+/// `role_claim_path` configured, empty `role_mapping`, claim path missing
+/// from the token, an unmapped claim value, or the mapped set resolving to
+/// zero local roles) still leave the user's existing roles untouched with
+/// no signal — an IdP-side de-provisioning that simply stops sending the
+/// covering claim never reaches this guard at all. That de-provisioning
+/// drift stays an open, named gap.
 ///
 /// Serialization: one `SELECT … FOR UPDATE` on the DEFAULT tenant's
 /// `tenants` row — a single global sentinel for both planes (role-subject
@@ -680,10 +686,13 @@ struct Assignment {
 /// [`LockoutVerdict::SystemLockout`] (the less recoverable plane wins).
 ///
 /// CALLER OBLIGATION: on any verdict other than [`LockoutVerdict::Permitted`],
-/// the caller MUST abort the guarded mutation — never write it — and drop or
-/// roll back the transaction rather than commit. This function only
-/// evaluates the post-state in memory; it never itself applies or rejects
-/// the mutation against the database.
+/// the caller MUST NOT write the guarded mutation. Committing *unrelated*
+/// work in the same transaction is permitted — the OIDC role sync commits a
+/// transaction that also carries user creation after a non-`Permitted`
+/// verdict, leaving only the role-set write skipped (the sentinel lock is
+/// then held until that commit). This function only evaluates the
+/// post-state in memory; it never itself applies or rejects the mutation
+/// against the database.
 ///
 /// PROHIBITION: this guard must never call `AccessEngine` — its cache and
 /// pool-connection reads escape the transaction and under-count holders.

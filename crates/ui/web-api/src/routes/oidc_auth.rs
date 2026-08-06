@@ -1,11 +1,7 @@
-#![expect(
-    clippy::let_underscore_must_use,
-    reason = "fire-and-forget cleanup sends on error paths intentionally drop results"
-)]
-
 use crate::AppState;
 use crate::auth::authentication::{
-    OidcUserParams, OidcUserResolution, extract_mapped_roles, resolve_oidc_user, sync_oidc_roles,
+    OidcUserParams, OidcUserResolution, RoleSyncOutcome, extract_mapped_roles, resolve_oidc_user,
+    sync_oidc_roles,
 };
 use crate::auth::password;
 use crate::auth::refresh_cookie::set_refresh_token_cookie;
@@ -902,27 +898,29 @@ async fn execute_oidc_resolution(
 ) -> Response {
     match resolution {
         OidcUserResolution::LinkedUser(user_id) => {
-            let user_id =
+            let (user_id, sync_outcome) =
                 match handle_linked_user(state, &txn, user_id, provider, additional_claims).await {
-                    Ok(uid) => uid,
+                    Ok(result) => result,
                     Err(response) => return response,
                 };
             if let Err(e) = txn.commit().await {
                 tracing::error!(error = %e, "Failed to commit OIDC callback transaction");
                 return Redirect::to("/login?error=oidc_internal_error").into_response();
             }
+            handle_role_sync_outcome(state, user_id, provider.name.as_str(), sync_outcome).await;
             create_oidc_exchange_and_redirect(state, user_id, provider_id).await
         }
         OidcUserResolution::NewUser(user_id) => {
-            let (user_id, first_user_registration) =
+            let (user_id, first_user_registration, sync_outcome) =
                 match handle_new_user(state, &txn, user_id, provider, additional_claims).await {
-                    Ok(uid) => uid,
+                    Ok(result) => result,
                     Err(response) => return response,
                 };
             if let Err(e) = txn.commit().await {
                 tracing::error!(error = %e, "Failed to commit OIDC callback transaction");
                 return Redirect::to("/login?error=oidc_internal_error").into_response();
             }
+            handle_role_sync_outcome(state, user_id, provider.name.as_str(), sync_outcome).await;
             let is_first_user = first_user_registration.is_some();
             if let Some(reg) = first_user_registration {
                 state.settings.set_registration(reg).await;
@@ -1105,18 +1103,72 @@ async fn check_registration_eligibility(
     )
 }
 
+/// Post-commit handling of a role-sync outcome. `Applied` -> engine flush +
+/// cross-instance publish. `SkippedLockout` -> audit Event naming the
+/// provider and attempted set -- the login has already succeeded; the Event
+/// is the operator's signal.
+///
+/// Not a route handler and not an `Executor::run` — the audit-coverage
+/// walker's other discovery mechanisms don't see it, so it is marked
+/// explicitly for the catalog's `user_role.sync_lockout_prevented` row.
+#[uptrakit_audit_log::audit_required]
+#[cfg(feature = "oidc")]
+async fn handle_role_sync_outcome(
+    state: &AppState,
+    user_id: Uuid,
+    provider_name: &str,
+    outcome: RoleSyncOutcome,
+) {
+    match outcome {
+        RoleSyncOutcome::Applied => {
+            state.access_engine.invalidate_subjects(&[user_id], &[]);
+            state
+                .notification
+                .notification_service
+                .publish_controller_event(uptrakit_wire::ControllerMessage::AccessInvalidated(
+                    uptrakit_wire::AccessInvalidatedPayload::new(vec![user_id], vec![]),
+                ))
+                .await;
+        }
+        RoleSyncOutcome::SkippedLockout {
+            attempted_role_names,
+        } => {
+            // Fully-qualified paths: this file never imports audit types bare
+            // (matches every existing emit in oidc_auth.rs).
+            if let Ok(entry) =
+                uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+                    uptrakit_audit_log::AuditActionType::USER_ROLE_SYNC_LOCKOUT_PREVENTED,
+                )
+                .tenant_scope(state.default_tenant_id)
+                .actor(uptrakit_audit_log::AuditActorType::Oidc, None)
+                .target("user", user_id.to_string(), None)
+                .outcome(uptrakit_audit_log::AuditOutcome::Denied)
+                .details(serde_json::json!({
+                    "provider": provider_name,
+                    "attempted_roles": attempted_role_names,
+                }))
+                .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+        }
+        RoleSyncOutcome::NoChange => {} // Closed enum (not #[non_exhaustive]) -- exhaustive match, no wildcard.
+    }
+}
+
 /// Handle the `LinkedUser` resolution: verify the user is still active and
 /// sync OIDC roles within the transaction.
 ///
-/// Returns `Ok(user_id)` so the caller can commit the transaction and create
-/// the exchange redirect, or `Err(Response)` on failure.
+/// Returns `Ok((user_id, sync_outcome))` so the caller can commit the
+/// transaction, invoke the outcome handler, and create the exchange
+/// redirect, or `Err(Response)` on failure.
 async fn handle_linked_user(
     state: &AppState,
     txn: &sea_orm::DatabaseTransaction,
     user_id: Uuid,
     provider: &oidc_provider::Model,
     additional_claims: &serde_json::Value,
-) -> Result<Uuid, Response> {
+) -> Result<(Uuid, RoleSyncOutcome), Response> {
     // Defense-in-depth: verify user is still active before creating session
     match User::find_by_id(user_id).one(txn).await {
         Ok(Some(user)) if !user.is_active => {
@@ -1133,32 +1185,44 @@ async fn handle_linked_user(
     }
 
     // Sync roles
-    let _ = sync_oidc_roles(
+    let sync_outcome = match sync_oidc_roles(
         txn,
+        state.default_tenant_id,
         state.default_tenant_id,
         user_id,
         provider,
         additional_claims,
     )
-    .await;
+    .await
+    {
+        Ok(outcome) => outcome,
+        Err(e) => {
+            // error!, not warn!: a persistent guard/savepoint failure (e.g.
+            // sentinel missing) means roles silently never sync on any
+            // login — this line is the only operator signal.
+            tracing::error!("OIDC role sync failed (login continues): {e:?}");
+            RoleSyncOutcome::NoChange
+        }
+    };
 
-    Ok(user_id)
+    Ok((user_id, sync_outcome))
 }
 
 /// Handle the `NewUser` resolution: check if this is the first user (owner
 /// setup) and sync OIDC roles within the transaction.
 ///
-/// Returns `Ok((user_id, registration))` so the caller can commit the
-/// transaction, publish the returned registration snapshot post-commit, and
-/// create the exchange redirect; `Err(Response)` on failure (the caller drops
-/// the transaction, rolling back).
+/// Returns `Ok((user_id, registration, sync_outcome))` so the caller can
+/// commit the transaction, publish the returned registration snapshot
+/// post-commit, invoke the outcome handler, and create the exchange
+/// redirect; `Err(Response)` on failure (the caller drops the transaction,
+/// rolling back).
 async fn handle_new_user(
     state: &AppState,
     txn: &sea_orm::DatabaseTransaction,
     user_id: Uuid,
     provider: &oidc_provider::Model,
     additional_claims: &serde_json::Value,
-) -> Result<(Uuid, Option<RegistrationSettings>), Response> {
+) -> Result<(Uuid, Option<RegistrationSettings>, RoleSyncOutcome), Response> {
     // Atomically check if this is the first user (threshold 1 because the
     // user was just created by resolve_oidc_user) and handle owner role +
     // initial setup inside the same transaction. Clear the default role
@@ -1185,16 +1249,27 @@ async fn handle_new_user(
     }
 
     // Sync roles
-    let _ = sync_oidc_roles(
+    let sync_outcome = match sync_oidc_roles(
         txn,
+        state.default_tenant_id,
         state.default_tenant_id,
         user_id,
         provider,
         additional_claims,
     )
-    .await;
+    .await
+    {
+        Ok(outcome) => outcome,
+        Err(e) => {
+            // error!, not warn!: a persistent guard/savepoint failure (e.g.
+            // sentinel missing) means roles silently never sync on any
+            // login — this line is the only operator signal.
+            tracing::error!("OIDC role sync failed (login continues): {e:?}");
+            RoleSyncOutcome::NoChange
+        }
+    };
 
-    Ok((user_id, first_user_registration))
+    Ok((user_id, first_user_registration, sync_outcome))
 }
 
 /// Handle the `LinkViaPasswordRequired` resolution: store a pending link and
@@ -1660,19 +1735,32 @@ pub async fn oidc_complete_registration(
     }
 
     // 8. Sync OIDC roles using stored mapped_roles
+    let mut role_sync: Option<(String, RoleSyncOutcome)> = None;
     if !pending.mapped_roles.is_empty()
         && let Some(provider) =
             find_active_provider(&txn, state.default_tenant_id, pending.provider_id).await
     {
         let fake_claims = build_fake_claims_for_sync(&provider, &pending.mapped_roles);
-        let _ = sync_oidc_roles(
+        let sync_outcome = match sync_oidc_roles(
             &txn,
+            state.default_tenant_id,
             state.default_tenant_id,
             user_id,
             &provider,
             &fake_claims,
         )
-        .await;
+        .await
+        {
+            Ok(outcome) => outcome,
+            Err(e) => {
+                // error!, not warn!: a persistent guard/savepoint failure
+                // (e.g. sentinel missing) means roles silently never sync on
+                // any login — this line is the only operator signal.
+                tracing::error!("OIDC role sync failed (registration continues): {e:?}");
+                RoleSyncOutcome::NoChange
+            }
+        };
+        role_sync = Some((provider.name.clone(), sync_outcome));
     }
 
     if let Err(e) = txn.commit().await {
@@ -1693,6 +1781,9 @@ pub async fn oidc_complete_registration(
     }
     if let Some(reg) = first_user_registration {
         state.settings.set_registration(reg).await;
+    }
+    if let Some((provider_name, sync_outcome)) = role_sync {
+        handle_role_sync_outcome(&state, user_id, provider_name.as_str(), sync_outcome).await;
     }
 
     emit_oidc_user_create_audit(
@@ -1899,20 +1990,55 @@ pub async fn oidc_link(
         return response;
     }
 
-    // Sync roles if we have mapped roles
+    // Sync roles if we have mapped roles. The sync itself gets its own
+    // Immediate transaction here (the guard requires a real transaction by
+    // type) — `find_active_provider` and the `link.insert` above stay on the
+    // pooled connection; only the sync write is wrapped. This is a net
+    // improvement over the old pooled-autocommit delete_many + N-insert
+    // loop, where a crash mid-loop left the user with zero roles: do not
+    // "simplify" this back to the pooled connection.
     if !pending.mapped_roles.is_empty()
         && let Some(provider) =
             find_active_provider(state.db(), state.default_tenant_id, pending.provider_id).await
     {
         let fake_claims = build_fake_claims_for_sync(&provider, &pending.mapped_roles);
-        let _ = sync_oidc_roles(
-            state.db(),
-            state.default_tenant_id,
-            pending.user_id,
-            &provider,
-            &fake_claims,
-        )
-        .await;
+        match uptrakit_shared_db::access_grants::begin_guarded(state.db()).await {
+            Ok(txn) => {
+                let sync_outcome = match sync_oidc_roles(
+                    &txn,
+                    state.default_tenant_id,
+                    state.default_tenant_id,
+                    pending.user_id,
+                    &provider,
+                    &fake_claims,
+                )
+                .await
+                {
+                    Ok(outcome) => outcome,
+                    Err(e) => {
+                        tracing::error!("OIDC role sync failed (link continues): {e:?}");
+                        RoleSyncOutcome::NoChange
+                    }
+                };
+                match txn.commit().await {
+                    Ok(()) => {
+                        handle_role_sync_outcome(
+                            &state,
+                            pending.user_id,
+                            provider.name.as_str(),
+                            sync_outcome,
+                        )
+                        .await;
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "failed to commit OIDC role-sync transaction during link");
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = ?e, "failed to open guarded transaction for OIDC role sync during link");
+            }
+        }
     }
 
     let response =
@@ -3280,8 +3406,6 @@ mod audit_tests {
     /// the caller committed a first user with zero roles + closed registration.
     #[tokio::test]
     async fn oidc_callback_new_user_rolls_back_on_owner_role_failure() {
-        use sea_orm::TransactionTrait as _;
-
         let app = TestApp::new().await;
         let provider_id = insert_active_oidc_provider(
             &app.db,
@@ -3299,7 +3423,9 @@ mod audit_tests {
 
         break_owner_role_assignment(&app.db).await;
 
-        let txn = app.db.begin().await.expect("begin");
+        let txn = uptrakit_shared_db::access_grants::begin_guarded(&app.db)
+            .await
+            .expect("begin (guarded)");
         let user_id = insert_txn_user(&txn, "oidc-rollback@test.local").await;
         if super::handle_new_user(&app.state, &txn, user_id, &provider, &serde_json::json!({}))
             .await
@@ -3323,7 +3449,6 @@ mod audit_tests {
     #[tokio::test]
     async fn oidc_callback_first_user_clears_preassigned_default_role() {
         use crate::auth::registration::RegistrationMode;
-        use sea_orm::TransactionTrait as _;
 
         let app = TestApp::new().await;
         let provider_id = insert_active_oidc_provider(
@@ -3339,7 +3464,9 @@ mod audit_tests {
             .expect("provider query")
             .expect("provider row");
 
-        let txn = app.db.begin().await.expect("begin");
+        let txn = uptrakit_shared_db::access_grants::begin_guarded(&app.db)
+            .await
+            .expect("begin (guarded)");
         let user_id = insert_txn_user(&txn, "oidc-clear@test.local").await;
         // Stand-in for resolve_oidc_user's best-effort default role (the legacy
         // "user" role no longer exists; viewer overlaps the owner set, proving
@@ -3347,7 +3474,7 @@ mod audit_tests {
         super::super::auth::assign_viewer_role(&txn, app.state.default_tenant_id, user_id)
             .await
             .expect("pre-assign default role");
-        let (returned_id, reg) = match super::handle_new_user(
+        let (returned_id, reg, sync_outcome) = match super::handle_new_user(
             &app.state,
             &txn,
             user_id,
@@ -3365,6 +3492,11 @@ mod audit_tests {
         assert!(
             reg.is_some(),
             "first user must yield a registration snapshot"
+        );
+        assert_eq!(
+            sync_outcome,
+            super::RoleSyncOutcome::NoChange,
+            "provider has no role_claim_path configured — sync must no-op"
         );
         let mut expected: Vec<String> = [
             "viewer",
@@ -3392,14 +3524,37 @@ mod audit_tests {
         );
     }
 
-    /// Spec test 5b: pins the scoped-out sync_oidc_roles behavior — a
-    /// role-mapping provider governs the first user's roles (mapped set replaces
-    /// the owner set). Deliberate, pre-existing provider-as-role-authority
-    /// behavior; NOT a regression introduced by the bootstrap consolidation.
-    #[tokio::test]
-    async fn oidc_callback_role_mapping_provider_overrides_owner_roles() {
-        use sea_orm::TransactionTrait as _;
+    /// The owner set of roles, sorted the same way `role_names_for_user`
+    /// sorts its result (used by more than one guard test below).
+    fn owner_role_names_sorted() -> Vec<String> {
+        let mut expected: Vec<String> = [
+            "viewer",
+            "operator",
+            "service_manager",
+            "software_manager",
+            "host_manager",
+            "settings_manager",
+            "command_manager",
+            "system_administrator",
+        ]
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect();
+        expected.sort();
+        expected
+    }
 
+    /// M1.6a guard test 1 (inverts the former pin test
+    /// `oidc_callback_role_mapping_provider_overrides_owner_roles`): a
+    /// role-mapping provider claims the first (and only) user's roles are
+    /// `["admin"]` -> local `operator`. Applying that mapped replace would
+    /// strip `settings_manager` (tenant `access:manage`) and
+    /// `system_administrator` (`system.access:manage`) — the sole covering
+    /// holders of both planes for this tenant. The lockout guard must skip
+    /// the write; the login still succeeds and the owner set survives
+    /// untouched.
+    #[tokio::test]
+    async fn oidc_role_mapping_cannot_strip_last_access_manage_holder() {
         let app = TestApp::new().await;
         let provider_id = insert_active_oidc_provider(
             &app.db,
@@ -3431,21 +3586,262 @@ mod audit_tests {
             .expect("provider query")
             .expect("provider row");
 
-        let txn = app.db.begin().await.expect("begin");
+        let txn = uptrakit_shared_db::access_grants::begin_guarded(&app.db)
+            .await
+            .expect("begin (guarded)");
         let user_id = insert_txn_user(&txn, "oidc-mapped@test.local").await;
         let claims = serde_json::json!({ "roles": ["admin"] });
-        if super::handle_new_user(&app.state, &txn, user_id, &provider, &claims)
-            .await
-            .is_err()
+        let (_, _, sync_outcome) = match super::handle_new_user(
+            &app.state, &txn, user_id, &provider, &claims,
+        )
+        .await
         {
-            panic!("handle_new_user must succeed");
-        }
+            Ok(v) => v,
+            Err(_) => panic!(
+                "handle_new_user must succeed — the guard skips the write, it never fails the login"
+            ),
+        };
         txn.commit().await.expect("commit");
 
         assert_eq!(
             role_names_for_user(&app.db, app.state.default_tenant_id, user_id).await,
+            owner_role_names_sorted(),
+            "the covering-shrink mapped replace must be skipped — the owner set survives untouched"
+        );
+        assert_eq!(
+            sync_outcome,
+            super::RoleSyncOutcome::SkippedLockout {
+                attempted_role_names: vec!["operator".to_string()]
+            }
+        );
+    }
+
+    /// M1.6a guard test 2: a pure shrink that does NOT cover-strip
+    /// `access:manage` still applies normally — the guard only blocks
+    /// lockouts, not ordinary syncs. A second (non-first) user carries the
+    /// default `viewer` role only; the same mapped-replace-to-`operator`
+    /// provider is permitted because the tenant's first user still holds
+    /// `settings_manager`.
+    #[tokio::test]
+    async fn oidc_role_mapping_pure_shrink_without_lockout_still_applies() {
+        let app = TestApp::new().await;
+        let provider_id = insert_active_oidc_provider(
+            &app.db,
+            app.state.default_tenant_id,
+            "Pure Shrink",
+            "pure-shrink",
+        )
+        .await;
+        {
+            use sea_orm::IntoActiveModel as _;
+            let provider_row = oidc_provider::Entity::find_by_id(provider_id)
+                .one(&app.db)
+                .await
+                .expect("provider query")
+                .expect("provider row");
+            let mut active = provider_row.into_active_model();
+            active.role_claim_path = Set(Some("roles".to_string()));
+            active.role_mapping = Set(oidc_provider::RoleMapping(std::collections::HashMap::from(
+                [("admin".to_string(), "operator".to_string())],
+            )));
+            active.update(&app.db).await.expect("update provider");
+        }
+        let provider = oidc_provider::Entity::find_by_id(provider_id)
+            .one(&app.db)
+            .await
+            .expect("provider query")
+            .expect("provider row");
+
+        // First user (owns the tenant's covering access:manage holder) so
+        // the second user's shrink below is NOT the last covering holder.
+        let txn = uptrakit_shared_db::access_grants::begin_guarded(&app.db)
+            .await
+            .expect("begin (guarded)");
+        let first_user_id = insert_txn_user(&txn, "oidc-owner@test.local").await;
+        super::handle_new_user(
+            &app.state,
+            &txn,
+            first_user_id,
+            &provider,
+            &serde_json::json!({}),
+        )
+        .await
+        .expect("first user setup must succeed");
+        txn.commit().await.expect("commit first user");
+
+        let txn = uptrakit_shared_db::access_grants::begin_guarded(&app.db)
+            .await
+            .expect("begin (guarded)");
+        let user_id = insert_txn_user(&txn, "oidc-shrink@test.local").await;
+        super::super::auth::assign_viewer_role(&txn, app.state.default_tenant_id, user_id)
+            .await
+            .expect("pre-assign default role");
+        let claims = serde_json::json!({ "roles": ["admin"] });
+        let sync_outcome = super::sync_oidc_roles(
+            &txn,
+            app.state.default_tenant_id,
+            app.state.default_tenant_id,
+            user_id,
+            &provider,
+            &claims,
+        )
+        .await
+        .expect("sync must succeed — not a lockout");
+        txn.commit().await.expect("commit second user's sync");
+
+        assert_eq!(sync_outcome, super::RoleSyncOutcome::Applied);
+        assert_eq!(
+            role_names_for_user(&app.db, app.state.default_tenant_id, user_id).await,
             vec!["operator".to_string()],
-            "role-mapping provider replaces the owner set with the mapped roles"
+            "non-covering shrink must still apply the mapped replace"
+        );
+    }
+
+    /// M1.6a guard test 3: the `SkippedLockout` outcome from guard test 1,
+    /// driven through the same post-commit path production code uses
+    /// (`handle_role_sync_outcome`), emits the
+    /// `user_role.sync_lockout_prevented` Event naming the provider and the
+    /// attempted role set — the operator's only signal, since the login
+    /// itself succeeded.
+    #[tokio::test]
+    async fn oidc_role_mapping_lockout_emits_prevented_audit_event() {
+        let app = TestApp::new().await;
+        let provider_id = insert_active_oidc_provider(
+            &app.db,
+            app.state.default_tenant_id,
+            "Lockout Audit",
+            "lockout-audit",
+        )
+        .await;
+        {
+            use sea_orm::IntoActiveModel as _;
+            let provider_row = oidc_provider::Entity::find_by_id(provider_id)
+                .one(&app.db)
+                .await
+                .expect("provider query")
+                .expect("provider row");
+            let mut active = provider_row.into_active_model();
+            active.role_claim_path = Set(Some("roles".to_string()));
+            active.role_mapping = Set(oidc_provider::RoleMapping(std::collections::HashMap::from(
+                [("admin".to_string(), "operator".to_string())],
+            )));
+            active.update(&app.db).await.expect("update provider");
+        }
+        let provider = oidc_provider::Entity::find_by_id(provider_id)
+            .one(&app.db)
+            .await
+            .expect("provider query")
+            .expect("provider row");
+
+        let txn = uptrakit_shared_db::access_grants::begin_guarded(&app.db)
+            .await
+            .expect("begin (guarded)");
+        let user_id = insert_txn_user(&txn, "oidc-lockout-audit@test.local").await;
+        let claims = serde_json::json!({ "roles": ["admin"] });
+        let (_, _, sync_outcome) =
+            match super::handle_new_user(&app.state, &txn, user_id, &provider, &claims).await {
+                Ok(v) => v,
+                Err(_) => panic!("handle_new_user must succeed"),
+            };
+        txn.commit().await.expect("commit");
+        super::handle_role_sync_outcome(&app.state, user_id, provider.name.as_str(), sync_outcome)
+            .await;
+
+        let row = tenant_audit_row_for_action(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::USER_ROLE_SYNC_LOCKOUT_PREVENTED,
+        )
+        .await;
+        assert_eq!(row.target_id.as_deref(), Some(user_id.to_string().as_str()));
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        let details = row.details_json.expect("details_json present");
+        assert_eq!(details["provider"], serde_json::json!("Lockout Audit"));
+        assert_eq!(details["attempted_roles"], serde_json::json!(["operator"]));
+    }
+
+    /// M1.6a guard test 4: a login whose mapped role set already equals the
+    /// user's current role set returns `NoChange` without writing — the
+    /// steady-state login path never takes the sentinel lock. Pinned via the
+    /// `user_role.assigned_at` timestamp staying byte-for-byte unchanged.
+    #[tokio::test]
+    async fn oidc_role_mapping_noop_sync_takes_no_lock() {
+        let app = TestApp::new().await;
+        let provider_id = insert_active_oidc_provider(
+            &app.db,
+            app.state.default_tenant_id,
+            "Noop Sync",
+            "noop-sync",
+        )
+        .await;
+        {
+            use sea_orm::IntoActiveModel as _;
+            let provider_row = oidc_provider::Entity::find_by_id(provider_id)
+                .one(&app.db)
+                .await
+                .expect("provider query")
+                .expect("provider row");
+            let mut active = provider_row.into_active_model();
+            active.role_claim_path = Set(Some("roles".to_string()));
+            active.role_mapping = Set(oidc_provider::RoleMapping(std::collections::HashMap::from(
+                [("admin".to_string(), "operator".to_string())],
+            )));
+            active.update(&app.db).await.expect("update provider");
+        }
+        let provider = oidc_provider::Entity::find_by_id(provider_id)
+            .one(&app.db)
+            .await
+            .expect("provider query")
+            .expect("provider row");
+
+        let operator_role_id = Role::find()
+            .filter(role::Column::Name.eq("operator"))
+            .one(&app.db)
+            .await
+            .expect("role query")
+            .expect("operator role exists")
+            .id;
+
+        let txn = uptrakit_shared_db::access_grants::begin_guarded(&app.db)
+            .await
+            .expect("begin (guarded)");
+        let user_id = insert_txn_user(&txn, "oidc-noop@test.local").await;
+        let assigned_at_before = OffsetDateTime::UNIX_EPOCH + time::Duration::days(1);
+        user_role::ActiveModel {
+            tenant_id: Set(app.state.default_tenant_id),
+            user_id: Set(user_id),
+            role_id: Set(operator_role_id),
+            assigned_at: Set(assigned_at_before),
+        }
+        .insert(&txn)
+        .await
+        .expect("pre-assign operator role");
+        let claims = serde_json::json!({ "roles": ["admin"] });
+        let sync_outcome = super::sync_oidc_roles(
+            &txn,
+            app.state.default_tenant_id,
+            app.state.default_tenant_id,
+            user_id,
+            &provider,
+            &claims,
+        )
+        .await
+        .expect("sync must succeed");
+        txn.commit().await.expect("commit");
+
+        assert_eq!(sync_outcome, super::RoleSyncOutcome::NoChange);
+        let row = UserRole::find()
+            .filter(user_role::Column::TenantId.eq(app.state.default_tenant_id))
+            .filter(user_role::Column::UserId.eq(user_id))
+            .one(&app.db)
+            .await
+            .expect("user_role query")
+            .expect("user_role row survives");
+        assert_eq!(
+            row.assigned_at, assigned_at_before,
+            "no-op sync must not touch the existing row's assigned_at"
         );
     }
 

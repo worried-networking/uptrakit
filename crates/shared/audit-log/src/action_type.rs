@@ -137,6 +137,8 @@ impl AuditActionType {
         RegisteredAuditAction::new("user.update", AuditActionKind::Stateful);
     pub const USER_ROLE_UPDATE: RegisteredAuditAction =
         RegisteredAuditAction::new("user_role.update", AuditActionKind::Stateful);
+    pub const USER_ROLE_SYNC_LOCKOUT_PREVENTED: RegisteredAuditAction =
+        RegisteredAuditAction::new("user_role.sync_lockout_prevented", AuditActionKind::Event);
     // USER_DELETE intentionally omitted: no hard-delete handler exists yet.
     // Re-add when a delete-user feature is implemented and the emit site is present.
     pub const ACCESS_GRANT_CREATE: RegisteredAuditAction =
@@ -482,6 +484,7 @@ const V1_ACTIONS: &[RegisteredAuditAction] = &[
     AuditActionType::USER_CREATE,
     AuditActionType::USER_UPDATE,
     AuditActionType::USER_ROLE_UPDATE,
+    AuditActionType::USER_ROLE_SYNC_LOCKOUT_PREVENTED,
     AuditActionType::ACCESS_GRANT_CREATE,
     AuditActionType::ACCESS_GRANT_UPDATE,
     AuditActionType::ACCESS_GRANT_DELETE,
@@ -756,6 +759,7 @@ uptrakit_audit_log_derive::audit_actions! {
     user_create => USER_CREATE, Stateful;
     user_update => USER_UPDATE, Stateful;
     user_role_update => USER_ROLE_UPDATE, Stateful;
+    user_role_sync_lockout_prevented => USER_ROLE_SYNC_LOCKOUT_PREVENTED, Event;
 
     // access grants — Stateful
     access_grant_create => ACCESS_GRANT_CREATE, Stateful;
