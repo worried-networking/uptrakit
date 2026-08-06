@@ -194,17 +194,25 @@ endpoints above -- there is no separate, unguarded cache path anymore.
 A skipped sync is otherwise silent to the signed-in user (they simply keep their prior
 roles) -- the only operator-visible signal is the `user_role.sync_lockout_prevented` audit
 Event. Alert on that action if you rely on OIDC role mapping to keep authority current.
+That Event is the only audit signal the sync ever emits: a sync that _fails_ (a database
+error, or a guard evaluation that cannot resolve the default-tenant sentinel) is logged at
+`error` -- as is a link-path transaction that cannot be opened -- and then treated by every
+call site as "no change", with no audit row at all. A
+persistently failing guard therefore looks identical to a login whose roles simply did not
+need updating -- watch the controller log, not just the audit trail.
 
 The residual gap is de-provisioning drift, not lockout: the sync has several fail-open
 early returns (no `role_claim_path` configured, empty `role_mapping`, claim path missing
 from the token, an unmapped or malformed claim value, or the mapped set resolving to zero
 local roles -- see `crates/shared/db/src/access_grants.rs`) that leave the user's existing
 roles untouched with no signal at all, not even an audit event. Note that a provider's
-`role_mapping` targets are resolved against **global** roles only: a mapping whose target
-names a tenant-scoped custom role matches nothing, so the sync no-ops silently for that
-login. `role_mapping` is free-form text and is not validated against the role table at
-write time, so a typo or a custom-role target is only visible as a sync that never
-applies. An IdP-side de-provisioning
+`role_mapping` targets are resolved against **global** roles only. Targets naming a
+tenant-scoped custom role match nothing and are dropped from the resolved set: if every
+target is tenant-scoped the sync no-ops silently for that login, and if only some are, the
+sync **applies the global subset** -- the user loses the custom role on every sign-in.
+`role_mapping` is free-form text and is not validated against the role table at write time,
+so a typo or a custom-role target is only visible as a sync that never applies or that
+quietly applies less than it names. An IdP-side de-provisioning
 that simply stops sending the covering claim never reaches the guard or the sync's write
 path -- it silently no-ops. Operators relying on OIDC role mapping should keep at least one
 local (non-OIDC) account holding `access:manage`.

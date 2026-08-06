@@ -2030,12 +2030,12 @@ pub async fn oidc_link(
                         .await;
                     }
                     Err(e) => {
-                        tracing::warn!(error = %e, "failed to commit OIDC role-sync transaction during link");
+                        tracing::error!(error = %e, "failed to commit OIDC role-sync transaction during link");
                     }
                 }
             }
             Err(e) => {
-                tracing::warn!(error = ?e, "failed to open guarded transaction for OIDC role sync during link");
+                tracing::error!(error = ?e, "failed to open guarded transaction for OIDC role sync during link");
             }
         }
     }
