@@ -77,16 +77,32 @@ the crate's public API is unchanged (submodules are `pub(crate)`/private; `lib.r
 The previous attempt built a parallel `surface_runtime/` directory that was never reachable (no
 `mod` wiring; the monolith stayed authoritative) and was later deleted wholesale. Plan A must:
 
-1. **Convert in place, never in parallel.** Each step moves code out of the monolith and wires the
+1. **Characterization tests first.** Before the first move, add tests pinning the *current*
+   classifier behavior — message-literal-driven is correct here, they pin the code as it exists,
+   including the previously untested `failed`/`storage_error`, `failed`/`bootstrap_failed`,
+   `failed`/`sync_failed`, and `failed`/`unclassified_error` arms. The existing suite alone is a
+   weak preservation oracle (§ 1.2 documents a test pinning a fiction; several arms are untested).
+   Plan B later rewrites these assertions against the typed matrix.
+2. **Convert in place, never in parallel.** Each step moves code out of the monolith and wires the
    `mod` declaration in the same commit; the monolith shrinks monotonically. At no point do two
    copies of a function exist.
-2. **Every commit compiles and is green** on the crate's test suite (workspace `warnings = "deny"`
+3. **Every commit compiles and is green** on the crate's test suite (workspace `warnings = "deny"`
    makes an unwired file's dead code invisible, not loud — reachability is proven by the `mod`
    chain, not by lint silence).
-3. **Test-count assertion:** record the crate's test count before the split; after the final move,
-   the count must be ≥ the baseline (guards against tests silently dropped with an unwired file).
-4. **Orphan check at the end:** every `.rs` file under `src/` reachable from `lib.rs` via the
+4. **Test-count assertion:** record the crate's test count *after* the § 3.2.1 characterization
+   tests land and *before* the first move; after the final move, the count must be ≥ that
+   baseline (guards against tests silently dropped with an unwired file).
+5. **Orphan check at the end:** every `.rs` file under `src/` reachable from `lib.rs` via the
    `mod` chain (the June artifact was exactly this class of defect).
+6. **DataLoad allowlist repoint.** `ci/dataload_params_allowlist.txt` line for
+   `crates/core/agent-ssh-runtime/src/surface_runtime.rs` must be repointed **in the same commit**
+   that moves the `InteractionKind::DataLoad` *occurrences* (two match arms today, lines ~631 and
+   ~744 — hint→kind derivation and capability-set derivation, not `.with_params` registrations) —
+   a row that stops matching is treated as stale and fails
+   `ci/verify_dataload_declares_params.sh`. Both occurrences must land in the same destination
+   file (one repointed row = a rename, not ratchet growth); if the plan splits them, that is a
+   pre-authorized one-row-to-two-row expansion, noted as such in the commit. That script joins
+   the Plan A gate list.
 
 ## 4. Plan B — typed error taxonomy
 
@@ -99,11 +115,15 @@ with `Report<Error>` conversions. Introducing a second error enum would duplicat
 
 - **`operations/sync.rs` migrates to `crate::error::{Error, Result}`.** All four functions return
   `Result<T>` (i.e. `Report<Error>`), using `report!`/`bail!`/`.context_to::<Error>()` — never
-  `Report::new()`. Existing string messages map to variants; representative mapping (exact
-  per-line selection is plan work, constrained by the classification matrix in § 4.3):
-  - `"database error: {e}"`, `"failed to update sudo state: {e}"` → `Error::Database` (via existing
-    `impl_report_conversion!`)
-  - `"host '{host_id}' not found"` → `Error::HostNotFound`
+  `Report::new()`. **Call sites whose callees already return the crate's `Report<Error>`
+  (`host_ops::find_host`, `host_ops::update_host_sudo_state`, …) drop their
+  `.map_err(|e| format!(...))` flattening and propagate via `?`** — never re-derive a variant from
+  a flattened string (`update_host_sudo_state` can itself yield `Error::HostNotFound`, which a
+  string-rewrap would misclassify as `Database`). Remaining string messages map to variants;
+  representative mapping (exact per-line selection is plan work, constrained by the classification
+  matrix in § 4.3):
+  - `"host '{host_id}' not found"` (the `.ok_or_else` on `find_host`'s `Ok(None)`) →
+    `Error::HostNotFound`
   - `"SSH connection failed: {e}"` → `Error::SshConnection` (existing russh conversion)
   - command-execution failures (root/sudo detection, helper install, sudoers write, docker group)
     → `Error::SshCommand` / `Error::Io` as appropriate
@@ -118,6 +138,20 @@ with `Report<Error>` conversions. Introducing a second error enum would duplicat
     validates password/key presence before `sync_connect`/`sync_execute` are called (their only
     callers are `spawn_sync_connect` / `spawn_sync_execute`). Classifying it as Validation is
     semantically right and changes no reachable behavior.
+  - `uptrakit_service_sdk::decrypt_sensitive_params` failures (`Result<_, String>` from the SDK;
+    three call sites in the runtime: bootstrap-connect, bootstrap-execute, sync auth resolution)
+    → `Error::Crypto`. Deliberate: none of its messages matches the current validation prefixes,
+    so today they classify `failed`/`bootstrap_failed` or `failed`/`sync_failed`; `Crypto` kinds
+    as System and preserves that exactly. (Mapping them to `InvalidInput` would be a third
+    classification change — not taken.)
+- **Re-context ban.** Within this crate, never `.context(Error::…)`/`.context_to::<Error>()` over
+  a value that is already a `Report<Error>` — that re-kinds the outermost context (e.g. a
+  `HostNotFound` wrapped as `SshCommand`) exactly as silently as the string re-wrap above.
+  Narrative context on an existing `Report<Error>` uses non-`Error` attachments.
+  `failure_kind` documents that it classifies `current_context()`.
+- **Trait-impl carve-out.** Signatures fixed by external traits (`InfraActionInvoker::invoke`,
+  `GuestBootstrapExecutor` impls in sync.rs) keep their trait-mandated error types; the
+  module-wide alias rule applies to the module's own functions.
 - **In-crate `Result<_, String>` helpers migrate too**: `parse_bootstrap_params`,
   `build_sync_auth_override` (→ `Error::InvalidInput`), `resolve_sync_auth`,
   `handle_remove_host`, `handle_list_hosts`. These strings are classification inputs today, so
@@ -132,44 +166,77 @@ New classification unit inside the `audit` submodule from Plan A:
 
 ```rust
 /// Closed set — matched exhaustively on purpose; a new kind must pick a row
-/// in every context of the classification matrix. Crate-private, NOT
-/// #[non_exhaustive] (follows the closed verdict-enum precedent).
-enum SurfaceFailureKind {
+/// in every context of the classification matrix. Crate-internal, so
+/// #[non_exhaustive] would be inert and would only force a wildcard arm the
+/// exhaustive-dispatch design forbids.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SurfaceFailureKind {
     Validation,
     NotFound,
-    Storage,
-    Ssh,
-    Internal,
+    System,
 }
 
 /// The audited surface operation the failure occurred in.
-enum SurfaceAuditContext {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SurfaceAuditContext {
     HostsRemove,      // interaction "hosts", DELETE
     BootstrapExecute, // interaction "bootstrap-execute"
     SyncExecute,      // interaction "sync-execute"
 }
 
-struct SurfaceFailureClass {
-    wire_code: SurfaceActionErrorCode,
-    outcome: AuditOutcome,                  // typed, from uptrakit-audit-log
-    reason_code: Option<&'static str>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SurfaceFailureClass {
+    pub(crate) outcome: AuditOutcome, // typed, from uptrakit-audit-log
+    pub(crate) reason_code: Option<&'static str>,
 }
 ```
+
+**Wire code has exactly one source**: `pub(crate) fn wire_code(kind: SurfaceFailureKind) ->
+SurfaceActionErrorCode` (`Validation` | `NotFound` → `InvalidRequest`, `System` →
+`InternalError`). `surface_error_from_report` calls it; `SurfaceFailureClass` deliberately does
+NOT carry a wire-code field — at audited sites the response code and the audit classification
+would otherwise be computed from two tables that can drift.
+
+(Visibility is `pub(crate)` — the types live in the `audit` submodule but are consumed from
+`dispatch` (§ 4.4); plain-private types/fields do not compile across sibling modules, bare `pub`
+trips the workspace `unreachable_pub = "deny"` lint. `classify`/`failure_kind` get `pub(crate)`
+likewise.
+All three types are `Copy` — every field is — so kinds and classes pass by value without clones;
+`Debug`/`PartialEq` are required by the § 5 `assert_eq!`-based matrix/kind tests.)
 
 Two total functions, each a single exhaustive `match` (no wildcard arms — `Error` and
 `SurfaceFailureKind` are own-crate enums; a new `Error` variant then **fails compilation** until a
 kind is chosen, which is the compile-time guarantee the audit asked for):
 
-1. `fn failure_kind(report: &Report<Error>) -> SurfaceFailureKind` — exhaustive over `Error`:
-   `InvalidInput` → `Validation`; `HostNotFound` → `NotFound`; `Database` → `Storage`;
-   `SshConnection` | `SshAuth` | `SshCommand` | `HostKeyMismatch` | `KeyGeneration` → `Ssh`;
-   `Io` | `Directory` | `Crypto` | `Enrollment` | `HostNameConflict` | `UnsupportedKeyType` |
-   `BootstrapVerification` | `PreconditionFailed` → `Internal`.
-   (`HostNameConflict` and `UnsupportedKeyType` are arguably caller errors, but today they classify
-   as `failed` — preservation wins; re-kinding later is a one-line, compile-checked, audit-visible
-   change, which is the point of the taxonomy.)
+1. `fn failure_kind(report: &Report<Error>) -> SurfaceFailureKind` — exhaustive over `Error`
+   (classifying `current_context()`): `InvalidInput` → `Validation`; `HostNotFound` → `NotFound`;
+   every other variant (`Database` | `SshConnection` | `SshAuth` | `SshCommand` |
+   `HostKeyMismatch` | `KeyGeneration` | `Io` | `Directory` | `Crypto` | `Enrollment` |
+   `HostNameConflict` | `UnsupportedKeyType` | `BootstrapVerification` | `PreconditionFailed`)
+   → `System`, listed as explicit arms, no wildcard.
+   (An earlier draft split `System` into `Storage`/`Ssh`/`Internal`; every cell of the resulting
+   matrix was identical across the three, so the distinction was unobservable, untestable, and
+   invited arbitrary future assignments — collapsed. `HostNameConflict` and `UnsupportedKeyType`
+   are arguably caller errors, but today they classify as `failed` — preservation wins; re-kinding
+   later is a one-line, compile-checked, audit-visible change, which is the point of the
+   taxonomy.)
 2. `fn classify(kind: SurfaceFailureKind, ctx: SurfaceAuditContext) -> SurfaceFailureClass` — the
    full matrix in § 4.3.
+
+**Single interaction-id source.** Plan B introduces an audit-context lookup while
+`interaction_id` → `action_type` already exists in `emit_surface_mutation_audit` — two string
+matches that must never drift. Both derive from **one total function**, keyed on
+`(interaction_id, method)` to mirror the dispatch arm table (`"hosts"` GET is un-audited while
+`"hosts"` DELETE audits as `host.deactivate`), returning
+`Option<(action_type, Option<SurfaceAuditContext>)>`: outer `None` = deliberately un-audited
+(hosts GET, connect paths); inner `None` = audited via the retained legacy classifier
+(plugin path, e.g. `bootstrap-proxmox-guest` → `host.update` with no typed context). Expected
+outer-`None` entries include the workflow-entry rejection arms `("bootstrap", _)` and
+`("sync", _)` (direct execution rejected with a caller-error response, never audited) alongside
+hosts GET and the connect paths. A bidirectional totality test asserts: forward — every
+dispatch-table key resolves through this function or is the documented `_` plugin fallthrough;
+reverse — every mapped key has an explicit dispatch arm **or** appears on a named plugin-handled
+list (`bootstrap-proxmox-guest`, which is dispatched via the `_` arm by design).
 
 `AuditOutcome` comes from `uptrakit-audit-log` (already a dependency; `lib.rs` imports
 `RuntimeAuditEmitter`). Its `as_str()` produces exactly the five strings the classifier hardcodes
@@ -181,19 +248,17 @@ named consts instead of scattered inline literals.
 ### 4.3 Classification matrix (normative)
 
 Wire code is context-independent: `Validation` and `NotFound` → `InvalidRequest` (caller error);
-`Storage`, `Ssh`, `Internal` → `InternalError` (system error).
+`System` → `InternalError` (system error).
 
 | kind \ context | HostsRemove | BootstrapExecute | SyncExecute |
 | --- | --- | --- | --- |
 | Validation | `validation_failed` / `invalid_request` | `validation_failed` / `invalid_request` | `validation_failed` / `invalid_request` |
 | NotFound | `denied` / `host_not_found` | `failed` / `bootstrap_failed` † | `denied` / `host_not_found` **(D1 — the one classification change)** |
-| Storage | `failed` / `storage_error` | `failed` / `bootstrap_failed` | `failed` / `sync_failed` |
-| Ssh | `failed` / `storage_error` † | `failed` / `bootstrap_failed` | `failed` / `sync_failed` |
-| Internal | `failed` / `storage_error` | `failed` / `bootstrap_failed` | `failed` / `sync_failed` |
+| System | `failed` / `storage_error` | `failed` / `bootstrap_failed` | `failed` / `sync_failed` |
 
-† Cells unreachable today (bootstrap creates hosts, so `NotFound` cannot occur; `HostsRemove` does
-no SSH). They are still defined — fail-closed to the context's existing fallback — because the
-matrix must be total. Every cell equals current production behavior except the marked D1 cell.
+† Unreachable today (bootstrap creates hosts, so `NotFound` cannot occur there). Still defined —
+fail-closed to the context's existing fallback — because the matrix must be total. Every cell
+equals current production behavior except the marked D1 cell.
 
 Success-path classification (`success` and the `bootstrap-proxmox-guest` `partial` derivation from
 `result.failed > 0`) is untouched.
@@ -204,8 +269,14 @@ Success-path classification (`success` and the `bootstrap-proxmox-guest` `partia
   - `surface_error_response(request_id, code, message)` — explicit-code constructor for the
     non-`Report` call sites that stay caller-errors (`"unknown surface"`, unknown-interaction),
     which keep `InvalidRequest`;
-  - a typed path `surface_error_from_report(request_id, report, kind)` (exact signature is plan
-    work) used by every `Err(Report<Error>)` site, taking `wire_code` from the classification.
+  - a typed path `surface_error_from_report(request_id, report)` (return shape is plan work:
+    the response plus the derived kind) used by every `Err(Report<Error>)` site — audited or not.
+    It calls `failure_kind(report)` internally, so call sites never hand-pick a kind
+    (hand-picking would reinstate manual classification in typed clothing). Wire code is
+    context-independent (§ 4.3), so this needs **no** `SurfaceAuditContext` — which is what lets
+    the un-audited sites (`handle_list_hosts`, the connect paths) get D2's kind-derived wire codes
+    without inventing audit contexts for them; `classify(kind, ctx)` is called only at the three
+    audit-emitting sites.
 - At each in-crate `Err` site the classification is computed **once** and flows to both the wire
   response and the audit emit — the audit path no longer re-parses `response.error.message`.
   `emit_surface_mutation_audit` gains a typed classification parameter
@@ -220,10 +291,13 @@ Success-path classification (`success` and the `bootstrap-proxmox-guest` `partia
   "stays on the typed V2 API" constraint is honored in the applicable sense: this crate's surface
   audit path is wire-forwarded Events — allowed by the V2 rules, which ban only service-forwarded
   *Stateful* events — and outcome typing now flows through `AuditOutcome`.)
-- **Error message text stops being load-bearing.** Wire messages become
+- **Error message text stops being load-bearing on the typed path.** Wire messages become
   `Report<Error>` display renderings; minor wording changes versus today's literals are acceptable
-  and expected (e.g. `"host not found: {id}"` instead of `"host 'id' not found"`). No test may pin
-  message text for classification purposes; message assertions are limited to presence/context.
+  and expected (e.g. `"host not found: {id}"` instead of `"host 'id' not found"`). No test on the
+  **typed** path may pin message text for classification purposes; message assertions are limited
+  to presence/context. Named exceptions: the retained plugin-path classifier (§ 4.5) is
+  definitionally message-matched and its tests pin messages; Plan A's characterization tests
+  (§ 3.2.1) pin current messages by design and are rewritten against the typed matrix in Plan B.
 
 ### 4.5 Explicit residual: plugin-origin responses
 
@@ -242,15 +316,41 @@ plugin still silently reclassifies — unchanged risk, now documented instead of
 ### 4.6 Behavior-change inventory (complete)
 
 1. **D1**: real sync-execute against a missing host: audit `failed`/`sync_failed` →
-   `denied`/`host_not_found`.
+   `denied`/`host_not_found`. Same family: a `HostNotFound` surfaced mid-flow (e.g.
+   `update_host_sudo_state`'s concurrent-delete window) now classifies `denied`/`host_not_found`
+   instead of `failed`/`sync_failed`.
 2. **D2**: wire `SurfaceActionError.code` for system-side failures: `InvalidRequest` →
-   `InternalError`. Affected classes: DB failures in list/remove/sync/bootstrap paths, SSH
-   failures, sudoers/helper-script/docker-group failures, `"failed to list hosts"`. Downstream:
-   web-api's code→HTTP-status mapping moves these to the 5xx group. No doc pins per-code
-   semantics for these paths (verified — only `CloseReason::InternalError` appears in
-   `docs/api/wire-protocol.md`), and no payload *shape* changes ⇒ no asyncapi/openapi regen.
+   `InternalError`. Downstream consequences, enumerated:
+   - **HTTP status: unchanged.** web-api hardcodes `StatusCode::UNPROCESSABLE_ENTITY` (422) for
+     every interaction failure regardless of `error.code`
+     (`crates/ui/web-api/src/routes/surfaces.rs`, `error_response_with_code` sites); there is no
+     code→status mapping.
+   - **HTTP JSON body `code` string** changes `"invalid_request"` → `"internal_error"` for these
+     failures (via `action_error_code`).
+   - **web-api's `SURFACE_ACTION_INVOKE` audit trail** (a second, independent audit path:
+     `classify_surface_action_response_for_audit` in `routes/surfaces.rs` and its duplicate in
+     `routes/service_ws/handler/audit_surface.rs`) derives outcome from `error.code`: these failures flip
+     `validation_failed` → `failed` (reason code `invalid_request` → `internal_error`).
+     **Deliberate** — it corrects the same caller-vs-system misclassification at that layer; no
+     web-api code changes.
+   - Affected failure classes: DB failures in list/remove/sync/bootstrap paths, SSH failures,
+     sudoers/helper-script/docker-group failures, `"failed to list hosts"`,
+     `decrypt_sensitive_params` failures (3 sites), and the `PreconditionFailed` conditions
+     (`"sudo is not available ..."`, `"no stored key fingerprint"`).
+   - **Residual note:** the two `PreconditionFailed` conditions are user-actionable yet now render
+     as `internal_error` in the HTTP body — the mirror of the misclassification D2 fixes.
+     Deliberate: `System` preserves today's audit outcome (`failed`); giving preconditions their
+     own caller-visible code is a future one-line re-kind, not silently decided here.
+   - No doc pins per-code semantics for these paths (verified — only `CloseReason::InternalError`
+     appears in `docs/api/wire-protocol.md`), and no payload *shape* changes ⇒ no
+     asyncapi/openapi regen.
 3. Wire error message wording may change (§ 4.4). Classification and audit fields are independent
    of it by construction.
+4. **Accepted divergence (D1 side effect):** for a sync-execute missing host, the agent-emitted
+   `host.update` event records `denied`/`host_not_found` while the controller's independent
+   `SURFACE_ACTION_INVOKE` event records `validation_failed` (it derives from the wire code, and
+   `NotFound` keeps `InvalidRequest` — no wire code maps to `Denied` without lying via
+   `PermissionDenied`). Known and accepted; no web-api change.
 
 Everything else — audit outcomes, reason codes, action types, emission sites, success/partial
 logic, plugin-path classification, and all of Plan A — byte-identical in behavior.
@@ -260,13 +360,15 @@ logic, plugin-path classification, and all of Plan A — byte-identical in behav
 All in-crate, using the existing real-DB test setup already used by the `remove_host_*` tests.
 Both success and failure paths per docs/development/testing.md.
 
-**Plan A:** no new behavior tests — the existing suite moves with the code and must stay green at
-every commit; plus the test-count and orphan-check guards from § 3.2.
+**Plan A:** the § 3.2.1 characterization tests land before the first move (pinning current
+classifier behavior, all arms); then the suite moves with the code and must stay green at every
+commit; plus the test-count, orphan-check, and DataLoad-allowlist guards from § 3.2.
 
 **Plan B:**
 
 1. **Matrix pin (table test).** One table-driven test asserting `classify(kind, ctx)` over **every
-   cell** of § 4.3 — wire code, `AuditOutcome`, reason code. This replaces message-literal pinning
+   cell** of § 4.3 — `AuditOutcome` + reason code per cell, plus `wire_code(kind)` per kind
+   (wire code is kind-only, § 4.2). This replaces message-literal pinning
    as the classification contract.
 2. **Kind pin.** Unit test asserting `failure_kind` for a representative `Report<Error>` of each
    `Error` variant (the exhaustive `match` itself is the structural guarantee; the test documents
@@ -284,6 +386,11 @@ every commit; plus the test-count and orphan-check guards from § 3.2.
    - one system-error real-path test where cheaply stageable; where a real DB/SSH fault cannot be
      staged through production paths, the matrix test is the pin (the typed kind closes the
      message-rewording channel that made synthetic tests vacuous).
+   - **re-context negative test**: a `HostNotFound` propagated through the full `sync_execute`
+     path still kinds `NotFound` (guards the § 4.1 re-context ban — no intermediate layer may
+     re-kind it to `System`).
+   - **interaction-id totality test**: every id in the dispatch arm table resolves through the
+     single audit-mapping function or appears on its explicit audit-exempt list (§ 4.2).
 4. **Previously untested arms** gain coverage: `failed`/`storage_error`,
    `failed`/`bootstrap_failed`, and `failed`/`sync_failed` via the matrix test;
    `failed`/`unclassified_error` (plugin-path fallthrough, outside the matrix) via a test driving
@@ -336,6 +443,10 @@ and must not be executed separately.
 - **New standalone surface-error enum carrying failure data** (the audit brief's literal
   suggestion): rejected — duplicates the crate's existing `Error`/`Report<Error>` model; the
   taxonomy is a *classification* of errors, not a second error carrier.
+- **Five-kind taxonomy** (`Storage`/`Ssh`/`Internal` as distinct kinds, per the audit brief):
+  rejected — every matrix cell was identical across the three, making the distinction
+  unobservable and untestable; collapsed to `System`. Splitting later (with distinct reason
+  codes) is a compile-checked, owner-visible change.
 - **Classify plugin-origin responses by `SurfaceActionErrorCode`**: rejected for now — the proxmox
   plugin sends `InvalidRequest` for all failures, so code-based classification would reclassify
   non-validation plugin failures as `validation_failed`, violating behavior preservation
