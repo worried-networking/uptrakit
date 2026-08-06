@@ -57,6 +57,13 @@ pub struct UpdateUserActiveRequest {
     pub is_active: bool,
 }
 
+impl Validate for UpdateUserActiveRequest {
+    fn validate(&self) -> Result<(), ValidationError> {
+        // No format/length invariants beyond field types; capability/existence checks are handler-side.
+        Ok(())
+    }
+}
+
 /// Request to apply an access preset to a user.
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -74,5 +81,23 @@ impl Validate for ApplyPresetRequest {
             });
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![expect(
+        clippy::assertions_on_result_states,
+        reason = "test assertions — is_ok/is_err provides readable failure messages"
+    )]
+    use super::*;
+
+    #[test]
+    fn update_user_active_validate_is_ok() {
+        assert!(
+            UpdateUserActiveRequest { is_active: false }
+                .validate()
+                .is_ok()
+        );
     }
 }

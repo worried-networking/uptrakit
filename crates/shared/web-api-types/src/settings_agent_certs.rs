@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::validation::{Validate, ValidationError};
+
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AgentCertificateSettingsResponse {
@@ -26,6 +28,13 @@ pub struct UpdateAgentCertificateSettingsRequest {
     /// Set to `0` to reset to automatic mode (`min(14 days, lifetime / 5)`).
     /// Omit to leave the current value unchanged.
     pub renewal_window_hours: Option<u16>,
+}
+
+impl Validate for UpdateAgentCertificateSettingsRequest {
+    fn validate(&self) -> Result<(), ValidationError> {
+        // No format/length invariants beyond field types; capability/existence checks are handler-side.
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -87,5 +96,15 @@ mod tests {
         let de: UpdateAgentCertificateSettingsRequest =
             serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(de.renewal_window_hours, Some(0));
+    }
+
+    #[test]
+    fn update_agent_cert_settings_request_validate_is_ok() {
+        let req = UpdateAgentCertificateSettingsRequest {
+            lifetime_hours: Some(17_520),
+            renewal_window_hours: Some(336),
+        };
+        req.validate()
+            .expect("UpdateAgentCertificateSettingsRequest should validate");
     }
 }

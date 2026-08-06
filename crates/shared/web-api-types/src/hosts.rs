@@ -1,5 +1,6 @@
 use crate::host_tags::HostTagSummary;
 use crate::services::ServiceStatus;
+use crate::validation::{Validate, ValidationError};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -67,6 +68,20 @@ pub struct HostAgentSummary {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateHostRequest {
     pub friendly_name: Option<String>,
+}
+
+impl Validate for UpdateHostRequest {
+    fn validate(&self) -> Result<(), ValidationError> {
+        if let Some(name) = &self.friendly_name
+            && name.trim().is_empty()
+        {
+            return Err(ValidationError {
+                field: "friendly_name",
+                message: "friendly_name must not be empty".to_string(),
+            });
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -330,5 +345,21 @@ mod tests {
         let req: UpdateHostRequest =
             serde_json::from_str(json).expect("deserialization should succeed");
         assert!(req.friendly_name.is_none());
+    }
+
+    #[test]
+    fn update_host_request_validate_rejects_empty_friendly_name() {
+        let req = UpdateHostRequest {
+            friendly_name: Some(String::new()),
+        };
+        assert_eq!(req.validate().err().map(|e| e.field), Some("friendly_name"));
+    }
+
+    #[test]
+    fn update_host_request_validate_passes_when_friendly_name_omitted() {
+        let req = UpdateHostRequest {
+            friendly_name: None,
+        };
+        req.validate().expect("None friendly_name should validate");
     }
 }

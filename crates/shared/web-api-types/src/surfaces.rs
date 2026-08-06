@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use uptrakit_wire::surfaces::{self, SurfaceDescriptor};
 use uuid::Uuid;
 
+use crate::validation::{Validate, ValidationError};
+
 /// Query parameters for listing registered surfaces.
 #[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::IntoParams))]
@@ -116,4 +118,23 @@ pub struct InvokeSurfaceInteractionRequest {
     /// Optional timeout override for this invocation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_seconds: Option<u16>,
+}
+
+impl Validate for InvokeSurfaceInteractionRequest {
+    fn validate(&self) -> Result<(), ValidationError> {
+        // No format/length invariants beyond field types; capability/existence checks are handler-side.
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invoke_surface_interaction_request_validate_is_ok() {
+        InvokeSurfaceInteractionRequest::default()
+            .validate()
+            .expect("InvokeSurfaceInteractionRequest::default() should validate");
+    }
 }

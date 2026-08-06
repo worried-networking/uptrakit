@@ -244,6 +244,20 @@ impl Validate for CreatePluginConfigRequest {
     }
 }
 
+impl Validate for UpdatePluginConfigRequest {
+    fn validate(&self) -> Result<(), ValidationError> {
+        if let Some(name) = &self.name
+            && name.trim().is_empty()
+        {
+            return Err(ValidationError {
+                field: "name",
+                message: "name must not be empty".to_string(),
+            });
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![expect(
@@ -338,6 +352,26 @@ mod tests {
         assert!(de.name.is_none());
         assert!(de.config.is_none());
         assert!(de.enabled.is_none());
+    }
+
+    #[test]
+    fn update_request_validate_rejects_empty_name() {
+        let req = UpdatePluginConfigRequest {
+            name: Some(String::new()),
+            config: None,
+            enabled: None,
+        };
+        assert_eq!(req.validate().err().map(|e| e.field), Some("name"));
+    }
+
+    #[test]
+    fn update_request_validate_passes_when_name_omitted() {
+        let req = UpdatePluginConfigRequest {
+            name: None,
+            config: None,
+            enabled: None,
+        };
+        assert!(req.validate().is_ok());
     }
 
     // ── PluginTypeInfo ─────────────────────────────────────────────

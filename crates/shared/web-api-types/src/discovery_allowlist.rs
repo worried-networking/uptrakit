@@ -3,6 +3,8 @@ use time::OffsetDateTime;
 use uptrakit_shared_types::PluginTypeId;
 use uuid::Uuid;
 
+use crate::validation::{Validate, ValidationError};
+
 /// A tenant-wide discovery allowlist entry.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -40,4 +42,25 @@ pub struct CreateDiscoveryAllowlistEntryRequest {
     /// Must be a known plugin type that has the `DiscoverLocalSoftware` capability.
     /// `Other`/unknown plugin types are rejected.
     pub plugin_type: PluginTypeId,
+}
+
+impl Validate for CreateDiscoveryAllowlistEntryRequest {
+    fn validate(&self) -> Result<(), ValidationError> {
+        // No format/length invariants beyond field types; capability/existence checks are handler-side.
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn create_discovery_allowlist_entry_request_validate_is_ok() {
+        let req = CreateDiscoveryAllowlistEntryRequest {
+            plugin_type: PluginTypeId::new("package-manager.apt"),
+        };
+        req.validate()
+            .expect("CreateDiscoveryAllowlistEntryRequest should validate");
+    }
 }
