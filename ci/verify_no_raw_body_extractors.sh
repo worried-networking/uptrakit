@@ -107,8 +107,10 @@ if [ "$entry_count" -gt "$MAX_ALLOWLIST_ENTRIES" ]; then
 fi
 
 # Residual check: every raw_extractor (legacy B1) fn must still call .validate()
-# in its body span (fn start to next async fn or EOF; file pre-truncated at
-# #[cfg(test)], which removes the test-module-absorption false negative).
+# in its body span (column-0 fn start to the first column-0 closing brace `}` —
+# the same rustfmt-guaranteed column-0 anchoring used above, so a `.validate()`
+# living in a nested/test module can never satisfy this check; no test-cfg
+# parsing needed).
 while IFS='|' read -r al_class al_path al_regex; do
   case "$al_class" in raw_extractor) ;; *) continue ;; esac
   fn_name=$(printf '%s' "$al_regex" | sed -nE 's/.*fn ([a-z_0-9]+).*/\1/p')

@@ -691,6 +691,40 @@ async fn execute_merge_invalid_request_writes_validation_failed_audit_event() {
 }
 
 #[tokio::test]
+async fn execute_merge_empty_candidates_writes_validation_failed_audit_event() {
+    let (db, _tenant_id, state, tenant_db) = setup_state().await;
+
+    let err = match execute_software_item_merge(
+        State(AuditEmitterState(state.audit_emitter.clone())),
+        tenant_db,
+        CanUpdateSoftware::new(auth_user_with(Permission::UpdateSoftware)),
+        CanDeleteSoftware::new(auth_user_with(Permission::DeleteSoftware)),
+        None,
+        Unvalidated::new_for_test(MergeSoftwareItemsExecuteRequest {
+            candidate_ids: vec![],
+            survivor_id: Uuid::now_v7(),
+        }),
+    )
+    .await
+    {
+        Ok(response) => panic!(
+            "empty candidate_ids should fail require_valid(), got status {}",
+            response.into_response().status()
+        ),
+        Err(err) => err,
+    };
+    assert_eq!(err.into_response().status(), StatusCode::BAD_REQUEST);
+
+    let row = tenant_audit_row_for_action(&db, SOFTWARE_ITEM_MERGE_AUDIT_ACTION).await;
+    assert_eq!(
+        row.outcome,
+        uptrakit_audit_log::AuditOutcome::ValidationFailed.as_str()
+    );
+    let details = row.details_json.expect("details");
+    assert_eq!(details["reason_code"], serde_json::json!("invalid_request"));
+}
+
+#[tokio::test]
 async fn batch_software_items_partial_result_writes_partial_audit_event() {
     let (db, tenant_id, state, tenant_db) = setup_state().await;
     let existing_item_id = Uuid::now_v7();

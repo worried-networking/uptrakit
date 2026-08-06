@@ -280,24 +280,21 @@ pub fn service_identity_from_der_with_trust_domain(
 }
 
 /// Axum extractor that deserialises the request body as JSON and immediately
-/// validates it with [`Validate::validate()`].
+/// validates it with [`Validate::validate()`], rejecting with a generic
+/// `400 Bad Request` before the handler body runs.
 ///
-/// Replaces the repetitive 3-line pattern:
-/// ```rust,ignore
-/// if let Err(e) = req.validate() {
-///     return error_response(StatusCode::BAD_REQUEST, e.to_string());
-/// }
-/// ```
+/// `Validated<T>` and [`Unvalidated<T>`] are not co-equal defaults. `Unvalidated<T>`
+/// is the default for mutations on an audited entity family — only it can emit
+/// the family's `ValidationFailed` audit event, return a non-400 status, or defer
+/// validation until after an authorization check. Reach for `Validated<T>` only
+/// when the entity family does not audit validation failures. See
+/// `docs/development/coding-standards.md` ("Request Type Validation") for the
+/// full policy.
 ///
-/// Usage — change the handler signature from:
-/// ```rust,ignore
-/// Json(req): Json<CreateFooRequest>
-/// ```
-/// to:
+/// Usage — change the handler signature from a raw body extractor to:
 /// ```rust,ignore
 /// Validated(req): Validated<CreateFooRequest>
 /// ```
-/// and remove the manual `validate()` call.
 ///
 /// Returns `400 Bad Request` on JSON deserialisation failure or validation failure.
 pub struct Validated<T>(pub T);

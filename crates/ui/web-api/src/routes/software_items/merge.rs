@@ -6,7 +6,7 @@ use crate::api_error::ApiError;
 use crate::app_state::AuditEmitterState;
 use crate::extract::Unvalidated;
 use crate::middleware::action::{CanDeleteSoftware, CanUpdateSoftware};
-use crate::middleware::require_auth::AuthenticatedApiTokenId;
+use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::queries::software_items as item_queries;
 use crate::tenant_db::TenantDb;
 
@@ -72,9 +72,25 @@ pub async fn execute_software_item_merge(
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     body: Unvalidated<MergeSoftwareItemsExecuteRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let api_token_id = api_token_id.map(|value| value.0);
     let req = match body.require_valid() {
         Ok(req) => req,
         Err(e) => {
+            let (actor_type, actor_id) = authenticated_user_audit_actor(&update_user, api_token_id);
+            if let Ok(entry) =
+                uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+                    SOFTWARE_ITEM_MERGE_AUDIT_ACTION,
+                )
+                .tenant_scope(tenant_db.tenant_id())
+                .actor(actor_type, actor_id)
+                .outcome(uptrakit_audit_log::AuditOutcome::ValidationFailed)
+                .details(serde_json::json!({
+                    "reason_code": "invalid_request",
+                }))
+                .build()
+            {
+                audit_emitter_state.0.emit_event(entry);
+            }
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 e.to_string(),
@@ -83,7 +99,6 @@ pub async fn execute_software_item_merge(
             ));
         }
     };
-    let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
         audit_emitter: &audit_emitter_state.0,
         tenant_id: tenant_db.tenant_id(),
