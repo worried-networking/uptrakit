@@ -1,0 +1,39 @@
+# verify_no_raw_body_extractors allowlist — FROZEN 2026-08-05, shrink-only; additions prohibited.
+# Row format: class|path|fn-regex
+#   raw_extractor — legacy Bucket-B1 manual-validate handler (Stage 2 converts; .validate() presence enforced)
+#   raw_body      — hand-rolled Request/Bytes body read (enumerated; validation is the handler's job)
+# Delete rows as Stage 2 converts sites and decrement MAX_ALLOWLIST_ENTRIES in the gate script.
+raw_extractor|crates/ui/web-api/src/routes/system_services.rs|fn update_system_service\b
+raw_extractor|crates/ui/web-api/src/routes/system_services.rs|fn batch_system_services\b
+raw_extractor|crates/ui/web-api/src/routes/hosts.rs|fn batch_hosts\b
+raw_extractor|crates/ui/web-api/src/routes/users.rs|fn update_user_roles\b
+raw_extractor|crates/ui/web-api/src/routes/users.rs|fn update_profile\b
+raw_extractor|crates/ui/web-api/src/routes/users.rs|fn initiate_email_change\b
+raw_extractor|crates/ui/web-api/src/routes/users.rs|fn change_password\b
+raw_extractor|crates/ui/web-api/src/routes/host_tags.rs|fn create_host_tag\b
+raw_extractor|crates/ui/web-api/src/routes/host_tags.rs|fn update_host_tag\b
+raw_extractor|crates/ui/web-api/src/routes/host_tags.rs|fn batch_host_tags\b
+raw_extractor|crates/ui/web-api/src/routes/host_tags.rs|fn set_host_tags\b
+raw_extractor|crates/ui/web-api/src/routes/access_presets.rs|fn apply_preset\b
+raw_extractor|crates/ui/web-api/src/routes/scheduler.rs|fn update_scheduled_task\b
+raw_extractor|crates/ui/web-api/src/routes/system_enrollment_tokens.rs|fn create_system_enrollment_token\b
+raw_extractor|crates/ui/web-api/src/routes/notifications.rs|fn create_channel\b
+raw_extractor|crates/ui/web-api/src/routes/notifications.rs|fn update_channel\b
+raw_extractor|crates/ui/web-api/src/routes/notifications.rs|fn create_rule\b
+raw_extractor|crates/ui/web-api/src/routes/notifications.rs|fn update_rule\b
+raw_extractor|crates/ui/web-api/src/routes/settings_access.rs|fn update_access_settings\b
+raw_extractor|crates/ui/web-api/src/routes/enrollment_tokens.rs|fn create_enrollment_token\b
+raw_extractor|crates/ui/web-api/src/routes/oauth/token.rs|fn token\b
+raw_extractor|crates/ui/web-api/src/routes/oauth/token.rs|fn mcp_token\b
+raw_extractor|crates/ui/web-api/src/routes/oauth/register.rs|fn register\b
+raw_extractor|crates/ui/web-api/src/routes/oauth/register.rs|fn update_client_registration\b
+raw_extractor|crates/ui/web-api/src/routes/oauth/device_authorization.rs|fn device_authorization\b
+raw_extractor|crates/ui/web-api/src/routes/oauth/clients_api.rs|fn manual_register_client\b
+raw_extractor|crates/ui/web-api/src/routes/services/batch.rs|fn batch_services\b
+raw_extractor|crates/ui/web-api/src/routes/services/crud.rs|fn update_service\b
+raw_extractor|crates/ui/web-api/src/routes/services/lifecycle.rs|fn set_update_freeze\b
+raw_body|crates/ui/web-api/src/routes/auth.rs|fn logout\b
+raw_body|crates/ui/web-api/src/routes/auth.rs|fn refresh\b
+raw_body|crates/ui/web-api/src/routes/ocsp.rs|fn ocsp_post\b
+raw_body|crates/ui/web-api/src/routes/notifications.rs|fn notification_callback\b
+raw_body|crates/ui/web-api/src/routes/oidc_auth.rs|fn oidc_link\b

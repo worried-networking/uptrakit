@@ -45,6 +45,7 @@ bash ci/verify_typed_audit_actions.sh                                # Audit act
 bash ci/verify_handler_state_contract.sh                             # No handler mixes State<Arc<AppState>> with sub-state
 python3 ci/verify_db_access_policy.py                                # db_access_policy.toml consistent with routes/
 bash ci/verify_agents_md_budget.sh                                   # AGENTS.md size budget gate
+bash ci/verify_no_raw_body_extractors.sh                             # Request bodies go through Unvalidated<T>/Validated<T>; raw Json/Form banned
 bash ci/verify_no_new_cfg_not_feature.sh                             # Additive-only feature flags: no new negated-feature cfg outside allowlist
 python3 ci/verify_action_security_declarations.py                    # Operation oauth2 scope lists match handler action extractors
 bash ci/verify_adr_numbers.sh                                        # No duplicate ADR numbers
