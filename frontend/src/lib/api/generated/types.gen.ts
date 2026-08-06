@@ -10356,7 +10356,7 @@ export type ApplyPresetErrors = {
      */
     404: unknown;
     /**
-     * Would remove last manage_users holder
+     * Would remove last manage_users or access:manage holder
      */
     409: unknown;
 };
@@ -10558,7 +10558,7 @@ export type UpdateUserRolesErrors = {
      */
     404: unknown;
     /**
-     * Would remove last manage_users holder
+     * Would remove the last remaining access administrator
      */
     409: unknown;
 };

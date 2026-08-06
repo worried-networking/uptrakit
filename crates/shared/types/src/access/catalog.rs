@@ -214,7 +214,7 @@ access_catalog! {
         Read => ("read", None, SYSTEM_AUDIT_READ, SYSTEM_AUDIT_READ_STR, "View system-level audit log entries"),
     };
     Users, "users", {
-        Manage => ("manage", None, USERS_MANAGE, USERS_MANAGE_STR, "Manage user lifecycle (activate/deactivate, MFA resets, email changes)"),
+        Manage => ("manage", None, USERS_MANAGE, USERS_MANAGE_STR, "Manage user lifecycle (activate/deactivate, lifecycle reads)"),
     };
     Access, "access", {
         Manage => ("manage", None, ACCESS_MANAGE, ACCESS_MANAGE_STR, "Manage grants, roles, and role assignments (authority administration)"),

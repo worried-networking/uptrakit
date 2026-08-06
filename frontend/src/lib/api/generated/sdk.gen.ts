@@ -1866,10 +1866,17 @@ export const token = <ThrowOnError extends boolean = true>(options: Options<Toke
 
 /**
  * List all available permissions
+ *
+ * Legacy permission catalog — removed in M1.8 (the action catalog endpoint
+ * replaces it in M1.6b).
  */
 export const listPermissions = <ThrowOnError extends boolean = true>(options?: Options<ListPermissionsData, ThrowOnError>): RequestResult<ListPermissionsResponses, ListPermissionsErrors, ThrowOnError> => (options?.client ?? client).get<ListPermissionsResponses, ListPermissionsErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -3668,7 +3675,11 @@ export const streamUpdateOutput = <ThrowOnError extends boolean = true>(options:
  */
 export const listUsers = <ThrowOnError extends boolean = true>(options?: Options<ListUsersData, ThrowOnError>): RequestResult<ListUsersResponses, ListUsersErrors, ThrowOnError> => (options?.client ?? client).get<ListUsersResponses, ListUsersErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -3681,7 +3692,11 @@ export const listUsers = <ThrowOnError extends boolean = true>(options?: Options
  */
 export const getUser = <ThrowOnError extends boolean = true>(options: Options<GetUserData, ThrowOnError>): RequestResult<GetUserResponses, GetUserErrors, ThrowOnError> => (options.client ?? client).get<GetUserResponses, GetUserErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -3694,7 +3709,11 @@ export const getUser = <ThrowOnError extends boolean = true>(options: Options<Ge
  */
 export const updateUserActive = <ThrowOnError extends boolean = true>(options: Options<UpdateUserActiveData, ThrowOnError>): RequestResult<UpdateUserActiveResponses, UpdateUserActiveErrors, ThrowOnError> => (options.client ?? client).put<UpdateUserActiveResponses, UpdateUserActiveErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -3711,7 +3730,15 @@ export const updateUserActive = <ThrowOnError extends boolean = true>(options: O
  *
  * Replaces all of the user's role assignments with the roles defined by the
  * chosen preset. Includes lockout prevention: will reject the request if it
- * would remove the `manage_users` permission from the last holder.
+ * would remove the `manage_users` permission from the last holder, and
+ * (M1.6a) the engine-backed `access:manage` lockout guard covers the same
+ * role-replacement for the access:manage plane. Interim gap: this handler
+ * still gates on the legacy `manage_users` permission via `CanManageUsers`
+ * rather than the `users:manage`/`access:manage` split — a `users:manage`-only
+ * caller can currently apply any preset, including ones that grant
+ * `access:manage`; full conversion lands in M1.6b. Assigning a preset whose
+ * roles reach the system plane additionally requires `system.access:manage`,
+ * checked inline against the engine.
  */
 export const applyPreset = <ThrowOnError extends boolean = true>(options: Options<ApplyPresetData, ThrowOnError>): RequestResult<ApplyPresetResponses, ApplyPresetErrors, ThrowOnError> => (options.client ?? client).post<ApplyPresetResponses, ApplyPresetErrors, ThrowOnError>({
     security: [{
@@ -3783,10 +3810,17 @@ export const changePassword = <ThrowOnError extends boolean = true>(options: Opt
 
 /**
  * Update a user's profile (first_name / last_name)
+ *
+ * Self-service (any authenticated user may update their own profile);
+ * updating another user's profile additionally requires `users:manage`.
  */
 export const updateProfile = <ThrowOnError extends boolean = true>(options: Options<UpdateProfileData, ThrowOnError>): RequestResult<UpdateProfileResponses, UpdateProfileErrors, ThrowOnError> => (options.client ?? client).put<UpdateProfileResponses, UpdateProfileErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -3800,10 +3834,17 @@ export const updateProfile = <ThrowOnError extends boolean = true>(options: Opti
 
 /**
  * Replace a user's role assignments
+ *
+ * Adding a role whose grants reach the system plane additionally requires
+ * system.access:manage (evaluated at runtime).
  */
 export const updateUserRoles = <ThrowOnError extends boolean = true>(options: Options<UpdateUserRolesData, ThrowOnError>): RequestResult<UpdateUserRolesResponses, UpdateUserRolesErrors, ThrowOnError> => (options.client ?? client).put<UpdateUserRolesResponses, UpdateUserRolesErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],

@@ -135,6 +135,8 @@ impl AuditActionType {
         RegisteredAuditAction::new("user.create", AuditActionKind::Stateful);
     pub const USER_UPDATE: RegisteredAuditAction =
         RegisteredAuditAction::new("user.update", AuditActionKind::Stateful);
+    pub const USER_ROLE_UPDATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("user_role.update", AuditActionKind::Stateful);
     // USER_DELETE intentionally omitted: no hard-delete handler exists yet.
     // Re-add when a delete-user feature is implemented and the emit site is present.
     pub const ACCESS_GRANT_CREATE: RegisteredAuditAction =
@@ -479,6 +481,7 @@ const V1_ACTIONS: &[RegisteredAuditAction] = &[
     AuditActionType::ENROLLMENT_TOKEN_REVOKE,
     AuditActionType::USER_CREATE,
     AuditActionType::USER_UPDATE,
+    AuditActionType::USER_ROLE_UPDATE,
     AuditActionType::ACCESS_GRANT_CREATE,
     AuditActionType::ACCESS_GRANT_UPDATE,
     AuditActionType::ACCESS_GRANT_DELETE,
@@ -752,6 +755,7 @@ uptrakit_audit_log_derive::audit_actions! {
     // users — Stateful
     user_create => USER_CREATE, Stateful;
     user_update => USER_UPDATE, Stateful;
+    user_role_update => USER_ROLE_UPDATE, Stateful;
 
     // access grants — Stateful
     access_grant_create => ACCESS_GRANT_CREATE, Stateful;

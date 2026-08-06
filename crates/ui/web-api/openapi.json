@@ -4922,6 +4922,7 @@
           "Users"
         ],
         "summary": "List all available permissions",
+        "description": "Legacy permission catalog — removed in M1.8 (the action catalog endpoint\nreplaces it in M1.6b).",
         "operationId": "list_permissions",
         "responses": {
           "200": {
@@ -4946,10 +4947,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "users:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_users"
+        ]
       }
     },
     "/api/v1/plugin-configs": {
@@ -10399,10 +10404,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "users:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_users"
+        ]
       }
     },
     "/api/v1/users/{id}": {
@@ -10447,10 +10456,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "users:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_users"
+        ]
       }
     },
     "/api/v1/users/{id}/active": {
@@ -10508,10 +10521,14 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "users:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_users"
+        ]
       }
     },
     "/api/v1/users/{id}/apply-preset": {
@@ -10520,7 +10537,7 @@
           "Users"
         ],
         "summary": "Apply an access preset to a user",
-        "description": "Replaces all of the user's role assignments with the roles defined by the\nchosen preset. Includes lockout prevention: will reject the request if it\nwould remove the `manage_users` permission from the last holder.",
+        "description": "Replaces all of the user's role assignments with the roles defined by the\nchosen preset. Includes lockout prevention: will reject the request if it\nwould remove the `manage_users` permission from the last holder, and\n(M1.6a) the engine-backed `access:manage` lockout guard covers the same\nrole-replacement for the access:manage plane. Interim gap: this handler\nstill gates on the legacy `manage_users` permission via `CanManageUsers`\nrather than the `users:manage`/`access:manage` split — a `users:manage`-only\ncaller can currently apply any preset, including ones that grant\n`access:manage`; full conversion lands in M1.6b. Assigning a preset whose\nroles reach the system plane additionally requires `system.access:manage`,\nchecked inline against the engine.",
         "operationId": "apply_preset",
         "parameters": [
           {
@@ -10568,7 +10585,7 @@
             "description": "User or preset not found"
           },
           "409": {
-            "description": "Would remove last manage_users holder"
+            "description": "Would remove last manage_users or access:manage holder"
           }
         },
         "security": [
@@ -10735,6 +10752,7 @@
           "Users"
         ],
         "summary": "Update a user's profile (first_name / last_name)",
+        "description": "Self-service (any authenticated user may update their own profile);\nupdating another user's profile additionally requires `users:manage`.",
         "operationId": "update_profile",
         "parameters": [
           {
@@ -10777,7 +10795,10 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": []
+          },
+          {
+            "developer_token": []
           }
         ]
       }
@@ -10788,6 +10809,7 @@
           "Users"
         ],
         "summary": "Replace a user's role assignments",
+        "description": "Adding a role whose grants reach the system plane additionally requires\nsystem.access:manage (evaluated at runtime).",
         "operationId": "update_user_roles",
         "parameters": [
           {
@@ -10835,15 +10857,19 @@
             "description": "User not found"
           },
           "409": {
-            "description": "Would remove last manage_users holder"
+            "description": "Would remove the last remaining access administrator"
           }
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "access:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
-        ],
-        "x-required-permission": "manage_users"
+        ]
       }
     }
   },
@@ -19022,7 +19048,7 @@
               "system.services:update": "Update system service settings",
               "system.settings:manage": "Manage global infrastructure settings",
               "updates:trigger": "Trigger update execution (single and batch)",
-              "users:manage": "Manage user lifecycle (activate/deactivate, MFA resets, email changes)"
+              "users:manage": "Manage user lifecycle (activate/deactivate, lifecycle reads)"
             }
           }
         },

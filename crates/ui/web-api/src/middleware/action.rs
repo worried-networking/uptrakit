@@ -2,10 +2,10 @@
 //!
 //! Converted route families declare authorization with these extractors +
 //! native `security(("oauth2" = ["<action>"]), ("developer_token" = []))`
-//! requirements; only `users.rs`, `roles.rs`, `access_presets.rs` keep the
-//! legacy `permission_extractor!` + `x-required-permission` model until
-//! M1.6a/M1.6b. Verdicts: 401 no principal, 403 `Decision::Deny`, 500 engine
-//! unavailable (fail-closed).
+//! requirements; only `access_presets.rs` keeps the legacy
+//! `permission_extractor!` + `x-required-permission` model until M1.6b.
+//! Verdicts: 401 no principal, 403 `Decision::Deny`, 500 engine unavailable
+//! (fail-closed).
 
 use axum::extract::{FromRef, FromRequestParts};
 use axum::http::request::Parts;

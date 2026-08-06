@@ -1,7 +1,10 @@
 //! HTTP handlers for user management endpoints.
 //!
-//! All endpoints require the [`Permission::ManageUsers`] permission via the
-//! [`CanManageUsers`] extractor.
+//! Lifecycle reads/writes (list, get, activate/deactivate, profile) gate on
+//! `users:manage` via [`CanManageUsers`]; role assignment
+//! ([`update_user_roles`]) gates on `access:manage` via `CanManageAccess` —
+//! assigning a role whose grants reach the system plane additionally
+//! requires `system.access:manage`, checked inline against the engine.
 
 #![expect(
     clippy::let_underscore_must_use,
@@ -21,23 +24,30 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set,
-    SqliteTransactionMode, TransactionOptions, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set, SqliteTransactionMode,
+    TransactionOptions, TransactionTrait,
 };
 use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::AppState;
-use crate::app_state::DbState;
+use crate::app_state::{AccessState, DbState};
 use crate::error_response::error_response;
-use crate::middleware::permission::CanManageUsers;
+use crate::middleware::action::{
+    AccessAuthority, CanManageAccess, CanManageUsers, record_access_deny, require_system_access,
+};
 use crate::middleware::require_auth::{
     AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
     get_user_permissions,
 };
 use uptrakit_audit_log::{AuditEntry, AuditOutcome, Event, Stateful};
+use uptrakit_shared_db::access_grants::{
+    GrantSubject, GuardedMutation, LockoutVerdict, check_lockout, list_grants,
+    patterns_reach_system_plane,
+};
 use uptrakit_shared_db::entity::prelude::*;
-use uptrakit_shared_db::entity::{permission, role, role_permission, user, user_role};
+use uptrakit_shared_db::entity::{role, user, user_role};
+use uptrakit_shared_types::access::{Decision, actions};
 use uptrakit_web_api_queries::queries::users::{UserView, update_user_active_in_tx};
 
 pub use uptrakit_web_api_types::users::{
@@ -107,87 +117,6 @@ async fn get_user_role_summaries(
         .collect())
 }
 
-/// Count how many *other* active users have the `manage_users` permission in
-/// this tenant. Used for lockout prevention.
-async fn count_other_manage_users_holders(
-    state: &AppState,
-    exclude_user_id: Uuid,
-) -> Result<u64, sea_orm::DbErr> {
-    // Find the permission row for manage_users.
-    let perm = Permission::find()
-        .filter(permission::Column::Name.eq("manage_users"))
-        .one(state.db())
-        .await?;
-
-    let perm_id = match perm {
-        Some(p) => p.id,
-        None => return Ok(0),
-    };
-
-    // Get role IDs that grant manage_users.
-    let role_perms = RolePermission::find()
-        .filter(role_permission::Column::PermissionId.eq(perm_id))
-        .all(state.db())
-        .await?;
-
-    let role_ids: Vec<Uuid> = role_perms.iter().map(|rp| rp.role_id).collect();
-    if role_ids.is_empty() {
-        return Ok(0);
-    }
-
-    // Count distinct users (other than the excluded one) who hold any of those
-    // roles in the default tenant and are active.
-    //
-    // We do this in two steps to stay compatible with SQLite:
-    // 1. Get user_ids from user_roles matching those role_ids + tenant.
-    // 2. Count active users in that set, excluding the target user.
-    let user_roles = UserRole::find()
-        .filter(user_role::Column::TenantId.eq(state.default_tenant_id))
-        .filter(user_role::Column::RoleId.is_in(role_ids))
-        .filter(user_role::Column::UserId.ne(exclude_user_id))
-        .all(state.db())
-        .await?;
-
-    let other_user_ids: std::collections::HashSet<Uuid> =
-        user_roles.iter().map(|ur| ur.user_id).collect();
-
-    if other_user_ids.is_empty() {
-        return Ok(0);
-    }
-
-    let count = User::find()
-        .filter(user::Column::Id.is_in(other_user_ids.into_iter().collect::<Vec<_>>()))
-        .filter(user::Column::IsActive.eq(true))
-        .count(state.db())
-        .await?;
-
-    Ok(count)
-}
-
-/// Check whether a set of role IDs grants the `manage_users` permission.
-async fn roles_grant_manage_users(
-    state: &AppState,
-    role_ids: &[Uuid],
-) -> Result<bool, sea_orm::DbErr> {
-    let perm = Permission::find()
-        .filter(permission::Column::Name.eq("manage_users"))
-        .one(state.db())
-        .await?;
-
-    let perm_id = match perm {
-        Some(p) => p.id,
-        None => return Ok(false),
-    };
-
-    let count = RolePermission::find()
-        .filter(role_permission::Column::PermissionId.eq(perm_id))
-        .filter(role_permission::Column::RoleId.is_in(role_ids.to_vec()))
-        .count(state.db())
-        .await?;
-
-    Ok(count > 0)
-}
-
 // ---------------------------------------------------------------------------
 // Endpoints
 // ---------------------------------------------------------------------------
@@ -202,8 +131,7 @@ async fn roles_grant_manage_users(
         (status = 403, description = "Not authorized")
     ),
     tag = "Users",
-    extensions(("x-required-permission" = json!("manage_users"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["users:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_users(
@@ -233,6 +161,9 @@ pub async fn list_users(
 }
 
 /// List all available permissions
+///
+/// Legacy permission catalog — removed in M1.8 (the action catalog endpoint
+/// replaces it in M1.6b).
 #[utoipa::path(
     get,
     path = "/api/v1/permissions",
@@ -242,8 +173,7 @@ pub async fn list_users(
         (status = 403, description = "Not authorized")
     ),
     tag = "Users",
-    extensions(("x-required-permission" = json!("manage_users"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["users:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_permissions(CanManageUsers(_user): CanManageUsers) -> Response {
@@ -274,8 +204,7 @@ pub async fn list_permissions(CanManageUsers(_user): CanManageUsers) -> Response
         (status = 404, description = "User not found")
     ),
     tag = "Users",
-    extensions(("x-required-permission" = json!("manage_users"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["users:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_user(
@@ -301,7 +230,22 @@ pub async fn get_user(
     }
 }
 
+/// Audit snapshot for a user's role-assignment set.
+///
+/// Distinct from `UserView`: role assignment is a separate transition from
+/// the user's own lifecycle fields, so it gets its own before/after shape and
+/// `user_role.update` action rather than reusing `user.update`.
+#[derive(uptrakit_audit_log::AuditView)]
+#[audit(target_type = "user", id_field = "user_id")]
+struct UserRolesView {
+    user_id: Uuid,
+    role_ids: Vec<Uuid>,
+}
+
 /// Replace a user's role assignments
+///
+/// Adding a role whose grants reach the system plane additionally requires
+/// system.access:manage (evaluated at runtime).
 #[utoipa::path(
     put,
     path = "/api/v1/users/{id}/roles",
@@ -315,17 +259,17 @@ pub async fn get_user(
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Not authorized"),
         (status = 404, description = "User not found"),
-        (status = 409, description = "Would remove last manage_users holder")
+        (status = 409, description = "Would remove the last remaining access administrator")
     ),
     tag = "Users",
-    extensions(("x-required-permission" = json!("manage_users"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["access:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_user_roles(
     State(state): State<Arc<AppState>>,
-    CanManageUsers(caller): CanManageUsers,
+    CanManageAccess(caller): CanManageAccess,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
+    Extension(authority): Extension<AccessAuthority>,
     Path(user_id): Path<Uuid>,
     Json(body): Json<UpdateUserRolesRequest>,
 ) -> Response {
@@ -436,91 +380,6 @@ pub async fn update_user_roles(
     };
     let current_role_ids: Vec<Uuid> = current_roles.iter().map(|r| r.id).collect();
 
-    // Lockout prevention: if the user currently has manage_users and the new
-    // roles would NOT grant it, check that other holders still exist.
-    let current_has_manage = match roles_grant_manage_users(&state, &current_role_ids).await {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::error!("DB error: {e}");
-            if let Ok(entry) = AuditEntry::<Event>::builder_event(AuditActionType::USER_UPDATE)
-                .tenant_scope(state.default_tenant_id)
-                .actor(actor_type, actor_id)
-                .target("user", user_id.to_string(), None)
-                .outcome(AuditOutcome::Failed)
-                .details(serde_json::json!({ "reason_code": "permission_check_failed" }))
-                .build()
-            {
-                state.audit_emitter.emit_event(entry);
-            }
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
-
-    if current_has_manage {
-        let new_grants_manage = match roles_grant_manage_users(&state, &body.role_ids).await {
-            Ok(v) => v,
-            Err(e) => {
-                tracing::error!("DB error: {e}");
-                if let Ok(entry) = AuditEntry::<Event>::builder_event(AuditActionType::USER_UPDATE)
-                    .tenant_scope(state.default_tenant_id)
-                    .actor(actor_type, actor_id)
-                    .target("user", user_id.to_string(), None)
-                    .outcome(AuditOutcome::Failed)
-                    .details(serde_json::json!({ "reason_code": "new_permission_check_failed" }))
-                    .build()
-                {
-                    state.audit_emitter.emit_event(entry);
-                }
-                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-            }
-        };
-
-        if !new_grants_manage {
-            let other_count = match count_other_manage_users_holders(&state, user_id).await {
-                Ok(c) => c,
-                Err(e) => {
-                    tracing::error!("DB error: {e}");
-                    if let Ok(entry) =
-                        AuditEntry::<Event>::builder_event(AuditActionType::USER_UPDATE)
-                            .tenant_scope(state.default_tenant_id)
-                            .actor(actor_type, actor_id)
-                            .target("user", user_id.to_string(), None)
-                            .outcome(AuditOutcome::Failed)
-                            .details(serde_json::json!({
-                                "reason_code": "manage_users_holder_count_failed",
-                            }))
-                            .build()
-                    {
-                        state.audit_emitter.emit_event(entry);
-                    }
-                    return error_response(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "Internal server error",
-                    );
-                }
-            };
-
-            if other_count == 0 {
-                if let Ok(entry) = AuditEntry::<Event>::builder_event(AuditActionType::USER_UPDATE)
-                    .tenant_scope(state.default_tenant_id)
-                    .actor(actor_type, actor_id)
-                    .target("user", user_id.to_string(), None)
-                    .outcome(AuditOutcome::Denied)
-                    .details(serde_json::json!({
-                        "reason_code": "last_manage_users_holder",
-                    }))
-                    .build()
-                {
-                    state.audit_emitter.emit_event(entry);
-                }
-                return error_response(
-                    StatusCode::CONFLICT,
-                    "Cannot remove manage_users permission from the last user who has it",
-                );
-            }
-        }
-    }
-
     // Replace roles in a transaction (IMMEDIATE to avoid SQLITE_BUSY_SNAPSHOT).
     let txn = match state
         .db()
@@ -548,6 +407,109 @@ pub async fn update_user_roles(
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
+
+    // System-plane fine check: re-read the user's CURRENT role ids inside the
+    // tx (a pre-tx read would let a concurrent unassign make a re-inserted
+    // role look "already held" and dodge classification), then classify only
+    // the roles this request actually ADDS.
+    let txn_current_role_ids: std::collections::BTreeSet<Uuid> = match UserRole::find()
+        .filter(user_role::Column::TenantId.eq(state.default_tenant_id))
+        .filter(user_role::Column::UserId.eq(user_id))
+        .all(&txn)
+        .await
+    {
+        Ok(rows) => rows.into_iter().map(|ur| ur.role_id).collect(),
+        Err(e) => {
+            tracing::error!("DB error: {e}");
+            drop(txn);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+    let added_role_ids: Vec<Uuid> = body
+        .role_ids
+        .iter()
+        .copied()
+        .filter(|id| !txn_current_role_ids.contains(id))
+        .collect();
+
+    let mut reaches_system_plane = false;
+    for role_id in &added_role_ids {
+        let load = match list_grants(
+            &txn,
+            state.default_tenant_id,
+            Some(GrantSubject::Role(*role_id)),
+        )
+        .await
+        {
+            Ok(l) => l,
+            Err(e) => {
+                tracing::error!("Failed to load grants for role {role_id}: {e}");
+                drop(txn);
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
+        if load.corrupt_skipped > 0 {
+            // Fail closed: a corrupt row for this role could hide system-plane
+            // authority the fine check below needs to see.
+            tracing::error!(
+                role_id = %role_id,
+                corrupt_skipped = load.corrupt_skipped,
+                "update_user_roles: corrupt grant rows skipped, refusing to proceed"
+            );
+            drop(txn);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+        for grant in &load.grants {
+            match patterns_reach_system_plane(&grant.patterns) {
+                Ok(v) => reaches_system_plane |= v,
+                Err(e) => {
+                    tracing::error!("Failed to classify grant patterns: {e}");
+                    drop(txn);
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Internal server error",
+                    );
+                }
+            }
+        }
+    }
+    if reaches_system_plane {
+        // APPROVED: body-dependent fine check (corpus 07, restated invariant)
+        if let Some(denied) = require_system_access(&state.access_engine, &authority) {
+            drop(txn);
+            return denied;
+        }
+    }
+
+    let verdict = match check_lockout(
+        &txn,
+        state.default_tenant_id,
+        &GuardedMutation::SetUserRoles {
+            tenant_id: state.default_tenant_id,
+            user_id,
+            new_role_ids: &body.role_ids,
+        },
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::error!("Failed to evaluate lockout guard: {e}");
+            drop(txn);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+    if !matches!(verdict, LockoutVerdict::Permitted) {
+        drop(txn);
+        return crate::routes::access_grants::lockout_denial_response(
+            &state,
+            AuditActionType::USER_ROLE_UPDATE.into(),
+            (actor_type, actor_id),
+            "user",
+            user_id.to_string(),
+            verdict,
+        );
+    }
 
     // Delete existing role assignments.
     if let Err(e) = UserRole::delete_many()
@@ -606,10 +568,16 @@ pub async fn update_user_roles(
         Vec::<&str>::new()
     };
 
-    let before_view = UserView::from(&user_model);
-    let after_view = UserView::from(&user_model); // roles are not on the user entity
+    let before_view = UserRolesView {
+        user_id,
+        role_ids: current_role_ids.clone(),
+    };
+    let after_view = UserRolesView {
+        user_id,
+        role_ids: body.role_ids.clone(),
+    };
     let hook = state.audit_emitter.commit_hook();
-    if let Ok(audit_entry) = AuditEntry::<Stateful>::user_update(&before_view, &after_view)
+    if let Ok(audit_entry) = AuditEntry::<Stateful>::user_role_update(&before_view, &after_view)
         .tenant_scope(state.default_tenant_id)
         .actor(actor_type, actor_id)
         .outcome(AuditOutcome::Success)
@@ -632,6 +600,15 @@ pub async fn update_user_roles(
     }
     hook.flush_after_commit().await;
 
+    state.access_engine.invalidate_subjects(&[user_id], &[]);
+    state
+        .notification
+        .notification_service
+        .publish_controller_event(uptrakit_wire::ControllerMessage::AccessInvalidated(
+            uptrakit_wire::AccessInvalidatedPayload::new(vec![user_id], vec![]),
+        ))
+        .await;
+
     match build_user_response(&state, &user_model).await {
         Ok(r) => (StatusCode::OK, Json(r)).into_response(),
         Err(e) => {
@@ -642,6 +619,9 @@ pub async fn update_user_roles(
 }
 
 /// Update a user's profile (first_name / last_name)
+///
+/// Self-service (any authenticated user may update their own profile);
+/// updating another user's profile additionally requires `users:manage`.
 #[utoipa::path(
     put,
     path = "/api/v1/users/{id}/profile",
@@ -657,23 +637,44 @@ pub async fn update_user_roles(
         (status = 422, description = "Validation error")
     ),
     tag = "Users",
-    security(("bearer_token" = []))
+    security(("oauth2" = []), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_profile(
     State(db): State<DbState>,
+    State(access): State<AccessState>,
+    Extension(authority): Extension<AccessAuthority>,
     Extension(auth_user): Extension<AuthenticatedUser>,
     Path(user_id): Path<Uuid>,
     Json(req): Json<uptrakit_web_api_types::profile::UpdateProfileRequest>,
 ) -> Response {
-    use crate::auth::permissions::Permission;
     use uptrakit_web_api_types::validation::Validate;
 
-    if auth_user.user_id != user_id && !auth_user.permissions.contains(&Permission::ManageUsers) {
-        return error_response(
-            StatusCode::FORBIDDEN,
-            "Cannot update another user's profile",
-        );
+    if auth_user.user_id != user_id {
+        let Some(ctx) = authority.ready() else {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Authorization authority unavailable",
+            );
+        };
+        match access.0.authorize(ctx, &actions::USERS_MANAGE, None) {
+            Decision::Allow => {}
+            Decision::Deny(reason) => {
+                record_access_deny(&reason);
+                return error_response(
+                    StatusCode::FORBIDDEN,
+                    "Cannot update another user's profile",
+                );
+            }
+            // `Decision` is #[non_exhaustive] in another crate: unknown
+            // variants deny, fail-closed.
+            _ => {
+                return error_response(
+                    StatusCode::FORBIDDEN,
+                    "Cannot update another user's profile",
+                );
+            }
+        }
     }
 
     if let Err(e) = req.validate() {
@@ -723,8 +724,7 @@ pub async fn update_profile(
         (status = 409, description = "Cannot deactivate self")
     ),
     tag = "Users",
-    extensions(("x-required-permission" = json!("manage_users"))),
-    security(("bearer_token" = []))
+    security(("oauth2" = ["users:manage"]), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_user_active(
@@ -771,6 +771,34 @@ pub async fn update_user_active(
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
+
+    if !body.is_active {
+        let verdict = match check_lockout(
+            &txn,
+            state.default_tenant_id,
+            &GuardedMutation::DeactivateUser { user_id },
+        )
+        .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::error!("Failed to evaluate lockout guard: {e}");
+                drop(txn);
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
+        if !matches!(verdict, LockoutVerdict::Permitted) {
+            drop(txn);
+            return crate::routes::access_grants::lockout_denial_response(
+                &state,
+                AuditActionType::USER_UPDATE.into(),
+                (actor_type, actor_id),
+                "user",
+                user_id.to_string(),
+                verdict,
+            );
+        }
+    }
 
     let (before_model, after_model) =
         match update_user_active_in_tx(&txn, user_id, body.is_active).await {
@@ -843,6 +871,20 @@ pub async fn update_user_active(
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
     hook.flush_after_commit().await;
+
+    // Invalidate on both directions: deactivation shrinks live authority,
+    // and activation must also flush any warmed negative cache entries from
+    // while the account was inactive — one code path for both.
+    if is_active_changed {
+        state.access_engine.invalidate_subjects(&[user_id], &[]);
+        state
+            .notification
+            .notification_service
+            .publish_controller_event(uptrakit_wire::ControllerMessage::AccessInvalidated(
+                uptrakit_wire::AccessInvalidatedPayload::new(vec![user_id], vec![]),
+            ))
+            .await;
+    }
 
     match build_user_response(&state, &after_model).await {
         Ok(r) => (StatusCode::OK, Json(r)).into_response(),
@@ -1407,20 +1449,20 @@ mod tests {
         ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
         Set,
     };
+    use uptrakit_shared_db::access_grants::{NewGrant, insert_grant};
     use uptrakit_shared_db::entity::audit_log;
+    use uptrakit_shared_types::access::Selector;
     use uptrakit_shared_types::{MaskedEmail, SecretString};
 
-    async fn latest_user_update_audit_row_for_target(
+    async fn latest_audit_row_for_target(
         db: &DatabaseConnection,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
         target_user_id: Uuid,
     ) -> audit_log::Model {
         for _ in 0..50 {
             if let Some(row) = audit_log::Entity::find()
                 .filter(audit_log::Column::TenantId.is_not_null())
-                .filter(
-                    audit_log::Column::ActionType
-                        .eq(uptrakit_audit_log::AuditActionType::USER_UPDATE),
-                )
+                .filter(audit_log::Column::ActionType.eq(action_type.as_str()))
                 .filter(audit_log::Column::TargetType.eq("user"))
                 .filter(audit_log::Column::TargetId.eq(target_user_id.to_string()))
                 .order_by_desc(audit_log::Column::OccurredAt)
@@ -1433,7 +1475,7 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
 
-        panic!("expected tenant user.update audit row");
+        panic!("expected {action_type} audit row for user target");
     }
 
     async fn insert_target_user(db: &DatabaseConnection, email: &str) -> user::Model {
@@ -1455,7 +1497,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn update_user_roles_writes_user_update_audit_event() {
+    async fn update_user_roles_writes_user_role_update_audit_event() {
         let app = TestApp::new().await;
         let client = app.client();
         let access_token = fixtures::register_and_get_token(&client).await;
@@ -1485,9 +1527,14 @@ mod tests {
             .await;
         assert_eq!(status, StatusCode::OK);
 
-        let row = latest_user_update_audit_row_for_target(&app.db, target_user.id).await;
+        let row = latest_audit_row_for_target(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::USER_ROLE_UPDATE,
+            target_user.id,
+        )
+        .await;
         assert_eq!(
-            uptrakit_audit_log::AuditActionType::USER_UPDATE,
+            uptrakit_audit_log::AuditActionType::USER_ROLE_UPDATE,
             row.action_type
         );
         assert_eq!(
@@ -1530,7 +1577,12 @@ mod tests {
             .await;
         assert_eq!(status, StatusCode::OK);
 
-        let row = latest_user_update_audit_row_for_target(&app.db, target_user.id).await;
+        let row = latest_audit_row_for_target(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::USER_UPDATE,
+            target_user.id,
+        )
+        .await;
         assert_eq!(
             uptrakit_audit_log::AuditActionType::USER_UPDATE,
             row.action_type
@@ -1574,7 +1626,12 @@ mod tests {
             .await;
         assert_eq!(status, StatusCode::CONFLICT);
 
-        let row = latest_user_update_audit_row_for_target(&app.db, caller.id).await;
+        let row = latest_audit_row_for_target(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::USER_UPDATE,
+            caller.id,
+        )
+        .await;
         assert_eq!(
             row.outcome,
             uptrakit_audit_log::AuditOutcome::Denied.as_str()
@@ -1620,7 +1677,12 @@ mod tests {
             .await;
         assert_eq!(status, StatusCode::OK);
 
-        let row = latest_user_update_audit_row_for_target(&app.db, target_user.id).await;
+        let row = latest_audit_row_for_target(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::USER_UPDATE,
+            target_user.id,
+        )
+        .await;
         let known_hash = "$argon2id$known-secret-hash-value";
 
         let before = row.before_snapshot.expect("before_snapshot");
@@ -1641,6 +1703,802 @@ mod tests {
         assert!(
             !after.to_string().contains(known_hash),
             "known password hash value must not appear in after_snapshot JSON"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_user_roles_adding_system_plane_role_without_system_access_denied() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        fixtures::open_registration(&app).await;
+        let target_user = insert_target_user(&app.db, "sysplane-target1@test.local").await;
+
+        let (_caller_id, caller_token) = fixtures::stage_user_with_grant(
+            &app,
+            "tenant-admin1@test.local",
+            &["access:manage"],
+            Some(app.tenant_id),
+        )
+        .await;
+
+        let sys_admin_role = Role::find()
+            .filter(role::Column::Name.eq("system_administrator"))
+            .one(&app.db)
+            .await
+            .expect("query system_administrator role")
+            .expect("system_administrator role row");
+
+        let req = UpdateUserRolesRequest {
+            role_ids: vec![sys_admin_role.id],
+        };
+        let status = client
+            .put_json(&format!("/api/v1/users/{}/roles", target_user.id), &req)
+            .bearer(&caller_token)
+            .send_status()
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "assigning a system-plane role without system.access:manage must be denied"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_user_roles_adding_system_plane_role_with_system_access_allowed() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        fixtures::open_registration(&app).await;
+        let target_user = insert_target_user(&app.db, "sysplane-target2@test.local").await;
+
+        let (caller_id, caller_token) = fixtures::stage_user_with_grant(
+            &app,
+            "tenant-admin2@test.local",
+            &["access:manage"],
+            Some(app.tenant_id),
+        )
+        .await;
+        insert_grant(
+            &app.db,
+            NewGrant {
+                subject: GrantSubject::User(caller_id),
+                tenant_id: None,
+                patterns: &["system.access:manage".parse().expect("valid pattern")],
+                selector: Selector::All,
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect("insert system-plane grant");
+        app.state
+            .access_engine
+            .invalidate_subjects(&[caller_id], &[]);
+
+        let sys_admin_role = Role::find()
+            .filter(role::Column::Name.eq("system_administrator"))
+            .one(&app.db)
+            .await
+            .expect("query system_administrator role")
+            .expect("system_administrator role row");
+
+        let req = UpdateUserRolesRequest {
+            role_ids: vec![sys_admin_role.id],
+        };
+        let status = client
+            .put_json(&format!("/api/v1/users/{}/roles", target_user.id), &req)
+            .bearer(&caller_token)
+            .send_status()
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "caller holding system.access:manage must be able to assign a system-plane role"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_user_roles_lockout_denial_writes_denied_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        fixtures::open_registration(&app).await;
+
+        let owner = User::find()
+            .filter(user::Column::Email.eq("owner@test.local"))
+            .one(&app.db)
+            .await
+            .expect("query owner user")
+            .expect("owner user row");
+        let settings_manager_role_id = fixtures::role_id_by_name(&app, "settings_manager").await;
+        UserRole::delete_many()
+            .filter(user_role::Column::TenantId.eq(app.tenant_id))
+            .filter(user_role::Column::UserId.eq(owner.id))
+            .filter(user_role::Column::RoleId.eq(settings_manager_role_id))
+            .exec(&app.db)
+            .await
+            .expect("strip owner's settings_manager assignment");
+        app.state
+            .access_engine
+            .invalidate_subjects(&[owner.id], &[]);
+
+        let (sole_holder_id, sole_holder_token) =
+            fixtures::stage_user_with_only_role(&app, "settings_manager").await;
+        let viewer_role_id = fixtures::role_id_by_name(&app, "viewer").await;
+
+        let req = UpdateUserRolesRequest {
+            role_ids: vec![viewer_role_id],
+        };
+        let status = client
+            .put_json(&format!("/api/v1/users/{}/roles", sole_holder_id), &req)
+            .bearer(&sole_holder_token)
+            .send_status()
+            .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+
+        let row = latest_audit_row_for_target(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::USER_ROLE_UPDATE,
+            sole_holder_id,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("lockout_access_manage")
+        );
+    }
+
+    #[tokio::test]
+    async fn update_user_active_deactivation_lockout_denial_writes_denied_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        fixtures::open_registration(&app).await;
+
+        let owner = User::find()
+            .filter(user::Column::Email.eq("owner@test.local"))
+            .one(&app.db)
+            .await
+            .expect("query owner user")
+            .expect("owner user row");
+        let settings_manager_role_id = fixtures::role_id_by_name(&app, "settings_manager").await;
+        UserRole::delete_many()
+            .filter(user_role::Column::TenantId.eq(app.tenant_id))
+            .filter(user_role::Column::UserId.eq(owner.id))
+            .filter(user_role::Column::RoleId.eq(settings_manager_role_id))
+            .exec(&app.db)
+            .await
+            .expect("strip owner's settings_manager assignment");
+        app.state
+            .access_engine
+            .invalidate_subjects(&[owner.id], &[]);
+
+        let (sole_holder_id, _sole_holder_token) =
+            fixtures::stage_user_with_only_role(&app, "settings_manager").await;
+
+        let (_caller_id, caller_token) = fixtures::stage_user_with_grant(
+            &app,
+            "active-lockout-caller@test.local",
+            &["users:manage"],
+            Some(app.tenant_id),
+        )
+        .await;
+
+        let req = UpdateUserActiveRequest { is_active: false };
+        let status = client
+            .put_json(&format!("/api/v1/users/{}/active", sole_holder_id), &req)
+            .bearer(&caller_token)
+            .send_status()
+            .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+
+        let row = latest_audit_row_for_target(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::USER_UPDATE,
+            sole_holder_id,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("lockout_access_manage")
+        );
+    }
+
+    #[tokio::test]
+    async fn update_profile_self_service_allowed_but_other_user_requires_users_manage_denied() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        fixtures::open_registration(&app).await;
+
+        let (self_user_id, self_token) = fixtures::stage_zero_role_user(&app).await;
+
+        // Self-service update succeeds without any users:manage grant.
+        let self_status = client
+            .put_json(
+                &format!("/api/v1/users/{self_user_id}/profile"),
+                &uptrakit_web_api_types::profile::UpdateProfileRequest {
+                    first_name: "Self".to_string(),
+                    last_name: "Updated".to_string(),
+                },
+            )
+            .bearer(&self_token)
+            .send_status()
+            .await;
+        assert_eq!(self_status, StatusCode::NO_CONTENT);
+
+        // Updating another user's profile without users:manage is denied.
+        let owner = User::find()
+            .filter(user::Column::Email.eq("owner@test.local"))
+            .one(&app.db)
+            .await
+            .expect("query owner user")
+            .expect("owner user row");
+        let other_status = client
+            .put_json(
+                &format!("/api/v1/users/{}/profile", owner.id),
+                &uptrakit_web_api_types::profile::UpdateProfileRequest {
+                    first_name: "Hijacked".to_string(),
+                    last_name: "Name".to_string(),
+                },
+            )
+            .bearer(&self_token)
+            .send_status()
+            .await;
+        assert_eq!(other_status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn split_users_manage_can_lifecycle_but_not_assign_and_vice_versa() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        fixtures::open_registration(&app).await;
+        let viewer_role_id = fixtures::role_id_by_name(&app, "viewer").await;
+
+        // users:manage-only: lifecycle changes allowed, role assignment denied.
+        let (_lifecycle_admin_id, lifecycle_admin_token) = fixtures::stage_user_with_grant(
+            &app,
+            "split-lifecycle-admin@test.local",
+            &["users:manage"],
+            Some(app.tenant_id),
+        )
+        .await;
+        let lifecycle_target =
+            insert_target_user(&app.db, "split-target-lifecycle@test.local").await;
+
+        let status = client
+            .get("/api/v1/users")
+            .bearer(&lifecycle_admin_token)
+            .send_status()
+            .await;
+        assert_eq!(status, StatusCode::OK, "users:manage must permit listing");
+
+        let status = client
+            .put_json(
+                &format!("/api/v1/users/{}/active", lifecycle_target.id),
+                &UpdateUserActiveRequest { is_active: false },
+            )
+            .bearer(&lifecycle_admin_token)
+            .send_status()
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "users:manage must permit lifecycle changes"
+        );
+
+        let status = client
+            .put_json(
+                &format!("/api/v1/users/{}/roles", lifecycle_target.id),
+                &UpdateUserRolesRequest {
+                    role_ids: vec![viewer_role_id],
+                },
+            )
+            .bearer(&lifecycle_admin_token)
+            .send_status()
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "users:manage alone must not permit role assignment"
+        );
+
+        // access:manage-only: role assignment allowed, lifecycle denied.
+        let (_access_admin_id, access_admin_token) = fixtures::stage_user_with_grant(
+            &app,
+            "split-access-admin@test.local",
+            &["access:manage"],
+            Some(app.tenant_id),
+        )
+        .await;
+        let access_target = insert_target_user(&app.db, "split-target-access@test.local").await;
+
+        let status = client
+            .get("/api/v1/users")
+            .bearer(&access_admin_token)
+            .send_status()
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "access:manage alone must not permit listing"
+        );
+
+        let status = client
+            .put_json(
+                &format!("/api/v1/users/{}/active", access_target.id),
+                &UpdateUserActiveRequest { is_active: false },
+            )
+            .bearer(&access_admin_token)
+            .send_status()
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "access:manage alone must not permit lifecycle changes"
+        );
+
+        let status = client
+            .put_json(
+                &format!("/api/v1/users/{}/roles", access_target.id),
+                &UpdateUserRolesRequest {
+                    role_ids: vec![viewer_role_id],
+                },
+            )
+            .bearer(&access_admin_token)
+            .send_status()
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "access:manage must permit role assignment"
+        );
+    }
+
+    #[tokio::test]
+    async fn deactivating_last_access_manage_holder_is_409_and_swap_is_legal() {
+        // -- Leg 1: deactivation. The self-deactivation guard fires first
+        // for a sole holder deactivating themselves (covered by
+        // `self_deactivation_writes_denied_user_update_audit_event`), so
+        // this exercises a DIFFERENT caller deactivating the sole holder:
+        // denied while sole, then legal once a second holder exists.
+        let app = TestApp::new().await;
+        let client = app.client();
+        fixtures::open_registration(&app).await;
+
+        let owner = User::find()
+            .filter(user::Column::Email.eq("owner@test.local"))
+            .one(&app.db)
+            .await
+            .expect("query owner user")
+            .expect("owner user row");
+        let settings_manager_role_id = fixtures::role_id_by_name(&app, "settings_manager").await;
+        UserRole::delete_many()
+            .filter(user_role::Column::TenantId.eq(app.tenant_id))
+            .filter(user_role::Column::UserId.eq(owner.id))
+            .filter(user_role::Column::RoleId.eq(settings_manager_role_id))
+            .exec(&app.db)
+            .await
+            .expect("strip owner's settings_manager assignment");
+        app.state
+            .access_engine
+            .invalidate_subjects(&[owner.id], &[]);
+
+        let (holder_a_id, _holder_a_token) =
+            fixtures::stage_user_with_only_role(&app, "settings_manager").await;
+        let (caller_b_id, caller_b_token) = fixtures::stage_user_with_grant(
+            &app,
+            "swap-deactivate-caller@test.local",
+            &["users:manage"],
+            Some(app.tenant_id),
+        )
+        .await;
+
+        let status = client
+            .put_json(
+                &format!("/api/v1/users/{holder_a_id}/active"),
+                &UpdateUserActiveRequest { is_active: false },
+            )
+            .bearer(&caller_b_token)
+            .send_status()
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::CONFLICT,
+            "deactivating the sole access:manage holder must be blocked"
+        );
+        let still_active = User::find_by_id(holder_a_id)
+            .one(&app.db)
+            .await
+            .expect("query holder A")
+            .expect("holder A row");
+        assert!(still_active.is_active, "holder A must still be active");
+
+        // Grant caller B coverage too — now two holders, so B deactivating
+        // A is legal (A drops, B remains).
+        insert_grant(
+            &app.db,
+            NewGrant {
+                subject: GrantSubject::User(caller_b_id),
+                tenant_id: Some(app.tenant_id),
+                patterns: &["access:manage".parse().expect("valid pattern")],
+                selector: Selector::All,
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect("grant caller B access:manage");
+        app.state
+            .access_engine
+            .invalidate_subjects(&[caller_b_id], &[]);
+
+        let status = client
+            .put_json(
+                &format!("/api/v1/users/{holder_a_id}/active"),
+                &UpdateUserActiveRequest { is_active: false },
+            )
+            .bearer(&caller_b_token)
+            .send_status()
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "deactivating A is legal once B also covers access:manage"
+        );
+        let now_inactive = User::find_by_id(holder_a_id)
+            .one(&app.db)
+            .await
+            .expect("query holder A")
+            .expect("holder A row");
+        assert!(!now_inactive.is_active, "holder A must now be inactive");
+
+        // -- Leg 2: role swap, in an isolated app so leg 1's second holder
+        // (caller B) cannot mask the lockout guard here. A sole holder's
+        // covering role may be swapped for another covering role (legal,
+        // post-state still covers), but swapping to a non-covering role
+        // set is not — the brief's "PUT roles [] -> 409" is unreachable
+        // literally (`UpdateUserRolesRequest::validate()` rejects an empty
+        // `role_ids` with 400 before the handler runs), so a non-empty,
+        // non-covering replacement (`viewer`) stands in for it here.
+        let app2 = TestApp::new().await;
+        let client2 = app2.client();
+        let owner_token2 = fixtures::open_registration(&app2).await;
+
+        let (status, created_role): (StatusCode, uptrakit_web_api_types::roles::RoleResponse) =
+            client2
+                .post_json(
+                    "/api/v1/roles",
+                    &uptrakit_web_api_types::roles::CreateRoleRequest {
+                        name: "swap-role-b".to_string(),
+                        description: None,
+                    },
+                )
+                .bearer(&owner_token2)
+                .send_json()
+                .await;
+        assert_eq!(status, StatusCode::CREATED);
+        insert_grant(
+            &app2.db,
+            NewGrant {
+                subject: GrantSubject::Role(created_role.id),
+                tenant_id: None,
+                patterns: &["access:manage".parse().expect("valid pattern")],
+                selector: Selector::All,
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect("grant role B access:manage coverage");
+
+        let owner2 = User::find()
+            .filter(user::Column::Email.eq("owner@test.local"))
+            .one(&app2.db)
+            .await
+            .expect("query owner user")
+            .expect("owner user row");
+        let settings_manager_role_id2 = fixtures::role_id_by_name(&app2, "settings_manager").await;
+        UserRole::delete_many()
+            .filter(user_role::Column::TenantId.eq(app2.tenant_id))
+            .filter(user_role::Column::UserId.eq(owner2.id))
+            .filter(user_role::Column::RoleId.eq(settings_manager_role_id2))
+            .exec(&app2.db)
+            .await
+            .expect("strip owner's settings_manager assignment");
+        app2.state
+            .access_engine
+            .invalidate_subjects(&[owner2.id], &[]);
+
+        let (holder_e_id, holder_e_token) = fixtures::stage_zero_role_user(&app2).await;
+        fixtures::link_role(&app2, holder_e_id, settings_manager_role_id2).await;
+        let viewer_role_id2 = fixtures::role_id_by_name(&app2, "viewer").await;
+
+        let status = client2
+            .put_json(
+                &format!("/api/v1/users/{holder_e_id}/roles"),
+                &UpdateUserRolesRequest {
+                    role_ids: vec![created_role.id],
+                },
+            )
+            .bearer(&holder_e_token)
+            .send_status()
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "swapping covering role A for covering role B must be legal"
+        );
+
+        let status = client2
+            .put_json(
+                &format!("/api/v1/users/{holder_e_id}/roles"),
+                &UpdateUserRolesRequest {
+                    role_ids: vec![viewer_role_id2],
+                },
+            )
+            .bearer(&holder_e_token)
+            .send_status()
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::CONFLICT,
+            "swapping the last covering role away must be blocked"
+        );
+    }
+
+    #[tokio::test]
+    async fn adding_authority_never_trips_lockout_409() {
+        // `check_lockout` only guards `SetUserRoles`/`DeactivateUser`;
+        // role/grant creation and user activation never invoke it at all
+        // (adding-only mutations, per its doc comment). `SetUserRoles` IS
+        // always evaluated (even for a pure add), but a post-state check
+        // can only fail when authority shrinks, so exercising all four ops
+        // here demonstrates none of them can ever produce a lockout 409.
+        let app = TestApp::new().await;
+        let client = app.client();
+        fixtures::open_registration(&app).await;
+
+        let (_admin_id, admin_token) = fixtures::stage_user_with_grant(
+            &app,
+            "adding-authority-admin@test.local",
+            &["access:manage", "users:manage"],
+            Some(app.tenant_id),
+        )
+        .await;
+
+        // role create — unguarded.
+        let (status, created_role): (StatusCode, uptrakit_web_api_types::roles::RoleResponse) =
+            client
+                .post_json(
+                    "/api/v1/roles",
+                    &uptrakit_web_api_types::roles::CreateRoleRequest {
+                        name: "adding-authority-role".to_string(),
+                        description: None,
+                    },
+                )
+                .bearer(&admin_token)
+                .send_json()
+                .await;
+        assert_eq!(
+            status,
+            StatusCode::CREATED,
+            "role create must never be lockout-denied"
+        );
+
+        // grant create — unguarded.
+        let (status, _created_grant): (
+            StatusCode,
+            uptrakit_web_api_types::access_grants::AccessGrantResponse,
+        ) = client
+            .post_json(
+                "/api/v1/access/grants",
+                &uptrakit_web_api_types::access_grants::CreateAccessGrantRequest {
+                    subject_type:
+                        uptrakit_web_api_types::access_grants::GrantSubjectTypeParam::Role,
+                    subject_id: created_role.id,
+                    patterns: vec!["hosts:read".to_string()],
+                    selector: Selector::All,
+                    description: None,
+                },
+            )
+            .bearer(&admin_token)
+            .send_json()
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::CREATED,
+            "grant create must never be lockout-denied"
+        );
+
+        // assignment-add — a zero-role user gains a role.
+        let (target_id, _target_token) = fixtures::stage_zero_role_user(&app).await;
+        let status = client
+            .put_json(
+                &format!("/api/v1/users/{target_id}/roles"),
+                &UpdateUserRolesRequest {
+                    role_ids: vec![created_role.id],
+                },
+            )
+            .bearer(&admin_token)
+            .send_status()
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "role assignment-add must never be lockout-denied"
+        );
+
+        // activate — unguarded (only deactivation invokes check_lockout).
+        let now = OffsetDateTime::now_utc();
+        let inactive_target = user::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            email: Set(MaskedEmail::new(
+                "adding-authority-inactive@test.local".to_string(),
+            )),
+            first_name: Set("Inactive".to_string()),
+            last_name: Set("Target".to_string()),
+            password_hash: Set(None),
+            is_active: Set(false),
+            deactivated_at: Set(Some(now)),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(&app.db)
+        .await
+        .expect("insert inactive target user");
+        let status = client
+            .put_json(
+                &format!("/api/v1/users/{}/active", inactive_target.id),
+                &UpdateUserActiveRequest { is_active: true },
+            )
+            .bearer(&admin_token)
+            .send_status()
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "activation must never be lockout-denied"
+        );
+    }
+
+    #[tokio::test]
+    async fn role_assignment_takes_effect_without_relogin() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        fixtures::open_registration(&app).await;
+
+        let (zero_id, zero_token) = fixtures::stage_zero_role_user(&app).await;
+        let status = client
+            .get("/api/v1/hosts")
+            .bearer(&zero_token)
+            .send_status()
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "zero-role user must be denied before assignment"
+        );
+
+        let (_admin_id, admin_token) = fixtures::stage_user_with_grant(
+            &app,
+            "relogin-admin@test.local",
+            &["access:manage"],
+            Some(app.tenant_id),
+        )
+        .await;
+        let viewer_role_id = fixtures::role_id_by_name(&app, "viewer").await;
+        let status = client
+            .put_json(
+                &format!("/api/v1/users/{zero_id}/roles"),
+                &UpdateUserRolesRequest {
+                    role_ids: vec![viewer_role_id],
+                },
+            )
+            .bearer(&admin_token)
+            .send_status()
+            .await;
+        assert_eq!(status, StatusCode::OK);
+
+        // SAME token, no re-login: the engine cache must be flushed by the
+        // endpoint's own invalidation, not by re-minting a JWT.
+        let status = client
+            .get("/api/v1/hosts")
+            .bearer(&zero_token)
+            .send_status()
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "role assignment must take effect without re-login"
+        );
+    }
+
+    #[tokio::test]
+    async fn assigning_system_administrator_requires_system_access_manage() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        fixtures::open_registration(&app).await;
+
+        let sys_admin_role = Role::find()
+            .filter(role::Column::Name.eq("system_administrator"))
+            .one(&app.db)
+            .await
+            .expect("query system_administrator role")
+            .expect("system_administrator role row");
+
+        // access:manage-only: denied.
+        let target_denied = insert_target_user(&app.db, "sysadmin-assign-denied@test.local").await;
+        let (_denied_admin_id, denied_admin_token) = fixtures::stage_user_with_grant(
+            &app,
+            "sysadmin-assign-tenant-only@test.local",
+            &["access:manage"],
+            Some(app.tenant_id),
+        )
+        .await;
+        let status = client
+            .put_json(
+                &format!("/api/v1/users/{}/roles", target_denied.id),
+                &UpdateUserRolesRequest {
+                    role_ids: vec![sys_admin_role.id],
+                },
+            )
+            .bearer(&denied_admin_token)
+            .send_status()
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "access:manage alone must not permit assigning system_administrator"
+        );
+
+        // access:manage + system.access:manage: allowed.
+        let target_allowed =
+            insert_target_user(&app.db, "sysadmin-assign-allowed@test.local").await;
+        let (allowed_admin_id, allowed_admin_token) = fixtures::stage_user_with_grant(
+            &app,
+            "sysadmin-assign-system@test.local",
+            &["access:manage"],
+            Some(app.tenant_id),
+        )
+        .await;
+        insert_grant(
+            &app.db,
+            NewGrant {
+                subject: GrantSubject::User(allowed_admin_id),
+                tenant_id: None,
+                patterns: &["system.access:manage".parse().expect("valid pattern")],
+                selector: Selector::All,
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect("insert system-plane grant");
+        app.state
+            .access_engine
+            .invalidate_subjects(&[allowed_admin_id], &[]);
+
+        let status = client
+            .put_json(
+                &format!("/api/v1/users/{}/roles", target_allowed.id),
+                &UpdateUserRolesRequest {
+                    role_ids: vec![sys_admin_role.id],
+                },
+            )
+            .bearer(&allowed_admin_token)
+            .send_status()
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "system.access:manage must permit assigning system_administrator"
         );
     }
 }

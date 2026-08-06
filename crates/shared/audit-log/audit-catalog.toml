@@ -733,7 +733,7 @@ action = "user.update"
 
 [[entries]]
 site = "uptrakit_web_api::routes::users::update_user_roles"
-action = "user.update"
+action = "user_role.update"
 
 # ---------------------------------------------------------------------------
 # Test utilities (only compiled with test-utils feature)

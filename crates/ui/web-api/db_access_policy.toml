@@ -845,8 +845,6 @@ oauth_auto_approve_consent = "full-state"
 [routes."users.rs"]
 build_user_response = "ignore"
 get_user_role_summaries = "ignore"
-count_other_manage_users_holders = "ignore"
-roles_grant_manage_users = "ignore"
 list_users = "full-state"
 list_permissions = "no-db"
 get_user = "full-state"
