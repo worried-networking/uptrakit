@@ -7,14 +7,15 @@ use std::convert::Infallible;
 use std::net::IpAddr;
 use std::ops::Deref;
 
-use axum::extract::{FromRef, FromRequest, FromRequestParts};
+use axum::Form;
+use axum::extract::{FromRef, FromRequest, FromRequestParts, OptionalFromRequest};
 use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::response::Response;
 use serde::de::DeserializeOwned;
 use uptrakit_web_api_auth::auth::api_token::ApiTokenService;
 use uptrakit_web_api_auth::auth::session::SessionService;
-use uptrakit_web_api_types::validation::Validate;
+use uptrakit_web_api_types::validation::{Validate, ValidationError};
 
 use crate::app_state::DbState;
 
@@ -312,12 +313,93 @@ where
         req: axum::http::Request<axum::body::Body>,
         state: &S,
     ) -> Result<Self, Self::Rejection> {
-        let axum::Json(body) = axum::Json::<T>::from_request(req, state)
+        let axum::Json(body) = <axum::Json<T> as FromRequest<S>>::from_request(req, state)
             .await
             .map_err(|e| error_response(StatusCode::BAD_REQUEST, e.to_string()))?;
         body.validate()
             .map_err(|e| error_response(StatusCode::BAD_REQUEST, e.to_string()))?;
         Ok(Validated(body))
+    }
+}
+
+/// A deserialized-but-not-yet-validated request body. The inner value is
+/// private; the only way to reach the fields is [`Unvalidated::require_valid`].
+pub struct Unvalidated<T>(T);
+
+impl<T: Validate> Unvalidated<T> {
+    pub fn require_valid(self) -> Result<T, ValidationError> {
+        self.0.validate()?;
+        Ok(self.0)
+    }
+}
+
+impl<T, S> FromRequest<S> for Unvalidated<T>
+where
+    T: DeserializeOwned + Validate + Send,
+    S: Send + Sync,
+{
+    type Rejection = <axum::Json<T> as FromRequest<S>>::Rejection;
+
+    async fn from_request(
+        req: axum::http::Request<axum::body::Body>,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let axum::Json(body) = <axum::Json<T> as FromRequest<S>>::from_request(req, state).await?;
+        Ok(Unvalidated(body))
+    }
+}
+
+impl<T, S> OptionalFromRequest<S> for Unvalidated<T>
+where
+    T: DeserializeOwned + Validate + Send,
+    S: Send + Sync,
+{
+    type Rejection = <axum::Json<T> as OptionalFromRequest<S>>::Rejection;
+
+    async fn from_request(
+        req: axum::http::Request<axum::body::Body>,
+        state: &S,
+    ) -> Result<Option<Self>, Self::Rejection> {
+        Ok(
+            <axum::Json<T> as OptionalFromRequest<S>>::from_request(req, state)
+                .await?
+                .map(|axum::Json(body)| Unvalidated(body)),
+        )
+    }
+}
+
+/// Form-borne counterpart of [`Unvalidated`].
+pub struct UnvalidatedForm<T>(T);
+
+impl<T: Validate> UnvalidatedForm<T> {
+    pub fn require_valid(self) -> Result<T, ValidationError> {
+        self.0.validate()?;
+        Ok(self.0)
+    }
+}
+
+impl<T, S> FromRequest<S> for UnvalidatedForm<T>
+where
+    T: DeserializeOwned + Validate + Send,
+    S: Send + Sync,
+{
+    type Rejection = <Form<T> as FromRequest<S>>::Rejection;
+
+    async fn from_request(
+        req: axum::http::Request<axum::body::Body>,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let Form(body) = <Form<T> as FromRequest<S>>::from_request(req, state).await?;
+        Ok(UnvalidatedForm(body))
+    }
+}
+
+#[cfg(test)]
+impl<T> Unvalidated<T> {
+    /// Test-only: existing handler tests call handlers directly (no HTTP layer)
+    /// and must construct a body value. Production code cannot reach this.
+    pub(crate) fn new_for_test(value: T) -> Self {
+        Unvalidated(value)
     }
 }
 
@@ -629,5 +711,45 @@ mod service_extractor_tests {
             .await
             .unwrap();
         let _: &ApiTokenService = &svc;
+    }
+}
+
+#[cfg(test)]
+mod unvalidated_tests {
+    use super::{Unvalidated, UnvalidatedForm, Validate, ValidationError};
+
+    struct Probe {
+        ok: bool,
+    }
+
+    impl Validate for Probe {
+        fn validate(&self) -> Result<(), ValidationError> {
+            if self.ok {
+                Ok(())
+            } else {
+                Err(ValidationError {
+                    field: "ok",
+                    message: "must be true".to_string(),
+                })
+            }
+        }
+    }
+
+    #[test]
+    fn require_valid_returns_inner_on_valid_body() {
+        let body = Unvalidated::new_for_test(Probe { ok: true });
+        body.require_valid().unwrap();
+    }
+
+    #[test]
+    fn require_valid_errors_on_invalid_body() {
+        let body = Unvalidated::new_for_test(Probe { ok: false });
+        assert_eq!(body.require_valid().err().map(|e| e.field), Some("ok"));
+    }
+
+    #[test]
+    fn form_require_valid_errors_on_invalid_body() {
+        let body = UnvalidatedForm(Probe { ok: false });
+        assert_eq!(body.require_valid().err().map(|e| e.field), Some("ok"));
     }
 }
