@@ -199,7 +199,12 @@ The residual gap is de-provisioning drift, not lockout: the sync has several fai
 early returns (no `role_claim_path` configured, empty `role_mapping`, claim path missing
 from the token, an unmapped or malformed claim value, or the mapped set resolving to zero
 local roles -- see `crates/shared/db/src/access_grants.rs`) that leave the user's existing
-roles untouched with no signal at all, not even an audit event. An IdP-side de-provisioning
+roles untouched with no signal at all, not even an audit event. Note that a provider's
+`role_mapping` targets are resolved against **global** roles only: a mapping whose target
+names a tenant-scoped custom role matches nothing, so the sync no-ops silently for that
+login. `role_mapping` is free-form text and is not validated against the role table at
+write time, so a typo or a custom-role target is only visible as a sync that never
+applies. An IdP-side de-provisioning
 that simply stops sending the covering claim never reaches the guard or the sync's write
 path -- it silently no-ops. Operators relying on OIDC role mapping should keep at least one
 local (non-OIDC) account holding `access:manage`.
