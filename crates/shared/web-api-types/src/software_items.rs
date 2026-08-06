@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
+use uptrakit_shared_types::command_validation::validate_command_length;
 use uptrakit_shared_types::{PluginRole, PluginTypeId};
 use uuid::Uuid;
 
@@ -635,6 +636,110 @@ impl Validate for UpdateSoftwareItemRequest {
         if let IconUrlPatch::Set(url) = &self.icon_url {
             validate_https_icon_url(url)?;
         }
+        Ok(())
+    }
+}
+
+impl Validate for TriggerUpdateRequest {
+    fn validate(&self) -> Result<(), ValidationError> {
+        validate_command_length(&self.to_version, "to_version").map_err(|message| {
+            ValidationError {
+                field: "to_version",
+                message,
+            }
+        })?;
+        Ok(())
+    }
+}
+
+impl Validate for HostPluginRoleAssignment {
+    fn validate(&self) -> Result<(), ValidationError> {
+        if self.package_identifier.trim().is_empty() {
+            return Err(ValidationError {
+                field: "package_identifier",
+                message: "package_identifier must not be empty".to_string(),
+            });
+        }
+        if let Some(cfg) = &self.plugin_config {
+            cfg.validate()?;
+        }
+        Ok(())
+    }
+}
+
+impl Validate for AssignHostsRequest {
+    fn validate(&self) -> Result<(), ValidationError> {
+        if self.host_assignments.is_empty() {
+            return Err(ValidationError {
+                field: "host_assignments",
+                message: "host_assignments must not be empty".to_string(),
+            });
+        }
+        if self.host_assignments.len() > crate::batch_actions::MAX_BATCH_SIZE {
+            return Err(ValidationError {
+                field: "host_assignments",
+                message: format!(
+                    "host_assignments must contain at most {} entries",
+                    crate::batch_actions::MAX_BATCH_SIZE
+                ),
+            });
+        }
+        for assignment in &self.host_assignments {
+            for plugin in &assignment.plugins {
+                plugin.validate()?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Validate for UpdateHostAssignmentRequest {
+    fn validate(&self) -> Result<(), ValidationError> {
+        let sources = [
+            self.plugin_config_id.is_some(),
+            self.plugin_config.is_some(),
+            self.plugin_type.is_some(),
+        ]
+        .into_iter()
+        .filter(|set| *set)
+        .count();
+        if sources != 1 {
+            return Err(ValidationError {
+                field: "plugin_config_id",
+                message: "exactly one of plugin_config_id, plugin_config, plugin_type must be set"
+                    .to_string(),
+            });
+        }
+        if let Some(pkg) = &self.package_identifier
+            && pkg.trim().is_empty()
+        {
+            return Err(ValidationError {
+                field: "package_identifier",
+                message: "package_identifier must not be empty".to_string(),
+            });
+        }
+        if let Some(cfg) = &self.plugin_config {
+            cfg.validate()?;
+        }
+        Ok(())
+    }
+}
+
+impl Validate for MergeSoftwareItemsExecuteRequest {
+    fn validate(&self) -> Result<(), ValidationError> {
+        if self.candidate_ids.is_empty() {
+            return Err(ValidationError {
+                field: "candidate_ids",
+                message: "candidate_ids must not be empty".to_string(),
+            });
+        }
+        Ok(())
+    }
+}
+
+impl Validate for MergeSoftwareItemsPreviewRequest {
+    fn validate(&self) -> Result<(), ValidationError> {
+        // Read-only dry-run; ids are typed Uuids. No format/length invariants beyond field types.
         Ok(())
     }
 }
@@ -1336,5 +1441,147 @@ mod tests {
         let parsed: MergeSoftwareItemsExecuteResponse =
             serde_json::from_str(&json).expect("deserialize");
         assert_eq!(parsed.deleted_ids.len(), 1);
+    }
+
+    // ── Validate impls ────────────────────────────────────────────────
+
+    fn valid_plugin_type_id() -> PluginTypeId {
+        PluginTypeId::new("apt")
+    }
+
+    fn valid_update_host_assignment() -> UpdateHostAssignmentRequest {
+        UpdateHostAssignmentRequest {
+            role: PluginRole::DetectVersion,
+            ordinal: 0,
+            plugin_config_id: Some(sample_uuid()),
+            plugin_config: None,
+            plugin_type: None,
+            package_identifier: Some("nginx".to_string()),
+            config_override: JsonObjectMapPatch::Keep,
+            execution_site: None,
+        }
+    }
+
+    #[test]
+    fn trigger_update_rejects_empty_and_oversized_to_version() {
+        let empty = TriggerUpdateRequest {
+            to_version: String::new(),
+            release_info: None,
+            interactive: false,
+        };
+        assert_eq!(empty.validate().err().map(|e| e.field), Some("to_version"));
+
+        let oversized = TriggerUpdateRequest {
+            to_version: "v".repeat(9000),
+            release_info: None,
+            interactive: false,
+        };
+        assert_eq!(
+            oversized.validate().err().map(|e| e.field),
+            Some("to_version")
+        );
+    }
+
+    #[test]
+    fn trigger_update_accepts_normal_version() {
+        let req = TriggerUpdateRequest {
+            to_version: "1.2.3".to_string(),
+            release_info: None,
+            interactive: false,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn assign_hosts_rejects_empty_and_oversized_assignment_lists() {
+        let empty = AssignHostsRequest {
+            host_assignments: vec![],
+        };
+        assert_eq!(
+            empty.validate().err().map(|e| e.field),
+            Some("host_assignments")
+        );
+
+        let one = HostSoftwareAssignment {
+            host_id: sample_uuid(),
+            plugins: vec![],
+        };
+        let oversized = AssignHostsRequest {
+            host_assignments: std::iter::repeat_with(|| HostSoftwareAssignment {
+                host_id: one.host_id,
+                plugins: vec![],
+            })
+            .take(101)
+            .collect(),
+        };
+        assert_eq!(
+            oversized.validate().err().map(|e| e.field),
+            Some("host_assignments")
+        );
+    }
+
+    #[test]
+    fn merge_preview_validate_is_ok() {
+        let req = MergeSoftwareItemsPreviewRequest {
+            candidate_ids: vec![sample_uuid()],
+            survivor_id: sample_uuid(),
+            seed_item_id: None,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn update_host_assignment_rejects_zero_and_two_config_sources() {
+        let mut req = valid_update_host_assignment();
+        req.plugin_config_id = None;
+        req.plugin_config = None;
+        req.plugin_type = None;
+        assert!(req.validate().is_err());
+
+        let mut two = valid_update_host_assignment();
+        two.plugin_config_id = Some(sample_uuid());
+        two.plugin_type = Some(valid_plugin_type_id());
+        assert!(two.validate().is_err());
+    }
+
+    #[test]
+    fn update_host_assignment_accepts_exactly_one_config_source() {
+        let req = valid_update_host_assignment();
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn host_plugin_role_assignment_rejects_empty_package_identifier() {
+        let assignment = HostPluginRoleAssignment {
+            role: PluginRole::DetectVersion,
+            ordinal: 0,
+            plugin_config_id: Some(sample_uuid()),
+            plugin_config: None,
+            package_identifier: String::new(),
+            config_override: None,
+            execution_site: "auto".to_string(),
+        };
+        assert_eq!(
+            assignment.validate().err().map(|e| e.field),
+            Some("package_identifier")
+        );
+    }
+
+    #[test]
+    fn merge_execute_rejects_empty_candidate_ids() {
+        let req = MergeSoftwareItemsExecuteRequest {
+            candidate_ids: vec![],
+            survivor_id: sample_uuid(),
+        };
+        assert_eq!(req.validate().err().map(|e| e.field), Some("candidate_ids"));
+    }
+
+    #[test]
+    fn merge_execute_accepts_non_empty_candidate_ids() {
+        let req = MergeSoftwareItemsExecuteRequest {
+            candidate_ids: vec![sample_uuid()],
+            survivor_id: sample_uuid(),
+        };
+        assert!(req.validate().is_ok());
     }
 }
