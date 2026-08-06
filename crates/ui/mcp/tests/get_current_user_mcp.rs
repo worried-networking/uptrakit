@@ -7,7 +7,7 @@ use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use reqwest::Client;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait,
-    QueryFilter, Set,
+    QueryFilter, QueryOrder, Set,
 };
 use serde_json::{Value, json};
 use time::OffsetDateTime;
@@ -17,6 +17,7 @@ use uuid::Uuid;
 
 use uptrakit_audit_log::{
     AuditEmitter, AuditLogBackend, AuditLogDispatcher, DatabaseBackend, NoopBackend,
+    RegisteredAuditAction,
 };
 use uptrakit_controller_core::access::AccessEngine;
 use uptrakit_controller_core::auth::{
@@ -27,12 +28,36 @@ use uptrakit_controller_core::settings::Settings;
 use uptrakit_controller_core::update::NoopUpdateDispatcher;
 use uptrakit_mcp::build_mcp_router;
 use uptrakit_mcp::state::McpState;
-use uptrakit_shared_db::entity::{role, tenant, user, user_role};
+use uptrakit_shared_db::entity::{audit_log, role, tenant, user, user_role};
 use uptrakit_shared_db::migration::run_migrations;
 use uptrakit_shared_types::MaskedEmail;
 use uptrakit_web_api_auth::auth::api_token::ApiTokenService;
 use uptrakit_web_api_auth::auth::registration::{RegistrationMode, RegistrationSettings};
 use uptrakit_web_api_types::oauth::{McpAccessTokenClaims, McpOAuthJwtVerifier};
+
+/// Polls the tenant-scoped `audit_logs` table up to 50 × 10 ms for the first
+/// row matching `action_type`, since `emit_event` is async/fire-and-forget.
+/// Mirrors the canonical idiom in `uptrakit-web-api`'s
+/// `integration_tests::access_deny_events` (Task 1 of this milestone).
+#[expect(clippy::expect_used, reason = "test helper — panic on query failure")]
+async fn poll_audit_row_by_action(
+    db: &DatabaseConnection,
+    action_type: RegisteredAuditAction,
+) -> Option<audit_log::Model> {
+    for _ in 0..50 {
+        if let Some(row) = audit_log::Entity::find()
+            .filter(audit_log::Column::ActionType.eq(action_type))
+            .order_by_desc(audit_log::Column::OccurredAt)
+            .one(db)
+            .await
+            .expect("query audit rows")
+        {
+            return Some(row);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    None
+}
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -528,6 +553,44 @@ async fn missing_access_mcp_permission_returns_403() {
     assert!(
         resp.headers().get("Mcp-Session-Id").is_none(),
         "McpAuthLayer must not set Mcp-Session-Id on 403"
+    );
+
+    // M1.6b: a qualifying mcp:use denial must emit a tenant-scoped
+    // access.denied audit Event (`emit_access_denied_event`,
+    // `uptrakit_mcp::auth`).
+    let denied_row =
+        poll_audit_row_by_action(&app.db, uptrakit_audit_log::AuditActionType::ACCESS_DENIED)
+            .await
+            .expect("mcp:use denial must emit an access.denied audit Event");
+    assert_eq!(denied_row.tenant_id, app.tenant_id);
+    assert_eq!(denied_row.actor_id, Some(user_id));
+    assert_eq!(
+        denied_row.outcome,
+        uptrakit_audit_log::AuditOutcome::Denied.as_str()
+    );
+    assert_eq!(denied_row.target_type.as_deref(), Some("action"));
+    assert_eq!(denied_row.target_id.as_deref(), Some("mcp:use"));
+
+    // The pre-existing AUTH_API_TOKEN_AUTHENTICATE deny row (emitted by
+    // `emit_api_token_auth_audit`, unrelated to this milestone's funnel)
+    // must still be present, untouched by the new Event.
+    let auth_row = poll_audit_row_by_action(
+        &app.db,
+        uptrakit_audit_log::AuditActionType::AUTH_API_TOKEN_AUTHENTICATE,
+    )
+    .await
+    .expect("the pre-existing api-token-authenticate deny row must still be emitted");
+    assert_eq!(
+        auth_row.outcome,
+        uptrakit_audit_log::AuditOutcome::Denied.as_str()
+    );
+    assert_eq!(
+        auth_row
+            .details_json
+            .as_ref()
+            .and_then(|v| v.get("reason_code"))
+            .and_then(|v| v.as_str()),
+        Some("missing_access_mcp_permission")
     );
 }
 

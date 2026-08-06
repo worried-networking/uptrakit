@@ -70,6 +70,12 @@ action = "role.delete"
 site = "uptrakit_web_api::middleware::action::record_access_denied"
 action = "access.denied"
 
+# Access deny observability (M1.6b) — MCP-side emit helper (emit-only;
+# counter increments stay at the call sites).
+[[entries]]
+site = "uptrakit_mcp::auth::emit_access_denied_event"
+action = "access.denied"
+
 # ---------------------------------------------------------------------------
 # Access presets
 # ---------------------------------------------------------------------------

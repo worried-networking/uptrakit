@@ -8,13 +8,16 @@ use sea_orm::EntityTrait;
 use tower::{Layer, Service};
 use uuid::Uuid;
 
-use uptrakit_audit_log::{AuditActionType, AuditActorType, AuditEntry, AuditOutcome};
+use uptrakit_audit_log::{
+    AuditActionType, AuditActorType, AuditEmitter, AuditEntry, AuditOutcome, Event,
+};
+use uptrakit_controller_core::access::AccessContext;
 use uptrakit_controller_core::auth::AuthFailure;
 use uptrakit_controller_core::auth::api_token::{
     authenticate_api_token, emit_api_token_auth_audit,
 };
 use uptrakit_shared_db::entity::prelude::User;
-use uptrakit_shared_types::access::{Decision, actions};
+use uptrakit_shared_types::access::{Action, Decision, DenyReason, actions};
 use uptrakit_web_api_types::oauth::McpScope;
 
 use crate::context::{McpAuthError, McpAuthMethod, McpRequestContext};
@@ -315,6 +318,7 @@ pub async fn validate_api_token_for_mcp(
                 "reason" => reason.as_str()
             )
             .increment(1);
+            emit_access_denied_event(&state.audit_emitter, &access, &actions::MCP_USE, &reason);
             emit_api_token_auth_audit(
                 &state.audit_emitter,
                 state.default_tenant_id,
@@ -459,6 +463,7 @@ pub async fn validate_oauth_access_token_for_mcp(
                 "reason" => reason.as_str()
             )
             .increment(1);
+            emit_access_denied_event(&state.audit_emitter, &access, &actions::MCP_USE, &reason);
             emit_mcp_oauth_audit(
                 state,
                 Some(user_id),
@@ -521,6 +526,43 @@ fn emit_mcp_oauth_audit(
     match entry {
         Ok(e) => state.audit_emitter.emit_event(e),
         Err(e) => tracing::warn!(error = %e, "failed to build MCP_OAUTH_AUTHENTICATE audit entry"),
+    }
+}
+
+/// `access.denied` Event for a qualifying MCP denial (spec §4). Emit-only:
+/// the callers' existing deny-counter increments stay untouched. Cannot
+/// reuse web-api's funnel helper — this crate does not depend on
+/// `uptrakit-web-api`; only the predicate is shared.
+///
+/// Not a route handler: the audit-coverage walker sees it only through
+/// this marker (catalog row keys this fn).
+#[uptrakit_audit_log::audit_required]
+pub(crate) fn emit_access_denied_event(
+    emitter: &AuditEmitter,
+    ctx: &AccessContext,
+    action: &Action,
+    reason: &DenyReason,
+) {
+    if !uptrakit_shared_types::access::deny_event_worthy(action) {
+        return;
+    }
+    let builder = AuditEntry::<Event>::builder_event(AuditActionType::ACCESS_DENIED);
+    let builder = if action.resource().is_system() {
+        builder.system_scope()
+    } else {
+        builder.tenant_scope(ctx.tenant_id)
+    };
+    if let Ok(entry) = builder
+        .actor(AuditActorType::User, Some(ctx.user_id))
+        .target("action", action.to_string(), None)
+        .outcome(AuditOutcome::Denied)
+        .details(serde_json::json!({
+            "actions": [action.to_string()],
+            "reason": reason.as_str(),
+        }))
+        .build()
+    {
+        emitter.emit_event(entry);
     }
 }
 

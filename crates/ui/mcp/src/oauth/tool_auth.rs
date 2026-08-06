@@ -2,6 +2,7 @@ use rmcp::ErrorData;
 use uptrakit_shared_types::access::{Action, Decision};
 use uptrakit_web_api_types::oauth::McpScope;
 
+use crate::auth::emit_access_denied_event;
 use crate::context::{McpAuthMethod, McpRequestContext};
 use crate::state::McpState;
 
@@ -79,6 +80,7 @@ pub fn require_tool_auth(
                     "reason" => reason.as_str()
                 )
                 .increment(1);
+                emit_access_denied_event(&state.audit_emitter, &ctx.access, action, &reason);
                 return Err(ErrorData::invalid_request(
                     format!("permission denied: {action} required"),
                     None,
