@@ -16,7 +16,7 @@
 )]
 
 use http::StatusCode;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};
 use uptrakit_shared_db::entity::{audit_log, system_audit_log};
 
 use crate::test_harness::TestApp;
@@ -45,6 +45,29 @@ async fn poll_tenant_access_denied_row(
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
     None
+}
+
+/// Polls the tenant-scoped `audit_logs` table up to 50 × 10 ms until at
+/// least `expected` `access.denied` rows exist, then returns the observed
+/// count (which may exceed `expected` if extra rows landed) — callers
+/// assert the exact value themselves, so an over-count is still caught.
+async fn poll_tenant_access_denied_count(db: &sea_orm::DatabaseConnection, expected: u64) -> u64 {
+    let mut count = 0;
+    for _ in 0..50 {
+        count = audit_log::Entity::find()
+            .filter(
+                audit_log::Column::ActionType
+                    .eq(uptrakit_audit_log::AuditActionType::ACCESS_DENIED),
+            )
+            .count(db)
+            .await
+            .expect("count audit rows");
+        if count >= expected {
+            return count;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    count
 }
 
 /// Polls the global `system_audit_logs` table up to 50 × 10 ms for the
@@ -126,12 +149,44 @@ async fn qualifying_deny_emits_access_denied_event() {
 ///   settings:read, system.settings:manage])` — `system.settings:manage`
 ///   qualifies but the other two don't, so the gate is mixed and must not
 ///   emit either (spec §4 OR-gate rule: ALL alternatives must qualify).
+///
+/// Absence claims are only sound between two positive controls: a fixed
+/// `sleep` followed by a single absence query would still pass if a buggy
+/// predicate emitted an Event slowly (past the sleep budget under load).
+/// Instead this test sandwiches the two negative probes between a
+/// qualifying deny (`GET /api/v1/roles`, `access:manage`) fired before and
+/// after them, and polls for the exact row count each time. The audit
+/// dispatcher is a single FIFO consumer processing this client's requests
+/// in the order they were made, so by the time the *second* qualifying
+/// deny's row is observed, any row a buggy (b)/(c) probe had incorrectly
+/// enqueued is guaranteed to already be visible too — an exact count of 2
+/// (not 3 or 4) at that point is what proves the negative probes emitted
+/// nothing, structurally rather than incidentally.
 #[tokio::test]
 async fn ordinary_and_mixed_gate_denials_emit_no_event() {
     let app = TestApp::new().await;
     let client = app.client();
     let (_user_id, token) = stage_zero_role_user(&app).await;
 
+    // (a) First positive control: a qualifying deny must land exactly one
+    // access.denied row before we probe anything else.
+    let status = client
+        .get("/api/v1/roles")
+        .bearer(&token)
+        .send_status()
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "zero-role user must be denied access:manage (first probe)"
+    );
+    let count = poll_tenant_access_denied_count(&app.db, 1).await;
+    assert_eq!(
+        count, 1,
+        "first qualifying deny must emit exactly one access.denied Event"
+    );
+
+    // (b) Ordinary single-action deny — must add nothing.
     let status = client
         .get("/api/v1/hosts")
         .bearer(&token)
@@ -143,6 +198,8 @@ async fn ordinary_and_mixed_gate_denials_emit_no_event() {
         "zero-role user must be denied hosts:read"
     );
 
+    // (c) Mixed OR-gate deny — must add nothing either (ALL alternatives
+    // must qualify for the gate itself to qualify).
     let status = client
         .get("/api/v1/plugin-types")
         .bearer(&token)
@@ -154,23 +211,55 @@ async fn ordinary_and_mixed_gate_denials_emit_no_event() {
         "zero-role user must be denied the mixed plugin-types gate"
     );
 
-    // Give any (incorrect) fire-and-forget emission a real chance to land
-    // before asserting its absence — mirrors the poll budget used for the
-    // positive-path assertions elsewhere in this module.
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    // (d) Second positive control, closing the sandwich: a second
+    // qualifying deny must bring the total to exactly 2 — not 3 or 4 — or
+    // (b)/(c) leaked a row.
+    let status = client
+        .get("/api/v1/roles")
+        .bearer(&token)
+        .send_status()
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "zero-role user must be denied access:manage (second probe)"
+    );
+    let count = poll_tenant_access_denied_count(&app.db, 2).await;
+    assert_eq!(
+        count, 2,
+        "the ordinary and mixed-gate probes must not have added any access.denied row \
+         between the two qualifying-deny controls"
+    );
 
-    let tenant_row = audit_log::Entity::find()
+    let rows = audit_log::Entity::find()
         .filter(
             audit_log::Column::ActionType.eq(uptrakit_audit_log::AuditActionType::ACCESS_DENIED),
         )
-        .order_by_desc(audit_log::Column::OccurredAt)
-        .one(&app.db)
+        .order_by_asc(audit_log::Column::OccurredAt)
+        .all(&app.db)
         .await
         .expect("query audit rows");
-    assert!(
-        tenant_row.is_none(),
-        "ordinary/mixed-gate denials must not emit an access.denied Event, got: {tenant_row:?}"
+    assert_eq!(
+        rows.len(),
+        2,
+        "expected exactly two access.denied rows total"
     );
+    for row in &rows {
+        let details = row.details_json.as_ref().expect("details_json present");
+        let actions: Vec<&str> = details
+            .get("actions")
+            .and_then(|v| v.as_array())
+            .expect("actions array present")
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert_eq!(
+            actions,
+            vec!["access:manage"],
+            "no access.denied row may mention hosts:read or any plugin-types mixed-gate \
+             alternative — got {actions:?}"
+        );
+    }
 }
 
 /// A qualifying system-plane denial (`system.audit:read`, resource
