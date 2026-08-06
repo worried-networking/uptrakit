@@ -33,6 +33,7 @@ use uuid::Uuid;
 use crate::AppState;
 use crate::app_state::{AccessState, DbState};
 use crate::error_response::error_response;
+use crate::extract::Unvalidated;
 use crate::middleware::action::{
     AccessAuthority, CanManageAccess, CanManageUsers, record_access_deny, require_system_access,
 };
@@ -683,11 +684,28 @@ pub async fn update_user_active(
     CanManageUsers(caller): CanManageUsers,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(user_id): Path<Uuid>,
-    Json(body): Json<UpdateUserActiveRequest>,
+    body: Unvalidated<UpdateUserActiveRequest>,
 ) -> Response {
     use uptrakit_audit_log::AuditActionType;
     let api_token_id = api_token_id.map(|value| value.0);
     let (actor_type, actor_id) = authenticated_user_audit_actor(&caller, api_token_id);
+
+    let body = match body.require_valid() {
+        Ok(body) => body,
+        Err(e) => {
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(AuditActionType::USER_UPDATE)
+                .tenant_scope(state.default_tenant_id)
+                .actor(actor_type, actor_id)
+                .target("user", user_id.to_string(), None)
+                .outcome(AuditOutcome::ValidationFailed)
+                .details(serde_json::json!({ "reason_code": "invalid_request" }))
+                .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            return error_response(StatusCode::BAD_REQUEST, e.to_string());
+        }
+    };
 
     // Prevent self-deactivation.
     if !body.is_active && caller.user_id == user_id {

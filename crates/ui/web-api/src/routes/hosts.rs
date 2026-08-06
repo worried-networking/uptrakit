@@ -1,6 +1,7 @@
 use crate::AppState;
 use crate::actions::hosts as host_actions;
 use crate::error_response::error_response;
+use crate::extract::Unvalidated;
 use crate::middleware::action::{CanDeleteHosts, CanReadHosts, CanTriggerChecks, CanUpdateHosts};
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::queries::hosts as host_queries;
@@ -120,11 +121,30 @@ pub async fn update_host(
     CanUpdateHosts(caller): CanUpdateHosts,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(host_id): Path<Uuid>,
-    Json(body): Json<UpdateHostRequest>,
+    body: Unvalidated<UpdateHostRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|v| v.0);
     let (actor_type, actor_id) = authenticated_user_audit_actor(&caller, api_token_id);
     let tenant_id = tenant_db.tenant_id();
+
+    let body = match body.require_valid() {
+        Ok(body) => body,
+        Err(e) => {
+            if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+                uptrakit_audit_log::AuditActionType::HOST_UPDATE,
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("host", host_id.to_string(), None)
+            .outcome(AuditOutcome::ValidationFailed)
+            .details(serde_json::json!({ "reason_code": "invalid_request" }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            return error_response(StatusCode::BAD_REQUEST, e.to_string());
+        }
+    };
 
     let tx = match state
         .db()

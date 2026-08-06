@@ -392,7 +392,7 @@ async fn merge_service_target_connected_returns_conflict() {
         CanUpdateServices::new(auth_user),
         None,
         Path(target.id),
-        Json(MergeAgentRequest {
+        crate::extract::Unvalidated::new_for_test(MergeAgentRequest {
             source_id: source.id,
         }),
     )
@@ -455,7 +455,7 @@ async fn merge_service_succeeds_and_deactivates_source() {
         CanUpdateServices::new(auth_user),
         None,
         Path(target.id),
-        Json(MergeAgentRequest {
+        crate::extract::Unvalidated::new_for_test(MergeAgentRequest {
             source_id: source.id,
         }),
     )
@@ -514,7 +514,7 @@ async fn merge_service_writes_service_merge_audit_event() {
         CanUpdateServices::new(auth_user),
         None,
         Path(target.id),
-        Json(MergeAgentRequest {
+        crate::extract::Unvalidated::new_for_test(MergeAgentRequest {
             source_id: source.id,
         }),
     )
@@ -569,7 +569,7 @@ async fn merge_service_api_token_actor_writes_api_token_actor_type() {
         CanUpdateServices::new(auth_user),
         Some(Extension(AuthenticatedApiTokenId(token_id))),
         Path(target.id),
-        Json(MergeAgentRequest {
+        crate::extract::Unvalidated::new_for_test(MergeAgentRequest {
             source_id: source.id,
         }),
     )
@@ -1305,7 +1305,7 @@ async fn merge_service_returns_400_when_target_embedded() {
         CanUpdateServices::new(auth_user),
         None,
         Path(target_id),
-        Json(MergeAgentRequest { source_id }),
+        crate::extract::Unvalidated::new_for_test(MergeAgentRequest { source_id }),
     )
     .await;
 
@@ -1402,7 +1402,7 @@ async fn merge_service_returns_400_when_source_embedded() {
         CanUpdateServices::new(auth_user),
         None,
         Path(target_id),
-        Json(MergeAgentRequest { source_id }),
+        crate::extract::Unvalidated::new_for_test(MergeAgentRequest { source_id }),
     )
     .await;
 

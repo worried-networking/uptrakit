@@ -25,6 +25,7 @@ use uuid::Uuid;
 use crate::AppState;
 use crate::api_error::ApiError;
 use crate::error_response::error_response;
+use crate::extract::Unvalidated;
 use crate::middleware::action::{CanReadSoftware, CanUpdateSoftware};
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::queries::discovery_allowlist as allowlist_queries;
@@ -91,11 +92,32 @@ pub async fn add_tenant_discovery_allowlist_entry(
     tenant_db: TenantDb,
     CanUpdateSoftware(user): CanUpdateSoftware,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
-    Json(req): Json<CreateDiscoveryAllowlistEntryRequest>,
+    body: Unvalidated<CreateDiscoveryAllowlistEntryRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
     let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
     let tenant_id = tenant_db.tenant_id();
+
+    let req = match body.require_valid() {
+        Ok(req) => req,
+        Err(e) => {
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
+                uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::ValidationFailed)
+            .details(serde_json::json!({
+                "scope": "tenant",
+                "reason_code": "invalid_request",
+            }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            return Ok(error_response(StatusCode::BAD_REQUEST, e.to_string()));
+        }
+    };
     let plugin_type_str = req.plugin_type.to_string();
 
     let tx = match state
@@ -442,11 +464,33 @@ pub async fn add_host_discovery_allowlist_entry(
     CanUpdateSoftware(user): CanUpdateSoftware,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(host_id): Path<Uuid>,
-    Json(req): Json<CreateDiscoveryAllowlistEntryRequest>,
+    body: Unvalidated<CreateDiscoveryAllowlistEntryRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
     let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
     let tenant_id = tenant_db.tenant_id();
+
+    let req = match body.require_valid() {
+        Ok(req) => req,
+        Err(e) => {
+            if let Ok(entry) = AuditEntry::<Event>::builder_event(
+                uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .outcome(AuditOutcome::ValidationFailed)
+            .details(serde_json::json!({
+                "scope": "host",
+                "host_id": host_id,
+                "reason_code": "invalid_request",
+            }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            return Ok(error_response(StatusCode::BAD_REQUEST, e.to_string()));
+        }
+    };
     let plugin_type_str = req.plugin_type.to_string();
 
     // Verify host belongs to tenant (read-only, outside the tx).

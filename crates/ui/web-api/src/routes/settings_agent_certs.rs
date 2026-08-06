@@ -1,6 +1,7 @@
 use crate::AppState;
 use crate::SettingKey;
 use crate::error_response::error_response;
+use crate::extract::Unvalidated;
 use crate::middleware::action::{CanManageSettingsCertificates, CanReadSettings};
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::settings_store::{delete_setting, upsert_setting};
@@ -95,11 +96,28 @@ pub async fn update_agent_certificate_settings(
     State(state): State<Arc<AppState>>,
     CanManageSettingsCertificates(user): CanManageSettingsCertificates,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
-    Json(req): Json<UpdateAgentCertificateSettingsRequest>,
+    body: Unvalidated<UpdateAgentCertificateSettingsRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
     let tenant_id = state.default_tenant_id;
+
+    let req = match body.require_valid() {
+        Ok(req) => req,
+        Err(e) => {
+            emit_agent_cert_settings_event(
+                &state,
+                actor_type,
+                actor_id,
+                AuditOutcome::ValidationFailed,
+                serde_json::json!({
+                    "setting_area": "agent_certificates",
+                    "reason_code": "invalid_request",
+                }),
+            );
+            return error_response(StatusCode::BAD_REQUEST, e.to_string());
+        }
+    };
     let mut changed_keys = Vec::new();
     let mut renewal_window_reset_to_auto = false;
 
@@ -554,7 +572,7 @@ mod tests {
                 None,
             )),
             None,
-            Json(UpdateAgentCertificateSettingsRequest {
+            crate::extract::Unvalidated::new_for_test(UpdateAgentCertificateSettingsRequest {
                 lifetime_hours: Some(0),
                 renewal_window_hours: None,
             }),
@@ -608,7 +626,7 @@ mod tests {
                 None,
             )),
             None,
-            Json(UpdateAgentCertificateSettingsRequest {
+            crate::extract::Unvalidated::new_for_test(UpdateAgentCertificateSettingsRequest {
                 lifetime_hours: Some(24),
                 renewal_window_hours: None,
             }),

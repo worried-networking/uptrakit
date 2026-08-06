@@ -10,7 +10,7 @@ use crate::AppState;
 use crate::api_error::ApiError;
 use crate::auth::token::hash_token;
 use crate::auth_audit_classification::DeviceFlowErrorAuditExt;
-use crate::extract::Validated;
+use crate::extract::{Unvalidated, Validated};
 use crate::middleware::action::CanReadServices;
 use crate::middleware::require_auth::{
     AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
@@ -68,8 +68,19 @@ pub async fn device_auth_approve(
     State(state): State<Arc<AppState>>,
     CanReadServices(auth_user): CanReadServices,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
-    Json(req): Json<DeviceAuthApproveRequest>,
+    body: Unvalidated<DeviceAuthApproveRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let req = match body.require_valid() {
+        Ok(req) => req,
+        Err(e) => {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                e.to_string(),
+                "validation_error",
+                None,
+            ));
+        }
+    };
     let api_token_id = api_token_id.map(|value| value.0);
     let normalized = req.user_code.replace('-', "").to_uppercase();
     let device_flow_id = hash_token(&normalized);

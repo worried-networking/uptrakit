@@ -6,6 +6,7 @@ use crate::AppState;
 use crate::actions::services as svc_actions;
 use crate::api_error::ApiError;
 use crate::error_response::{error_response, error_response_with_code};
+use crate::extract::Unvalidated;
 use crate::middleware::action::CanUpdateServices;
 use crate::middleware::require_auth::AuthenticatedApiTokenId;
 use crate::queries::services as svc_queries;
@@ -46,7 +47,7 @@ pub async fn merge_service(
     CanUpdateServices(user): CanUpdateServices,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(target_uuid): Path<Uuid>,
-    Json(body): Json<MergeAgentRequest>,
+    body: Unvalidated<MergeAgentRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
@@ -54,6 +55,23 @@ pub async fn merge_service(
         tenant_id: tenant_db.tenant_id(),
         user: &user,
         api_token_id,
+    };
+
+    let body = match body.require_valid() {
+        Ok(body) => body,
+        Err(e) => {
+            emit_service_lifecycle_audit(
+                &audit_ctx,
+                uptrakit_audit_log::AuditActionType::SERVICE_MERGE,
+                target_uuid,
+                None,
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                serde_json::json!({
+                    "reason_code": "service.invalid_request",
+                }),
+            );
+            return Ok(error_response(StatusCode::BAD_REQUEST, e.to_string()));
+        }
     };
     let source_uuid = body.source_id;
 
