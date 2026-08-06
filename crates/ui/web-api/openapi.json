@@ -993,6 +993,9 @@
               }
             }
           },
+          "400": {
+            "description": "Invalid request body"
+          },
           "401": {
             "description": "Not authenticated"
           },
@@ -3511,6 +3514,9 @@
               }
             }
           },
+          "400": {
+            "description": "Invalid request body"
+          },
           "401": {
             "description": "Not authenticated"
           },
@@ -5263,6 +5269,9 @@
               }
             }
           },
+          "400": {
+            "description": "Invalid request body"
+          },
           "404": {
             "description": "Plugin config not found"
           }
@@ -6985,6 +6994,9 @@
               }
             }
           },
+          "400": {
+            "description": "Invalid request body"
+          },
           "404": {
             "description": "Provider not found"
           }
@@ -7619,6 +7631,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "Invalid request body"
           },
           "404": {
             "description": "Software item not found"
@@ -10505,6 +10520,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "Invalid request body"
           },
           "401": {
             "description": "Not authenticated"

@@ -107,6 +107,7 @@ pub async fn get_host(
     request_body = UpdateHostRequest,
     responses(
         (status = 200, description = "Host updated", body = HostResponse),
+        (status = 400, description = "Invalid request body"),
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Not authorized"),
         (status = 404, description = "Host not found")

@@ -251,6 +251,7 @@ pub async fn get_software_item(
     request_body = UpdateSoftwareItemRequest,
     responses(
         (status = 200, description = "Software item updated", body = SoftwareItemResponse),
+        (status = 400, description = "Invalid request body"),
         (status = 404, description = "Software item not found"),
         (status = 409, description = "Duplicate software item")
     ),

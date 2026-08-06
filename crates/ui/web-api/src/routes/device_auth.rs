@@ -55,6 +55,7 @@ fn emit_device_auth_decision_audit(
     request_body = DeviceAuthApproveRequest,
     responses(
         (status = 200, description = "Device authorized", body = DeviceAuthApproveResponse),
+        (status = 400, description = "Invalid request body"),
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Not authorized"),
         (status = 404, description = "Device flow not found"),

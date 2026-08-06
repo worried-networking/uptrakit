@@ -411,6 +411,7 @@ pub async fn get_provider(
     request_body = UpdateOidcProviderRequest,
     responses(
         (status = 200, description = "Provider updated", body = OidcProviderResponse),
+        (status = 400, description = "Invalid request body"),
         (status = 404, description = "Provider not found")
     ),
     tag = "OIDC Providers",

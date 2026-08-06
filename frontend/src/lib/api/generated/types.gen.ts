@@ -4274,6 +4274,10 @@ export type DeviceAuthApproveData = {
 
 export type DeviceAuthApproveErrors = {
     /**
+     * Invalid request body
+     */
+    400: unknown;
+    /**
      * Not authenticated
      */
     401: unknown;
@@ -5962,6 +5966,10 @@ export type UpdateHostData = {
 
 export type UpdateHostErrors = {
     /**
+     * Invalid request body
+     */
+    400: unknown;
+    /**
      * Not authenticated
      */
     401: unknown;
@@ -7059,6 +7067,10 @@ export type UpdatePluginConfigData = {
 };
 
 export type UpdatePluginConfigErrors = {
+    /**
+     * Invalid request body
+     */
+    400: unknown;
     /**
      * Plugin config not found
      */
@@ -8161,6 +8173,10 @@ export type UpdateProviderData = {
 
 export type UpdateProviderErrors = {
     /**
+     * Invalid request body
+     */
+    400: unknown;
+    /**
      * Provider not found
      */
     404: unknown;
@@ -8529,6 +8545,10 @@ export type UpdateSoftwareItemData = {
 };
 
 export type UpdateSoftwareItemErrors = {
+    /**
+     * Invalid request body
+     */
+    400: unknown;
     /**
      * Software item not found
      */
@@ -10299,6 +10319,10 @@ export type UpdateUserActiveData = {
 };
 
 export type UpdateUserActiveErrors = {
+    /**
+     * Invalid request body
+     */
+    400: unknown;
     /**
      * Not authenticated
      */

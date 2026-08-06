@@ -470,6 +470,7 @@ pub async fn get_plugin_config(
     request_body = UpdatePluginConfigRequest,
     responses(
         (status = 200, description = "Plugin config updated", body = PluginConfigResponse),
+        (status = 400, description = "Invalid request body"),
         (status = 404, description = "Plugin config not found")
     ),
     tag = "Plugin Configs",

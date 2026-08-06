@@ -670,6 +670,7 @@ pub async fn update_profile(
     request_body = UpdateUserActiveRequest,
     responses(
         (status = 200, description = "User activation status updated", body = UserWithRolesResponse),
+        (status = 400, description = "Invalid request body"),
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Not authorized"),
         (status = 404, description = "User not found"),
