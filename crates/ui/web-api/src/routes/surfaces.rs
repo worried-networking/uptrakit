@@ -16,6 +16,7 @@ use uptrakit_web_api_types::surfaces::{
     InvokeSurfaceInteractionRequest, ListSurfacesQuery, ReadSurfaceInteractionQuery,
     SurfaceProviderAvailability, SurfaceProviderInfo, SurfaceReadResponse, SurfaceResponse,
 };
+use uptrakit_web_api_types::validation::ValidationError;
 use uptrakit_wire::surfaces;
 use uuid::Uuid;
 
@@ -23,6 +24,7 @@ use uptrakit_shared_db::entity::system_service;
 
 use crate::AppState;
 use crate::error_response::{error_response, error_response_with_code};
+use crate::extract::Unvalidated;
 use crate::middleware::action::{AccessAuthority, record_access_deny};
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, AuthenticatedUser};
 use crate::middleware::tenant_context::TenantContext;
@@ -613,6 +615,33 @@ async fn dispatch_surface_interaction(
     ))
 }
 
+/// Shared `Err` arm for every method-mapped interaction handler's
+/// `body.require_valid()` call: emits a `SURFACE_ACTION_INVOKE` /
+/// `ValidationFailed` audit event (mirroring the file's established
+/// `AuditEntry::<Event>::builder_event(...).tenant_scope(...).actor(...).outcome(ValidationFailed)`
+/// chain) and returns the `400` response. This fires before the interaction
+/// is resolved, so only tenant scope and actor are available/needed.
+fn validation_failed_response(
+    state: &AppState,
+    tenant_ctx: &TenantContext,
+    auth_user: &AuthenticatedUser,
+    e: &ValidationError,
+) -> Response {
+    let (actor_type, actor_id) = auth_user.audit_actor(None);
+    if let Ok(entry) = uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+        uptrakit_audit_log::AuditActionType::SURFACE_ACTION_INVOKE,
+    )
+    .tenant_scope(tenant_ctx.tenant_id)
+    .actor(actor_type, actor_id)
+    .outcome(uptrakit_audit_log::AuditOutcome::ValidationFailed)
+    .details(serde_json::json!({ "reason_code": "invalid_request" }))
+    .build()
+    {
+        state.audit_emitter.emit_event(entry);
+    }
+    error_response(StatusCode::BAD_REQUEST, e.to_string())
+}
+
 /// Read a surface interaction via `GET`. Query keys: reserved (`page`,
 /// `per_page`) coerce to numbers; declared keys parse strictly per their
 /// schema; undeclared keys pass through as strings. `target_provider_id` and
@@ -706,8 +735,12 @@ pub async fn invoke_surface_interaction(
     axum::Extension(authority): axum::Extension<AccessAuthority>,
     api_token_id: Option<axum::Extension<AuthenticatedApiTokenId>>,
     Path((surface_id, interaction_id)): Path<(String, String)>,
-    Json(body): Json<InvokeSurfaceInteractionRequest>,
+    body: Unvalidated<InvokeSurfaceInteractionRequest>,
 ) -> Response {
+    let body = match body.require_valid() {
+        Ok(body) => body,
+        Err(e) => return validation_failed_response(&state, &tenant_ctx, &auth_user, &e),
+    };
     dispatch_surface_interaction(
         InteractionCallCtx {
             state,
@@ -760,8 +793,15 @@ pub async fn update_surface_interaction(
     axum::Extension(authority): axum::Extension<AccessAuthority>,
     api_token_id: Option<axum::Extension<AuthenticatedApiTokenId>>,
     Path((surface_id, interaction_id)): Path<(String, String)>,
-    body: Option<Json<InvokeSurfaceInteractionRequest>>,
+    body: Option<Unvalidated<InvokeSurfaceInteractionRequest>>,
 ) -> Response {
+    let body = match body {
+        Some(body) => match body.require_valid() {
+            Ok(body) => body,
+            Err(e) => return validation_failed_response(&state, &tenant_ctx, &auth_user, &e),
+        },
+        None => InvokeSurfaceInteractionRequest::default(),
+    };
     dispatch_surface_interaction(
         InteractionCallCtx {
             state,
@@ -774,7 +814,7 @@ pub async fn update_surface_interaction(
         surface_id,
         interaction_id,
         None,
-        InteractionInput::Body(body.map(|Json(b)| b).unwrap_or_default()),
+        InteractionInput::Body(body),
     )
     .await
 }
@@ -813,8 +853,15 @@ pub async fn delete_surface_interaction(
     axum::Extension(authority): axum::Extension<AccessAuthority>,
     api_token_id: Option<axum::Extension<AuthenticatedApiTokenId>>,
     Path((surface_id, interaction_id)): Path<(String, String)>,
-    body: Option<Json<InvokeSurfaceInteractionRequest>>,
+    body: Option<Unvalidated<InvokeSurfaceInteractionRequest>>,
 ) -> Response {
+    let body = match body {
+        Some(body) => match body.require_valid() {
+            Ok(body) => body,
+            Err(e) => return validation_failed_response(&state, &tenant_ctx, &auth_user, &e),
+        },
+        None => InvokeSurfaceInteractionRequest::default(),
+    };
     dispatch_surface_interaction(
         InteractionCallCtx {
             state,
@@ -827,7 +874,7 @@ pub async fn delete_surface_interaction(
         surface_id,
         interaction_id,
         None,
-        InteractionInput::Body(body.map(|Json(b)| b).unwrap_or_default()),
+        InteractionInput::Body(body),
     )
     .await
 }
@@ -950,8 +997,15 @@ pub async fn update_surface_interaction_item(
     axum::Extension(authority): axum::Extension<AccessAuthority>,
     api_token_id: Option<axum::Extension<AuthenticatedApiTokenId>>,
     Path((surface_id, interaction_id, item_id)): Path<(String, String, String)>,
-    body: Option<Json<InvokeSurfaceInteractionRequest>>,
+    body: Option<Unvalidated<InvokeSurfaceInteractionRequest>>,
 ) -> Response {
+    let body = match body {
+        Some(body) => match body.require_valid() {
+            Ok(body) => body,
+            Err(e) => return validation_failed_response(&state, &tenant_ctx, &auth_user, &e),
+        },
+        None => InvokeSurfaceInteractionRequest::default(),
+    };
     dispatch_surface_interaction(
         InteractionCallCtx {
             state,
@@ -964,7 +1018,7 @@ pub async fn update_surface_interaction_item(
         surface_id,
         interaction_id,
         Some(item_id),
-        InteractionInput::Body(body.map(|Json(b)| b).unwrap_or_default()),
+        InteractionInput::Body(body),
     )
     .await
 }
@@ -1004,8 +1058,15 @@ pub async fn delete_surface_interaction_item(
     axum::Extension(authority): axum::Extension<AccessAuthority>,
     api_token_id: Option<axum::Extension<AuthenticatedApiTokenId>>,
     Path((surface_id, interaction_id, item_id)): Path<(String, String, String)>,
-    body: Option<Json<InvokeSurfaceInteractionRequest>>,
+    body: Option<Unvalidated<InvokeSurfaceInteractionRequest>>,
 ) -> Response {
+    let body = match body {
+        Some(body) => match body.require_valid() {
+            Ok(body) => body,
+            Err(e) => return validation_failed_response(&state, &tenant_ctx, &auth_user, &e),
+        },
+        None => InvokeSurfaceInteractionRequest::default(),
+    };
     dispatch_surface_interaction(
         InteractionCallCtx {
             state,
@@ -1018,7 +1079,7 @@ pub async fn delete_surface_interaction_item(
         surface_id,
         interaction_id,
         Some(item_id),
-        InteractionInput::Body(body.map(|Json(b)| b).unwrap_or_default()),
+        InteractionInput::Body(body),
     )
     .await
 }
@@ -2192,7 +2253,7 @@ mod tests {
             )),
             None,
             Path(("ssh.guest.panel".to_string(), "refresh".to_string())),
-            Json(InvokeSurfaceInteractionRequest {
+            crate::extract::Unvalidated::new_for_test(InvokeSurfaceInteractionRequest {
                 params: serde_json::Map::new(),
                 encrypted_sensitive_params: None,
                 target_provider_id: Some("service.provider-a".to_string()),
@@ -2318,7 +2379,7 @@ mod tests {
             )),
             None,
             Path(("ssh.guest.panel".to_string(), "refresh".to_string())),
-            Json(InvokeSurfaceInteractionRequest {
+            crate::extract::Unvalidated::new_for_test(InvokeSurfaceInteractionRequest {
                 params: serde_json::Map::new(),
                 encrypted_sensitive_params: None,
                 target_provider_id: Some("service.provider-a".to_string()),
@@ -2399,7 +2460,7 @@ mod tests {
             )),
             Some(axum::Extension(api_token_id)),
             Path(("ssh.guest.panel".to_string(), "refresh".to_string())),
-            Json(InvokeSurfaceInteractionRequest {
+            crate::extract::Unvalidated::new_for_test(InvokeSurfaceInteractionRequest {
                 params: serde_json::Map::new(),
                 encrypted_sensitive_params: None,
                 target_provider_id: Some("missing-provider".to_string()),
@@ -2502,7 +2563,7 @@ mod tests {
             )),
             Some(axum::Extension(api_token_id)),
             Path(("ssh.guest.panel".to_string(), "refresh".to_string())),
-            Json(InvokeSurfaceInteractionRequest {
+            crate::extract::Unvalidated::new_for_test(InvokeSurfaceInteractionRequest {
                 params: serde_json::Map::new(),
                 encrypted_sensitive_params: None,
                 target_provider_id: Some("service.provider-a".to_string()),
@@ -2588,7 +2649,7 @@ mod tests {
             )),
             None,
             Path(("ssh.guest.panel".to_string(), "refresh".to_string())),
-            Json(InvokeSurfaceInteractionRequest {
+            crate::extract::Unvalidated::new_for_test(InvokeSurfaceInteractionRequest {
                 params: serde_json::Map::new(),
                 encrypted_sensitive_params: None,
                 target_provider_id: Some("service.provider-a".to_string()),

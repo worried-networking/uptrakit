@@ -455,6 +455,42 @@ async fn put_item_segment_delivers_reserved_id_param() {
     );
 }
 
+/// Regression: `PUT` against a method-mapped interaction with NO request
+/// body (no `Content-Type`, no bytes) must still reach the handler and
+/// default the body to `InvokeSurfaceInteractionRequest::default()` rather
+/// than being rejected by the `Option<Unvalidated<T>>` extractor. This only
+/// exercises the real Axum extraction layer (`.request()`, not a direct
+/// handler call) because a direct call bypasses `OptionalFromRequest`
+/// entirely and could not observe this regression.
+#[tokio::test]
+async fn update_surface_interaction_without_body_still_defaults() {
+    let (app, calls): (TestApp, StubSurfaceCalls) =
+        TestApp::with_stub_surfaces(vec![StubInteraction {
+            interaction_id: "replace",
+            kind: InteractionKind::MutationAction,
+            http_method: Some(InteractionHttpMethod::Put),
+            params: vec![],
+            required_action: None,
+        }])
+        .await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let status = client
+        .request(
+            http::Method::PUT,
+            "/api/v1/surfaces/test.stub/interactions/replace",
+        )
+        .bearer(&token)
+        .send_status()
+        .await;
+    assert_eq!(status, http::StatusCode::OK);
+
+    let recorded = calls.lock();
+    assert_eq!(recorded.len(), 1);
+    assert!(recorded[0].params.is_empty());
+}
+
 /// Spec test 5: an interaction id with no registration at all is a `404`
 /// regardless of which HTTP method is used to reach it. `POST`/`PUT` use
 /// the JSON convenience wrappers (rather than a bare `request()` call)
