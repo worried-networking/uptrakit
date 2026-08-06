@@ -5,6 +5,15 @@ export type ClientOptions = {
 };
 
 /**
+ * The full access catalog: three code-defined sections, one endpoint.
+ */
+export type AccessCatalogResponse = {
+    resources: Array<CatalogResourceEntry>;
+    role_bundles: Array<RoleBundleEntry>;
+    scope_presets: Array<ScopePresetEntry>;
+};
+
+/**
  * A stored grant row.
  */
 export type AccessGrantResponse = {
@@ -304,6 +313,18 @@ export type BatchUpdateResponse = {
      * Per-item update details.
      */
     updates: Array<BatchUpdateItem>;
+};
+
+export type CatalogActionEntry = {
+    action: string;
+    description: string;
+    selector_support: SelectorSupport;
+    verb: string;
+};
+
+export type CatalogResourceEntry = {
+    actions: Array<CatalogActionEntry>;
+    resource: string;
 };
 
 export type ChangePasswordRequest = {
@@ -2382,6 +2403,12 @@ export type ResetDeletedCounts = {
     update_history: number;
 };
 
+export type RoleBundleEntry = {
+    description: string;
+    name: string;
+    roles: Array<string>;
+};
+
 /**
  * A role — global built-in or tenant-scoped custom.
  */
@@ -2416,6 +2443,17 @@ export type ScheduledTaskResponse = {
     task_type: string;
     updated_at: string;
 };
+
+export type ScopePresetEntry = {
+    actions?: Array<string> | null;
+    description: string;
+    kind: ScopePresetKind;
+    name: string;
+};
+
+export const ScopePresetKind = { STATIC: 'static', CALLER_ACTIONS: 'caller_actions' } as const;
+
+export type ScopePresetKind = typeof ScopePresetKind[keyof typeof ScopePresetKind];
 
 /**
  * A newtype wrapper for strings that contain sensitive data (secrets, tokens,
@@ -2470,6 +2508,24 @@ export type Selector = {
     ids: Array<string>;
     type: 'items';
 };
+
+/**
+ * Selector-capability level of an action — first-class catalog metadata
+ * (`05-action-model.md` §Selector-capable actions). Each level admits
+ * the previous levels' selector kinds.
+ */
+export const SelectorSupport = {
+    NONE: 'none',
+    HOST: 'host',
+    HOST_AND_SOFTWARE: 'host_and_software'
+} as const;
+
+/**
+ * Selector-capability level of an action — first-class catalog metadata
+ * (`05-action-model.md` §Selector-capable actions). Each level admits
+ * the previous levels' selector kinds.
+ */
+export type SelectorSupport = typeof SelectorSupport[keyof typeof SelectorSupport];
 
 /**
  * Unified response for any service (agent or MQTT).
@@ -3911,6 +3967,29 @@ export type ListAccessPresetsResponses = {
 };
 
 export type ListAccessPresetsResponse = ListAccessPresetsResponses[keyof ListAccessPresetsResponses];
+
+export type GetAccessCatalogData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/access/catalog';
+};
+
+export type GetAccessCatalogErrors = {
+    /**
+     * Not authenticated
+     */
+    401: unknown;
+};
+
+export type GetAccessCatalogResponses = {
+    /**
+     * The access catalog
+     */
+    200: AccessCatalogResponse;
+};
+
+export type GetAccessCatalogResponse = GetAccessCatalogResponses[keyof GetAccessCatalogResponses];
 
 export type ListAccessGrantsData = {
     body?: never;

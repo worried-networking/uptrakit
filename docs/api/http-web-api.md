@@ -680,6 +680,8 @@ request/response examples.
 - `PUT /api/v1/access/grants/{id}` -- replace a grant's patterns and description. Requires
   `access:manage`.
 - `DELETE /api/v1/access/grants/{id}` -- delete an access grant. Requires `access:manage`.
+- `GET /api/v1/access/catalog` -- the authorization vocabulary as data: built-in actions,
+  role bundles, and scope presets. Authenticated-but-ungoverned -- no grant required.
 - `GET /api/v1/access-presets` -- list all access presets with their role compositions.
 - `POST /api/v1/users/{id}/apply-preset` -- apply an access preset to a user.
 

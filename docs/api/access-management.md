@@ -140,6 +140,41 @@ additionally requires `system.access:manage`, checked inline against the engine.
 role assignment, this is evaluated only against roles the preset would newly grant --
 re-applying a preset the user already effectively holds does not re-trigger the check.
 
+## Catalog endpoint
+
+`GET /api/v1/access/catalog` returns the authorization vocabulary as data: the built-in
+action catalog, the code-defined role bundles, and the available scope presets. It is
+**authenticated-but-ungoverned** -- any authenticated principal reads it regardless of
+grants (empty-scoped in `scope-map.golden.json`, i.e. `authenticated-only`), since the
+response is read-only vocabulary, not tenant data. The live `surface.*` disclosure this
+implies (every registered surface's `use` action, regardless of the caller's own access to
+that surface) is an accepted v1 reconnaissance surface.
+
+The response has three sections:
+
+- `resources`: the built-in `CATALOG` (one entry per resource, each carrying its actions
+  with verb, description, and `selector_support`), plus one synthetic entry per
+  live `surface.<id>:use` action drawn from the dynamic-action registry (see [Shared
+  surface runtime](../../AGENTS.md#shared-surface-runtime)). Dynamic entries track
+  registry state -- they appear when a surface provider registers and disappear when it
+  unregisters.
+- `role_bundles`: the five code-defined `RoleBundle` tiers (`read_only`, `operator`,
+  `manager`, `administrator`, `owner`), each with its name, description, and constituent
+  role list. These are not database-backed and cannot be created, edited, or deleted.
+- `scope_presets`: named starting points for scoping a token/grant. Each preset's `kind`
+  says how its action list is produced:
+  - `static`: `actions` is populated directly by the server (e.g. `all-reads`).
+  - `caller_actions`: `actions` is `null`; the client expands the preset against the
+    caller's own effective action list at token-creation time (`all-my-current-actions`).
+  - Any other value is a forward-compatible `Other(String)` the client doesn't recognize
+    yet. **Client contract:** an unknown `kind` means "do not offer this preset" -- never
+    treat it as `caller_actions` (that would silently expand the wrong thing).
+
+`all-reads` is an explicit, reviewed list of `read`-verb actions, not a lexical derivation
+from the catalog -- a new `read` verb landing in `CATALOG` does not automatically join
+`all-reads`; it must be consciously reviewed in (or explicitly reviewed out) by whoever
+adds it, and a guard test reds either way until that review happens.
+
 ## Encoding rules for API consumers
 
 - Subject (`subject_type`/`subject_id`) and tenant encoding are immutable after grant

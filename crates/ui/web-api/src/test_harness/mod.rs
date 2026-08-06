@@ -83,6 +83,12 @@ impl TestApp {
     /// `effective_http_method()` before registration, mirroring what
     /// production admission (`normalize_interaction_methods`) would have
     /// done — so DataLoad stubs carry `Get` exactly like real descriptors.
+    ///
+    /// **Trap:** this swaps in a *fresh* `SurfaceRegistry` on the cloned
+    /// state, but the `AccessEngine` was wired against the *original*
+    /// registry at [`build_test_state`] time — registrations here are
+    /// invisible to `AccessEngine::dynamic_actions()`. Use [`TestApp::new`]
+    /// for anything reading `dynamic_actions()`.
     pub(crate) async fn with_stub_surfaces(
         stubs: Vec<StubInteraction>,
     ) -> (Self, StubSurfaceCalls) {
@@ -565,11 +571,23 @@ pub(crate) async fn build_test_state_with_plugin_ops(
             Arc::clone(&instance_plugin_snapshot),
         ));
 
+    // Shared with `surface_proxy_deps` below so `AccessEngine::dynamic_actions()`
+    // observes the same registrations a test reaches via
+    // `app.state.surface_proxy_deps.registry` (mirrors production wiring in
+    // `AppStateBuilder::build()`).
+    let surface_registry = Arc::new(crate::surface_registry::SurfaceRegistry::new(
+        crate::surface_registry::SurfaceRegistryConfig::default(),
+    ));
+
     let state = Arc::new(AppState {
         db: crate::app_state::DbState::new(db.clone()),
-        access_engine: Arc::new(uptrakit_controller_core::access::AccessEngine::new(
-            db.clone(),
-        )),
+        access_engine: Arc::new(
+            uptrakit_controller_core::access::AccessEngine::new(db.clone()).with_registry(
+                Arc::new(crate::surface_action_registry::SurfaceActionRegistry(
+                    Arc::clone(&surface_registry),
+                )),
+            ),
+        ),
         cert: crate::app_state::CertState {
             ca_snapshot: ca_rx,
             ca_key_store,
@@ -618,9 +636,7 @@ pub(crate) async fn build_test_state_with_plugin_ops(
         )),
         audit_emitter,
         surface_proxy_deps: crate::app_state::SurfaceProxyDeps::new(
-            Arc::new(crate::surface_registry::SurfaceRegistry::new(
-                crate::surface_registry::SurfaceRegistryConfig::default(),
-            )),
+            Arc::clone(&surface_registry),
             Arc::new(crate::surface_proxy::SurfaceProxy::new()),
             surface_visibility,
         ),

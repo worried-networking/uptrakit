@@ -455,6 +455,11 @@ pub(crate) mod roles {
     }
 }
 
+pub(crate) mod access_catalog {
+    /// `GET /api/v1/access/catalog`
+    pub(crate) const BASE: &str = "/api/v1/access/catalog";
+}
+
 pub(crate) mod access_presets {
     /// `GET /api/v1/access-presets`
     pub(crate) const BASE: &str = "/api/v1/access-presets";

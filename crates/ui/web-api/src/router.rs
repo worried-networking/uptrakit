@@ -202,6 +202,8 @@ use crate::extractors::{GlobalSettingsVersion, SettingsVersion};
         crate::routes::access_grants::get_access_grant,
         crate::routes::access_grants::update_access_grant,
         crate::routes::access_grants::delete_access_grant,
+        // Access catalog
+        crate::routes::access_catalog::get_access_catalog,
         // MFA — unauthenticated challenge completion
         crate::routes::mfa::mfa_verify,
         crate::routes::mfa::mfa_send_email,
@@ -370,6 +372,13 @@ use crate::extractors::{GlobalSettingsVersion, SettingsVersion};
             crate::routes::access_grants::CreateAccessGrantRequest,
             crate::routes::access_grants::UpdateAccessGrantRequest,
             crate::routes::access_grants::GrantSubjectTypeParam,
+            crate::routes::access_catalog::AccessCatalogResponse,
+            crate::routes::access_catalog::CatalogResourceEntry,
+            crate::routes::access_catalog::CatalogActionEntry,
+            crate::routes::access_catalog::RoleBundleEntry,
+            crate::routes::access_catalog::ScopePresetEntry,
+            crate::routes::access_catalog::ScopePresetKind,
+            uptrakit_shared_types::access::SelectorSupport,
             // Update batches
             crate::routes::update_batches::BatchUpdateResponse,
             crate::routes::update_batches::BatchUpdateItem,
@@ -837,6 +846,8 @@ pub fn build_router_with_openapi(state: Arc<AppState>) -> (Router, utoipa::opena
             crate::routes::access_grants::update_access_grant,
             crate::routes::access_grants::delete_access_grant
         ))
+        // Access catalog
+        .routes(routes!(crate::routes::access_catalog::get_access_catalog))
         // Admin events SSE stream
         .route(
             "/api/v1/events/stream",

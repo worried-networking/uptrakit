@@ -370,6 +370,38 @@
         "x-required-permission": "manage_users"
       }
     },
+    "/api/v1/access/catalog": {
+      "get": {
+        "tags": [
+          "Access"
+        ],
+        "summary": "Get the access catalog",
+        "operationId": "get_access_catalog",
+        "responses": {
+          "200": {
+            "description": "The access catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessCatalogResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated"
+          }
+        },
+        "security": [
+          {
+            "oauth2": []
+          },
+          {
+            "developer_token": []
+          }
+        ]
+      }
+    },
     "/api/v1/access/grants": {
       "get": {
         "tags": [
@@ -10893,6 +10925,35 @@
   },
   "components": {
     "schemas": {
+      "AccessCatalogResponse": {
+        "type": "object",
+        "description": "The full access catalog: three code-defined sections, one endpoint.",
+        "required": [
+          "resources",
+          "role_bundles",
+          "scope_presets"
+        ],
+        "properties": {
+          "resources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CatalogResourceEntry"
+            }
+          },
+          "role_bundles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RoleBundleEntry"
+            }
+          },
+          "scope_presets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScopePresetEntry"
+            }
+          }
+        }
+      },
       "AccessGrantResponse": {
         "type": "object",
         "description": "A stored grant row.",
@@ -11511,6 +11572,47 @@
               "$ref": "#/components/schemas/BatchUpdateItem"
             },
             "description": "Per-item update details."
+          }
+        }
+      },
+      "CatalogActionEntry": {
+        "type": "object",
+        "required": [
+          "action",
+          "verb",
+          "description",
+          "selector_support"
+        ],
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "selector_support": {
+            "$ref": "#/components/schemas/SelectorSupport"
+          },
+          "verb": {
+            "type": "string"
+          }
+        }
+      },
+      "CatalogResourceEntry": {
+        "type": "object",
+        "required": [
+          "resource",
+          "actions"
+        ],
+        "properties": {
+          "actions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CatalogActionEntry"
+            }
+          },
+          "resource": {
+            "type": "string"
           }
         }
       },
@@ -16463,6 +16565,28 @@
           }
         }
       },
+      "RoleBundleEntry": {
+        "type": "object",
+        "required": [
+          "name",
+          "description",
+          "roles"
+        ],
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "RoleResponse": {
         "type": "object",
         "description": "A role — global built-in or tenant-scoped custom.",
@@ -16575,6 +16699,41 @@
             "format": "date-time"
           }
         }
+      },
+      "ScopePresetEntry": {
+        "type": "object",
+        "required": [
+          "name",
+          "description",
+          "kind"
+        ],
+        "properties": {
+          "actions": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "description": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ScopePresetKind"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "ScopePresetKind": {
+        "type": "string",
+        "enum": [
+          "static",
+          "caller_actions"
+        ]
       },
       "SecretString": {
         "type": "string",
@@ -16691,6 +16850,15 @@
           }
         ],
         "description": "Resource selector on a grant: which hosts / software items a\nselector-capable action may target. `All` is the M1 default; write-path\nacceptance of the narrowing variants lands in M2 (grant validation, not\nthis type).\n\nSerialized form is the `access_grants.selector` storage JSON\n(`06-grant-model.md` §Storage schema): `{\"type\":\"all\"}`,\n`{\"type\":\"tags\",\"ids\":[…]}`, … — uniform `ids` field. Unknown extra\nkeys are ignored on deserialize (serde internally-tagged enums cannot\n`deny_unknown_fields`); that is safe because an ignored key can never\nbroaden authority and a missing/mistyped `ids` still fails as a\nmissing field."
+      },
+      "SelectorSupport": {
+        "type": "string",
+        "description": "Selector-capability level of an action — first-class catalog metadata\n(`05-action-model.md` §Selector-capable actions). Each level admits\nthe previous levels' selector kinds.",
+        "enum": [
+          "none",
+          "host",
+          "host_and_software"
+        ]
       },
       "ServiceResponse": {
         "type": "object",

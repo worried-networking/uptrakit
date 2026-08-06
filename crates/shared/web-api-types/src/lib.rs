@@ -6,6 +6,7 @@ pub use uptrakit_shared_types::SecretString;
 /// without a direct `uptrakit-shared-types` dependency.
 pub use uptrakit_shared_types::PluginRole;
 
+pub mod access_catalog;
 pub mod access_grants;
 pub mod access_presets;
 pub mod agents;
