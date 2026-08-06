@@ -272,9 +272,11 @@ delete_plugin_type_settings = "full-state"
 from_request_parts = "ignore"
 
 [routes."roles.rs"]
-build_role_response = "ignore"
-list_roles = "tenant-agnostic"
-get_role = "tenant-agnostic"
+list_roles = "tenant-scoped"
+get_role = "tenant-scoped"
+create_role = "full-state"
+update_role = "full-state"
+delete_role = "full-state"
 
 [routes."scheduler.rs"]
 list_scheduled_tasks = "tenant-scoped"

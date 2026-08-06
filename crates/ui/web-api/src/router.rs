@@ -187,9 +187,12 @@ use crate::extractors::{GlobalSettingsVersion, SettingsVersion};
         crate::routes::users::cancel_email_change,
         crate::routes::users::change_password,
         crate::routes::users::list_permissions,
-        // Roles (read-only)
+        // Roles
         crate::routes::roles::list_roles,
         crate::routes::roles::get_role,
+        crate::routes::roles::create_role,
+        crate::routes::roles::update_role,
+        crate::routes::roles::delete_role,
         // Access presets
         crate::routes::access_presets::list_access_presets,
         crate::routes::access_presets::apply_preset,
@@ -360,6 +363,8 @@ use crate::extractors::{GlobalSettingsVersion, SettingsVersion};
             uptrakit_web_api_types::profile::InitiateEmailChangeRequest,
             uptrakit_web_api_types::profile::ChangePasswordRequest,
             crate::routes::roles::RoleResponse,
+            crate::routes::roles::CreateRoleRequest,
+            crate::routes::roles::UpdateRoleRequest,
             crate::routes::access_presets::AccessPresetResponse,
             crate::routes::access_grants::AccessGrantResponse,
             crate::routes::access_grants::CreateAccessGrantRequest,
@@ -809,9 +814,16 @@ pub fn build_router_with_openapi(state: Arc<AppState>) -> (Router, utoipa::opena
             crate::routes::users::cancel_email_change
         ))
         .routes(routes!(crate::routes::users::change_password))
-        // Roles (read-only)
-        .routes(routes!(crate::routes::roles::list_roles))
-        .routes(routes!(crate::routes::roles::get_role))
+        // Roles
+        .routes(routes!(
+            crate::routes::roles::create_role,
+            crate::routes::roles::list_roles
+        ))
+        .routes(routes!(
+            crate::routes::roles::get_role,
+            crate::routes::roles::update_role,
+            crate::routes::roles::delete_role
+        ))
         // Access presets
         .routes(routes!(crate::routes::access_presets::list_access_presets))
         .routes(routes!(crate::routes::access_presets::apply_preset))

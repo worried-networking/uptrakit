@@ -2,7 +2,7 @@
 //!
 //! Sections:
 //! 1. `truncate_utf8_safe` unit tests
-//! 2. Per-variant mapping tests for all 17 domain error types
+//! 2. Per-variant mapping tests for all 18 domain error types
 //! 3. Dynamic-display dual-payload tests for all 11 allowlisted variants
 //! 4. 5xx logging test (exactly one `ERROR` event with structured fields)
 //! 5. 4xx no-logging test (zero `ERROR` events)
@@ -34,6 +34,7 @@ use uptrakit_web_api_queries::queries::{
     plugin_configs::PluginConfigError,
     plugin_type_settings::PluginTypeSettingsError,
     reset_data::ResetDataQueryError,
+    roles::RoleQueryError,
     scheduled_tasks::ScheduledTaskError,
     services::ServiceQueryError,
     software_items::SoftwareItemQueryError,
@@ -886,6 +887,23 @@ async fn reset_data_query_error_all_variants() {
 }
 
 #[tokio::test]
+async fn role_query_error_all_variants() {
+    async fn check(report: Report<RoleQueryError>, expected_status: u16, expected_code: &str) {
+        let (status, json) = read_response(ApiError::from(report).into_response()).await;
+        assert_eq!(status.as_u16(), expected_status, "code={expected_code}");
+        assert_eq!(code_of(&json), expected_code);
+    }
+
+    check(report!(RoleQueryError::NotFound), 404, "role.not_found").await;
+    check(
+        report!(RoleQueryError::Db(sea_orm::DbErr::Custom("test".into()))),
+        500,
+        "role.database_error",
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn system_enrollment_token_error_all_variants() {
     let (status, json) = read_response(
         ApiError::from(report!(SystemEnrollmentTokenError::Database(
@@ -1345,6 +1363,9 @@ const ALL_IMPL_CODES: &[&str] = &[
     "registration.token_required",
     "registration.verification_failed",
     "reset_data.database_error",
+    "role.database_error",
+    "role.not_found",
+    "role.unknown_error",
     "scheduled_task.database_error",
     "scheduled_task.invalid_interval",
     "scheduled_task.not_found",
@@ -1470,6 +1491,7 @@ fn mapping_review_md_exists_and_has_all_variant_names() {
         "OAuthClientError",
         "OAuthConsentError",
         "AccessGrantError",
+        "RoleQueryError",
     ];
     for section in required_sections {
         assert!(

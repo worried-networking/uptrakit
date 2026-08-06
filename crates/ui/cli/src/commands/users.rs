@@ -250,18 +250,16 @@ impl HumanOutput for Vec<RoleResponse> {
         if self.is_empty() {
             return "No roles found.\n".to_string();
         }
-        let mut out = format!(
-            "{:<38} {:<25} {:<10} PERMISSIONS\n",
-            "ID", "NAME", "BUILT-IN"
-        );
+        let mut out = format!("{:<38} {:<25} {:<10} TENANT\n", "ID", "NAME", "BUILT-IN");
         for r in self {
-            let perms: Vec<String> = r.permissions.iter().map(|p| p.to_string()).collect();
             out.push_str(&format!(
                 "{:<38} {:<25} {:<10} {}\n",
                 r.id,
                 r.name,
                 if r.is_built_in { "yes" } else { "no" },
-                perms.join(", ")
+                r.tenant_id
+                    .map(|t| t.to_string())
+                    .unwrap_or_else(|| "(global)".to_string())
             ));
         }
         out
@@ -280,14 +278,12 @@ impl HumanOutput for RoleResponse {
             "Built-in:    {}\n",
             if self.is_built_in { "yes" } else { "no" }
         ));
-        if self.permissions.is_empty() {
-            out.push_str("Permissions: (none)\n");
-        } else {
-            out.push_str("Permissions:\n");
-            for p in &self.permissions {
-                out.push_str(&format!("  - {p}\n"));
-            }
-        }
+        out.push_str(&format!(
+            "Tenant:      {}\n",
+            self.tenant_id
+                .map(|t| t.to_string())
+                .unwrap_or_else(|| "(global)".to_string())
+        ));
         out
     }
 }
@@ -472,7 +468,8 @@ mod tests {
             name: "admin".to_string(),
             description: Some("Full administrator access".to_string()),
             is_built_in: true,
-            permissions: vec![],
+            tenant_id: None,
+            created_at: time::OffsetDateTime::UNIX_EPOCH,
         }
     }
 

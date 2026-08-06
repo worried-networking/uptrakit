@@ -47,6 +47,22 @@ site = "uptrakit_web_api::routes::access_grants::delete_access_grant"
 action = "access_grant.delete"
 
 # ---------------------------------------------------------------------------
+# Roles
+# ---------------------------------------------------------------------------
+
+[[entries]]
+site = "uptrakit_web_api::routes::roles::create_role"
+action = "role.create"
+
+[[entries]]
+site = "uptrakit_web_api::routes::roles::update_role"
+action = "role.update"
+
+[[entries]]
+site = "uptrakit_web_api::routes::roles::delete_role"
+action = "role.delete"
+
+# ---------------------------------------------------------------------------
 # Access presets
 # ---------------------------------------------------------------------------
 

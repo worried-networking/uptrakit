@@ -66,6 +66,9 @@ registration.no_token_configured
 registration.token_required
 registration.verification_failed
 reset_data.database_error
+role.database_error
+role.not_found
+role.unknown_error
 scheduled_task.database_error
 scheduled_task.invalid_interval
 scheduled_task.not_found

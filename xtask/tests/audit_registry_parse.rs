@@ -12,7 +12,7 @@ fn registry_load_finds_known_actions() {
         .get("plugin_config.update")
         .expect("plugin_config.update");
     assert_eq!(pcu.kind, registry::Kind::Stateful);
-    // Total should be 142 actions (139 + 3 access-grant variants:
-    // access_grant.{create,update,delete})
-    assert_eq!(reg.actions.len(), 142);
+    // Total should be 145 actions (142 + 3 role variants:
+    // role.{create,update,delete})
+    assert_eq!(reg.actions.len(), 145);
 }

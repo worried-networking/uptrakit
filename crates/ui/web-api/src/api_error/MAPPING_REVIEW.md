@@ -291,6 +291,18 @@ only, never holder identities or counts.
 
 ---
 
+## RoleQueryError
+
+Serves `/api/v1/roles` create/list/get/update/delete (M1.6a Task 5).
+
+| Variant | Status | Message Strategy | Code |
+| --- | --- | --- | --- |
+| `RoleQueryError::NotFound` | 404 | static | `role.not_found` |
+| `RoleQueryError::Db` | 500 | static | `role.database_error` |
+| non_exhaustive wildcard | 500 | static | `role.unknown_error` |
+
+---
+
 ## Intentional Pre-migration Deltas
 
 | Variant | Old Status | New Status | Rationale |

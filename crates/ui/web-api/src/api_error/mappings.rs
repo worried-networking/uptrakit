@@ -23,6 +23,7 @@ use uptrakit_web_api_queries::queries::{
     plugin_configs::PluginConfigError,
     plugin_type_settings::PluginTypeSettingsError,
     reset_data::ResetDataQueryError,
+    roles::RoleQueryError,
     scheduled_tasks::ScheduledTaskError,
     services::ServiceQueryError,
     software_items::SoftwareItemQueryError,
@@ -1191,6 +1192,40 @@ impl From<Report<AccessGrantError>> for ApiError {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "An internal error occurred.",
                 "access_grant.unknown_error",
+                Some(format_report_summary(&report)),
+            ),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RoleQueryError
+// ---------------------------------------------------------------------------
+
+impl From<Report<RoleQueryError>> for ApiError {
+    fn from(report: Report<RoleQueryError>) -> Self {
+        use RoleQueryError::*;
+        let ctx = report.current_context();
+        match ctx {
+            NotFound => ApiError::new(
+                StatusCode::NOT_FOUND,
+                "Role not found.",
+                "role.not_found",
+                None,
+            ),
+            Db(_) => ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "An internal error occurred.",
+                "role.database_error",
+                Some(format_report_summary(&report)),
+            ),
+            // RoleQueryError is #[non_exhaustive] in uptrakit-web-api-queries, so
+            // this wildcard is required for forward-compatibility and is
+            // genuinely reachable (not dead code) — no #[expect] needed.
+            _ => ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "An internal error occurred.",
+                "role.unknown_error",
                 Some(format_report_summary(&report)),
             ),
         }

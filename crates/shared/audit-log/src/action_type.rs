@@ -143,6 +143,12 @@ impl AuditActionType {
         RegisteredAuditAction::new("access_grant.update", AuditActionKind::Stateful);
     pub const ACCESS_GRANT_DELETE: RegisteredAuditAction =
         RegisteredAuditAction::new("access_grant.delete", AuditActionKind::Stateful);
+    pub const ROLE_CREATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("role.create", AuditActionKind::Stateful);
+    pub const ROLE_UPDATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("role.update", AuditActionKind::Stateful);
+    pub const ROLE_DELETE: RegisteredAuditAction =
+        RegisteredAuditAction::new("role.delete", AuditActionKind::Stateful);
     pub const OIDC_PROVIDER_CREATE: RegisteredAuditAction =
         RegisteredAuditAction::new("oidc_provider.create", AuditActionKind::Stateful);
     pub const OIDC_PROVIDER_UPDATE: RegisteredAuditAction =
@@ -476,6 +482,9 @@ const V1_ACTIONS: &[RegisteredAuditAction] = &[
     AuditActionType::ACCESS_GRANT_CREATE,
     AuditActionType::ACCESS_GRANT_UPDATE,
     AuditActionType::ACCESS_GRANT_DELETE,
+    AuditActionType::ROLE_CREATE,
+    AuditActionType::ROLE_UPDATE,
+    AuditActionType::ROLE_DELETE,
     AuditActionType::OIDC_PROVIDER_CREATE,
     AuditActionType::OIDC_PROVIDER_UPDATE,
     AuditActionType::OIDC_PROVIDER_DELETE,
@@ -748,6 +757,11 @@ uptrakit_audit_log_derive::audit_actions! {
     access_grant_create => ACCESS_GRANT_CREATE, Stateful;
     access_grant_update => ACCESS_GRANT_UPDATE, Stateful;
     access_grant_delete => ACCESS_GRANT_DELETE, Stateful;
+
+    // roles — Stateful
+    role_create => ROLE_CREATE, Stateful;
+    role_update => ROLE_UPDATE, Stateful;
+    role_delete => ROLE_DELETE, Stateful;
 
     // oidc providers — Stateful
     oidc_provider_create => OIDC_PROVIDER_CREATE, Stateful;

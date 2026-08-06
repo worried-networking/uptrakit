@@ -5614,11 +5614,11 @@
         "tags": [
           "Users"
         ],
-        "summary": "List all roles with their permissions",
+        "summary": "List roles for the active tenant plus the global built-ins.",
         "operationId": "list_roles",
         "responses": {
           "200": {
-            "description": "List of roles with permissions",
+            "description": "Global built-ins plus the tenant's custom roles",
             "content": {
               "application/json": {
                 "schema": {
@@ -5639,10 +5639,65 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "access:manage"
+            ]
+          },
+          {
+            "developer_token": []
           }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Users"
         ],
-        "x-required-permission": "manage_users"
+        "summary": "Create a tenant-scoped custom role.",
+        "operationId": "create_role",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRoleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Role created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Not authenticated"
+          },
+          "403": {
+            "description": "Not authorized"
+          },
+          "409": {
+            "description": "role_name_shadows_global: collides with a global built-in name. role_name_taken: collides with another custom role in this tenant."
+          }
+        },
+        "security": [
+          {
+            "oauth2": [
+              "access:manage"
+            ]
+          },
+          {
+            "developer_token": []
+          }
+        ]
       }
     },
     "/api/v1/roles/{id}": {
@@ -5650,13 +5705,13 @@
         "tags": [
           "Users"
         ],
-        "summary": "Get a single role with its permissions",
+        "summary": "Get a single role.",
         "operationId": "get_role",
         "parameters": [
           {
             "name": "id",
             "in": "path",
-            "description": "Role UUID",
+            "description": "Role id",
             "required": true,
             "schema": {
               "type": "string",
@@ -5666,7 +5721,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Role details with permissions",
+            "description": "Role details",
             "content": {
               "application/json": {
                 "schema": {
@@ -5687,10 +5742,127 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": [
+              "access:manage"
+            ]
+          },
+          {
+            "developer_token": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Rename/re-describe an own-tenant custom role. `tenant_id` and\n`is_built_in` are immutable.",
+        "operationId": "update_role",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Role id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
-        "x-required-permission": "manage_users"
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateRoleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Role updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Not authenticated"
+          },
+          "403": {
+            "description": "Not authorized"
+          },
+          "404": {
+            "description": "Role not found"
+          },
+          "409": {
+            "description": "built_in_role_immutable: built-ins cannot be renamed. role_name_shadows_global / role_name_taken: name collision."
+          }
+        },
+        "security": [
+          {
+            "oauth2": [
+              "access:manage"
+            ]
+          },
+          {
+            "developer_token": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Delete an own-tenant custom role, cascading its grants and assignments.",
+        "description": "Cross-instance revocation latency is bounded by the 60 s cache TTL\nbackstop, same as grant deletion.",
+        "operationId": "delete_role",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Role id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Role deleted"
+          },
+          "401": {
+            "description": "Not authenticated"
+          },
+          "403": {
+            "description": "Not authorized. Deleting a role carrying a system-plane grant additionally requires system.access:manage."
+          },
+          "404": {
+            "description": "Role not found"
+          },
+          "409": {
+            "description": "built_in_role_immutable: built-ins cannot be deleted. lockout_access_manage / lockout_system_access: this change would remove the last remaining covering holder."
+          }
+        },
+        "security": [
+          {
+            "oauth2": [
+              "access:manage"
+            ]
+          },
+          {
+            "developer_token": []
+          }
+        ]
       }
     },
     "/api/v1/scheduler/tasks": {
@@ -11672,6 +11844,25 @@
           }
         }
       },
+      "CreateRoleRequest": {
+        "type": "object",
+        "description": "Body for `POST /api/v1/roles`.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "description": "1-64 chars: lowercase alphanumeric plus `-`/`_`, starting with a letter"
+          }
+        }
+      },
       "CreateSoftwareIgnoreRequest": {
         "type": "object",
         "description": "Request body for creating a software ignore rule.",
@@ -16230,14 +16421,18 @@
       },
       "RoleResponse": {
         "type": "object",
-        "description": "A role with its assigned permissions.",
+        "description": "A role — global built-in or tenant-scoped custom.",
         "required": [
           "id",
           "name",
           "is_built_in",
-          "permissions"
+          "created_at"
         ],
         "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
           "description": {
             "type": [
               "string",
@@ -16254,11 +16449,13 @@
           "name": {
             "type": "string"
           },
-          "permissions": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Permission"
-            }
+          "tenant_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "`null` for the global built-ins; the owning tenant for custom roles."
           }
         }
       },
@@ -18423,6 +18620,24 @@
           "last_name": {
             "type": "string",
             "example": "Doe"
+          }
+        }
+      },
+      "UpdateRoleRequest": {
+        "type": "object",
+        "description": "Body for `PUT /api/v1/roles/{id}`.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
           }
         }
       },

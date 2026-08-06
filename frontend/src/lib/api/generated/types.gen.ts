@@ -468,6 +468,17 @@ export type CreatePluginConfigRequest = {
 };
 
 /**
+ * Body for `POST /api/v1/roles`.
+ */
+export type CreateRoleRequest = {
+    description?: string | null;
+    /**
+     * 1-64 chars: lowercase alphanumeric plus `-`/`_`, starting with a letter
+     */
+    name: string;
+};
+
+/**
  * Request body for creating a software ignore rule.
  */
 export type CreateSoftwareIgnoreRequest = {
@@ -2372,14 +2383,18 @@ export type ResetDeletedCounts = {
 };
 
 /**
- * A role with its assigned permissions.
+ * A role — global built-in or tenant-scoped custom.
  */
 export type RoleResponse = {
+    created_at: string;
     description?: string | null;
     id: string;
     is_built_in: boolean;
     name: string;
-    permissions: Array<Permission>;
+    /**
+     * `null` for the global built-ins; the owning tenant for custom roles.
+     */
+    tenant_id?: string | null;
 };
 
 /**
@@ -3427,6 +3442,14 @@ export type UpdatePluginConfigRequest = {
 export type UpdateProfileRequest = {
     first_name: string;
     last_name: string;
+};
+
+/**
+ * Body for `PUT /api/v1/roles/{id}`.
+ */
+export type UpdateRoleRequest = {
+    description?: string | null;
+    name: string;
 };
 
 /**
@@ -7254,18 +7277,93 @@ export type ListRolesErrors = {
 
 export type ListRolesResponses = {
     /**
-     * List of roles with permissions
+     * Global built-ins plus the tenant's custom roles
      */
     200: Array<RoleResponse>;
 };
 
 export type ListRolesResponse = ListRolesResponses[keyof ListRolesResponses];
 
+export type CreateRoleData = {
+    body: CreateRoleRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/roles';
+};
+
+export type CreateRoleErrors = {
+    /**
+     * Validation error
+     */
+    400: unknown;
+    /**
+     * Not authenticated
+     */
+    401: unknown;
+    /**
+     * Not authorized
+     */
+    403: unknown;
+    /**
+     * role_name_shadows_global: collides with a global built-in name. role_name_taken: collides with another custom role in this tenant.
+     */
+    409: unknown;
+};
+
+export type CreateRoleResponses = {
+    /**
+     * Role created
+     */
+    201: RoleResponse;
+};
+
+export type CreateRoleResponse = CreateRoleResponses[keyof CreateRoleResponses];
+
+export type DeleteRoleData = {
+    body?: never;
+    path: {
+        /**
+         * Role id
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/api/v1/roles/{id}';
+};
+
+export type DeleteRoleErrors = {
+    /**
+     * Not authenticated
+     */
+    401: unknown;
+    /**
+     * Not authorized. Deleting a role carrying a system-plane grant additionally requires system.access:manage.
+     */
+    403: unknown;
+    /**
+     * Role not found
+     */
+    404: unknown;
+    /**
+     * built_in_role_immutable: built-ins cannot be deleted. lockout_access_manage / lockout_system_access: this change would remove the last remaining covering holder.
+     */
+    409: unknown;
+};
+
+export type DeleteRoleResponses = {
+    /**
+     * Role deleted
+     */
+    204: void;
+};
+
+export type DeleteRoleResponse = DeleteRoleResponses[keyof DeleteRoleResponses];
+
 export type GetRoleData = {
     body?: never;
     path: {
         /**
-         * Role UUID
+         * Role id
          */
         id: string;
     };
@@ -7290,12 +7388,56 @@ export type GetRoleErrors = {
 
 export type GetRoleResponses = {
     /**
-     * Role details with permissions
+     * Role details
      */
     200: RoleResponse;
 };
 
 export type GetRoleResponse = GetRoleResponses[keyof GetRoleResponses];
+
+export type UpdateRoleData = {
+    body: UpdateRoleRequest;
+    path: {
+        /**
+         * Role id
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/api/v1/roles/{id}';
+};
+
+export type UpdateRoleErrors = {
+    /**
+     * Validation error
+     */
+    400: unknown;
+    /**
+     * Not authenticated
+     */
+    401: unknown;
+    /**
+     * Not authorized
+     */
+    403: unknown;
+    /**
+     * Role not found
+     */
+    404: unknown;
+    /**
+     * built_in_role_immutable: built-ins cannot be renamed. role_name_shadows_global / role_name_taken: name collision.
+     */
+    409: unknown;
+};
+
+export type UpdateRoleResponses = {
+    /**
+     * Role updated
+     */
+    200: RoleResponse;
+};
+
+export type UpdateRoleResponse = UpdateRoleResponses[keyof UpdateRoleResponses];
 
 export type ListScheduledTasksData = {
     body?: never;

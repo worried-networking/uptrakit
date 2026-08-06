@@ -46,6 +46,29 @@ pub enum RoleNameCollision {
     Tenant,
 }
 
+/// A snapshot of a role entity for audit purposes.
+#[derive(uptrakit_audit_log::AuditView)]
+#[audit(target_type = "role")]
+pub struct RoleView {
+    pub id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub is_built_in: bool,
+    pub tenant_id: Option<Uuid>,
+}
+
+impl From<&role::Model> for RoleView {
+    fn from(m: &role::Model) -> Self {
+        Self {
+            id: m.id,
+            name: m.name.clone(),
+            description: m.description.clone(),
+            is_built_in: m.is_built_in,
+            tenant_id: m.tenant_id,
+        }
+    }
+}
+
 fn scope_condition(tenant_id: Uuid) -> Condition {
     Condition::any()
         .add(role::Column::TenantId.is_null())
