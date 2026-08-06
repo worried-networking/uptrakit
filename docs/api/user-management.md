@@ -1,7 +1,8 @@
 # User Management API
 
-All user management endpoints require the `ManageUsers` permission. They are global
-(not tenant-scoped).
+User lifecycle endpoints (list, read, activate/deactivate) require the `users:manage` action.
+Role assignment and role CRUD require `access:manage` — see
+[Access Management](access-management.md). Both families are global (not tenant-scoped).
 
 See [Authentication and Authorization](../security/auth-and-authorization.md) for the full
 permission model, built-in roles, and access presets.
@@ -58,7 +59,9 @@ Get a single user with their roles and resolved permissions.
 ### `PUT /api/v1/users/{id}/roles`
 
 Replace all role assignments for a user. The previous assignments are removed and the
-provided role IDs are assigned.
+provided role IDs are assigned. Unlike the other endpoints on this page, this one gates
+on `access:manage`, not `users:manage` -- see [Access Management API](access-management.md)
+for the full grant/role/assignment gate reference and the M1.6a permission split.
 
 **Path parameters**: `id` -- user UUID.
 
@@ -75,8 +78,10 @@ provided role IDs are assigned.
 - `role_ids` must not be empty (at least one role required).
 - `role_ids` must contain at most 20 entries.
 
-**Lockout prevention**: if this change would remove `manage_users` from the last user who
-has it, the request is rejected with `409 Conflict`.
+**Lockout prevention**: if this change would remove the last remaining `access:manage` or
+`system.access:manage` holder, the request is rejected with `409 Conflict` (reason codes
+`lockout_access_manage` / `lockout_system_access` -- see
+[Access Management API](access-management.md#lockout-409-semantics)).
 
 **Response** (`200`): `UserWithRolesResponse` with updated roles and permissions.
 
@@ -94,8 +99,10 @@ Activate or deactivate a user account.
 }
 ```
 
-**Lockout prevention**: deactivating the last user with `manage_users` is rejected with
-`409 Conflict`.
+**Lockout prevention**: deactivating the last remaining `access:manage` or
+`system.access:manage` holder is rejected with `409 Conflict` (reason codes
+`lockout_access_manage` / `lockout_system_access` -- see
+[Access Management API](access-management.md#lockout-409-semantics)).
 
 **Response** (`200`): `UserWithRolesResponse`.
 
@@ -130,19 +137,24 @@ List all available permissions.
 
 ## Role endpoints
 
+Role CRUD (`GET`/`POST`/`PUT`/`DELETE`) gates on `access:manage`, not `users:manage` --
+see [Access Management API](access-management.md#role-endpoints) for the full reference.
+
 ### `GET /api/v1/roles`
 
-List all roles with their permissions.
+List all roles for the active tenant plus the global built-ins.
 
-**Response** (`200`): array of role objects with permissions.
+**Response** (`200`): array of role objects. `RoleResponse` no longer carries a
+`permissions` field -- a role's effective grants are visible via
+`GET /api/v1/access/grants?subject_type=role&subject_id={role_id}`.
 
 ### `GET /api/v1/roles/{id}`
 
-Get a single role with its permissions.
+Get a single role.
 
 **Path parameters**: `id` -- role UUID.
 
-**Response** (`200`): role object with permissions.
+**Response** (`200`): role object (no `permissions` field; see above).
 
 ## Access preset endpoints
 
@@ -202,10 +214,13 @@ List all access presets with their role compositions.
 
 | File                                                | Purpose                                                                                            |
 | --------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `crates/ui/web-api/src/routes/users.rs`             | User and role route handlers                                                                       |
-| `crates/ui/web-api/src/routes/access_presets.rs`    | Preset route handlers                                                                              |
+| `crates/ui/web-api/src/routes/users.rs`             | User lifecycle handlers (`CanManageUsers`) and role assignment (`CanManageAccess`)                 |
+| `crates/ui/web-api/src/routes/roles.rs`             | Role CRUD handlers (`CanManageAccess`) -- see [Access Management API](access-management.md)        |
+| `crates/ui/web-api/src/routes/access_presets.rs`    | Preset route handlers (legacy `CanManageUsers`, interim until M1.6b)                               |
+| `crates/ui/web-api/src/middleware/action.rs`        | `CanManageUsers`, `CanManageAccess` typed extractors                                               |
 | `crates/shared/web-api-types/src/users.rs`          | `UserWithRolesResponse`, `UpdateUserRolesRequest`, `UpdateUserActiveRequest`, `ApplyPresetRequest` |
+| `crates/shared/web-api-types/src/roles.rs`          | `RoleResponse`, `CreateRoleRequest`, `UpdateRoleRequest`                                           |
 | `crates/shared/web-api-types/src/access_presets.rs` | `AccessPresetResponse`                                                                             |
-| `crates/shared/types/src/permissions.rs`            | `Permission` enum (32 variants)                                                                    |
+| `crates/shared/types/src/permissions.rs`            | `Permission` enum (legacy permission model backing `access_presets.rs`)                            |
 | `crates/shared/types/src/access_preset.rs`          | `AccessPreset` enum (5 variants)                                                                   |
 | `crates/ui/web-api/src/middleware/permission.rs`    | `CanManageUsers` extractor                                                                         |

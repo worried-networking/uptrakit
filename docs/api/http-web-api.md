@@ -19,9 +19,8 @@ Types are imported via `uptrakit_openapi_client::types::*` (re-exported from `up
 - Route handlers enforce permissions via typed Axum extractors. Converted operations (`CanReadHosts`, and the rest of
   `crates/ui/web-api/src/middleware/action.rs`) declare a native `oauth2`/`developer_token` OpenAPI security
   requirement. The `x-required-permission` extension survives only on the legacy `permission_extractor!` operations
-  (`crates/ui/web-api/src/middleware/permission.rs`) in `users.rs`, `roles.rs`, and `access_presets.rs`, until
-  M1.6a/M1.6b converts them. See [Authentication and Authorization](../security/auth-and-authorization.md) for the
-  full permission model.
+  (`crates/ui/web-api/src/middleware/permission.rs`) in `access_presets.rs`, until M1.6b converts it. See
+  [Authentication and Authorization](../security/auth-and-authorization.md) for the full permission model.
 
 ## Error Response Shape
 
@@ -654,17 +653,33 @@ Host tags provide user-defined labels for organizing hosts within a tenant. See
 
 ## User Management Endpoints
 
-User, role, and access preset management. All endpoints require the `ManageUsers` permission.
-See [User Management API](user-management.md) for the full endpoint reference with
+User, role, and access preset management. User lifecycle endpoints require `users:manage`;
+role and role-assignment endpoints require `access:manage`; the preset endpoint remains on
+the legacy `manage_users` permission until M1.6b. See [User Management API](user-management.md)
+and [Access Management API](access-management.md) for the full endpoint reference with
 request/response examples.
 
 - `GET /api/v1/users` -- list users with their assigned roles. Paginated.
 - `GET /api/v1/users/{id}` -- get a single user with roles and resolved permissions.
-- `PUT /api/v1/users/{id}/roles` -- replace a user's role assignments.
+- `PUT /api/v1/users/{id}/roles` -- replace a user's role assignments. Requires `access:manage`.
 - `PUT /api/v1/users/{id}/active` -- activate or deactivate a user.
 - `GET /api/v1/permissions` -- list all available permissions.
-- `GET /api/v1/roles` -- list all roles with their permissions.
-- `GET /api/v1/roles/{id}` -- get a single role with its permissions.
+- `GET /api/v1/roles` -- list all roles for the active tenant plus the global built-ins.
+  Requires `access:manage`.
+- `GET /api/v1/roles/{id}` -- get a single role. Requires `access:manage`.
+- `POST /api/v1/roles` -- create a tenant-scoped custom role. Requires `access:manage`.
+- `PUT /api/v1/roles/{id}` -- rename/re-describe a custom role; built-ins are immutable.
+  Requires `access:manage`.
+- `DELETE /api/v1/roles/{id}` -- delete a custom role, cascading its grants and assignments.
+  Requires `access:manage`.
+- `POST /api/v1/access/grants` -- create an access grant for a user or role. Requires
+  `access:manage`.
+- `GET /api/v1/access/grants` -- list access grants, optionally filtered by subject. Requires
+  `access:manage`.
+- `GET /api/v1/access/grants/{id}` -- get a single access grant. Requires `access:manage`.
+- `PUT /api/v1/access/grants/{id}` -- replace a grant's patterns and description. Requires
+  `access:manage`.
+- `DELETE /api/v1/access/grants/{id}` -- delete an access grant. Requires `access:manage`.
 - `GET /api/v1/access-presets` -- list all access presets with their role compositions.
 - `POST /api/v1/users/{id}/apply-preset` -- apply an access preset to a user.
 
