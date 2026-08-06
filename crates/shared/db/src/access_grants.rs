@@ -654,13 +654,14 @@ struct Assignment {
 /// sole `access:manage`/`system.access:manage` covering holder is skipped,
 /// not applied (`RoleSyncOutcome::SkippedLockout` in that module), and the
 /// login proceeds with the pre-sync role set. Do not over-claim this closes
-/// the whole gap: the sync's five fail-open early returns (no
+/// the whole gap: the sync's six fail-open early returns (no
 /// `role_claim_path` configured, empty `role_mapping`, claim path missing
-/// from the token, an unmapped claim value, or the mapped set resolving to
-/// zero local roles) still leave the user's existing roles untouched with
-/// no signal — an IdP-side de-provisioning that simply stops sending the
-/// covering claim never reaches this guard at all. That de-provisioning
-/// drift stays an open, named gap.
+/// from the token, a claim value that is neither an array nor a string, an
+/// unmapped claim value, or the mapped set resolving to zero local roles)
+/// still leave the user's existing roles untouched with no signal — an
+/// IdP-side de-provisioning that simply stops sending the covering claim
+/// never reaches this guard at all. That de-provisioning drift stays an
+/// open, named gap.
 ///
 /// Serialization: one `SELECT … FOR UPDATE` on the DEFAULT tenant's
 /// `tenants` row — a single global sentinel for both planes (role-subject

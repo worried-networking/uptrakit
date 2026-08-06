@@ -69,8 +69,13 @@ NULL` via a database CHECK constraint. Tokens with `auth_method = "oidc"` but
   rejected with `OidcUserResolution::EmailNotVerified`. Providers that omit the claim
   for confirmed accounts must be configured to always include `email_verified: true`.
 - **Role mapping fully replaces roles on login.** `sync_oidc_roles()` deletes all
-  existing `user_roles` and inserts the mapped roles on every OIDC login. A
-  compromised provider can escalate or de-escalate any user's roles silently.
+  existing `user_roles` and inserts the mapped roles on every OIDC login. Escalation
+  and non-covering de-escalation are still applied silently. De-escalation that would
+  strip the sole `access:manage`/`system.access:manage` covering holder is bounded
+  (skipped by the lockout guard, not applied) and no longer silent (a
+  `user_role.sync_lockout_prevented` audit Event is emitted) -- but a compromised
+  provider can still freely escalate any user, or de-escalate any non-covering role,
+  without a trace.
 - **Auto-create enables mass provisioning.** When `auto_create_users` is enabled, the
   compromised provider can create unlimited accounts. There is no per-provider account
   creation rate limit.

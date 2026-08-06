@@ -183,13 +183,26 @@ already holds 200 grants returns `409` with reason code `too_many_grants`.
 
 ### Known gap: OIDC role sync
 
-The guard covers the API surface only. OIDC login replaces a linked user's entire role set
-from the identity provider's claim mapping on every sign-in, and that path runs neither the
-lockout guard nor cache invalidation. A claim mapping that stops resolving to a covering
-role therefore removes the last `access:manage` holder in a way no endpoint documented here
-would permit, and leaves the downgraded principal on cached authority until the TTL below
-expires. Operators relying on OIDC role mapping should keep at least one local (non-OIDC)
-account holding `access:manage`. Closing this is M1.6b's scope.
+OIDC login replaces a linked user's entire role set from the identity provider's claim
+mapping on every sign-in. That path now runs the same lockout guard as the API surface:
+a mapped replace that would strip the sole `access:manage`/`system.access:manage` covering
+holder is skipped rather than applied, and the login proceeds with the pre-sync role set
+(`RoleSyncOutcome::SkippedLockout`). When the sync does apply, it invalidates the affected
+user's cached authority and publishes `AccessInvalidated` after commit, same as the guarded
+endpoints above -- there is no separate, unguarded cache path anymore.
+
+A skipped sync is otherwise silent to the signed-in user (they simply keep their prior
+roles) -- the only operator-visible signal is the `user_role.sync_lockout_prevented` audit
+Event. Alert on that action if you rely on OIDC role mapping to keep authority current.
+
+The residual gap is de-provisioning drift, not lockout: the sync has several fail-open
+early returns (no `role_claim_path` configured, empty `role_mapping`, claim path missing
+from the token, an unmapped or malformed claim value, or the mapped set resolving to zero
+local roles -- see `crates/shared/db/src/access_grants.rs`) that leave the user's existing
+roles untouched with no signal at all, not even an audit event. An IdP-side de-provisioning
+that simply stops sending the covering claim never reaches the guard or the sync's write
+path -- it silently no-ops. Operators relying on OIDC role mapping should keep at least one
+local (non-OIDC) account holding `access:manage`.
 
 ## Revocation latency
 

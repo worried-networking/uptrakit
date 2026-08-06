@@ -7,7 +7,9 @@ use crate::settings_store::{RawSettings, RawSettingsExt, upsert_setting};
 use rootcause::prelude::*;
 use sea_orm::ConnectionTrait;
 #[cfg(feature = "oidc")]
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set, TransactionTrait};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set, TransactionTrait,
+};
 #[cfg(feature = "oidc")]
 use time::OffsetDateTime;
 #[cfg(feature = "oidc")]
@@ -343,9 +345,12 @@ pub async fn sync_oidc_roles(
         return Ok(RoleSyncOutcome::NoChange);
     }
 
-    // Look up matching local roles
+    // Look up matching local roles. Ordered by name so a lockout denial's
+    // `attempted_role_names` (below) is deterministic rather than depending
+    // on SQLite's unspecified IN-list result order.
     let local_roles = Role::find()
         .filter(role::Column::Name.is_in(local_role_names))
+        .order_by_asc(role::Column::Name)
         .all(txn)
         .await
         .context_to()?;
@@ -426,7 +431,25 @@ pub async fn sync_oidc_roles(
     }
     .await;
     match write_result {
-        Ok(()) => sp.commit().await.context_to()?, // RELEASE
+        Ok(()) => {
+            // RELEASE. `commit()` consumes `sp`; on failure there is no
+            // handle left to explicitly roll back with -- `sp`'s Drop impl
+            // (invoked as `commit()` unwinds) already queues a best-effort
+            // `start_rollback()` internally. That queued rollback is the
+            // same not-a-contract mechanism the comment above warns against
+            // relying on, so make the failure loud rather than letting it
+            // propagate silently: an operator seeing this log line knows
+            // the outer transaction's eventual commit may be carrying
+            // whatever that queued rollback did or didn't flush in time.
+            if let Err(commit_err) = sp.commit().await {
+                tracing::error!(
+                    error = ?commit_err,
+                    "savepoint RELEASE failed after OIDC role-sync write succeeded; \
+                     outer transaction may carry inconsistent role state"
+                );
+                return Err(commit_err).context_to();
+            }
+        }
         Err(e) => {
             // Immediate ROLLBACK TO SAVEPOINT. Never `let _ =` here:
             // let_underscore_must_use is deny at the workspace root, and a

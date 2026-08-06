@@ -1112,7 +1112,6 @@ async fn check_registration_eligibility(
 /// walker's other discovery mechanisms don't see it, so it is marked
 /// explicitly for the catalog's `user_role.sync_lockout_prevented` row.
 #[uptrakit_audit_log::audit_required]
-#[cfg(feature = "oidc")]
 async fn handle_role_sync_outcome(
     state: &AppState,
     user_id: Uuid,
@@ -3842,6 +3841,137 @@ mod audit_tests {
         assert_eq!(
             row.assigned_at, assigned_at_before,
             "no-op sync must not touch the existing row's assigned_at"
+        );
+    }
+
+    /// M1.6a guard test 5: `sync_oidc_roles`'s write phase runs inside a
+    /// SAVEPOINT specifically so a mid-write failure can be rolled back
+    /// without forcing the whole outer (login) transaction to abort —
+    /// see the rustdoc above `sync_oidc_roles`. This pins that atomicity
+    /// guarantee against a regression (e.g. a future swap to relying on
+    /// `DatabaseTransaction`'s Drop-queued rollback instead of the explicit
+    /// `sp.rollback()` call) actually holding.
+    ///
+    /// A same-tenant delete-then-insert-mismatch failure inside the
+    /// savepoint is not reachable via pure data setup: the roles the insert
+    /// loop writes are the exact rows a single batched `SELECT` already
+    /// fetched earlier in the SAME function, on the SAME connection, inside
+    /// the SAME `Immediate`-mode transaction that holds SQLite's write lock
+    /// for its whole duration — nothing can invalidate those ids between the
+    /// fetch and the insert. So the failure here is induced via a `tenant_id`
+    /// that has no row in `tenants` (an FK violation on the `user_roles`
+    /// INSERT), scoped away from the user's real, pre-existing role
+    /// assignment under the real tenant. That still exercises the exact
+    /// `Err(e) => sp.rollback()` branch and proves the two things a
+    /// Drop-based regression would break: no orphaned row survives the
+    /// failed write, and collateral (real-tenant) data is untouched.
+    #[tokio::test]
+    async fn oidc_role_mapping_savepoint_rolls_back_on_write_failure() {
+        let app = TestApp::new().await;
+        let provider_id = insert_active_oidc_provider(
+            &app.db,
+            app.state.default_tenant_id,
+            "Savepoint Rollback",
+            "savepoint-rollback",
+        )
+        .await;
+        {
+            use sea_orm::IntoActiveModel as _;
+            let provider_row = oidc_provider::Entity::find_by_id(provider_id)
+                .one(&app.db)
+                .await
+                .expect("provider query")
+                .expect("provider row");
+            let mut active = provider_row.into_active_model();
+            active.role_claim_path = Set(Some("roles".to_string()));
+            active.role_mapping = Set(oidc_provider::RoleMapping(std::collections::HashMap::from(
+                [("admin".to_string(), "operator".to_string())],
+            )));
+            active.update(&app.db).await.expect("update provider");
+        }
+        let provider = oidc_provider::Entity::find_by_id(provider_id)
+            .one(&app.db)
+            .await
+            .expect("provider query")
+            .expect("provider row");
+
+        let viewer_role_id = Role::find()
+            .filter(role::Column::Name.eq("viewer"))
+            .one(&app.db)
+            .await
+            .expect("role query")
+            .expect("viewer role exists")
+            .id;
+
+        // Set up the user's real, pre-existing role assignment under the
+        // real tenant, in its own committed transaction.
+        let txn = uptrakit_shared_db::access_grants::begin_guarded(&app.db)
+            .await
+            .expect("begin (guarded)");
+        let user_id = insert_txn_user(&txn, "oidc-savepoint@test.local").await;
+        let pre_existing_assigned_at = OffsetDateTime::UNIX_EPOCH + time::Duration::days(1);
+        user_role::ActiveModel {
+            tenant_id: Set(app.state.default_tenant_id),
+            user_id: Set(user_id),
+            role_id: Set(viewer_role_id),
+            assigned_at: Set(pre_existing_assigned_at),
+        }
+        .insert(&txn)
+        .await
+        .expect("pre-assign viewer role under the real tenant");
+        txn.commit().await.expect("commit pre-existing assignment");
+
+        // Sync scoped to a tenant_id with no row in `tenants` -- the
+        // savepoint's write phase gets past the DELETE (matches nothing for
+        // this tenant/user pair) but the INSERT violates the `user_roles.
+        // tenant_id -> tenants.id` foreign key, forcing `write_result` to
+        // Err and driving the explicit `sp.rollback()` branch.
+        let bogus_tenant_id = uuid::Uuid::now_v7();
+        let txn = uptrakit_shared_db::access_grants::begin_guarded(&app.db)
+            .await
+            .expect("begin (guarded)");
+        let claims = serde_json::json!({ "roles": ["admin"] });
+        let sync_result = super::sync_oidc_roles(
+            &txn,
+            bogus_tenant_id,
+            app.state.default_tenant_id,
+            user_id,
+            &provider,
+            &claims,
+        )
+        .await;
+        assert!(
+            sync_result.is_err(),
+            "the FK-violating insert must surface as Err, not silently succeed"
+        );
+        // Mirror the real caller contract (`let _ = sync_oidc_roles(...)`):
+        // a sync error does not abort the outer transaction.
+        txn.commit()
+            .await
+            .expect("outer transaction commit must still succeed after the savepoint rollback");
+
+        let bogus_tenant_rows = UserRole::find()
+            .filter(user_role::Column::TenantId.eq(bogus_tenant_id))
+            .filter(user_role::Column::UserId.eq(user_id))
+            .all(&app.db)
+            .await
+            .expect("bogus-tenant user_role query");
+        assert!(
+            bogus_tenant_rows.is_empty(),
+            "the savepoint rollback must leave no orphaned partial write behind"
+        );
+
+        let real_tenant_row = UserRole::find()
+            .filter(user_role::Column::TenantId.eq(app.state.default_tenant_id))
+            .filter(user_role::Column::UserId.eq(user_id))
+            .one(&app.db)
+            .await
+            .expect("real-tenant user_role query")
+            .expect("the pre-existing role assignment must survive intact");
+        assert_eq!(real_tenant_row.role_id, viewer_role_id);
+        assert_eq!(
+            real_tenant_row.assigned_at, pre_existing_assigned_at,
+            "the pre-existing assignment must be untouched by the failed, unrelated-tenant sync"
         );
     }
 
