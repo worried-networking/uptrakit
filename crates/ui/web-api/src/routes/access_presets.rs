@@ -1,6 +1,6 @@
 //! HTTP handlers for access preset endpoints.
 //!
-//! Presets are code-defined bundles of roles (see [`AccessPreset`]). The list
+//! Presets are code-defined bundles of roles (see [`RoleBundle`]). The list
 //! endpoint returns all available presets; the apply endpoint replaces a user's
 //! roles with the roles from a chosen preset.
 
@@ -14,7 +14,7 @@ use axum::{
 };
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set};
 use time::OffsetDateTime;
-use uptrakit_shared_types::AccessPreset;
+use uptrakit_shared_types::RoleBundle;
 use uuid::Uuid;
 
 use crate::AppState;
@@ -76,7 +76,7 @@ fn emit_user_preset_audit(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_access_presets(CanManageUsers(_user): CanManageUsers) -> Response {
-    let presets: Vec<AccessPresetResponse> = AccessPreset::all()
+    let presets: Vec<AccessPresetResponse> = RoleBundle::all()
         .iter()
         .map(|p| AccessPresetResponse {
             name: p.as_str().to_string(),
@@ -148,7 +148,7 @@ pub async fn apply_preset(
     }
 
     // Parse the preset name.
-    let preset: AccessPreset = match body.preset.parse() {
+    let preset: RoleBundle = match body.preset.parse() {
         Ok(p) => p,
         Err(_) => {
             emit_user_preset_audit(

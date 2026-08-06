@@ -691,7 +691,7 @@ request/response examples.
 | `crates/ui/web-api/src/routes/access_presets.rs`    | Preset route handlers  |
 | `crates/shared/web-api-types/src/users.rs`          | Request/response types |
 | `crates/shared/web-api-types/src/access_presets.rs` | Preset response types  |
-| `crates/shared/types/src/access_preset.rs`          | `AccessPreset` enum    |
+| `crates/shared/types/src/role_bundle.rs`            | `RoleBundle` enum      |
 
 ## System Services Endpoints
 

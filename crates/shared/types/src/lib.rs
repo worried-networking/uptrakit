@@ -1,6 +1,6 @@
 pub mod access;
-mod access_preset;
 pub mod package_identifier;
+mod role_bundle;
 pub use package_identifier::PackageIdentifierRules;
 mod batch_status;
 pub mod command_validation;
@@ -31,7 +31,6 @@ pub mod ssrf;
 mod update_category;
 mod update_status;
 
-pub use access_preset::{AccessPreset, ParseAccessPresetError};
 pub use batch_status::{BatchStatus, ParseBatchStatusError};
 pub use config_test_kind::ConfigTestKind;
 pub use device_auth_status::{DeviceAuthStatus, ParseDeviceAuthStatusError};
@@ -49,6 +48,7 @@ pub use plugin_role::{ParsePluginRoleError, PluginRole};
 pub use plugin_type_id::{PluginTypeId, notification_plugin_type, plugin_ids};
 pub use provider_validation::{ProviderValidationError, validate_provider_api_base_url};
 pub use release_types::{AttestationStatus, ReleaseAsset, ReleaseInfo};
+pub use role_bundle::{ParseAccessPresetError, RoleBundle};
 pub use secret_string::SecretString;
 pub use service_status::{ParseServiceStatusError, ServiceStatus};
 pub use session_token_type::{ParseSessionTokenTypeError, SessionTokenType};

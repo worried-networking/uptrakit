@@ -222,5 +222,5 @@ List all access presets with their role compositions.
 | `crates/shared/web-api-types/src/roles.rs`          | `RoleResponse`, `CreateRoleRequest`, `UpdateRoleRequest`                                           |
 | `crates/shared/web-api-types/src/access_presets.rs` | `AccessPresetResponse`                                                                             |
 | `crates/shared/types/src/permissions.rs`            | `Permission` enum (legacy permission model backing `access_presets.rs`)                            |
-| `crates/shared/types/src/access_preset.rs`          | `AccessPreset` enum (5 variants)                                                                   |
+| `crates/shared/types/src/role_bundle.rs`            | `RoleBundle` enum (5 variants)                                                                     |
 | `crates/ui/web-api/src/middleware/permission.rs`    | `CanManageUsers` extractor                                                                         |

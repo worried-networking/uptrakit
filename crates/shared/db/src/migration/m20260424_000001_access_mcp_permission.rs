@@ -11,7 +11,7 @@ use uuid::Uuid;
 /// - `operator`: granted (holds `trigger_updates`)
 ///   NOTE: `operator` lacks `view_software`, so it can call `trigger_update`
 ///   via MCP but will receive 403 on all history tools. In practice,
-///   `AccessPreset::Operator` always bundles `viewer` + `operator`.
+///   `RoleBundle::Operator` always bundles `viewer` + `operator`.
 /// - `software_manager`: granted (holds `trigger_updates`; lacks `view_software`)
 /// - `settings_manager`: NOT granted (lacks both)
 ///

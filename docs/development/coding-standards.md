@@ -199,7 +199,7 @@ Enums currently annotated with `#[non_exhaustive]`:
 - `BatchStatus`
 - `UpdateStatus`
 - `Permission`
-- `AccessPreset`
+- `RoleBundle`
 
 **`uptrakit-wire`:**
 
