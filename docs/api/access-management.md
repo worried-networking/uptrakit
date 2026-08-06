@@ -148,7 +148,9 @@ action catalog, the code-defined role bundles, and the available scope presets. 
 grants (empty-scoped in `scope-map.golden.json`, i.e. `authenticated-only`), since the
 response is read-only vocabulary, not tenant data. The live `surface.*` disclosure this
 implies (every registered surface's `use` action, regardless of the caller's own access to
-that surface) is an accepted v1 reconnaissance surface.
+that surface) is an accepted v1 reconnaissance surface -- `dynamic_actions()` is tenant- and
+visibility-blind by trait shape (see `crates/ui/web-api/src/surface_action_registry.rs`), so
+a surface id registered by one tenant is visible to any authenticated user of any tenant.
 
 The response has three sections:
 

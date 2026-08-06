@@ -376,6 +376,7 @@
           "Access"
         ],
         "summary": "Get the access catalog",
+        "description": "Actions (built-in + live dynamic) with selector support, advisory role\nbundles, and advisory scope presets.",
         "operationId": "get_access_catalog",
         "responses": {
           "200": {
@@ -10938,19 +10939,22 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/CatalogResourceEntry"
-            }
+            },
+            "description": "Actions grouped by resource — built-in catalog plus live-registered\ndynamic (`surface.*`) entries."
           },
           "role_bundles": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/RoleBundleEntry"
-            }
+            },
+            "description": "Advisory role bundles (the demoted access-preset tiers); applied by\nclients via standard role assignment."
           },
           "scope_presets": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ScopePresetEntry"
-            }
+            },
+            "description": "Advisory scope presets for token-creation UX (consumed in M4.2)."
           }
         }
       },
@@ -11577,6 +11581,7 @@
       },
       "CatalogActionEntry": {
         "type": "object",
+        "description": "One valid action with its catalog metadata.",
         "required": [
           "action",
           "verb",
@@ -11585,7 +11590,8 @@
         ],
         "properties": {
           "action": {
-            "type": "string"
+            "type": "string",
+            "description": "The action string, e.g. `hosts:read`."
           },
           "description": {
             "type": "string"
@@ -11594,12 +11600,14 @@
             "$ref": "#/components/schemas/SelectorSupport"
           },
           "verb": {
-            "type": "string"
+            "type": "string",
+            "description": "The verb, e.g. `read`."
           }
         }
       },
       "CatalogResourceEntry": {
         "type": "object",
+        "description": "One resource and its valid actions.",
         "required": [
           "resource",
           "actions"
@@ -11612,7 +11620,8 @@
             }
           },
           "resource": {
-            "type": "string"
+            "type": "string",
+            "description": "Resource path, e.g. `hosts`, `settings.auth`, `surface.proxmox.hosts`."
           }
         }
       },
@@ -16567,6 +16576,7 @@
       },
       "RoleBundleEntry": {
         "type": "object",
+        "description": "One advisory role bundle: tier name, description, seed-role names.",
         "required": [
           "name",
           "description",
@@ -16702,6 +16712,7 @@
       },
       "ScopePresetEntry": {
         "type": "object",
+        "description": "One advisory scope preset.",
         "required": [
           "name",
           "description",
@@ -16715,7 +16726,8 @@
             ],
             "items": {
               "type": "string"
-            }
+            },
+            "description": "Present when `kind` is `static`; absent for `caller_actions`;\nunspecified for unknown kinds."
           },
           "description": {
             "type": "string"

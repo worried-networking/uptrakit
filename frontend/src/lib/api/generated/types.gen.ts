@@ -8,8 +8,19 @@ export type ClientOptions = {
  * The full access catalog: three code-defined sections, one endpoint.
  */
 export type AccessCatalogResponse = {
+    /**
+     * Actions grouped by resource — built-in catalog plus live-registered
+     * dynamic (`surface.*`) entries.
+     */
     resources: Array<CatalogResourceEntry>;
+    /**
+     * Advisory role bundles (the demoted access-preset tiers); applied by
+     * clients via standard role assignment.
+     */
     role_bundles: Array<RoleBundleEntry>;
+    /**
+     * Advisory scope presets for token-creation UX (consumed in M4.2).
+     */
     scope_presets: Array<ScopePresetEntry>;
 };
 
@@ -315,15 +326,30 @@ export type BatchUpdateResponse = {
     updates: Array<BatchUpdateItem>;
 };
 
+/**
+ * One valid action with its catalog metadata.
+ */
 export type CatalogActionEntry = {
+    /**
+     * The action string, e.g. `hosts:read`.
+     */
     action: string;
     description: string;
     selector_support: SelectorSupport;
+    /**
+     * The verb, e.g. `read`.
+     */
     verb: string;
 };
 
+/**
+ * One resource and its valid actions.
+ */
 export type CatalogResourceEntry = {
     actions: Array<CatalogActionEntry>;
+    /**
+     * Resource path, e.g. `hosts`, `settings.auth`, `surface.proxmox.hosts`.
+     */
     resource: string;
 };
 
@@ -2403,6 +2429,9 @@ export type ResetDeletedCounts = {
     update_history: number;
 };
 
+/**
+ * One advisory role bundle: tier name, description, seed-role names.
+ */
 export type RoleBundleEntry = {
     description: string;
     name: string;
@@ -2444,7 +2473,14 @@ export type ScheduledTaskResponse = {
     updated_at: string;
 };
 
+/**
+ * One advisory scope preset.
+ */
 export type ScopePresetEntry = {
+    /**
+     * Present when `kind` is `static`; absent for `caller_actions`;
+     * unspecified for unknown kinds.
+     */
     actions?: Array<string> | null;
     description: string;
     kind: ScopePresetKind;

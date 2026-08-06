@@ -39,6 +39,9 @@ const ALL_READS_ACTIONS: &[&str] = &[
 const ALL_READS_EXCLUDED: &[&str] = &[];
 
 /// Get the access catalog
+///
+/// Actions (built-in + live dynamic) with selector support, advisory role
+/// bundles, and advisory scope presets.
 #[utoipa::path(
     get,
     path = "/api/v1/access/catalog",
@@ -71,6 +74,9 @@ pub async fn get_access_catalog(
         })
         .collect();
 
+    // Live dynamic actions (surface.*), grouped per resource. Served via
+    // the engine so the catalog can never advertise an action the engine
+    // denies (spec §2).
     for action in access.0.dynamic_actions() {
         let entry = CatalogActionEntry {
             action: action.to_string(),

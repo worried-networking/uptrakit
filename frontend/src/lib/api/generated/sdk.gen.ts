@@ -166,6 +166,9 @@ export const listAccessPresets = <ThrowOnError extends boolean = true>(options?:
 
 /**
  * Get the access catalog
+ *
+ * Actions (built-in + live dynamic) with selector support, advisory role
+ * bundles, and advisory scope presets.
  */
 export const getAccessCatalog = <ThrowOnError extends boolean = true>(options?: Options<GetAccessCatalogData, ThrowOnError>): RequestResult<GetAccessCatalogResponses, GetAccessCatalogErrors, ThrowOnError> => (options?.client ?? client).get<GetAccessCatalogResponses, GetAccessCatalogErrors, ThrowOnError>({
     security: [{

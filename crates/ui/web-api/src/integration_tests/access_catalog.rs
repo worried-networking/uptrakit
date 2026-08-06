@@ -178,9 +178,10 @@ async fn catalog_shape_pins_builtins_bundles_and_presets() {
         .flat_map(|r| r.actions.iter())
         .map(|a| a.action.clone())
         .collect();
-    assert!(
-        expected_actions.is_subset(&actual_actions),
-        "every built-in CATALOG action must appear in the response"
+    assert_eq!(
+        expected_actions, actual_actions,
+        "no surfaces are registered in this test, so the response's action set must equal \
+         CATALOG's exactly — a subset check would miss a spurious extra"
     );
 
     // Role bundles: 5 entries; `owner`'s roles pinned to a hardcoded literal
