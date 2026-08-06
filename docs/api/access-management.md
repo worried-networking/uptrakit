@@ -197,7 +197,10 @@ Event. Alert on that action if you rely on OIDC role mapping to keep authority c
 That Event is the only audit signal the sync ever emits: a sync that _fails_ (a database
 error, or a guard evaluation that cannot resolve the default-tenant sentinel) is logged at
 `error` -- as is a link-path transaction that cannot be opened -- and then treated by every
-call site as "no change", with no audit row at all. A
+call site as "no change", with no audit row at all. A link-path transaction that opens but
+fails to commit is the one partial case: the write never landed, so an applied sync
+degrades to "no change" (no invalidation, no publish), while a lockout denial -- which
+wrote nothing either way -- still emits its Event. A
 persistently failing guard therefore looks identical to a login whose roles simply did not
 need updating -- watch the controller log, not just the audit trail.
 

@@ -165,9 +165,10 @@ whose resolved authority covers `access:manage` @ `All` in the affected tenant s
 nor zero active users whose global authority covers `system.access:manage` (global plane, E6).
 
 **Guarded (shrinking) mutations**: grant update, grant delete, role delete, `update_user_roles`
-(always, post-state), `update_user_active` when deactivating, OIDC role sync (only when the
-post-state role set does not cover the pre-state set — a pure-add or no-op sync skips the guard and
-takes **no lock**, keeping the login path lock-free in the common case). **Every guarded mutation
+(always, post-state), `update_user_active` when deactivating, OIDC role sync (whenever the
+post-state role set differs from the pre-state set — only an exact no-op sync skips the guard and
+takes **no lock**, keeping the common login path lock-free; see the OIDC section below for why the
+pure-add exemption was dropped). **Every guarded mutation
 evaluates both planes** — grant delete/update and role delete can drop the last system-plane holder
 just as deactivation can; the pre-filter is cheap at this scale.
 **Skipped (adding-only)**: grant create, role create, role rename/description update, user activation —
@@ -236,9 +237,14 @@ trimmed to the capabilities that exist (activate/deactivate, lifecycle reads).
 guard bypass: an IdP group change could strip the last `access:manage` holder at next login, with no
 recovery path. Decision: **guard the sync**.
 
-- The sync runs the same post-state check on its transaction **only when the post-state role set
-  does not cover the pre-state set** — a pure-add or no-op sync (the overwhelmingly common login)
-  takes no guard, no sentinel lock, and stays lock-free. On violation the sync **keeps the existing
+- The sync runs the same post-state check on its transaction **whenever the post-state role set
+  differs from the pre-state set**; only an exact-match (no-op) sync — the overwhelmingly common
+  login — takes no guard, no sentinel lock, and stays lock-free. (An earlier draft of this bullet
+  also exempted pure-add syncs. That shortcut was dropped during implementation: deciding
+  whether-to-lock from a read taken _before_ the sentinel lock is an unguarded-shrink hole the
+  moment the serialization property is the deployment's rather than the code's. A pure-add set
+  now reaches the guard, which re-reads authority state under the lock and returns `Permitted`.)
+  On violation the sync **keeps the existing
   assignment unchanged**, lets the login complete, and an audit **Event**
   (`user_role.sync_lockout_prevented`) is emitted naming the provider and the attempted role set —
   the login never fails.

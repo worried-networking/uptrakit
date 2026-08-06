@@ -1199,7 +1199,7 @@ async fn handle_linked_user(
             // error!, not warn!: a persistent guard/savepoint failure (e.g.
             // sentinel missing) means roles silently never sync on any
             // login — this line is the only operator signal.
-            tracing::error!("OIDC role sync failed (login continues): {e:?}");
+            tracing::error!(error = ?e, "OIDC role sync failed (login continues)");
             RoleSyncOutcome::NoChange
         }
     };
@@ -1263,7 +1263,7 @@ async fn handle_new_user(
             // error!, not warn!: a persistent guard/savepoint failure (e.g.
             // sentinel missing) means roles silently never sync on any
             // login — this line is the only operator signal.
-            tracing::error!("OIDC role sync failed (login continues): {e:?}");
+            tracing::error!(error = ?e, "OIDC role sync failed (login continues)");
             RoleSyncOutcome::NoChange
         }
     };
@@ -1755,7 +1755,7 @@ pub async fn oidc_complete_registration(
                 // error!, not warn!: a persistent guard/savepoint failure
                 // (e.g. sentinel missing) means roles silently never sync on
                 // any login — this line is the only operator signal.
-                tracing::error!("OIDC role sync failed (registration continues): {e:?}");
+                tracing::error!(error = ?e, "OIDC role sync failed (registration continues)");
                 RoleSyncOutcome::NoChange
             }
         };
@@ -2015,24 +2015,34 @@ pub async fn oidc_link(
                 {
                     Ok(outcome) => outcome,
                     Err(e) => {
-                        tracing::error!("OIDC role sync failed (link continues): {e:?}");
+                        tracing::error!(error = ?e, "OIDC role sync failed (link continues)");
                         RoleSyncOutcome::NoChange
                     }
                 };
-                match txn.commit().await {
-                    Ok(()) => {
-                        handle_role_sync_outcome(
-                            &state,
-                            pending.user_id,
-                            provider.name.as_str(),
-                            sync_outcome,
-                        )
-                        .await;
-                    }
+                // The outcome handler runs whatever the commit did. A commit
+                // failure only invalidates the WRITE, so `Applied` degrades to
+                // `NoChange` (nothing landed -- do not invalidate or publish
+                // for it). A lockout denial performed no write at all: its
+                // Event is the operator's only signal that an IdP group change
+                // tried to strip the last holder, so it must survive.
+                let sync_outcome = match txn.commit().await {
+                    Ok(()) => sync_outcome,
                     Err(e) => {
                         tracing::error!(error = %e, "failed to commit OIDC role-sync transaction during link");
+                        match sync_outcome {
+                            RoleSyncOutcome::Applied => RoleSyncOutcome::NoChange,
+                            outcome @ (RoleSyncOutcome::SkippedLockout { .. }
+                            | RoleSyncOutcome::NoChange) => outcome,
+                        }
                     }
-                }
+                };
+                handle_role_sync_outcome(
+                    &state,
+                    pending.user_id,
+                    provider.name.as_str(),
+                    sync_outcome,
+                )
+                .await;
             }
             Err(e) => {
                 tracing::error!(error = ?e, "failed to open guarded transaction for OIDC role sync during link");

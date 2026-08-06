@@ -116,6 +116,11 @@ pub enum AuthError {
     EmailDeliveryUnavailable,
 
     /// Lockout-guard failure during OIDC role sync.
+    ///
+    /// No `#[from]`: conversions route through `.context_to()` via the
+    /// `impl_report_conversion!` below, and error-handling.md bans carrying
+    /// both (the derived `From` impl would be dead code) — same rule the
+    /// source type's own `AccessGrantError::Db` variant follows.
     #[error("access guard error: {0}")]
     AccessGuard(uptrakit_shared_db::access_grants::AccessGrantError),
 }

@@ -2395,10 +2395,14 @@ mod tests {
 
         let phase1_user = register_user(&state, &db, "viewer-shadow-phase1@example.com").await;
         let phase1_roles = assigned_role_ids(&db, state.default_tenant_id, phase1_user.id).await;
+        // `is_empty`, not `!contains(shadow)`: with the global row renamed
+        // away the scoped lookup finds nothing and assigns nothing, so the
+        // weaker form would pass vacuously and stay green if the filter were
+        // reverted to also match tenant rows on an empty result.
         assert!(
-            !phase1_roles.contains(&shadow_role_id),
-            "assign_viewer_role must never assign the tenant shadow role, \
-             even when it is the only name match"
+            phase1_roles.is_empty(),
+            "assign_viewer_role must assign no role at all when only the tenant \
+             shadow matches the name; got {phase1_roles:?} (shadow: {shadow_role_id})"
         );
 
         // Phase 2: restore the global row and re-drive with both rows
@@ -2488,27 +2492,33 @@ mod tests {
                 // Pre-fix: the unscoped lookup found and assigned the
                 // tenant shadow instead of erroring — this is the RED case.
                 txn1.commit().await.expect("commit phase 1");
-                let assigned = user_role::Entity::find()
-                    .filter(user_role::Column::TenantId.eq(state.default_tenant_id))
-                    .filter(user_role::Column::UserId.eq(user_id))
-                    .filter(user_role::Column::RoleId.eq(shadow_role_id))
-                    .one(&db)
-                    .await
-                    .expect("query user_role");
-                assert!(
-                    assigned.is_none(),
-                    "assign_owner_roles must never assign the tenant shadow role, \
-                     even when it is the only name match"
-                );
             }
             Err(_) => {
                 // Post-fix: the scoped query finds no global row (it was
                 // renamed away) and errors instead of falling back to the
-                // shadow — drop the txn so the partial writes for the other
-                // seven roles roll back.
-                drop(txn1);
+                // shadow. Roll back EXPLICITLY so the partial writes for the
+                // other roles are gone before phase 2 reads: `drop` alone only
+                // QUEUES the rollback (see the savepoint note on
+                // `sync_oidc_roles`), which is not a contract to assert on.
+                txn1.rollback().await.expect("rollback phase 1");
             }
         }
+
+        // Asserted outside the match so it pins BOTH outcomes: whether the
+        // call errors or succeeds, the tenant shadow must never end up
+        // assigned, even when it is the only name match.
+        let shadow_assigned = user_role::Entity::find()
+            .filter(user_role::Column::TenantId.eq(state.default_tenant_id))
+            .filter(user_role::Column::UserId.eq(user_id))
+            .filter(user_role::Column::RoleId.eq(shadow_role_id))
+            .one(&db)
+            .await
+            .expect("query user_role");
+        assert!(
+            shadow_assigned.is_none(),
+            "assign_owner_roles must never assign the tenant shadow role, \
+             even when it is the only name match"
+        );
 
         // Phase 2: restore the global row and re-drive with both rows
         // present — the durable regression pin.

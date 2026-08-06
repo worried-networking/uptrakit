@@ -395,10 +395,16 @@ pub async fn sync_oidc_roles(
     )
     .await
     .context_to()?;
-    if verdict != uptrakit_shared_db::access_grants::LockoutVerdict::Permitted {
-        return Ok(RoleSyncOutcome::SkippedLockout {
-            attempted_role_names: local_roles.iter().map(|r| r.name.clone()).collect(),
-        });
+    // Exhaustive, no wildcard: a future verdict variant must be classified
+    // here deliberately rather than silently falling into "denied".
+    match verdict {
+        uptrakit_shared_db::access_grants::LockoutVerdict::Permitted => {}
+        uptrakit_shared_db::access_grants::LockoutVerdict::TenantLockout
+        | uptrakit_shared_db::access_grants::LockoutVerdict::SystemLockout => {
+            return Ok(RoleSyncOutcome::SkippedLockout {
+                attempted_role_names: local_roles.iter().map(|r| r.name.clone()).collect(),
+            });
+        }
     }
 
     // Write phase inside a savepoint: a mid-write failure must not leave a
