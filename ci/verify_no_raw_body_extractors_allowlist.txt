@@ -3,6 +3,10 @@
 #   raw_extractor — legacy Bucket-B1 manual-validate handler (Stage 2 converts; .validate() presence enforced)
 #   raw_body      — hand-rolled Request/Bytes body read (enumerated; validation is the handler's job)
 # Delete rows as Stage 2 converts sites and decrement MAX_ALLOWLIST_ENTRIES in the gate script.
+# CAVEAT: the gate's ratchet only enforces a row-count ceiling (see MAX_ALLOWLIST_ENTRIES), not a
+# frozen row set — a commit that deletes one legacy row and adds one new row keeps the count
+# unchanged and trips neither STALE nor the ratchet. "Additions prohibited" above is enforced by
+# code review, not by this script; do not rely on the gate alone to catch a one-for-one swap.
 raw_extractor|crates/ui/web-api/src/routes/system_services.rs|fn update_system_service\b
 raw_extractor|crates/ui/web-api/src/routes/system_services.rs|fn batch_system_services\b
 raw_extractor|crates/ui/web-api/src/routes/hosts.rs|fn batch_hosts\b

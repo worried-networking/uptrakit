@@ -53,7 +53,7 @@ fi
 #  - Json< / Form<  (covers Option<Json<...>> via the inner match)
 #  - `: Request [,)]` / `: Bytes [,)]` anchored to param TYPE position — a bare
 #    "Request" token would match every *Request body type name.
-RAW_PATTERN='(Json|Form)[[:space:]]*<|:[[:space:]]*(axum::extract::)?Request[[:space:]]*[,)]|:[[:space:]]*(axum::(body|extract)::)?Bytes[[:space:]]*[,)]'
+RAW_PATTERN='(Json|Form)[[:space:]]*<|:[[:space:]]*(axum::extract::)?Request[[:space:]]*(<|[,)])|:[[:space:]]*(axum::(body|extract)::)?Bytes[[:space:]]*(<|[,)])'
 
 is_allowlisted() {
   local file="$1" sig="$2" al_class al_path al_regex
