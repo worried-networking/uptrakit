@@ -41,10 +41,7 @@ use crate::middleware::require_auth::{
     get_user_permissions,
 };
 use uptrakit_audit_log::{AuditEntry, AuditOutcome, Event, Stateful};
-use uptrakit_shared_db::access_grants::{
-    GrantSubject, GuardedMutation, LockoutVerdict, check_lockout, list_grants,
-    patterns_reach_system_plane,
-};
+use uptrakit_shared_db::access_grants::{GuardedMutation, LockoutVerdict, check_lockout};
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{role, user, user_role};
 use uptrakit_shared_types::access::{Decision, actions};
@@ -408,71 +405,24 @@ pub async fn update_user_roles(
         }
     };
 
-    // System-plane fine check: re-read the user's CURRENT role ids inside the
-    // tx (a pre-tx read would let a concurrent unassign make a re-inserted
-    // role look "already held" and dodge classification), then classify only
-    // the roles this request actually ADDS.
-    let txn_current_role_ids: std::collections::BTreeSet<Uuid> = match UserRole::find()
-        .filter(user_role::Column::TenantId.eq(state.default_tenant_id))
-        .filter(user_role::Column::UserId.eq(user_id))
-        .all(&txn)
-        .await
+    // System-plane fine check over the roles this request actually ADDS
+    // (shared with `apply_preset`; see the helper's doc for the in-tx
+    // re-read and fail-closed rationale).
+    let reaches_system_plane = match crate::routes::access_grants::added_roles_reach_system_plane(
+        &txn,
+        state.default_tenant_id,
+        user_id,
+        &body.role_ids,
+        "update_user_roles",
+    )
+    .await
     {
-        Ok(rows) => rows.into_iter().map(|ur| ur.role_id).collect(),
-        Err(e) => {
-            tracing::error!("DB error: {e}");
+        Ok(v) => v,
+        Err(denied) => {
             drop(txn);
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            return denied;
         }
     };
-    let added_role_ids: Vec<Uuid> = body
-        .role_ids
-        .iter()
-        .copied()
-        .filter(|id| !txn_current_role_ids.contains(id))
-        .collect();
-
-    let mut reaches_system_plane = false;
-    for role_id in &added_role_ids {
-        let load = match list_grants(
-            &txn,
-            state.default_tenant_id,
-            Some(GrantSubject::Role(*role_id)),
-        )
-        .await
-        {
-            Ok(l) => l,
-            Err(e) => {
-                tracing::error!("Failed to load grants for role {role_id}: {e}");
-                drop(txn);
-                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-            }
-        };
-        if load.corrupt_skipped > 0 {
-            // Fail closed: a corrupt row for this role could hide system-plane
-            // authority the fine check below needs to see.
-            tracing::error!(
-                role_id = %role_id,
-                corrupt_skipped = load.corrupt_skipped,
-                "update_user_roles: corrupt grant rows skipped, refusing to proceed"
-            );
-            drop(txn);
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-        for grant in &load.grants {
-            match patterns_reach_system_plane(&grant.patterns) {
-                Ok(v) => reaches_system_plane |= v,
-                Err(e) => {
-                    tracing::error!("Failed to classify grant patterns: {e}");
-                    drop(txn);
-                    return error_response(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "Internal server error",
-                    );
-                }
-            }
-        }
-    }
     if reaches_system_plane {
         // APPROVED: body-dependent fine check (corpus 07, restated invariant)
         if let Some(denied) = require_system_access(&state.access_engine, &authority) {
@@ -657,6 +607,7 @@ pub async fn update_profile(
                 "Authorization authority unavailable",
             );
         };
+        // APPROVED: body-dependent fine check (corpus 07, restated invariant)
         match access.0.authorize(ctx, &actions::USERS_MANAGE, None) {
             Decision::Allow => {}
             Decision::Deny(reason) => {
@@ -1449,7 +1400,7 @@ mod tests {
         ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
         Set,
     };
-    use uptrakit_shared_db::access_grants::{NewGrant, insert_grant};
+    use uptrakit_shared_db::access_grants::{GrantSubject, NewGrant, insert_grant};
     use uptrakit_shared_db::entity::audit_log;
     use uptrakit_shared_types::access::Selector;
     use uptrakit_shared_types::{MaskedEmail, SecretString};

@@ -16,6 +16,7 @@ list_access_grants = "full-state"
 get_access_grant = "full-state"
 update_access_grant = "full-state"
 delete_access_grant = "full-state"
+added_roles_reach_system_plane = "ignore"
 
 [routes."access_presets.rs"]
 list_access_presets = "no-db"

@@ -13,7 +13,6 @@
     reason = "test fixture: panics on setup failure are acceptable"
 )]
 
-use http_body_util::BodyExt;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use uptrakit_shared_db::access_grants::{GrantSubject, delete_grant, load_grants_for_principal};
 use uptrakit_shared_db::entity::{
@@ -406,8 +405,11 @@ pub(crate) async fn open_registration(app: &super::TestApp) -> String {
         password: SecretString::new("TestPassword123!"),
         registration_token: None,
     };
-    let resp = client.post_json("/api/v1/auth/register", &req).send().await;
-    if resp.status() != http::StatusCode::CREATED {
+    let (status, body) = client
+        .post_json("/api/v1/auth/register", &req)
+        .send_bytes()
+        .await;
+    if status != http::StatusCode::CREATED {
         // Already registered by an earlier call in this test — registration
         // is already open too, so just log in and return.
         let (login_status, login_auth) =
@@ -419,8 +421,7 @@ pub(crate) async fn open_registration(app: &super::TestApp) -> String {
         );
         return login_auth.access_token.expose_secret().to_string();
     }
-    let bytes = resp.into_body().collect().await.expect("body").to_bytes();
-    let auth: AuthResponse = serde_json::from_slice(&bytes).expect("decode register response");
+    let auth: AuthResponse = serde_json::from_slice(&body).expect("decode register response");
     let owner_token = auth.access_token.expose_secret().to_string();
 
     let reopen = client

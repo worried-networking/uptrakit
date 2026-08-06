@@ -23,7 +23,11 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
+use sea_orm::{
+    ColumnTrait, DatabaseTransaction, EntityTrait, QueryFilter, SqliteTransactionMode,
+    TransactionOptions, TransactionTrait,
+};
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use uptrakit_audit_log::{
     AbsentView, AuditActionType, AuditActorType, AuditEntry, AuditOutcome, Event, Stateful,
@@ -33,6 +37,8 @@ use uptrakit_shared_db::access_grants::{
     begin_guarded, check_lockout, delete_grant, insert_grant, list_grants, load_grant,
     patterns_reach_system_plane, update_grant,
 };
+use uptrakit_shared_db::entity::prelude::UserRole;
+use uptrakit_shared_db::entity::user_role;
 use uptrakit_shared_types::access::ActionPattern;
 use uuid::Uuid;
 
@@ -641,6 +647,11 @@ pub async fn delete_access_grant(
 /// Denied audit Event and returns the client-visible 409. Reason codes
 /// only — never holder identities or counts (a `users:manage`-only caller
 /// may receive this and must not learn access-plane state).
+///
+/// The Event is scoped by the plane the guard fired on, matching the
+/// scoping the Stateful emits use for the same rows: a `SystemLockout` is
+/// a system-plane fact (`.system_scope()`), a `TenantLockout` a
+/// tenant-plane one (`.tenant_scope(default_tenant_id)`).
 pub(crate) fn lockout_denial_response(
     state: &AppState,
     action: AuditActionType,
@@ -649,17 +660,24 @@ pub(crate) fn lockout_denial_response(
     target_id: String,
     verdict: LockoutVerdict,
 ) -> Response {
-    let reason_code = match verdict {
-        LockoutVerdict::TenantLockout => "lockout_access_manage",
-        LockoutVerdict::SystemLockout => "lockout_system_access",
+    let (reason_code, system_plane) = match verdict {
+        LockoutVerdict::TenantLockout => ("lockout_access_manage", false),
+        LockoutVerdict::SystemLockout => ("lockout_system_access", true),
         LockoutVerdict::Permitted => {
             // Callers only invoke this on a lockout verdict.
             tracing::error!("lockout_denial_response called with Permitted");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
-    match AuditEntry::<Event>::builder_event(action)
-        .tenant_scope(state.default_tenant_id)
+    let scoped = {
+        let builder = AuditEntry::<Event>::builder_event(action);
+        if system_plane {
+            builder.system_scope()
+        } else {
+            builder.tenant_scope(state.default_tenant_id)
+        }
+    };
+    match scoped
         .actor(actor.0, actor.1)
         .target(target_type, target_id, None)
         .outcome(AuditOutcome::Denied)
@@ -680,6 +698,79 @@ pub(crate) fn lockout_denial_response(
         "This change would remove the last remaining access administrator",
         reason_code,
     )
+}
+
+/// Does this role-set replacement ADD any role reaching the system plane?
+///
+/// Shared by the two role-assignment paths (`users.rs::update_user_roles`
+/// and `access_presets.rs::apply_preset`) so their classification cannot
+/// drift apart — a divergence here is a privilege-escalation hole, not a
+/// style nit.
+///
+/// The subject's current role ids are re-read INSIDE `txn`: a pre-tx read
+/// would let a concurrent unassign make a re-inserted role look "already
+/// held" and dodge classification. Only the roles the request actually adds
+/// are classified; re-applying a role the user already holds never
+/// re-triggers the caller's fine check.
+///
+/// Fails closed. On `Err` the caller must roll back (drop the txn) and
+/// return the carried 500 — a corrupt grant row for an added role could
+/// hide exactly the system-plane authority this classification exists to
+/// see. `handler` names the calling handler in the log line only.
+pub(crate) async fn added_roles_reach_system_plane(
+    txn: &DatabaseTransaction,
+    tenant_id: Uuid,
+    user_id: Uuid,
+    requested_role_ids: &[Uuid],
+    handler: &'static str,
+) -> std::result::Result<bool, Response> {
+    let internal_error =
+        || error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+
+    let current_role_ids: BTreeSet<Uuid> = match UserRole::find()
+        .filter(user_role::Column::TenantId.eq(tenant_id))
+        .filter(user_role::Column::UserId.eq(user_id))
+        .all(txn)
+        .await
+    {
+        Ok(rows) => rows.into_iter().map(|ur| ur.role_id).collect(),
+        Err(e) => {
+            tracing::error!("DB error: {e}");
+            return Err(internal_error());
+        }
+    };
+
+    let mut reaches_system_plane = false;
+    for role_id in requested_role_ids
+        .iter()
+        .filter(|id| !current_role_ids.contains(id))
+    {
+        let load = match list_grants(txn, tenant_id, Some(GrantSubject::Role(*role_id))).await {
+            Ok(l) => l,
+            Err(e) => {
+                tracing::error!("Failed to load grants for role {role_id}: {e}");
+                return Err(internal_error());
+            }
+        };
+        if load.corrupt_skipped > 0 {
+            tracing::error!(
+                role_id = %role_id,
+                corrupt_skipped = load.corrupt_skipped,
+                "{handler}: corrupt grant rows skipped, refusing to proceed"
+            );
+            return Err(internal_error());
+        }
+        for grant in &load.grants {
+            match patterns_reach_system_plane(&grant.patterns) {
+                Ok(v) => reaches_system_plane |= v,
+                Err(e) => {
+                    tracing::error!("Failed to classify grant patterns: {e}");
+                    return Err(internal_error());
+                }
+            }
+        }
+    }
+    Ok(reaches_system_plane)
 }
 
 fn subject_invalidation_ids(subject: GrantSubject) -> (Vec<Uuid>, Vec<Uuid>) {
@@ -753,7 +844,7 @@ mod tests {
         stage_zero_role_user,
     };
     use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
-    use uptrakit_shared_db::entity::audit_log;
+    use uptrakit_shared_db::entity::{audit_log, system_audit_log};
 
     async fn latest_grant_audit_row_for_target(
         db: &sea_orm::DatabaseConnection,
@@ -776,6 +867,31 @@ mod tests {
         }
 
         panic!("expected {action:?} audit row");
+    }
+
+    /// Same poll, but over `system_audit_log` — where system-scoped entries
+    /// for a global grant row are routed by the audit backend.
+    async fn latest_system_grant_audit_row_for_target(
+        db: &sea_orm::DatabaseConnection,
+        action: uptrakit_audit_log::RegisteredAuditAction,
+        target_grant_id: Uuid,
+    ) -> system_audit_log::Model {
+        for _ in 0..50 {
+            if let Some(row) = system_audit_log::Entity::find()
+                .filter(system_audit_log::Column::ActionType.eq(action))
+                .filter(system_audit_log::Column::TargetType.eq("access_grant"))
+                .filter(system_audit_log::Column::TargetId.eq(target_grant_id.to_string()))
+                .order_by_desc(system_audit_log::Column::OccurredAt)
+                .one(db)
+                .await
+                .expect("query system audit rows")
+            {
+                return row;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        panic!("expected {action:?} system audit row");
     }
 
     #[tokio::test]
@@ -1249,6 +1365,27 @@ mod tests {
             .await;
         assert_eq!(status, http::StatusCode::CONFLICT);
         assert_eq!(body.code, Some("lockout_system_access".to_string()));
+
+        // A system-plane lockout is a system-plane fact: the Denied Event is
+        // system-scoped, so it lands in `system_audit_log` — the same routing
+        // the Stateful emits give this global row. A tenant lockout stays
+        // tenant-scoped (asserted by
+        // `deleting_last_covering_grant_is_409_with_reason_code_and_state_unchanged`).
+        let row = latest_system_grant_audit_row_for_target(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::ACCESS_GRANT_DELETE,
+            system_grant_id,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        let details = row.details_json.expect("details_json present");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("lockout_system_access")
+        );
     }
 
     #[tokio::test]

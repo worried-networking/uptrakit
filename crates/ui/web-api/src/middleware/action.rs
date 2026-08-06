@@ -55,9 +55,10 @@ impl AccessAuthority {
 /// Record one policy deny on `uptrakit_access_denies_total{reason}`.
 ///
 /// Single owner for the counter: the `action_extractor!` single-action arm,
-/// the [`authorize_any`] OR-gate, and the surface read/invoke gate
-/// (`routes/surfaces.rs`) all funnel through here, so the metric name and
-/// label shape cannot drift apart across the three deny paths.
+/// the [`authorize_any`] OR-gate, the surface read/invoke gate
+/// (`routes/surfaces.rs`), and the self-or-`users:manage` fine check in
+/// `routes/users.rs::update_profile` all funnel through here, so the metric
+/// name and label shape cannot drift apart across the deny paths.
 pub(crate) fn record_access_deny(reason: &DenyReason) {
     metrics::counter!(
         "uptrakit_access_denies_total",

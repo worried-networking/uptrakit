@@ -169,6 +169,11 @@ The response body carries the reason code only -- **never** holder identities or
 cannot learn access-plane state from a denial. The same reason code is recorded in the
 matching `Denied` audit event's `details`.
 
+That audit event is scoped by the plane the guard fired on, matching how the same row's
+successful mutations are scoped: `lockout_system_access` denials are system-scoped (routed
+to `system_audit_log`, readable via `GET /api/v1/system-audit-logs`), `lockout_access_manage`
+denials are tenant-scoped (`audit_log`).
+
 Adding-only mutations -- grant create and role create -- are not guarded (they cannot
 remove authority from anyone). Role rename (`PUT /api/v1/roles/{id}`) is not guarded
 either, since it never changes what the role grants.
