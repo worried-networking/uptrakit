@@ -78,6 +78,11 @@ impl_report_conversion!(AccessGrantError => AccessEngineError::GrantResolution);
 pub trait DynamicActionRegistry: Send + Sync {
     /// Is this concrete dynamic action currently registered?
     fn is_registered(&self, action: &Action) -> bool;
+
+    /// Every dynamic action currently registered — the catalog's dynamic
+    /// section (M1.6b). Contract: an action appears here iff
+    /// `is_registered` returns `true` for it.
+    fn registered_actions(&self) -> Vec<Action>;
 }
 
 /// Point-in-time snapshot of one principal's resolved grants.
@@ -135,6 +140,17 @@ impl AccessEngine {
     pub fn with_registry(mut self, registry: Arc<dyn DynamicActionRegistry>) -> Self {
         self.registry = Some(registry);
         self
+    }
+
+    /// Every currently registered dynamic action (the catalog's dynamic
+    /// section, M1.6b); empty when no registry is injected — matching
+    /// `authorize`'s fail-closed treatment of dynamic actions.
+    #[must_use]
+    pub fn dynamic_actions(&self) -> Vec<Action> {
+        self.registry
+            .as_ref()
+            .map(|registry| registry.registered_actions())
+            .unwrap_or_default()
     }
 
     /// Resolve a principal's access context.
@@ -583,6 +599,10 @@ mod tests {
     impl DynamicActionRegistry for StubRegistry {
         fn is_registered(&self, action: &Action) -> bool {
             self.registered.contains(action)
+        }
+
+        fn registered_actions(&self) -> Vec<Action> {
+            self.registered.clone()
         }
     }
 

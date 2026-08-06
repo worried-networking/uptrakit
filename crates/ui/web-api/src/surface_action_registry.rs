@@ -28,6 +28,21 @@ impl DynamicActionRegistry for SurfaceActionRegistry {
             None => false,
         }
     }
+
+    fn registered_actions(&self) -> Vec<Action> {
+        // Grammar mismatch is real: `validate_surface_identifier` admits ids
+        // (underscores, …) the Action resource grammar rejects. Build through
+        // the same parse the read side uses and skip non-parsing ids — such a
+        // surface's `:use` action is unparseable everywhere, so
+        // `is_registered` can never return true for it either (fail-closed,
+        // iff-contract preserved). Never normalize: a normalized id would
+        // advertise an action the engine denies.
+        self.0
+            .surface_ids()
+            .into_iter()
+            .filter_map(|surface_id| format!("surface.{surface_id}:use").parse::<Action>().ok())
+            .collect()
+    }
 }
 
 #[cfg(all(test, feature = "db-sqlite"))]
@@ -41,7 +56,7 @@ mod tests {
 
     use uuid::Uuid;
 
-    use uptrakit_controller_core::access::AccessEngine;
+    use uptrakit_controller_core::access::{AccessEngine, DynamicActionRegistry};
     use uptrakit_shared_db::access_grants::{GrantSubject, NewGrant, insert_grant};
     use uptrakit_shared_types::access::{Action, ActionPattern, Decision, DenyReason, Selector};
     use uptrakit_wire::surfaces;
@@ -105,6 +120,7 @@ mod tests {
         let tenant_id = default_tenant_id(&db).await;
         let user_id = Uuid::now_v7();
         let registry = Arc::new(SurfaceRegistry::new(SurfaceRegistryConfig::default()));
+        let registry_impl = SurfaceActionRegistry(Arc::clone(&registry));
         let engine = AccessEngine::new(db.clone())
             .with_registry(Arc::new(SurfaceActionRegistry(Arc::clone(&registry))));
 
@@ -157,6 +173,16 @@ mod tests {
             .expect("valid registration must admit");
         assert_eq!(engine.authorize(&ctx, &stub_action, None), Decision::Allow);
 
+        // Enumeration must agree with `is_registered` while registered.
+        let enumerated = engine.dynamic_actions();
+        assert_eq!(enumerated, vec![stub_action.clone()]);
+        for action in &enumerated {
+            assert!(
+                registry_impl.is_registered(action),
+                "every enumerated action must independently pass is_registered"
+            );
+        }
+
         // Everything-else-false leg: an unregistered `plugin.*` action denies
         // even with the registry wired.
         let plugin_action = "plugin.anything:use"
@@ -182,6 +208,55 @@ mod tests {
         assert_eq!(
             engine.authorize(&ctx, &stub_action, None),
             Decision::Deny(DenyReason::UnknownAction)
+        );
+        assert!(
+            engine.dynamic_actions().is_empty(),
+            "enumeration must be empty once the surface is unregistered"
+        );
+    }
+
+    /// Grammar mismatch (plan-review-resolved branch): `validate_surface_identifier`
+    /// accepts `_` in a surface id while the Action resource grammar's
+    /// `is_valid_segment` rejects it. Registration succeeds (surface-id
+    /// admission is the surfaces crate's own grammar), but enumeration's
+    /// `surface.<id>:use` parse fails and the id is silently dropped —
+    /// fail-closed, never normalized.
+    #[tokio::test]
+    async fn underscore_surface_id_is_dropped_from_enumeration_fail_closed() {
+        let db = setup_migrated_db().await;
+        let tenant_id = default_tenant_id(&db).await;
+        let registry = Arc::new(SurfaceRegistry::new(SurfaceRegistryConfig::default()));
+        let engine = AccessEngine::new(db.clone())
+            .with_registry(Arc::new(SurfaceActionRegistry(Arc::clone(&registry))));
+
+        let mut registration =
+            registration_for_test_stub("service.test-stub-underscore", tenant_id);
+        registration.surfaces[0].descriptor.surface_id =
+            surfaces::SurfaceId::new("test.stub_underscore").expect("valid surface id");
+
+        let service_id = Uuid::now_v7();
+        registry
+            .register_service(
+                service_id,
+                "uptrakit-agent-ssh",
+                Some(tenant_id),
+                registration,
+            )
+            .expect("underscore id must pass surface admission — precondition");
+
+        assert!(
+            registry.has_surface("test.stub_underscore"),
+            "the surface IS registered"
+        );
+
+        let enumerated = engine.dynamic_actions();
+        assert!(
+            enumerated
+                .iter()
+                .all(|action| !action.to_string().contains("stub_underscore")),
+            "the enumeration parse-skip must drop the unparseable surface id; its `:use` action \
+             is unparseable everywhere, so is_registered can never be probed with it and the iff \
+             contract holds vacuously"
         );
     }
 }

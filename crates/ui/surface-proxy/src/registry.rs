@@ -759,6 +759,22 @@ impl SurfaceRegistry {
             .is_some_and(|providers| !providers.is_empty())
     }
 
+    /// All surface ids with at least one registered provider — the same
+    /// non-empty-provider predicate as [`Self::has_surface`], for the
+    /// dynamic-action enumeration seam (M1.6b catalog). Tenant- and
+    /// visibility-blind like `has_surface`. Clones ids under the lock;
+    /// callers must build `Action`s only after this returns (same
+    /// non-reentrancy invariant as `has_surface`).
+    pub fn surface_ids(&self) -> Vec<String> {
+        self.inner
+            .lock()
+            .surface_to_providers
+            .iter()
+            .filter(|(_, providers)| !providers.is_empty())
+            .map(|(surface_id, _)| surface_id.clone())
+            .collect()
+    }
+
     fn validate_registration_basics(
         &self,
         source_kind: surfaces::ProviderKind,
