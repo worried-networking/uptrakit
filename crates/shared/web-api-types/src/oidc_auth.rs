@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use uptrakit_shared_types::SecretString;
 use uuid::Uuid;
 
+use crate::validation::{Validate, ValidationError};
+
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct OidcProviderInfo {
@@ -45,6 +47,26 @@ pub struct OidcExchangeRequest {
 pub struct OidcCompleteRegistrationRequest {
     pub registration_code: SecretString,
     pub registration_token: SecretString,
+}
+
+impl Validate for OidcExchangeRequest {
+    fn validate(&self) -> Result<(), ValidationError> {
+        if self.code.trim().is_empty() {
+            return Err(ValidationError {
+                field: "code",
+                message: "code must not be empty".to_string(),
+            });
+        }
+        Ok(())
+    }
+}
+
+impl Validate for OidcCompleteRegistrationRequest {
+    fn validate(&self) -> Result<(), ValidationError> {
+        // Both fields are SecretString; presence is enforced by deserialization.
+        // No format/length invariants beyond field types; token verification is handler-side.
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -143,5 +165,21 @@ mod tests {
         let de: OidcExchangeRequest =
             serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(de.code, "auth-code-123");
+    }
+
+    #[test]
+    fn oidc_exchange_rejects_empty_code() {
+        let req = OidcExchangeRequest {
+            code: String::new(),
+        };
+        assert_eq!(req.validate().err().map(|e| e.field), Some("code"));
+    }
+
+    #[test]
+    fn oidc_exchange_accepts_code() {
+        let req = OidcExchangeRequest {
+            code: "abc".to_string(),
+        };
+        req.validate().unwrap();
     }
 }

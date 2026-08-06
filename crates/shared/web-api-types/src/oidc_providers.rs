@@ -121,6 +121,58 @@ impl Validate for CreateOidcProviderRequest {
     }
 }
 
+impl Validate for UpdateOidcProviderRequest {
+    fn validate(&self) -> Result<(), ValidationError> {
+        if let Some(name) = &self.name
+            && name.trim().is_empty()
+        {
+            return Err(ValidationError {
+                field: "name",
+                message: "name must not be empty".to_string(),
+            });
+        }
+        if let Some(slug) = &self.slug {
+            if slug.len() > 64 {
+                return Err(ValidationError {
+                    field: "slug",
+                    message: "must be at most 64 characters".to_string(),
+                });
+            }
+
+            let first = slug.as_bytes().first().copied().unwrap_or(0);
+            let valid_slug = !slug.is_empty()
+                && (first.is_ascii_lowercase() || first.is_ascii_digit())
+                && slug
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+            if !valid_slug {
+                return Err(ValidationError {
+                    field: "slug",
+                    message: "must match ^[a-z0-9][a-z0-9-]*$".to_string(),
+                });
+            }
+        }
+        if let Some(issuer_url) = &self.issuer_url
+            && !issuer_url.starts_with("http://")
+            && !issuer_url.starts_with("https://")
+        {
+            return Err(ValidationError {
+                field: "issuer_url",
+                message: "issuer_url must start with http:// or https://".to_string(),
+            });
+        }
+        if let Some(client_id) = &self.client_id
+            && client_id.trim().is_empty()
+        {
+            return Err(ValidationError {
+                field: "client_id",
+                message: "client_id must not be empty".to_string(),
+            });
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![expect(
@@ -229,6 +281,61 @@ mod tests {
     fn validate_accepts_valid_request() {
         let req = valid_create_request();
         assert!(req.validate().is_ok());
+    }
+
+    // ── UpdateOidcProviderRequest ─────────────────────────────────────
+
+    fn empty_update_request() -> UpdateOidcProviderRequest {
+        UpdateOidcProviderRequest {
+            name: None,
+            slug: None,
+            logo_url: None,
+            issuer_url: None,
+            client_id: None,
+            client_secret: None,
+            scopes: None,
+            auto_create_users: None,
+            allow_private_network_issuers: None,
+            role_claim_path: None,
+            role_mapping: None,
+        }
+    }
+
+    #[test]
+    fn update_validate_passes_when_all_fields_omitted() {
+        assert!(empty_update_request().validate().is_ok());
+    }
+
+    #[test]
+    fn update_validate_rejects_empty_name() {
+        let mut req = empty_update_request();
+        req.name = Some(String::new());
+        assert_eq!(req.validate().err().map(|e| e.field), Some("name"));
+    }
+
+    #[test]
+    fn update_validate_rejects_bad_slug() {
+        for bad in ["UPPER", "-x", "a/b", &"a".repeat(65)] {
+            let mut req = empty_update_request();
+            req.slug = Some(bad.to_string());
+            assert_eq!(req.validate().err().map(|e| e.field), Some("slug"));
+        }
+    }
+
+    #[test]
+    fn update_validate_rejects_non_http_issuer_url() {
+        for bad in ["ftp://x", ""] {
+            let mut req = empty_update_request();
+            req.issuer_url = Some(bad.to_string());
+            assert_eq!(req.validate().err().map(|e| e.field), Some("issuer_url"));
+        }
+    }
+
+    #[test]
+    fn update_validate_rejects_empty_client_id() {
+        let mut req = empty_update_request();
+        req.client_id = Some(String::new());
+        assert_eq!(req.validate().err().map(|e| e.field), Some("client_id"));
     }
 
     // ── OidcProviderResponse ─────────────────────────────────────────
