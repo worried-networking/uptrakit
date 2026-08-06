@@ -53,6 +53,7 @@ sea-orm-migration = { workspace = true, features = ["sqlx-sqlite"] }
 sqlx = { workspace = true }
 
 [dev-dependencies]
+futures-util = { workspace = true, features = ["async-await-macro"] }
 rcgen = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }

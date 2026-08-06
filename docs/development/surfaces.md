@@ -187,6 +187,50 @@ Presence of business-critical plugin surfaces under feature unification is guard
 `contribution_monotonicity_guard.rs` in the same test directory
 ([ADR-0032](../adr/0032-plugin-contribution-monotonicity.md)).
 
+## Action timeout enforcement
+
+Surface action descriptors declare a `timeout_seconds` budget (`.with_timeout(N)`); at invoke time
+the effective deadline — the declared budget or the caller's override — is validated against
+1..=300 s and rejected outright, never clamped, when it falls outside that range. Two timers
+enforce deadlines:
+
+- **Controller-side** (`crates/ui/surface-proxy/src/proxy.rs`, `resolve_timeout` in
+  `proxy/validation.rs`): the effective deadline. An out-of-range value fails invocation with
+  `SchemaValidationFailed` before the request is ever dispatched; an in-range value starts the
+  controller's timer, and on elapse the controller abandons the pending request and notifies the
+  provider with `SurfaceActionCancel { reason: Timeout }`.
+- **Agent-side** (SSH agent runtime, `surface_runtime.rs`): each spawned surface task is wrapped in
+  `tokio::time::timeout` with a flat 330 s backstop (`AGENT_SURFACE_TASK_TIMEOUT` = the proxy's
+  maximum request deadline + 30 s headroom, pinned by a `const _: () = assert!(...)` next to the
+  constant so the two can never drift silently). The wire request carries no timeout field, so the
+  agent cannot know the effective deadline; because an out-of-range deadline is rejected and never
+  dispatched rather than clamped, the flat backstop is still the only agent-side budget that never
+  preempts a still-succeeding handler on any controller-sanctioned deadline. On expiry the
+  agent logs a warning, then drops the hung task and its SSH session — the fd/resource-leak fix
+  the controller-side timeout cannot reach. The session close is an abrupt socket drop (no SSH
+  `DISCONNECT`); a peer may log it as an error, which is acceptable for a hung task. The emitted
+  `timeout` error response is best-effort: the controller abandoned the request long before, so
+  the response is typically dropped — its job is resource release, not user notification. Timed-out
+  mutating actions are still audited before the response is sent, classified by the `Timeout` error
+  code with the dedicated `agent_timeout` reason code (distinguishable from an ordinary handler
+  failure — the remote effects of a killed task are unknown); the audit entry records the
+  invocation outcome, not per-unit results (a fan-out action killed mid-run may have completed some
+  units). A retry issued after the controller's shorter deadline stacks a second agent-side task
+  until the backstop releases the first — the backstop bounds the stack (each task dies within
+  330 s); a concurrency cap belongs to the task-registry follow-up. Known limitation: the timer
+  boundary is inconsistent across handlers — `sync-execute` deliberately keeps its
+  `ReportPluginConfig` streaming outside the timer, but `bootstrap-execute` wraps all of
+  `run_bootstrap_execute`, including its tail call to `send_infra_plugin_reports`; a bootstrap that
+  reaches the backstop while the bounded `bg_tx` is full can drop a freshly created PVE API token
+  report. Tracked as a follow-up, not fixed here.
+
+Two caveats: a timed-out mutating action may leave the remote host partially configured (same
+window that already exists for a crash mid-task; e.g. a `sync-execute` that rotated a PVE API
+token but timed out before persisting it — re-running the sync regenerates the token
+idempotently). And the backstop is per invocation, not per unit of work: `bootstrap-proxmox-guest`
+provisions every selected guest under one invocation-wide budget, so very large selections can hit
+it — split large selections until a per-guest deadline lands.
+
 ## Plugin integration pattern
 
 Plugin descriptors provide shared surface registrations and the controller-local interaction logic

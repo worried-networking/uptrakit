@@ -14,6 +14,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::LazyLock;
+use std::time::Duration;
 
 use uptrakit_plugin_infrastructure_registry::agent_infra::{
     InfraActionInvokeError, InfraActionInvoker, InfraPluginContext,
@@ -53,6 +54,20 @@ pub const SSH_HOSTS_SURFACE_ID: &str = "ssh-agent.hosts";
 
 const SSH_HOSTS_SURFACE_LABEL: &str = "SSH Hosts";
 const SSH_HOSTS_SURFACE_PRIORITY: i32 = 450;
+/// Agent-side backstop for any spawned surface task. Descriptor `timeout_seconds` budgets
+/// are enforced by the controller, and the effective deadline is caller-overridable per
+/// request up to the proxy's `MAX_TIMEOUT_SECONDS` (300s,
+/// `crates/ui/surface-proxy/src/proxy.rs:40`); the wire `SurfaceActionRequest` carries no
+/// timeout field, so the agent cannot know the effective value. This constant is therefore
+/// the maximum possible controller deadline plus 30s scheduling headroom: it can never
+/// preempt a controller-sanctioned request, and its only job is to release a truly-hung
+/// task and its SSH fd.
+const AGENT_SURFACE_TASK_TIMEOUT: Duration = Duration::from_secs(330);
+// Pins the rationale above: the backstop must exceed the proxy's MAX_TIMEOUT_SECONDS
+// (300s, `crates/ui/surface-proxy/src/proxy.rs`), which is private to that crate and so
+// cannot be referenced here. Without this, shrinking the constant would silently make the
+// backstop preempt controller-sanctioned requests with every gate still green.
+const _: () = assert!(AGENT_SURFACE_TASK_TIMEOUT.as_secs() > 300);
 const SSH_HOSTS_DATA_ACTION_ID: &str = "hosts";
 const SSH_HOSTS_DEFAULT_PER_PAGE: u32 = 50;
 const SSH_HOSTS_COLUMNS: [(&str, &str); 5] = [
@@ -1084,44 +1099,42 @@ fn spawn_infra_plugin_action(request: SurfaceActionRequest, ctx: &SurfaceRuntime
             guest_bootstrap: &guest_bootstrap,
         };
 
-        let mut response: Option<SurfaceActionResponse> = None;
-        for bundle in infra_bundles.iter() {
-            if let Some(guest_exec) = bundle.guest_exec.as_ref()
-                && let Some(resp) = guest_exec
-                    .handle_service_extension_action(&plugin_ctx, &request)
-                    .await
-            {
-                response = Some(resp);
-                break;
-            }
-        }
-
-        let resp = response.unwrap_or_else(|| {
-            tracing::warn!(
-                action_id = %request.interaction_id,
-                surface_id = %request.surface_id,
-                "no infrastructure plugin handled this action"
-            );
-            make_surface_error_response(request.request_id, "unknown action")
-        });
-
-        emit_surface_mutation_audit(
+        let resp = resolve_surface_task_with_timeout(
+            AGENT_SURFACE_TASK_TIMEOUT,
+            request.request_id,
+            request.interaction_id.as_str(),
+            async {
+                let mut response: Option<SurfaceActionResponse> = None;
+                for bundle in infra_bundles.iter() {
+                    if let Some(guest_exec) = bundle.guest_exec.as_ref()
+                        && let Some(resp) = guest_exec
+                            .handle_service_extension_action(&plugin_ctx, &request)
+                            .await
+                    {
+                        response = Some(resp);
+                        break;
+                    }
+                }
+                response.unwrap_or_else(|| {
+                    tracing::warn!(
+                        action_id = %request.interaction_id,
+                        surface_id = %request.surface_id,
+                        "no infrastructure plugin handled this action"
+                    );
+                    make_surface_error_response(request.request_id, "unknown action")
+                })
+            },
+        )
+        .await;
+        audit_and_send_surface_response(
             &bg_tx,
             tenant_id,
             request.interaction_id.as_str(),
             request.request_id,
             &serde_json::Value::Object(request.params.clone()),
-            &resp,
+            resp,
         )
         .await;
-
-        if bg_tx
-            .send(ServiceMessage::SurfaceActionResponse(resp))
-            .await
-            .is_err()
-        {
-            tracing::error!("failed to send infra plugin action result via bg_tx");
-        }
     });
 }
 
@@ -1311,16 +1324,24 @@ fn spawn_bootstrap_connect(request: SurfaceActionRequest, ctx: &SurfaceRuntimeCo
         .map(|value| value.ciphertext_b64);
 
     tokio::spawn(async move {
-        let response = run_bootstrap_connect(BootstrapConnectArgs {
+        let response = resolve_surface_task_with_timeout(
+            AGENT_SURFACE_TASK_TIMEOUT,
             request_id,
-            params: &params,
-            sensitive_params_sealed: sensitive_params_sealed.as_deref(),
-            private_key_der: private_key_der.as_deref(),
-            service_id,
-            tenant_id,
-            state_dir: &state_dir,
-            db,
-        })
+            "bootstrap-connect",
+            async {
+                run_bootstrap_connect(BootstrapConnectArgs {
+                    request_id,
+                    params: &params,
+                    sensitive_params_sealed: sensitive_params_sealed.as_deref(),
+                    private_key_der: private_key_der.as_deref(),
+                    service_id,
+                    tenant_id,
+                    state_dir: &state_dir,
+                    db,
+                })
+                .await
+            },
+        )
         .await;
         let msg = ServiceMessage::SurfaceActionResponse(response);
         if bg_tx.send(msg).await.is_err() {
@@ -1344,31 +1365,35 @@ fn spawn_bootstrap_execute(request: SurfaceActionRequest, ctx: &SurfaceRuntimeCo
         .map(|value| value.ciphertext_b64);
 
     tokio::spawn(async move {
-        let response = run_bootstrap_execute(BootstrapExecuteArgs {
+        let response = resolve_surface_task_with_timeout(
+            AGENT_SURFACE_TASK_TIMEOUT,
             request_id,
-            params: &params,
-            sensitive_params_sealed: sensitive_params_sealed.as_deref(),
-            private_key_der: private_key_der.as_deref(),
-            service_id,
-            tenant_id,
-            state_dir: &state_dir,
-            bg_tx: &bg_tx,
-            db,
-        })
+            "bootstrap-execute",
+            async {
+                run_bootstrap_execute(BootstrapExecuteArgs {
+                    request_id,
+                    params: &params,
+                    sensitive_params_sealed: sensitive_params_sealed.as_deref(),
+                    private_key_der: private_key_der.as_deref(),
+                    service_id,
+                    tenant_id,
+                    state_dir: &state_dir,
+                    bg_tx: &bg_tx,
+                    db,
+                })
+                .await
+            },
+        )
         .await;
-        emit_surface_mutation_audit(
+        audit_and_send_surface_response(
             &bg_tx,
             tenant_id,
             "bootstrap-execute",
             request_id,
             &params,
-            &response,
+            response,
         )
         .await;
-        let msg = ServiceMessage::SurfaceActionResponse(response);
-        if bg_tx.send(msg).await.is_err() {
-            tracing::error!("failed to send bootstrap-execute result via bg_tx");
-        }
     });
 }
 
@@ -1403,19 +1428,32 @@ fn spawn_sync_connect(request: SurfaceActionRequest, ctx: &SurfaceRuntimeContext
 
         let allow_all = param_bool(&params, "allow_all");
 
-        let response =
-            match sync::sync_connect(&host_id, &db, tenant_id, auth_override.as_ref(), allow_all)
+        let response = resolve_surface_task_with_timeout(
+            AGENT_SURFACE_TASK_TIMEOUT,
+            request_id,
+            "sync-connect",
+            async {
+                match sync::sync_connect(
+                    &host_id,
+                    &db,
+                    tenant_id,
+                    auth_override.as_ref(),
+                    allow_all,
+                )
                 .await
-            {
-                Ok(plan) => match serde_json::to_value(&plan) {
-                    Ok(data) => make_surface_success_response(request_id, data),
-                    Err(e) => make_surface_error_response(
-                        request_id,
-                        &format!("failed to serialize plan: {e}"),
-                    ),
-                },
-                Err(e) => make_surface_error_response(request_id, &e),
-            };
+                {
+                    Ok(plan) => match serde_json::to_value(&plan) {
+                        Ok(data) => make_surface_success_response(request_id, data),
+                        Err(e) => make_surface_error_response(
+                            request_id,
+                            &format!("failed to serialize plan: {e}"),
+                        ),
+                    },
+                    Err(e) => make_surface_error_response(request_id, &e),
+                }
+            },
+        )
+        .await;
         let _ = bg_tx
             .send(ServiceMessage::SurfaceActionResponse(response))
             .await;
@@ -1450,17 +1488,26 @@ fn spawn_sync_execute(request: SurfaceActionRequest, ctx: &SurfaceRuntimeContext
         let allow_all = param_bool(&params, "allow_all");
         let skip_actions = parse_skip_actions(&params);
 
-        let response = match sync::sync_execute(
-            &host_id,
-            &db,
-            tenant_id,
-            auth_override.as_ref(),
-            allow_all,
-            &skip_actions,
+        let response = match tokio::time::timeout(
+            AGENT_SURFACE_TASK_TIMEOUT,
+            sync::sync_execute(
+                &host_id,
+                &db,
+                tenant_id,
+                auth_override.as_ref(),
+                allow_all,
+                &skip_actions,
+            ),
         )
         .await
         {
-            Ok((summary, plugin_config_reports)) => {
+            Err(_elapsed) => make_surface_timeout_response(
+                request_id,
+                "sync-execute",
+                AGENT_SURFACE_TASK_TIMEOUT,
+            ),
+            Ok(Err(e)) => make_surface_error_response(request_id, &e),
+            Ok(Ok((summary, plugin_config_reports))) => {
                 // Send any plugin config reports generated during sync (e.g.
                 // a recreated PVE API token).
                 for report in &plugin_config_reports {
@@ -1486,21 +1533,16 @@ fn spawn_sync_execute(request: SurfaceActionRequest, ctx: &SurfaceRuntimeContext
                 }
                 make_surface_success_response(request_id, serde_json::json!({ "summary": summary }))
             }
-            Err(e) => make_surface_error_response(request_id, &e),
         };
-        emit_surface_mutation_audit(
+        audit_and_send_surface_response(
             &bg_tx,
             tenant_id,
             "sync-execute",
             request_id,
             &params,
-            &response,
+            response,
         )
         .await;
-        let msg = ServiceMessage::SurfaceActionResponse(response);
-        if bg_tx.send(msg).await.is_err() {
-            tracing::error!("failed to send sync-execute result via bg_tx");
-        }
     });
 }
 
@@ -1920,6 +1962,16 @@ fn classify_surface_mutation_outcome(
         return ("success", None);
     }
 
+    // Agent-side backstop expiry: keyed on the error CODE, not message text — the one
+    // failure whose remote effects are unknown (the task was killed, not completed).
+    if response
+        .error
+        .as_ref()
+        .is_some_and(|error| matches!(error.code, SurfaceActionErrorCode::Timeout))
+    {
+        return ("failed", Some("agent_timeout"));
+    }
+
     let message = response
         .error
         .as_ref()
@@ -2192,6 +2244,35 @@ async fn emit_surface_mutation_audit(
     }
 }
 
+/// Audit a completed surface mutation, then send its response over `bg_tx`.
+/// Both run regardless of whether `response` is a success or a `Timeout` — so a timed-out
+/// mutation is still audited. Shared tail of the three auditing surface spawns.
+async fn audit_and_send_surface_response(
+    bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
+    tenant_id: Option<uuid::Uuid>,
+    interaction_id: &str,
+    request_id: uuid::Uuid,
+    params: &serde_json::Value,
+    response: SurfaceActionResponse,
+) {
+    emit_surface_mutation_audit(
+        bg_tx,
+        tenant_id,
+        interaction_id,
+        request_id,
+        params,
+        &response,
+    )
+    .await;
+    if bg_tx
+        .send(ServiceMessage::SurfaceActionResponse(response))
+        .await
+        .is_err()
+    {
+        tracing::error!(%interaction_id, "failed to send surface action result via bg_tx");
+    }
+}
+
 /// Resolve `host_id`, decrypt sensitive params, and build the auth override.
 ///
 /// This is the common setup for both `spawn_sync_connect` and
@@ -2275,6 +2356,61 @@ fn make_surface_error_response(request_id: uuid::Uuid, message: &str) -> Surface
     }
 }
 
+/// Build the timeout response for a surface action that exceeded the agent-side backstop,
+/// logging the kill — the single warn site for both the seam and the direct `sync-execute`
+/// wrap. The warn (plus, for mutating actions, the `agent_timeout` audit event) is the
+/// operator-visible signal: the controller usually abandoned the request long ago and
+/// typically drops the response.
+/// First producer of `SurfaceActionErrorCode::Timeout` in the agent-hosted response path
+/// (the controller's proxy constructs it separately for its own timeouts).
+fn make_surface_timeout_response(
+    request_id: uuid::Uuid,
+    interaction_id: &str,
+    budget: Duration,
+) -> SurfaceActionResponse {
+    tracing::warn!(
+        %interaction_id,
+        budget_secs = budget.as_secs(),
+        "surface action exceeded the agent-side backstop; dropping hung task and its SSH session"
+    );
+    SurfaceActionResponse {
+        request_id,
+        success: false,
+        result: None,
+        error: Some(SurfaceActionError {
+            code: SurfaceActionErrorCode::Timeout,
+            message: format!(
+                "surface action '{interaction_id}' exceeded the agent-side {}s backstop",
+                budget.as_secs()
+            ),
+            details: None,
+        }),
+    }
+}
+
+/// Await a spawned surface handler under `budget`, returning its `SurfaceActionResponse` — or a
+/// `Timeout` response if the budget elapses first. RESOLVE-ONLY: the caller still owns auditing
+/// and sending the returned response, so any in-body side effect (`emit_surface_mutation_audit`)
+/// runs on the timeout branch too. Dropping `task` on timeout cancels its in-flight `.await`,
+/// releasing the owned `Arc<SshSession>` (russh Sender-drop cascade closes the socket — abrupt,
+/// no SSH DISCONNECT; acceptable for a hung task).
+async fn resolve_surface_task_with_timeout<F>(
+    budget: Duration,
+    request_id: uuid::Uuid,
+    interaction_id: &str,
+    task: F,
+) -> SurfaceActionResponse
+where
+    F: std::future::Future<Output = SurfaceActionResponse>,
+{
+    match tokio::time::timeout(budget, task).await {
+        Ok(response) => response,
+        // `Elapsed` carries no context; the builder logs the warn and carries the
+        // interaction_id + budget in the message.
+        Err(_elapsed) => make_surface_timeout_response(request_id, interaction_id, budget),
+    }
+}
+
 async fn send_response(conn: &mut dyn ServiceTransport, response: SurfaceActionResponse) {
     if let Err(e) = conn
         .transport_send(ServiceMessage::SurfaceActionResponse(response))
@@ -2292,7 +2428,6 @@ mod tests {
     )]
 
     use std::collections::{BTreeMap, BTreeSet};
-    use std::time::Duration;
 
     use super::*;
     use sea_orm::{Database, DatabaseConnection};
@@ -3376,5 +3511,109 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ── AGENT_SURFACE_TASK_TIMEOUT backstop ─────────────────────────────
+
+    #[tokio::test(start_paused = true)]
+    async fn surface_task_timeout_returns_timeout_response() {
+        let request_id = uuid::Uuid::now_v7();
+        let budget = Duration::from_secs(60);
+        let task = resolve_surface_task_with_timeout(
+            budget,
+            request_id,
+            "bootstrap-execute",
+            std::future::pending::<SurfaceActionResponse>(),
+        );
+        tokio::pin!(task);
+        // Arm the timer FIRST: `tokio::time::timeout`'s Sleep is created on first poll, so
+        // advancing before polling would anchor the deadline late and make the boundary
+        // assertion vacuous.
+        assert!(
+            futures_util::poll!(task.as_mut()).is_pending(),
+            "task must start pending"
+        );
+        // Just before the budget: still pending.
+        tokio::time::advance(Duration::from_secs(59)).await;
+        assert!(
+            futures_util::poll!(task.as_mut()).is_pending(),
+            "must not trip before the budget elapses"
+        );
+        // Past the budget: resolves to a Timeout response.
+        tokio::time::advance(Duration::from_secs(2)).await;
+        let response = task.await;
+        assert!(!response.success);
+        let error = response.error.expect("timeout response carries an error");
+        assert_eq!(error.code, SurfaceActionErrorCode::Timeout);
+        assert!(error.message.contains("bootstrap-execute"));
+        assert!(error.message.contains("60s"));
+        assert_eq!(response.request_id, request_id);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn surface_task_within_budget_returns_handler_response() {
+        let request_id = uuid::Uuid::now_v7();
+        let inner = make_surface_success_response(request_id, serde_json::json!({"ok": true}));
+        let response = resolve_surface_task_with_timeout(
+            Duration::from_secs(60),
+            request_id,
+            "sync-execute",
+            std::future::ready(inner),
+        )
+        .await;
+        assert!(
+            response.success,
+            "ready handler response must pass through untouched"
+        );
+        assert!(response.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn timed_out_mutation_is_audited_then_sent() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<ServiceMessage>(8);
+        let request_id = uuid::Uuid::now_v7();
+        let tenant_id = Some(uuid::Uuid::now_v7());
+        let params = serde_json::json!({"host_id": "h1"});
+        let response = make_surface_timeout_response(
+            request_id,
+            "bootstrap-execute",
+            Duration::from_secs(120),
+        );
+
+        audit_and_send_surface_response(
+            &tx,
+            tenant_id,
+            "bootstrap-execute",
+            request_id,
+            &params,
+            response,
+        )
+        .await;
+
+        // First the audit event (bootstrap-execute is audit-gated to host.update)...
+        let first = rx.recv().await.expect("audit event");
+        let ServiceMessage::AuditEvent(audit) = first else {
+            panic!("expected AuditEvent first, got {first:?}");
+        };
+        assert_eq!(audit.action_type, "host.update");
+        assert_eq!(audit.request_id, Some(request_id.to_string()));
+        // ...classified by the Timeout CODE, not message text: outcome "failed" with the
+        // dedicated agent_timeout reason_code, so a killed task is distinguishable from an
+        // ordinary handler failure.
+        assert_eq!(audit.outcome, "failed");
+        let details: serde_json::Value =
+            serde_json::from_str(audit.details_json.as_deref().expect("details_json"))
+                .expect("details_json parses");
+        assert_eq!(details["reason_code"], "agent_timeout");
+        // ...then the Timeout response itself.
+        let second = rx.recv().await.expect("surface response");
+        let ServiceMessage::SurfaceActionResponse(sent) = second else {
+            panic!("expected SurfaceActionResponse second, got {second:?}");
+        };
+        assert_eq!(sent.request_id, request_id);
+        assert_eq!(
+            sent.error.expect("timeout error").code,
+            SurfaceActionErrorCode::Timeout
+        );
     }
 }
