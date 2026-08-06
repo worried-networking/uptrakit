@@ -17,7 +17,7 @@ use uptrakit_web_api_types::oauth::ConsentDecision;
 use uuid::Uuid;
 
 use crate::AppState;
-use crate::extract::ClientIp;
+use crate::extract::{ClientIp, Unvalidated};
 use crate::middleware::require_auth::AuthenticatedUser;
 use crate::oauth::http_responses::{oauth_400, oauth_500};
 use crate::oauth::rate_limit::EndpointKind;
@@ -199,11 +199,16 @@ pub async fn approve_consent(
     client_ip: Option<Extension<ClientIp>>,
     auth_user: Option<Extension<AuthenticatedUser>>,
     Path(request_id): Path<Uuid>,
-    axum::Json(_body): axum::Json<ConsentDecision>,
+    body: Unvalidated<ConsentDecision>,
 ) -> Response {
     if !state.oauth.enabled {
         return StatusCode::NOT_FOUND.into_response();
     }
+
+    let _body = match body.require_valid() {
+        Ok(v) => v,
+        Err(e) => return oauth_400("invalid_request", &e.to_string()),
+    };
 
     let (auth_user, _ip_str) =
         match require_auth_and_rate_limit(auth_user, &client_ip, &state, EndpointKind::Consent)

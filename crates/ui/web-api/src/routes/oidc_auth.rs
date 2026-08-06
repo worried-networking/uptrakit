@@ -12,7 +12,7 @@ use crate::auth::refresh_cookie::set_refresh_token_cookie;
 use crate::auth::session::SessionService;
 use crate::auth::token::{generate_secure_token, generate_uuid};
 use crate::error_response::error_response;
-use crate::extract::SessionSvc;
+use crate::extract::{SessionSvc, Unvalidated};
 use axum::{
     Extension, Json,
     extract::{Path, Query, State},
@@ -1342,8 +1342,23 @@ fn link_redirect_with_no_referrer(
 pub async fn oidc_exchange(
     State(state): State<Arc<AppState>>,
     session_svc: SessionSvc,
-    Json(req): Json<OidcExchangeRequest>,
+    body: Unvalidated<OidcExchangeRequest>,
 ) -> Response {
+    let req = match body.require_valid() {
+        Ok(req) => req,
+        Err(e) => {
+            let response = error_response(StatusCode::BAD_REQUEST, e.to_string());
+            emit_oidc_exchange_audit(
+                &state,
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                None,
+                response.status(),
+                Some("invalid_request"),
+            );
+            return response;
+        }
+    };
+
     let pending = match state.oidc.oidc_token_exchange_store.take(&req.code).await {
         Ok(Some(p)) => p,
         Ok(None) => {
@@ -1412,8 +1427,24 @@ pub async fn oidc_exchange(
 pub async fn oidc_complete_registration(
     State(state): State<Arc<AppState>>,
     session_svc: SessionSvc,
-    Json(req): Json<OidcCompleteRegistrationRequest>,
+    body: Unvalidated<OidcCompleteRegistrationRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let req = match body.require_valid() {
+        Ok(req) => req,
+        Err(e) => {
+            emit_oidc_user_create_audit(
+                &state,
+                None,
+                None,
+                None,
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                Some("invalid_request"),
+                None,
+            );
+            return Ok(error_response(StatusCode::BAD_REQUEST, e.to_string()));
+        }
+    };
+
     // 1. Validate the registration token first (pure check, no side effects).
     // This must happen before consuming the one-time-use code so that a wrong
     // token does not permanently burn a valid registration_code.
@@ -2774,6 +2805,29 @@ mod audit_tests {
             details["reason_code"],
             serde_json::json!("invalid_or_expired_exchange_code")
         );
+    }
+
+    #[tokio::test]
+    async fn oidc_exchange_empty_code_writes_validation_failed_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+
+        let (status, _body): (http::StatusCode, serde_json::Value) = client
+            .post_json(
+                "/api/v1/auth/oidc/exchange",
+                &serde_json::json!({ "code": "" }),
+            )
+            .send_json()
+            .await;
+        assert_eq!(status, http::StatusCode::BAD_REQUEST);
+
+        let row = tenant_audit_row_for_action(&app.db, ACTION_AUTH_OIDC_EXCHANGE).await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed.as_str()
+        );
+        let details = row.details_json.expect("audit details");
+        assert_eq!(details["reason_code"], serde_json::json!("invalid_request"));
     }
 
     #[tokio::test]
