@@ -441,6 +441,31 @@ pub(crate) async fn open_registration(app: &super::TestApp) -> String {
     owner_token
 }
 
+/// Insert a TENANT-scoped role shadowing a well-known global (`tenant_id IS
+/// NULL`) role name — the M16a-plan3 Task 2 role-name-shadowing regression
+/// fixture. The five by-name role resolvers must scope their lookup to
+/// global rows so a hostile tenant-created role can never be picked up in
+/// place of the built-in it shares a name with.
+pub(crate) async fn insert_shadow_role(
+    db: &DatabaseConnection,
+    tenant_id: uuid::Uuid,
+    name: &str,
+) -> uuid::Uuid {
+    let id = uuid::Uuid::now_v7();
+    role::ActiveModel {
+        id: Set(id),
+        name: Set(name.to_string()),
+        description: Set(None),
+        is_built_in: Set(false),
+        created_at: Set(time::OffsetDateTime::now_utc()),
+        tenant_id: Set(Some(tenant_id)),
+    }
+    .insert(db)
+    .await
+    .expect("insert shadow role");
+    id
+}
+
 /// Id of a seeded built-in role, by name.
 pub(crate) async fn role_id_by_name(app: &super::TestApp, role_name: &str) -> uuid::Uuid {
     role::Entity::find()

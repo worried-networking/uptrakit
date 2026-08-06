@@ -249,6 +249,7 @@ pub async fn resolve_oidc_user<C: ConnectionTrait>(
     // Assign default 'user' role (role mapping may override this later via sync_oidc_roles)
     if let Ok(Some(user_role_entity)) = Role::find()
         .filter(role::Column::Name.eq("user"))
+        .filter(role::Column::TenantId.is_null())
         .one(db)
         .await
     {
@@ -350,6 +351,7 @@ pub async fn sync_oidc_roles(
     // on SQLite's unspecified IN-list result order.
     let local_roles = Role::find()
         .filter(role::Column::Name.is_in(local_role_names))
+        .filter(role::Column::TenantId.is_null())
         .order_by_asc(role::Column::Name)
         .all(txn)
         .await

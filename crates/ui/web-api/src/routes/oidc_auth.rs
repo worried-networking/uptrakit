@@ -4105,4 +4105,175 @@ mod audit_tests {
         );
         assert_eq!(app.state.settings.registration().mode, mode_before);
     }
+
+    /// M16a-plan3 Task 2: a tenant-scoped role whose name is claimed by a
+    /// role-mapping value must never shadow the matching global role —
+    /// `sync_oidc_roles`'s `.is_in(local_role_names)` lookup must stay
+    /// scoped to `tenant_id IS NULL` rows. Deterministic pre-fix (unlike
+    /// the `.one()` sites): both the global and shadow "operator" rows
+    /// match the unscoped `.is_in()`/`.all()` query, so the shadow is
+    /// visibly assigned alongside the global row.
+    #[tokio::test]
+    async fn sync_oidc_roles_ignores_tenant_shadow() {
+        let app = TestApp::new().await;
+        let provider_id = insert_active_oidc_provider(
+            &app.db,
+            app.state.default_tenant_id,
+            "Role Shadow",
+            "role-shadow",
+        )
+        .await;
+        {
+            use sea_orm::IntoActiveModel as _;
+            let provider_row = oidc_provider::Entity::find_by_id(provider_id)
+                .one(&app.db)
+                .await
+                .expect("provider query")
+                .expect("provider row");
+            let mut active = provider_row.into_active_model();
+            active.role_claim_path = Set(Some("roles".to_string()));
+            active.role_mapping = Set(oidc_provider::RoleMapping(std::collections::HashMap::from(
+                [("admin".to_string(), "operator".to_string())],
+            )));
+            active.update(&app.db).await.expect("update provider");
+        }
+        let provider = oidc_provider::Entity::find_by_id(provider_id)
+            .one(&app.db)
+            .await
+            .expect("provider query")
+            .expect("provider row");
+
+        let global_operator_id = Role::find()
+            .filter(role::Column::Name.eq("operator"))
+            .filter(role::Column::TenantId.is_null())
+            .one(&app.db)
+            .await
+            .expect("role query")
+            .expect("global operator role exists")
+            .id;
+        let shadow_operator_id = crate::test_harness::fixtures::insert_shadow_role(
+            &app.db,
+            app.state.default_tenant_id,
+            "operator",
+        )
+        .await;
+
+        // First user (owns the tenant's covering access:manage holder) so
+        // the second user's sync below is not the last covering holder.
+        let txn = uptrakit_shared_db::access_grants::begin_guarded(&app.db)
+            .await
+            .expect("begin (guarded)");
+        let first_user_id = insert_txn_user(&txn, "oidc-role-shadow-owner@test.local").await;
+        super::handle_new_user(
+            &app.state,
+            &txn,
+            first_user_id,
+            &provider,
+            &serde_json::json!({}),
+        )
+        .await
+        .expect("first user setup must succeed");
+        txn.commit().await.expect("commit first user");
+
+        let txn = uptrakit_shared_db::access_grants::begin_guarded(&app.db)
+            .await
+            .expect("begin (guarded)");
+        let user_id = insert_txn_user(&txn, "oidc-role-shadow@test.local").await;
+        let claims = serde_json::json!({ "roles": ["admin"] });
+        let sync_outcome = super::sync_oidc_roles(
+            &txn,
+            app.state.default_tenant_id,
+            app.state.default_tenant_id,
+            user_id,
+            &provider,
+            &claims,
+        )
+        .await
+        .expect("sync must succeed — not a lockout");
+        txn.commit().await.expect("commit sync");
+
+        assert_eq!(sync_outcome, super::RoleSyncOutcome::Applied);
+        let assigned_role_ids: Vec<uuid::Uuid> = UserRole::find()
+            .filter(user_role::Column::TenantId.eq(app.state.default_tenant_id))
+            .filter(user_role::Column::UserId.eq(user_id))
+            .all(&app.db)
+            .await
+            .expect("user_role query")
+            .into_iter()
+            .map(|r| r.role_id)
+            .collect();
+        assert_eq!(
+            assigned_role_ids,
+            vec![global_operator_id],
+            "sync_oidc_roles must assign only the global operator role"
+        );
+        assert!(
+            !assigned_role_ids.contains(&shadow_operator_id),
+            "the tenant shadow role must never be assigned by sync_oidc_roles"
+        );
+    }
+
+    /// M16a-plan3 Task 2: a tenant-scoped role named "user" must never
+    /// shadow a global built-in — `resolve_oidc_user`'s best-effort
+    /// default-role lookup must stay scoped to `tenant_id IS NULL` rows.
+    /// The legacy "user" role no longer exists among the built-in roles
+    /// (see `m20260310_000002_granular_permissions.rs`'s `OLD_ROLES`
+    /// migration), so a tenant-created role named "user" is the ONLY name
+    /// match — pre-fix, the unscoped lookup finds and assigns it;
+    /// post-fix, `resolve_oidc_user` must stay inert (assign nothing).
+    #[tokio::test]
+    async fn resolve_oidc_user_stays_inert_for_tenant_role_named_user() {
+        let app = TestApp::new().await;
+        let provider_id = insert_active_oidc_provider(
+            &app.db,
+            app.state.default_tenant_id,
+            "User Shadow",
+            "user-shadow",
+        )
+        .await;
+        let provider = oidc_provider::Entity::find_by_id(provider_id)
+            .one(&app.db)
+            .await
+            .expect("provider query")
+            .expect("provider row");
+
+        crate::test_harness::fixtures::insert_shadow_role(
+            &app.db,
+            app.state.default_tenant_id,
+            "user",
+        )
+        .await;
+
+        let resolution = super::resolve_oidc_user(super::OidcUserParams {
+            db: &app.db,
+            tenant_id: app.state.default_tenant_id,
+            provider_id: provider.id,
+            oidc_subject: "user-shadow-subject",
+            email: "user-shadow@test.local",
+            first_name: Some("Shadow"),
+            last_name: Some("Target"),
+            auto_create: true,
+            email_verified: Some(true),
+        })
+        .await
+        .expect("resolve_oidc_user must succeed");
+
+        let user_id = match resolution {
+            super::OidcUserResolution::NewUser(id) => id,
+            _ => panic!("expected NewUser resolution"),
+        };
+
+        let role_count = UserRole::find()
+            .filter(user_role::Column::TenantId.eq(app.state.default_tenant_id))
+            .filter(user_role::Column::UserId.eq(user_id))
+            .count(&app.db)
+            .await
+            .expect("count user_role rows");
+        assert_eq!(
+            role_count, 0,
+            "resolve_oidc_user must stay inert — no global \"user\" role \
+             exists, so the tenant shadow must never be picked up as a \
+             best-effort default"
+        );
+    }
 }

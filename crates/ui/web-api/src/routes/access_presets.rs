@@ -212,6 +212,7 @@ pub async fn apply_preset(
         .filter(
             role::Column::Name.is_in(role_names.iter().map(|s| s.to_string()).collect::<Vec<_>>()),
         )
+        .filter(role::Column::TenantId.is_null())
         .all(state.db())
         .await
     {
@@ -770,6 +771,66 @@ mod tests {
         assert_eq!(details["update_kind"], serde_json::json!("apply_preset"));
         assert_eq!(details["preset"], serde_json::json!("operator"));
         assert_eq!(details["changed_fields"], serde_json::json!(["roles"]));
+    }
+
+    /// M16a-plan3 Task 2: a tenant-scoped role sharing a preset's role name
+    /// must never shadow the global built-in — `apply_preset`'s
+    /// `.is_in(role_names)` lookup must stay scoped to `tenant_id IS NULL`
+    /// rows. Deterministic pre-fix: the unscoped query matches both the
+    /// global "viewer" row and the shadow, so `role_models.len() (2) !=
+    /// role_names.len() (1)` trips the existing mismatch guard and the
+    /// endpoint returns 500 instead of silently assigning the shadow.
+    #[tokio::test]
+    async fn apply_preset_ignores_tenant_shadow() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let access_token = fixtures::register_and_get_token(&client).await;
+        let target_user = insert_target_user(&app.db, "preset-shadow-target@test.local").await;
+
+        let global_viewer_id = Role::find()
+            .filter(role::Column::Name.eq("viewer"))
+            .filter(role::Column::TenantId.is_null())
+            .one(&app.db)
+            .await
+            .expect("query")
+            .expect("seeded global viewer role")
+            .id;
+        let shadow_viewer_id = fixtures::insert_shadow_role(&app.db, app.tenant_id, "viewer").await;
+
+        let status = client
+            .post_json(
+                &format!("/api/v1/users/{}/apply-preset", target_user.id),
+                &ApplyPresetRequest {
+                    preset: "read_only".to_string(),
+                },
+            )
+            .bearer(&access_token)
+            .send_status()
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "apply_preset must succeed once the by-name lookup is scoped to global rows"
+        );
+
+        let assigned_role_ids: Vec<Uuid> = user_role::Entity::find()
+            .filter(user_role::Column::TenantId.eq(app.tenant_id))
+            .filter(user_role::Column::UserId.eq(target_user.id))
+            .all(&app.db)
+            .await
+            .expect("user_role query")
+            .into_iter()
+            .map(|r| r.role_id)
+            .collect();
+        assert_eq!(
+            assigned_role_ids,
+            vec![global_viewer_id],
+            "apply_preset must assign only the global viewer role"
+        );
+        assert!(
+            !assigned_role_ids.contains(&shadow_viewer_id),
+            "the tenant shadow role must never be assigned by apply_preset"
+        );
     }
 
     #[tokio::test]

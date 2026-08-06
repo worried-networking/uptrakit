@@ -2287,6 +2287,273 @@ mod tests {
             "second user gets the default viewer role only"
         );
     }
+
+    /// M16a-plan3 Task 2: a tenant-scoped role named "viewer" must never
+    /// shadow the global built-in — `assign_viewer_role`'s by-name lookup
+    /// must stay scoped to `tenant_id IS NULL` rows.
+    ///
+    /// RED staging (per the M16a-plan3 spec): `.one()` with no `ORDER BY` is
+    /// nondeterministic once both the global row and the shadow exist (a
+    /// naive "insert shadow, drive, assert global wins" setup can pass
+    /// pre-fix by luck — confirmed empirically here). Phase 1 makes the
+    /// shadow the ONLY name match by renaming the global row away first,
+    /// which is deterministic pre-fix (assigns the shadow) and post-fix
+    /// (the scoped query matches nothing, so `assign_viewer_role` errors —
+    /// swallowed by `register()`'s best-effort call site, leaving the user
+    /// role-less). Phase 2 restores the global row and re-drives with both
+    /// rows present as the durable regression pin.
+    #[tokio::test]
+    async fn assign_viewer_role_ignores_tenant_shadow() {
+        use sea_orm::sea_query::Expr;
+
+        let db = setup_empty_test_db().await;
+        let state = test_state(db.clone()).await;
+
+        // First user registers to open the tenant up and take the owner
+        // role set; subsequent registrations are the ones that drive
+        // assign_viewer_role.
+        let response = match register(
+            State(state.clone()),
+            crate::extract::SessionSvc::new(SessionService::new(db.clone())),
+            first_user_request(),
+        )
+        .await
+        {
+            Ok(r) => r.into_response(),
+            Err(_) => panic!("first registration must succeed"),
+        };
+        assert_eq!(response.status(), StatusCode::CREATED);
+
+        async fn reopen_registration(state: &Arc<AppState>) {
+            let mut reg = state.settings.registration();
+            reg.mode = RegistrationMode::Open;
+            state.settings.set_registration(reg).await;
+        }
+
+        async fn register_user(
+            state: &Arc<AppState>,
+            db: &DatabaseConnection,
+            email: &str,
+        ) -> user::Model {
+            reopen_registration(state).await;
+            let response = match register(
+                State(state.clone()),
+                crate::extract::SessionSvc::new(SessionService::new(db.clone())),
+                crate::extract::Validated(RegisterRequest {
+                    email: email.to_string(),
+                    first_name: "Second".to_string(),
+                    last_name: "User".to_string(),
+                    password: SecretString::new("correct-horse-battery-staple".to_string()),
+                    registration_token: None,
+                }),
+            )
+            .await
+            {
+                Ok(r) => r.into_response(),
+                Err(_) => panic!("registration must succeed"),
+            };
+            assert_eq!(response.status(), StatusCode::CREATED);
+            User::find()
+                .filter(user::Column::Email.eq(email))
+                .one(db)
+                .await
+                .expect("query")
+                .expect("registered user")
+        }
+
+        async fn assigned_role_ids(
+            db: &DatabaseConnection,
+            tenant_id: uuid::Uuid,
+            user_id: uuid::Uuid,
+        ) -> Vec<uuid::Uuid> {
+            user_role::Entity::find()
+                .filter(user_role::Column::TenantId.eq(tenant_id))
+                .filter(user_role::Column::UserId.eq(user_id))
+                .all(db)
+                .await
+                .expect("query user_role")
+                .into_iter()
+                .map(|r| r.role_id)
+                .collect()
+        }
+
+        // Phase 1: only the shadow matches the name "viewer".
+        Role::update_many()
+            .col_expr(role::Column::Name, Expr::value("viewer_renamed"))
+            .filter(role::Column::Name.eq("viewer"))
+            .filter(role::Column::TenantId.is_null())
+            .exec(&db)
+            .await
+            .expect("rename global viewer role away");
+
+        let shadow_role_id = crate::test_harness::fixtures::insert_shadow_role(
+            &db,
+            state.default_tenant_id,
+            "viewer",
+        )
+        .await;
+
+        let phase1_user = register_user(&state, &db, "viewer-shadow-phase1@example.com").await;
+        let phase1_roles = assigned_role_ids(&db, state.default_tenant_id, phase1_user.id).await;
+        assert!(
+            !phase1_roles.contains(&shadow_role_id),
+            "assign_viewer_role must never assign the tenant shadow role, \
+             even when it is the only name match"
+        );
+
+        // Phase 2: restore the global row and re-drive with both rows
+        // present — the durable regression pin.
+        Role::update_many()
+            .col_expr(role::Column::Name, Expr::value("viewer"))
+            .filter(role::Column::Name.eq("viewer_renamed"))
+            .exec(&db)
+            .await
+            .expect("restore global viewer role");
+
+        let global_viewer_id = Role::find()
+            .filter(role::Column::Name.eq("viewer"))
+            .filter(role::Column::TenantId.is_null())
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("restored global viewer role")
+            .id;
+
+        let phase2_user = register_user(&state, &db, "viewer-shadow-phase2@example.com").await;
+        let phase2_roles = assigned_role_ids(&db, state.default_tenant_id, phase2_user.id).await;
+        assert_eq!(
+            phase2_roles,
+            vec![global_viewer_id],
+            "assign_viewer_role must pick the global viewer row, not the tenant shadow"
+        );
+    }
+
+    /// M16a-plan3 Task 2: a tenant-scoped role named "system_administrator"
+    /// must never shadow the global built-in — `assign_owner_roles`' by-name
+    /// lookup must stay scoped to `tenant_id IS NULL` rows.
+    ///
+    /// RED staging (per the M16a-plan3 spec): `.one()` with no `ORDER BY` is
+    /// nondeterministic once both the global row and the shadow exist, so a
+    /// naive "insert shadow, drive, assert global wins" setup could pass
+    /// pre-fix by luck. Phase 1 makes the shadow the ONLY name match by
+    /// renaming the global row away first, which is deterministic pre-fix
+    /// (assigns the shadow) and post-fix (the scoped query matches nothing,
+    /// so the lookup errors instead). Phase 2 restores the global row and
+    /// re-drives with both rows present as the durable regression pin.
+    #[tokio::test]
+    async fn assign_owner_roles_ignores_tenant_shadow() {
+        use sea_orm::sea_query::Expr;
+
+        let db = setup_empty_test_db().await;
+        let state = test_state(db.clone()).await;
+
+        Role::update_many()
+            .col_expr(
+                role::Column::Name,
+                Expr::value("system_administrator_renamed"),
+            )
+            .filter(role::Column::Name.eq("system_administrator"))
+            .exec(&db)
+            .await
+            .expect("rename global system_administrator role away");
+
+        let shadow_role_id = crate::test_harness::fixtures::insert_shadow_role(
+            &db,
+            state.default_tenant_id,
+            "system_administrator",
+        )
+        .await;
+
+        let now = OffsetDateTime::now_utc();
+        let user_id = crate::auth::token::generate_uuid();
+        user::ActiveModel {
+            id: Set(user_id),
+            email: Set(MaskedEmail::new("owner-shadow-target@example.com")),
+            first_name: Set("Owner".to_string()),
+            last_name: Set("Shadow".to_string()),
+            password_hash: Set(None),
+            is_active: Set(true),
+            deactivated_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(&db)
+        .await
+        .expect("insert user");
+
+        // Phase 1: only the shadow matches the name "system_administrator".
+        let txn1 = db.begin().await.expect("begin phase-1 txn");
+        match assign_owner_roles(&txn1, state.default_tenant_id, user_id).await {
+            Ok(()) => {
+                // Pre-fix: the unscoped lookup found and assigned the
+                // tenant shadow instead of erroring — this is the RED case.
+                txn1.commit().await.expect("commit phase 1");
+                let assigned = user_role::Entity::find()
+                    .filter(user_role::Column::TenantId.eq(state.default_tenant_id))
+                    .filter(user_role::Column::UserId.eq(user_id))
+                    .filter(user_role::Column::RoleId.eq(shadow_role_id))
+                    .one(&db)
+                    .await
+                    .expect("query user_role");
+                assert!(
+                    assigned.is_none(),
+                    "assign_owner_roles must never assign the tenant shadow role, \
+                     even when it is the only name match"
+                );
+            }
+            Err(_) => {
+                // Post-fix: the scoped query finds no global row (it was
+                // renamed away) and errors instead of falling back to the
+                // shadow — drop the txn so the partial writes for the other
+                // seven roles roll back.
+                drop(txn1);
+            }
+        }
+
+        // Phase 2: restore the global row and re-drive with both rows
+        // present — the durable regression pin.
+        Role::update_many()
+            .col_expr(role::Column::Name, Expr::value("system_administrator"))
+            .filter(role::Column::Name.eq("system_administrator_renamed"))
+            .exec(&db)
+            .await
+            .expect("restore global system_administrator role");
+
+        let global_owner_role_ids: std::collections::BTreeSet<uuid::Uuid> = Role::find()
+            .filter(role::Column::Name.is_in(owner_role_names()))
+            .filter(role::Column::TenantId.is_null())
+            .all(&db)
+            .await
+            .expect("query global owner roles")
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
+
+        let txn2 = db.begin().await.expect("begin phase-2 txn");
+        assign_owner_roles(&txn2, state.default_tenant_id, user_id)
+            .await
+            .expect("assign_owner_roles must succeed once the global row is restored");
+        txn2.commit().await.expect("commit phase 2");
+
+        let assigned_role_ids: std::collections::BTreeSet<uuid::Uuid> = user_role::Entity::find()
+            .filter(user_role::Column::TenantId.eq(state.default_tenant_id))
+            .filter(user_role::Column::UserId.eq(user_id))
+            .all(&db)
+            .await
+            .expect("query user_role")
+            .into_iter()
+            .map(|r| r.role_id)
+            .collect();
+
+        assert_eq!(
+            assigned_role_ids, global_owner_role_ids,
+            "assign_owner_roles must assign exactly the global role ids, never the tenant shadow"
+        );
+        assert!(
+            !assigned_role_ids.contains(&shadow_role_id),
+            "the tenant shadow id must never appear among the assigned roles"
+        );
+    }
 }
 
 /// Query parameters for the email-change confirmation endpoint.
@@ -2849,6 +3116,7 @@ pub async fn assign_owner_roles(
     for role_name in all_roles {
         let role_entity = Role::find()
             .filter(role::Column::Name.eq(role_name))
+            .filter(role::Column::TenantId.is_null())
             .one(db)
             .await
             .context_to()?
@@ -2872,6 +3140,7 @@ pub async fn assign_viewer_role(
 ) -> crate::auth::Result<()> {
     let viewer_role = Role::find()
         .filter(role::Column::Name.eq("viewer"))
+        .filter(role::Column::TenantId.is_null())
         .one(db)
         .await
         .context_to()?
