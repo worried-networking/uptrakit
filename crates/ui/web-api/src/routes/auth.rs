@@ -1560,6 +1560,49 @@ mod tests {
         );
     }
 
+    /// D13: engine unavailable degrades `me` to HTTP 200 with an explicit
+    /// `unavailable` authority marker and an empty action list — never a
+    /// non-2xx (the SPA logs the user out on any non-2xx `me` response).
+    #[tokio::test]
+    async fn me_engine_unavailable_is_200_with_unavailable_authority() {
+        let db = setup_test_db().await;
+        let state = test_state(db.clone()).await;
+        let user_id = User::find().one(&db).await.unwrap().unwrap().id;
+
+        let auth_user = AuthenticatedUser::new(user_id, AuthMethod::Password, vec![], None);
+
+        let response = me(
+            State(state),
+            axum::Extension(auth_user),
+            axum::Extension(crate::middleware::action::AccessAuthority::Unavailable),
+        )
+        .await;
+        let (parts, body) = response.into_parts();
+        assert_eq!(parts.status, StatusCode::OK);
+        let bytes = axum::body::to_bytes(body, usize::MAX).await.expect("body");
+        let json: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
+        assert_eq!(json["authority"], "unavailable");
+        assert_eq!(json["actions"].as_array().expect("array").len(), 0);
+    }
+
+    /// D13: `effective_actions` (the `me`-adjacent helper embedding actions
+    /// into login/register responses) degrades the same way when the
+    /// engine's own DB access fails — mirrors the engine's own
+    /// `context_propagates_db_errors_never_empty_authority` test, which
+    /// proves `context()` itself errors against a schema-less connection.
+    #[tokio::test]
+    async fn effective_actions_degrades_to_unavailable_on_engine_failure() {
+        let db = Database::connect("sqlite::memory:").await.expect("connect");
+        let engine = uptrakit_controller_core::access::AccessEngine::new(db);
+        let (actions, authority) =
+            effective_actions(&engine, uuid::Uuid::now_v7(), uuid::Uuid::now_v7()).await;
+        assert!(actions.is_empty());
+        assert_eq!(
+            authority,
+            uptrakit_web_api_types::auth::AuthorityStatus::Unavailable
+        );
+    }
+
     #[tokio::test]
     async fn register_conflict_writes_user_create_denied_audit_event() {
         let db = setup_test_db().await;

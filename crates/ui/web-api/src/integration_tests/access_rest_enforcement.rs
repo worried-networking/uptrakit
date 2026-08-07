@@ -690,6 +690,17 @@ async fn d5_authenticated_only_endpoints_zero_grant_ok() {
             "{path}: D5 zero-grant principal must succeed"
         );
     }
+    // D13: `me`'s authority must read `ok` for a healthy engine even when
+    // the principal holds zero grants — kept observably distinct from the
+    // handler-level `me_engine_unavailable_is_200_with_unavailable_authority`
+    // unit test in `routes/auth.rs`, which forces the engine itself to fail.
+    let (status, body): (http::StatusCode, serde_json::Value) = client
+        .get("/api/v1/auth/me")
+        .bearer(&token)
+        .send_json()
+        .await;
+    assert_eq!(status, http::StatusCode::OK);
+    assert_eq!(body["authority"], "ok");
     // Mutating authenticated-only op — the highest-stakes miss:
     assert_eq!(
         client
