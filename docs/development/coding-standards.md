@@ -1194,7 +1194,9 @@ action_extractor! {
 ```
 
 The macro generates a struct `CanReadNewThing(pub AuthenticatedUser)` with a `FromRequestParts` impl that resolves the request's `AccessContext`
-through the `AccessEngine`, records the deny metric, and emits the `access.denied` audit Event on a policy deny.
+through the `AccessEngine` and records the deny metric on a policy deny. The `access.denied` audit Event is additionally emitted only for actions
+`deny_event_worthy()` classifies as audit-worthy (`crates/shared/types/src/access/mod.rs`) — system-plane actions plus `commands:manage`,
+`access:manage`, and `mcp:use`; every other denial is the counter and a debug trace.
 
 ### Anti-pattern
 
@@ -1257,7 +1259,7 @@ use uuid::Uuid;
 
 pub async fn get_host(
     tenant_db: TenantDb,
-    CanViewHosts(_user): CanViewHosts,
+    CanReadHosts(_user): CanReadHosts,
     Path(host_id): Path<Uuid>,        // Axum validates the UUID
 ) -> Response {
     // use host_id directly — no parse_str needed
