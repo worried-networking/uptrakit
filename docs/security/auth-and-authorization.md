@@ -102,7 +102,6 @@ graceful fallback.**
 | Site                                  | Anti-pattern           | Effect                                                                           |
 | ------------------------------------- | ---------------------- | -------------------------------------------------------------------------------- |
 | `users.rs` — build user response      | `.unwrap_or_default()` | DB outage → empty permission set in the admin user list/detail view              |
-| `access_presets.rs` — apply preset    | `.unwrap_or_default()` | DB outage → empty permission set in the apply-preset response                    |
 | `oidc_auth.rs` — count existing users | `.unwrap_or(false)`    | DB outage → assume zero users → unintended first-admin OIDC registration allowed |
 | `oidc_auth.rs` — list OIDC providers  | `.unwrap_or_default()` | DB outage → empty provider list → correct behavior obscured, outage masked       |
 
@@ -110,8 +109,8 @@ The auth token-minting paths — `register`, `login`, `refresh`, the OIDC mint, 
 builders — now propagate permission-load failures as HTTP 500 rather than minting a token with empty permissions.
 The one deliberate exception is `me`: on a permission-load DB error it stays fail-closed (empty permissions, HTTP
 200) because the SPA treats any non-2xx from `me` as an unconditional logout, so a 500 would eject an
-already-logged-in user on a transient blip. The `users.rs` and `access_presets.rs` sites above are lower-severity
-read paths that mint no token; they remain to be fixed to the same `?`-propagation pattern.
+already-logged-in user on a transient blip. The `users.rs` site above is a lower-severity
+read path that mints no token; it remains to be fixed to the same `?`-propagation pattern.
 
 ### Required pattern
 
@@ -275,9 +274,9 @@ Built-in roles are marked with `is_built_in = true` in the `roles` table.
 
 ### Access presets
 
-Access presets are code-defined bundles (not stored in the database) that assign one or more roles
-in a single operation. They are exposed via the `GET /api/v1/access-presets` and
-`POST /api/v1/users/{id}/apply-preset` endpoints.
+Access presets are code-defined bundles (not stored in the database) that group one or more roles
+under a single name. They are exposed as advisory metadata via `GET /api/v1/access/catalog`; apply
+one to a user by assigning its roles through `PUT /api/v1/users/{id}/roles`.
 
 | Preset          | Roles assigned                                                                                         | Use case                        |
 | --------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------- |
@@ -314,7 +313,7 @@ with HTTP 409 Conflict.
    `crates/ui/web-api/src/middleware/permission.rs` using a macro that generates one concrete struct per permission.
    If the user lacks the permission the extractor short-circuits with `403 Forbidden` before the handler body runs.
    No DB round-trip is needed.
-1. Endpoints still on the legacy model (only `users.rs`, `roles.rs`, `access_presets.rs` after the M1.4b sweep) also
+1. Endpoints still on the legacy model (only `users.rs` and `roles.rs` after the M1.4b sweep) also
    carry an `x-required-permission` OpenAPI extension (set in the `#[utoipa::path]` annotation, e.g.
    `extensions(("x-required-permission" = json!("view_hosts")))`). This makes the required permission
    machine-readable in the generated OpenAPI spec.
@@ -422,7 +421,7 @@ for the permission pattern conventions.
 
 ### Adding a new permission
 
-Legacy model only. After the M1.4b sweep this applies solely to `users.rs`, `roles.rs`, and `access_presets.rs`; new
+Legacy model only. After the M1.4b sweep this applies solely to `users.rs` and `roles.rs`; new
 authorization work declares a catalog action and an `action_extractor!` type instead (see the next section).
 
 1. Add a variant to the `Permission` enum in `crates/shared/types/src/permissions.rs` (with `as_str` / `from_str` /
@@ -449,7 +448,7 @@ instead of the `x-required-permission` extension. The `hosts` route family (`cra
 is the first converted family and serves as the reference conversion.
 
 The M1.4b sweep (batches B1–B6) converted **all** route families except the M1.6a/M1.6b handoffs
-(`users.rs`, `roles.rs`, `access_presets.rs`). OR-of-alternatives operations (batch actions,
+(`users.rs`, `roles.rs`). OR-of-alternatives operations (batch actions,
 `list_plugin_types`, plugin-type-settings reads) declare one single-scope `oauth2` requirement per
 alternative and enforce inline via `authorize_any`, with no action extractor. Dynamic surface wrappers
 carry `x-action-dynamic: true` alongside the authenticated-only security form. The operator OAuth clients
@@ -486,7 +485,7 @@ calls `AccessEngine::authorize()` directly for the single `system.settings:manag
 predicate used to filter instance-scoped plugins out of listings, not a request-denying gate, so it returns a `bool`
 and does not increment the deny counter.
 
-Only `users.rs`, `roles.rs`, and `access_presets.rs` remain on the legacy `permission_extractor!` +
+Only `users.rs` and `roles.rs` remain on the legacy `permission_extractor!` +
 `x-required-permission` model described above, until M1.6a/M1.6b converts them. Which model a given
 handler uses is visible from its extractor import: `crate::middleware::action::CanXxx` (new) vs.
 `crate::middleware::permission::CanXxx` (legacy) — the two macros generate similarly-named but distinct

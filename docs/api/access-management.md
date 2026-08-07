@@ -7,9 +7,9 @@ roles, and role assignment -- this page). A third, fine-grained action,
 row confers **system-plane** authority (a pattern whose resource starts with `system.`,
 e.g. `system.access:manage` or `system.*:*`).
 
-This page documents the grant and role CRUD families, the role-assignment endpoint, and
-the interim state of the access-preset endpoint. It reflects what M1.6a actually shipped,
-not the original design. [Authentication and Authorization](../security/auth-and-authorization.md)
+This page documents the grant and role CRUD families and the role-assignment endpoint.
+It reflects what M1.6a actually shipped, not the original design.
+[Authentication and Authorization](../security/auth-and-authorization.md)
 still describes the pre-split model; it will be rewritten in M1.9 to cover the full
 `users:manage`/`access:manage`/`system.access:manage` picture.
 
@@ -125,20 +125,9 @@ system-plane check, even if that role reaches the system plane.
 Request body (`UpdateUserRolesRequest`): `role_ids` must contain 1-20 entries, all of
 which must resolve to existing roles (unresolved ids -- `400`, no reason code).
 
-## Preset endpoint (interim state)
-
-`POST /api/v1/users/{id}/apply-preset` was **not** converted by this milestone. It still
-gates on the legacy `manage_users` permission via `CanManageUsers` (the
-`x-required-permission` OpenAPI extension, not a native `security()` scope) rather than
-the `users:manage`/`access:manage` split -- a `users:manage`-only caller can currently
-apply any preset, including ones that grant `access:manage`. Full conversion is
-M1.6b.
-
-One runtime check was added ahead of that conversion: applying a preset whose roles reach
-the system plane (currently only the `owner` preset, via `system_administrator`)
-additionally requires `system.access:manage`, checked inline against the engine. As with
-role assignment, this is evaluated only against roles the preset would newly grant --
-re-applying a preset the user already effectively holds does not re-trigger the check.
+Role bundles (see the catalog endpoint below) are advisory metadata, not a separate grant
+mechanism: to apply a bundle to a user, look up its `roles()` in the catalog response and
+assign them via this same endpoint.
 
 ## Catalog endpoint
 
@@ -279,7 +268,6 @@ originating instance invalidates and publishes immediately on commit.
 | `crates/ui/web-api/src/routes/access_grants.rs`    | Grant CRUD route handlers                          |
 | `crates/ui/web-api/src/routes/roles.rs`            | Role CRUD route handlers                           |
 | `crates/ui/web-api/src/routes/users.rs`            | `update_user_roles` (assignment endpoint)          |
-| `crates/ui/web-api/src/routes/access_presets.rs`   | Preset route handlers (interim gate)               |
 | `crates/shared/web-api-types/src/access_grants.rs` | Grant request/response types and validation bounds |
 | `crates/shared/web-api-types/src/roles.rs`         | Role request/response types and validation bounds  |
 | `crates/shared/db/src/access_grants.rs`            | Engine-owned persistence, lockout guard, bounds    |

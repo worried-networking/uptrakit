@@ -63,8 +63,9 @@ uptrakit-cli users get <user-id>
 # Replace a user's roles (provide role IDs)
 uptrakit-cli users set-roles <user-id> --role-ids <id1>,<id2>
 
-# Apply an access preset
-uptrakit-cli users apply-preset <user-id> --preset administrator
+# Look up a role bundle's role composition in the catalog, then apply it by name
+uptrakit-cli api GET /api/v1/access/catalog
+uptrakit-cli users set-roles <user-id> --names viewer,service_manager
 ```
 
 ### Activating and deactivating users
@@ -85,9 +86,6 @@ uptrakit-cli roles list
 
 # List all permissions
 uptrakit-cli permissions list
-
-# List access presets
-uptrakit-cli access-presets list
 ```
 
 ## Lockout prevention

@@ -48,7 +48,7 @@ pub use plugin_role::{ParsePluginRoleError, PluginRole};
 pub use plugin_type_id::{PluginTypeId, notification_plugin_type, plugin_ids};
 pub use provider_validation::{ProviderValidationError, validate_provider_api_base_url};
 pub use release_types::{AttestationStatus, ReleaseAsset, ReleaseInfo};
-pub use role_bundle::{ParseAccessPresetError, RoleBundle};
+pub use role_bundle::RoleBundle;
 pub use secret_string::SecretString;
 pub use service_status::{ParseServiceStatusError, ServiceStatus};
 pub use session_token_type::{ParseSessionTokenTypeError, SessionTokenType};

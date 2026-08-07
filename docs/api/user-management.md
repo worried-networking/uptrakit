@@ -106,26 +106,10 @@ Activate or deactivate a user account.
 
 **Response** (`200`): `UserWithRolesResponse`.
 
-### `POST /api/v1/users/{id}/apply-preset`
-
-Apply an access preset to a user, replacing their current roles with those defined by
-the preset.
-
-**Path parameters**: `id` -- user UUID.
-
-**Request body** (`ApplyPresetRequest`):
-
-```json
-{
-  "preset": "administrator"
-}
-```
-
-**Valid preset values**: `read_only`, `operator`, `manager`, `administrator`, `owner`.
-See [Access Presets](../security/auth-and-authorization.md#access-presets) for the role
-composition of each preset.
-
-**Response** (`200`): `UserWithRolesResponse` with the preset's roles applied.
+Role bundles (`read_only`, `operator`, `manager`, `administrator`, `owner`) are catalog
+metadata, not a separate endpoint -- look up a bundle's role composition via
+`GET /api/v1/access/catalog` (see [Access Management API](access-management.md#catalog-endpoint))
+and apply it via `PUT /api/v1/users/{id}/roles` above.
 
 ## Permission endpoints
 
@@ -156,71 +140,14 @@ Get a single role.
 
 **Response** (`200`): role object (no `permissions` field; see above).
 
-## Access preset endpoints
-
-### `GET /api/v1/access-presets`
-
-List all access presets with their role compositions.
-
-**Response** (`200`): `Vec<AccessPresetResponse>`
-
-```json
-[
-  {
-    "name": "read_only",
-    "description": "Dashboard viewers, stakeholders",
-    "roles": ["viewer"]
-  },
-  {
-    "name": "operator",
-    "description": "On-call staff, trigger checks/updates, approve agents",
-    "roles": ["viewer", "operator"]
-  },
-  {
-    "name": "manager",
-    "description": "Team leads with full CRUD on services, software, hosts",
-    "roles": ["viewer", "service_manager", "software_manager", "host_manager"]
-  },
-  {
-    "name": "administrator",
-    "description": "Tenant administrators with full management",
-    "roles": [
-      "viewer",
-      "service_manager",
-      "software_manager",
-      "host_manager",
-      "settings_manager",
-      "command_manager"
-    ]
-  },
-  {
-    "name": "owner",
-    "description": "System owner with full control",
-    "roles": [
-      "viewer",
-      "operator",
-      "service_manager",
-      "software_manager",
-      "host_manager",
-      "settings_manager",
-      "command_manager",
-      "system_administrator"
-    ]
-  }
-]
-```
-
 ## Key files
 
-| File                                                | Purpose                                                                                            |
-| --------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `crates/ui/web-api/src/routes/users.rs`             | User lifecycle handlers (`CanManageUsers`) and role assignment (`CanManageAccess`)                 |
-| `crates/ui/web-api/src/routes/roles.rs`             | Role CRUD handlers (`CanManageAccess`) -- see [Access Management API](access-management.md)        |
-| `crates/ui/web-api/src/routes/access_presets.rs`    | Preset route handlers (legacy `CanManageUsers`, interim until M1.6b)                               |
-| `crates/ui/web-api/src/middleware/action.rs`        | `CanManageUsers`, `CanManageAccess` typed extractors                                               |
-| `crates/shared/web-api-types/src/users.rs`          | `UserWithRolesResponse`, `UpdateUserRolesRequest`, `UpdateUserActiveRequest`, `ApplyPresetRequest` |
-| `crates/shared/web-api-types/src/roles.rs`          | `RoleResponse`, `CreateRoleRequest`, `UpdateRoleRequest`                                           |
-| `crates/shared/web-api-types/src/access_presets.rs` | `AccessPresetResponse`                                                                             |
-| `crates/shared/types/src/permissions.rs`            | `Permission` enum (legacy permission model backing `access_presets.rs`)                            |
-| `crates/shared/types/src/role_bundle.rs`            | `RoleBundle` enum (5 variants)                                                                     |
-| `crates/ui/web-api/src/middleware/permission.rs`    | `CanManageUsers` extractor                                                                         |
+| File                                             | Purpose                                                                                     |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| `crates/ui/web-api/src/routes/users.rs`          | User lifecycle handlers (`CanManageUsers`) and role assignment (`CanManageAccess`)          |
+| `crates/ui/web-api/src/routes/roles.rs`          | Role CRUD handlers (`CanManageAccess`) -- see [Access Management API](access-management.md) |
+| `crates/ui/web-api/src/middleware/action.rs`     | `CanManageUsers`, `CanManageAccess` typed extractors                                        |
+| `crates/shared/web-api-types/src/users.rs`       | `UserWithRolesResponse`, `UpdateUserRolesRequest`, `UpdateUserActiveRequest`                |
+| `crates/shared/web-api-types/src/roles.rs`       | `RoleResponse`, `CreateRoleRequest`, `UpdateRoleRequest`                                    |
+| `crates/shared/types/src/role_bundle.rs`         | `RoleBundle` enum (catalog metadata)                                                        |
+| `crates/ui/web-api/src/middleware/permission.rs` | `CanManageUsers` extractor                                                                  |

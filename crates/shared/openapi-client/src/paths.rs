@@ -434,10 +434,6 @@ pub(crate) mod users {
     pub(crate) fn active(id: &Uuid) -> String {
         format!("/api/v1/users/{id}/active")
     }
-    /// `POST /api/v1/users/{id}/apply-preset`
-    pub(crate) fn apply_preset(id: &Uuid) -> String {
-        format!("/api/v1/users/{id}/apply-preset")
-    }
 }
 
 pub(crate) mod permissions {
@@ -458,11 +454,6 @@ pub(crate) mod roles {
 pub(crate) mod access_catalog {
     /// `GET /api/v1/access/catalog`
     pub(crate) const BASE: &str = "/api/v1/access/catalog";
-}
-
-pub(crate) mod access_presets {
-    /// `GET /api/v1/access-presets`
-    pub(crate) const BASE: &str = "/api/v1/access-presets";
 }
 
 pub(crate) mod access_grants {

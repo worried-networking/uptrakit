@@ -25,7 +25,7 @@ use commands::surfaces::SurfacesCommands;
 use commands::system_enrollment_tokens::SystemEnrollmentTokensCommands;
 use commands::system_services::SystemServicesCommands;
 use commands::update::UpdateCommands;
-use commands::users::{AccessPresetsCommands, RolesCommands, UsersCommands};
+use commands::users::{RolesCommands, UsersCommands};
 
 #[derive(Debug, Parser)]
 #[command(name = "uptrakit", about = "Uptrakit CLI")]
@@ -184,7 +184,7 @@ enum Commands {
         #[command(subcommand)]
         command: SurfacesCommands,
     },
-    /// Manage users, roles, and access presets
+    /// Manage users and roles
     Users {
         #[command(subcommand)]
         command: UsersCommands,
@@ -193,11 +193,6 @@ enum Commands {
     Roles {
         #[command(subcommand)]
         command: RolesCommands,
-    },
-    /// List access presets
-    AccessPresets {
-        #[command(subcommand)]
-        command: AccessPresetsCommands,
     },
 }
 
@@ -291,9 +286,6 @@ async fn run(cli: Cli) -> error::Result<()> {
         Commands::Surfaces { command } => commands::surfaces::dispatch(command, &ctx).await?,
         Commands::Users { command } => commands::users::dispatch_users(command, &ctx).await?,
         Commands::Roles { command } => commands::users::dispatch_roles(command, &ctx).await?,
-        Commands::AccessPresets { command } => {
-            commands::users::dispatch_access_presets(command, &ctx).await?;
-        }
     }
     Ok(())
 }

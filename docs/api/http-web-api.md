@@ -18,9 +18,9 @@ Types are imported via `uptrakit_openapi_client::types::*` (re-exported from `up
   with a message describing the limit window.
 - Route handlers enforce permissions via typed Axum extractors. Converted operations (`CanReadHosts`, and the rest of
   `crates/ui/web-api/src/middleware/action.rs`) declare a native `oauth2`/`developer_token` OpenAPI security
-  requirement. The `x-required-permission` extension survives only on the legacy `permission_extractor!` operations
-  (`crates/ui/web-api/src/middleware/permission.rs`) in `access_presets.rs`, until M1.6b converts it. See
-  [Authentication and Authorization](../security/auth-and-authorization.md) for the full permission model.
+  requirement. The legacy `permission_extractor!` model (`crates/ui/web-api/src/middleware/permission.rs`) no longer
+  backs any route family. See [Authentication and Authorization](../security/auth-and-authorization.md) for the full
+  permission model.
 
 ## Error Response Shape
 
@@ -681,18 +681,15 @@ request/response examples.
   `access:manage`.
 - `DELETE /api/v1/access/grants/{id}` -- delete an access grant. Requires `access:manage`.
 - `GET /api/v1/access/catalog` -- the authorization vocabulary as data: built-in actions,
-  role bundles, and scope presets. Authenticated-but-ungoverned -- no grant required.
-- `GET /api/v1/access-presets` -- list all access presets with their role compositions.
-- `POST /api/v1/users/{id}/apply-preset` -- apply an access preset to a user.
+  role bundles, and scope presets. Authenticated-but-ungoverned -- no grant required. Role
+  bundles are advisory metadata; apply one to a user via `PUT /api/v1/users/{id}/roles`.
 
 ### Key files
 
 | File                                                | Purpose                |
 | --------------------------------------------------- | ---------------------- |
 | `crates/ui/web-api/src/routes/users.rs`             | Route handlers         |
-| `crates/ui/web-api/src/routes/access_presets.rs`    | Preset route handlers  |
 | `crates/shared/web-api-types/src/users.rs`          | Request/response types |
-| `crates/shared/web-api-types/src/access_presets.rs` | Preset response types  |
 | `crates/shared/types/src/role_bundle.rs`            | `RoleBundle` enum      |
 
 ## System Services Endpoints

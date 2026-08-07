@@ -1,5 +1,3 @@
-use std::str::FromStr;
-
 use serde::{Deserialize, Serialize};
 
 /// A named role bundle (the demoted access-preset tiers): catalog metadata, never a server-side mechanism.
@@ -92,25 +90,5 @@ impl RoleBundle {
 impl std::fmt::Display for RoleBundle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
-    }
-}
-
-/// Error returned when parsing an invalid [`RoleBundle`] string.
-#[derive(Debug, thiserror::Error)]
-#[error("invalid access preset value")]
-pub struct ParseAccessPresetError;
-
-impl FromStr for RoleBundle {
-    type Err = ParseAccessPresetError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "read_only" => Ok(Self::ReadOnly),
-            "operator" => Ok(Self::Operator),
-            "manager" => Ok(Self::Manager),
-            "administrator" => Ok(Self::Administrator),
-            "owner" => Ok(Self::Owner),
-            _ => Err(ParseAccessPresetError),
-        }
     }
 }

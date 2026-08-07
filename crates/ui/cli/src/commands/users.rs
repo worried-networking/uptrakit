@@ -5,10 +5,9 @@ use crate::output::HumanOutput;
 use clap::Subcommand;
 use rootcause::prelude::*;
 use uptrakit_openapi_client::Uuid;
-use uptrakit_openapi_client::types::access_presets::AccessPresetResponse;
 use uptrakit_openapi_client::types::roles::RoleResponse;
 use uptrakit_openapi_client::types::users::{
-    ApplyPresetRequest, UpdateUserActiveRequest, UpdateUserRolesRequest, UserWithRolesResponse,
+    UpdateUserActiveRequest, UpdateUserRolesRequest, UserWithRolesResponse,
 };
 
 #[derive(Debug, Subcommand)]
@@ -38,13 +37,6 @@ pub enum UsersCommands {
         /// User UUID
         id: Uuid,
     },
-    /// Apply an access preset to a user
-    ApplyPreset {
-        /// User UUID
-        id: Uuid,
-        /// Preset name to apply
-        preset: String,
-    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -56,12 +48,6 @@ pub enum RolesCommands {
         /// Role UUID
         id: Uuid,
     },
-}
-
-#[derive(Debug, Subcommand)]
-pub enum AccessPresetsCommands {
-    /// List all access presets
-    List,
 }
 
 pub async fn dispatch_users(command: UsersCommands, ctx: &CliContext) -> Result<()> {
@@ -123,18 +109,6 @@ pub async fn dispatch_users(command: UsersCommands, ctx: &CliContext) -> Result<
             .await?;
             crate::output::print_output(ctx.format, &resp)?;
         }
-        UsersCommands::ApplyPreset { id, preset } => {
-            let resp = apply_preset(
-                &id,
-                &preset,
-                ctx.server.as_deref(),
-                ctx.token.as_deref(),
-                ctx.insecure,
-                ctx.request_timeout,
-            )
-            .await?;
-            crate::output::print_output(ctx.format, &resp)?;
-        }
     }
     Ok(())
 }
@@ -154,25 +128,6 @@ pub async fn dispatch_roles(command: RolesCommands, ctx: &CliContext) -> Result<
         RolesCommands::Show { id } => {
             let resp = show_role(
                 &id,
-                ctx.server.as_deref(),
-                ctx.token.as_deref(),
-                ctx.insecure,
-                ctx.request_timeout,
-            )
-            .await?;
-            crate::output::print_output(ctx.format, &resp)?;
-        }
-    }
-    Ok(())
-}
-
-pub async fn dispatch_access_presets(
-    command: AccessPresetsCommands,
-    ctx: &CliContext,
-) -> Result<()> {
-    match command {
-        AccessPresetsCommands::List => {
-            let resp = list_presets(
                 ctx.server.as_deref(),
                 ctx.token.as_deref(),
                 ctx.insecure,
@@ -288,24 +243,6 @@ impl HumanOutput for RoleResponse {
     }
 }
 
-impl HumanOutput for Vec<AccessPresetResponse> {
-    fn to_human_string(&self) -> String {
-        if self.is_empty() {
-            return "No access presets found.\n".to_string();
-        }
-        let mut out = format!("{:<25} {:<40} ROLES\n", "NAME", "DESCRIPTION");
-        for p in self {
-            out.push_str(&format!(
-                "{:<25} {:<40} {}\n",
-                p.name,
-                p.description,
-                p.roles.join(", ")
-            ));
-        }
-        out
-    }
-}
-
 // ── Commands ─────────────────────────────────────────────────────────────────
 
 /// List all users with roles.
@@ -361,22 +298,6 @@ pub async fn set_active(
     client.update_user_active(id, &req).await.context_to()
 }
 
-/// Apply an access preset to a user.
-pub async fn apply_preset(
-    id: &Uuid,
-    preset: &str,
-    server: Option<&str>,
-    token: Option<&str>,
-    insecure: bool,
-    request_timeout: Option<std::time::Duration>,
-) -> Result<UserWithRolesResponse> {
-    let client = authenticated_client(server, token, insecure, request_timeout)?;
-    let req = ApplyPresetRequest {
-        preset: preset.to_string(),
-    };
-    client.apply_preset(id, &req).await.context_to()
-}
-
 /// List all roles.
 pub async fn list_roles(
     server: Option<&str>,
@@ -398,17 +319,6 @@ pub async fn show_role(
 ) -> Result<RoleResponse> {
     let client = authenticated_client(server, token, insecure, request_timeout)?;
     client.get_role(id).await.context_to()
-}
-
-/// List all access presets.
-pub async fn list_presets(
-    server: Option<&str>,
-    token: Option<&str>,
-    insecure: bool,
-    request_timeout: Option<std::time::Duration>,
-) -> Result<Vec<AccessPresetResponse>> {
-    let client = authenticated_client(server, token, insecure, request_timeout)?;
-    client.list_access_presets().await.context_to()
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -489,27 +399,5 @@ mod tests {
     fn role_list_empty() {
         let roles: Vec<RoleResponse> = vec![];
         assert!(roles.to_human_string().contains("No roles found"));
-    }
-
-    #[test]
-    fn preset_list_empty() {
-        let presets: Vec<AccessPresetResponse> = vec![];
-        assert!(
-            presets
-                .to_human_string()
-                .contains("No access presets found")
-        );
-    }
-
-    #[test]
-    fn preset_list_has_rows() {
-        let presets = vec![AccessPresetResponse {
-            name: "viewer".to_string(),
-            description: "Read-only access".to_string(),
-            roles: vec!["viewer".to_string()],
-        }];
-        let s = presets.to_human_string();
-        assert!(s.contains("viewer"), "name missing");
-        assert!(s.contains("Read-only access"), "description missing");
     }
 }

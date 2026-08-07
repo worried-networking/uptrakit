@@ -64,26 +64,6 @@ impl Validate for UpdateUserActiveRequest {
     }
 }
 
-/// Request to apply an access preset to a user.
-#[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct ApplyPresetRequest {
-    /// The access preset name to apply.
-    pub preset: String,
-}
-
-impl Validate for ApplyPresetRequest {
-    fn validate(&self) -> Result<(), ValidationError> {
-        if self.preset.is_empty() {
-            return Err(ValidationError {
-                field: "preset",
-                message: "preset name must not be empty".to_string(),
-            });
-        }
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     #![expect(

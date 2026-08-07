@@ -1968,21 +1968,6 @@ fn users_deactivate_parses() {
     ));
 }
 
-#[test]
-fn users_apply_preset_parses() {
-    let args = Cli::try_parse_from(["uptrakit", "users", "apply-preset", SVC_UUID, "admin"])
-        .expect("should parse");
-    match args.command {
-        Some(Commands::Users {
-            command: UsersCommands::ApplyPreset { id, preset },
-        }) => {
-            assert_eq!(id, uuid(SVC_UUID));
-            assert_eq!(preset, "admin");
-        }
-        _ => panic!("expected Users ApplyPreset"),
-    }
-}
-
 // -- Roles commands --
 
 #[test]
@@ -2005,19 +1990,6 @@ fn roles_show_parses() {
         }) => assert_eq!(id, uuid(SVC_UUID)),
         _ => panic!("expected Roles Show"),
     }
-}
-
-// -- Access Presets commands --
-
-#[test]
-fn access_presets_list_parses() {
-    let args = Cli::try_parse_from(["uptrakit", "access-presets", "list"]).expect("should parse");
-    assert!(matches!(
-        args.command,
-        Some(Commands::AccessPresets {
-            command: AccessPresetsCommands::List
-        })
-    ));
 }
 
 // -- auth login --tofu tests --

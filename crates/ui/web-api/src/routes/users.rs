@@ -49,8 +49,7 @@ use uptrakit_shared_types::access::{Decision, actions};
 use uptrakit_web_api_queries::queries::users::{UserView, update_user_active_in_tx};
 
 pub use uptrakit_web_api_types::users::{
-    ApplyPresetRequest, UpdateUserActiveRequest, UpdateUserRolesRequest, UserRoleSummary,
-    UserWithRolesResponse,
+    UpdateUserActiveRequest, UpdateUserRolesRequest, UserRoleSummary, UserWithRolesResponse,
 };
 
 /// Permission info for the listing endpoint.
@@ -406,9 +405,8 @@ pub async fn update_user_roles(
         }
     };
 
-    // System-plane fine check over the roles this request actually ADDS
-    // (shared with `apply_preset`; see the helper's doc for the in-tx
-    // re-read and fail-closed rationale).
+    // System-plane fine check over the roles this request actually ADDS;
+    // see the helper's doc for the in-tx re-read and fail-closed rationale.
     let reaches_system_plane = match crate::routes::access_grants::added_roles_reach_system_plane(
         &txn,
         state.default_tenant_id,

@@ -8,7 +8,6 @@ pub use uptrakit_shared_types::PluginRole;
 
 pub mod access_catalog;
 pub mod access_grants;
-pub mod access_presets;
 pub mod agents;
 pub mod api_tokens;
 pub mod audit_logs;

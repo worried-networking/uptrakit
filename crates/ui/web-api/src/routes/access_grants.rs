@@ -708,10 +708,9 @@ pub(crate) fn lockout_denial_response(
 
 /// Does this role-set replacement ADD any role reaching the system plane?
 ///
-/// Shared by the two role-assignment paths (`users.rs::update_user_roles`
-/// and `access_presets.rs::apply_preset`) so their classification cannot
-/// drift apart — a divergence here is a privilege-escalation hole, not a
-/// style nit.
+/// Used by `users.rs::update_user_roles`'s role-assignment path so its
+/// classification stays consistent — a divergence here is a
+/// privilege-escalation hole, not a style nit.
 ///
 /// The subject's current role ids are re-read INSIDE `txn`: a pre-tx read
 /// would let a concurrent unassign make a re-inserted role look "already

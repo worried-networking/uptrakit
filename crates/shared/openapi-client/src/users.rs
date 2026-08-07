@@ -1,7 +1,7 @@
 use crate::Result;
 use crate::UptrakitClient;
 use crate::types_impl::users::{
-    ApplyPresetRequest, UpdateUserActiveRequest, UpdateUserRolesRequest, UserWithRolesResponse,
+    UpdateUserActiveRequest, UpdateUserRolesRequest, UserWithRolesResponse,
 };
 use uuid::Uuid;
 
@@ -33,23 +33,11 @@ impl UptrakitClient {
     ) -> Result<UserWithRolesResponse> {
         self.put_json(&crate::paths::users::active(id), req).await
     }
-
-    /// Apply an access preset to a user, replacing their roles.
-    pub async fn apply_preset(
-        &self,
-        id: &Uuid,
-        req: &ApplyPresetRequest,
-    ) -> Result<UserWithRolesResponse> {
-        self.post_json(&crate::paths::users::apply_preset(id), req)
-            .await
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::types_impl::users::{
-        ApplyPresetRequest, UpdateUserActiveRequest, UpdateUserRolesRequest,
-    };
+    use crate::types_impl::users::{UpdateUserActiveRequest, UpdateUserRolesRequest};
 
     #[test]
     fn update_user_roles_request_serialization() {
@@ -64,14 +52,5 @@ mod tests {
         let req = UpdateUserActiveRequest { is_active: false };
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["is_active"], false);
-    }
-
-    #[test]
-    fn apply_preset_request_serialization() {
-        let req = ApplyPresetRequest {
-            preset: "admin".to_string(),
-        };
-        let json = serde_json::to_value(&req).expect("serialize");
-        assert_eq!(json["preset"], "admin");
     }
 }

@@ -334,42 +334,6 @@
         ]
       }
     },
-    "/api/v1/access-presets": {
-      "get": {
-        "tags": [
-          "Users"
-        ],
-        "summary": "List all available access presets",
-        "operationId": "list_access_presets",
-        "responses": {
-          "200": {
-            "description": "List of access presets",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/AccessPresetResponse"
-                  }
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Not authenticated"
-          },
-          "403": {
-            "description": "Not authorized"
-          }
-        },
-        "security": [
-          {
-            "bearer_token": []
-          }
-        ],
-        "x-required-permission": "manage_users"
-      }
-    },
     "/api/v1/access/catalog": {
       "get": {
         "tags": [
@@ -10582,71 +10546,6 @@
         ]
       }
     },
-    "/api/v1/users/{id}/apply-preset": {
-      "post": {
-        "tags": [
-          "Users"
-        ],
-        "summary": "Apply an access preset to a user",
-        "description": "Replaces all of the user's role assignments with the roles defined by the\nchosen preset. Includes lockout prevention: will reject the request if it\nwould remove the `manage_users` permission from the last holder, and\n(M1.6a) the engine-backed `access:manage` lockout guard covers the same\nrole-replacement for the access:manage plane. Interim gap: this handler\nstill gates on the legacy `manage_users` permission via `CanManageUsers`\nrather than the `users:manage`/`access:manage` split — a `users:manage`-only\ncaller can currently apply any preset, including ones that grant\n`access:manage`; full conversion lands in M1.6b. Assigning a preset whose\nroles reach the system plane additionally requires `system.access:manage`,\nchecked inline against the engine.",
-        "operationId": "apply_preset",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "User UUID",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ApplyPresetRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Preset applied",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserWithRolesResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request"
-          },
-          "401": {
-            "description": "Not authenticated"
-          },
-          "403": {
-            "description": "Not authorized"
-          },
-          "404": {
-            "description": "User or preset not found"
-          },
-          "409": {
-            "description": "Would remove last manage_users or access:manage holder"
-          }
-        },
-        "security": [
-          {
-            "bearer_token": []
-          }
-        ],
-        "x-required-permission": "manage_users"
-      }
-    },
     "/api/v1/users/{id}/email": {
       "post": {
         "tags": [
@@ -11005,29 +10904,6 @@
           }
         }
       },
-      "AccessPresetResponse": {
-        "type": "object",
-        "description": "An access preset definition with its role composition.",
-        "required": [
-          "name",
-          "description",
-          "roles"
-        ],
-        "properties": {
-          "description": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "roles": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        }
-      },
       "AccessSettingsResponse": {
         "type": "object",
         "required": [
@@ -11136,19 +11012,6 @@
               "null"
             ],
             "format": "date-time"
-          }
-        }
-      },
-      "ApplyPresetRequest": {
-        "type": "object",
-        "description": "Request to apply an access preset to a user.",
-        "required": [
-          "preset"
-        ],
-        "properties": {
-          "preset": {
-            "type": "string",
-            "description": "The access preset name to apply."
           }
         }
       },

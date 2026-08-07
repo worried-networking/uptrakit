@@ -1,6 +1,5 @@
 pub mod access_catalog;
 pub mod access_grants;
-pub mod access_presets;
 pub(crate) mod agent_operations;
 pub(crate) mod agents;
 pub mod api_tokens;

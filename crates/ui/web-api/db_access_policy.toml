@@ -21,12 +21,6 @@ update_access_grant = "full-state"
 delete_access_grant = "full-state"
 added_roles_reach_system_plane = "ignore"
 
-[routes."access_presets.rs"]
-list_access_presets = "no-db"
-apply_preset = "full-state"
-roles_grant_manage_users_check = "ignore"
-count_other_manage_users = "ignore"
-
 [routes."agents.rs"]
 do_enroll = "ignore"
 find_or_create_host_and_link = "ignore"

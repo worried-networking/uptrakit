@@ -239,9 +239,9 @@ These are non-negotiable design constraints. Do not violate them.
    See [SSRF Protection](docs/security/secure-development.md#ssrf-protection).
 1. **Use typed permission extractors for route authorization.** Never call `user.has_permission(...)` in handler bodies; declare the requirement
    via an Axum extractor. Route families default to `action_extractor!` (`crates/ui/web-api/src/middleware/action.rs`), backed by the
-   `AccessEngine`, declaring a native `security(...)` OpenAPI requirement. Only `access_presets.rs` remains on the
-   legacy `permission_extractor!` (`crates/ui/web-api/src/middleware/permission.rs`) model, carrying the matching `x-required-permission` OpenAPI
-   extension, until M1.6b converts it. See [Authentication and Authorization](docs/security/auth-and-authorization.md).
+   `AccessEngine`, declaring a native `security(...)` OpenAPI requirement. The legacy `permission_extractor!`
+   (`crates/ui/web-api/src/middleware/permission.rs`) model no longer backs any route family; the macro and module
+   survive for later milestones. See [Authentication and Authorization](docs/security/auth-and-authorization.md).
 1. **Surface permissions are enforced at read/invoke time.** `required_action` (a catalog `resource:verb` action
    string, parsed to `Action` at registration admission) on surface descriptors and interactions is enforced
    server-side via `AccessEngine` before dispatch, for both plugin- and service-backed surfaces; provider-origin

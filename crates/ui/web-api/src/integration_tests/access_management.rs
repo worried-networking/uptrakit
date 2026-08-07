@@ -34,10 +34,10 @@
 //!      `POST/DELETE .../email`, `PUT .../password`) carry no
 //!      `users:manage`/`access:manage` scope at all (`security(("bearer_token"
 //!      = []))` / per-request `oauth2 = []`) — out of scope for this matrix.
-//!    - `access_presets.rs::apply_preset` deliberately stays on the legacy
-//!      `users:manage` gate (`CanManageUsers` + `x-required-permission =
-//!      "manage_users"`) until M1.6b; per task instructions this module does
-//!      not assert it needs `access:manage`.
+//!    - The access-preset endpoints (`GET /api/v1/access-presets`,
+//!      `POST /api/v1/users/{id}/apply-preset`) were retired in M1.6b —
+//!      [`deleted_preset_routes_are_gone_not_stubbed`] proves they 404/405
+//!      rather than silently reappearing.
 //!
 //! E11 needs no new test here: seed-read pairing (`settings_manager` ->
 //! `settings:read`, `operator` -> `services:read`) is already pinned by
@@ -313,5 +313,34 @@ async fn access_manage_only_principal_gets_403_on_user_read_routes() {
         status,
         StatusCode::FORBIDDEN,
         "getting a user must require users:manage"
+    );
+}
+
+/// E9: the retired access-preset endpoints must be gone, not stubbed —
+/// `GET /api/v1/access-presets` and `POST /api/v1/users/{id}/apply-preset`
+/// were deleted in M1.6b; this asserts the routes 404/405 rather than
+/// silently reappearing (e.g. via a router merge or a partial revert).
+#[tokio::test]
+async fn deleted_preset_routes_are_gone_not_stubbed() {
+    let app = TestApp::new().await;
+    let (_user_id, token) = stage_zero_role_user(&app).await;
+    let client = app.client();
+    let status = client
+        .get("/api/v1/access-presets")
+        .bearer(&token)
+        .send_status()
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let status = client
+        .post_json(
+            &format!("/api/v1/users/{}/apply-preset", uuid::Uuid::now_v7()),
+            &json!({"preset": "owner"}),
+        )
+        .bearer(&token)
+        .send_status()
+        .await;
+    assert!(
+        status == StatusCode::NOT_FOUND || status == StatusCode::METHOD_NOT_ALLOWED,
+        "expected 404/405, got {status}"
     );
 }

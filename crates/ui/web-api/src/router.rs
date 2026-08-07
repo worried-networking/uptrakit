@@ -193,9 +193,6 @@ use crate::extractors::{GlobalSettingsVersion, SettingsVersion};
         crate::routes::roles::create_role,
         crate::routes::roles::update_role,
         crate::routes::roles::delete_role,
-        // Access presets
-        crate::routes::access_presets::list_access_presets,
-        crate::routes::access_presets::apply_preset,
         // Access grants
         crate::routes::access_grants::create_access_grant,
         crate::routes::access_grants::list_access_grants,
@@ -360,14 +357,12 @@ use crate::extractors::{GlobalSettingsVersion, SettingsVersion};
             crate::routes::users::UserRoleSummary,
             crate::routes::users::UpdateUserRolesRequest,
             crate::routes::users::UpdateUserActiveRequest,
-            crate::routes::users::ApplyPresetRequest,
             crate::routes::users::PermissionInfo,
             uptrakit_web_api_types::profile::InitiateEmailChangeRequest,
             uptrakit_web_api_types::profile::ChangePasswordRequest,
             crate::routes::roles::RoleResponse,
             crate::routes::roles::CreateRoleRequest,
             crate::routes::roles::UpdateRoleRequest,
-            crate::routes::access_presets::AccessPresetResponse,
             crate::routes::access_grants::AccessGrantResponse,
             crate::routes::access_grants::CreateAccessGrantRequest,
             crate::routes::access_grants::UpdateAccessGrantRequest,
@@ -833,9 +828,6 @@ pub fn build_router_with_openapi(state: Arc<AppState>) -> (Router, utoipa::opena
             crate::routes::roles::update_role,
             crate::routes::roles::delete_role
         ))
-        // Access presets
-        .routes(routes!(crate::routes::access_presets::list_access_presets))
-        .routes(routes!(crate::routes::access_presets::apply_preset))
         // Access grants
         .routes(routes!(
             crate::routes::access_grants::create_access_grant,

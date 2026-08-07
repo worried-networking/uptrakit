@@ -40,15 +40,6 @@ export type AccessGrantResponse = {
     tenant_id?: string | null;
 };
 
-/**
- * An access preset definition with its role composition.
- */
-export type AccessPresetResponse = {
-    description: string;
-    name: string;
-    roles: Array<string>;
-};
-
 export type AccessSettingsResponse = {
     mode: RegistrationMode;
     password_auth_enabled: boolean;
@@ -95,16 +86,6 @@ export type ApiTokenResponse = {
     last_used_at?: string | null;
     name: string;
     revoked_at?: string | null;
-};
-
-/**
- * Request to apply an access preset to a user.
- */
-export type ApplyPresetRequest = {
-    /**
-     * The access preset name to apply.
-     */
-    preset: string;
 };
 
 /**
@@ -3976,33 +3957,6 @@ export type RevokeConsentResponses = {
 };
 
 export type RevokeConsentResponse = RevokeConsentResponses[keyof RevokeConsentResponses];
-
-export type ListAccessPresetsData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/v1/access-presets';
-};
-
-export type ListAccessPresetsErrors = {
-    /**
-     * Not authenticated
-     */
-    401: unknown;
-    /**
-     * Not authorized
-     */
-    403: unknown;
-};
-
-export type ListAccessPresetsResponses = {
-    /**
-     * List of access presets
-     */
-    200: Array<AccessPresetResponse>;
-};
-
-export type ListAccessPresetsResponse = ListAccessPresetsResponses[keyof ListAccessPresetsResponses];
 
 export type GetAccessCatalogData = {
     body?: never;
@@ -10464,50 +10418,6 @@ export type UpdateUserActiveResponses = {
 };
 
 export type UpdateUserActiveResponse = UpdateUserActiveResponses[keyof UpdateUserActiveResponses];
-
-export type ApplyPresetData = {
-    body: ApplyPresetRequest;
-    path: {
-        /**
-         * User UUID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/api/v1/users/{id}/apply-preset';
-};
-
-export type ApplyPresetErrors = {
-    /**
-     * Invalid request
-     */
-    400: unknown;
-    /**
-     * Not authenticated
-     */
-    401: unknown;
-    /**
-     * Not authorized
-     */
-    403: unknown;
-    /**
-     * User or preset not found
-     */
-    404: unknown;
-    /**
-     * Would remove last manage_users or access:manage holder
-     */
-    409: unknown;
-};
-
-export type ApplyPresetResponses = {
-    /**
-     * Preset applied
-     */
-    200: UserWithRolesResponse;
-};
-
-export type ApplyPresetResponse = ApplyPresetResponses[keyof ApplyPresetResponses];
 
 export type CancelEmailChangeData = {
     body?: never;
