@@ -45,8 +45,8 @@ them with `users set-roles` (see below).
 
 ## Managing users
 
-Users with the `manage_users` permission can manage other users through the REST API
-or the CLI.
+Users with the **settings_manager** role (or broader) can manage other users through the
+REST API or the CLI.
 
 ### Viewing users
 
@@ -85,16 +85,16 @@ uptrakit-cli users set-active <user-id> --active true
 # List all roles
 uptrakit-cli roles list
 
-# List all permissions
-uptrakit-cli permissions list
+# List the available action catalog (actions, categories, role bundles)
+uptrakit-cli api GET /api/v1/access/catalog
 ```
 
 ## Lockout prevention
 
-To prevent accidental lockout, Uptrakit enforces the following rule: you cannot remove
-the `manage_users` permission from the last user who holds it. This applies to both role
-changes and user deactivation. Attempts that would violate this rule are rejected with an
-error.
+To prevent accidental lockout, Uptrakit enforces the following rule: you cannot remove the
+last remaining holder of the `access:manage` or `system.access:manage` action -- the actions
+that grant role and access-grant administration. This applies to both role changes and user
+deactivation. Attempts that would violate this rule are rejected with an error.
 
 ## Security considerations
 

@@ -659,10 +659,10 @@ and [Access Management API](access-management.md) for the full endpoint referenc
 request/response examples.
 
 - `GET /api/v1/users` -- list users with their assigned roles. Paginated.
-- `GET /api/v1/users/{id}` -- get a single user with roles and resolved permissions.
+- `GET /api/v1/users/{id}` -- get a single user with roles.
 - `PUT /api/v1/users/{id}/roles` -- replace a user's role assignments. Requires `access:manage`.
 - `PUT /api/v1/users/{id}/active` -- activate or deactivate a user.
-- `GET /api/v1/permissions` -- list all available permissions.
+- `GET /api/v1/permissions` -- removed in M1.7; use `GET /api/v1/access/catalog` instead.
 - `GET /api/v1/roles` -- list all roles for the active tenant plus the global built-ins.
   Requires `access:manage`.
 - `GET /api/v1/roles/{id}` -- get a single role. Requires `access:manage`.

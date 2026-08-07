@@ -1142,7 +1142,8 @@ hand-maintained inventory here would only drift out of sync. The `*Request` nami
 
 ## Route Authorization Pattern
 
-All protected web-API route handlers enforce authorization via typed Axum extractors. Never call `user.has_permission(...)` inline in a handler body.
+All protected web-API route handlers enforce authorization via typed Axum extractors. Never perform an inline authorization check in a handler
+body — there is no `has_permission`-style method to call; use the extractor pattern below.
 
 ### Required pattern
 
@@ -1201,7 +1202,7 @@ through the `AccessEngine` and records the deny metric on a policy deny. The `ac
 ### Anti-pattern
 
 ```rust
-// WRONG — do not call has_permission in handlers
+// WRONG — no such method exists; this shape (ad-hoc inline authorization instead of a typed extractor) is the anti-pattern
 pub async fn list_hosts(
     Extension(user): Extension<AuthenticatedUser>,
 ) -> Response {
@@ -1215,14 +1216,15 @@ pub async fn list_hosts(
 ### Approved exception: custom authentication paths
 
 Handlers that perform their own token extraction (e.g., reading a `token` query parameter or `Authorization` header because browser WebSocket
-connections cannot set custom headers) cannot use Axum extractors for authentication. In these handlers, `auth_user.has_permission(perm)` is
-acceptable **only** when:
+connections cannot set custom headers) cannot use Axum extractors for authentication. In these handlers, an inline `AccessEngine` call —
+`build_access_authority(&state, user_id).await` followed by `authorize_any(&state.access_engine, access_ctx, &state.audit_emitter, &[action])` —
+is acceptable **only** when:
 
 1. The token validation is already done manually (JWT or API token, same logic as the standard middleware), **and**
 2. No typed extractor exists that covers the custom auth path.
 
-Any such handler must include a `// APPROVED: custom auth path — extractor not applicable` comment alongside the `has_permission` call. The
-`interactive_ws` WebSocket endpoint is the canonical example.
+Any such handler must include a `// APPROVED: custom auth path` comment alongside the inline engine call. The `interactive_ws` WebSocket
+endpoint (`crates/ui/web-api/src/routes/interactive_ws.rs`) is the canonical example.
 
 See also: [Authentication and Authorization](../security/auth-and-authorization.md).
 

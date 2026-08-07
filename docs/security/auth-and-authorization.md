@@ -11,7 +11,7 @@ description: Authentication methods, JWT access token claims, role and permissio
 | Password (Argon2id)      | User login                | Local accounts with hashed passwords.                                                                                                                                                                                                            |
 | OIDC                     | User login                | External identity providers with auto-create or account linking. Requires the `oidc` Cargo feature (enabled by default).                                                                                                                         |
 | Device authorization     | CLI login                 | RFC 8628-style flow: device code, browser approval, API token issuance. Status tracked via `DeviceAuthStatus` enum (`pending`, `authorized`, `expired`).                                                                                         |
-| JWT access tokens        | API requests              | Short-lived tokens that carry resolved permissions (never stored).                                                                                                                                                                               |
+| JWT access tokens        | API requests              | Short-lived tokens that carry no authorization data; the `AccessEngine` resolves authority per request (never stored).                                                                                                                           |
 | Refresh tokens           | API requests              | SHA-256 hashed, 7-day expiry, rotated on each use within a DB transaction, revoking the predecessor. Session integrity validated on every use (see below).                                                                                       |
 | API tokens               | Programmatic access       | Long-lived, revocable bearer tokens stored in the database.                                                                                                                                                                                      |
 | mTLS client certs        | Agent/MQTT connections    | Issued after CSR approval and validated per connection.                                                                                                                                                                                          |
@@ -30,7 +30,6 @@ Every access token minted by `JwtManager::create_access_token` includes:
 | `sub`         | User UUID                                 | Identifies the subject user.                           |
 | `exp`         | Unix timestamp                            | Token expiry (15 minutes from issuance).               |
 | `jti`         | UUID                                      | Per-token unique identifier used for denylist lookups. |
-| `permissions` | `string[]`                                | Resolved permissions embedded at issuance time.        |
 | `auth_method` | `"password"` \| `"oidc"` \| `"api_token"` | How the user authenticated.                            |
 
 `decode_access_token` validates **all three** of `exp`, `iss`, and `aud`. Tokens that lack any of
@@ -101,16 +100,20 @@ graceful fallback.**
 
 | Site                                  | Anti-pattern           | Effect                                                                           |
 | ------------------------------------- | ---------------------- | -------------------------------------------------------------------------------- |
-| `users.rs` — build user response      | `.unwrap_or_default()` | DB outage → empty permission set in the admin user list/detail view              |
 | `oidc_auth.rs` — count existing users | `.unwrap_or(false)`    | DB outage → assume zero users → unintended first-admin OIDC registration allowed |
 | `oidc_auth.rs` — list OIDC providers  | `.unwrap_or_default()` | DB outage → empty provider list → correct behavior obscured, outage masked       |
 
-The auth token-minting paths — `register`, `login`, `refresh`, the OIDC mint, and the post-MFA/2FA session
-builders — now propagate permission-load failures as HTTP 500 rather than minting a token with empty permissions.
-The one deliberate exception is `me`: on a permission-load DB error it stays fail-closed (empty permissions, HTTP
-200) because the SPA treats any non-2xx from `me` as an unconditional logout, so a 500 would eject an
-already-logged-in user on a transient blip. The `users.rs` site above is a lower-severity
-read path that mints no token; it remains to be fixed to the same `?`-propagation pattern.
+`users.rs`'s `build_user_response` (the site formerly listed above) now propagates role-lookup failures with `?`
+instead of defaulting; it mints no token and the response carries no permission/action data, so a DB outage there
+surfaces as an error rather than a silently degraded response.
+
+`register`, `login`, `refresh`, the OIDC mint, `me`, and the post-MFA/2FA session builders all resolve their
+response's `actions` list through `effective_actions()` / `AccessEngine::allowed_actions()` (see [Transition:
+action extractors](#transition-action-extractors-m14am14b)). None of them propagate a 500 for an `AccessEngine`
+failure on this path: the response still returns its normal success status with `actions: []` and
+`authority: "unavailable"`. This is deliberate and uniform across the family — the SPA treats any non-2xx from `me`
+as an unconditional logout, so a 500 there would eject an already-logged-in user on a transient DB blip, and the
+same carve-out now covers the other mint paths so a blip degrades authority instead of failing the request.
 
 ### Required pattern
 
@@ -118,10 +121,10 @@ All auth-path DB queries must be propagated with `?` after mapping to an appropr
 
 ```rust
 // ✓ Correct — DB outage surfaces as 500; access never silently granted or denied
-let permissions = get_user_permissions(db, user_id)
+let roles = get_user_role_summaries(state, user_id)
     .await
     .map_err(|e| {
-        tracing::error!(err = %e, user_id = %user_id, "failed to load user permissions");
+        tracing::error!(err = %e, user_id = %user_id, "failed to load user roles");
         AuthFailure::InternalError
     })?;
 ```
@@ -164,6 +167,13 @@ validity window.
 Authorization uses a typed `Permission` enum (defined in `crates/shared/types/src/permissions.rs`, re-exported
 via `crates/shared/web-api-types/src/permissions.rs`) rather than raw role-name strings. There are 33 granular
 permissions organized by domain:
+
+> **Historical model.** The `permission_extractor!` mechanism this section documents
+> (`crates/ui/web-api/src/middleware/permission.rs`) was deleted in M1.7; no route family enforces through it any
+> more, and the JWT/response fields it relied on (the `permissions` claim, `UserResponse.permissions`) no longer
+> exist. The `Permission` enum and its backing tables are removed in M1.8. See [Transition: action
+> extractors](#transition-action-extractors-m14am14b) below for the live mechanism. The reference tables in this
+> section remain for migration/historical context.
 
 ### Permissions reference
 
@@ -297,27 +307,33 @@ OIDC role mapping can override this.
 
 ### Lockout prevention
 
-The system prevents removing the `manage_users` permission from the last user who holds it.
-Attempts to change roles in a way that would leave no user with `manage_users` are rejected
-with HTTP 409 Conflict.
+The system prevents removing the last remaining `access:manage` or `system.access:manage` holder.
+Attempts to change roles, or to deactivate a user, in a way that would leave no user holding
+either action are rejected with HTTP 409 Conflict (reason codes `lockout_access_manage` /
+`lockout_system_access` -- see [Access Management API](../api/access-management.md#lockout-409-semantics)).
 
 ### How it works
 
-1. `get_user_permissions()` (`middleware/require_auth.rs`) resolves a user's permissions: user -> user_roles -> role_permissions ->
-   permissions table.
-1. The resolved `Vec<Permission>` is embedded in the JWT access token (`permissions` claim) and returned in
-   `UserResponse.permissions`.
-1. The `require_auth` middleware injects `AuthenticatedUser` with the `permissions` field decoded from the JWT.
-1. Route handlers declare their permission requirement via a **typed Axum extractor** (e.g.
-   `CanViewHosts(_user): CanViewHosts`). The extractor is defined in
-   `crates/ui/web-api/src/middleware/permission.rs` using a macro that generates one concrete struct per permission.
-   If the user lacks the permission the extractor short-circuits with `403 Forbidden` before the handler body runs.
-   No DB round-trip is needed.
-1. Endpoints on the legacy model carry an `x-required-permission` OpenAPI extension (set in the
+How the now-deleted legacy model worked, retained for historical/migration context (see the historical-model note
+above):
+
+1. `get_user_permissions()` (`middleware/require_auth.rs`, deleted in M1.7) resolved a user's permissions: user ->
+   user_roles -> role_permissions -> permissions table.
+1. The resolved `Vec<Permission>` was embedded in the JWT access token (`permissions` claim, removed in M1.7) and
+   returned in `UserResponse.permissions` (replaced by `actions` + `authority`, see [JWT Access Token Claims
+   Contract](#jwt-access-token-claims-contract) above).
+1. The `require_auth` middleware used to inject `AuthenticatedUser` with a `permissions` field decoded from the
+   JWT; `AuthenticatedUser` carries no such field today.
+1. Route handlers declared their permission requirement via a **typed Axum extractor** (e.g.
+   `CanViewHosts(_user): CanViewHosts`), generated by a macro in the now-deleted `middleware/permission.rs`. If
+   the user lacked the permission the extractor short-circuited with `403 Forbidden` before the handler body ran.
+   No DB round-trip was needed.
+1. Endpoints on the legacy model carried an `x-required-permission` OpenAPI extension (set in the
    `#[utoipa::path]` annotation, e.g. `extensions(("x-required-permission" = json!("view_hosts")))`).
-   This makes the required permission machine-readable in the generated OpenAPI spec.
-1. The frontend receives permissions as `string[]` (e.g. `["view_settings", "view_services"]`) and uses the `Permission`
-   TypeScript enum for checks.
+   This made the required permission machine-readable in the generated OpenAPI spec.
+1. The frontend received permissions as `string[]` (e.g. `["view_settings", "view_services"]`) and used a
+   `Permission` TypeScript enum for checks; it now reads `actions: string[]` + `authority` from the `me`/login
+   response and checks membership directly against the branded action strings.
 
 ### Self-authenticated endpoints
 
@@ -436,8 +452,9 @@ authorization work declares a catalog action and an `action_extractor!` type ins
 
 ### Transition: action extractors (M1.4a/M1.4b)
 
-A second, parallel authorization model is being rolled out route family by route family. Converted
-families enforce through `action_extractor!`-generated types (`crates/ui/web-api/src/middleware/action.rs`),
+This model was rolled out route family by route family and now backs every route family (see the completion
+note at the end of this section). Converted families enforce through `action_extractor!`-generated types
+(`crates/ui/web-api/src/middleware/action.rs`),
 backed by the `AccessEngine` (`crates/ui/controller-core/src/access/mod.rs`) rather than the JWT's
 embedded `permissions` claim — decisions reflect live DB grants on every request (immediate effect on
 grant/revoke, no re-login required), and denial always returns a fixed, generic `403 Forbidden` body
@@ -485,10 +502,9 @@ predicate used to filter instance-scoped plugins out of listings, not a request-
 and does not increment the deny counter.
 
 The legacy `permission_extractor!` + `x-required-permission` model described above no longer backs
-any route family; the macro and `middleware/permission.rs` module survive for later milestones. Which
-model a given handler uses is visible from its extractor import: `crate::middleware::action::CanXxx` (new) vs.
-`crate::middleware::permission::CanXxx` (legacy) — the two macros generate similarly-named but distinct
-types, never mix them in the same handler.
+any route family; the module was deleted in M1.7 (`middleware/permission.rs` no longer exists). Every
+handler now imports its extractor from `crate::middleware::action::CanXxx`; the `Permission` enum itself
+and its backing tables are removed in M1.8.
 
 ## System Service Credential Guard
 

@@ -29,16 +29,6 @@ List all users with their assigned roles.
       "roles": [
         { "id": "019...", "name": "viewer" },
         { "id": "019...", "name": "service_manager" }
-      ],
-      "permissions": [
-        "view_services",
-        "view_software",
-        "view_hosts",
-        "view_settings",
-        "approve_services",
-        "reject_services",
-        "remove_services",
-        "update_services"
       ]
     }
   ],
@@ -50,7 +40,7 @@ List all users with their assigned roles.
 
 ### `GET /api/v1/users/{id}`
 
-Get a single user with their roles and resolved permissions.
+Get a single user with their roles.
 
 **Path parameters**: `id` -- user UUID.
 
@@ -83,7 +73,7 @@ for the full grant/role/assignment gate reference and the M1.6a permission split
 `lockout_access_manage` / `lockout_system_access` -- see
 [Access Management API](access-management.md#lockout-409-semantics)).
 
-**Response** (`200`): `UserWithRolesResponse` with updated roles and permissions.
+**Response** (`200`): `UserWithRolesResponse` with updated roles.
 
 ### `PUT /api/v1/users/{id}/active`
 
@@ -115,11 +105,9 @@ and apply it via `PUT /api/v1/users/{id}/roles` above.
 
 ## Permission endpoints
 
-### `GET /api/v1/permissions`
-
-List all available permissions.
-
-**Response** (`200`): `Vec<Permission>` (array of permission strings).
+`GET /api/v1/permissions` was removed in M1.7 along with the wire `Permission` vocabulary. Look up the
+available action catalog via `GET /api/v1/access/catalog` (see [Access Management
+API](access-management.md#catalog-endpoint)).
 
 ## Role endpoints
 
@@ -144,12 +132,11 @@ Get a single role.
 
 ## Key files
 
-| File                                             | Purpose                                                                                     |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------- |
-| `crates/ui/web-api/src/routes/users.rs`          | User lifecycle handlers (`CanManageUsers`) and role assignment (`CanManageAccess`)          |
-| `crates/ui/web-api/src/routes/roles.rs`          | Role CRUD handlers (`CanManageAccess`) -- see [Access Management API](access-management.md) |
-| `crates/ui/web-api/src/middleware/action.rs`     | `CanManageUsers`, `CanManageAccess` typed extractors                                        |
-| `crates/shared/web-api-types/src/users.rs`       | `UserWithRolesResponse`, `UpdateUserRolesRequest`, `UpdateUserActiveRequest`                |
-| `crates/shared/web-api-types/src/roles.rs`       | `RoleResponse`, `CreateRoleRequest`, `UpdateRoleRequest`                                    |
-| `crates/shared/types/src/role_bundle.rs`         | `RoleBundle` enum (catalog metadata)                                                        |
-| `crates/ui/web-api/src/middleware/permission.rs` | `CanManageUsers` extractor                                                                  |
+| File                                         | Purpose                                                                                     |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `crates/ui/web-api/src/routes/users.rs`      | User lifecycle handlers (`CanManageUsers`) and role assignment (`CanManageAccess`)          |
+| `crates/ui/web-api/src/routes/roles.rs`      | Role CRUD handlers (`CanManageAccess`) -- see [Access Management API](access-management.md) |
+| `crates/ui/web-api/src/middleware/action.rs` | `CanManageUsers`, `CanManageAccess` typed extractors                                        |
+| `crates/shared/web-api-types/src/users.rs`   | `UserWithRolesResponse`, `UpdateUserRolesRequest`, `UpdateUserActiveRequest`                |
+| `crates/shared/web-api-types/src/roles.rs`   | `RoleResponse`, `CreateRoleRequest`, `UpdateRoleRequest`                                    |
+| `crates/shared/types/src/role_bundle.rs`     | `RoleBundle` enum (catalog metadata)                                                        |
