@@ -32,7 +32,7 @@ principal-facing contract to the action vocabulary:
    effective authority is queryable via the M1.6a grants API and the catalog. No per-row engine
    resolution in `list_users` (batch-query rule).
 3. **Login-family responses populate `actions` + `authority` at response time** via a shared
-   helper (engine context → expansion). Engine failure at login/refresh/MFA/OIDC degrades to
+   helper (engine context → expansion). Engine failure at login/MFA/OIDC degrades to
    `authority: "unavailable"` + empty list with the auth flow still succeeding — this aligns the
    OIDC mint path, which today 500s on permission-load failure (documented behavior change).
 4. **`UserResponse.permissions` renames to `actions`** (with `authority` beside it). CLI
@@ -125,10 +125,14 @@ pub enum AuthorityStatus {
 ```
 
 **`UserResponse`** (`src/auth.rs:79-88`): `permissions: Vec<Permission>` →
-`actions: Vec<Action>` + `authority: AuthorityStatus`. `Action` already has hand-written serde +
-an open-string utoipa schema (documented grammar, built-ins as documentation) — the generated TS
-type is `Array<string>`, exactly the branded-string shape the frontend wants. Update the serde
-round-trip tests at `src/lib.rs:370-448`.
+`actions: Vec<String>` + `authority: AuthorityStatus`. The wire field is deliberately
+`Vec<String>`, not `Vec<Action>` (amended 2026-08-07, plan-review contrarian finding):
+`Action`'s deserializer rejects any resource/verb absent from the compiled catalog, so a typed
+field would make a newer controller's response unparseable to an older
+CLI/openapi-client — a login-breaking skew the moment the catalog grows (M2/M3 both grow it).
+Servers construct the strings from `allowed_actions()`'s `Vec<Action>`; clients treat entries
+as opaque strings; the OpenAPI schema is the same open string array either way. Update the
+serde round-trip tests at `src/lib.rs:370-448`.
 
 **`me` handler** (`routes/auth.rs:2733-2789`): add `Extension(access): Extension<AccessAuthority>`
 (inserted by `require_auth` on every authenticated request; keeps the single
@@ -154,11 +158,11 @@ async fn effective_actions(
     engine: &AccessEngine,
     tenant_id: Uuid,
     user_id: Uuid,
-) -> (Vec<Action>, AuthorityStatus)
+) -> (Vec<String>, AuthorityStatus)
 ```
 
 Calls `engine.context(tenant_id, user_id, None)` → `allowed_actions`; on `Err`, logs `warn` and
-returns `(vec![], AuthorityStatus::Unavailable)`. Consumers: login, register, refresh, MFA
+returns `(vec![], AuthorityStatus::Unavailable)`. Consumers: login, register, MFA
 verify, `build_session_tokens` (`me_2fa.rs`), OIDC mint — every site that embeds `UserResponse`.
 The OIDC path's current 500-on-load-failure becomes this degraded 200 (owner decision 3).
 
@@ -323,8 +327,9 @@ Rust (all endpoint tests through the `TestApp` harness; success + failure paths)
   (sibling idiom: `routes/system_services.rs:968`) → 200, empty `actions`,
   `authority: "unavailable"`. Asserts the status AND both body fields (something no existing
   test observes).
-- **Login family**: login (and refresh) response's embedded user carries populated `actions` +
-  `authority: "ok"`; helper failure leg staged with an engine over a schema-less
+- **Login family**: login response's embedded user carries populated `actions` +
+  `authority: "ok"` (`RefreshResponse` embeds no user — corrected 2026-08-07, refresh is
+  claims-only); helper failure leg staged with an engine over a schema-less
   `sqlite::memory:` connection (idiom:
   `access/mod.rs::context_propagates_db_errors_never_empty_authority`) → `(empty,
   Unavailable)` while the flow still returns 200.
@@ -408,8 +413,11 @@ Surgical M1.7 edits (M1.9 owns the full rewrites):
   ungated.
 - **#52/#57 (goldens)**: pre-declared above with per-artifact resolution and non-zero-count
   assertions on filtered test runs.
-- **#43/#56 (commit boundaries)**: `allowed_actions` lands in the same task as its first caller
-  (`me`); the helper `effective_actions` lands with the login-family conversion; no
-  producer-before-consumer commits.
+- **#43/#56 (commit boundaries)**: `allowed_actions` is a `pub` lib API on `AccessEngine` —
+  `pub` items satisfy dead-code, so it may land one task ahead of its first caller with its
+  unit tests (plan Task 1); the ledger rule's producer-before-consumer constraint binds
+  non-`pub` items only, and the private helper `effective_actions` accordingly lands with the
+  login-family conversion in the same task. (Amended 2026-08-07 during plan review — the
+  original wording required same-task landing for both.)
 - **#44 (commit mechanics)**: breaking commits (`feat(web-api)!`, `feat(cli)!`) carry bodies
   naming the broken contracts + `BREAKING CHANGE:` footers.
