@@ -1,5 +1,5 @@
 use rmcp::ErrorData;
-use uptrakit_shared_types::access::{Action, Decision};
+use uptrakit_shared_types::access::{Action, Decision, DenyReason};
 use uptrakit_web_api_types::oauth::McpScope;
 
 use crate::auth::emit_access_denied_event;
@@ -72,27 +72,24 @@ pub fn require_tool_auth(
     require_scopes(&ctx.auth_method, auth.required_scopes)
         .map_err(|e| ErrorData::invalid_request(format!("insufficient_scope: {e}"), None))?;
     for action in auth.required_actions {
-        match state.access_engine.authorize(&ctx.access, action, None) {
-            Decision::Allow => {}
-            Decision::Deny(reason) => {
-                metrics::counter!(
-                    "uptrakit_access_denies_total",
-                    "reason" => reason.as_str()
-                )
-                .increment(1);
-                emit_access_denied_event(&state.audit_emitter, &ctx.access, action, &reason);
-                return Err(ErrorData::invalid_request(
-                    format!("permission denied: {action} required"),
-                    None,
-                ));
-            }
-            // `Decision` is #[non_exhaustive] in another crate.
-            _ => {
-                return Err(ErrorData::invalid_request(
-                    format!("permission denied: {action} required"),
-                    None,
-                ));
-            }
+        let decision = state.access_engine.authorize(&ctx.access, action, None);
+        if !matches!(decision, Decision::Allow) {
+            let reason = match decision {
+                Decision::Deny(reason) => reason,
+                // `Decision` is #[non_exhaustive] in another crate: unknown
+                // variants deny fail-closed, counted/audited as no_grant.
+                _ => DenyReason::NoGrant,
+            };
+            metrics::counter!(
+                "uptrakit_access_denies_total",
+                "reason" => reason.as_str()
+            )
+            .increment(1);
+            emit_access_denied_event(&state.audit_emitter, &ctx.access, action, &reason);
+            return Err(ErrorData::invalid_request(
+                format!("permission denied: {action} required"),
+                None,
+            ));
         }
     }
     Ok(())

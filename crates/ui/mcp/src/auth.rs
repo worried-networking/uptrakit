@@ -307,38 +307,30 @@ pub async fn validate_api_token_for_mcp(
             return Err(McpAuthError::Internal);
         }
     };
-    match state
+    let decision = state
         .access_engine
-        .authorize(&access, &actions::MCP_USE, None)
-    {
-        Decision::Allow => {}
-        Decision::Deny(reason) => {
-            metrics::counter!(
-                "uptrakit_access_denies_total",
-                "reason" => reason.as_str()
-            )
-            .increment(1);
-            emit_access_denied_event(&state.audit_emitter, &access, &actions::MCP_USE, &reason);
-            emit_api_token_auth_audit(
-                &state.audit_emitter,
-                state.default_tenant_id,
-                None,
-                AuditOutcome::Denied,
-                "missing_access_mcp_permission",
-            );
-            return Err(McpAuthError::Forbidden);
-        }
-        // `Decision` is #[non_exhaustive] in another crate.
-        _ => {
-            emit_api_token_auth_audit(
-                &state.audit_emitter,
-                state.default_tenant_id,
-                None,
-                AuditOutcome::Denied,
-                "missing_access_mcp_permission",
-            );
-            return Err(McpAuthError::Forbidden);
-        }
+        .authorize(&access, &actions::MCP_USE, None);
+    if !matches!(decision, Decision::Allow) {
+        let reason = match decision {
+            Decision::Deny(reason) => reason,
+            // `Decision` is #[non_exhaustive] in another crate: unknown
+            // variants deny fail-closed, counted/audited as no_grant.
+            _ => DenyReason::NoGrant,
+        };
+        metrics::counter!(
+            "uptrakit_access_denies_total",
+            "reason" => reason.as_str()
+        )
+        .increment(1);
+        emit_access_denied_event(&state.audit_emitter, &access, &actions::MCP_USE, &reason);
+        emit_api_token_auth_audit(
+            &state.audit_emitter,
+            state.default_tenant_id,
+            None,
+            AuditOutcome::Denied,
+            "missing_access_mcp_permission",
+        );
+        return Err(McpAuthError::Forbidden);
     }
 
     emit_api_token_auth_audit(
@@ -452,36 +444,29 @@ pub async fn validate_oauth_access_token_for_mcp(
             return Err(McpAuthError::Internal);
         }
     };
-    match state
+    let decision = state
         .access_engine
-        .authorize(&access, &actions::MCP_USE, None)
-    {
-        Decision::Allow => {}
-        Decision::Deny(reason) => {
-            metrics::counter!(
-                "uptrakit_access_denies_total",
-                "reason" => reason.as_str()
-            )
-            .increment(1);
-            emit_access_denied_event(&state.audit_emitter, &access, &actions::MCP_USE, &reason);
-            emit_mcp_oauth_audit(
-                state,
-                Some(user_id),
-                AuditOutcome::Denied,
-                "missing_access_mcp_permission",
-            );
-            return Err(McpAuthError::Forbidden);
-        }
-        // `Decision` is #[non_exhaustive] in another crate.
-        _ => {
-            emit_mcp_oauth_audit(
-                state,
-                Some(user_id),
-                AuditOutcome::Denied,
-                "missing_access_mcp_permission",
-            );
-            return Err(McpAuthError::Forbidden);
-        }
+        .authorize(&access, &actions::MCP_USE, None);
+    if !matches!(decision, Decision::Allow) {
+        let reason = match decision {
+            Decision::Deny(reason) => reason,
+            // `Decision` is #[non_exhaustive] in another crate: unknown
+            // variants deny fail-closed, counted/audited as no_grant.
+            _ => DenyReason::NoGrant,
+        };
+        metrics::counter!(
+            "uptrakit_access_denies_total",
+            "reason" => reason.as_str()
+        )
+        .increment(1);
+        emit_access_denied_event(&state.audit_emitter, &access, &actions::MCP_USE, &reason);
+        emit_mcp_oauth_audit(
+            state,
+            Some(user_id),
+            AuditOutcome::Denied,
+            "missing_access_mcp_permission",
+        );
+        return Err(McpAuthError::Forbidden);
     }
 
     emit_mcp_oauth_audit(state, Some(user_id), AuditOutcome::Success, "authenticated");
