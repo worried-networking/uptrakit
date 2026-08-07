@@ -186,7 +186,6 @@ use crate::extractors::{GlobalSettingsVersion, SettingsVersion};
         crate::routes::users::initiate_email_change,
         crate::routes::users::cancel_email_change,
         crate::routes::users::change_password,
-        crate::routes::users::list_permissions,
         // Roles
         crate::routes::roles::list_roles,
         crate::routes::roles::get_role,
@@ -357,7 +356,6 @@ use crate::extractors::{GlobalSettingsVersion, SettingsVersion};
             crate::routes::users::UserRoleSummary,
             crate::routes::users::UpdateUserRolesRequest,
             crate::routes::users::UpdateUserActiveRequest,
-            crate::routes::users::PermissionInfo,
             uptrakit_web_api_types::profile::InitiateEmailChangeRequest,
             uptrakit_web_api_types::profile::ChangePasswordRequest,
             crate::routes::roles::RoleResponse,
@@ -798,7 +796,6 @@ pub fn build_router_with_openapi(state: Arc<AppState>) -> (Router, utoipa::opena
         .routes(routes!(crate::routes::audit_logs::list_system_audit_logs))
         // User management
         .routes(routes!(crate::routes::users::list_users))
-        .routes(routes!(crate::routes::users::list_permissions))
         .routes(routes!(crate::routes::users::get_user))
         .routes(routes!(crate::routes::users::update_user_roles))
         .routes(routes!(crate::routes::users::update_user_active))

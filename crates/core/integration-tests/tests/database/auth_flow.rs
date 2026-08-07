@@ -14,8 +14,8 @@ async fn test_register_first_user_gets_owner(harness: &TestHarness) {
     assert_eq!(auth.token_type, "Bearer");
     assert_eq!(auth.user.email, "owner@test.local");
     assert!(
-        !auth.user.permissions.is_empty(),
-        "first user should have permissions"
+        !auth.user.actions.is_empty(),
+        "first user should have actions"
     );
 }
 
@@ -46,8 +46,8 @@ async fn test_register_second_user_gets_viewer(harness: &TestHarness) {
     let (s2, second) = register_user(&client, "user2@test.local", "StrongPassword2!").await;
     assert_eq!(s2, http::StatusCode::CREATED);
     assert!(
-        second.user.permissions.len() < first.user.permissions.len(),
-        "second user should have fewer permissions than owner"
+        second.user.actions.len() < first.user.actions.len(),
+        "second user should have fewer actions than owner"
     );
 }
 

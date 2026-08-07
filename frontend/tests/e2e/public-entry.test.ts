@@ -114,7 +114,6 @@ test.describe('Public entry shell', () => {
 					email: 'user@example.com',
 					first_name: 'Test',
 					last_name: 'User',
-					permissions: [],
 					actions: [],
 					authority: 'ok'
 				}
@@ -150,7 +149,6 @@ test.describe('Public entry shell', () => {
 					email: 'user@example.com',
 					first_name: 'Test',
 					last_name: 'User',
-					permissions: [],
 					actions: [],
 					authority: 'ok'
 				}
@@ -184,7 +182,6 @@ test.describe('Public entry shell', () => {
 					email: 'user@example.com',
 					first_name: 'Test',
 					last_name: 'User',
-					permissions: [],
 					actions: [],
 					authority: 'ok'
 				}

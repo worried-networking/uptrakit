@@ -26,10 +26,9 @@
 //!      [`users_manage_only_principal_gets_403_on_grant_by_id_routes`].
 //!    - `users.rs`: `split_users_manage_can_lifecycle_but_not_assign_and_vice_versa`
 //!      covers `GET /api/v1/users` and `PUT /api/v1/users/{id}/active`
-//!      against an `access:manage`-only principal. `GET /api/v1/permissions`
-//!      and `GET /api/v1/users/{id}` were never asserted against an
-//!      `access:manage`-only principal — closed by
-//!      [`access_manage_only_principal_gets_403_on_user_read_routes`].
+//!      against an `access:manage`-only principal. `GET /api/v1/users/{id}`
+//!      was never asserted against an `access:manage`-only principal —
+//!      closed by [`access_manage_only_principal_gets_403_on_user_read_routes`].
 //!    - `users.rs`'s self-service routes (`PUT .../profile`,
 //!      `POST/DELETE .../email`, `PUT .../password`) carry no
 //!      `users:manage`/`access:manage` scope at all — authenticated-only
@@ -39,6 +38,9 @@
 //!      `POST /api/v1/users/{id}/apply-preset`) were retired in M1.6b —
 //!      [`deleted_preset_routes_are_gone_not_stubbed`] proves they 404/405
 //!      rather than silently reappearing.
+//!    - `GET /api/v1/permissions` was deleted outright in M1.7 (the wire
+//!      `Permission` vocabulary retirement) — [`deleted_permissions_endpoint_is_gone`]
+//!      proves it 404s rather than silently reappearing.
 //!
 //! E11 needs no new test here: seed-read pairing (`settings_manager` ->
 //! `settings:read`, `operator` -> `services:read`) is already pinned by
@@ -272,13 +274,15 @@ async fn users_manage_only_principal_gets_403_on_grant_by_id_routes() {
     );
 }
 
-/// E2 gap-fill: `GET /api/v1/permissions` and `GET /api/v1/users/{id}`
-/// under an `access:manage`-only principal. Tasks 3-6 asserted only
-/// `GET /api/v1/users` (list)/`PUT /api/v1/users/{id}/active` for this
-/// principal shape
+/// E2 gap-fill: `GET /api/v1/users/{id}` under an `access:manage`-only
+/// principal. Tasks 3-6 asserted only `GET /api/v1/users` (list)/`PUT
+/// /api/v1/users/{id}/active` for this principal shape
 /// (`users.rs::split_users_manage_can_lifecycle_but_not_assign_and_vice_versa`);
-/// deleting `CanManageUsers` on either of these two read handlers would
-/// leave this test green with the old behavior.
+/// deleting `CanManageUsers` on this read handler would leave this test
+/// green with the old behavior.
+///
+/// (`GET /api/v1/permissions` was covered here too until M1.7 deleted the
+/// route outright — see [`deleted_permissions_endpoint_is_gone`].)
 #[tokio::test]
 async fn access_manage_only_principal_gets_403_on_user_read_routes() {
     let app = TestApp::new().await;
@@ -295,17 +299,6 @@ async fn access_manage_only_principal_gets_403_on_user_read_routes() {
     .await;
 
     let status = client
-        .get("/api/v1/permissions")
-        .bearer(&token)
-        .send_status()
-        .await;
-    assert_eq!(
-        status,
-        StatusCode::FORBIDDEN,
-        "listing permissions must require users:manage"
-    );
-
-    let status = client
         .get(&format!("/api/v1/users/{target_id}"))
         .bearer(&token)
         .send_status()
@@ -314,6 +307,27 @@ async fn access_manage_only_principal_gets_403_on_user_read_routes() {
         status,
         StatusCode::FORBIDDEN,
         "getting a user must require users:manage"
+    );
+}
+
+/// M1.7: `GET /api/v1/permissions` was deleted outright (the access
+/// catalog supersedes it) — this asserts the route 404s rather than
+/// silently reappearing, same shape as
+/// [`deleted_preset_routes_are_gone_not_stubbed`]'s E9 precedent.
+#[tokio::test]
+async fn deleted_permissions_endpoint_is_gone() {
+    let app = TestApp::new().await;
+    let (_user_id, token) = stage_zero_role_user(&app).await;
+    let client = app.client();
+    let status = client
+        .get("/api/v1/permissions")
+        .bearer(&token)
+        .send_status()
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "route must be gone, not stubbed"
     );
 }
 

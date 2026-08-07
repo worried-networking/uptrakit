@@ -2116,55 +2116,6 @@ export type PaginatedResponseUpdateHistoryResponse = {
     total_pages: number;
 };
 
-export const Permission = {
-    VIEW_SERVICES: 'view_services',
-    APPROVE_SERVICES: 'approve_services',
-    REJECT_SERVICES: 'reject_services',
-    REMOVE_SERVICES: 'remove_services',
-    UPDATE_SERVICES: 'update_services',
-    VIEW_SYSTEM_SERVICES: 'view_system_services',
-    APPROVE_SYSTEM_SERVICES: 'approve_system_services',
-    REJECT_SYSTEM_SERVICES: 'reject_system_services',
-    REMOVE_SYSTEM_SERVICES: 'remove_system_services',
-    UPDATE_SYSTEM_SERVICES: 'update_system_services',
-    VIEW_SOFTWARE: 'view_software',
-    CREATE_SOFTWARE: 'create_software',
-    UPDATE_SOFTWARE: 'update_software',
-    DELETE_SOFTWARE: 'delete_software',
-    TRIGGER_CHECKS: 'trigger_checks',
-    TRIGGER_UPDATES: 'trigger_updates',
-    MANAGE_SCHEDULER: 'manage_scheduler',
-    VIEW_HOSTS: 'view_hosts',
-    UPDATE_HOSTS: 'update_hosts',
-    DEACTIVATE_HOSTS: 'deactivate_hosts',
-    VIEW_SETTINGS: 'view_settings',
-    MANAGE_AUTH_SETTINGS: 'manage_auth_settings',
-    MANAGE_ENROLLMENT_TOKENS: 'manage_enrollment_tokens',
-    MANAGE_AGENT_CERTS: 'manage_agent_certs',
-    MANAGE_GLOBAL_SETTINGS: 'manage_global_settings',
-    MANAGE_COMMANDS: 'manage_commands',
-    VIEW_NOTIFICATIONS: 'view_notifications',
-    MANAGE_NOTIFICATIONS: 'manage_notifications',
-    VIEW_AUDIT_LOGS: 'view_audit_logs',
-    VIEW_SYSTEM_AUDIT_LOGS: 'view_system_audit_logs',
-    MANAGE_USERS: 'manage_users',
-    MANAGE_IGNORES: 'manage_ignores',
-    TEST_PLUGIN_CONFIGS: 'test_plugin_configs',
-    ACCESS_MCP: 'access_mcp',
-    VIEW_INSTANCE_CONFIG_STATE: 'view_instance_config_state',
-    MANAGE_INSTANCE_CONFIG_STATE: 'manage_instance_config_state'
-} as const;
-
-export type Permission = typeof Permission[keyof typeof Permission];
-
-/**
- * Permission info for the listing endpoint.
- */
-export type PermissionInfo = {
-    description: string;
-    name: string;
-};
-
 /**
  * Capabilities that a plugin may support.
  *
@@ -3721,7 +3672,6 @@ export type UserResponse = {
     has_pending_email_change: boolean;
     id: string;
     last_name: string;
-    permissions: Array<Permission>;
 };
 
 /**
@@ -3733,7 +3683,7 @@ export type UserRoleSummary = {
 };
 
 /**
- * A user with their assigned roles and resolved permissions.
+ * A user with their assigned roles.
  */
 export type UserWithRolesResponse = {
     email: string;
@@ -3741,7 +3691,6 @@ export type UserWithRolesResponse = {
     id: string;
     is_active: boolean;
     last_name: string;
-    permissions: Array<Permission>;
     roles: Array<UserRoleSummary>;
 };
 
@@ -6964,33 +6913,6 @@ export type TokenResponses = {
 };
 
 export type TokenResponse = TokenResponses[keyof TokenResponses];
-
-export type ListPermissionsData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/v1/permissions';
-};
-
-export type ListPermissionsErrors = {
-    /**
-     * Not authenticated
-     */
-    401: unknown;
-    /**
-     * Not authorized
-     */
-    403: unknown;
-};
-
-export type ListPermissionsResponses = {
-    /**
-     * List of all permissions
-     */
-    200: Array<PermissionInfo>;
-};
-
-export type ListPermissionsResponse = ListPermissionsResponses[keyof ListPermissionsResponses];
 
 export type ListPluginConfigsData = {
     body?: never;
@@ -10411,7 +10333,7 @@ export type GetUserErrors = {
 
 export type GetUserResponses = {
     /**
-     * User details with roles and permissions
+     * User details with roles
      */
     200: UserWithRolesResponse;
 };

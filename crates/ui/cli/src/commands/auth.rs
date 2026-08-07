@@ -12,6 +12,7 @@ use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::ClientError;
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::api_tokens::CreateApiTokenRequest;
+use uptrakit_openapi_client::types::auth::AuthorityStatus;
 use uptrakit_openapi_client::types::oauth::{
     DeviceAuthorizationRequest, DeviceAuthorizationResponse, OAuthErrorCode, OAuthTokenRequest,
 };
@@ -318,6 +319,29 @@ pub async fn dispatch(command: AuthCommands, ctx: &CliContext) -> Result<()> {
     Ok(())
 }
 
+/// Canonical string tag for `AuthorityStatus::Ok`, shared by the JSON
+/// producer (`status()`, via [`authority_to_string`]) and the human-output
+/// consumer (`AuthStatusOutput::to_human_string`) so the two sides cannot
+/// drift apart.
+const AUTHORITY_OK: &str = "ok";
+
+/// Canonical string tag for `AuthorityStatus::Unavailable`. See
+/// [`AUTHORITY_OK`].
+const AUTHORITY_UNAVAILABLE: &str = "unavailable";
+
+/// Maps the wire `AuthorityStatus` enum to the string tag stored on
+/// [`AuthStatusOutput::authority`]. The sole conversion site — both the
+/// producer in `status()` and the `to_human_string()` consumer compare
+/// against [`AUTHORITY_OK`]/[`AUTHORITY_UNAVAILABLE`] rather than
+/// hand-writing their own literals, so a typo on either side cannot
+/// silently suppress the degraded-authority note.
+fn authority_to_string(status: AuthorityStatus) -> &'static str {
+    match status {
+        AuthorityStatus::Ok => AUTHORITY_OK,
+        AuthorityStatus::Unavailable => AUTHORITY_UNAVAILABLE,
+    }
+}
+
 /// Serializable output for `auth status`.
 #[derive(Debug, Serialize)]
 pub struct AuthStatusOutput {
@@ -326,7 +350,8 @@ pub struct AuthStatusOutput {
     pub last_name: String,
     pub email: String,
     pub user_id: Uuid,
-    pub permissions: Vec<String>,
+    pub actions: Vec<String>,
+    pub authority: String,
     pub ca_fingerprint: Option<String>,
 }
 
@@ -340,8 +365,13 @@ impl HumanOutput for AuthStatusOutput {
         ));
         out.push_str(&format!("Email:       {}\n", self.email));
         out.push_str(&format!("User ID:     {}\n", self.user_id));
-        if !self.permissions.is_empty() {
-            out.push_str(&format!("Permissions: {}\n", self.permissions.join(", ")));
+        if !self.actions.is_empty() {
+            out.push_str(&format!("Actions:     {}\n", self.actions.join(", ")));
+        }
+        if self.authority == AUTHORITY_UNAVAILABLE {
+            out.push_str(
+                "Authority:   unavailable — grants could not be resolved; the list above is empty\n",
+            );
         }
         match &self.ca_fingerprint {
             Some(fp) => out.push_str(&format!("CA trust:    {fp}\n")),
@@ -701,7 +731,8 @@ pub async fn status(
 
     let user = client.me().await.context_to()?;
 
-    let permissions: Vec<String> = user.permissions.iter().map(|p| p.to_string()).collect();
+    let actions = user.actions.clone();
+    let authority = authority_to_string(user.authority).to_string();
 
     let ca_fingerprint = if insecure {
         None
@@ -722,7 +753,8 @@ pub async fn status(
         last_name: user.last_name,
         email: user.email,
         user_id: user.id,
-        permissions,
+        actions,
+        authority,
         ca_fingerprint,
     })
 }
@@ -948,7 +980,8 @@ mod tests {
             last_name: "Doe".to_string(),
             email: "john@example.com".to_string(),
             user_id,
-            permissions: vec!["view_settings".to_string(), "manage_agents".to_string()],
+            actions: vec!["settings:read".to_string(), "agents:manage".to_string()],
+            authority: "ok".to_string(),
             ca_fingerprint: None,
         };
         let json = serde_json::to_string(&output).expect("serialize");
@@ -956,7 +989,8 @@ mod tests {
         assert_eq!(parsed["server"], "https://example.com");
         assert_eq!(parsed["first_name"], "John");
         assert_eq!(parsed["user_id"], user_id.to_string());
-        assert_eq!(parsed["permissions"][0], "view_settings");
+        assert_eq!(parsed["actions"][0], "settings:read");
+        assert_eq!(parsed["authority"], "ok");
     }
 
     #[test]
@@ -967,13 +1001,14 @@ mod tests {
             last_name: "Doe".to_string(),
             email: "john@example.com".to_string(),
             user_id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").expect("uuid"),
-            permissions: vec!["view_settings".to_string()],
+            actions: vec!["settings:read".to_string()],
+            authority: "ok".to_string(),
             ca_fingerprint: None,
         };
         let s = output.to_human_string();
         assert!(s.contains("https://example.com"), "server missing");
         assert!(s.contains("john@example.com"), "email missing");
-        assert!(s.contains("view_settings"), "permissions missing");
+        assert!(s.contains("settings:read"), "actions missing");
     }
 
     #[test]
@@ -985,7 +1020,8 @@ mod tests {
             last_name: "B".into(),
             email: "alice@b.com".into(),
             user_id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").expect("uuid"),
-            permissions: vec![],
+            actions: vec![],
+            authority: "ok".to_string(),
             ca_fingerprint: Some(fp.clone()),
         };
         let json = serde_json::to_string(&output).expect("serialize");
@@ -1001,7 +1037,8 @@ mod tests {
             last_name: "B".into(),
             email: "alice@b.com".into(),
             user_id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").expect("uuid"),
-            permissions: vec![],
+            actions: vec![],
+            authority: "ok".to_string(),
             ca_fingerprint: None,
         };
         let json = serde_json::to_string(&output).expect("serialize");
@@ -1018,7 +1055,8 @@ mod tests {
             last_name: "B".into(),
             email: "a@b.com".into(),
             user_id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").expect("uuid"),
-            permissions: vec![],
+            actions: vec![],
+            authority: "ok".to_string(),
             ca_fingerprint: Some(fp.clone()),
         };
         let s = output.to_human_string();
@@ -1033,11 +1071,67 @@ mod tests {
             last_name: "B".into(),
             email: "a@b.com".into(),
             user_id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").expect("uuid"),
-            permissions: vec![],
+            actions: vec![],
+            authority: "ok".to_string(),
             ca_fingerprint: None,
         };
         let s = output.to_human_string();
         assert!(s.contains("system roots"), "system roots line missing");
+    }
+
+    #[test]
+    fn auth_status_human_output_shows_unavailable_authority_note() {
+        // Routes through `authority_to_string` (the same conversion `status()`
+        // calls) rather than a hand-written "unavailable" literal, so this test
+        // fails if the producer's mapping and the `to_human_string()` note
+        // trigger (`AUTHORITY_UNAVAILABLE`) ever drift apart.
+        let output = AuthStatusOutput {
+            server: "https://example.com".into(),
+            first_name: "A".into(),
+            last_name: "B".into(),
+            email: "a@b.com".into(),
+            user_id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").expect("uuid"),
+            actions: vec![],
+            authority: authority_to_string(AuthorityStatus::Unavailable).to_string(),
+            ca_fingerprint: None,
+        };
+        let s = output.to_human_string();
+        assert!(
+            s.contains("Authority:   unavailable"),
+            "unavailable authority note missing"
+        );
+    }
+
+    #[test]
+    fn authority_to_string_matches_the_note_trigger_constants() {
+        // Direct pin on the shared mapping: if either variant's string tag
+        // changes without updating `AUTHORITY_OK`/`AUTHORITY_UNAVAILABLE`
+        // together, this fails loudly instead of silently suppressing the
+        // degraded-authority note.
+        assert_eq!(authority_to_string(AuthorityStatus::Ok), AUTHORITY_OK);
+        assert_eq!(
+            authority_to_string(AuthorityStatus::Unavailable),
+            AUTHORITY_UNAVAILABLE
+        );
+    }
+
+    #[test]
+    fn auth_status_human_output_omits_unavailable_note_when_ok() {
+        let output = AuthStatusOutput {
+            server: "https://example.com".into(),
+            first_name: "A".into(),
+            last_name: "B".into(),
+            email: "a@b.com".into(),
+            user_id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").expect("uuid"),
+            actions: vec!["settings:read".to_string()],
+            authority: authority_to_string(AuthorityStatus::Ok).to_string(),
+            ca_fingerprint: None,
+        };
+        let s = output.to_human_string();
+        assert!(
+            !s.contains("Authority:"),
+            "unavailable authority note should not render when authority is ok"
+        );
     }
 
     #[test]

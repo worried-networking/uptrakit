@@ -168,7 +168,6 @@ pub(crate) async fn build_full_session(
             last_name: user.last_name.clone(),
             actions,
             authority,
-            permissions,
             has_pending_email_change,
         },
     };

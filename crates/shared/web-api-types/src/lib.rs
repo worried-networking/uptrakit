@@ -369,13 +369,6 @@ mod tests {
             last_name: "User".to_string(),
             actions: vec!["hosts:read".to_string()],
             authority: AuthorityStatus::Ok,
-            permissions: vec![
-                Permission::ViewSettings,
-                Permission::ManageAuthSettings,
-                Permission::ViewServices,
-                Permission::UpdateServices,
-                Permission::ManageGlobalSettings,
-            ],
             has_pending_email_change: false,
         };
         let json = serde_json::to_string(&user).unwrap();
@@ -387,23 +380,18 @@ mod tests {
         assert_eq!(deserialized.last_name, "User");
         assert_eq!(deserialized.actions, vec!["hosts:read".to_string()]);
         assert_eq!(deserialized.authority, AuthorityStatus::Ok);
-        assert_eq!(deserialized.permissions.len(), 5);
-        assert_eq!(deserialized.permissions[0], Permission::ViewSettings);
-        assert_eq!(deserialized.permissions[1], Permission::ManageAuthSettings);
-        assert_eq!(deserialized.permissions[2], Permission::ViewServices);
-        assert_eq!(deserialized.permissions[3], Permission::UpdateServices);
-        assert_eq!(
-            deserialized.permissions[4],
-            Permission::ManageGlobalSettings
-        );
 
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed["authority"], "ok");
         assert_eq!(parsed["actions"][0], "hosts:read");
+        assert!(
+            parsed.get("permissions").is_none(),
+            "permissions must not appear on the wire"
+        );
     }
 
     #[test]
-    fn user_response_empty_permissions() {
+    fn user_response_empty_actions_with_unavailable_authority() {
         let user_id = Uuid::parse_str("00000000-0000-0000-0000-000000000002").expect("valid uuid");
         let user = UserResponse {
             id: user_id,
@@ -411,15 +399,36 @@ mod tests {
             first_name: "View".to_string(),
             last_name: "Only".to_string(),
             actions: vec![],
-            authority: AuthorityStatus::Ok,
-            permissions: vec![],
+            authority: AuthorityStatus::Unavailable,
             has_pending_email_change: false,
         };
         let json = serde_json::to_string(&user).unwrap();
         let deserialized: UserResponse = serde_json::from_str(&json).unwrap();
 
-        assert!(deserialized.permissions.is_empty());
         assert!(deserialized.actions.is_empty());
+        assert_eq!(deserialized.authority, AuthorityStatus::Unavailable);
+    }
+
+    #[test]
+    fn user_response_empty_actions_with_ok_authority() {
+        // The genuine zero-grant-user shape: authority resolved successfully
+        // but the user simply holds no actions (distinct from the
+        // `Unavailable` case above, where resolution itself failed).
+        let user_id = Uuid::parse_str("00000000-0000-0000-0000-000000000003").expect("valid uuid");
+        let user = UserResponse {
+            id: user_id,
+            email: "zero-grant@example.com".to_string(),
+            first_name: "Zero".to_string(),
+            last_name: "Grant".to_string(),
+            actions: vec![],
+            authority: AuthorityStatus::Ok,
+            has_pending_email_change: false,
+        };
+        let json = serde_json::to_string(&user).unwrap();
+        let deserialized: UserResponse = serde_json::from_str(&json).unwrap();
+
+        assert!(deserialized.actions.is_empty());
+        assert_eq!(deserialized.authority, AuthorityStatus::Ok);
     }
 
     #[test]
@@ -435,9 +444,8 @@ mod tests {
                 email: "admin@example.com".to_string(),
                 first_name: "Admin".to_string(),
                 last_name: "User".to_string(),
-                actions: vec![],
+                actions: vec!["settings:read".to_string(), "services:update".to_string()],
                 authority: AuthorityStatus::Ok,
-                permissions: vec![Permission::ViewSettings, Permission::UpdateServices],
                 has_pending_email_change: false,
             },
         };
@@ -456,9 +464,9 @@ mod tests {
         assert_eq!(deserialized.token_type, "Bearer");
         assert_eq!(deserialized.user.id, user_id);
         assert_eq!(deserialized.user.email, "admin@example.com");
-        assert_eq!(deserialized.user.permissions.len(), 2);
-        assert_eq!(deserialized.user.permissions[0], Permission::ViewSettings);
-        assert_eq!(deserialized.user.permissions[1], Permission::UpdateServices);
+        assert_eq!(deserialized.user.actions.len(), 2);
+        assert_eq!(deserialized.user.actions[0], "settings:read");
+        assert_eq!(deserialized.user.actions[1], "services:update");
     }
 
     // ── 6. UpdateStatus enum round-trip ─────────────────────────────────

@@ -10,7 +10,6 @@ const mockUser = {
 	email: 'admin@example.com',
 	first_name: 'Admin',
 	last_name: 'User',
-	permissions: ['view_agents', 'manage_agents'],
 	actions: ['services:read', 'services:approve', 'services:reject', 'services:delete', 'services:update'],
 	authority: 'ok'
 };

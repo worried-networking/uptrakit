@@ -21,7 +21,6 @@ async function mockAuthenticatedSession(page: Page) {
 				email: 'user@example.com',
 				first_name: 'Test',
 				last_name: 'User',
-				permissions: [],
 				actions: [],
 				authority: 'ok'
 			}

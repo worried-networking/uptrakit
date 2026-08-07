@@ -436,11 +436,6 @@ pub(crate) mod users {
     }
 }
 
-pub(crate) mod permissions {
-    /// `GET /api/v1/permissions`
-    pub(crate) const BASE: &str = "/api/v1/permissions";
-}
-
 pub(crate) mod roles {
     use uuid::Uuid;
     /// `GET /api/v1/roles`

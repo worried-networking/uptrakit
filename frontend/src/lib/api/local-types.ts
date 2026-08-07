@@ -2,7 +2,7 @@
 // (`./generated`). These were hand-written in the old `src/lib/types.ts` (deleted in
 // Task 12b) and are re-exported from `$lib/api` so call sites import everything from one
 // place. Types that DO have a generated equivalent (every `*Request` / `*Response`,
-// `AuthorityStatus`, `ErrorResponse`, `MfaMethod`, `Permission`, `PluginCapability`,
+// `AuthorityStatus`, `ErrorResponse`, `MfaMethod`, `PluginCapability`,
 // `ServiceStatus`, `SystemAlert`, the notification enums, …) are intentionally NOT
 // duplicated here — they resolve through `export * from './generated'` in `./index.ts`.
 

@@ -4919,47 +4919,6 @@
         }
       }
     },
-    "/api/v1/permissions": {
-      "get": {
-        "tags": [
-          "Users"
-        ],
-        "summary": "List all available permissions",
-        "description": "Legacy permission catalog — removed in M1.8 (the action catalog endpoint\nreplaces it in M1.6b).",
-        "operationId": "list_permissions",
-        "responses": {
-          "200": {
-            "description": "List of all permissions",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/PermissionInfo"
-                  }
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Not authenticated"
-          },
-          "403": {
-            "description": "Not authorized"
-          }
-        },
-        "security": [
-          {
-            "oauth2": [
-              "users:manage"
-            ]
-          },
-          {
-            "developer_token": []
-          }
-        ]
-      }
-    },
     "/api/v1/plugin-configs": {
       "get": {
         "tags": [
@@ -10431,7 +10390,7 @@
         "tags": [
           "Users"
         ],
-        "summary": "Get a single user with roles and resolved permissions",
+        "summary": "Get a single user with roles",
         "operationId": "get_user",
         "parameters": [
           {
@@ -10447,7 +10406,7 @@
         ],
         "responses": {
           "200": {
-            "description": "User details with roles and permissions",
+            "description": "User details with roles",
             "content": {
               "application/json": {
                 "schema": {
@@ -15988,63 +15947,6 @@
           }
         }
       },
-      "Permission": {
-        "type": "string",
-        "enum": [
-          "view_services",
-          "approve_services",
-          "reject_services",
-          "remove_services",
-          "update_services",
-          "view_system_services",
-          "approve_system_services",
-          "reject_system_services",
-          "remove_system_services",
-          "update_system_services",
-          "view_software",
-          "create_software",
-          "update_software",
-          "delete_software",
-          "trigger_checks",
-          "trigger_updates",
-          "manage_scheduler",
-          "view_hosts",
-          "update_hosts",
-          "deactivate_hosts",
-          "view_settings",
-          "manage_auth_settings",
-          "manage_enrollment_tokens",
-          "manage_agent_certs",
-          "manage_global_settings",
-          "manage_commands",
-          "view_notifications",
-          "manage_notifications",
-          "view_audit_logs",
-          "view_system_audit_logs",
-          "manage_users",
-          "manage_ignores",
-          "test_plugin_configs",
-          "access_mcp",
-          "view_instance_config_state",
-          "manage_instance_config_state"
-        ]
-      },
-      "PermissionInfo": {
-        "type": "object",
-        "description": "Permission info for the listing endpoint.",
-        "required": [
-          "name",
-          "description"
-        ],
-        "properties": {
-          "description": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          }
-        }
-      },
       "PluginCapability": {
         "type": "string",
         "description": "Capabilities that a plugin may support.\n\n# Design note\n\nThis is a closed, centralized enum rather than a trait-based capability system.\nAll plugins in this project are first-party and registered exclusively through\n`uptrakit-plugin-registry` (see AGENTS.md: \"adding a new plugin only through\nthe registry is an acceptable tradeoff\"). `#[non_exhaustive]` allows adding new\nvariants in future releases without requiring downstream match-arm updates.",
@@ -18948,7 +18850,6 @@
           "last_name",
           "actions",
           "authority",
-          "permissions",
           "has_pending_email_change"
         ],
         "properties": {
@@ -18978,12 +18879,6 @@
           },
           "last_name": {
             "type": "string"
-          },
-          "permissions": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Permission"
-            }
           }
         }
       },
@@ -19006,15 +18901,14 @@
       },
       "UserWithRolesResponse": {
         "type": "object",
-        "description": "A user with their assigned roles and resolved permissions.",
+        "description": "A user with their assigned roles.",
         "required": [
           "id",
           "email",
           "first_name",
           "last_name",
           "is_active",
-          "roles",
-          "permissions"
+          "roles"
         ],
         "properties": {
           "email": {
@@ -19032,12 +18926,6 @@
           },
           "last_name": {
             "type": "string"
-          },
-          "permissions": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Permission"
-            }
           },
           "roles": {
             "type": "array",

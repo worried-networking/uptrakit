@@ -1,4 +1,3 @@
-use crate::permissions::Permission;
 use crate::validation::{Validate, ValidationError};
 use serde::{Deserialize, Serialize};
 use uptrakit_shared_types::SecretString;
@@ -115,7 +114,6 @@ pub struct UserResponse {
     /// this response. `unavailable` ⇒ `actions` is empty and the client
     /// should degrade, not log out.
     pub authority: AuthorityStatus,
-    pub permissions: Vec<Permission>,
     pub has_pending_email_change: bool,
 }
 

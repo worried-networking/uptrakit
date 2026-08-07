@@ -33,8 +33,7 @@ const sampleUser: UserResponse = {
 	last_name: 'User',
 	has_pending_email_change: false,
 	actions: [],
-	authority: 'ok',
-	permissions: []
+	authority: 'ok'
 };
 
 const sampleRefresh: RefreshResponse = {

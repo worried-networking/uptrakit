@@ -2275,7 +2275,6 @@ async fn mint_oidc_auth_response(
             last_name: user.last_name,
             actions,
             authority,
-            permissions,
             has_pending_email_change: false,
         },
     };

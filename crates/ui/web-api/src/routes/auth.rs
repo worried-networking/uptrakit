@@ -502,7 +502,6 @@ pub async fn register(
             last_name: req.last_name,
             actions,
             authority,
-            permissions,
             has_pending_email_change: false,
         },
     };
@@ -777,7 +776,6 @@ pub async fn login(
             last_name: user.last_name,
             actions,
             authority,
-            permissions,
             has_pending_email_change: false,
         },
     };
@@ -2848,24 +2846,6 @@ pub async fn me(
         ),
     };
 
-    // Get fresh user permissions from DB (legacy field, removed in Task 5).
-    //
-    // DEVIATION from the other auth-token-mint sites in this file: on a permission-load DB
-    // error, `me` keeps the `vec![]` fallback instead of returning 500. Verified: the SPA's
-    // `initialize()` (frontend/src/lib/auth.svelte.ts) treats any non-200 from `me` (401 or
-    // 5xx) identically — an unconditional logout. A 500 here would eject an already-logged-in
-    // user on a transient DB blip, which is strictly worse than this fail-closed degraded
-    // render (empty permissions deny everything). Revisit if the frontend ever distinguishes
-    // 401 from 5xx on this endpoint.
-    let permissions = match get_user_permissions(state.db(), state.default_tenant_id, user.id).await
-    {
-        Ok(p) => p,
-        Err(e) => {
-            tracing::error!("Failed to get user permissions: {:?}", e);
-            vec![]
-        }
-    };
-
     let has_pending_email_change = EmailChangeRequest::find()
         .filter(uptrakit_shared_db::entity::email_change_request::Column::UserId.eq(user.id))
         .filter(
@@ -2884,7 +2864,6 @@ pub async fn me(
         last_name: user.last_name,
         actions,
         authority,
-        permissions,
         has_pending_email_change,
     };
 

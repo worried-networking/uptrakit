@@ -16,7 +16,6 @@ const mockUser = {
 	email: 'dev@example.com',
 	first_name: 'Dev',
 	last_name: 'User',
-	permissions: [],
 	actions: [],
 	authority: 'ok'
 };

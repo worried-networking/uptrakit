@@ -840,7 +840,6 @@ async fn build_session_tokens(
             last_name: user.last_name.clone(),
             actions,
             authority,
-            permissions,
             has_pending_email_change,
         },
     })

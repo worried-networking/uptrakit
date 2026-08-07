@@ -7,7 +7,6 @@ const mockUser = {
 	email: 'audit@example.com',
 	first_name: 'Audit',
 	last_name: 'Viewer',
-	permissions: ['view_audit_logs'],
 	actions: ['audit:read'],
 	authority: 'ok'
 };

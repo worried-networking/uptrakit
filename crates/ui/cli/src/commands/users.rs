@@ -14,7 +14,7 @@ use uptrakit_openapi_client::types::users::{
 pub enum UsersCommands {
     /// List all users with their roles
     List,
-    /// Show user details including roles and permissions
+    /// Show user details including roles
     Show {
         /// User UUID
         id: Uuid,
@@ -209,14 +209,6 @@ impl HumanOutput for UserWithRolesResponse {
                 out.push_str(&format!("  - {} ({})\n", r.name, r.id));
             }
         }
-        if self.permissions.is_empty() {
-            out.push_str("Permissions: (none)\n");
-        } else {
-            out.push_str("Permissions:\n");
-            for p in &self.permissions {
-                out.push_str(&format!("  - {p}\n"));
-            }
-        }
         out
     }
 }
@@ -394,7 +386,6 @@ mod tests {
                     .unwrap(),
                 name: "admin".to_string(),
             }],
-            permissions: vec![],
         }
     }
 

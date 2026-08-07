@@ -22,7 +22,6 @@ pub mod oauth_clients;
 pub mod oauth_consents;
 pub mod oidc_auth;
 pub mod oidc_providers;
-pub mod permissions;
 pub mod pki;
 pub mod plugin_configs;
 pub mod plugin_type_settings;

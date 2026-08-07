@@ -1,9 +1,8 @@
-use crate::permissions::Permission;
 use crate::validation::{Validate, ValidationError};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// A user with their assigned roles and resolved permissions.
+/// A user with their assigned roles.
 #[derive(Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UserWithRolesResponse {
@@ -13,7 +12,6 @@ pub struct UserWithRolesResponse {
     pub last_name: String,
     pub is_active: bool,
     pub roles: Vec<UserRoleSummary>,
-    pub permissions: Vec<Permission>,
 }
 
 /// Summary of a role assigned to a user.

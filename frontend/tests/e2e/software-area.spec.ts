@@ -5,15 +5,6 @@ const mockUser = {
 	email: 'dev@example.com',
 	first_name: 'Dev',
 	last_name: 'User',
-	permissions: [
-		'view_software',
-		'create_software',
-		'update_software',
-		'delete_software',
-		'trigger_checks',
-		'trigger_updates',
-		'manage_ignores'
-	],
 	actions: [
 		'software:read',
 		'software:create',

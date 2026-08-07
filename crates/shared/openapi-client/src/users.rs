@@ -6,12 +6,12 @@ use crate::types_impl::users::{
 use uuid::Uuid;
 
 impl UptrakitClient {
-    /// List all users with their roles and resolved permissions.
+    /// List all users with their roles.
     pub async fn list_users(&self) -> Result<Vec<UserWithRolesResponse>> {
         self.get(crate::paths::users::BASE).await
     }
 
-    /// Get a single user by ID with roles and permissions.
+    /// Get a single user by ID with roles.
     pub async fn get_user(&self, id: &Uuid) -> Result<UserWithRolesResponse> {
         self.get(&crate::paths::users::by_id(id)).await
     }

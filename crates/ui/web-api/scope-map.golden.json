@@ -62,7 +62,6 @@
   "get /api/v1/notifications/log": "oauth2:notifications:read",
   "get /api/v1/notifications/rules": "oauth2:notifications:read",
   "get /api/v1/notifications/rules/{id}": "oauth2:notifications:read",
-  "get /api/v1/permissions": "oauth2:users:manage",
   "get /api/v1/plugin-configs": "oauth2:software:read",
   "get /api/v1/plugin-configs/{id}": "oauth2:software:read",
   "get /api/v1/plugin-type-settings": "or:settings:read|system.settings:manage",

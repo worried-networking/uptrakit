@@ -39,7 +39,6 @@ use crate::middleware::action::{
 };
 use crate::middleware::require_auth::{
     AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
-    get_user_permissions,
 };
 use uptrakit_audit_log::{AuditEntry, AuditOutcome, Event, Stateful};
 use uptrakit_shared_db::access_grants::{GuardedMutation, LockoutVerdict, check_lockout};
@@ -52,13 +51,6 @@ pub use uptrakit_web_api_types::users::{
     UpdateUserActiveRequest, UpdateUserRolesRequest, UserRoleSummary, UserWithRolesResponse,
 };
 
-/// Permission info for the listing endpoint.
-#[derive(serde::Serialize, utoipa::ToSchema)]
-pub struct PermissionInfo {
-    pub name: String,
-    pub description: String,
-}
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -69,9 +61,6 @@ async fn build_user_response(
     user_model: &user::Model,
 ) -> Result<UserWithRolesResponse, sea_orm::DbErr> {
     let roles = get_user_role_summaries(state, user_model.id).await?;
-    let permissions = get_user_permissions(state.db(), state.default_tenant_id, user_model.id)
-        .await
-        .unwrap_or_default();
 
     Ok(UserWithRolesResponse {
         id: user_model.id,
@@ -80,7 +69,6 @@ async fn build_user_response(
         last_name: user_model.last_name.clone(),
         is_active: user_model.is_active,
         roles,
-        permissions,
     })
 }
 
@@ -157,37 +145,7 @@ pub async fn list_users(
     (StatusCode::OK, Json(responses)).into_response()
 }
 
-/// List all available permissions
-///
-/// Legacy permission catalog — removed in M1.8 (the action catalog endpoint
-/// replaces it in M1.6b).
-#[utoipa::path(
-    get,
-    path = "/api/v1/permissions",
-    responses(
-        (status = 200, description = "List of all permissions", body = Vec<PermissionInfo>),
-        (status = 401, description = "Not authenticated"),
-        (status = 403, description = "Not authorized")
-    ),
-    tag = "Users",
-    security(("oauth2" = ["users:manage"]), ("developer_token" = []))
-)]
-#[tracing::instrument(skip_all)]
-pub async fn list_permissions(CanManageUsers(_user): CanManageUsers) -> Response {
-    use crate::auth::permissions::Permission;
-
-    let perms: Vec<PermissionInfo> = Permission::all()
-        .into_iter()
-        .map(|p| PermissionInfo {
-            name: p.as_str().to_string(),
-            description: p.description().to_string(),
-        })
-        .collect();
-
-    (StatusCode::OK, Json(perms)).into_response()
-}
-
-/// Get a single user with roles and resolved permissions
+/// Get a single user with roles
 #[utoipa::path(
     get,
     path = "/api/v1/users/{id}",
@@ -195,7 +153,7 @@ pub async fn list_permissions(CanManageUsers(_user): CanManageUsers) -> Response
         ("id" = Uuid, Path, description = "User UUID")
     ),
     responses(
-        (status = 200, description = "User details with roles and permissions", body = UserWithRolesResponse),
+        (status = 200, description = "User details with roles", body = UserWithRolesResponse),
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Not authorized"),
         (status = 404, description = "User not found")

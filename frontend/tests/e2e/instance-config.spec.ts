@@ -5,20 +5,17 @@ const mockUserWithView = {
 	email: 'admin@example.com',
 	first_name: 'Admin',
 	last_name: 'User',
-	permissions: ['view_instance_config_state', 'manage_global_settings'],
 	actions: ['system.config-state:read', 'system.settings:manage'],
 	authority: 'ok' as const
 };
 
 const mockUserWithManage = {
 	...mockUserWithView,
-	permissions: ['view_instance_config_state', 'manage_instance_config_state', 'manage_global_settings'],
 	actions: ['system.config-state:read', 'system.config-state:manage', 'system.settings:manage']
 };
 
 const mockUserWithoutView = {
 	...mockUserWithView,
-	permissions: ['manage_global_settings'],
 	actions: ['system.settings:manage']
 };
 

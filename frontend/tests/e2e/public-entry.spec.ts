@@ -22,7 +22,6 @@ async function mockAuthenticatedSession(page: import('@playwright/test').Page) {
 				email: 'user@example.com',
 				first_name: 'Test',
 				last_name: 'User',
-				permissions: [],
 				actions: [],
 				authority: 'ok'
 			}
