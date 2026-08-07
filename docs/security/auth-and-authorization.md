@@ -420,7 +420,7 @@ for the permission pattern conventions.
 
 ### Adding a new permission
 
-Legacy model only. After the M1.4b sweep this applies solely to `users.rs` and `roles.rs`; new
+Legacy model only, retained for historical reference: no route family is on it any more. All
 authorization work declares a catalog action and an `action_extractor!` type instead (see the next section).
 
 1. Add a variant to the `Permission` enum in `crates/shared/types/src/permissions.rs` (with `as_str` / `from_str` /
@@ -446,8 +446,8 @@ native OpenAPI security requirement, e.g. `security(("oauth2" = ["hosts:read"]),
 instead of the `x-required-permission` extension. The `hosts` route family (`crates/ui/web-api/src/routes/hosts.rs`)
 is the first converted family and serves as the reference conversion.
 
-The M1.4b sweep (batches B1–B6) converted **all** route families except the M1.6a/M1.6b handoffs
-(`users.rs`, `roles.rs`). OR-of-alternatives operations (batch actions,
+The M1.4b sweep (batches B1–B6) converted **all** route families except the `users.rs` / `roles.rs`
+handoffs, which M1.6a/M1.6b finished. OR-of-alternatives operations (batch actions,
 `list_plugin_types`, plugin-type-settings reads) declare one single-scope `oauth2` requirement per
 alternative and enforce inline via `authorize_any`, with no action extractor. Dynamic surface wrappers
 carry `x-action-dynamic: true` alongside the authenticated-only security form. The operator OAuth clients
