@@ -5,7 +5,7 @@ Role assignment and role CRUD require `access:manage` — see
 [Access Management](access-management.md). Both families are global (not tenant-scoped).
 
 See [Authentication and Authorization](../security/auth-and-authorization.md) for the full
-permission model, built-in roles, and access presets.
+permission model, built-in roles, and role bundles.
 
 ## User endpoints
 

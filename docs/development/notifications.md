@@ -615,7 +615,7 @@ which delegates to the typed `PluginConfig::with_secrets_masked()`.
 Route handlers enforce the `view_notifications` / `manage_notifications` permission strings below via typed
 extractors. The corresponding `Permission` enum variants (`ViewNotifications`, `ManageNotifications`) are defined
 in `crates/shared/types/src/permissions.rs` alongside the full set of platform permissions -- see that file for
-the authoritative variant list rather than hardcoding a count here. For the roles/presets that grant these
+the authoritative variant list rather than hardcoding a count here. For the roles/bundles that grant these
 permissions, see [Authentication and Authorization](../security/auth-and-authorization.md).
 
 ### Channels
@@ -997,8 +997,8 @@ API calls, following the same pattern as MQTT and OIDC settings.
 - [Notifications API](../api/notifications.md)
 - [Notifications Security](../security/notifications-security.md)
 - [Notifications End-User Guide](../end-user/notifications.md)
-- [Authentication and Authorization](../security/auth-and-authorization.md) -- permission model, roles, and access
-  presets that gate `view_notifications` / `manage_notifications`
+- [Authentication and Authorization](../security/auth-and-authorization.md) -- permission model, roles, and role
+  bundles that gate `view_notifications` / `manage_notifications`
 - [User Management API](../api/user-management.md) -- endpoint reference for managing which users hold the
   notification permissions
 - [Coding Standards](coding-standards.md)

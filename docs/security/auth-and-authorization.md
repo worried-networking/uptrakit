@@ -272,13 +272,13 @@ Eight built-in roles group permissions into logical responsibilities:
 
 Built-in roles are marked with `is_built_in = true` in the `roles` table.
 
-### Access presets
+### Role bundles
 
-Access presets are code-defined bundles (not stored in the database) that group one or more roles
-under a single name. They are exposed as advisory metadata via `GET /api/v1/access/catalog`; apply
-one to a user by assigning its roles through `PUT /api/v1/users/{id}/roles`.
+Role bundles are code-defined (not stored in the database) and group one or more roles under a
+single name. They are exposed as advisory metadata via `GET /api/v1/access/catalog`; apply one to
+a user by assigning its roles through `PUT /api/v1/users/{id}/roles`.
 
-| Preset          | Roles assigned                                                                                         | Use case                        |
+| Bundle          | Roles assigned                                                                                         | Use case                        |
 | --------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------- |
 | `read_only`     | `viewer`                                                                                               | Dashboard viewers, stakeholders |
 | `operator`      | `viewer`, `operator`                                                                                   | On-call staff                   |
@@ -292,7 +292,7 @@ See [User Management API](https://github.com/worried-networking/uptrakit/tree/ma
 ### First user setup
 
 The first registered user -- whether via password or OIDC -- receives all 8 built-in roles
-(equivalent to the `owner` preset). Subsequent users receive only the `viewer` role by default.
+(equivalent to the `owner` bundle). Subsequent users receive only the `viewer` role by default.
 OIDC role mapping can override this.
 
 ### Lockout prevention

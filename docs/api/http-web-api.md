@@ -653,9 +653,8 @@ Host tags provide user-defined labels for organizing hosts within a tenant. See
 
 ## User Management Endpoints
 
-User, role, and access preset management. User lifecycle endpoints require `users:manage`;
-role and role-assignment endpoints require `access:manage`; the preset endpoint remains on
-the legacy `manage_users` permission until M1.6b. See [User Management API](user-management.md)
+User and role management. User lifecycle endpoints require `users:manage`; role and
+role-assignment endpoints require `access:manage`. See [User Management API](user-management.md)
 and [Access Management API](access-management.md) for the full endpoint reference with
 request/response examples.
 
@@ -686,11 +685,11 @@ request/response examples.
 
 ### Key files
 
-| File                                                | Purpose                |
-| --------------------------------------------------- | ---------------------- |
-| `crates/ui/web-api/src/routes/users.rs`             | Route handlers         |
-| `crates/shared/web-api-types/src/users.rs`          | Request/response types |
-| `crates/shared/types/src/role_bundle.rs`            | `RoleBundle` enum      |
+| File                                       | Purpose                |
+| ------------------------------------------ | ---------------------- |
+| `crates/ui/web-api/src/routes/users.rs`    | Route handlers         |
+| `crates/shared/web-api-types/src/users.rs` | Request/response types |
+| `crates/shared/types/src/role_bundle.rs`   | `RoleBundle` enum      |
 
 ## System Services Endpoints
 

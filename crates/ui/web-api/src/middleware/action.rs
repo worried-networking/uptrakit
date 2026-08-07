@@ -554,6 +554,11 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    /// Pins the outage/deny split: an unavailable authority short-circuits to
+    /// 500 before any `authorize` call, so it never enters the deny funnel. A
+    /// wildcard arm that classified `Unavailable` as a denial would answer 403
+    /// here (see `require_system_access_denies_without_grant`), reddening this
+    /// test.
     #[tokio::test]
     async fn require_system_access_unavailable_authority_is_500() {
         let db = test_db().await;
@@ -611,19 +616,5 @@ mod tests {
         let response =
             require_system_access(&engine, &noop_emitter(), &AccessAuthority::Ready(ctx));
         assert!(response.is_none());
-    }
-
-    #[tokio::test]
-    async fn require_system_access_unavailable_does_not_reach_the_deny_funnel() {
-        // Unavailable returns 500 before any authorize call or funnel entry —
-        // the emitter is not consulted. The deny funnel's Event emission for
-        // this site is covered end-to-end in integration_tests; this pins the
-        // arm classification: outage → 500, never a deny Event.
-        let db = test_db().await;
-        let engine = AccessEngine::new(db);
-        let response =
-            require_system_access(&engine, &noop_emitter(), &AccessAuthority::Unavailable)
-                .expect("must reject");
-        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 }

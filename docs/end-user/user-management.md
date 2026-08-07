@@ -1,19 +1,19 @@
 ---
 title: User Management
 weight: 240
-description: Uptrakit uses a granular role-based access control system with 32 permissions grouped into 8 built-in roles, allowing flexible assignment of access presets for common use cases.
+description: Uptrakit uses a granular role-based access control system with 32 permissions grouped into 8 built-in roles, with code-defined role bundles for common use cases.
 ---
 
 # User Management
 
 Uptrakit uses a granular role-based access control (RBAC) system with 32 permissions grouped
 into 8 built-in roles. Users are assigned one or more roles, and each role grants a specific
-set of permissions. Access presets provide convenient role bundles for common use cases.
+set of permissions. Role bundles name convenient role groupings for common use cases.
 
 ## First user setup
 
 The first user to register (via password or OIDC) automatically receives all 8 built-in
-roles, equivalent to the **owner** access preset. This ensures the initial administrator
+roles, equivalent to the **owner** role bundle. This ensures the initial administrator
 has full control. Subsequent users receive only the **viewer** role by default.
 
 ## Built-in roles
@@ -29,12 +29,13 @@ has full control. Subsequent users receive only the **viewer** role by default.
 | **command_manager**      | Command configuration     | Modify command-bearing plugin config fields (equivalent to root access on managed hosts)   |
 | **system_administrator** | Infrastructure management | Global settings, system services, system audit logs                                        |
 
-## Access presets
+## Role bundles
 
-Presets assign a predefined set of roles in a single operation. They are useful for quickly
-setting up user access levels without manually selecting individual roles.
+Role bundles name a predefined set of roles. They are advisory metadata served by
+`uptrakit-cli api GET /api/v1/access/catalog` -- look up a bundle's roles there, then assign
+them with `users set-roles` (see below).
 
-| Preset            | Roles                                                                                      | Typical use case                |
+| Bundle            | Roles                                                                                      | Typical use case                |
 | ----------------- | ------------------------------------------------------------------------------------------ | ------------------------------- |
 | **read_only**     | viewer                                                                                     | Stakeholders, dashboard viewers |
 | **operator**      | viewer, operator                                                                           | On-call staff                   |
