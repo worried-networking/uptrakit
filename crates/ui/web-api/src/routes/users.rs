@@ -1766,6 +1766,63 @@ mod tests {
         );
     }
 
+    /// Security-critical: mirrors `added_roles_reach_system_plane`'s "already-held roles
+    /// are not re-classified" branch (`routes/access_grants.rs`) — a divergence here is a
+    /// privilege-escalation hole, not a style nit. Re-applying a role set the target
+    /// already holds must not require `system.access:manage`, even when that set reaches
+    /// the system plane, because no role is actually ADDED by the request.
+    #[tokio::test]
+    async fn update_user_roles_reapplying_already_held_system_plane_roles_does_not_require_system_access()
+     {
+        let app = TestApp::new().await;
+        let client = app.client();
+        fixtures::open_registration(&app).await;
+        let target_user = insert_target_user(&app.db, "sysplane-target3@test.local").await;
+
+        let sys_admin_role = Role::find()
+            .filter(role::Column::Name.eq("system_administrator"))
+            .one(&app.db)
+            .await
+            .expect("query system_administrator role")
+            .expect("system_administrator role row");
+
+        // Target already holds the system-plane role before this request.
+        let now = OffsetDateTime::now_utc();
+        user_role::ActiveModel {
+            tenant_id: Set(app.tenant_id),
+            user_id: Set(target_user.id),
+            role_id: Set(sys_admin_role.id),
+            assigned_at: Set(now),
+        }
+        .insert(&app.db)
+        .await
+        .expect("pre-stage target's existing system_administrator assignment");
+
+        let (_caller_id, caller_token) = fixtures::stage_user_with_grant(
+            &app,
+            "tenant-admin3@test.local",
+            &["access:manage"],
+            Some(app.tenant_id),
+        )
+        .await;
+
+        // Re-assign the SAME role set the target already holds -- no role is actually
+        // ADDED, so this must not require system.access:manage.
+        let req = UpdateUserRolesRequest {
+            role_ids: vec![sys_admin_role.id],
+        };
+        let status = client
+            .put_json(&format!("/api/v1/users/{}/roles", target_user.id), &req)
+            .bearer(&caller_token)
+            .send_status()
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "re-applying an already-held system-plane role must not require system.access:manage"
+        );
+    }
+
     #[tokio::test]
     async fn update_user_roles_lockout_denial_writes_denied_audit_event() {
         let app = TestApp::new().await;

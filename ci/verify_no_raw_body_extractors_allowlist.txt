@@ -18,7 +18,6 @@ raw_extractor|crates/ui/web-api/src/routes/host_tags.rs|fn create_host_tag\b
 raw_extractor|crates/ui/web-api/src/routes/host_tags.rs|fn update_host_tag\b
 raw_extractor|crates/ui/web-api/src/routes/host_tags.rs|fn batch_host_tags\b
 raw_extractor|crates/ui/web-api/src/routes/host_tags.rs|fn set_host_tags\b
-raw_extractor|crates/ui/web-api/src/routes/access_presets.rs|fn apply_preset\b
 raw_extractor|crates/ui/web-api/src/routes/scheduler.rs|fn update_scheduled_task\b
 raw_extractor|crates/ui/web-api/src/routes/system_enrollment_tokens.rs|fn create_system_enrollment_token\b
 raw_extractor|crates/ui/web-api/src/routes/notifications.rs|fn create_channel\b

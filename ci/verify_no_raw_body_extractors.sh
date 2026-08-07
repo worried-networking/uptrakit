@@ -11,7 +11,7 @@ ROUTES_DIR="crates/ui/web-api/src/routes"
 WEB_API_SRC="crates/ui/web-api/src"
 ALLOWLIST="ci/verify_no_raw_body_extractors_allowlist.txt"
 # Shrink-only ratchet: decrement as Stage 2 converts sites; never increment.
-MAX_ALLOWLIST_ENTRIES=34
+MAX_ALLOWLIST_ENTRIES=33
 
 if ! command -v perl >/dev/null 2>&1; then
   echo "perl is required for verify_no_raw_body_extractors.sh" >&2

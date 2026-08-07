@@ -313,10 +313,9 @@ with HTTP 409 Conflict.
    `crates/ui/web-api/src/middleware/permission.rs` using a macro that generates one concrete struct per permission.
    If the user lacks the permission the extractor short-circuits with `403 Forbidden` before the handler body runs.
    No DB round-trip is needed.
-1. Endpoints still on the legacy model (only `users.rs` and `roles.rs` after the M1.4b sweep) also
-   carry an `x-required-permission` OpenAPI extension (set in the `#[utoipa::path]` annotation, e.g.
-   `extensions(("x-required-permission" = json!("view_hosts")))`). This makes the required permission
-   machine-readable in the generated OpenAPI spec.
+1. Endpoints on the legacy model carry an `x-required-permission` OpenAPI extension (set in the
+   `#[utoipa::path]` annotation, e.g. `extensions(("x-required-permission" = json!("view_hosts")))`).
+   This makes the required permission machine-readable in the generated OpenAPI spec.
 1. The frontend receives permissions as `string[]` (e.g. `["view_settings", "view_services"]`) and uses the `Permission`
    TypeScript enum for checks.
 
@@ -485,9 +484,9 @@ calls `AccessEngine::authorize()` directly for the single `system.settings:manag
 predicate used to filter instance-scoped plugins out of listings, not a request-denying gate, so it returns a `bool`
 and does not increment the deny counter.
 
-Only `users.rs` and `roles.rs` remain on the legacy `permission_extractor!` +
-`x-required-permission` model described above, until M1.6a/M1.6b converts them. Which model a given
-handler uses is visible from its extractor import: `crate::middleware::action::CanXxx` (new) vs.
+The legacy `permission_extractor!` + `x-required-permission` model described above no longer backs
+any route family; the macro and `middleware/permission.rs` module survive for later milestones. Which
+model a given handler uses is visible from its extractor import: `crate::middleware::action::CanXxx` (new) vs.
 `crate::middleware::permission::CanXxx` (legacy) — the two macros generate similarly-named but distinct
 types, never mix them in the same handler.
 

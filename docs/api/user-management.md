@@ -106,6 +106,8 @@ Activate or deactivate a user account.
 
 **Response** (`200`): `UserWithRolesResponse`.
 
+### Role bundles
+
 Role bundles (`read_only`, `operator`, `manager`, `administrator`, `owner`) are catalog
 metadata, not a separate endpoint -- look up a bundle's role composition via
 `GET /api/v1/access/catalog` (see [Access Management API](access-management.md#catalog-endpoint))

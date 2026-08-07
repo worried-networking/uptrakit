@@ -209,8 +209,7 @@ def _check_file(
     imported from `middleware::action` in this file (see
     `_action_module_imports`) — the legacy `middleware::permission` module
     defines same-named extractors (`CanManageCommands`, `CanUpdateHosts`,
-    `CanTriggerChecks`) still used by unconverted files (users.rs, roles.rs,
-    access_presets.rs after the M1.4b sweep). A
+    `CanTriggerChecks`) still referenced by callers of that module. A
     file cannot import the same unqualified name from both modules (compile
     error), but it CAN import *different* names from each module in the
     same file — e.g. `action::{AccessAuthority, authorize_any}` alongside
