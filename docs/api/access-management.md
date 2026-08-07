@@ -127,7 +127,9 @@ which must resolve to existing roles (unresolved ids -- `400`, no reason code).
 
 Role bundles (see the catalog endpoint below) are advisory metadata, not a separate grant
 mechanism: to apply a bundle to a user, look up its `roles()` in the catalog response and
-assign them via this same endpoint.
+assign them via this same endpoint. From the CLI, `uptrakit users set-roles <id> --names
+<role,role,...>` resolves those names against the roles list and calls the same endpoint,
+so bundle application needs no role UUIDs.
 
 ## Catalog endpoint
 
