@@ -9,26 +9,12 @@ const mockUser = {
 	email: 'admin@example.com',
 	first_name: 'Admin',
 	last_name: 'User',
-	// `manage_services`/`manage_hosts`/`manage_settings`/`manage_software` were never real
-	// `Permission` variants — they granted nothing pre-swap. The `actions` list below is a
-	// deliberately broader superset of what that legacy fixture actually conferred; a future
-	// deny-path regression on any of these actions will NOT be caught by this fixture alone.
-	actions: [
-		'services:read',
-		'services:approve',
-		'services:reject',
-		'services:delete',
-		'services:update',
-		'hosts:read',
-		'hosts:update',
-		'hosts:delete',
-		'settings:read',
-		'system.settings:manage',
-		'software:read',
-		'software:create',
-		'software:update',
-		'software:delete'
-	],
+	// Empty on purpose: the legacy fixture listed `manage_services`/`manage_hosts`/
+	// `manage_settings`/`manage_software`, none of which were real `Permission` variants,
+	// so it conferred nothing. These specs only exercise login, redirect, and home-page
+	// load — none needs a grant. Keeping the list empty preserves that deny-side surface;
+	// granting a superset here would mask a future gating regression on those actions.
+	actions: [],
 	authority: 'ok'
 };
 
