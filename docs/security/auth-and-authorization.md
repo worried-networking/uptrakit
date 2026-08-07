@@ -436,19 +436,24 @@ for the permission pattern conventions.
 
 ### Adding a new permission
 
-Legacy model only, retained for historical reference: no route family is on it any more. All
-authorization work declares a catalog action and an `action_extractor!` type instead (see the next section).
+**This workflow is no longer executable and must not be followed.** M1.7 deleted the artifacts steps 3
+and 5 edited (`crates/ui/web-api/src/middleware/permission.rs` and the frontend `Permission` enum), and
+no route family is on this model any more. All authorization work declares a catalog action and an
+`action_extractor!` type instead (see the next section). Recorded here only so historical migrations and
+commits stay readable:
 
-1. Add a variant to the `Permission` enum in `crates/shared/types/src/permissions.rs` (with `as_str` / `from_str` /
-   `description` arms).
-1. Write a DB migration to insert it into the `permissions` table and assign it to the appropriate built-in
-   role(s) using `grant_permission()`. Decide which role(s) should include the new permission based on the
-   domain (e.g. software permissions go to `software_manager`, host permissions to `host_manager`).
-1. Add a `CanXxx => Permission::Xxx` entry to the `permission_extractor!` macro call in
-   `crates/ui/web-api/src/middleware/permission.rs`.
-1. Use `CanXxx(_user): CanXxx` (or `CanXxx(user): CanXxx` if you need the user) in the relevant route handler(s),
-   and add `extensions(("x-required-permission" = json!("xxx")))` to the corresponding `#[utoipa::path]` annotation.
-1. Add the variant to the `Permission` TypeScript enum in `frontend/src/lib/types.ts`.
+1. A variant was added to the `Permission` enum in `crates/shared/types/src/permissions.rs` (with
+   `as_str` / `from_str` / `description` arms). The enum itself is removed in M1.8.
+1. A DB migration inserted it into the `permissions` table and assigned it to the appropriate built-in
+   role(s) via `grant_permission()`, chosen by domain (software permissions to `software_manager`, host
+   permissions to `host_manager`).
+1. A `CanXxx => Permission::Xxx` entry was added to the `permission_extractor!` macro call — that macro
+   and its module were deleted in M1.7.
+1. The handler took `CanXxx(_user): CanXxx` and its `#[utoipa::path]` carried
+   `extensions(("x-required-permission" = json!("xxx")))`, since replaced by a native
+   `security(("oauth2" = ["resource:verb"]))` requirement.
+1. The variant was mirrored into a frontend `Permission` enum. The SPA now gates on branded action
+   strings (`hasAction` / `hasAnyAction` in `frontend/src/lib/api/local-types.ts`).
 
 ### Transition: action extractors (M1.4a/M1.4b)
 
