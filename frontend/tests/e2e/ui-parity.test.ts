@@ -70,7 +70,34 @@ const mockUser = {
 		'update_system_services',
 		'view_system_services',
 		'view_audit_logs'
-	]
+	],
+	actions: [
+		'services:read',
+		'services:approve',
+		'services:reject',
+		'services:delete',
+		'services:update',
+		'hosts:read',
+		'hosts:update',
+		'hosts:delete',
+		'software:read',
+		'software:create',
+		'software:update',
+		'software:delete',
+		'checks:trigger',
+		'updates:trigger',
+		'scheduler:manage',
+		'settings:read',
+		'settings.auth:manage',
+		'settings.enrollment-tokens:manage',
+		'settings.certificates:manage',
+		'system.settings:manage',
+		'notifications:read',
+		'system.services:update',
+		'system.services:read',
+		'audit:read'
+	],
+	authority: 'ok'
 };
 
 const settingsTabsParity = buildSettingsTabsParityFixture();
@@ -86,7 +113,7 @@ const paritySurfaces: SurfaceResponse[] = [
 		priority: 650,
 		slot: 'settings.below.global',
 		scope: 'global',
-		required_action: 'manage_global_settings',
+		required_action: 'system.settings:manage',
 		provider_kind: 'service',
 		root_node: { kind: 'text_block', text: 'global-audit' }
 	}),

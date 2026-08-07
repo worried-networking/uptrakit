@@ -30,14 +30,15 @@ vi.mock('$lib/auth.svelte', () => ({
 		first_name: 'A',
 		last_name: 'B',
 		has_pending_email_change: false,
-		permissions: [
-			'view_software',
-			'manage_commands',
-			'trigger_checks',
-			'update_software',
-			'manage_global_settings',
-			'test_plugin_configs'
-		]
+		actions: [
+			'software:read',
+			'commands:manage',
+			'checks:trigger',
+			'software:update',
+			'system.settings:manage',
+			'plugin-configs:trigger'
+		],
+		authority: 'ok'
 	}))
 }));
 vi.mock('$lib/notifications.svelte', () => ({ showSuccess: vi.fn(), showError: vi.fn() }));
@@ -46,7 +47,7 @@ vi.mock('$lib/stores/events.svelte', () => ({
 	getLastEvent: vi.fn(() => null)
 }));
 
-import { Permission, type InstancePluginSummary } from '$lib/api';
+import { Actions, type InstancePluginSummary } from '$lib/api';
 import * as auth from '$lib/auth.svelte';
 import * as api from '$lib/api';
 import PluginConfigsTab from './PluginConfigsTab.svelte';
@@ -59,14 +60,15 @@ describe('PluginConfigsTab button variants', () => {
 			first_name: 'A',
 			last_name: 'B',
 			has_pending_email_change: false,
-			permissions: [
-				Permission.VIEW_SOFTWARE,
-				Permission.MANAGE_COMMANDS,
-				Permission.TRIGGER_CHECKS,
-				Permission.UPDATE_SOFTWARE,
-				Permission.MANAGE_GLOBAL_SETTINGS,
-				Permission.TEST_PLUGIN_CONFIGS
-			]
+			actions: [
+				Actions.SOFTWARE_READ,
+				Actions.COMMANDS_MANAGE,
+				Actions.CHECKS_TRIGGER,
+				Actions.SOFTWARE_UPDATE,
+				Actions.SYSTEM_SETTINGS_MANAGE,
+				Actions.PLUGIN_CONFIGS_TRIGGER
+			],
+			authority: 'ok'
 		} as ReturnType<typeof auth.getUser>);
 		const { container } = render(PluginConfigsTab);
 		await waitFor(() => expect(container.querySelector('button.preset-filled-primary-500')).toBeNull());
@@ -118,13 +120,14 @@ describe('PluginConfigsTab — Instance Plugins section', () => {
 			first_name: 'A',
 			last_name: 'B',
 			has_pending_email_change: false,
-			permissions: [
-				Permission.VIEW_SOFTWARE,
-				Permission.MANAGE_COMMANDS,
-				Permission.TRIGGER_CHECKS,
-				Permission.UPDATE_SOFTWARE,
-				Permission.TEST_PLUGIN_CONFIGS
-			]
+			actions: [
+				Actions.SOFTWARE_READ,
+				Actions.COMMANDS_MANAGE,
+				Actions.CHECKS_TRIGGER,
+				Actions.SOFTWARE_UPDATE,
+				Actions.PLUGIN_CONFIGS_TRIGGER
+			],
+			authority: 'ok'
 		} as ReturnType<typeof auth.getUser>);
 		vi.mocked(api.listInstancePlugins).mockResolvedValue({ data: [dashboardIconsPlugin] } as unknown as Awaited<
 			ReturnType<typeof api.listInstancePlugins>

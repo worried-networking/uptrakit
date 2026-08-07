@@ -10,7 +10,9 @@ const mockUser = {
 	email: 'admin@example.com',
 	first_name: 'Admin',
 	last_name: 'User',
-	permissions: ['view_agents', 'manage_agents']
+	permissions: ['view_agents', 'manage_agents'],
+	actions: ['services:read', 'services:approve', 'services:reject', 'services:delete', 'services:update'],
+	authority: 'ok'
 };
 
 const sampleService = {
@@ -63,7 +65,7 @@ test.describe('Services page', () => {
 		);
 
 		await page.goto('/services');
-		await expect(page.getByText('prod-agent')).toBeVisible();
+		await expect(page.getByRole('cell', { name: 'prod-agent', exact: true })).toBeVisible();
 		await expect(page.getByText('prod-host')).toBeVisible();
 	});
 

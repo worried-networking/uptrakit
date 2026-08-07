@@ -19,7 +19,7 @@ import * as api from '$lib/api';
 import * as auth from '$lib/auth.svelte';
 import InstanceConfigTab from './InstanceConfigTab.svelte';
 import type { ConfigStateResponse } from '$lib/api';
-import { Permission } from '$lib/api';
+import { Actions } from '$lib/api';
 
 const idleState: ConfigStateResponse = {
 	coordinator_state: 'idle',
@@ -80,7 +80,8 @@ describe('InstanceConfigTab', () => {
 			email: 'a@b.com',
 			first_name: 'A',
 			last_name: 'B',
-			permissions: [Permission.VIEW_INSTANCE_CONFIG_STATE],
+			actions: [Actions.SYSTEM_CONFIG_STATE_READ],
+			authority: 'ok',
 			has_pending_email_change: false
 		});
 		render(InstanceConfigTab);
@@ -97,7 +98,8 @@ describe('InstanceConfigTab', () => {
 			email: 'a@b.com',
 			first_name: 'A',
 			last_name: 'B',
-			permissions: [Permission.VIEW_INSTANCE_CONFIG_STATE, Permission.MANAGE_INSTANCE_CONFIG_STATE],
+			actions: [Actions.SYSTEM_CONFIG_STATE_READ, Actions.SYSTEM_CONFIG_STATE_MANAGE],
+			authority: 'ok',
 			has_pending_email_change: false
 		});
 		render(InstanceConfigTab);

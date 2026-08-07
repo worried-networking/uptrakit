@@ -24,7 +24,7 @@
 	import { AdminEventType } from '$lib/sse';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
-	import { Permission, PluginCapability, hasAnyPermission, hasPermissionValue } from '$lib/api';
+	import { Actions, PluginCapability, hasAction, hasAnyAction, hasActionValue } from '$lib/api';
 	import SurfaceReadPanel from '$lib/components/surfaces/SurfaceReadPanel.svelte';
 	import {
 		getSurfaceReadModel,
@@ -101,21 +101,21 @@
 	let assignedSoftwareError: string | null = $state(null);
 	const assignedSoftwareTotalPages = $derived(Math.ceil(assignedSoftwareTotal / 20));
 
-	const canManage = $derived(hasAnyPermission(getUser(), Permission.UPDATE_HOSTS, Permission.DEACTIVATE_HOSTS));
+	const canManage = $derived(hasAnyAction(getUser(), Actions.HOSTS_UPDATE, Actions.HOSTS_DELETE));
 	const canManageSoftware = $derived(
-		hasAnyPermission(
+		hasAnyAction(
 			getUser(),
-			Permission.CREATE_SOFTWARE,
-			Permission.UPDATE_SOFTWARE,
-			Permission.DELETE_SOFTWARE,
-			Permission.TRIGGER_CHECKS,
-			Permission.TRIGGER_UPDATES
+			Actions.SOFTWARE_CREATE,
+			Actions.SOFTWARE_UPDATE,
+			Actions.SOFTWARE_DELETE,
+			Actions.CHECKS_TRIGGER,
+			Actions.UPDATES_TRIGGER
 		)
 	);
-	const canViewSoftware = $derived(getUser()?.permissions.includes(Permission.VIEW_SOFTWARE) ?? false);
+	const canViewSoftware = $derived(hasAction(getUser(), Actions.SOFTWARE_READ));
 	const hostDetailSlotSurfaces = $derived(getSurfacesBySlot('host_detail.tabs'));
 	const hostDetailSlotRenderableSurfaces = $derived(
-		hostDetailSlotSurfaces.filter((surface) => hasPermissionValue(getUser(), surface.required_action))
+		hostDetailSlotSurfaces.filter((surface) => hasActionValue(getUser(), surface.required_action))
 	);
 	const hostDetailSlotReads = $derived.by(() => {
 		const result: Record<string, NonNullable<ReturnType<typeof getSurfaceReadModel>>> = {};
@@ -537,7 +537,7 @@
 					<div class="space-y-4">
 						{#each hostDetailSlotSurfaces as surface (surface.surface_id)}
 							<SectionCard title={surface.label}>
-								{#if hasPermissionValue(getUser(), surface.required_action)}
+								{#if hasActionValue(getUser(), surface.required_action)}
 									<SurfaceReadPanel
 										{surface}
 										read={hostDetailSlotReads[surface.surface_id]}

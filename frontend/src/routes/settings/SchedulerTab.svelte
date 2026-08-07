@@ -4,14 +4,14 @@
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import { formatDate } from '$lib/utils';
 	import { getUser } from '$lib/auth.svelte';
-	import { Permission } from '$lib/api';
+	import { Actions, hasAction } from '$lib/api';
 	import type { ScheduledTaskResponse } from '$lib/api';
 	import { Callout, DataTable, ModalShell, SectionCard, StatusBadge } from '$lib/components/ui';
 	import type { DataTableColumn } from '$lib/components/ui';
 	import { FormFieldRow, Input, Checkbox } from '$lib/components/forms';
 	import Button from '$lib/components/Button.svelte';
 
-	const canManage = $derived(getUser()?.permissions.includes(Permission.MANAGE_SCHEDULER) ?? false);
+	const canManage = $derived(hasAction(getUser(), Actions.SCHEDULER_MANAGE));
 
 	let tasks: ScheduledTaskResponse[] = $state([]);
 	let loading: boolean = $state(true);

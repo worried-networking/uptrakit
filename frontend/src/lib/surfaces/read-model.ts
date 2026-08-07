@@ -92,9 +92,9 @@ function collectNodeDataSourceUsage(
 	return out;
 }
 
-export function filterSurfacesByPermission<T extends { required_action?: string }>(
+export function filterSurfacesByAction<T extends { required_action?: string }>(
 	surfaces: T[],
-	canAccess: (requiredPermission: string | undefined) => boolean
+	canAccess: (requiredAction: string | undefined) => boolean
 ): T[] {
 	return surfaces.filter((surface) => canAccess(surface.required_action));
 }

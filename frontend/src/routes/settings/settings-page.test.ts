@@ -23,12 +23,12 @@ vi.mock('$lib/surfaces/registry.svelte', () => ({
 	loadSurfaceReadModels: vi.fn()
 }));
 vi.mock('$lib/surfaces/read-model', () => ({
-	filterSurfacesByPermission: vi.fn(() => []),
+	filterSurfacesByAction: vi.fn(() => []),
 	isSurfaceTabPending: vi.fn(() => false)
 }));
 
 import * as auth from '$lib/auth.svelte';
-import { Permission } from '$lib/api';
+import { Actions } from '$lib/api';
 import SettingsPage from './+page.svelte';
 
 function makeUser() {
@@ -38,7 +38,8 @@ function makeUser() {
 		first_name: 'A',
 		last_name: 'B',
 		has_pending_email_change: false,
-		permissions: [Permission.MANAGE_AUTH_SETTINGS]
+		actions: [Actions.SETTINGS_AUTH_MANAGE],
+		authority: 'ok' as const
 	};
 }
 

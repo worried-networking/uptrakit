@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { SurfaceReadResponse, SurfaceResponse } from '$lib/surfaces/contract';
 import {
 	buildStaticSurfaceData,
-	filterSurfacesByPermission,
+	filterSurfacesByAction,
 	isSurfaceReadRenderable,
 	isSurfaceTabPending,
 	shouldUseSurfaceRoute
@@ -145,7 +145,7 @@ describe('surface read model helpers', () => {
 		expect(shouldUseSurfaceRoute(surfaces, readBySurface)).toBe(true);
 	});
 
-	it('filters slot surfaces by required permission before rendering', () => {
+	it('filters slot surfaces by required action before rendering', () => {
 		const surfaces: SurfaceResponse[] = [
 			{
 				...makeSurface('surface.public'),
@@ -153,14 +153,11 @@ describe('surface read model helpers', () => {
 			},
 			{
 				...makeSurface('surface.admin'),
-				required_action: 'manage_settings'
+				required_action: 'settings:manage'
 			}
 		];
 
-		const visible = filterSurfacesByPermission(
-			surfaces,
-			(requiredPermission) => requiredPermission !== 'manage_settings'
-		);
+		const visible = filterSurfacesByAction(surfaces, (requiredAction) => requiredAction !== 'settings:manage');
 
 		expect(visible.map((surface) => surface.surface_id)).toEqual(['surface.public']);
 	});

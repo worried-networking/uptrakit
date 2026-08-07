@@ -18,26 +18,6 @@ vi.mock('$app/navigation', () => ({
 	goto: vi.fn()
 }));
 
-vi.mock('$lib/types', () => ({
-	Permission: {
-		ViewSoftware: 'view_software',
-		ViewSettings: 'view_settings',
-		ViewSystemServices: 'view_system_services',
-		ViewHosts: 'view_hosts',
-		ViewAuditLogs: 'view_audit_logs',
-		ManageAuthSettings: 'manage_auth_settings',
-		ManageEnrollmentTokens: 'manage_enrollment_tokens',
-		ManageAgentCerts: 'manage_agent_certs',
-		CreateSoftware: 'create_software',
-		UpdateSoftware: 'update_software',
-		DeleteSoftware: 'delete_software',
-		ManageScheduler: 'manage_scheduler',
-		ManageGlobalSettings: 'manage_global_settings'
-	},
-	hasPermissionValue: (user: { permissions?: string[] } | null | undefined, permission: string | null | undefined) =>
-		permission ? Boolean(user?.permissions?.includes(permission)) : true
-}));
-
 vi.mock('$lib/auth.svelte', () => ({
 	getUser: vi.fn(() => ({
 		id: 'user-1',
@@ -45,7 +25,8 @@ vi.mock('$lib/auth.svelte', () => ({
 		first_name: 'Test',
 		last_name: 'User',
 		has_pending_email_change: false,
-		permissions: ['view_software', 'view_settings']
+		actions: ['software:read', 'settings:read'],
+		authority: 'ok'
 	})),
 	getLoading: vi.fn(() => false),
 	initialize: vi.fn(),

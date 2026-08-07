@@ -62,7 +62,29 @@ const mockUser = {
 		'update_system_services',
 		'view_system_services',
 		'view_audit_logs'
-	]
+	],
+	actions: [
+		'hosts:read',
+		'hosts:update',
+		'hosts:delete',
+		'software:read',
+		'software:create',
+		'software:update',
+		'software:delete',
+		'checks:trigger',
+		'updates:trigger',
+		'scheduler:manage',
+		'settings:read',
+		'settings.auth:manage',
+		'settings.enrollment-tokens:manage',
+		'settings.certificates:manage',
+		'system.settings:manage',
+		'notifications:read',
+		'system.services:update',
+		'system.services:read',
+		'audit:read'
+	],
+	authority: 'ok'
 };
 
 const settingsTabsParity = buildSettingsTabsParityFixture();

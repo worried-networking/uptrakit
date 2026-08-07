@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
-import { Permission, type AuditLogEntry, type PaginatedResponse } from '$lib/api';
+import { Actions, type AuditLogEntry, type PaginatedResponse } from '$lib/api';
 import { within } from '@testing-library/svelte';
 
 vi.mock('$lib/api', async (importOriginal) => ({
@@ -25,7 +25,8 @@ const auditViewer = {
 	first_name: 'Audit',
 	last_name: 'Viewer',
 	has_pending_email_change: false,
-	permissions: [Permission.VIEW_AUDIT_LOGS]
+	actions: [Actions.AUDIT_READ],
+	authority: 'ok' as const
 };
 
 const sampleEntry: AuditLogEntry = {
@@ -92,7 +93,7 @@ describe('Audit Logs Page', () => {
 	it('uses shared tab-strip and section-header actions for scope and filters', async () => {
 		vi.mocked(auth.getUser).mockReturnValue({
 			...auditViewer,
-			permissions: [Permission.VIEW_AUDIT_LOGS, Permission.VIEW_SYSTEM_AUDIT_LOGS]
+			actions: [Actions.AUDIT_READ, Actions.SYSTEM_AUDIT_READ]
 		});
 
 		render(AuditLogsPage);
@@ -210,7 +211,7 @@ describe('Button Migrations', () => {
 	it('Out-of-scope regression: TabStrip scope toggle remains unchanged', async () => {
 		vi.mocked(auth.getUser).mockReturnValue({
 			...auditViewer,
-			permissions: [Permission.VIEW_AUDIT_LOGS, Permission.VIEW_SYSTEM_AUDIT_LOGS]
+			actions: [Actions.AUDIT_READ, Actions.SYSTEM_AUDIT_READ]
 		});
 		render(AuditLogsPage);
 		await waitFor(() => expect(screen.getByRole('tablist', { name: 'Audit log scope' })).toBeInTheDocument());
@@ -225,7 +226,7 @@ describe('Button Migrations', () => {
 	it('when hasBoth is true, renders TabStrip without a SectionCard wrapper', async () => {
 		vi.mocked(auth.getUser).mockReturnValue({
 			...auditViewer,
-			permissions: [Permission.VIEW_AUDIT_LOGS, Permission.VIEW_SYSTEM_AUDIT_LOGS]
+			actions: [Actions.AUDIT_READ, Actions.SYSTEM_AUDIT_READ]
 		});
 		render(AuditLogsPage);
 		await waitFor(() => expect(screen.getByRole('tablist', { name: 'Audit log scope' })).toBeInTheDocument());
@@ -238,7 +239,7 @@ describe('Button Migrations', () => {
 	it('when system-only user, does not render "Showing system-level audit logs." text', async () => {
 		vi.mocked(auth.getUser).mockReturnValue({
 			...auditViewer,
-			permissions: [Permission.VIEW_SYSTEM_AUDIT_LOGS]
+			actions: [Actions.SYSTEM_AUDIT_READ]
 		});
 		render(AuditLogsPage);
 		await waitFor(() => expect(screen.getByText('Audit Logs')).toBeInTheDocument());

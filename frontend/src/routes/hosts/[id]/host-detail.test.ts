@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import type { HostResponse, PaginatedResponse, UpdateHistoryResponse } from '$lib/api';
-import { Permission } from '$lib/api';
+import { Actions } from '$lib/api';
 import type { SurfaceReadResponse, SurfaceResponse } from '$lib/surfaces/contract';
 
 vi.mock('$lib/api', async (importOriginal) => ({
@@ -60,15 +60,16 @@ const adminUser = {
 	first_name: 'Admin',
 	last_name: 'User',
 	has_pending_email_change: false,
-	permissions: [
-		Permission.UPDATE_HOSTS,
-		Permission.DEACTIVATE_HOSTS,
-		Permission.CREATE_SOFTWARE,
-		Permission.UPDATE_SOFTWARE,
-		Permission.DELETE_SOFTWARE,
-		Permission.TRIGGER_CHECKS,
-		Permission.TRIGGER_UPDATES
-	]
+	actions: [
+		Actions.HOSTS_UPDATE,
+		Actions.HOSTS_DELETE,
+		Actions.SOFTWARE_CREATE,
+		Actions.SOFTWARE_UPDATE,
+		Actions.SOFTWARE_DELETE,
+		Actions.CHECKS_TRIGGER,
+		Actions.UPDATES_TRIGGER
+	],
+	authority: 'ok' as const
 };
 
 function makeHistoryPage(items: UpdateHistoryResponse[]): PaginatedResponse<UpdateHistoryResponse> {
@@ -353,7 +354,7 @@ describe('Host Detail Page', () => {
 	it('hides Edit Name and Deactivate buttons when user lacks host management permissions', async () => {
 		vi.mocked(auth.getUser).mockReturnValue({
 			...adminUser,
-			permissions: [Permission.TRIGGER_CHECKS]
+			actions: [Actions.CHECKS_TRIGGER]
 		});
 		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
 			ReturnType<typeof api.getHost>
@@ -376,7 +377,7 @@ describe('Host Detail Page', () => {
 	it('hides Trigger Discovery button when user lacks software management permissions', async () => {
 		vi.mocked(auth.getUser).mockReturnValue({
 			...adminUser,
-			permissions: [Permission.UPDATE_HOSTS]
+			actions: [Actions.HOSTS_UPDATE]
 		});
 		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
 			ReturnType<typeof api.getHost>
@@ -556,14 +557,14 @@ describe('Host Detail Page', () => {
 		>);
 
 		const gatedSurface = buildHostDetailSurface({
-			required_action: Permission.VIEW_SETTINGS
+			required_action: Actions.SETTINGS_READ
 		});
 		vi.mocked(surfaceRegistry.getSurfacesBySlot).mockImplementation((slot: string) =>
 			slot === 'host_detail.tabs' ? [gatedSurface] : []
 		);
 		vi.mocked(auth.getUser).mockReturnValue({
 			...adminUser,
-			permissions: [Permission.UPDATE_HOSTS]
+			actions: [Actions.HOSTS_UPDATE]
 		});
 
 		render(HostDetailPage);
@@ -576,13 +577,12 @@ describe('Host Detail Page', () => {
 		expect(vi.mocked(surfaceRegistry.loadSurfaceReadModels)).not.toHaveBeenCalled();
 	});
 
-	// Documents a known regression until M1.7: `required_action` is now a typed catalog
-	// action string (`resource:verb`), but `User.permissions` still carries legacy
-	// permission names. The SPA's client-side gate compares them literally, so an
-	// action-gated surface hides even from a fully-privileged admin fixture user until
-	// M1.7 aligns the client-side permission model with the action catalog. Server-side
-	// enforcement (AccessEngine) is unaffected by this client-side gap.
-	it('hides an action-gated surface even for the admin fixture user (known regression until M1.7)', async () => {
+	// M1.7 fix: `required_action` is a typed catalog action string (`resource:verb`), and
+	// `User.actions` now carries the same catalog vocabulary (server-expanded via
+	// AccessEngine::allowed_actions()). The SPA's client-side gate compares them literally,
+	// so an action-gated surface is now visible to a fully-privileged admin fixture user
+	// that actually holds the required action.
+	it('shows an action-gated surface for the admin fixture user who holds the required action', async () => {
 		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
 			ReturnType<typeof api.getHost>
 		>);
@@ -600,15 +600,14 @@ describe('Host Detail Page', () => {
 
 		expect(document.querySelector('[data-parity-region="host_detail.tabs"]')).toBeInTheDocument();
 		expect(screen.getByText(gatedSurface.label)).toBeInTheDocument();
-		expect(screen.getByText('Access denied')).toBeInTheDocument();
-		expect(screen.getByText('You do not have permission to access this surface.')).toBeInTheDocument();
-		expect(vi.mocked(surfaceRegistry.loadSurfaceReadModels)).not.toHaveBeenCalled();
+		expect(screen.queryByText('Access denied')).not.toBeInTheDocument();
+		expect(vi.mocked(surfaceRegistry.loadSurfaceReadModels)).toHaveBeenCalledWith([gatedSurface.surface_id]);
 	});
 
 	it('does not submit allowlist entry when plugin type is empty', async () => {
 		vi.mocked(auth.getUser).mockReturnValue({
 			...adminUser,
-			permissions: [...adminUser.permissions, Permission.VIEW_SOFTWARE]
+			actions: [...adminUser.actions, Actions.SOFTWARE_READ]
 		});
 		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
 			ReturnType<typeof api.getHost>
@@ -717,7 +716,7 @@ describe('Button primitive contract — hosts/[id]/+page.svelte', () => {
 		>);
 		vi.mocked(auth.getUser).mockReturnValue({
 			...adminUser,
-			permissions: [...adminUser.permissions, Permission.VIEW_SOFTWARE]
+			actions: [...adminUser.actions, Actions.SOFTWARE_READ]
 		});
 		render(HostDetailPage);
 		await waitFor(() => screen.getByRole('button', { name: /add plugin type/i }));
@@ -798,7 +797,7 @@ describe('Button primitive contract — hosts/[id]/+page.svelte', () => {
 		>);
 		vi.mocked(auth.getUser).mockReturnValue({
 			...adminUser,
-			permissions: [...adminUser.permissions, Permission.VIEW_SOFTWARE]
+			actions: [...adminUser.actions, Actions.SOFTWARE_READ]
 		});
 		render(HostDetailPage);
 		await waitFor(() => screen.getByRole('button', { name: /edit name/i }));
@@ -917,7 +916,7 @@ describe('Host Detail Page — param-only navigation reload', () => {
 		);
 		vi.mocked(auth.getUser).mockReturnValue({
 			...adminUser,
-			permissions: [...adminUser.permissions, Permission.VIEW_SOFTWARE]
+			actions: [...adminUser.actions, Actions.SOFTWARE_READ]
 		});
 
 		let resolveSoftware1!: (value: Awaited<ReturnType<typeof api.listSoftwareItems>>) => void;

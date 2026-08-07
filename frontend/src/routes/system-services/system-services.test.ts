@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
-import { Permission, type PaginatedResponse, type SystemServiceResponse } from '$lib/api';
+import { Actions, type PaginatedResponse, type SystemServiceResponse } from '$lib/api';
 
 vi.mock('$lib/api', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/api')>()),
@@ -36,13 +36,14 @@ const user = {
 	first_name: 'System',
 	last_name: 'User',
 	has_pending_email_change: false,
-	permissions: [
-		Permission.VIEW_SYSTEM_SERVICES,
-		Permission.APPROVE_SYSTEM_SERVICES,
-		Permission.REJECT_SYSTEM_SERVICES,
-		Permission.REMOVE_SYSTEM_SERVICES,
-		Permission.UPDATE_SYSTEM_SERVICES
-	]
+	actions: [
+		Actions.SYSTEM_SERVICES_READ,
+		Actions.SYSTEM_SERVICES_APPROVE,
+		Actions.SYSTEM_SERVICES_REJECT,
+		Actions.SYSTEM_SERVICES_DELETE,
+		Actions.SYSTEM_SERVICES_UPDATE
+	],
+	authority: 'ok' as const
 };
 
 function makePage(items: SystemServiceResponse[]): PaginatedResponse<SystemServiceResponse> {

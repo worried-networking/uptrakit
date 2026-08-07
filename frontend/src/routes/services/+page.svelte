@@ -16,7 +16,7 @@
 		ApiError
 	} from '$lib/api';
 	import type { ServiceResponse, BatchActionResponse } from '$lib/api';
-	import { Permission, hasAnyPermission } from '$lib/api';
+	import { Actions, hasAnyAction } from '$lib/api';
 	import { formatDate, parseUrlPage, nextValidPage } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
@@ -97,12 +97,12 @@
 	);
 
 	const canManage = $derived(
-		hasAnyPermission(
+		hasAnyAction(
 			getUser(),
-			Permission.APPROVE_SERVICES,
-			Permission.REJECT_SERVICES,
-			Permission.REMOVE_SERVICES,
-			Permission.UPDATE_SERVICES
+			Actions.SERVICES_APPROVE,
+			Actions.SERVICES_REJECT,
+			Actions.SERVICES_DELETE,
+			Actions.SERVICES_UPDATE
 		)
 	);
 

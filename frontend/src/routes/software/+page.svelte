@@ -49,7 +49,7 @@
 		MergeSoftwareItemSummary
 	} from '$lib/api';
 	import SurfaceReadPanel from '$lib/components/surfaces/SurfaceReadPanel.svelte';
-	import { Permission, hasAnyPermission, hasPermissionValue } from '$lib/api';
+	import { Actions, hasAction, hasAnyAction, hasActionValue } from '$lib/api';
 	import {
 		getSurfaceReadLoading,
 		getSurfaceReadModel,
@@ -58,7 +58,7 @@
 		loadSurfaceReadModels,
 		refreshSurfaceReadModel
 	} from '$lib/surfaces/registry.svelte';
-	import { filterSurfacesByPermission, isSurfaceTabPending } from '$lib/surfaces/read-model';
+	import { filterSurfacesByAction, isSurfaceTabPending } from '$lib/surfaces/read-model';
 	import {
 		Callout,
 		ContextMenuItem,
@@ -106,8 +106,8 @@
 	let activeSurfaceTab: string = $state('');
 
 	const slotTabSurfaces = $derived(
-		filterSurfacesByPermission(getSurfacesBySlot('software.tabs'), (requiredPermission) =>
-			hasPermissionValue(getUser(), requiredPermission)
+		filterSurfacesByAction(getSurfacesBySlot('software.tabs'), (requiredAction) =>
+			hasActionValue(getUser(), requiredAction)
 		)
 	);
 	const slotTabReads = $derived.by(() => {
@@ -169,22 +169,21 @@
 			: undefined
 	);
 
-	const canView = $derived(getUser()?.permissions.includes(Permission.VIEW_SOFTWARE) ?? false);
+	const canView = $derived(hasAction(getUser(), Actions.SOFTWARE_READ));
 	const canManage = $derived(
-		hasAnyPermission(
+		hasAnyAction(
 			getUser(),
-			Permission.CREATE_SOFTWARE,
-			Permission.UPDATE_SOFTWARE,
-			Permission.DELETE_SOFTWARE,
-			Permission.TRIGGER_CHECKS,
-			Permission.TRIGGER_UPDATES
+			Actions.SOFTWARE_CREATE,
+			Actions.SOFTWARE_UPDATE,
+			Actions.SOFTWARE_DELETE,
+			Actions.CHECKS_TRIGGER,
+			Actions.UPDATES_TRIGGER
 		)
 	);
-	const canTriggerChecks = $derived(getUser()?.permissions.includes(Permission.TRIGGER_CHECKS) ?? false);
-	const canTriggerUpdates = $derived(getUser()?.permissions.includes(Permission.TRIGGER_UPDATES) ?? false);
+	const canTriggerChecks = $derived(hasAction(getUser(), Actions.CHECKS_TRIGGER));
+	const canTriggerUpdates = $derived(hasAction(getUser(), Actions.UPDATES_TRIGGER));
 	const canMergeSoftware = $derived(
-		(getUser()?.permissions.includes(Permission.UPDATE_SOFTWARE) ?? false) &&
-			(getUser()?.permissions.includes(Permission.DELETE_SOFTWARE) ?? false)
+		hasAction(getUser(), Actions.SOFTWARE_UPDATE) && hasAction(getUser(), Actions.SOFTWARE_DELETE)
 	);
 	const itemsEmptyState = $derived.by(() => {
 		if (updatable.value) {

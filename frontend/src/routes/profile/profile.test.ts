@@ -35,7 +35,8 @@ const user = {
 	first_name: 'Profile',
 	last_name: 'User',
 	has_pending_email_change: false,
-	permissions: []
+	actions: [],
+	authority: 'ok' as const
 };
 
 async function goToTokensTab() {

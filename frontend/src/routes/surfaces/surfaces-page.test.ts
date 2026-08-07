@@ -37,7 +37,8 @@ vi.mock('$lib/auth.svelte', () => ({
 		first_name: 'Test',
 		last_name: 'User',
 		has_pending_email_change: false,
-		permissions: []
+		actions: [],
+		authority: 'ok'
 	}))
 }));
 
@@ -85,7 +86,8 @@ describe('/surfaces/[id] canonical surface page', () => {
 			first_name: 'Test',
 			last_name: 'User',
 			has_pending_email_change: false,
-			permissions: []
+			actions: [],
+			authority: 'ok'
 		});
 		vi.mocked(getSurfaceRegistryLoaded).mockReturnValue(true);
 		vi.mocked(getSurfaceById).mockReturnValue(buildSurfacePageParity().surface);
@@ -125,7 +127,7 @@ describe('/surfaces/[id] canonical surface page', () => {
 	it('shows surface access denied without falling back to removed compatibility content', () => {
 		vi.mocked(getSurfaceById).mockReturnValue({
 			...buildSurfacePageParity().surface,
-			required_action: 'view_settings'
+			required_action: 'settings:read'
 		});
 		vi.mocked(getUser).mockReturnValue({
 			id: 'user-1',
@@ -133,7 +135,8 @@ describe('/surfaces/[id] canonical surface page', () => {
 			first_name: 'Test',
 			last_name: 'User',
 			has_pending_email_change: false,
-			permissions: []
+			actions: [],
+			authority: 'ok'
 		});
 
 		render(SurfacesPage);
@@ -338,7 +341,8 @@ describe('/surfaces/[id] handlePageChange URL management', () => {
 				first_name: 'Test',
 				last_name: 'User',
 				has_pending_email_change: false,
-				permissions: []
+				actions: [],
+				authority: 'ok'
 			}))
 		}));
 		vi.doMock('$lib/surfaces/registry.svelte', () => ({
@@ -390,7 +394,8 @@ describe('/surfaces/[id] handlePageChange URL management', () => {
 				first_name: 'Test',
 				last_name: 'User',
 				has_pending_email_change: false,
-				permissions: []
+				actions: [],
+				authority: 'ok'
 			}))
 		}));
 		vi.doMock('$lib/surfaces/registry.svelte', () => ({

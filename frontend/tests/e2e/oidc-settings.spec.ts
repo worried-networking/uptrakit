@@ -5,7 +5,9 @@ const mockUser = {
 	email: 'admin@example.com',
 	first_name: 'Admin',
 	last_name: 'User',
-	permissions: ['manage_auth_settings']
+	permissions: ['manage_auth_settings'],
+	actions: ['settings.auth:manage'],
+	authority: 'ok'
 };
 
 const mockSettings = {

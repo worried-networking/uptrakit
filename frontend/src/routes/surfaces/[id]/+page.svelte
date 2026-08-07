@@ -15,7 +15,7 @@
 		loadSurfaceReadModels
 	} from '$lib/surfaces/registry.svelte';
 	import { isSurfaceTabPending } from '$lib/surfaces/read-model';
-	import { hasPermissionValue } from '$lib/api';
+	import { hasActionValue } from '$lib/api';
 	import { Callout, PageShell } from '$lib/components/ui';
 
 	let surfaceId = $derived(page.params.id as string);
@@ -23,7 +23,7 @@
 	let surfaceRead = $derived(surface ? getSurfaceReadModel(surface.surface_id) : undefined);
 	let isReadRequested = $derived(surface ? getSurfaceReadRequested(surface.surface_id) : false);
 	let isReadLoading = $derived(surface ? getSurfaceReadLoading(surface.surface_id) : false);
-	let canViewSurface = $derived(surface ? hasPermissionValue(getUser(), surface.required_action) : false);
+	let canViewSurface = $derived(surface ? hasActionValue(getUser(), surface.required_action) : false);
 	let isPendingSurfaceRead = $derived(
 		surface
 			? isSurfaceTabPending({

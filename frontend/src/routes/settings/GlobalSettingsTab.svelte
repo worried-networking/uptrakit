@@ -13,7 +13,7 @@
 		updateZeroconfSettings,
 		rotateCa
 	} from '$lib/api';
-	import { Permission, hasAnyPermission, hasPermissionValue, ApiError } from '$lib/api';
+	import { Actions, hasAnyAction, hasActionValue, ApiError } from '$lib/api';
 	import type { SystemAlert } from '$lib/api';
 	import { showSuccess, showError, clearError } from '$lib/notifications.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
@@ -23,7 +23,7 @@
 	import { FormFieldRow, FormFieldReadOnly, Input, Textarea, Checkbox, Select } from '$lib/components/forms';
 	import Button from '$lib/components/Button.svelte';
 	import { getSurfaceReadModel, getSurfacesBySlot, loadSurfaceReadModels } from '$lib/surfaces/registry.svelte';
-	import { filterSurfacesByPermission, shouldUseSurfaceRoute } from '$lib/surfaces/read-model';
+	import { filterSurfacesByAction, shouldUseSurfaceRoute } from '$lib/surfaces/read-model';
 
 	// --- Network Settings ---
 	let trustedProxiesText: string = $state('');
@@ -66,8 +66,8 @@
 	let loading: boolean = $state(true);
 
 	const belowSurfaces = $derived(
-		filterSurfacesByPermission(getSurfacesBySlot('settings.below.global'), (requiredPermission) =>
-			hasPermissionValue(getUser(), requiredPermission)
+		filterSurfacesByAction(getSurfacesBySlot('settings.below.global'), (requiredAction) =>
+			hasActionValue(getUser(), requiredAction)
 		)
 	);
 	const belowSurfaceReads = $derived.by(() => {
@@ -83,12 +83,12 @@
 	const useSurfaceBelowPanels = $derived(shouldUseSurfaceRoute(belowSurfaces, belowSurfaceReads));
 
 	const canManageSystemServices = $derived(
-		hasAnyPermission(
+		hasAnyAction(
 			getUser(),
-			Permission.APPROVE_SYSTEM_SERVICES,
-			Permission.REJECT_SYSTEM_SERVICES,
-			Permission.REMOVE_SYSTEM_SERVICES,
-			Permission.UPDATE_SYSTEM_SERVICES
+			Actions.SYSTEM_SERVICES_APPROVE,
+			Actions.SYSTEM_SERVICES_REJECT,
+			Actions.SYSTEM_SERVICES_DELETE,
+			Actions.SYSTEM_SERVICES_UPDATE
 		)
 	);
 

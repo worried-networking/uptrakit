@@ -16,7 +16,7 @@
 	import { getThemeMode, setThemeMode, initTheme, type ThemeMode } from '$lib/theme.svelte';
 	import { getSystemAlerts } from '$lib/api';
 	import { getIsOnline } from '$lib/stores/network.svelte';
-	import { Permission, hasPermissionValue } from '$lib/api';
+	import { Actions, hasAction, hasActionValue, type Action } from '$lib/api';
 	import {
 		loadSurfaceRegistry,
 		clearSurfaceRegistry,
@@ -151,7 +151,7 @@
 	});
 
 	$effect(() => {
-		if (getUser()?.permissions.includes(Permission.MANAGE_GLOBAL_SETTINGS)) {
+		if (hasAction(getUser(), Actions.SYSTEM_SETTINGS_MANAGE)) {
 			void fetchAlerts();
 		}
 	});
@@ -166,7 +166,7 @@
 	});
 
 	$effect(() => {
-		if (getUser()?.permissions.includes(Permission.VIEW_SOFTWARE)) {
+		if (hasAction(getUser(), Actions.SOFTWARE_READ)) {
 			void fetchUpdatableSoftwareCount();
 		}
 	});
@@ -179,7 +179,7 @@
 		label: string;
 		priority: number;
 		icon: LucideIcon;
-		permission?: Permission | Permission[];
+		permission?: Action | Action[];
 	}[] = [
 		{ href: '/', label: 'Home', priority: 100, icon: House },
 		{ href: '/services', label: 'Services', priority: 200, icon: Server },
@@ -188,7 +188,7 @@
 			label: 'System Services',
 			priority: 300,
 			icon: ServerCog,
-			permission: Permission.VIEW_SYSTEM_SERVICES
+			permission: Actions.SYSTEM_SERVICES_READ
 		},
 		{ href: '/hosts', label: 'Hosts', priority: 400, icon: HardDrive },
 		{
@@ -196,28 +196,28 @@
 			label: 'Tags',
 			priority: 450,
 			icon: Tags,
-			permission: Permission.VIEW_HOSTS
+			permission: Actions.HOSTS_READ
 		},
 		{
 			href: '/software',
 			label: 'Software',
 			priority: 500,
 			icon: Package,
-			permission: Permission.VIEW_SOFTWARE
+			permission: Actions.SOFTWARE_READ
 		},
 		{
 			href: '/history',
 			label: 'History',
 			priority: 800,
 			icon: History,
-			permission: Permission.VIEW_SOFTWARE
+			permission: Actions.SOFTWARE_READ
 		},
 		{
 			href: '/audit-logs',
 			label: 'Audit Logs',
 			priority: 900,
 			icon: ScrollText,
-			permission: Permission.VIEW_AUDIT_LOGS
+			permission: Actions.AUDIT_READ
 		},
 		{
 			href: '/settings',
@@ -225,23 +225,23 @@
 			priority: 1000,
 			icon: Settings,
 			permission: [
-				Permission.VIEW_SETTINGS,
-				Permission.MANAGE_AUTH_SETTINGS,
-				Permission.MANAGE_ENROLLMENT_TOKENS,
-				Permission.MANAGE_AGENT_CERTS,
-				Permission.VIEW_SOFTWARE,
-				Permission.CREATE_SOFTWARE,
-				Permission.UPDATE_SOFTWARE,
-				Permission.DELETE_SOFTWARE,
-				Permission.MANAGE_SCHEDULER,
-				Permission.MANAGE_GLOBAL_SETTINGS
+				Actions.SETTINGS_READ,
+				Actions.SETTINGS_AUTH_MANAGE,
+				Actions.SETTINGS_ENROLLMENT_TOKENS_MANAGE,
+				Actions.SETTINGS_CERTIFICATES_MANAGE,
+				Actions.SOFTWARE_READ,
+				Actions.SOFTWARE_CREATE,
+				Actions.SOFTWARE_UPDATE,
+				Actions.SOFTWARE_DELETE,
+				Actions.SCHEDULER_MANAGE,
+				Actions.SYSTEM_SETTINGS_MANAGE
 			]
 		}
 	];
 
 	const surfacePageNavItems = $derived(
 		resolveSurfacePageNavItems(
-			getSurfacesBySlot('surface.page').filter((surface) => hasPermissionValue(getUser(), surface.required_action))
+			getSurfacesBySlot('surface.page').filter((surface) => hasActionValue(getUser(), surface.required_action))
 		).map((item) => ({
 			id: item.id,
 			href: item.href,
@@ -260,7 +260,7 @@
 				.filter((item) => {
 					if (!item.permission) return true;
 					const perms = Array.isArray(item.permission) ? item.permission : [item.permission];
-					return perms.some((p) => getUser()?.permissions.includes(p));
+					return perms.some((p) => hasAction(getUser(), p));
 				})
 				.map((item): ShellNavItem => {
 					const isSoftware = item.href === '/software';
@@ -547,6 +547,16 @@
 							<Button variant="ghost" size="sm" onclick={() => setSessionExpired(false)}>Dismiss</Button>
 						</div>
 					</Callout>
+				</div>
+			{/if}
+
+			{#if getUser()?.authority === 'unavailable'}
+				<div class="px-4 pt-3" data-ui="app-shell-banner">
+					<Callout
+						tone="warning"
+						title="Authorization unavailable"
+						message="Your permissions could not be resolved right now, so some actions may be hidden. Reload the page to retry."
+					/>
 				</div>
 			{/if}
 		</div>

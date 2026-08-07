@@ -7,7 +7,9 @@ const mockUser = {
 	email: 'dev@example.com',
 	first_name: 'Dev',
 	last_name: 'User',
-	permissions: []
+	permissions: [],
+	actions: [],
+	authority: 'ok'
 };
 
 async function mockAuthApi(page: import('@playwright/test').Page) {

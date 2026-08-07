@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/svelte';
 import { buildSettingsTabsParityFixture } from '$lib/test-fixtures/ui-parity';
-import { Permission } from '$lib/api';
+import { Actions } from '$lib/api';
 
 vi.mock('$app/state', () => ({
 	page: {
@@ -20,7 +20,8 @@ vi.mock('$lib/auth.svelte', () => ({
 		first_name: 'Test',
 		last_name: 'User',
 		has_pending_email_change: false,
-		permissions: [Permission.VIEW_NOTIFICATIONS, Permission.UPDATE_SYSTEM_SERVICES]
+		actions: [Actions.NOTIFICATIONS_READ, Actions.SYSTEM_SERVICES_UPDATE],
+		authority: 'ok'
 	}))
 }));
 
@@ -76,7 +77,8 @@ describe('/settings shared-surface tabs', () => {
 			first_name: 'Test',
 			last_name: 'User',
 			has_pending_email_change: false,
-			permissions: [Permission.VIEW_NOTIFICATIONS, Permission.UPDATE_SYSTEM_SERVICES]
+			actions: [Actions.NOTIFICATIONS_READ, Actions.SYSTEM_SERVICES_UPDATE],
+			authority: 'ok'
 		});
 		vi.mocked(getSurfaceRegistryLoaded).mockReturnValue(true);
 		vi.mocked(getSurfacesBySlot).mockImplementation((slot: string) =>
@@ -106,12 +108,13 @@ describe('/settings shared-surface tabs', () => {
 			first_name: 'Test',
 			last_name: 'User',
 			has_pending_email_change: false,
-			permissions: [
-				Permission.MANAGE_AUTH_SETTINGS,
-				Permission.MANAGE_ENROLLMENT_TOKENS,
-				Permission.MANAGE_AGENT_CERTS,
-				Permission.MANAGE_GLOBAL_SETTINGS
-			]
+			actions: [
+				Actions.SETTINGS_AUTH_MANAGE,
+				Actions.SETTINGS_ENROLLMENT_TOKENS_MANAGE,
+				Actions.SETTINGS_CERTIFICATES_MANAGE,
+				Actions.SYSTEM_SETTINGS_MANAGE
+			],
+			authority: 'ok'
 		});
 
 		render(SettingsPage);

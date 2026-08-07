@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/svelte';
-import { Permission } from '$lib/api';
+import { Actions } from '$lib/api';
 
 vi.mock('$app/state', () => ({
 	page: {
@@ -34,7 +34,7 @@ vi.mock('$lib/surfaces/registry.svelte', () => ({
 	refreshSurfaceReadModel: vi.fn(async () => {})
 }));
 vi.mock('$lib/surfaces/read-model', () => ({
-	filterSurfacesByPermission: vi.fn(() => []),
+	filterSurfacesByAction: vi.fn(() => []),
 	isSurfaceTabPending: vi.fn(() => false)
 }));
 vi.mock('$lib/notifications.svelte', () => ({ showSuccess: vi.fn(), showError: vi.fn() }));
@@ -50,7 +50,8 @@ const viewUser = {
 	first_name: 'Test',
 	last_name: 'User',
 	has_pending_email_change: false,
-	permissions: [Permission.VIEW_SOFTWARE]
+	actions: [Actions.SOFTWARE_READ],
+	authority: 'ok' as const
 };
 
 describe('Software page — URL-reactive filter state', () => {

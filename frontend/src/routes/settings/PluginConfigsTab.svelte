@@ -26,7 +26,7 @@
 	import BatchActionBar from '$lib/components/BatchActionBar.svelte';
 	import BatchResultDialog from '$lib/components/BatchResultDialog.svelte';
 	import { getUser } from '$lib/auth.svelte';
-	import { Permission, PluginCapability, hasAnyPermission } from '$lib/api';
+	import { Actions, PluginCapability, hasAction, hasAnyAction } from '$lib/api';
 	import {
 		Callout,
 		DataTable,
@@ -49,15 +49,13 @@
 		InstancePluginSummary
 	} from '$lib/api';
 
-	const canViewConfigs = $derived(getUser()?.permissions.includes(Permission.VIEW_SOFTWARE) ?? false);
-	const canManageConfigs = $derived(getUser()?.permissions.includes(Permission.MANAGE_COMMANDS) ?? false);
-	const canTriggerDiscovery = $derived(getUser()?.permissions.includes(Permission.TRIGGER_CHECKS) ?? false);
-	const canManageAllowlist = $derived(getUser()?.permissions.includes(Permission.UPDATE_SOFTWARE) ?? false);
-	const canViewTypeSettings = $derived(
-		hasAnyPermission(getUser(), Permission.VIEW_SETTINGS, Permission.MANAGE_GLOBAL_SETTINGS)
-	);
-	const canManageGlobalSettings = $derived(getUser()?.permissions.includes(Permission.MANAGE_GLOBAL_SETTINGS) ?? false);
-	const canTest = $derived(getUser()?.permissions.includes(Permission.TEST_PLUGIN_CONFIGS) ?? false);
+	const canViewConfigs = $derived(hasAction(getUser(), Actions.SOFTWARE_READ));
+	const canManageConfigs = $derived(hasAction(getUser(), Actions.COMMANDS_MANAGE));
+	const canTriggerDiscovery = $derived(hasAction(getUser(), Actions.CHECKS_TRIGGER));
+	const canManageAllowlist = $derived(hasAction(getUser(), Actions.SOFTWARE_UPDATE));
+	const canViewTypeSettings = $derived(hasAnyAction(getUser(), Actions.SETTINGS_READ, Actions.SYSTEM_SETTINGS_MANAGE));
+	const canManageGlobalSettings = $derived(hasAction(getUser(), Actions.SYSTEM_SETTINGS_MANAGE));
+	const canTest = $derived(hasAction(getUser(), Actions.PLUGIN_CONFIGS_TRIGGER));
 
 	// Plugin types
 	let pluginTypes: PluginTypeInfo[] = $state([]);

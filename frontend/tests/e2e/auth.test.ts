@@ -18,7 +18,24 @@ const mockUser = {
 		'manage_settings',
 		'view_software',
 		'manage_software'
-	]
+	],
+	actions: [
+		'services:read',
+		'services:approve',
+		'services:reject',
+		'services:delete',
+		'services:update',
+		'hosts:read',
+		'hosts:update',
+		'hosts:delete',
+		'settings:read',
+		'system.settings:manage',
+		'software:read',
+		'software:create',
+		'software:update',
+		'software:delete'
+	],
+	authority: 'ok'
 };
 
 const tokenResponse = {

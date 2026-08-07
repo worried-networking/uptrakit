@@ -6,36 +6,95 @@
 // `SystemAlert`, the notification enums, …) are intentionally NOT duplicated here — they
 // resolve through `export * from './generated'` in `./index.ts`.
 
-import type { AuthorityStatus, Permission } from './generated';
-
-// ── Authenticated user + permission helpers ───────────────────────────────────
+// ── Authenticated user + action helpers ───────────────────────────────────────
 // `User` is the shape the frontend renders the session around. The generated client only
 // exposes per-endpoint `GetUserResponse`, so the canonical app-facing `User` stays local.
+
+/**
+ * Action string in the catalog grammar (`resource:verb`, including dynamic
+ * `plugin.*` / `surface.*` and system-plane `system.*` forms). Open set —
+ * dynamic actions exist only at runtime, so this is a branded string shape,
+ * not a closed union.
+ */
+export type Action = `${string}:${string}`;
+
+/**
+ * Built-in actions the UI gates on. Values are validated against the server
+ * catalog (the committed OpenAPI scope dictionary) by `actions.test.ts`.
+ */
+export const Actions = {
+	SERVICES_READ: 'services:read',
+	SERVICES_APPROVE: 'services:approve',
+	SERVICES_REJECT: 'services:reject',
+	SERVICES_DELETE: 'services:delete',
+	SERVICES_UPDATE: 'services:update',
+	SYSTEM_SERVICES_READ: 'system.services:read',
+	SYSTEM_SERVICES_APPROVE: 'system.services:approve',
+	SYSTEM_SERVICES_REJECT: 'system.services:reject',
+	SYSTEM_SERVICES_DELETE: 'system.services:delete',
+	SYSTEM_SERVICES_UPDATE: 'system.services:update',
+	HOSTS_READ: 'hosts:read',
+	HOSTS_UPDATE: 'hosts:update',
+	HOSTS_DELETE: 'hosts:delete',
+	SOFTWARE_READ: 'software:read',
+	SOFTWARE_CREATE: 'software:create',
+	SOFTWARE_UPDATE: 'software:update',
+	SOFTWARE_DELETE: 'software:delete',
+	CHECKS_TRIGGER: 'checks:trigger',
+	UPDATES_TRIGGER: 'updates:trigger',
+	SCHEDULER_MANAGE: 'scheduler:manage',
+	SETTINGS_READ: 'settings:read',
+	SETTINGS_AUTH_MANAGE: 'settings.auth:manage',
+	SETTINGS_ENROLLMENT_TOKENS_MANAGE: 'settings.enrollment-tokens:manage',
+	SETTINGS_CERTIFICATES_MANAGE: 'settings.certificates:manage',
+	SYSTEM_SETTINGS_MANAGE: 'system.settings:manage',
+	COMMANDS_MANAGE: 'commands:manage',
+	NOTIFICATIONS_READ: 'notifications:read',
+	NOTIFICATIONS_MANAGE: 'notifications:manage',
+	AUDIT_READ: 'audit:read',
+	SYSTEM_AUDIT_READ: 'system.audit:read',
+	USERS_MANAGE: 'users:manage',
+	DISCOVERY_IGNORES_MANAGE: 'discovery.ignores:manage',
+	PLUGIN_CONFIGS_TRIGGER: 'plugin-configs:trigger',
+	MCP_USE: 'mcp:use',
+	SYSTEM_CONFIG_STATE_READ: 'system.config-state:read',
+	SYSTEM_CONFIG_STATE_MANAGE: 'system.config-state:manage'
+} as const satisfies Record<string, Action>;
 
 export interface User {
 	id: string;
 	email: string;
 	first_name: string;
 	last_name: string;
-	// Optional here (required on the wire `UserResponse`): the M1.7 frontend action-vocabulary
-	// swap (Task 4) is what actually consumes these; making them required now would force a
-	// ~60-site test-fixture sweep that belongs to that task, not this additive backend reshape.
-	actions?: string[];
-	authority?: AuthorityStatus;
-	permissions: Permission[];
+	actions: readonly string[];
+	authority: 'ok' | 'unavailable';
 	has_pending_email_change: boolean;
 }
 
-/** Returns true if the user holds at least one of the given permissions. */
-export function hasAnyPermission(user: User | null | undefined, ...perms: Permission[]): boolean {
-	if (!user) return false;
-	return perms.some((p) => user.permissions.includes(p));
+/**
+ * Returns true if the user holds the given action. The field-level `?.`
+ * is deliberate: `User` is produced by `as unknown as` casts from wire
+ * payloads and by hand-written test fixtures — a missing `actions` key
+ * must degrade to "deny", never throw in the layout.
+ */
+export function hasAction(user: User | null | undefined, action: Action): boolean {
+	return user?.actions?.includes(action) ?? false;
 }
 
-export function hasPermissionValue(user: User | null | undefined, permission?: string | null): boolean {
-	if (!permission) return true;
-	if (!user) return false;
-	return user.permissions.includes(permission as Permission);
+/** Returns true if the user holds at least one of the given actions. */
+export function hasAnyAction(user: User | null | undefined, ...actions: Action[]): boolean {
+	return actions.some((a) => hasAction(user, a));
+}
+
+/**
+ * Gate against an optional server-supplied requirement (e.g. a surface's
+ * `required_action`): a null/undefined requirement gates nothing.
+ */
+export function hasActionValue(user: User | null | undefined, action?: string | null): boolean {
+	// `!action` (not just null/undefined): an empty-string requirement
+	// gates nothing.
+	if (!action) return true;
+	return user?.actions?.includes(action) ?? false;
 }
 
 // ── Generic pagination envelope ────────────────────────────────────────────────

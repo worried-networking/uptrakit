@@ -19,7 +19,8 @@ vi.mock('$lib/auth.svelte', () => ({
 		first_name: 'Test',
 		last_name: 'User',
 		has_pending_email_change: false,
-		permissions: ['view_software']
+		actions: ['software:read'],
+		authority: 'ok'
 	}))
 }));
 

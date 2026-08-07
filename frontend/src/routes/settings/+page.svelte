@@ -6,7 +6,7 @@
 	import type { AgentCertificateSettingsResponse } from '$lib/api';
 	import type { EnrollmentTokensSummary } from '$lib/api';
 	import type { OidcProviderResponse } from '$lib/api';
-	import { Permission, hasAnyPermission, hasPermissionValue } from '$lib/api';
+	import { Actions, hasAction, hasAnyAction, hasActionValue } from '$lib/api';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import SurfaceReadPanel from '$lib/components/surfaces/SurfaceReadPanel.svelte';
 	import {
@@ -17,7 +17,7 @@
 		getSurfacesBySlot,
 		loadSurfaceReadModels
 	} from '$lib/surfaces/registry.svelte';
-	import { filterSurfacesByPermission, isSurfaceTabPending } from '$lib/surfaces/read-model';
+	import { filterSurfacesByAction, isSurfaceTabPending } from '$lib/surfaces/read-model';
 	import type { SurfaceResponse } from '$lib/surfaces/contract';
 	import { SvelteMap } from 'svelte/reactivity';
 	import { Callout, PageShell, SectionCard, TabStrip, type TabStripItem } from '$lib/components/ui';
@@ -51,35 +51,31 @@
 
 	// ── Permissions ─────────────────────────────────────────────────────
 	const canManageSettings = $derived(
-		hasAnyPermission(
+		hasAnyAction(
 			getUser(),
-			Permission.MANAGE_AUTH_SETTINGS,
-			Permission.MANAGE_ENROLLMENT_TOKENS,
-			Permission.MANAGE_AGENT_CERTS
+			Actions.SETTINGS_AUTH_MANAGE,
+			Actions.SETTINGS_ENROLLMENT_TOKENS_MANAGE,
+			Actions.SETTINGS_CERTIFICATES_MANAGE
 		)
 	);
-	const canManageOAuthClients = $derived(hasPermissionValue(getUser(), Permission.MANAGE_AUTH_SETTINGS));
-	const canViewSoftware = $derived(getUser()?.permissions.includes(Permission.VIEW_SOFTWARE) ?? false);
-	const canViewTypeSettings = $derived(
-		hasAnyPermission(getUser(), Permission.VIEW_SETTINGS, Permission.MANAGE_GLOBAL_SETTINGS)
-	);
+	const canManageOAuthClients = $derived(hasActionValue(getUser(), Actions.SETTINGS_AUTH_MANAGE));
+	const canViewSoftware = $derived(hasAction(getUser(), Actions.SOFTWARE_READ));
+	const canViewTypeSettings = $derived(hasAnyAction(getUser(), Actions.SETTINGS_READ, Actions.SYSTEM_SETTINGS_MANAGE));
 	const canManageSoftware = $derived(
-		hasAnyPermission(
+		hasAnyAction(
 			getUser(),
-			Permission.CREATE_SOFTWARE,
-			Permission.UPDATE_SOFTWARE,
-			Permission.DELETE_SOFTWARE,
-			Permission.TRIGGER_CHECKS,
-			Permission.TRIGGER_UPDATES,
-			Permission.MANAGE_SCHEDULER
+			Actions.SOFTWARE_CREATE,
+			Actions.SOFTWARE_UPDATE,
+			Actions.SOFTWARE_DELETE,
+			Actions.CHECKS_TRIGGER,
+			Actions.UPDATES_TRIGGER,
+			Actions.SCHEDULER_MANAGE
 		)
 	);
-	const canManageGlobalSettings = $derived(getUser()?.permissions.includes(Permission.MANAGE_GLOBAL_SETTINGS) ?? false);
-	const canViewNotifications = $derived(getUser()?.permissions.includes(Permission.VIEW_NOTIFICATIONS) ?? false);
-	const canViewInstanceConfig = $derived(
-		getUser()?.permissions.includes(Permission.VIEW_INSTANCE_CONFIG_STATE) ?? false
-	);
-	const hasAnyTabPermission = $derived(
+	const canManageGlobalSettings = $derived(hasAction(getUser(), Actions.SYSTEM_SETTINGS_MANAGE));
+	const canViewNotifications = $derived(hasAction(getUser(), Actions.NOTIFICATIONS_READ));
+	const canViewInstanceConfig = $derived(hasAction(getUser(), Actions.SYSTEM_CONFIG_STATE_READ));
+	const hasAnyTabAction = $derived(
 		canManageSettings ||
 			canManageOAuthClients ||
 			canViewSoftware ||
@@ -92,8 +88,8 @@
 
 	// ── Tab state ────────────────────────────────────────────────────────
 	const slotTabSurfaces = $derived(
-		filterSurfacesByPermission(getSurfacesBySlot('settings.tabs'), (requiredPermission) =>
-			hasPermissionValue(getUser(), requiredPermission)
+		filterSurfacesByAction(getSurfacesBySlot('settings.tabs'), (requiredAction) =>
+			hasActionValue(getUser(), requiredAction)
 		)
 	);
 	const slotTabReads = $derived.by(() => {
@@ -165,7 +161,7 @@
 
 	// Redirect if no permissions at all
 	$effect(() => {
-		if (getUser() && !hasAnyTabPermission) {
+		if (getUser() && !hasAnyTabAction) {
 			goto('/');
 		}
 	});
@@ -281,7 +277,7 @@
 	}
 </script>
 
-{#if getUser() && hasAnyTabPermission}
+{#if getUser() && hasAnyTabAction}
 	<PageShell title="Settings" description="Configure authentication, plugins, scheduling, and global behavior.">
 		<TabStrip
 			items={tabItems}

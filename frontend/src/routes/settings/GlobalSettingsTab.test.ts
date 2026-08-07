@@ -13,7 +13,7 @@ vi.mock('$lib/surfaces/registry.svelte', () => ({
 	loadSurfaceReadModels: vi.fn()
 }));
 vi.mock('$lib/surfaces/read-model', () => ({
-	filterSurfacesByPermission: vi.fn(() => []),
+	filterSurfacesByAction: vi.fn(() => []),
 	shouldUseSurfaceRoute: vi.fn(() => false)
 }));
 vi.mock('$lib/api', async (importOriginal) => ({

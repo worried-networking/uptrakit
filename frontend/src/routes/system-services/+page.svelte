@@ -14,7 +14,7 @@
 		executeBatchChunked
 	} from '$lib/api';
 	import type { SystemServiceResponse, BatchActionResponse } from '$lib/api';
-	import { Permission, hasAnyPermission } from '$lib/api';
+	import { Actions, hasAction, hasAnyAction } from '$lib/api';
 	import { formatDate, parseUrlPage, nextValidPage } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
@@ -91,14 +91,14 @@
 			: undefined
 	);
 
-	const canView = $derived(getUser()?.permissions.includes(Permission.VIEW_SYSTEM_SERVICES) ?? false);
+	const canView = $derived(hasAction(getUser(), Actions.SYSTEM_SERVICES_READ));
 	const canManage = $derived(
-		hasAnyPermission(
+		hasAnyAction(
 			getUser(),
-			Permission.APPROVE_SYSTEM_SERVICES,
-			Permission.REJECT_SYSTEM_SERVICES,
-			Permission.REMOVE_SYSTEM_SERVICES,
-			Permission.UPDATE_SYSTEM_SERVICES
+			Actions.SYSTEM_SERVICES_APPROVE,
+			Actions.SYSTEM_SERVICES_REJECT,
+			Actions.SYSTEM_SERVICES_DELETE,
+			Actions.SYSTEM_SERVICES_UPDATE
 		)
 	);
 

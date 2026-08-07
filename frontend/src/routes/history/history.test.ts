@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { flushSync } from 'svelte';
-import { Permission, type UpdateHistoryResponse } from '$lib/api';
+import { Actions, type UpdateHistoryResponse } from '$lib/api';
 import { page } from '$app/state';
 import { goto } from '$app/navigation';
 import type { InteractiveCallbacks } from '$lib/interactive';
@@ -117,7 +117,8 @@ const user = {
 	first_name: 'History',
 	last_name: 'User',
 	has_pending_email_change: false,
-	permissions: [Permission.VIEW_SOFTWARE, Permission.TRIGGER_UPDATES]
+	actions: [Actions.SOFTWARE_READ, Actions.UPDATES_TRIGGER],
+	authority: 'ok' as const
 };
 
 const queuedItem = {

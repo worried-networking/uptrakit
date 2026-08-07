@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import type { SoftwareItemDetailResponse, SoftwareItemHostSummary } from '$lib/api';
-import { Permission } from '$lib/api';
+import { Actions } from '$lib/api';
 import type { SurfaceReadResponse, SurfaceResponse } from '$lib/surfaces/contract';
 
 vi.mock('$lib/api', async (importOriginal) => ({
@@ -70,14 +70,15 @@ const adminUser = {
 	first_name: 'Admin',
 	last_name: 'User',
 	has_pending_email_change: false,
-	permissions: [
-		Permission.VIEW_SOFTWARE,
-		Permission.CREATE_SOFTWARE,
-		Permission.UPDATE_SOFTWARE,
-		Permission.DELETE_SOFTWARE,
-		Permission.TRIGGER_CHECKS,
-		Permission.TRIGGER_UPDATES
-	]
+	actions: [
+		Actions.SOFTWARE_READ,
+		Actions.SOFTWARE_CREATE,
+		Actions.SOFTWARE_UPDATE,
+		Actions.SOFTWARE_DELETE,
+		Actions.CHECKS_TRIGGER,
+		Actions.UPDATES_TRIGGER
+	],
+	authority: 'ok' as const
 };
 
 function makeHost(): SoftwareItemHostSummary {
@@ -118,7 +119,7 @@ function makeSoftwareItem(hosts: SoftwareItemHostSummary[]): SoftwareItemDetailR
 	};
 }
 
-function makeSurface(surfaceId: string, slot: string, label: string, requiredPermission?: string): SurfaceResponse {
+function makeSurface(surfaceId: string, slot: string, label: string, requiredAction?: string): SurfaceResponse {
 	return {
 		surface_id: surfaceId,
 		label,
@@ -126,7 +127,7 @@ function makeSurface(surfaceId: string, slot: string, label: string, requiredPer
 		slot,
 		scope: 'tenant',
 		targeting: 'universal',
-		required_action: requiredPermission,
+		required_action: requiredAction,
 		provider_kind: 'plugin',
 		required_capabilities: [],
 		root_node: {
@@ -183,13 +184,13 @@ describe('Software Detail shared-surface slots', () => {
 			'software.item.tab.surface',
 			'software_item.tabs',
 			'Software Item Diagnostics',
-			Permission.VIEW_SOFTWARE
+			Actions.SOFTWARE_READ
 		);
 		const hostContextSurface = makeSurface(
 			'software.item.host.context.surface',
 			'software_item.host_context_menu',
 			'Host Context Action',
-			Permission.UPDATE_SOFTWARE
+			Actions.SOFTWARE_UPDATE
 		);
 		const reads = new Map<string, SurfaceReadResponse>([
 			[softwareItemTabSurface.surface_id, makeRenderableRead(softwareItemTabSurface, 'load_software_item_tab')],
@@ -234,7 +235,7 @@ describe('Software Detail shared-surface slots', () => {
 			'software.item.tab.surface',
 			'software_item.tabs',
 			'Software Item Diagnostics',
-			Permission.VIEW_SOFTWARE
+			Actions.SOFTWARE_READ
 		);
 		const reads = new Map<string, SurfaceReadResponse>([
 			[softwareItemTabSurface.surface_id, makeRenderableRead(softwareItemTabSurface, 'load_software_item_tab')]
@@ -283,13 +284,13 @@ describe('Software Detail shared-surface slots', () => {
 			'software.item.tab.surface',
 			'software_item.tabs',
 			'Software Item Diagnostics',
-			Permission.VIEW_SOFTWARE
+			Actions.SOFTWARE_READ
 		);
 		const hostContextSurface = makeSurface(
 			'software.item.host.context.surface',
 			'software_item.host_context_menu',
 			'Run Host Action',
-			Permission.UPDATE_SOFTWARE
+			Actions.SOFTWARE_UPDATE
 		);
 		const reads = new Map<string, SurfaceReadResponse>([
 			[softwareItemTabSurface.surface_id, makeRenderableRead(softwareItemTabSurface, 'load_software_item_tab')],

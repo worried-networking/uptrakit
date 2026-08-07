@@ -10,7 +10,9 @@ const mockUser = {
 	email: 'admin@example.com',
 	first_name: 'Admin',
 	last_name: 'User',
-	permissions: ['view_hosts', 'update_hosts', 'deactivate_hosts', 'view_software']
+	permissions: ['view_hosts', 'update_hosts', 'deactivate_hosts', 'view_software'],
+	actions: ['hosts:read', 'hosts:update', 'hosts:delete', 'software:read'],
+	authority: 'ok'
 };
 
 const sampleHost = {

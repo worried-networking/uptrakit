@@ -13,7 +13,17 @@ const mockUser = {
 		'trigger_checks',
 		'trigger_updates',
 		'manage_ignores'
-	]
+	],
+	actions: [
+		'software:read',
+		'software:create',
+		'software:update',
+		'software:delete',
+		'checks:trigger',
+		'updates:trigger',
+		'discovery.ignores:manage'
+	],
+	authority: 'ok'
 };
 
 const softwareItems = {

@@ -8,7 +8,7 @@ import type {
 	SoftwareItemHostSummary,
 	SoftwareItemResponse
 } from '$lib/api';
-import { Permission } from '$lib/api';
+import { Actions } from '$lib/api';
 import { ApiError } from '$lib/api';
 
 vi.mock('$lib/api', async (importOriginal) => {
@@ -75,19 +75,20 @@ const adminUser = {
 	first_name: 'Admin',
 	last_name: 'User',
 	has_pending_email_change: false,
-	permissions: [
-		Permission.VIEW_SOFTWARE,
-		Permission.CREATE_SOFTWARE,
-		Permission.UPDATE_SOFTWARE,
-		Permission.DELETE_SOFTWARE,
-		Permission.TRIGGER_CHECKS,
-		Permission.TRIGGER_UPDATES
-	]
+	actions: [
+		Actions.SOFTWARE_READ,
+		Actions.SOFTWARE_CREATE,
+		Actions.SOFTWARE_UPDATE,
+		Actions.SOFTWARE_DELETE,
+		Actions.CHECKS_TRIGGER,
+		Actions.UPDATES_TRIGGER
+	],
+	authority: 'ok' as const
 };
 
 const viewOnlyUser = {
 	...adminUser,
-	permissions: [Permission.VIEW_SOFTWARE]
+	actions: [Actions.SOFTWARE_READ]
 };
 
 function makeSoftwareItem(id: string, name: string): SoftwareItemResponse {

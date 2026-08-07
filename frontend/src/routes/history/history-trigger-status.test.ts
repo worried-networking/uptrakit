@@ -7,7 +7,7 @@ import type {
 	SoftwareItemResponse,
 	UpdateHistoryResponse
 } from '$lib/api';
-import { Permission } from '$lib/api';
+import { Actions } from '$lib/api';
 
 vi.mock('$lib/api', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/api')>()),
@@ -51,7 +51,8 @@ const adminUser = {
 	first_name: 'Admin',
 	last_name: 'User',
 	has_pending_email_change: false,
-	permissions: [Permission.VIEW_SOFTWARE, Permission.TRIGGER_UPDATES]
+	actions: [Actions.SOFTWARE_READ, Actions.UPDATES_TRIGGER],
+	authority: 'ok' as const
 };
 
 function makeHistoryPage(items: UpdateHistoryResponse[]): PaginatedResponse<UpdateHistoryResponse> {

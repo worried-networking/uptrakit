@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
-import { Permission, PluginCapability } from '$lib/api';
+import { Actions, PluginCapability } from '$lib/api';
 
 vi.mock('$lib/api', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/api')>()),
@@ -104,15 +104,16 @@ describe('settings panels design-language alignment', () => {
 			first_name: 'Settings',
 			last_name: 'User',
 			has_pending_email_change: false,
-			permissions: [
-				Permission.VIEW_SOFTWARE,
-				Permission.MANAGE_COMMANDS,
-				Permission.TRIGGER_CHECKS,
-				Permission.UPDATE_SOFTWARE,
-				Permission.VIEW_SETTINGS,
-				Permission.MANAGE_GLOBAL_SETTINGS,
-				Permission.TEST_PLUGIN_CONFIGS
-			]
+			actions: [
+				Actions.SOFTWARE_READ,
+				Actions.COMMANDS_MANAGE,
+				Actions.CHECKS_TRIGGER,
+				Actions.SOFTWARE_UPDATE,
+				Actions.SETTINGS_READ,
+				Actions.SYSTEM_SETTINGS_MANAGE,
+				Actions.PLUGIN_CONFIGS_TRIGGER
+			],
+			authority: 'ok'
 		});
 	});
 

@@ -5,7 +5,7 @@
 	import { getUser } from '$lib/auth.svelte';
 	import { listAuditLogs, listSystemAuditLogs } from '$lib/api';
 	import { formatDate, parseUrlPage } from '$lib/utils';
-	import { Permission } from '$lib/api';
+	import { Actions, hasAction } from '$lib/api';
 	import type { AuditLogEntry } from '$lib/api';
 	import Button from '$lib/components/Button.svelte';
 	import Modal from '$lib/components/Modal.svelte';
@@ -28,8 +28,8 @@
 
 	const user = $derived(getUser());
 
-	const canViewTenant = $derived(user?.permissions.includes(Permission.VIEW_AUDIT_LOGS) ?? false);
-	const canViewSystem = $derived(user?.permissions.includes(Permission.VIEW_SYSTEM_AUDIT_LOGS) ?? false);
+	const canViewTenant = $derived(hasAction(user, Actions.AUDIT_READ));
+	const canViewSystem = $derived(hasAction(user, Actions.SYSTEM_AUDIT_READ));
 	const hasBoth = $derived(canViewTenant && canViewSystem);
 
 	// Active tab: prefer URL param; default to whichever tab is available

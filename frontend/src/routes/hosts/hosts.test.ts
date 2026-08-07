@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import type { HostResponse, PaginatedResponse } from '$lib/api';
-import { Permission } from '$lib/api';
+import { Actions } from '$lib/api';
 
 vi.mock('$lib/api', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/api')>()),
@@ -41,16 +41,17 @@ const adminUser = {
 	first_name: 'Admin',
 	last_name: 'User',
 	has_pending_email_change: false,
-	permissions: [
-		Permission.UPDATE_HOSTS,
-		Permission.DEACTIVATE_HOSTS,
-		Permission.VIEW_SOFTWARE,
-		Permission.CREATE_SOFTWARE,
-		Permission.UPDATE_SOFTWARE,
-		Permission.DELETE_SOFTWARE,
-		Permission.TRIGGER_CHECKS,
-		Permission.TRIGGER_UPDATES
-	]
+	actions: [
+		Actions.HOSTS_UPDATE,
+		Actions.HOSTS_DELETE,
+		Actions.SOFTWARE_READ,
+		Actions.SOFTWARE_CREATE,
+		Actions.SOFTWARE_UPDATE,
+		Actions.SOFTWARE_DELETE,
+		Actions.CHECKS_TRIGGER,
+		Actions.UPDATES_TRIGGER
+	],
+	authority: 'ok' as const
 };
 
 function makePage(items: HostResponse[]): PaginatedResponse<HostResponse> {
@@ -209,7 +210,7 @@ describe('Hosts Page', () => {
 	it('does not show the actions button when the user lacks host management permissions', async () => {
 		vi.mocked(auth.getUser).mockReturnValue({
 			...adminUser,
-			permissions: [Permission.TRIGGER_CHECKS]
+			actions: [Actions.CHECKS_TRIGGER]
 		});
 		vi.mocked(api.listHosts).mockResolvedValue({ data: makePage([sampleHost]) } as unknown as Awaited<
 			ReturnType<typeof api.listHosts>
@@ -250,7 +251,7 @@ describe('Hosts Page', () => {
 	it('does not show Trigger Discovery when the user lacks software management permissions', async () => {
 		vi.mocked(auth.getUser).mockReturnValue({
 			...adminUser,
-			permissions: [Permission.UPDATE_HOSTS]
+			actions: [Actions.HOSTS_UPDATE]
 		});
 		vi.mocked(api.listHosts).mockResolvedValue({ data: makePage([sampleHost]) } as unknown as Awaited<
 			ReturnType<typeof api.listHosts>

@@ -32,13 +32,14 @@ vi.mock('$lib/auth.svelte', () => ({
 		first_name: 'A',
 		last_name: 'B',
 		has_pending_email_change: false,
-		permissions: ['manage_scheduler']
+		actions: [Actions.SCHEDULER_MANAGE],
+		authority: 'ok'
 	}))
 }));
 vi.mock('$lib/notifications.svelte', () => ({ showSuccess: vi.fn(), showError: vi.fn() }));
 
 import * as api from '$lib/api';
-import { Permission } from '$lib/api';
+import { Actions } from '$lib/api';
 import * as auth from '$lib/auth.svelte';
 import SchedulerTab from './SchedulerTab.svelte';
 
@@ -51,7 +52,8 @@ function makeUser() {
 		first_name: 'A',
 		last_name: 'B',
 		has_pending_email_change: false,
-		permissions: [Permission.MANAGE_SCHEDULER]
+		actions: [Actions.SCHEDULER_MANAGE],
+		authority: 'ok'
 	} as ReturnType<typeof auth.getUser>;
 }
 
