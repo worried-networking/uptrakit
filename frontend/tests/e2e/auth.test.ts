@@ -19,6 +19,10 @@ const mockUser = {
 		'view_software',
 		'manage_software'
 	],
+	// `manage_services`/`manage_hosts`/`manage_settings`/`manage_software` above were never real
+	// `Permission` variants — they granted nothing pre-swap. The `actions` list below is a
+	// deliberately broader superset of what that legacy fixture actually conferred; a future
+	// deny-path regression on any of these actions will NOT be caught by this fixture alone.
 	actions: [
 		'services:read',
 		'services:approve',

@@ -49,7 +49,7 @@
 		'instance-config'
 	]);
 
-	// ── Permissions ─────────────────────────────────────────────────────
+	// ── Actions ─────────────────────────────────────────────────────────
 	const canManageSettings = $derived(
 		hasAnyAction(
 			getUser(),
@@ -58,7 +58,7 @@
 			Actions.SETTINGS_CERTIFICATES_MANAGE
 		)
 	);
-	const canManageOAuthClients = $derived(hasActionValue(getUser(), Actions.SETTINGS_AUTH_MANAGE));
+	const canManageOAuthClients = $derived(hasAction(getUser(), Actions.SETTINGS_AUTH_MANAGE));
 	const canViewSoftware = $derived(hasAction(getUser(), Actions.SOFTWARE_READ));
 	const canViewTypeSettings = $derived(hasAnyAction(getUser(), Actions.SETTINGS_READ, Actions.SYSTEM_SETTINGS_MANAGE));
 	const canManageSoftware = $derived(

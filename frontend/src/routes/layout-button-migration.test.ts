@@ -5,6 +5,7 @@ import * as softwareUpdates from '$lib/stores/software-updates.svelte';
 import layoutSource from './+layout.svelte?raw';
 import Layout from './+layout.svelte';
 import * as auth from '$lib/auth.svelte';
+import type { User } from '$lib/api';
 import { page } from '$app/state';
 import { UPDATES_AVAILABLE_HREF } from './software/constants';
 
@@ -130,6 +131,50 @@ describe('layout Button migration', () => {
 			const dismissBtn = screen.getByRole('button', { name: /dismiss/i });
 			expect(dismissBtn.className).toContain('h-[19px]'); // size="sm"
 			expect(dismissBtn.className).toContain('bg-transparent'); // ghost
+		});
+	});
+
+	describe('degraded-authority banner', () => {
+		const okUser: User = {
+			id: 'user-1',
+			email: 'user@example.com',
+			first_name: 'Test',
+			last_name: 'User',
+			has_pending_email_change: false,
+			actions: ['software:read', 'settings:read'],
+			authority: 'ok'
+		};
+
+		afterEach(() => {
+			vi.mocked(auth.getUser).mockReturnValue(okUser);
+		});
+
+		it('is absent when authority is "ok"', () => {
+			vi.mocked(auth.getUser).mockReturnValue(okUser);
+			render(Layout, {
+				children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
+			});
+			expect(screen.queryByText('Authorization unavailable')).not.toBeInTheDocument();
+		});
+
+		it('is present when authority is "unavailable"', () => {
+			vi.mocked(auth.getUser).mockReturnValue({ ...okUser, authority: 'unavailable' });
+			render(Layout, {
+				children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
+			});
+			expect(screen.getByText('Authorization unavailable')).toBeInTheDocument();
+		});
+
+		it('does not end the session when authority is "unavailable"', () => {
+			vi.mocked(auth.getUser).mockReturnValue({ ...okUser, authority: 'unavailable' });
+			render(Layout, {
+				children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
+			});
+			// Degraded authority is a warning, not a logout: no session-ending side effect fires,
+			// and the shell (nav) keeps rendering alongside the banner.
+			expect(auth.handleLogout).not.toHaveBeenCalled();
+			expect(auth.setSessionExpired).not.toHaveBeenCalled();
+			expect(document.querySelector('[data-ui="app-shell-header"]')).not.toBeNull();
 		});
 	});
 

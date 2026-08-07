@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SurfaceReadResponse, SurfaceResponse } from '$lib/surfaces/contract';
+import { hasActionValue } from '$lib/api/local-types';
+import type { User } from '$lib/api/local-types';
 import {
 	buildStaticSurfaceData,
 	filterSurfacesByAction,
@@ -7,6 +9,18 @@ import {
 	isSurfaceTabPending,
 	shouldUseSurfaceRoute
 } from './read-model';
+
+function makeUser(actions: readonly string[]): User {
+	return {
+		id: 'user-1',
+		email: 'user@example.com',
+		first_name: 'Test',
+		last_name: 'User',
+		has_pending_email_change: false,
+		actions,
+		authority: 'ok'
+	};
+}
 
 function makeSurface(surfaceId: string): SurfaceResponse {
 	return {
@@ -160,6 +174,34 @@ describe('surface read model helpers', () => {
 		const visible = filterSurfacesByAction(surfaces, (requiredAction) => requiredAction !== 'settings:manage');
 
 		expect(visible.map((surface) => surface.surface_id)).toEqual(['surface.public']);
+	});
+
+	it('keeps a gated surface when the user holds the required action (hasActionValue comparison)', () => {
+		const surfaces: SurfaceResponse[] = [
+			{
+				...makeSurface('surface.admin'),
+				required_action: 'settings:manage'
+			}
+		];
+		const user = makeUser(['settings:manage']);
+
+		const visible = filterSurfacesByAction(surfaces, (requiredAction) => hasActionValue(user, requiredAction));
+
+		expect(visible.map((surface) => surface.surface_id)).toEqual(['surface.admin']);
+	});
+
+	it('drops a gated surface when the user does not hold the required action (hasActionValue comparison)', () => {
+		const surfaces: SurfaceResponse[] = [
+			{
+				...makeSurface('surface.admin'),
+				required_action: 'settings:manage'
+			}
+		];
+		const user = makeUser([]);
+
+		const visible = filterSurfacesByAction(surfaces, (requiredAction) => hasActionValue(user, requiredAction));
+
+		expect(visible).toEqual([]);
 	});
 
 	it('only keeps pending surface tabs while waiting for read data', () => {

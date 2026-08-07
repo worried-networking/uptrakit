@@ -67,6 +67,10 @@ test.describe('Services page', () => {
 		await page.goto('/services');
 		await expect(page.getByRole('cell', { name: 'prod-agent', exact: true })).toBeVisible();
 		await expect(page.getByText('prod-host')).toBeVisible();
+		// This is the task's intended behavior change: a principal holding the services:*
+		// management actions now sees the row-actions launcher (it was never reachable under
+		// the old, always-mismatching permission strings).
+		await expect(page.getByRole('button', { name: 'Actions for prod-agent' })).toBeVisible();
 	});
 
 	test('shows empty-state message when there are no services', async ({ page }) => {
