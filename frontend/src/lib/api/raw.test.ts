@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiGet, authenticatedFetch, loginRaw } from './raw';
 import { getAccessToken, setAccessToken, setSessionExpired } from '../token-store.svelte';
-import type { RefreshResponse, User } from '$lib/api';
+import type { RefreshResponse, UserResponse } from '$lib/api';
 
 // raw.ts (via ./client) imports token state from '../token-store.svelte'; client.ts
 // also registers an onTokenChange listener at module-init time — provide it.
@@ -15,12 +15,14 @@ vi.mock('../token-store.svelte', () => ({
 
 const URL = 'http://localhost/api/v1/auth/me';
 
-const sampleUser: User = {
+const sampleUser: UserResponse = {
 	id: 'user-1',
 	email: 'user@example.com',
 	first_name: 'Test',
 	last_name: 'User',
 	has_pending_email_change: false,
+	actions: [],
+	authority: 'ok',
 	permissions: []
 };
 

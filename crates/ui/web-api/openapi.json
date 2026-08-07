@@ -11194,6 +11194,14 @@
           }
         }
       },
+      "AuthorityStatus": {
+        "type": "string",
+        "description": "Whether the access engine resolved this principal's authority.\n\nDeliberately a closed two-variant enum (no `#[non_exhaustive]`, no\n`Other`): the set is definitionally complete — the engine either\nresolved grants or it did not — matching the closed-verdict-set\nprecedent rather than the wire-safe open-enum rule, which targets\nvocabularies that can grow (spec §3).",
+        "enum": [
+          "ok",
+          "unavailable"
+        ]
+      },
       "AuthorizationServerMetadata": {
         "type": "object",
         "description": "OAuth 2.0 Authorization Server Metadata (RFC 8414 §2) returned from\n`/.well-known/oauth-authorization-server`.",
@@ -18938,10 +18946,23 @@
           "email",
           "first_name",
           "last_name",
+          "actions",
+          "authority",
           "permissions",
           "has_pending_email_change"
         ],
         "properties": {
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Expanded effective action list: wildcards expanded against the\ncatalog, dynamic actions included per live registries. Token-scope\nintersection applies once scoped credentials exist (M3) — pre-M3\nsession credentials carry no scope. Empty when `authority` is\n`unavailable`.\n\nDeliberately `Vec<String>`, not `Vec<Action>`: `Action`'s\ndeserializer rejects any resource/verb the COMPILED catalog lacks,\nso a typed field would make a newer controller's response\nunparseable to an older client (CLI could not even log in) the\nmoment the catalog grows. The action set is open — clients treat\nentries as opaque strings."
+          },
+          "authority": {
+            "$ref": "#/components/schemas/AuthorityStatus",
+            "description": "Whether the access engine resolved this principal's authority for\nthis response. `unavailable` ⇒ `actions` is empty and the client\nshould degrade, not log out."
+          },
           "email": {
             "type": "string"
           },

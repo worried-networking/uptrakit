@@ -12,7 +12,7 @@ import {
 	setLoading,
 	setUser
 } from './auth.svelte';
-import type { AuthResponse, RefreshResponse, User } from '$lib/api';
+import type { AuthResponse, RefreshResponse, UserResponse } from '$lib/api';
 
 vi.mock('./api', () => ({
 	me: vi.fn(),
@@ -26,12 +26,14 @@ vi.mock('./api', () => ({
 	oidcLink: vi.fn()
 }));
 
-const sampleUser: User = {
+const sampleUser: UserResponse = {
 	id: 'user-1',
 	email: 'user@example.com',
 	first_name: 'Test',
 	last_name: 'User',
 	has_pending_email_change: false,
+	actions: [],
+	authority: 'ok',
 	permissions: []
 };
 

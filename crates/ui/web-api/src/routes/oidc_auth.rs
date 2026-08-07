@@ -2258,6 +2258,10 @@ async fn mint_oidc_auth_response(
         }
     };
 
+    let (actions, authority) =
+        super::auth::effective_actions(&state.access_engine, state.default_tenant_id, user.id)
+            .await;
+
     let cookie = set_refresh_token_cookie(&refresh_token);
     let response = AuthResponse {
         access_token: SecretString::new(access_token),
@@ -2269,6 +2273,8 @@ async fn mint_oidc_auth_response(
             email: user.email.expose_email().to_string(),
             first_name: user.first_name,
             last_name: user.last_name,
+            actions,
+            authority,
             permissions,
             has_pending_email_change: false,
         },

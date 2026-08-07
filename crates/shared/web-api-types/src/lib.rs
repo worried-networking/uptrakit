@@ -86,7 +86,7 @@ mod tests {
         clippy::assertions_on_result_states,
         reason = "test assertions — is_ok/is_err provides readable failure messages"
     )]
-    use crate::auth::{AuthResponse, UserResponse};
+    use crate::auth::{AuthResponse, AuthorityStatus, UserResponse};
     use crate::error::ErrorResponse;
     use crate::oidc_providers::CreateOidcProviderRequest;
     use crate::permissions::Permission;
@@ -367,6 +367,8 @@ mod tests {
             email: "owner@example.com".to_string(),
             first_name: "Owner".to_string(),
             last_name: "User".to_string(),
+            actions: vec!["hosts:read".to_string()],
+            authority: AuthorityStatus::Ok,
             permissions: vec![
                 Permission::ViewSettings,
                 Permission::ManageAuthSettings,
@@ -383,6 +385,8 @@ mod tests {
         assert_eq!(deserialized.email, "owner@example.com");
         assert_eq!(deserialized.first_name, "Owner");
         assert_eq!(deserialized.last_name, "User");
+        assert_eq!(deserialized.actions, vec!["hosts:read".to_string()]);
+        assert_eq!(deserialized.authority, AuthorityStatus::Ok);
         assert_eq!(deserialized.permissions.len(), 5);
         assert_eq!(deserialized.permissions[0], Permission::ViewSettings);
         assert_eq!(deserialized.permissions[1], Permission::ManageAuthSettings);
@@ -392,6 +396,10 @@ mod tests {
             deserialized.permissions[4],
             Permission::ManageGlobalSettings
         );
+
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["authority"], "ok");
+        assert_eq!(parsed["actions"][0], "hosts:read");
     }
 
     #[test]
@@ -402,6 +410,8 @@ mod tests {
             email: "viewer@example.com".to_string(),
             first_name: "View".to_string(),
             last_name: "Only".to_string(),
+            actions: vec![],
+            authority: AuthorityStatus::Ok,
             permissions: vec![],
             has_pending_email_change: false,
         };
@@ -409,6 +419,7 @@ mod tests {
         let deserialized: UserResponse = serde_json::from_str(&json).unwrap();
 
         assert!(deserialized.permissions.is_empty());
+        assert!(deserialized.actions.is_empty());
     }
 
     #[test]
@@ -424,6 +435,8 @@ mod tests {
                 email: "admin@example.com".to_string(),
                 first_name: "Admin".to_string(),
                 last_name: "User".to_string(),
+                actions: vec![],
+                authority: AuthorityStatus::Ok,
                 permissions: vec![Permission::ViewSettings, Permission::UpdateServices],
                 has_pending_email_change: false,
             },

@@ -185,6 +185,28 @@ export type AuthResponse = {
 };
 
 /**
+ * Whether the access engine resolved this principal's authority.
+ *
+ * Deliberately a closed two-variant enum (no `#[non_exhaustive]`, no
+ * `Other`): the set is definitionally complete — the engine either
+ * resolved grants or it did not — matching the closed-verdict-set
+ * precedent rather than the wire-safe open-enum rule, which targets
+ * vocabularies that can grow (spec §3).
+ */
+export const AuthorityStatus = { OK: 'ok', UNAVAILABLE: 'unavailable' } as const;
+
+/**
+ * Whether the access engine resolved this principal's authority.
+ *
+ * Deliberately a closed two-variant enum (no `#[non_exhaustive]`, no
+ * `Other`): the set is definitionally complete — the engine either
+ * resolved grants or it did not — matching the closed-verdict-set
+ * precedent rather than the wire-safe open-enum rule, which targets
+ * vocabularies that can grow (spec §3).
+ */
+export type AuthorityStatus = typeof AuthorityStatus[keyof typeof AuthorityStatus];
+
+/**
  * OAuth 2.0 Authorization Server Metadata (RFC 8414 §2) returned from
  * `/.well-known/oauth-authorization-server`.
  */
@@ -3673,6 +3695,27 @@ export type UpsertPluginTypeSettingsRequest = {
 };
 
 export type UserResponse = {
+    /**
+     * Expanded effective action list: wildcards expanded against the
+     * catalog, dynamic actions included per live registries. Token-scope
+     * intersection applies once scoped credentials exist (M3) — pre-M3
+     * session credentials carry no scope. Empty when `authority` is
+     * `unavailable`.
+     *
+     * Deliberately `Vec<String>`, not `Vec<Action>`: `Action`'s
+     * deserializer rejects any resource/verb the COMPILED catalog lacks,
+     * so a typed field would make a newer controller's response
+     * unparseable to an older client (CLI could not even log in) the
+     * moment the catalog grows. The action set is open — clients treat
+     * entries as opaque strings.
+     */
+    actions: Array<string>;
+    /**
+     * Whether the access engine resolved this principal's authority for
+     * this response. `unavailable` ⇒ `actions` is empty and the client
+     * should degrade, not log out.
+     */
+    authority: AuthorityStatus;
     email: string;
     first_name: string;
     has_pending_email_change: boolean;

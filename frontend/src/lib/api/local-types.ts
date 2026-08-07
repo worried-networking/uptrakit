@@ -6,7 +6,7 @@
 // `SystemAlert`, the notification enums, …) are intentionally NOT duplicated here — they
 // resolve through `export * from './generated'` in `./index.ts`.
 
-import type { Permission } from './generated';
+import type { AuthorityStatus, Permission } from './generated';
 
 // ── Authenticated user + permission helpers ───────────────────────────────────
 // `User` is the shape the frontend renders the session around. The generated client only
@@ -17,6 +17,11 @@ export interface User {
 	email: string;
 	first_name: string;
 	last_name: string;
+	// Optional here (required on the wire `UserResponse`): the M1.7 frontend action-vocabulary
+	// swap (Task 4) is what actually consumes these; making them required now would force a
+	// ~60-site test-fixture sweep that belongs to that task, not this additive backend reshape.
+	actions?: string[];
+	authority?: AuthorityStatus;
 	permissions: Permission[];
 	has_pending_email_change: boolean;
 }

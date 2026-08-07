@@ -821,6 +821,13 @@ async fn build_session_tokens(
             }
         };
 
+    let (actions, authority) = crate::routes::auth::effective_actions(
+        &state.access_engine,
+        state.default_tenant_id,
+        user.id,
+    )
+    .await;
+
     Ok(AuthResponse {
         access_token: SecretString::new(access_token),
         refresh_token: SecretString::new(refresh_token),
@@ -831,6 +838,8 @@ async fn build_session_tokens(
             email: user.email.expose_email().to_string(),
             first_name: user.first_name.clone(),
             last_name: user.last_name.clone(),
+            actions,
+            authority,
             permissions,
             has_pending_email_change,
         },

@@ -130,6 +130,10 @@ pub(crate) async fn build_full_session(
             }
         };
 
+    let (actions, authority) =
+        super::auth::effective_actions(&state.access_engine, state.default_tenant_id, user.id)
+            .await;
+
     let cookie = set_refresh_token_cookie(&refresh_token);
 
     let has_pending_email_change =
@@ -162,6 +166,8 @@ pub(crate) async fn build_full_session(
             email: user.email.expose_email().to_string(),
             first_name: user.first_name.clone(),
             last_name: user.last_name.clone(),
+            actions,
+            authority,
             permissions,
             has_pending_email_change,
         },

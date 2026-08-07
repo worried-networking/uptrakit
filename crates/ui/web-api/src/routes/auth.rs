@@ -186,6 +186,33 @@ fn emit_user_register_audit(
     }
 }
 
+/// Effective-action view for embedding a [`UserResponse`] in an auth
+/// response. Engine failure degrades to `Unavailable` + an empty list;
+/// the auth flow itself proceeds — same carve-out as `me` (spec §3).
+pub(crate) async fn effective_actions(
+    engine: &uptrakit_controller_core::access::AccessEngine,
+    tenant_id: uuid::Uuid,
+    user_id: uuid::Uuid,
+) -> (Vec<String>, uptrakit_web_api_types::auth::AuthorityStatus) {
+    match engine.context(tenant_id, user_id, None).await {
+        Ok(ctx) => (
+            engine
+                .allowed_actions(&ctx)
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+            uptrakit_web_api_types::auth::AuthorityStatus::Ok,
+        ),
+        Err(e) => {
+            tracing::warn!(%user_id, "access engine unavailable while building auth response: {e:?}");
+            (
+                Vec::new(),
+                uptrakit_web_api_types::auth::AuthorityStatus::Unavailable,
+            )
+        }
+    }
+}
+
 /// Register a new user
 #[utoipa::path(
     post,
@@ -459,6 +486,9 @@ pub async fn register(
             }
         };
 
+    let (actions, authority) =
+        effective_actions(&state.access_engine, state.default_tenant_id, user_id).await;
+
     let cookie = set_refresh_token_cookie(&refresh_token);
     let response = AuthResponse {
         access_token: SecretString::new(access_token),
@@ -470,6 +500,8 @@ pub async fn register(
             email: req.email,
             first_name: req.first_name,
             last_name: req.last_name,
+            actions,
+            authority,
             permissions,
             has_pending_email_change: false,
         },
@@ -729,6 +761,9 @@ pub async fn login(
         None,
     );
 
+    let (actions, authority) =
+        effective_actions(&state.access_engine, state.default_tenant_id, user.id).await;
+
     let cookie = set_refresh_token_cookie(&refresh_token);
     let response = AuthResponse {
         access_token: SecretString::new(access_token),
@@ -740,6 +775,8 @@ pub async fn login(
             email: user.email.expose_email().to_string(),
             first_name: user.first_name,
             last_name: user.last_name,
+            actions,
+            authority,
             permissions,
             has_pending_email_change: false,
         },
@@ -2734,6 +2771,7 @@ pub async fn confirm_email_change(
 pub async fn me(
     State(state): State<Arc<AppState>>,
     axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
+    axum::Extension(access): axum::Extension<crate::middleware::action::AccessAuthority>,
 ) -> Response {
     // Get user info from DB (fresh data)
     let user = match User::find_by_id(auth_user.user_id).one(state.db()).await {
@@ -2747,7 +2785,27 @@ pub async fn me(
         return error_response(StatusCode::FORBIDDEN, "User is deactivated");
     }
 
-    // Get fresh user permissions from DB
+    let (actions, authority) = match access.ready() {
+        Some(ctx) => (
+            state
+                .access_engine
+                .allowed_actions(ctx)
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+            uptrakit_web_api_types::auth::AuthorityStatus::Ok,
+        ),
+        // Engine unavailable: HTTP 200 with an explicit degraded marker —
+        // the SPA logs out on any non-2xx from `me`, so a 500 here would
+        // eject a logged-in user on a transient DB blip (spec §3; resolved
+        // carve-out 09-resolved-questions.md §4).
+        None => (
+            Vec::new(),
+            uptrakit_web_api_types::auth::AuthorityStatus::Unavailable,
+        ),
+    };
+
+    // Get fresh user permissions from DB (legacy field, removed in Task 5).
     //
     // DEVIATION from the other auth-token-mint sites in this file: on a permission-load DB
     // error, `me` keeps the `vec![]` fallback instead of returning 500. Verified: the SPA's
@@ -2781,6 +2839,8 @@ pub async fn me(
         email: user.email.expose_email().to_string(),
         first_name: user.first_name,
         last_name: user.last_name,
+        actions,
+        authority,
         permissions,
         has_pending_email_change,
     };
