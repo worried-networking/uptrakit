@@ -1946,13 +1946,27 @@ mod tests {
     #[tokio::test]
     async fn interactive_ws_engine_unavailable_writes_failed_session_establish_audit() {
         let (base_url, app) = serve_app().await;
-        let token = crate::test_harness::fixtures::register_and_get_token(&app.client()).await;
+        let (status, auth) = crate::test_harness::fixtures::register_user(
+            &app.client(),
+            "owner@test.local",
+            "TestPassword123!",
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "registration failed");
+        let token = auth.access_token.expose_secret().to_string();
         let update_id = Uuid::now_v7();
 
+        // Registration resolves the caller's actions for its own response, which
+        // warms the engine's authority cache for this `(tenant, user)` key.  The
+        // dropped table alone would therefore inject nothing — invalidate so the
+        // WS request's own `context()` call has to hit the missing table.
         app.db
             .execute_unprepared("DROP TABLE user_roles")
             .await
             .expect("drop user_roles table");
+        app.state
+            .access_engine
+            .invalidate_subjects(&[auth.user.id], &[]);
 
         let err = tokio_tungstenite::connect_async(format!(
             "{base_url}/api/v1/update-history/{update_id}/interactive?token={token}"
