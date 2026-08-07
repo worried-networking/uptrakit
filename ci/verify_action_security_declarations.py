@@ -20,7 +20,10 @@ action extractors (M1.4a). Rules:
       plugin/surface scopes never appear in route declarations.
 
 Unconverted operations (bearer_token + x-required-permission) are ignored
-except by R3 — transition tolerance for the M1.4b window. Non-vacuity:
+except by R3. No such operation survives — M1.6b retired the last of them
+and deregistered the bearer_token scheme — so this path is now defensive
+only, kept so a reintroduced legacy declaration degrades rather than
+crashes the checker (its parser is covered by the tests). Non-vacuity:
 empty extractor map, empty catalog map, or zero converted operations is a
 hard error. Parsing follows ci/verify_db_access_policy.py's
 balanced-attribute-scan pattern (standalone copy, no cross-import).
