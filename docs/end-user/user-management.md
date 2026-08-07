@@ -60,8 +60,8 @@ uptrakit-cli users get <user-id>
 ### Changing user roles
 
 ```bash
-# Replace a user's roles (provide role IDs)
-uptrakit-cli users set-roles <user-id> --role-ids <id1>,<id2>
+# Replace a user's roles (role IDs are positional, space-separated)
+uptrakit-cli users set-roles <user-id> <id1> <id2>
 
 # Look up a role bundle's role composition in the catalog, then apply it by name
 uptrakit-cli api GET /api/v1/access/catalog
