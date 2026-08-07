@@ -28,6 +28,7 @@ vi.mock('$lib/surfaces/read-model', () => ({
 }));
 
 import * as auth from '$lib/auth.svelte';
+import { goto } from '$app/navigation';
 import { Actions } from '$lib/api';
 import SettingsPage from './+page.svelte';
 
@@ -68,5 +69,32 @@ describe('+page.svelte Retry All buttons', () => {
 		// Negative: no raw Skeleton preset classes on any button
 		const rawBtns = container.querySelectorAll('button.btn.btn-sm.preset-filled-primary-500');
 		expect(rawBtns.length).toBe(0);
+	});
+});
+
+describe('+page.svelte authority-unavailable redirect guard', () => {
+	it('does not bounce the user to "/" when authority is unavailable, even though actions is empty', async () => {
+		// Degraded-authority `me` response: empty `actions` + `authority: 'unavailable'` is a
+		// deliberate fail-open placeholder, not a genuine denial (M1.7). Without the guard in
+		// the redirect `$effect`, `hasAnyTabAction` is false here and the page would call the
+		// bare `goto('/')` redirect — distinct from the always-running URL-sync effect, which
+		// calls `goto(pathname, { replaceState: true, ... })` with a second argument.
+		vi.mocked(auth.getUser).mockReturnValue({
+			id: 'u-degraded',
+			email: 'degraded@b.com',
+			first_name: 'D',
+			last_name: 'E',
+			has_pending_email_change: false,
+			actions: [],
+			authority: 'unavailable' as const
+		});
+
+		render(SettingsPage);
+
+		await waitFor(() => {
+			expect(vi.mocked(goto)).toHaveBeenCalled();
+		});
+
+		expect(vi.mocked(goto)).not.toHaveBeenCalledWith('/');
 	});
 });

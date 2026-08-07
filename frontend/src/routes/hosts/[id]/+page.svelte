@@ -24,7 +24,7 @@
 	import { AdminEventType } from '$lib/sse';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
-	import { Actions, PluginCapability, hasAction, hasAnyAction, hasActionValue } from '$lib/api';
+	import { Actions, PluginCapability, hasAction, hasAnyAction, hasActionValue, isAuthorityUnavailable } from '$lib/api';
 	import SurfaceReadPanel from '$lib/components/surfaces/SurfaceReadPanel.svelte';
 	import {
 		getSurfaceReadModel,
@@ -543,6 +543,12 @@
 										read={hostDetailSlotReads[surface.surface_id]}
 										baseParams={hostDetailBaseParams}
 										reloadToken={hostDetailReloadToken}
+									/>
+								{:else if isAuthorityUnavailable(getUser())}
+									<Callout
+										tone="warning"
+										title="Authorization unavailable"
+										message="Your permissions could not be resolved right now, so this surface is hidden. Reload the page to retry."
 									/>
 								{:else}
 									<Callout

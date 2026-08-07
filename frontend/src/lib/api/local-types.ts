@@ -99,6 +99,16 @@ export function hasActionValue(user: User | null | undefined, action?: string | 
 	return user?.actions?.includes(action) ?? false;
 }
 
+/**
+ * Returns true when the backend could not resolve the user's authority
+ * (e.g. a transient access-engine failure). In that state `me` returns
+ * HTTP 200 with an empty `actions` array on purpose, so callers must not
+ * read the resulting empty-`actions` gate as a genuine denial.
+ */
+export function isAuthorityUnavailable(user: User | null | undefined): boolean {
+	return user?.authority === 'unavailable';
+}
+
 // ── Generic pagination envelope ────────────────────────────────────────────────
 // The generated client monomorphizes pagination per resource (e.g.
 // `PaginatedResponseHostResponse`); this generic stays for code that is itself generic

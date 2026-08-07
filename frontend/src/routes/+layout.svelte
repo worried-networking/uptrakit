@@ -16,7 +16,7 @@
 	import { getThemeMode, setThemeMode, initTheme, type ThemeMode } from '$lib/theme.svelte';
 	import { getSystemAlerts } from '$lib/api';
 	import { getIsOnline } from '$lib/stores/network.svelte';
-	import { Actions, hasAction, hasActionValue, type Action } from '$lib/api';
+	import { Actions, hasAction, hasActionValue, isAuthorityUnavailable, type Action } from '$lib/api';
 	import {
 		loadSurfaceRegistry,
 		clearSurfaceRegistry,
@@ -550,7 +550,7 @@
 				</div>
 			{/if}
 
-			{#if getUser()?.authority === 'unavailable'}
+			{#if isAuthorityUnavailable(getUser())}
 				<div class="px-4 pt-3" data-ui="app-shell-banner">
 					<Callout
 						tone="warning"

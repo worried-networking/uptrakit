@@ -577,6 +577,42 @@ describe('Host Detail Page', () => {
 		expect(vi.mocked(surfaceRegistry.loadSurfaceReadModels)).not.toHaveBeenCalled();
 	});
 
+	// M1.7 fix: when the backend cannot resolve authority, `me` returns HTTP 200 with an
+	// empty `actions` array and `authority: 'unavailable'` on purpose (fail-open, not a
+	// denial). A per-surface host-detail gate must not read that empty-actions state as
+	// "Access denied" — it should surface a distinct "Authorization unavailable" warning.
+	it('renders an authorization-unavailable warning instead of a denial when authority could not be resolved', async () => {
+		vi.mocked(api.getHost).mockResolvedValue({ data: sampleHost } as unknown as Awaited<
+			ReturnType<typeof api.getHost>
+		>);
+
+		const gatedSurface = buildHostDetailSurface({
+			required_action: Actions.SETTINGS_READ
+		});
+		vi.mocked(surfaceRegistry.getSurfacesBySlot).mockImplementation((slot: string) =>
+			slot === 'host_detail.tabs' ? [gatedSurface] : []
+		);
+		vi.mocked(auth.getUser).mockReturnValue({
+			...adminUser,
+			actions: [],
+			authority: 'unavailable'
+		});
+
+		render(HostDetailPage);
+		await waitFor(() => expect(screen.getByRole('heading', { name: 'Production Server' })).toBeInTheDocument());
+
+		expect(document.querySelector('[data-parity-region="host_detail.tabs"]')).toBeInTheDocument();
+		expect(screen.getByText(gatedSurface.label)).toBeInTheDocument();
+		expect(screen.getByText('Authorization unavailable')).toBeInTheDocument();
+		expect(
+			screen.getByText(
+				'Your permissions could not be resolved right now, so this surface is hidden. Reload the page to retry.'
+			)
+		).toBeInTheDocument();
+		expect(screen.queryByText('Access denied')).not.toBeInTheDocument();
+		expect(vi.mocked(surfaceRegistry.loadSurfaceReadModels)).not.toHaveBeenCalled();
+	});
+
 	// M1.7 fix: `required_action` is a typed catalog action string (`resource:verb`), and
 	// `User.actions` now carries the same catalog vocabulary (server-expanded via
 	// AccessEngine::allowed_actions()). The SPA's client-side gate compares them literally,

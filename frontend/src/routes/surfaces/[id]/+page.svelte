@@ -15,7 +15,7 @@
 		loadSurfaceReadModels
 	} from '$lib/surfaces/registry.svelte';
 	import { isSurfaceTabPending } from '$lib/surfaces/read-model';
-	import { hasActionValue } from '$lib/api';
+	import { hasActionValue, isAuthorityUnavailable } from '$lib/api';
 	import { Callout, PageShell } from '$lib/components/ui';
 
 	let surfaceId = $derived(page.params.id as string);
@@ -24,6 +24,7 @@
 	let isReadRequested = $derived(surface ? getSurfaceReadRequested(surface.surface_id) : false);
 	let isReadLoading = $derived(surface ? getSurfaceReadLoading(surface.surface_id) : false);
 	let canViewSurface = $derived(surface ? hasActionValue(getUser(), surface.required_action) : false);
+	let authorityUnavailable = $derived(isAuthorityUnavailable(getUser()));
 	let isPendingSurfaceRead = $derived(
 		surface
 			? isSurfaceTabPending({
@@ -89,7 +90,13 @@
 		<p class="py-8 text-center text-[var(--text-muted)]">Loading...</p>
 	{:else if surface}
 		<div data-parity-region="surface.page">
-			{#if !canViewSurface}
+			{#if !canViewSurface && authorityUnavailable}
+				<Callout
+					tone="warning"
+					title="Authorization unavailable"
+					message="Your permissions could not be resolved right now, so this surface is hidden. Reload the page to retry."
+				/>
+			{:else if !canViewSurface}
 				<Callout tone="danger" title="Access denied" message="You do not have permission to access this surface." />
 			{:else if isPendingSurfaceRead}
 				<p class="py-8 text-center text-[var(--text-muted)]">Loading...</p>

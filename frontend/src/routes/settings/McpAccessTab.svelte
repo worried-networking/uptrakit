@@ -22,9 +22,8 @@
 	import { createFormDraft } from '$lib/forms/draft.svelte';
 	import RegisterClientDialog from './RegisterClientDialog.svelte';
 
-	const user = getUser();
-	const canManage = hasAction(user, Actions.SETTINGS_AUTH_MANAGE);
-	const canManageGlobalSettings = hasAction(user, Actions.SYSTEM_SETTINGS_MANAGE);
+	const canManage = $derived(hasAction(getUser(), Actions.SETTINGS_AUTH_MANAGE));
+	const canManageGlobalSettings = $derived(hasAction(getUser(), Actions.SYSTEM_SETTINGS_MANAGE));
 
 	let clients: OAuthClientResponse[] = $state([]);
 	let loading: boolean = $state(true);

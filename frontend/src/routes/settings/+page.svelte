@@ -6,7 +6,7 @@
 	import type { AgentCertificateSettingsResponse } from '$lib/api';
 	import type { EnrollmentTokensSummary } from '$lib/api';
 	import type { OidcProviderResponse } from '$lib/api';
-	import { Actions, hasAction, hasAnyAction, hasActionValue } from '$lib/api';
+	import { Actions, hasAction, hasAnyAction, hasActionValue, isAuthorityUnavailable } from '$lib/api';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import SurfaceReadPanel from '$lib/components/surfaces/SurfaceReadPanel.svelte';
 	import {
@@ -159,9 +159,12 @@
 	let activeTab: string = $state(page.url.searchParams.get('tab') ?? 'general');
 	const builtinAppendGroup = $derived(BUILTIN_TAB_IDS.has(activeTab) ? slotTabGroupsByTabId.get(activeTab) : undefined);
 
-	// Redirect if no permissions at all
+	// Redirect if no permissions at all. Skipped when authority is unavailable: the
+	// empty `actions` array in that state is a degraded-read placeholder, not a genuine
+	// denial, so bouncing the user off the page would defeat the fail-open contract.
 	$effect(() => {
-		if (getUser() && !hasAnyTabAction) {
+		const user = getUser();
+		if (user && !hasAnyTabAction && !isAuthorityUnavailable(user)) {
 			goto('/');
 		}
 	});
