@@ -1933,15 +1933,91 @@ fn users_set_roles_parses() {
     .expect("should parse");
     match args.command {
         Some(Commands::Users {
-            command: UsersCommands::SetRoles { id, role_ids },
+            command:
+                UsersCommands::SetRoles {
+                    id,
+                    role_ids,
+                    names,
+                },
         }) => {
             assert_eq!(id, uuid(SVC_UUID));
             assert_eq!(role_ids.len(), 2);
             assert_eq!(role_ids[0], uuid(HOST_UUID));
             assert_eq!(role_ids[1], uuid(ITEM_UUID));
+            assert!(names.is_none());
         }
         _ => panic!("expected Users SetRoles"),
     }
+}
+
+#[test]
+fn users_set_roles_parses_uuid_form() {
+    let args = Cli::try_parse_from(["uptrakit", "users", "set-roles", SVC_UUID, SVC_UUID])
+        .expect("should parse");
+    match args.command {
+        Some(Commands::Users {
+            command: UsersCommands::SetRoles {
+                role_ids, names, ..
+            },
+        }) => {
+            assert_eq!(role_ids.len(), 1);
+            assert!(names.is_none());
+        }
+        _ => panic!("wrong command"),
+    }
+}
+
+#[test]
+fn users_set_roles_parses_names_form() {
+    let args = Cli::try_parse_from([
+        "uptrakit",
+        "users",
+        "set-roles",
+        SVC_UUID,
+        "--names",
+        "viewer,operator",
+    ])
+    .expect("should parse");
+    match args.command {
+        Some(Commands::Users {
+            command: UsersCommands::SetRoles {
+                role_ids, names, ..
+            },
+        }) => {
+            assert!(role_ids.is_empty());
+            assert_eq!(
+                names.as_deref(),
+                Some(&["viewer".to_string(), "operator".to_string()][..])
+            );
+        }
+        _ => panic!("wrong command"),
+    }
+}
+
+#[test]
+fn users_set_roles_rejects_neither_form() {
+    // Sibling idiom: assert!(…is_err()), not expect_err.
+    assert!(
+        Cli::try_parse_from(["uptrakit", "users", "set-roles", SVC_UUID]).is_err(),
+        "the roles_input group is required"
+    );
+}
+
+#[test]
+fn users_set_roles_rejects_both_forms() {
+    assert!(
+        Cli::try_parse_from([
+            "uptrakit",
+            "users",
+            "set-roles",
+            SVC_UUID,
+            SVC_UUID,
+            "--names",
+            "viewer",
+        ])
+        .is_err(),
+        "the two forms conflict"
+    );
 }
 
 #[test]

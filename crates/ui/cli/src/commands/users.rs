@@ -1,6 +1,6 @@
 use crate::client::authenticated_client;
 use crate::commands::CliContext;
-use crate::error::Result;
+use crate::error::{CliError, Result};
 use crate::output::HumanOutput;
 use clap::Subcommand;
 use rootcause::prelude::*;
@@ -20,12 +20,17 @@ pub enum UsersCommands {
         id: Uuid,
     },
     /// Replace a user's roles
+    #[command(group = clap::ArgGroup::new("roles_input").required(true))]
     SetRoles {
         /// User UUID
         id: Uuid,
         /// Role UUIDs to assign (replaces all existing roles)
-        #[arg(required = true)]
+        #[arg(group = "roles_input")]
         role_ids: Vec<Uuid>,
+        /// Comma-separated role names to assign instead of UUIDs
+        /// (resolved via the roles list; replaces all existing roles)
+        #[arg(long, value_delimiter = ',', group = "roles_input")]
+        names: Option<Vec<String>>,
     },
     /// Activate a user
     Activate {
@@ -73,16 +78,32 @@ pub async fn dispatch_users(command: UsersCommands, ctx: &CliContext) -> Result<
             .await?;
             crate::output::print_output(ctx.format, &resp)?;
         }
-        UsersCommands::SetRoles { id, role_ids } => {
-            let resp = set_roles(
-                &id,
-                &role_ids,
-                ctx.server.as_deref(),
-                ctx.token.as_deref(),
-                ctx.insecure,
-                ctx.request_timeout,
-            )
-            .await?;
+        UsersCommands::SetRoles {
+            id,
+            role_ids,
+            names,
+        } => {
+            let resp = if let Some(names) = names {
+                set_roles_by_names(
+                    &id,
+                    &names,
+                    ctx.server.as_deref(),
+                    ctx.token.as_deref(),
+                    ctx.insecure,
+                    ctx.request_timeout,
+                )
+                .await?
+            } else {
+                set_roles(
+                    &id,
+                    &role_ids,
+                    ctx.server.as_deref(),
+                    ctx.token.as_deref(),
+                    ctx.insecure,
+                    ctx.request_timeout,
+                )
+                .await?
+            };
             crate::output::print_output(ctx.format, &resp)?;
         }
         UsersCommands::Activate { id } => {
@@ -281,6 +302,36 @@ pub async fn set_roles(
     let req = UpdateUserRolesRequest {
         role_ids: role_ids.to_vec(),
     };
+    client.update_user_roles(id, &req).await.context_to()
+}
+
+/// Resolve role names to ids via the roles list, then replace the user's
+/// roles through the same `update_user_roles` path as the UUID form.
+pub async fn set_roles_by_names(
+    id: &Uuid,
+    names: &[String],
+    server: Option<&str>,
+    token: Option<&str>,
+    insecure: bool,
+    request_timeout: Option<std::time::Duration>,
+) -> Result<UserWithRolesResponse> {
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
+    let roles = client.list_roles().await.context_to()?;
+    let mut role_ids = Vec::with_capacity(names.len());
+    let mut unknown = Vec::new();
+    for name in names {
+        match roles.iter().find(|role| &role.name == name) {
+            Some(role) => role_ids.push(role.id),
+            None => unknown.push(name.clone()),
+        }
+    }
+    if !unknown.is_empty() {
+        return Err(report!(CliError::Other(format!(
+            "unknown role name(s): {} (run `uptrakit roles list`)",
+            unknown.join(", ")
+        ))));
+    }
+    let req = UpdateUserRolesRequest { role_ids };
     client.update_user_roles(id, &req).await.context_to()
 }
 
