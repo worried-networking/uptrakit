@@ -19,7 +19,7 @@ use uptrakit_audit_log::{
     AuditEmitter, AuditLogBackend, AuditLogDispatcher, DatabaseBackend, NoopBackend,
     RegisteredAuditAction,
 };
-use uptrakit_controller_core::access::AccessEngine;
+use uptrakit_controller_core::access::{AccessEngine, DynamicActionRegistry};
 use uptrakit_controller_core::auth::{
     AuthState, DeviceFlowStore, JwtManager, RateLimitStore, TokenDenylist,
 };
@@ -28,9 +28,11 @@ use uptrakit_controller_core::settings::Settings;
 use uptrakit_controller_core::update::NoopUpdateDispatcher;
 use uptrakit_mcp::build_mcp_router;
 use uptrakit_mcp::state::McpState;
+use uptrakit_shared_db::access_grants::{GrantSubject, NewGrant, insert_grant};
 use uptrakit_shared_db::entity::{audit_log, role, tenant, user, user_role};
 use uptrakit_shared_db::migration::run_migrations;
 use uptrakit_shared_types::MaskedEmail;
+use uptrakit_shared_types::access::{Action, ActionPattern, Resource, Selector, Verb};
 use uptrakit_web_api_auth::auth::api_token::ApiTokenService;
 use uptrakit_web_api_auth::auth::registration::{RegistrationMode, RegistrationSettings};
 use uptrakit_web_api_types::oauth::{McpAccessTokenClaims, McpOAuthJwtVerifier};
@@ -78,7 +80,7 @@ struct McpTestApp {
 
 impl McpTestApp {
     async fn new() -> Self {
-        Self::build(false, None).await
+        Self::build(false, None, None).await
     }
 
     async fn new_with_oauth() -> Self {
@@ -87,11 +89,23 @@ impl McpTestApp {
             TEST_ISSUER.to_string(),
             vec![TEST_AUD.to_string()],
         );
-        Self::build(true, Some(Arc::new(verifier))).await
+        Self::build(true, Some(Arc::new(verifier)), None).await
+    }
+
+    /// Builds with a dynamic-action registry injected before the engine is
+    /// `Arc`-wrapped — the seam this harness owns directly (unlike
+    /// `TestApp::with_stub_surfaces` in web-api, whose post-construction
+    /// registry swap is invisible to the engine's already-shared `Arc`).
+    async fn new_with_dynamic_action_registry(registry: Arc<dyn DynamicActionRegistry>) -> Self {
+        Self::build(false, None, Some(registry)).await
     }
 
     #[expect(clippy::unwrap_used, reason = "test harness — panic on setup failure")]
-    async fn build(oauth_enabled: bool, oauth_verifier: Option<Arc<McpOAuthJwtVerifier>>) -> Self {
+    async fn build(
+        oauth_enabled: bool,
+        oauth_verifier: Option<Arc<McpOAuthJwtVerifier>>,
+        dynamic_action_registry: Option<Arc<dyn DynamicActionRegistry>>,
+    ) -> Self {
         // Required so EncryptedString fields (token hash, audit log) work without
         // a real master key in the test process.
         uptrakit_crypto::enable_plaintext_mode();
@@ -125,7 +139,11 @@ impl McpTestApp {
 
         let cancel = CancellationToken::new();
 
-        let engine = Arc::new(AccessEngine::new(db.clone()));
+        let mut engine = AccessEngine::new(db.clone());
+        if let Some(registry) = dynamic_action_registry {
+            engine = engine.with_registry(registry);
+        }
+        let engine = Arc::new(engine);
 
         let state = McpState::new(
             DbState::new(db.clone()),
@@ -172,6 +190,25 @@ impl McpTestApp {
 impl Drop for McpTestApp {
     fn drop(&mut self) {
         self.cancel.cancel();
+    }
+}
+
+/// Minimal `DynamicActionRegistry` stub for staging a live-registered
+/// `surface.*`/`plugin.*` action in tests. Shape mirrors the sibling
+/// `StubRegistry` in `uptrakit-controller-core`'s own `access::tests`
+/// module — that one is private to its crate, so this suite defines its
+/// own copy rather than reaching into it.
+struct StubRegistry {
+    registered: Vec<Action>,
+}
+
+impl DynamicActionRegistry for StubRegistry {
+    fn is_registered(&self, action: &Action) -> bool {
+        self.registered.contains(action)
+    }
+
+    fn registered_actions(&self) -> Vec<Action> {
+        self.registered.clone()
     }
 }
 
@@ -493,6 +530,65 @@ async fn api_token_get_current_user_succeeds() {
     assert!(
         parsed.get("permissions").is_none(),
         "permissions key must not appear in the response"
+    );
+}
+
+/// Single-derivation proof: `get_current_user`'s `actions` field now comes
+/// from `AccessEngine::allowed_actions`, which additionally sweeps
+/// live-registered dynamic `surface.*`/`plugin.*` actions — the hand-rolled
+/// `CATALOG` loop this replaced could never surface one. Registers a
+/// `surface.test-stub:use` action via `StubRegistry` (injected before the
+/// engine is `Arc`-wrapped, a seam this harness owns directly), grants it to
+/// the user directly (bypassing the seeded role catalog, which only knows
+/// built-in actions), and asserts it appears in the response.
+#[tokio::test]
+async fn get_current_user_includes_dynamic_action_via_registry() {
+    let dynamic_action = Action::new(
+        Resource::surface("test-stub").expect("valid surface resource"),
+        Verb::Use,
+    )
+    .expect("dynamic action");
+
+    let app = McpTestApp::new_with_dynamic_action_registry(Arc::new(StubRegistry {
+        registered: vec![dynamic_action],
+    }))
+    .await;
+    let user_id = insert_user(&app.db, "dynamic@mcp.test").await;
+    link_user_to_access_mcp_role(&app.db, app.tenant_id, user_id).await;
+
+    let patterns = vec![
+        "surface.test-stub:use"
+            .parse::<ActionPattern>()
+            .expect("valid action pattern"),
+    ];
+    insert_grant(
+        &app.db,
+        NewGrant {
+            subject: GrantSubject::User(user_id),
+            tenant_id: Some(app.tenant_id),
+            patterns: &patterns,
+            selector: Selector::All,
+            description: None,
+            created_by: None,
+        },
+    )
+    .await
+    .expect("insert dynamic-action grant");
+
+    let token = create_api_token(&app.db, user_id).await;
+    let session = McpSession::initialize(app.addr, &token).await;
+    let result = session.call_tool("get_current_user", json!({})).await;
+
+    let text = result["result"]["content"][0]["text"]
+        .as_str()
+        .expect("content[0].text must be a string");
+    let parsed: Value = serde_json::from_str(text).expect("text must be valid JSON");
+    let actions = parsed["actions"]
+        .as_array()
+        .expect("actions must be an array");
+    assert!(
+        actions.iter().any(|a| a == "surface.test-stub:use"),
+        "dynamic surface action must appear once registered and granted, got: {actions:?}"
     );
 }
 

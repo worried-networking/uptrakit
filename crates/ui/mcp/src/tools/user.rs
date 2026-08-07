@@ -3,7 +3,6 @@ use schemars::JsonSchema;
 use sea_orm::EntityTrait;
 use serde::Serialize;
 use uptrakit_shared_db::entity::prelude::User;
-use uptrakit_shared_types::access::{Action, CATALOG, Decision};
 use uptrakit_web_api_types::oauth::McpScope;
 
 use crate::context::McpRequestContext;
@@ -29,9 +28,9 @@ pub struct GetCurrentUserResult {
     pub first_name: String,
     /// Last name.
     pub last_name: String,
-    /// Concrete built-in actions the caller may perform (catalog-expanded;
-    /// dynamic `plugin.*`/`surface.*` actions are excluded until M1.7's `me`
-    /// machinery).
+    /// Concrete actions the caller may perform — catalog-expanded plus
+    /// live-registered dynamic `plugin.*`/`surface.*` actions, derived via
+    /// `AccessEngine::allowed_actions` (single derivation shared with `me`).
     pub actions: Vec<String>,
 }
 
@@ -49,22 +48,13 @@ impl McpHandler {
             .map_err(|e| mcp_error(format!("database error: {e}")))?
             .ok_or_else(|| mcp_error("authenticated user not found in database"))?;
 
-        let mut actions = Vec::new();
-        for entry in CATALOG {
-            for verb_entry in entry.verbs {
-                let Ok(action) = Action::new(entry.resource.clone(), verb_entry.verb) else {
-                    continue;
-                };
-                if matches!(
-                    self.state
-                        .access_engine
-                        .authorize(&ctx.access, &action, None),
-                    Decision::Allow
-                ) {
-                    actions.push(verb_entry.action_str.to_owned());
-                }
-            }
-        }
+        let actions: Vec<String> = self
+            .state
+            .access_engine
+            .allowed_actions(&ctx.access)
+            .iter()
+            .map(ToString::to_string)
+            .collect();
 
         Ok(Json(GetCurrentUserResult {
             user_id: user.id.to_string(),
