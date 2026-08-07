@@ -10601,7 +10601,10 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": []
+          },
+          {
+            "developer_token": []
           }
         ]
       },
@@ -10637,7 +10640,10 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": []
+          },
+          {
+            "developer_token": []
           }
         ]
       }
@@ -10691,7 +10697,10 @@
         },
         "security": [
           {
-            "bearer_token": []
+            "oauth2": []
+          },
+          {
+            "developer_token": []
           }
         ]
       }
@@ -19053,11 +19062,6 @@
       }
     },
     "securitySchemes": {
-      "bearer_token": {
-        "type": "http",
-        "scheme": "bearer",
-        "bearerFormat": "JWT"
-      },
       "developer_token": {
         "type": "http",
         "scheme": "bearer",

@@ -32,8 +32,9 @@
 //!      [`access_manage_only_principal_gets_403_on_user_read_routes`].
 //!    - `users.rs`'s self-service routes (`PUT .../profile`,
 //!      `POST/DELETE .../email`, `PUT .../password`) carry no
-//!      `users:manage`/`access:manage` scope at all (`security(("bearer_token"
-//!      = []))` / per-request `oauth2 = []`) — out of scope for this matrix.
+//!      `users:manage`/`access:manage` scope at all — authenticated-only
+//!      (`security(("oauth2" = []), ("developer_token" = []))`) — out of
+//!      scope for this matrix.
 //!    - The access-preset endpoints (`GET /api/v1/access-presets`,
 //!      `POST /api/v1/users/{id}/apply-preset`) were retired in M1.6b —
 //!      [`deleted_preset_routes_are_gone_not_stubbed`] proves they 404/405

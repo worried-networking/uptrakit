@@ -28,9 +28,6 @@ fn classify(op: &serde_json::Value) -> String {
         let Some(obj) = requirement.as_object() else {
             continue;
         };
-        if obj.contains_key("bearer_token") {
-            return "unconverted".to_string();
-        }
         if let Some(scopes) = obj.get("oauth2").and_then(serde_json::Value::as_array) {
             let mut group: Vec<String> = scopes
                 .iter()

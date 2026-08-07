@@ -3739,7 +3739,11 @@ export const updateUserActive = <ThrowOnError extends boolean = true>(options: O
  */
 export const cancelEmailChange = <ThrowOnError extends boolean = true>(options: Options<CancelEmailChangeData, ThrowOnError>): RequestResult<CancelEmailChangeResponses, CancelEmailChangeErrors, ThrowOnError> => (options.client ?? client).delete<CancelEmailChangeResponses, CancelEmailChangeErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -3755,7 +3759,11 @@ export const cancelEmailChange = <ThrowOnError extends boolean = true>(options: 
  */
 export const initiateEmailChange = <ThrowOnError extends boolean = true>(options: Options<InitiateEmailChangeData, ThrowOnError>): RequestResult<InitiateEmailChangeResponses, InitiateEmailChangeErrors, ThrowOnError> => (options.client ?? client).post<InitiateEmailChangeResponses, InitiateEmailChangeErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],
@@ -3774,7 +3782,11 @@ export const initiateEmailChange = <ThrowOnError extends boolean = true>(options
  */
 export const changePassword = <ThrowOnError extends boolean = true>(options: Options<ChangePasswordData, ThrowOnError>): RequestResult<ChangePasswordResponses, ChangePasswordErrors, ThrowOnError> => (options.client ?? client).put<ChangePasswordResponses, ChangePasswordErrors, ThrowOnError>({
     security: [{
-            key: 'bearer_token',
+            key: 'oauth2',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'developer_token',
             scheme: 'bearer',
             type: 'http'
         }],

@@ -2,8 +2,9 @@
 //!
 //! Converted route families declare authorization with these extractors +
 //! native `security(("oauth2" = ["<action>"]), ("developer_token" = []))`
-//! requirements; only `access_presets.rs` keeps the legacy
-//! `permission_extractor!` + `x-required-permission` model until M1.6b.
+//! requirements. The legacy `permission_extractor!` + `x-required-permission`
+//! model is fully retired from route families; it survives only in
+//! `middleware/permission.rs` itself, which M1.8 deletes.
 //! Verdicts: 401 no principal, 403 `Decision::Deny`, 500 engine unavailable
 //! (fail-closed).
 

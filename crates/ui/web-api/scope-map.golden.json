@@ -23,7 +23,7 @@
   "delete /api/v1/surfaces/{surface_id}/interactions/{interaction_id}/{item_id}": "dynamic",
   "delete /api/v1/system-enrollment-tokens/{id}": "oauth2:system.settings:manage",
   "delete /api/v1/system-services/{id}": "oauth2:system.services:delete",
-  "delete /api/v1/users/{id}/email": "unconverted",
+  "delete /api/v1/users/{id}/email": "authenticated-only",
   "get /.well-known/oauth-authorization-server": "public",
   "get /api/oauth/clients": "oauth2:settings.auth:manage",
   "get /api/oauth/consents": "authenticated-only",
@@ -168,7 +168,7 @@
   "post /api/v1/system-services/batch": "or:system.services:approve|system.services:reject|system.services:delete",
   "post /api/v1/system-services/{id}/approve": "oauth2:system.services:approve",
   "post /api/v1/system-services/{id}/reject": "oauth2:system.services:reject",
-  "post /api/v1/users/{id}/email": "unconverted",
+  "post /api/v1/users/{id}/email": "authenticated-only",
   "put /api/v1/access/grants/{id}": "oauth2:access:manage",
   "put /api/v1/global-settings/nats": "oauth2:system.settings:manage",
   "put /api/v1/global-settings/network": "oauth2:system.settings:manage",
@@ -196,7 +196,7 @@
   "put /api/v1/surfaces/{surface_id}/interactions/{interaction_id}/{item_id}": "dynamic",
   "put /api/v1/system-services/{id}": "oauth2:system.services:update",
   "put /api/v1/users/{id}/active": "oauth2:users:manage",
-  "put /api/v1/users/{id}/password": "unconverted",
+  "put /api/v1/users/{id}/password": "authenticated-only",
   "put /api/v1/users/{id}/profile": "authenticated-only",
   "put /api/v1/users/{id}/roles": "oauth2:access:manage"
 }

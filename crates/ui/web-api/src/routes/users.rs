@@ -886,7 +886,7 @@ pub async fn update_user_active(
         (status = 503, description = "Email delivery unavailable")
     ),
     tag = "Users",
-    security(("bearer_token" = []))
+    security(("oauth2" = []), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn initiate_email_change(
@@ -1079,7 +1079,7 @@ pub async fn initiate_email_change(
         (status = 422, description = "Validation error")
     ),
     tag = "Users",
-    security(("bearer_token" = []))
+    security(("oauth2" = []), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn change_password(
@@ -1269,7 +1269,7 @@ fn extract_refresh_token_from_headers(headers: &axum::http::HeaderMap) -> Option
         (status = 403, description = "Not authorized")
     ),
     tag = "Users",
-    security(("bearer_token" = []))
+    security(("oauth2" = []), ("developer_token" = []))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn cancel_email_change(

@@ -1172,7 +1172,7 @@ Every protected endpoint must declare its required permission as an OpenAPI exte
     get,
     path = "/api/v1/hosts",
     extensions(("x-required-permission" = json!("view_hosts"))),
-    security(("bearer_token" = [])),
+    security(("oauth2" = ["hosts:read"]), ("developer_token" = [])),
     ...
 )]
 ```
