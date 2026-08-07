@@ -748,22 +748,9 @@ async fn build_session_tokens(
     user: &uptrakit_shared_db::entity::user::Model,
 ) -> Result<uptrakit_web_api_types::auth::AuthResponse, Response> {
     use crate::auth::AuthMethod;
-    use crate::middleware::require_auth::get_user_permissions;
     use crate::routes::mfa::UserResponse;
     use uptrakit_web_api_types::SecretString;
     use uptrakit_web_api_types::auth::AuthResponse;
-
-    let permissions = match get_user_permissions(state.db(), state.default_tenant_id, user.id).await
-    {
-        Ok(p) => p,
-        Err(e) => {
-            tracing::error!("build_session_tokens: failed to get permissions: {:?}", e);
-            return Err(error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Internal server error",
-            ));
-        }
-    };
 
     let refresh_token = match session_svc
         .create_refresh_token(user.id, AuthMethod::Password, None, None)
@@ -782,24 +769,23 @@ async fn build_session_tokens(
         }
     };
 
-    let access_token =
-        match state
-            .auth
-            .jwt
-            .create_access_token(user.id, &permissions, "password", None, None)
-        {
-            Ok(t) => t,
-            Err(e) => {
-                tracing::error!(
-                    "build_session_tokens: failed to create access token: {:?}",
-                    e
-                );
-                return Err(error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Internal server error",
-                ));
-            }
-        };
+    let access_token = match state
+        .auth
+        .jwt
+        .create_access_token(user.id, "password", None, None)
+    {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!(
+                "build_session_tokens: failed to create access token: {:?}",
+                e
+            );
+            return Err(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
+        }
+    };
 
     let has_pending_email_change =
         match uptrakit_shared_db::entity::prelude::EmailChangeRequest::find()
@@ -1115,7 +1101,7 @@ mod tests {
     /// Build an [`AuthenticatedUser`] extension for `user_id` with no permissions.
     fn auth_user(user_id: uuid::Uuid) -> AuthenticatedUser {
         use crate::auth::AuthMethod;
-        AuthenticatedUser::new(user_id, AuthMethod::Password, vec![], None)
+        AuthenticatedUser::new(user_id, AuthMethod::Password, None)
     }
 
     // ── mfa_status: unenrolled ───────────────────────────────────────────────

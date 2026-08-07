@@ -1841,17 +1841,16 @@ mod tests {
         ws.close(None).await.expect("close");
     }
 
-    /// Discriminating regression test for the D15 conversion: stages a user
-    /// whose legacy `role_permissions` snapshot (baked into the JWT at login)
-    /// still grants `trigger_updates` via the built-in `operator` role, but
-    /// whose `AccessEngine` authority for `updates:trigger` has been revoked
-    /// (the covering `access_grants` row(s) deleted, cache invalidated).
-    /// Pre-conversion code (a legacy permission-claim check on `auth_user`)
-    /// answers from the stale JWT claim and reaches 101 Switching Protocols; the
-    /// engine-gated code must reject with a plain 403 before any upgrade.
+    /// Regression test: a user is linked to the built-in `operator` role
+    /// (which carries a seed `updates:trigger` grant), but every
+    /// `access_grants` row covering `updates:trigger` for that role is then
+    /// deleted and the cache invalidated. The deny must be grant-scoped:
+    /// still being linked to `operator` must not itself authorize the
+    /// upgrade once its covering grants are gone — the engine must reject
+    /// with a plain 403 before any upgrade.
     #[cfg(feature = "db-sqlite")]
     #[tokio::test]
-    async fn interactive_ws_engine_deny_overrides_legacy_permission_is_403_no_upgrade() {
+    async fn interactive_ws_forbidden_after_operator_grants_revoked_no_upgrade() {
         let (base_url, app) = serve_app().await;
         let client = app.client();
 
@@ -1886,18 +1885,10 @@ mod tests {
         )
         .await;
 
-        // Re-login so the legacy JWT claim snapshot picks up the newly
-        // assigned `operator` role's `trigger_updates` permission — the
-        // engine's authority was revoked above, but the legacy claim was
-        // never touched, so it still answers "yes".
-        let (login_status, login_auth) = crate::test_harness::fixtures::login_user(
-            &client,
-            "trigger-legacy@test.local",
-            "TestPassword123!",
-        )
-        .await;
-        assert_eq!(login_status, StatusCode::OK);
-        let token = login_auth.access_token.expose_secret().to_string();
+        // `revoke_role_grants_covering` invalidates the role's cached
+        // authority, so the registration token already in hand re-resolves
+        // grants on the next request — no fresh login needed.
+        let token = auth.access_token.expose_secret().to_string();
 
         let host = crate::test_harness::fixtures::insert_host(&app.db, app.tenant_id).await;
         let software_item = insert_software_item(&app.db, app.tenant_id).await;

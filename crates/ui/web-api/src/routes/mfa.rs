@@ -20,7 +20,6 @@ use crate::auth::totp::verify_totp_code;
 use crate::auth_mfa_response::mfa_challenge_load_error_response;
 use crate::error_response::error_response;
 use crate::extract::{SessionSvc, Validated};
-use crate::middleware::require_auth::get_user_permissions;
 use axum::{
     Json,
     extract::State,
@@ -77,29 +76,14 @@ fn emit_mfa_audit(
 
 /// Build a full authenticated session for `user_id` after MFA is verified.
 ///
-/// Loads permissions, creates a refresh token (password auth method), creates
-/// an access JWT, sets the refresh-token cookie, and returns an [`AuthResponse`].
-/// Returns an error response if any step fails.
+/// Creates a refresh token (password auth method), creates an access JWT,
+/// sets the refresh-token cookie, and returns an [`AuthResponse`]. Returns an
+/// error response if any step fails.
 pub(crate) async fn build_full_session(
     state: &AppState,
     session_svc: &SessionSvc,
     user: &uptrakit_shared_db::entity::user::Model,
 ) -> Result<Response, Response> {
-    let permissions = match get_user_permissions(state.db(), state.default_tenant_id, user.id).await
-    {
-        Ok(p) => p,
-        Err(e) => {
-            tracing::error!(
-                "Failed to get user permissions during MFA session build: {:?}",
-                e
-            );
-            return Err(error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Internal server error",
-            ));
-        }
-    };
-
     let refresh_token = match session_svc
         .create_refresh_token(user.id, AuthMethod::Password, None, None)
         .await
@@ -114,21 +98,20 @@ pub(crate) async fn build_full_session(
         }
     };
 
-    let access_token =
-        match state
-            .auth
-            .jwt
-            .create_access_token(user.id, &permissions, "password", None, None)
-        {
-            Ok(token) => token,
-            Err(e) => {
-                tracing::error!("Failed to create access token after MFA: {:?}", e);
-                return Err(error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Internal server error",
-                ));
-            }
-        };
+    let access_token = match state
+        .auth
+        .jwt
+        .create_access_token(user.id, "password", None, None)
+    {
+        Ok(token) => token,
+        Err(e) => {
+            tracing::error!("Failed to create access token after MFA: {:?}", e);
+            return Err(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
+        }
+    };
 
     let (actions, authority) =
         super::auth::effective_actions(&state.access_engine, state.default_tenant_id, user.id)

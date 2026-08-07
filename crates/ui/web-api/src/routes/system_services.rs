@@ -668,7 +668,6 @@ mod tests {
 
     use super::*;
     use crate::auth::AuthMethod;
-    use crate::auth::permissions::Permission;
     use sea_orm::{
         ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait,
         QueryFilter, QueryOrder, QuerySelect, Set,
@@ -788,12 +787,7 @@ mod tests {
         let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
         let service = insert_pending_system_service(&db).await;
 
-        let auth_user = AuthenticatedUser::new(
-            Uuid::now_v7(),
-            AuthMethod::Password,
-            vec![Permission::UpdateSystemServices],
-            None,
-        );
+        let auth_user = AuthenticatedUser::new(Uuid::now_v7(), AuthMethod::Password, None);
 
         let response = update_system_service(
             State(Arc::clone(&state)),
@@ -832,12 +826,7 @@ mod tests {
         let service = insert_pending_system_service(&db).await;
 
         let user_id = Uuid::now_v7();
-        let auth_user = AuthenticatedUser::new(
-            user_id,
-            AuthMethod::Password,
-            vec![Permission::ViewSystemServices],
-            None,
-        );
+        let auth_user = AuthenticatedUser::new(user_id, AuthMethod::Password, None);
         let access_ctx = state
             .access_engine
             .context(tenant_id, user_id, None)
@@ -891,12 +880,7 @@ mod tests {
         let service = insert_pending_system_service(&db).await;
 
         let user_id = Uuid::now_v7();
-        let auth_user = AuthenticatedUser::new(
-            user_id,
-            AuthMethod::Password,
-            vec![Permission::ApproveSystemServices],
-            None,
-        );
+        let auth_user = AuthenticatedUser::new(user_id, AuthMethod::Password, None);
 
         let patterns = vec![
             "system.services:approve"
@@ -954,7 +938,7 @@ mod tests {
         let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
         let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
 
-        let auth_user = AuthenticatedUser::new(Uuid::now_v7(), AuthMethod::Password, vec![], None);
+        let auth_user = AuthenticatedUser::new(Uuid::now_v7(), AuthMethod::Password, None);
 
         // Over MAX_BATCH_SIZE (100): `body.validate()` would reject this with
         // BAD_REQUEST if it ran. The Unavailable authority check must win
@@ -993,12 +977,7 @@ mod tests {
         let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
         let missing_service_id = Uuid::now_v7();
 
-        let auth_user = AuthenticatedUser::new(
-            Uuid::now_v7(),
-            AuthMethod::Password,
-            vec![Permission::ApproveSystemServices],
-            None,
-        );
+        let auth_user = AuthenticatedUser::new(Uuid::now_v7(), AuthMethod::Password, None);
 
         let response = approve_system_service(
             State(Arc::clone(&state)),
@@ -1045,12 +1024,7 @@ mod tests {
             insert_system_service_with_status(&db, system_service::SystemServiceStatus::Approved)
                 .await;
 
-        let auth_user = AuthenticatedUser::new(
-            Uuid::now_v7(),
-            AuthMethod::Password,
-            vec![Permission::ApproveSystemServices],
-            None,
-        );
+        let auth_user = AuthenticatedUser::new(Uuid::now_v7(), AuthMethod::Password, None);
 
         let response = approve_system_service(
             State(Arc::clone(&state)),
@@ -1095,12 +1069,7 @@ mod tests {
         let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
         let missing_service_id = Uuid::now_v7();
 
-        let auth_user = AuthenticatedUser::new(
-            Uuid::now_v7(),
-            AuthMethod::Password,
-            vec![Permission::RejectSystemServices],
-            None,
-        );
+        let auth_user = AuthenticatedUser::new(Uuid::now_v7(), AuthMethod::Password, None);
 
         let response = reject_system_service(
             State(Arc::clone(&state)),
@@ -1146,12 +1115,7 @@ mod tests {
         let service = insert_pending_system_service(&db).await;
         let service = set_system_service_embedded(&db, service, true).await;
 
-        let auth_user = AuthenticatedUser::new(
-            Uuid::now_v7(),
-            AuthMethod::Password,
-            vec![Permission::RemoveSystemServices],
-            None,
-        );
+        let auth_user = AuthenticatedUser::new(Uuid::now_v7(), AuthMethod::Password, None);
 
         let response = deactivate_system_service(
             State(Arc::clone(&state)),

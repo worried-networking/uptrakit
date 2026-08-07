@@ -492,9 +492,10 @@ pub(crate) async fn link_role(app: &super::TestApp, user_id: uuid::Uuid, role_id
 }
 
 /// Register a fresh user (registration must already be open), strip its
-/// auto-assigned `viewer` role, link ONLY `role_name`, invalidate the engine
-/// cache, then re-login so the legacy JWT claim snapshot reflects the newly
-/// linked role's legacy permission set. Returns `(user_id, access_token)`.
+/// auto-assigned `viewer` role, then link ONLY `role_name`. `link_role`
+/// invalidates the engine cache, so the token already in hand authorizes
+/// against the newly linked role's grants on the next request without a
+/// fresh mint. Returns `(user_id, access_token)`.
 pub(crate) async fn register_user_with_only_role(
     app: &super::TestApp,
     email: &str,
@@ -518,9 +519,7 @@ pub(crate) async fn register_user_with_only_role(
     let role_id = role_id_by_name(app, role_name).await;
     link_role(app, user_id, role_id).await;
 
-    let (login_status, login_auth) = login_user(&client, email, "TestPassword123!").await;
-    assert_eq!(login_status, http::StatusCode::OK, "re-login failed");
-    (user_id, login_auth.access_token.expose_secret().to_string())
+    (user_id, auth.access_token.expose_secret().to_string())
 }
 
 /// Owner + a fresh second user holding ONLY `role_name`. Returns
@@ -603,23 +602,18 @@ pub(crate) async fn stage_user_with_grant(
     .expect("stage grant");
     app.state.access_engine.invalidate_subjects(&[user_id], &[]);
 
-    // Re-login so the returned token's JWT claims snapshot reflects the
-    // post-strip role set, mirroring `register_user_with_only_role`:
-    // `AuthenticatedUser::permissions` is populated from the claims at
-    // token-mint time, so a token minted before the roles were stripped
-    // would still carry the auto-assigned roles.
-    let (login_status, login_auth) = login_user(&client, email, "TestPassword123!").await;
-    assert_eq!(login_status, http::StatusCode::OK, "re-login failed");
-    (user_id, login_auth.access_token.expose_secret().to_string())
+    // Grants take effect immediately: `invalidate_subjects` above evicts
+    // the cached authority, so the token already in hand authorizes
+    // against the newly staged grant without a fresh mint.
+    (user_id, auth.access_token.expose_secret().to_string())
 }
 
 /// Delete every `access_grants` row held by `role_id` whose patterns cover
 /// any of `covered`, then invalidate the role's cached authority.
 ///
-/// Deleting all matching rows (not `.one()`) is what makes the
-/// engine-vs-legacy-claim tests discriminating: a seeded role carries an
-/// M1.2 grant plus later backfills, and one surviving row would keep the
-/// action allowed while the JWT claim stayed identical.
+/// Deleting all matching rows (not `.one()`) is load-bearing: a seeded role
+/// carries an M1.2 grant plus later backfills; one surviving row would keep
+/// the action allowed.
 pub(crate) async fn revoke_role_grants_covering(
     app: &super::TestApp,
     role_id: uuid::Uuid,

@@ -2217,21 +2217,6 @@ async fn mint_oidc_auth_response(
         return error_response(StatusCode::FORBIDDEN, "User is deactivated");
     }
 
-    // Load permissions honestly — a DB error is a 500, never an empty-permission token.
-    let permissions = match crate::middleware::require_auth::get_user_permissions(
-        state.db(),
-        state.default_tenant_id,
-        user_id,
-    )
-    .await
-    {
-        Ok(p) => p,
-        Err(e) => {
-            tracing::error!(error = ?e, "Failed to load user permissions during OIDC mint");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
-
     // Only now mint the refresh token — all validation has passed.
     let refresh_token = match session_svc
         .create_refresh_token(user_id, AuthMethod::Oidc { provider_id }, None, None)
@@ -2244,19 +2229,18 @@ async fn mint_oidc_auth_response(
         }
     };
 
-    let access_token = match state.auth.jwt.create_access_token(
-        user_id,
-        &permissions,
-        "oidc",
-        Some(provider_id),
-        None,
-    ) {
-        Ok(t) => t,
-        Err(e) => {
-            tracing::error!(error = ?e, "Failed to create OIDC access token");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
+    let access_token =
+        match state
+            .auth
+            .jwt
+            .create_access_token(user_id, "oidc", Some(provider_id), None)
+        {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::error!(error = ?e, "Failed to create OIDC access token");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
 
     let (actions, authority) =
         super::auth::effective_actions(&state.access_engine, state.default_tenant_id, user.id)
@@ -2857,71 +2841,6 @@ mod audit_tests {
     }
 
     #[tokio::test]
-    async fn oidc_exchange_returns_500_on_permission_load_failure() {
-        let app = TestApp::new().await;
-        let client = app.client();
-        let email = "oidc-perm-fail@test.local";
-        let (register_status, _register_body): (http::StatusCode, serde_json::Value) = client
-            .post_json(
-                "/api/v1/auth/register",
-                &serde_json::json!({
-                    "email": email,
-                    "password": "password123",
-                    "first_name": "Oidc",
-                    "last_name": "PermFail",
-                }),
-            )
-            .send_json()
-            .await;
-        assert_eq!(register_status, http::StatusCode::CREATED);
-        let user_id = User::find()
-            .filter(user::Column::Email.eq(email))
-            .one(&app.db)
-            .await
-            .expect("query registered user")
-            .expect("registered user should exist")
-            .id;
-        let provider_id = insert_active_oidc_provider(
-            &app.db,
-            app.state.default_tenant_id,
-            "OIDC Perm Fail",
-            "oidc-perm-fail",
-        )
-        .await;
-        let exchange_code = "oidc-perm-fail-code";
-        app.state
-            .oidc
-            .oidc_token_exchange_store
-            .insert(exchange_code.to_string(), user_id, provider_id)
-            .await
-            .expect("store exchange code");
-
-        // Force the permission load to error by removing its table.
-        drop_table(&app.db, "role_permissions").await;
-
-        let (status, _body): (http::StatusCode, serde_json::Value) = client
-            .post_json(
-                "/api/v1/auth/oidc/exchange",
-                &serde_json::json!({ "code": exchange_code }),
-            )
-            .send_json()
-            .await;
-        assert_eq!(status, http::StatusCode::INTERNAL_SERVER_ERROR);
-
-        // No OIDC session row was persisted (the password-auth session created
-        // by registration is expected to exist).
-        let oidc_sessions = session::Entity::find()
-            .filter(session::Column::AuthMethod.eq("oidc"))
-            .all(&app.db)
-            .await
-            .expect("query sessions");
-        assert!(
-            oidc_sessions.is_empty(),
-            "no OIDC session must be minted when permission load fails"
-        );
-    }
-
-    #[tokio::test]
     async fn oidc_exchange_invalid_code_writes_validation_failed_audit_event() {
         let app = TestApp::new().await;
         let client = app.client();
@@ -3215,7 +3134,7 @@ mod audit_tests {
             .state
             .auth
             .jwt
-            .create_access_token(uuid::Uuid::now_v7(), &[], "oidc", Some(provider_id), None)
+            .create_access_token(uuid::Uuid::now_v7(), "oidc", Some(provider_id), None)
             .expect("create bearer token");
         let (status, _body): (http::StatusCode, serde_json::Value) = client
             .post_json(

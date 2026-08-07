@@ -332,7 +332,6 @@ mod tests {
     #[cfg(feature = "db-sqlite")]
     use crate::auth::AuthMethod;
     #[cfg(feature = "db-sqlite")]
-    use crate::auth::permissions::Permission;
     #[cfg(feature = "db-sqlite")]
     use crate::middleware::action::CanManageSystemSettings;
     #[cfg(feature = "db-sqlite")]
@@ -480,7 +479,6 @@ mod tests {
             CanManageSystemSettings::new(AuthenticatedUser::new(
                 user_id,
                 AuthMethod::Password,
-                vec![Permission::ManageGlobalSettings],
                 None,
             )),
             None,
@@ -539,7 +537,6 @@ mod tests {
             CanManageSystemSettings::new(AuthenticatedUser::new(
                 user_id,
                 AuthMethod::Password,
-                vec![Permission::ManageGlobalSettings],
                 None,
             )),
             None,
@@ -594,7 +591,6 @@ mod tests {
             CanManageSystemSettings::new(AuthenticatedUser::new(
                 user_id,
                 AuthMethod::Password,
-                vec![Permission::ManageGlobalSettings],
                 None,
             )),
             None,

@@ -336,7 +336,6 @@ mod tests {
 
     use super::*;
     use crate::auth::AuthMethod;
-    use crate::auth::permissions::Permission;
     use axum::extract::FromRef;
     use sea_orm::{
         ActiveModelTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryOrder, Set,
@@ -398,12 +397,7 @@ mod tests {
         let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
         let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
 
-        let auth_user = AuthenticatedUser::new(
-            Uuid::now_v7(),
-            AuthMethod::Password,
-            vec![Permission::ManageGlobalSettings],
-            None,
-        );
+        let auth_user = AuthenticatedUser::new(Uuid::now_v7(), AuthMethod::Password, None);
 
         let response = create_system_enrollment_token(
             State(DbState::from_ref(&state)),
@@ -439,12 +433,7 @@ mod tests {
         let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
         let missing_id = Uuid::now_v7();
 
-        let auth_user = AuthenticatedUser::new(
-            Uuid::now_v7(),
-            AuthMethod::Password,
-            vec![Permission::ManageGlobalSettings],
-            None,
-        );
+        let auth_user = AuthenticatedUser::new(Uuid::now_v7(), AuthMethod::Password, None);
 
         let response = revoke_system_enrollment_token(
             State(DbState::from_ref(&state)),
@@ -479,12 +468,7 @@ mod tests {
         let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
         let token = insert_system_enrollment_token(&db).await;
 
-        let auth_user = AuthenticatedUser::new(
-            Uuid::now_v7(),
-            AuthMethod::Password,
-            vec![Permission::ManageGlobalSettings],
-            None,
-        );
+        let auth_user = AuthenticatedUser::new(Uuid::now_v7(), AuthMethod::Password, None);
 
         let response = revoke_system_enrollment_token(
             State(DbState::from_ref(&state)),

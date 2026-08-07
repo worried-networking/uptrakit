@@ -3,8 +3,8 @@ use uptrakit_shared_types::access::actions;
 
 use crate::test_harness::TestApp;
 use crate::test_harness::fixtures::{
-    insert_embedded_service, insert_service, link_role, login_user, open_registration,
-    register_and_get_token, register_user, revoke_role_grants_covering, role_id_by_name,
+    insert_embedded_service, insert_service, link_role, open_registration, register_and_get_token,
+    register_user, revoke_role_grants_covering, role_id_by_name,
 };
 
 #[tokio::test]
@@ -174,7 +174,7 @@ async fn get_embedded_service_shows_is_embedded() {
 }
 
 #[tokio::test]
-async fn batch_services_engine_deny_overrides_legacy_permission_is_403() {
+async fn batch_services_forbidden_after_covering_grant_revoked() {
     let app = TestApp::new().await;
     let client = app.client();
     open_registration(&app).await;
@@ -192,10 +192,10 @@ async fn batch_services_engine_deny_overrides_legacy_permission_is_403() {
     link_role(&app, user_id, service_manager_role_id).await;
     revoke_role_grants_covering(&app, service_manager_role_id, &[actions::SERVICES_APPROVE]).await;
 
-    let (login_status, login_auth) =
-        login_user(&client, "batch-legacy@test.local", "TestPassword123!").await;
-    assert_eq!(login_status, http::StatusCode::OK);
-    let token = login_auth.access_token.expose_secret().to_string();
+    // `revoke_role_grants_covering` invalidates the role's cached authority,
+    // so the registration token already in hand re-resolves grants on the
+    // next request — no fresh login needed.
+    let token = auth.access_token.expose_secret().to_string();
 
     let svc = insert_service(&app.db, app.tenant_id, ServiceStatus::Pending).await;
 
@@ -211,8 +211,7 @@ async fn batch_services_engine_deny_overrides_legacy_permission_is_403() {
     assert_eq!(
         status,
         http::StatusCode::FORBIDDEN,
-        "engine must deny the services batch approve once the covering grant is revoked, \
-         even though the legacy approve_services JWT claim is still present"
+        "engine must deny the services batch approve once the covering grant is revoked"
     );
 }
 

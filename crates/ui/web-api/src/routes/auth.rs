@@ -13,7 +13,7 @@ use crate::auth::{AuthError, password, token::generate_uuid};
 use crate::auth_audit_classification::AuthErrorAuditExt;
 use crate::error_response::error_response;
 use crate::extract::SessionSvc;
-use crate::middleware::require_auth::{AuthenticatedUser, get_user_permissions};
+use crate::middleware::require_auth::AuthenticatedUser;
 use axum::{
     Json,
     extract::State,
@@ -441,19 +441,6 @@ pub async fn register(
         state.settings.set_registration(reg).await;
     }
 
-    // Get user permissions
-    let permissions = match get_user_permissions(state.db(), state.default_tenant_id, user_id).await
-    {
-        Ok(p) => p,
-        Err(e) => {
-            tracing::error!("Failed to get user permissions: {:?}", e);
-            return Ok(error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Internal server error",
-            ));
-        }
-    };
-
     // Create refresh token
     let refresh_token = match session_svc
         .create_refresh_token(user_id, AuthMethod::Password, None, None)
@@ -470,21 +457,20 @@ pub async fn register(
     };
 
     // Create JWT access token
-    let access_token =
-        match state
-            .auth
-            .jwt
-            .create_access_token(user_id, &permissions, "password", None, None)
-        {
-            Ok(token) => token,
-            Err(e) => {
-                tracing::error!("Failed to create access token: {:?}", e);
-                return Ok(error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Internal server error",
-                ));
-            }
-        };
+    let access_token = match state
+        .auth
+        .jwt
+        .create_access_token(user_id, "password", None, None)
+    {
+        Ok(token) => token,
+        Err(e) => {
+            tracing::error!("Failed to create access token: {:?}", e);
+            return Ok(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
+        }
+    };
 
     let (actions, authority) =
         effective_actions(&state.access_engine, state.default_tenant_id, user_id).await;
@@ -698,22 +684,6 @@ pub async fn login(
         None
     };
 
-    // Get user permissions
-    let permissions = match get_user_permissions(state.db(), state.default_tenant_id, user.id).await
-    {
-        Ok(p) => p,
-        Err(e) => {
-            tracing::error!("Failed to get user permissions: {:?}", e);
-            emit_auth_login_audit(
-                &state,
-                Some(user.id),
-                uptrakit_audit_log::AuditOutcome::Failed,
-                Some("permission_load_failed"),
-            );
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
-
     // Create refresh token
     let refresh_token = match session_svc
         .create_refresh_token(user.id, AuthMethod::Password, None, None)
@@ -733,25 +703,24 @@ pub async fn login(
     };
 
     // Create JWT access token
-    let access_token = match state.auth.jwt.create_access_token(
-        user.id,
-        &permissions,
-        "password",
-        None,
-        setup_required_claim,
-    ) {
-        Ok(token) => token,
-        Err(e) => {
-            tracing::error!("Failed to create access token: {:?}", e);
-            emit_auth_login_audit(
-                &state,
-                Some(user.id),
-                uptrakit_audit_log::AuditOutcome::Failed,
-                Some("access_token_create_failed"),
-            );
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
+    let access_token =
+        match state
+            .auth
+            .jwt
+            .create_access_token(user.id, "password", None, setup_required_claim)
+        {
+            Ok(token) => token,
+            Err(e) => {
+                tracing::error!("Failed to create access token: {:?}", e);
+                emit_auth_login_audit(
+                    &state,
+                    Some(user.id),
+                    uptrakit_audit_log::AuditOutcome::Failed,
+                    Some("access_token_create_failed"),
+                );
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
 
     emit_auth_login_audit(
         &state,
@@ -921,7 +890,6 @@ mod tests {
 
     use super::*;
     use crate::ServiceCredentialSources;
-    use crate::auth::permissions::Permission;
     use crate::auth::registration::RegistrationMode;
     use crate::auth::session::SessionService;
     use axum::body::Body;
@@ -1229,12 +1197,7 @@ mod tests {
             .await
             .unwrap();
 
-        let auth_user = AuthenticatedUser::new(
-            user_id,
-            AuthMethod::Password,
-            vec![Permission::ViewServices],
-            None,
-        );
+        let auth_user = AuthenticatedUser::new(user_id, AuthMethod::Password, None);
 
         let req = Request::builder()
             .uri("/api/v1/auth/logout")
@@ -1302,7 +1265,6 @@ mod tests {
         let auth_user = AuthenticatedUser::new(
             User::find().one(&db).await.unwrap().unwrap().id,
             AuthMethod::Password,
-            vec![Permission::ViewServices],
             None,
         );
 
@@ -1345,12 +1307,7 @@ mod tests {
         let state = test_state(db.clone()).await;
         let user_id = User::find().one(&db).await.unwrap().unwrap().id;
 
-        let auth_user = AuthenticatedUser::new(
-            user_id,
-            AuthMethod::Password,
-            vec![Permission::ViewServices],
-            None,
-        );
+        let auth_user = AuthenticatedUser::new(user_id, AuthMethod::Password, None);
 
         let req = Request::builder()
             .uri("/api/v1/auth/logout")
@@ -1396,12 +1353,7 @@ mod tests {
             .await
             .expect("drop session table");
 
-        let auth_user = AuthenticatedUser::new(
-            user_id,
-            AuthMethod::Password,
-            vec![Permission::ViewServices],
-            None,
-        );
+        let auth_user = AuthenticatedUser::new(user_id, AuthMethod::Password, None);
 
         let req = Request::builder()
             .uri("/api/v1/auth/logout")
@@ -1453,12 +1405,7 @@ mod tests {
         .await
         .expect("install revoke failure trigger");
 
-        let auth_user = AuthenticatedUser::new(
-            user_id,
-            AuthMethod::Password,
-            vec![Permission::ViewServices],
-            None,
-        );
+        let auth_user = AuthenticatedUser::new(user_id, AuthMethod::Password, None);
 
         let req = Request::builder()
             .uri("/api/v1/auth/logout")
@@ -1567,7 +1514,7 @@ mod tests {
         let state = test_state(db.clone()).await;
         let user_id = User::find().one(&db).await.unwrap().unwrap().id;
 
-        let auth_user = AuthenticatedUser::new(user_id, AuthMethod::Password, vec![], None);
+        let auth_user = AuthenticatedUser::new(user_id, AuthMethod::Password, None);
 
         let response = me(
             State(state),
@@ -1858,9 +1805,7 @@ mod tests {
 
     /// A fresh migrated DB with no pre-seeded user, so a subsequently registered user
     /// becomes the first user (threshold 1) and gets roles assigned by
-    /// `handle_first_user_setup` — required to exercise the `role_permissions` lookup
-    /// inside `get_user_permissions` (a user with zero roles short-circuits before ever
-    /// querying `role_permissions`).
+    /// `handle_first_user_setup`.
     async fn setup_empty_test_db() -> DatabaseConnection {
         let opt = ConnectOptions::new("sqlite::memory:".to_owned());
         let db = Database::connect(opt).await.expect("test db");
@@ -2056,69 +2001,16 @@ mod tests {
         );
     }
 
+    /// The pre-rotation ordering invariant survives independently of the
+    /// removed permission load: `refresh` must verify the refresh token AND
+    /// check `user.is_active` before calling `rotate_refresh_token`, so a
+    /// deactivated-user denial never revokes or replaces the caller's
+    /// still-valid old refresh token.
     #[tokio::test]
-    async fn register_returns_500_on_permission_load_failure() {
-        let db = setup_empty_test_db().await;
-        let state = test_state(db.clone()).await;
-
-        drop_table(&db, "role_permissions").await;
-
-        let response = match register(
-            State(state),
-            crate::extract::SessionSvc::new(SessionService::new(db.clone())),
-            crate::extract::Validated(RegisterRequest {
-                email: "first-user@example.com".to_string(),
-                first_name: "First".to_string(),
-                last_name: "User".to_string(),
-                password: SecretString::new("correct-horse-battery-staple".to_string()),
-                registration_token: None,
-            }),
-        )
-        .await
-        {
-            Ok(response) => response.into_response(),
-            Err(_) => panic!("register response"),
-        };
-
-        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    }
-
-    #[tokio::test]
-    async fn login_returns_500_on_permission_load_failure() {
+    async fn refresh_denies_deactivated_user_without_rotating_old_token() {
         let db = setup_test_db().await;
         let state = test_state(db.clone()).await;
         let user_id = User::find().one(&db).await.unwrap().unwrap().id;
-
-        // Assign a role so `get_user_permissions` actually queries `role_permissions`
-        // instead of short-circuiting on an empty role set.
-        assign_viewer_role(&db, state.default_tenant_id, user_id)
-            .await
-            .expect("assign viewer role");
-
-        drop_table(&db, "role_permissions").await;
-
-        let response = login(
-            State(state),
-            crate::extract::SessionSvc::new(SessionService::new(db.clone())),
-            crate::extract::Validated(LoginRequest {
-                email: "test@example.com".to_string(),
-                password: SecretString::new("correct-horse-battery-staple".to_string()),
-            }),
-        )
-        .await;
-
-        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    }
-
-    #[tokio::test]
-    async fn refresh_returns_500_and_leaves_old_token_usable_on_permission_load_failure() {
-        let db = setup_test_db().await;
-        let state = test_state(db.clone()).await;
-        let user_id = User::find().one(&db).await.unwrap().unwrap().id;
-
-        assign_viewer_role(&db, state.default_tenant_id, user_id)
-            .await
-            .expect("assign viewer role");
 
         let session_service = SessionService::new(db.clone());
         let refresh_token = session_service
@@ -2126,7 +2018,15 @@ mod tests {
             .await
             .expect("create refresh token");
 
-        drop_table(&db, "role_permissions").await;
+        let mut active: user::ActiveModel = User::find_by_id(user_id)
+            .one(&db)
+            .await
+            .expect("query user")
+            .expect("user exists")
+            .into();
+        active.is_active = Set(false);
+        active.deactivated_at = Set(Some(OffsetDateTime::now_utc()));
+        active.update(&db).await.expect("deactivate user");
 
         let response = refresh(
             State(state),
@@ -2141,12 +2041,12 @@ mod tests {
         )
         .await;
 
-        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
 
-        // Under the PRIMARY reorder (permission load before rotation), a permission-load
-        // failure means rotate_refresh_token was never called: the caller's original
-        // refresh_token's session row must be untouched (not revoked, not replaced) so a
-        // retry after the transient DB blip succeeds with the SAME token.
+        // The deactivation check runs before `rotate_refresh_token`: the
+        // caller's original refresh token's session row must be untouched
+        // (not revoked, not replaced) so reactivating the user lets the same
+        // token succeed on retry.
         let original = uptrakit_shared_db::entity::session::Entity::find()
             .filter(
                 uptrakit_shared_db::entity::session::Column::RefreshTokenHash
@@ -2158,7 +2058,7 @@ mod tests {
             .expect("original session row still exists");
         assert!(
             original.revoked_at.is_none(),
-            "the pre-existing token must not be revoked on a pre-rotation failure"
+            "the pre-existing token must not be revoked on a pre-rotation denial"
         );
 
         // Exactly one session row exists for the user — no new row was minted.
@@ -2169,7 +2069,7 @@ mod tests {
         assert_eq!(
             all_sessions.len(),
             1,
-            "no new session row should be minted before permissions are validated"
+            "no new session row should be minted before the is_active check passes"
         );
     }
 
@@ -2998,30 +2898,6 @@ pub async fn refresh(
         return error_response(StatusCode::FORBIDDEN, "User is deactivated");
     }
 
-    // Get fresh permissions from DB — before rotation, so a load failure never strands
-    // the caller's still-valid old refresh token (nothing has been minted/revoked yet).
-    let permissions = match get_user_permissions(state.db(), state.default_tenant_id, user.id).await
-    {
-        Ok(p) => p,
-        Err(e) => {
-            tracing::error!("Failed to get user permissions: {:?}", e);
-            // Audit emission mirrors the is_active branch above: same helper family,
-            // Failed instead of Denied, reason code reflects a permission-load failure.
-            emit_auth_token_refresh_audit(
-                &state,
-                audit_actor_type_for_auth_method(&verified.auth_method),
-                Some(verified.auth_method.kind()),
-                Some(verified.user_id),
-                uptrakit_audit_log::AuditOutcome::Failed,
-                Some("permission_load_failed"),
-                request_id.clone(),
-            );
-            // Nothing minted yet — the caller's existing refresh token is untouched;
-            // no revoke needed. Just fail closed.
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
-
     // Only now rotate: revoke old, mint new. All validation has passed.
     let (verified, new_refresh_token) = match session_svc.rotate_refresh_token(&refresh_token).await
     {
@@ -3074,7 +2950,6 @@ pub async fn refresh(
 
     let access_token = match state.auth.jwt.create_access_token(
         user.id,
-        &permissions,
         auth_method,
         oidc_provider_id,
         setup_required_claim,

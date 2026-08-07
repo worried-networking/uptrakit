@@ -16,8 +16,11 @@
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 #[cfg(feature = "dashboard-icons")]
 use uptrakit_shared_db::entity::system_audit_log;
+
 #[cfg(feature = "dashboard-icons")]
-use uptrakit_web_api_types::permissions::Permission;
+use uptrakit_shared_db::access_grants::{GrantSubject, NewGrant, insert_grant};
+#[cfg(feature = "dashboard-icons")]
+use uptrakit_shared_types::access::{ActionPattern, Selector};
 
 use crate::test_harness::TestApp;
 use crate::test_harness::fixtures::register_and_get_token;
@@ -53,28 +56,41 @@ async fn poll_system_audit_row(
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-/// GET /api/v1/instance-plugins requires ManageGlobalSettings.
-/// A token with only ViewSettings must be rejected with 403.
+/// GET /api/v1/instance-plugins requires `system.settings:manage`
+/// (`CanManageSystemSettings`). A principal holding only the unrelated
+/// `settings:read` grant is authenticated but under-privileged for this
+/// endpoint, so it must still be rejected with 403 — not merely because it
+/// carries no grant at all.
 #[cfg(feature = "dashboard-icons")]
 #[tokio::test]
 async fn list_requires_manage_global_settings() {
     let app = TestApp::new().await;
     let client = app.client();
 
-    let viewer_token = app
+    let user_id = uuid::Uuid::now_v7();
+    let token = app
         .jwt
-        .create_access_token(
-            uuid::Uuid::now_v7(),
-            &[Permission::ViewSettings],
-            "password",
-            None,
-            None,
-        )
-        .expect("mint viewer token");
+        .create_access_token(user_id, "password", None, None)
+        .expect("mint token");
+    let patterns = vec!["settings:read".parse::<ActionPattern>().expect("pattern")];
+    insert_grant(
+        &app.db,
+        NewGrant {
+            subject: GrantSubject::User(user_id),
+            tenant_id: Some(app.tenant_id),
+            patterns: &patterns,
+            selector: Selector::All,
+            description: None,
+            created_by: None,
+        },
+    )
+    .await
+    .expect("insert grant");
+    app.state.access_engine.invalidate_subjects(&[user_id], &[]);
 
     let status = client
         .get("/api/v1/instance-plugins")
-        .bearer(&viewer_token)
+        .bearer(&token)
         .send_status()
         .await;
 

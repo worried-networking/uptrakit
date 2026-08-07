@@ -15,7 +15,6 @@ use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, service, software_item, user,
 };
 use uptrakit_shared_types::access::{ActionPattern, Selector};
-use uptrakit_web_api_types::permissions::Permission;
 use uuid::Uuid;
 
 async fn insert_software_item(app: &TestApp, item_id: Uuid, name: &str) -> software_item::Model {
@@ -762,18 +761,12 @@ async fn merge_preview_allows_update_without_delete_but_execute_forbids_it() {
 
     let update_only_token = app
         .jwt
-        .create_access_token(
-            editor_user_id,
-            &[Permission::UpdateSoftware],
-            "password",
-            None,
-            None,
-        )
+        .create_access_token(editor_user_id, "password", None, None)
         .expect("mint update-only token");
 
     // `merge_preview`'s `CanUpdateSoftware` extractor consults only
-    // `AccessEngine` grants post-conversion, not the JWT's legacy
-    // `Permission` claim above, so grant `software:update` directly.
+    // `AccessEngine` grants — tokens carry no authorization claim — so
+    // grant `software:update` directly.
     let patterns = vec!["software:update".parse::<ActionPattern>().expect("pattern")];
     insert_grant(
         &app.db,

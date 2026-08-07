@@ -16,7 +16,6 @@ use super::*;
 use crate::AppState;
 use crate::app_state::AuditEmitterState;
 use crate::auth::AuthMethod;
-use crate::auth::permissions::Permission;
 use crate::extract::{Unvalidated, Validated};
 use crate::middleware::action::{
     CanCreateSoftware, CanDeleteSoftware, CanTriggerChecks, CanTriggerUpdates, CanUpdateSoftware,
@@ -363,8 +362,8 @@ async fn tenant_audit_row_for_action_and_outcome(
     panic!("expected tenant audit row with outcome");
 }
 
-fn auth_user_with(permission: Permission) -> AuthenticatedUser {
-    AuthenticatedUser::new(Uuid::now_v7(), AuthMethod::Password, vec![permission], None)
+fn test_auth_user() -> AuthenticatedUser {
+    AuthenticatedUser::new(Uuid::now_v7(), AuthMethod::Password, None)
 }
 
 #[tokio::test]
@@ -374,7 +373,7 @@ async fn create_software_item_writes_success_audit_event() {
     let response = create_software_item(
         State(Arc::clone(&state)),
         tenant_db,
-        CanCreateSoftware::new(auth_user_with(Permission::CreateSoftware)),
+        CanCreateSoftware::new(test_auth_user()),
         None,
         Validated(CreateSoftwareItemRequest {
             name: "Create Audit App".to_string(),
@@ -407,7 +406,7 @@ async fn create_software_item_duplicate_writes_validation_failed_audit_event() {
     let first = create_software_item(
         State(Arc::clone(&state)),
         tenant_db,
-        CanCreateSoftware::new(auth_user_with(Permission::CreateSoftware)),
+        CanCreateSoftware::new(test_auth_user()),
         None,
         Validated(CreateSoftwareItemRequest {
             name: req.name.clone(),
@@ -423,7 +422,7 @@ async fn create_software_item_duplicate_writes_validation_failed_audit_event() {
     let err = create_software_item(
         State(Arc::clone(&state)),
         tenant_db,
-        CanCreateSoftware::new(auth_user_with(Permission::CreateSoftware)),
+        CanCreateSoftware::new(test_auth_user()),
         None,
         Validated(req),
     )
@@ -451,7 +450,7 @@ async fn update_software_item_missing_item_writes_denied_audit_event() {
     let response = update_software_item(
         State(Arc::clone(&state)),
         tenant_db,
-        CanUpdateSoftware::new(auth_user_with(Permission::UpdateSoftware)),
+        CanUpdateSoftware::new(test_auth_user()),
         None,
         Path(missing_item_id),
         Unvalidated::new_for_test(UpdateSoftwareItemRequest {
@@ -482,7 +481,7 @@ async fn delete_software_item_missing_item_writes_denied_audit_event() {
     let response = delete_software_item(
         State(Arc::clone(&state)),
         tenant_db,
-        CanDeleteSoftware::new(auth_user_with(Permission::DeleteSoftware)),
+        CanDeleteSoftware::new(test_auth_user()),
         None,
         Path(missing_item_id),
     )
@@ -510,7 +509,7 @@ async fn approve_software_item_already_featured_writes_denied_audit_event() {
     let response = approve_software_item(
         State(Arc::clone(&state)),
         tenant_db,
-        CanUpdateSoftware::new(auth_user_with(Permission::UpdateSoftware)),
+        CanUpdateSoftware::new(test_auth_user()),
         None,
         Path(item_id),
     )
@@ -538,7 +537,7 @@ async fn assign_hosts_empty_payload_writes_validation_failed_audit_event() {
     let response = assign_hosts(
         State(Arc::clone(&state)),
         tenant_db,
-        CanUpdateSoftware::new(auth_user_with(Permission::UpdateSoftware)),
+        CanUpdateSoftware::new(test_auth_user()),
         None,
         Path(item_id),
         Unvalidated::new_for_test(AssignHostsRequest {
@@ -567,7 +566,7 @@ async fn unassign_host_missing_assignment_writes_denied_audit_event() {
     let response = unassign_host(
         State(Arc::clone(&state)),
         tenant_db,
-        CanUpdateSoftware::new(auth_user_with(Permission::UpdateSoftware)),
+        CanUpdateSoftware::new(test_auth_user()),
         None,
         Path((item_id, host_id)),
         Query(DeleteHostAssignmentParams {
@@ -598,7 +597,7 @@ async fn update_host_assignment_missing_item_writes_denied_audit_event() {
     let response = update_host_assignment(
         State(Arc::clone(&state)),
         tenant_db,
-        CanUpdateSoftware::new(auth_user_with(Permission::UpdateSoftware)),
+        CanUpdateSoftware::new(test_auth_user()),
         None,
         Path((item_id, host_id)),
         Unvalidated::new_for_test(UpdateHostAssignmentRequest {
@@ -632,7 +631,7 @@ async fn delete_plugin_assignment_invalid_role_writes_validation_failed_audit_ev
     let response = delete_plugin_assignment(
         State(Arc::clone(&state)),
         tenant_db,
-        CanUpdateSoftware::new(auth_user_with(Permission::UpdateSoftware)),
+        CanUpdateSoftware::new(test_auth_user()),
         None,
         Path((item_id, host_id, "invalid_role".to_string(), 0)),
     )
@@ -660,8 +659,8 @@ async fn execute_merge_invalid_request_writes_validation_failed_audit_event() {
     let err = match execute_software_item_merge(
         State(AuditEmitterState(state.audit_emitter.clone())),
         tenant_db,
-        CanUpdateSoftware::new(auth_user_with(Permission::UpdateSoftware)),
-        CanDeleteSoftware::new(auth_user_with(Permission::DeleteSoftware)),
+        CanUpdateSoftware::new(test_auth_user()),
+        CanDeleteSoftware::new(test_auth_user()),
         None,
         Unvalidated::new_for_test(MergeSoftwareItemsExecuteRequest {
             candidate_ids: vec![only_id],
@@ -697,8 +696,8 @@ async fn execute_merge_empty_candidates_writes_validation_failed_audit_event() {
     let err = match execute_software_item_merge(
         State(AuditEmitterState(state.audit_emitter.clone())),
         tenant_db,
-        CanUpdateSoftware::new(auth_user_with(Permission::UpdateSoftware)),
-        CanDeleteSoftware::new(auth_user_with(Permission::DeleteSoftware)),
+        CanUpdateSoftware::new(test_auth_user()),
+        CanDeleteSoftware::new(test_auth_user()),
         None,
         Unvalidated::new_for_test(MergeSoftwareItemsExecuteRequest {
             candidate_ids: vec![],
@@ -741,7 +740,7 @@ async fn batch_software_items_partial_result_writes_partial_audit_event() {
     let response = batch_software_items(
         State(Arc::clone(&state)),
         tenant_db,
-        CanDeleteSoftware::new(auth_user_with(Permission::DeleteSoftware)),
+        CanDeleteSoftware::new(test_auth_user()),
         None,
         Validated(BatchActionRequest {
             action: "approve".to_string(),
@@ -771,7 +770,7 @@ async fn batch_software_items_unknown_action_writes_validation_failed_audit_even
     let response = batch_software_items(
         State(Arc::clone(&state)),
         tenant_db,
-        CanDeleteSoftware::new(auth_user_with(Permission::DeleteSoftware)),
+        CanDeleteSoftware::new(test_auth_user()),
         None,
         Validated(BatchActionRequest {
             action: "invalid".to_string(),
@@ -813,12 +812,7 @@ async fn trigger_update_writes_software_update_triggered_audit_event() {
     let host_software_item_id = insert_host_assignment(&db, host.id, item_id).await;
     insert_execute_update_plugin(&db, host.id, item_id, host_software_item_id).await;
 
-    let auth_user = AuthenticatedUser::new(
-        Uuid::now_v7(),
-        AuthMethod::Password,
-        vec![Permission::TriggerUpdates],
-        None,
-    );
+    let auth_user = AuthenticatedUser::new(Uuid::now_v7(), AuthMethod::Password, None);
     let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
     let response = trigger_update(
@@ -889,12 +883,7 @@ async fn trigger_update_host_not_assigned_writes_validation_failed_audit_event()
     let item_id = Uuid::now_v7();
     insert_software_item_row(&db, tenant_id, item_id).await;
 
-    let auth_user = AuthenticatedUser::new(
-        Uuid::now_v7(),
-        AuthMethod::Password,
-        vec![Permission::TriggerUpdates],
-        None,
-    );
+    let auth_user = AuthenticatedUser::new(Uuid::now_v7(), AuthMethod::Password, None);
     let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
     let response = trigger_update(
@@ -958,12 +947,7 @@ async fn trigger_update_missing_item_writes_denied_audit_event() {
 
     let missing_item_id = Uuid::now_v7();
 
-    let auth_user = AuthenticatedUser::new(
-        Uuid::now_v7(),
-        AuthMethod::Password,
-        vec![Permission::TriggerUpdates],
-        None,
-    );
+    let auth_user = AuthenticatedUser::new(Uuid::now_v7(), AuthMethod::Password, None);
     let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
     let response = trigger_update(
@@ -1034,12 +1018,7 @@ async fn trigger_update_with_api_token_actor_writes_api_token_actor_id() {
     insert_execute_update_plugin(&db, host.id, item_id, host_software_item_id).await;
 
     let token_id = Uuid::now_v7();
-    let auth_user = AuthenticatedUser::new(
-        Uuid::now_v7(),
-        AuthMethod::ApiToken,
-        vec![Permission::TriggerUpdates],
-        None,
-    );
+    let auth_user = AuthenticatedUser::new(Uuid::now_v7(), AuthMethod::ApiToken, None);
     let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
     let response = trigger_update(
@@ -1107,12 +1086,7 @@ async fn check_versions_writes_software_version_check_triggered_audit_event() {
     let host_software_item_id = insert_host_assignment(&db, host.id, item_id).await;
     insert_detect_version_plugin(&db, host.id, item_id, host_software_item_id, "agent").await;
 
-    let auth_user = AuthenticatedUser::new(
-        Uuid::now_v7(),
-        AuthMethod::Password,
-        vec![Permission::TriggerChecks],
-        None,
-    );
+    let auth_user = AuthenticatedUser::new(Uuid::now_v7(), AuthMethod::Password, None);
     let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
     let response = check_versions(
@@ -1163,12 +1137,7 @@ async fn check_versions_host_writes_software_version_check_triggered_audit_event
     let host_software_item_id = insert_host_assignment(&db, host.id, item_id).await;
     insert_detect_version_plugin(&db, host.id, item_id, host_software_item_id, "agent").await;
 
-    let auth_user = AuthenticatedUser::new(
-        Uuid::now_v7(),
-        AuthMethod::Password,
-        vec![Permission::TriggerChecks],
-        None,
-    );
+    let auth_user = AuthenticatedUser::new(Uuid::now_v7(), AuthMethod::Password, None);
     let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
     let response = check_versions_host(
@@ -1210,12 +1179,7 @@ async fn check_versions_host_missing_assignment_writes_validation_failed_audit_e
     let item_id = Uuid::now_v7();
     insert_software_item_row(&db, tenant_id, item_id).await;
 
-    let auth_user = AuthenticatedUser::new(
-        Uuid::now_v7(),
-        AuthMethod::Password,
-        vec![Permission::TriggerChecks],
-        None,
-    );
+    let auth_user = AuthenticatedUser::new(Uuid::now_v7(), AuthMethod::Password, None);
     let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
     let response = check_versions_host(

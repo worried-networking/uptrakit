@@ -611,7 +611,6 @@ mod tests {
 
     use super::*;
     use crate::auth::AuthMethod;
-    use crate::auth::permissions::Permission;
     use crate::middleware::action::CanManageSystemSettings;
     use crate::middleware::require_auth::AuthenticatedUser;
     use crate::test_harness::{build_test_state, insert_default_tenant, setup_migrated_db};
@@ -669,7 +668,6 @@ mod tests {
             CanManageSystemSettings::new(AuthenticatedUser::new(
                 uuid::Uuid::now_v7(),
                 AuthMethod::Password,
-                vec![Permission::ManageGlobalSettings],
                 None,
             )),
             None,
@@ -726,7 +724,6 @@ mod tests {
             CanManageSystemSettings::new(AuthenticatedUser::new(
                 uuid::Uuid::now_v7(),
                 AuthMethod::Password,
-                vec![Permission::ManageGlobalSettings],
                 None,
             )),
             None,

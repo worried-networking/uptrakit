@@ -199,17 +199,14 @@ async fn zero_role_user_cannot_list_plugin_type_settings() {
     );
 }
 
-/// Discriminating regression test for the M1.5 conversion: stages a `viewer`
-/// principal whose legacy `role_permissions` snapshot (baked into the JWT at
-/// login) still grants `view_settings`, but whose `AccessEngine` authority
-/// for `settings:read` / `system.settings:manage` has been revoked (every
-/// covering `access_grants` row deleted, cache invalidated — a role may hold
-/// more than one seed grant row, so this loops rather than calling `.one()`).
-/// Pre-conversion code (checking the legacy permission claim) answers from
-/// the stale JWT and returns 200; the engine-gated code must reject with a
-/// plain 403.
+/// Regression test: a `viewer` principal's role link is left untouched, but
+/// every `access_grants` row covering `settings:read` / `system.settings:manage`
+/// for that role is deleted and the cache invalidated (a role may hold more
+/// than one seed grant row, so this loops rather than calling `.one()`). The
+/// deny must be grant-scoped: still being linked to the `viewer` role must
+/// not itself grant access once its covering grants are gone.
 #[tokio::test]
-async fn viewer_engine_deny_overrides_legacy_permission_for_plugin_type_settings_list() {
+async fn plugin_type_settings_list_forbidden_after_viewer_grants_revoked() {
     let app = TestApp::new().await;
     let client = app.client();
     open_registration(&app).await;
@@ -255,8 +252,7 @@ async fn viewer_engine_deny_overrides_legacy_permission_for_plugin_type_settings
     assert_eq!(
         status,
         http::StatusCode::FORBIDDEN,
-        "engine must deny the plugin type settings list once the covering grant is revoked, \
-         even though the legacy view_settings JWT claim is still present"
+        "engine must deny the plugin type settings list once the covering grant is revoked"
     );
 }
 

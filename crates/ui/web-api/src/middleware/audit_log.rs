@@ -69,7 +69,6 @@ mod tests {
         req.extensions_mut().insert(AuthenticatedUser::new(
             uuid::Uuid::now_v7(),
             AuthMethod::Password,
-            Vec::new(),
             None,
         ));
         next.run(req).await

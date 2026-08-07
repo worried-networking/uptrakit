@@ -511,7 +511,6 @@ mod tests {
 
     use super::*;
     use crate::auth::AuthMethod;
-    use crate::auth::permissions::Permission;
     use crate::middleware::action::CanManageSettingsCertificates;
     use crate::middleware::require_auth::AuthenticatedUser;
     use sea_orm::{
@@ -568,7 +567,6 @@ mod tests {
             CanManageSettingsCertificates::new(AuthenticatedUser::new(
                 user_id,
                 AuthMethod::Password,
-                vec![Permission::ManageAgentCerts],
                 None,
             )),
             None,
@@ -622,7 +620,6 @@ mod tests {
             CanManageSettingsCertificates::new(AuthenticatedUser::new(
                 uuid::Uuid::now_v7(),
                 AuthMethod::Password,
-                vec![Permission::ManageAgentCerts],
                 None,
             )),
             None,

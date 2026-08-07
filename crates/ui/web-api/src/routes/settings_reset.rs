@@ -107,7 +107,6 @@ mod tests {
 
     use super::*;
     use crate::auth::AuthMethod;
-    use crate::auth::permissions::Permission;
     use crate::middleware::action::CanManageSystemSettings;
     use crate::middleware::require_auth::AuthenticatedUser;
     use sea_orm::{
@@ -167,7 +166,6 @@ mod tests {
             CanManageSystemSettings::new(AuthenticatedUser::new(
                 user_id,
                 AuthMethod::Password,
-                vec![Permission::ManageGlobalSettings],
                 None,
             )),
             None,

@@ -9,16 +9,11 @@ use axum::extract::{Request, State};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use http::StatusCode;
-use rootcause::prelude::*;
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
-use uptrakit_shared_db::entity::prelude::*;
-use uptrakit_shared_db::entity::{permission, role_permission, user_role};
 
 pub use uptrakit_controller_core::auth::{AuthFailure, AuthenticatedApiTokenId, AuthenticatedUser};
 
 use crate::AppState;
 use crate::auth::AuthMethod;
-use crate::auth::permissions::Permission;
 use crate::error_response::{error_response, error_response_with_code};
 
 /// Typed Axum extension indicating the current JWT contains `setup_required: true`.
@@ -238,12 +233,7 @@ pub(crate) async fn authenticate_api_token(
     state: &AppState,
     token: &str,
 ) -> std::result::Result<(AuthenticatedUser, uuid::Uuid), AuthFailure> {
-    uptrakit_controller_core::auth::api_token::authenticate_api_token(
-        state.db(),
-        state.default_tenant_id,
-        token,
-    )
-    .await
+    uptrakit_controller_core::auth::api_token::authenticate_api_token(state.db(), token).await
 }
 
 /// Authenticate using a JWT access token (stateless validation + denylist check).
@@ -294,65 +284,9 @@ pub(crate) async fn authenticate_jwt(
     let setup_required = claims.setup_required.unwrap_or(false);
 
     Ok((
-        AuthenticatedUser::new(
-            user_id,
-            auth_method,
-            claims.permissions,
-            Some(claims.jti.clone()),
-        ),
+        AuthenticatedUser::new(user_id, auth_method, Some(claims.jti.clone())),
         setup_required,
     ))
-}
-
-/// Resolve the deduplicated set of permissions for a user via user_roles -> role_permissions -> permissions.
-pub async fn get_user_permissions(
-    db: &DatabaseConnection,
-    tenant_id: uuid::Uuid,
-    user_id: uuid::Uuid,
-) -> crate::auth::Result<Vec<Permission>> {
-    // Get user's role IDs
-    let user_roles = UserRole::find()
-        .filter(user_role::Column::TenantId.eq(tenant_id))
-        .filter(user_role::Column::UserId.eq(user_id))
-        .all(db)
-        .await
-        .context_to()?;
-
-    let role_ids: Vec<uuid::Uuid> = user_roles.iter().map(|ur| ur.role_id).collect();
-
-    if role_ids.is_empty() {
-        return Ok(vec![]);
-    }
-
-    // Get permission IDs for those roles
-    let role_perms = RolePermission::find()
-        .filter(role_permission::Column::RoleId.is_in(role_ids))
-        .all(db)
-        .await
-        .context_to()?;
-
-    let perm_ids: Vec<uuid::Uuid> = role_perms.iter().map(|rp| rp.permission_id).collect();
-
-    if perm_ids.is_empty() {
-        return Ok(vec![]);
-    }
-
-    // Get permission names
-    let perm_models = uptrakit_shared_db::entity::prelude::Permission::find()
-        .filter(permission::Column::Id.is_in(perm_ids))
-        .all(db)
-        .await
-        .context_to()?;
-
-    // Deduplicate and convert to enum
-    let mut seen = std::collections::HashSet::new();
-    let permissions: Vec<Permission> = perm_models
-        .into_iter()
-        .filter_map(|p| p.name.parse::<Permission>().ok())
-        .filter(|p| seen.insert(p.clone()))
-        .collect();
-
-    Ok(permissions)
 }
 
 fn extract_bearer_token(req: &Request) -> Option<String> {
@@ -374,7 +308,6 @@ mod tests {
     use super::*;
     use crate::ServiceCredentialSources;
     use crate::auth::jwt::JwtManager;
-    use crate::auth::permissions::Permission;
     use crate::auth::registration::{RegistrationMode, RegistrationSettings};
     use crate::auth::token::generate_uuid;
     use crate::settings::Settings;
@@ -646,13 +579,12 @@ mod tests {
         let state = test_state(db).await;
 
         let user_id = generate_uuid();
-        let permissions = vec![Permission::ViewServices];
 
         // Create a JWT access token
         let jwt_token = state
             .auth
             .jwt
-            .create_access_token(user_id, &permissions, "password", None, None)
+            .create_access_token(user_id, "password", None, None)
             .unwrap();
 
         // Build app with auth middleware
@@ -798,7 +730,7 @@ mod tests {
         let other_jwt = JwtManager::from_secret(b"different-secret");
         let user_id = generate_uuid();
         let token = other_jwt
-            .create_access_token(user_id, &[], "password", None, None)
+            .create_access_token(user_id, "password", None, None)
             .unwrap();
 
         let app = Router::new()
@@ -871,7 +803,7 @@ mod tests {
         let token = state
             .auth
             .jwt
-            .create_access_token(user_id, &[], "password", None, Some(true))
+            .create_access_token(user_id, "password", None, Some(true))
             .expect("encode");
 
         let app = Router::new()
@@ -899,7 +831,7 @@ mod tests {
         let token = state
             .auth
             .jwt
-            .create_access_token(user_id, &[], "password", None, Some(true))
+            .create_access_token(user_id, "password", None, Some(true))
             .expect("encode");
 
         let app = Router::new()
@@ -929,11 +861,10 @@ mod tests {
         let state = test_state(db).await;
 
         let user_id = generate_uuid();
-        let permissions = vec![];
         let jwt_token = state
             .auth
             .jwt
-            .create_access_token(user_id, &permissions, "password", None, None)
+            .create_access_token(user_id, "password", None, None)
             .unwrap();
 
         let (auth_user, setup_required) = authenticate_jwt(&state, &jwt_token).await.unwrap();

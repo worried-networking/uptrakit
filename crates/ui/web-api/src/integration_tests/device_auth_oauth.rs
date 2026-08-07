@@ -6,12 +6,9 @@
 use http::StatusCode;
 use uptrakit_shared_db::access_grants::{GrantSubject, NewGrant, insert_grant};
 use uptrakit_shared_types::access::{ActionPattern, Selector};
-use uptrakit_web_api_types::{
-    oauth::{
-        AuthorizationServerMetadata, DeviceAuthDenyResponse, DeviceAuthLookupResponse,
-        DeviceAuthorizationResponse, OAuthErrorCode, OAuthErrorResponse, OAuthTokenResponse,
-    },
-    permissions::Permission,
+use uptrakit_web_api_types::oauth::{
+    AuthorizationServerMetadata, DeviceAuthDenyResponse, DeviceAuthLookupResponse,
+    DeviceAuthorizationResponse, OAuthErrorCode, OAuthErrorResponse, OAuthTokenResponse,
 };
 
 use crate::test_harness::TestApp;
@@ -505,24 +502,21 @@ async fn invalid_client_when_client_id_mismatches() {
 
 /// `POST /auth/device/deny` authorizes on the single mapped `services:read`
 /// grant alone (positive proof a lone action-grant suffices — no other
-/// action, no JWT `Permission`, is consulted). The JWT's legacy `Permission`
-/// claim is irrelevant post-conversion (`CanReadServices` only consults
-/// `AccessEngine` grants), so the ephemeral user is granted `services:read`
-/// directly via `insert_grant` and the request proceeds past authorization
-/// to the handler's business logic, which then 404s on the unknown
-/// `user_code` (mirrors `deny_unknown_user_code_returns_not_found`).
+/// action is consulted). Tokens carry no authorization claim at all
+/// (`CanReadServices` only consults `AccessEngine` grants), so the ephemeral
+/// user is granted `services:read` directly via `insert_grant` and the
+/// request proceeds past authorization to the handler's business logic,
+/// which then 404s on the unknown `user_code` (mirrors
+/// `deny_unknown_user_code_returns_not_found`).
 #[tokio::test]
 async fn deny_requires_permission() {
     let app = TestApp::new().await;
     let client = app.client();
 
     let user_id = uuid::Uuid::now_v7();
-    // Mint a token with ViewSettings only; the JWT `Permission` claim is not
-    // consulted by `CanReadServices` post-conversion, so the token's own
-    // claims are deliberately unrelated to the granted action below.
     let viewer_token = app
         .jwt
-        .create_access_token(user_id, &[Permission::ViewSettings], "password", None, None)
+        .create_access_token(user_id, "password", None, None)
         .expect("mint viewer token");
 
     let patterns = vec!["services:read".parse::<ActionPattern>().expect("pattern")];

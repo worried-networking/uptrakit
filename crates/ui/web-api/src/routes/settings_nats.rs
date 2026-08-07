@@ -374,7 +374,6 @@ mod tests {
     use super::*;
     use crate::ServiceCredentialSources;
     use crate::auth::AuthMethod;
-    use crate::auth::permissions::Permission;
     use crate::auth::registration::{RegistrationMode, RegistrationSettings};
     use crate::middleware::require_auth::{AuthenticatedApiTokenId, AuthenticatedUser};
     use sea_orm::{
@@ -680,7 +679,6 @@ mod tests {
             CanManageSystemSettings::new(AuthenticatedUser::new(
                 user.id,
                 AuthMethod::Password,
-                vec![Permission::ManageGlobalSettings],
                 None,
             )),
             None,
@@ -746,7 +744,6 @@ mod tests {
             CanManageSystemSettings::new(AuthenticatedUser::new(
                 user.id,
                 AuthMethod::Password,
-                vec![Permission::ManageGlobalSettings],
                 None,
             )),
             None,
@@ -797,7 +794,6 @@ mod tests {
             CanManageSystemSettings::new(AuthenticatedUser::new(
                 user.id,
                 AuthMethod::Password,
-                vec![Permission::ManageGlobalSettings],
                 None,
             )),
             None,
@@ -814,7 +810,6 @@ mod tests {
             CanManageSystemSettings::new(AuthenticatedUser::new(
                 user.id,
                 AuthMethod::Password,
-                vec![Permission::ManageGlobalSettings],
                 None,
             )),
             None,
@@ -863,7 +858,6 @@ mod tests {
             CanManageSystemSettings::new(AuthenticatedUser::new(
                 user.id,
                 AuthMethod::ApiToken,
-                vec![Permission::ManageGlobalSettings],
                 None,
             )),
             Some(Extension(AuthenticatedApiTokenId(token_id))),
@@ -924,7 +918,6 @@ mod tests {
             CanManageSystemSettings::new(AuthenticatedUser::new(
                 user.id,
                 AuthMethod::Password,
-                vec![Permission::ManageGlobalSettings],
                 None,
             )),
             None,
@@ -986,7 +979,6 @@ mod tests {
             CanManageSystemSettings::new(AuthenticatedUser::new(
                 user.id,
                 AuthMethod::Password,
-                vec![Permission::ManageGlobalSettings],
                 None,
             )),
             None,

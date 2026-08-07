@@ -268,26 +268,25 @@ pub async fn validate_api_token_for_mcp(
         return Err(McpAuthError::JwtNotAccepted);
     }
 
-    let (auth_user, token_id) =
-        match authenticate_api_token(state.db.db(), state.default_tenant_id, token).await {
-            Ok(pair) => pair,
-            Err(failure) => {
-                if let Some(reason) = failure.api_token_reason_code() {
-                    emit_api_token_auth_audit(
-                        &state.audit_emitter,
-                        state.default_tenant_id,
-                        None,
-                        AuditOutcome::Denied,
-                        reason,
-                    );
-                }
-                return Err(match failure {
-                    AuthFailure::UserDeactivated => McpAuthError::Forbidden,
-                    AuthFailure::InternalError => McpAuthError::Internal,
-                    _ => McpAuthError::Unauthorized,
-                });
+    let (auth_user, token_id) = match authenticate_api_token(state.db.db(), token).await {
+        Ok(pair) => pair,
+        Err(failure) => {
+            if let Some(reason) = failure.api_token_reason_code() {
+                emit_api_token_auth_audit(
+                    &state.audit_emitter,
+                    state.default_tenant_id,
+                    None,
+                    AuditOutcome::Denied,
+                    reason,
+                );
             }
-        };
+            return Err(match failure {
+                AuthFailure::UserDeactivated => McpAuthError::Forbidden,
+                AuthFailure::InternalError => McpAuthError::Internal,
+                _ => McpAuthError::Unauthorized,
+            });
+        }
+    };
 
     let access = match state
         .access_engine

@@ -19,8 +19,6 @@ use crate::app_state::AuditEmitterState;
 #[cfg(feature = "db-sqlite")]
 use crate::auth::AuthMethod;
 #[cfg(feature = "db-sqlite")]
-use crate::auth::permissions::Permission;
-#[cfg(feature = "db-sqlite")]
 use crate::extract::Validated;
 #[cfg(feature = "db-sqlite")]
 use crate::middleware::action::CanManageCommands;
@@ -680,7 +678,6 @@ async fn create_plugin_config_denied_dangerous_commands_writes_denied_audit_even
         CanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
             AuthMethod::ApiToken,
-            vec![Permission::ManageCommands],
             None,
         )),
         Some(Extension(AuthenticatedApiTokenId(actor_token_id))),
@@ -728,7 +725,6 @@ async fn create_plugin_config_success_persists_command_risk_details() {
         CanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
             AuthMethod::ApiToken,
-            vec![Permission::ManageCommands],
             None,
         )),
         None,
@@ -791,7 +787,6 @@ async fn update_plugin_config_success_persists_command_risk_details() {
         CanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
             AuthMethod::ApiToken,
-            vec![Permission::ManageCommands],
             None,
         )),
         None,
@@ -823,7 +818,6 @@ async fn update_plugin_config_success_persists_command_risk_details() {
         CanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
             AuthMethod::ApiToken,
-            vec![Permission::ManageCommands],
             None,
         )),
         None,
@@ -874,7 +868,6 @@ async fn delete_plugin_config_success_persists_command_risk_details() {
         CanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
             AuthMethod::ApiToken,
-            vec![Permission::ManageCommands],
             None,
         )),
         None,
@@ -908,7 +901,6 @@ async fn delete_plugin_config_success_persists_command_risk_details() {
         CanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
             AuthMethod::ApiToken,
-            vec![Permission::ManageCommands],
             None,
         )),
         None,
@@ -954,7 +946,6 @@ async fn delete_plugin_config_not_found_writes_denied_audit_event() {
         CanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
             AuthMethod::ApiToken,
-            vec![Permission::ManageCommands],
             None,
         )),
         None,
@@ -998,7 +989,6 @@ async fn delete_plugin_config_load_db_failure_writes_failed_audit_event() {
         CanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
             AuthMethod::ApiToken,
-            vec![Permission::ManageCommands],
             None,
         )),
         None,
@@ -1037,7 +1027,6 @@ async fn delete_plugin_config_delete_db_failure_writes_failed_audit_event() {
         CanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
             AuthMethod::ApiToken,
-            vec![Permission::ManageCommands],
             None,
         )),
         None,
@@ -1075,7 +1064,6 @@ async fn delete_plugin_config_delete_db_failure_writes_failed_audit_event() {
         CanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
             AuthMethod::ApiToken,
-            vec![Permission::ManageCommands],
             None,
         )),
         None,
@@ -1114,7 +1102,6 @@ async fn batch_plugin_configs_unknown_action_writes_validation_failed_audit_even
         CanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
             AuthMethod::ApiToken,
-            vec![Permission::ManageCommands],
             None,
         )),
         None,
@@ -1159,7 +1146,6 @@ async fn batch_plugin_configs_delete_backend_failure_writes_failed_audit_event()
         CanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
             AuthMethod::ApiToken,
-            vec![Permission::ManageCommands],
             None,
         )),
         None,
@@ -1203,7 +1189,6 @@ async fn create_seed_plugin_config(
         CanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
             AuthMethod::ApiToken,
-            vec![Permission::ManageCommands],
             None,
         )),
         None,
@@ -1259,7 +1244,6 @@ async fn batch_plugin_configs_delete_summary_success_writes_success_outcome() {
         CanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
             AuthMethod::ApiToken,
-            vec![Permission::ManageCommands],
             None,
         )),
         None,
@@ -1310,7 +1294,6 @@ async fn batch_plugin_configs_delete_summary_partial_writes_partial_outcome() {
         CanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
             AuthMethod::ApiToken,
-            vec![Permission::ManageCommands],
             None,
         )),
         None,
@@ -1352,7 +1335,6 @@ async fn batch_plugin_configs_delete_summary_denied_writes_denied_outcome() {
         CanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
             AuthMethod::ApiToken,
-            vec![Permission::ManageCommands],
             None,
         )),
         None,
@@ -1395,7 +1377,6 @@ async fn create_plugin_config_config_json_absent_from_audit_snapshots() {
         CanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
             AuthMethod::ApiToken,
-            vec![Permission::ManageCommands],
             None,
         )),
         None,

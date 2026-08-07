@@ -671,7 +671,7 @@ mod tests {
         let user_id = uuid::Uuid::now_v7();
         let jwt_token = app
             .jwt
-            .create_access_token(user_id, &[], "password", None, None)
+            .create_access_token(user_id, "password", None, None)
             .expect("create_access_token");
 
         let uri = format!(
@@ -721,7 +721,7 @@ mod tests {
         let user_id = uuid::Uuid::now_v7();
         let jwt_token = app
             .jwt
-            .create_access_token(user_id, &[], "password", None, None)
+            .create_access_token(user_id, "password", None, None)
             .expect("create_access_token");
 
         let uri = format!(
@@ -938,7 +938,7 @@ mod tests {
         // Issue JWT for the inserted user.
         let jwt_token = app
             .jwt
-            .create_access_token(user_id, &[], "password", None, None)
+            .create_access_token(user_id, "password", None, None)
             .expect("create_access_token");
 
         // Insert an active consent covering the requested scope.
@@ -1016,7 +1016,7 @@ mod tests {
 
         let jwt_token = app
             .jwt
-            .create_access_token(user_id, &[], "password", None, None)
+            .create_access_token(user_id, "password", None, None)
             .expect("create_access_token");
 
         let uri = valid_query(&client_id, &encode_redirect_uri(TEST_REDIRECT_URI));
@@ -1091,7 +1091,7 @@ mod tests {
         let user_id = insert_test_user(&db).await;
         let jwt_token = cimd_app
             .jwt
-            .create_access_token(user_id, &[], "password", None, None)
+            .create_access_token(user_id, "password", None, None)
             .expect("create_access_token");
 
         let req = Request::builder()
@@ -1148,7 +1148,7 @@ mod tests {
 
         let user_id = insert_test_user(&db).await;
         let jwt_token = jwt
-            .create_access_token(user_id, &[], "password", None, None)
+            .create_access_token(user_id, "password", None, None)
             .expect("create_access_token");
 
         // Non-resolvable https:// client_id — enters CIMD branch, fetch fails,

@@ -9,7 +9,6 @@ use uptrakit_shared_types::access::{ActionPattern, Selector};
 use crate::test_harness::TestApp;
 use crate::test_harness::fixtures::register_and_get_token;
 use http_body_util::BodyExt;
-use uptrakit_web_api_types::permissions::Permission;
 
 fn ensure_crypto_provider() {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
@@ -62,8 +61,7 @@ async fn github_provider_settings_forbids_missing_permission() {
     let client = app.client();
 
     let user_id = uuid::Uuid::now_v7();
-    // Mint a token with the legacy ViewSettings claim; it is not consulted by
-    // the post-conversion action extractor (`CanManageSystemSettings` only
+    // Tokens carry no authorization claim (`CanManageSystemSettings` only
     // reads `AccessEngine` grants), so the mapped `settings:read` action is
     // granted directly. This endpoint requires `system.settings:manage`, so
     // the grant is deliberately insufficient — the test still pins the
@@ -71,7 +69,7 @@ async fn github_provider_settings_forbids_missing_permission() {
     // passing on a zero-grant subject.
     let token = app
         .jwt
-        .create_access_token(user_id, &[Permission::ViewSettings], "password", None, None)
+        .create_access_token(user_id, "password", None, None)
         .expect("mint reduced-permission token");
     let patterns = vec!["settings:read".parse::<ActionPattern>().expect("pattern")];
     insert_grant(

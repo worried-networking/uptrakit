@@ -1679,7 +1679,6 @@ mod tests {
 
     use super::*;
     use crate::auth::AuthMethod;
-    use crate::auth::permissions::Permission as AuthPermission;
     #[cfg(feature = "db-sqlite")]
     use crate::auth::registration::{RegistrationMode, RegistrationSettings};
     #[cfg(feature = "db-sqlite")]
@@ -1702,13 +1701,13 @@ mod tests {
     #[cfg(feature = "db-sqlite")]
     use uptrakit_wire::ControllerMessage;
 
-    fn auth_user_with_permissions(permissions: Vec<AuthPermission>) -> AuthenticatedUser {
-        AuthenticatedUser::new(Uuid::nil(), AuthMethod::Password, permissions, None)
+    fn test_auth_user() -> AuthenticatedUser {
+        AuthenticatedUser::new(Uuid::nil(), AuthMethod::Password, None)
     }
 
     #[cfg(feature = "db-sqlite")]
-    fn api_token_auth_user_with_permissions(permissions: Vec<AuthPermission>) -> AuthenticatedUser {
-        AuthenticatedUser::new(Uuid::now_v7(), AuthMethod::ApiToken, permissions, None)
+    fn test_api_token_auth_user() -> AuthenticatedUser {
+        AuthenticatedUser::new(Uuid::now_v7(), AuthMethod::ApiToken, None)
     }
 
     fn catalog_item(surface_id: &str, label: &str, provider_id: &str) -> SurfaceCatalogItem {
@@ -2266,7 +2265,7 @@ mod tests {
         let denied = invoke_surface_interaction(
             State(Arc::clone(&state)),
             TenantContext { tenant_id },
-            axum::Extension(auth_user_with_permissions(vec![])),
+            axum::Extension(test_auth_user()),
             axum::Extension(AccessAuthority::Ready(
                 state
                     .access_engine
@@ -2390,9 +2389,7 @@ mod tests {
         let denied = invoke_surface_interaction(
             State(Arc::clone(&state)),
             TenantContext { tenant_id },
-            axum::Extension(auth_user_with_permissions(vec![
-                AuthPermission::ViewSoftware,
-            ])),
+            axum::Extension(test_auth_user()),
             axum::Extension(AccessAuthority::Ready(
                 state
                     .access_engine
@@ -2470,10 +2467,7 @@ mod tests {
         let denied = invoke_surface_interaction(
             State(Arc::clone(&state)),
             TenantContext { tenant_id },
-            axum::Extension(api_token_auth_user_with_permissions(vec![
-                AuthPermission::ViewSoftware,
-                AuthPermission::UpdateSoftware,
-            ])),
+            axum::Extension(test_api_token_auth_user()),
             axum::Extension(AccessAuthority::Ready(
                 state
                     .access_engine
@@ -2573,10 +2567,7 @@ mod tests {
         let invoke = invoke_surface_interaction(
             State(Arc::clone(&state)),
             TenantContext { tenant_id },
-            axum::Extension(api_token_auth_user_with_permissions(vec![
-                AuthPermission::ViewSoftware,
-                AuthPermission::UpdateSoftware,
-            ])),
+            axum::Extension(test_api_token_auth_user()),
             axum::Extension(AccessAuthority::Ready(
                 state
                     .access_engine
@@ -2659,10 +2650,7 @@ mod tests {
         let invoke = invoke_surface_interaction(
             State(Arc::clone(&state)),
             TenantContext { tenant_id },
-            axum::Extension(auth_user_with_permissions(vec![
-                AuthPermission::ViewSoftware,
-                AuthPermission::UpdateSoftware,
-            ])),
+            axum::Extension(test_auth_user()),
             axum::Extension(AccessAuthority::Ready(
                 state
                     .access_engine

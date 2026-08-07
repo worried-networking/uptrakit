@@ -1,12 +1,9 @@
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use sea_orm::{DatabaseConnection, EntityTrait};
 use uuid::Uuid;
 
 use uptrakit_audit_log::{AuditActionType, AuditActorType, AuditEmitter, AuditEntry, AuditOutcome};
 use uptrakit_shared_db::entity::prelude::*;
-use uptrakit_shared_db::entity::{permission, role_permission, user_role};
 use uptrakit_web_api_auth::auth::api_token::ApiTokenService;
-// Alias to avoid name collision with the DB `Permission` entity from entity::prelude::*.
-use uptrakit_web_api_auth::auth::permissions::Permission as AuthPermission;
 use uptrakit_web_api_auth::auth::{AuthError, AuthMethod};
 
 use crate::auth::{AuthFailure, AuthenticatedUser};
@@ -45,7 +42,6 @@ pub fn emit_api_token_auth_audit(
 /// [`AuthFailure::InternalError`] on database failures.
 pub async fn authenticate_api_token(
     db: &DatabaseConnection,
-    default_tenant_id: Uuid,
     token: &str,
 ) -> Result<(AuthenticatedUser, Uuid), AuthFailure> {
     let service = ApiTokenService::new(db.clone());
@@ -68,64 +64,10 @@ pub async fn authenticate_api_token(
         return Err(AuthFailure::UserDeactivated);
     }
 
-    let permissions = get_user_permissions(db, default_tenant_id, user_id)
-        .await
-        .map_err(|e| {
-            tracing::error!(err = %e, user_id = %user_id, "failed to load user permissions");
-            AuthFailure::InternalError
-        })?;
-
     Ok((
-        AuthenticatedUser::new(user_id, AuthMethod::ApiToken, permissions, None),
+        AuthenticatedUser::new(user_id, AuthMethod::ApiToken, None),
         token_id,
     ))
-}
-
-// Mirrors `require_auth::get_user_permissions`; cannot delegate because controller-core must not depend on web-api.
-async fn get_user_permissions(
-    db: &DatabaseConnection,
-    tenant_id: Uuid,
-    user_id: Uuid,
-) -> uptrakit_web_api_auth::auth::Result<Vec<AuthPermission>> {
-    use rootcause::prelude::*;
-
-    let user_roles = UserRole::find()
-        .filter(user_role::Column::TenantId.eq(tenant_id))
-        .filter(user_role::Column::UserId.eq(user_id))
-        .all(db)
-        .await
-        .context_to()?;
-
-    let role_ids: Vec<Uuid> = user_roles.iter().map(|ur| ur.role_id).collect();
-    if role_ids.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let role_perms = RolePermission::find()
-        .filter(role_permission::Column::RoleId.is_in(role_ids))
-        .all(db)
-        .await
-        .context_to()?;
-
-    let perm_ids: Vec<Uuid> = role_perms.iter().map(|rp| rp.permission_id).collect();
-    if perm_ids.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let perm_models = Permission::find()
-        .filter(permission::Column::Id.is_in(perm_ids))
-        .all(db)
-        .await
-        .context_to()?;
-
-    let mut seen = std::collections::HashSet::new();
-    let permissions = perm_models
-        .into_iter()
-        .filter_map(|p| p.name.parse::<AuthPermission>().ok())
-        .filter(|p| seen.insert(p.clone()))
-        .collect();
-
-    Ok(permissions)
 }
 
 fn classify_api_token_verify_error(error: &rootcause::Report<AuthError>) -> AuthFailure {

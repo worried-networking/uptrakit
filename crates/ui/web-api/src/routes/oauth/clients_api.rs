@@ -587,7 +587,7 @@ mod tests {
         // Mint a token for a principal with no engine grants.
         let user_id = uuid::Uuid::nil();
         let token = jwt
-            .create_access_token(user_id, &[], "password", None, None)
+            .create_access_token(user_id, "password", None, None)
             .expect("create access token");
 
         let status = client

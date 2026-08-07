@@ -2,7 +2,6 @@ use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation};
 use rootcause::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use super::permissions::Permission;
 use super::token::generate_uuid;
 use super::{AuthError, Result};
 
@@ -12,7 +11,6 @@ pub const ACCESS_TOKEN_EXPIRY_SECS: i64 = 900; // 15 minutes
 pub struct AccessTokenClaims {
     pub sub: String,
     pub jti: String,
-    pub permissions: Vec<Permission>,
     pub auth_method: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub oidc_provider_id: Option<String>,
@@ -57,7 +55,6 @@ impl JwtManager {
     pub fn create_access_token(
         &self,
         user_id: uuid::Uuid,
-        permissions: &[Permission],
         auth_method: &str,
         oidc_provider_id: Option<uuid::Uuid>,
         setup_required: Option<bool>,
@@ -67,7 +64,6 @@ impl JwtManager {
         let claims = AccessTokenClaims {
             sub: user_id.to_string(),
             jti: generate_uuid().to_string(),
-            permissions: permissions.to_vec(),
             auth_method: auth_method.to_string(),
             oidc_provider_id: oidc_provider_id.map(|id| id.to_string()),
             iat: now,
@@ -124,22 +120,66 @@ mod tests {
         JwtManager::from_secret(b"test-secret-key-for-jwt-testing-only-do-not-use")
     }
 
+    /// Pre-M1.7 tokens carry a `permissions` array; serde must ignore the
+    /// unknown field so outstanding sessions survive the deploy.
+    #[test]
+    fn access_token_with_legacy_permissions_claim_still_decodes() {
+        let secret = b"test-secret-key-for-jwt-testing-only-do-not-use";
+        let manager = JwtManager::from_secret(secret);
+        let user_id = uuid::Uuid::now_v7();
+
+        let token = manager
+            .create_access_token(user_id, "password", None, None)
+            .expect("mint");
+        let claims = manager.decode_access_token(&token).expect("decode");
+        assert!(!claims.jti.is_empty());
+
+        // The new shape omits `permissions` entirely.
+        let parts: Vec<&str> = token.split('.').collect();
+        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(parts[1])
+            .expect("decode b64");
+        let json: serde_json::Value = serde_json::from_slice(&payload).expect("json");
+        assert!(json.get("permissions").is_none());
+
+        // Legacy shape: hand-build a payload carrying the removed
+        // `permissions` field and encode/decode through the same manager,
+        // mirroring `test_decode_legacy_token_without_aud_rejected`'s
+        // raw-encode idiom below instead of inventing a helper.
+        let legacy_payload = serde_json::json!({
+            "sub": claims.sub,
+            "jti": claims.jti,
+            "permissions": ["view_settings", "manage_users"],
+            "auth_method": "password",
+            "iat": claims.iat,
+            "exp": claims.exp,
+            "iss": "uptrakit",
+            "aud": ["uptrakit"],
+        });
+        let legacy_token = jsonwebtoken::encode(
+            &Header::default(),
+            &legacy_payload,
+            &EncodingKey::from_secret(secret),
+        )
+        .expect("encode legacy token");
+
+        let decoded = manager
+            .decode_access_token(&legacy_token)
+            .expect("legacy token must decode");
+        assert_eq!(decoded.sub, claims.sub);
+    }
+
     #[test]
     fn test_create_and_decode_access_token() {
         let manager = test_manager();
         let user_id = uuid::Uuid::now_v7();
-        let permissions = vec![Permission::ViewSettings, Permission::UpdateServices];
 
         let token = manager
-            .create_access_token(user_id, &permissions, "password", None, None)
+            .create_access_token(user_id, "password", None, None)
             .unwrap();
 
         let claims = manager.decode_access_token(&token).unwrap();
         assert_eq!(claims.sub, user_id.to_string());
-        assert_eq!(
-            claims.permissions,
-            vec![Permission::ViewSettings, Permission::UpdateServices]
-        );
         assert_eq!(claims.auth_method, "password");
         assert!(claims.oidc_provider_id.is_none());
     }
@@ -149,10 +189,9 @@ mod tests {
         let manager = test_manager();
         let user_id = uuid::Uuid::now_v7();
         let provider_id = uuid::Uuid::now_v7();
-        let permissions = vec![Permission::ViewServices];
 
         let token = manager
-            .create_access_token(user_id, &permissions, "oidc", Some(provider_id), None)
+            .create_access_token(user_id, "oidc", Some(provider_id), None)
             .unwrap();
 
         let claims = manager.decode_access_token(&token).unwrap();
@@ -175,7 +214,7 @@ mod tests {
         let user_id = uuid::Uuid::now_v7();
 
         let token = manager1
-            .create_access_token(user_id, &[], "password", None, None)
+            .create_access_token(user_id, "password", None, None)
             .unwrap();
 
         let result = manager2.decode_access_token(&token);
@@ -196,7 +235,7 @@ mod tests {
         struct LegacyClaims<'a> {
             sub: &'a str,
             jti: &'a str,
-            permissions: Vec<Permission>,
+            permissions: Vec<String>,
             auth_method: &'a str,
             iat: i64,
             exp: i64,
@@ -236,7 +275,7 @@ mod tests {
 
         let user_id = uuid::Uuid::now_v7();
         let token = manager1
-            .create_access_token(user_id, &[], "password", None, None)
+            .create_access_token(user_id, "password", None, None)
             .unwrap();
 
         let claims = manager2.decode_access_token(&token).unwrap();
@@ -248,7 +287,7 @@ mod tests {
         let manager = JwtManager::from_secret(b"test-secret-that-is-long-enough!!");
         let user_id = uuid::Uuid::now_v7();
         let token = manager
-            .create_access_token(user_id, &[], "password", None, Some(true))
+            .create_access_token(user_id, "password", None, Some(true))
             .expect("encode");
         let claims = manager.decode_access_token(&token).expect("decode");
         assert_eq!(claims.setup_required, Some(true));
@@ -259,7 +298,7 @@ mod tests {
         let manager = JwtManager::from_secret(b"test-secret-that-is-long-enough!!");
         let user_id = uuid::Uuid::now_v7();
         let token = manager
-            .create_access_token(user_id, &[], "password", None, None)
+            .create_access_token(user_id, "password", None, None)
             .expect("encode");
         let claims = manager.decode_access_token(&token).expect("decode");
         assert_eq!(claims.setup_required, None);

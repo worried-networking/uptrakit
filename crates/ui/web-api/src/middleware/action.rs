@@ -2,9 +2,9 @@
 //!
 //! Converted route families declare authorization with these extractors +
 //! native `security(("oauth2" = ["<action>"]), ("developer_token" = []))`
-//! requirements. The legacy `permission_extractor!` + `x-required-permission`
-//! model is fully retired from route families; it survives only in
-//! `middleware/permission.rs` itself, which M1.8 deletes.
+//! requirements. The legacy macro-generated permission-extractor +
+//! `x-required-permission` model is fully retired from route families;
+//! `middleware/permission.rs` itself was deleted in M1.7.
 //! Verdicts: 401 no principal, 403 `Decision::Deny`, 500 engine unavailable
 //! (fail-closed).
 
@@ -26,9 +26,8 @@ use crate::middleware::require_auth::AuthenticatedUser;
 ///
 /// `Unavailable` means the engine could not resolve the principal's grants
 /// (DB failure): action extractors fail closed with 500; routes without an
-/// action extractor (`me`, `logout`, unconverted families) proceed —
-/// rendering the verdict here, not in the middleware, is what preserves
-/// `me`'s documented 200-on-DB-blip guard (`routes/auth.rs`) until M1.7.
+/// action extractor (`logout`, unconverted families) proceed; `me` renders
+/// `Unavailable` as `authority: "unavailable"` with HTTP 200 (M1.7).
 #[derive(Clone)]
 #[non_exhaustive]
 pub enum AccessAuthority {
@@ -131,7 +130,7 @@ pub(crate) fn record_access_denied(
 
 /// Generates a concrete Axum extractor struct for a single catalog action.
 ///
-/// Same ergonomic shape as `permission_extractor!` (`middleware/permission.rs`)
+/// Same ergonomic shape as the retired legacy permission extractor
 /// plus one new outcome: 500 when [`AccessAuthority::Unavailable`].
 macro_rules! action_extractor {
     ($(
@@ -447,12 +446,8 @@ mod tests {
 
     fn parts_with(user_id: uuid::Uuid, authority: Option<AccessAuthority>) -> Parts {
         let mut req = Request::new(Body::empty());
-        req.extensions_mut().insert(AuthenticatedUser::new(
-            user_id,
-            AuthMethod::Password,
-            vec![],
-            None,
-        ));
+        req.extensions_mut()
+            .insert(AuthenticatedUser::new(user_id, AuthMethod::Password, None));
         if let Some(authority) = authority {
             req.extensions_mut().insert(authority);
         }

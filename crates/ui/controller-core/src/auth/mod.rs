@@ -6,7 +6,6 @@ pub mod rate_limit;
 
 pub use uptrakit_web_api_auth::auth::device_flow::DeviceFlowStore;
 pub use uptrakit_web_api_auth::auth::jwt::JwtManager;
-pub use uptrakit_web_api_auth::auth::permissions::Permission;
 pub use uptrakit_web_api_auth::auth::rate_limit::RateLimitStore;
 pub use uptrakit_web_api_auth::auth::token_denylist::TokenDenylist;
 pub use uptrakit_web_api_auth::auth::{AuthError, AuthMethod};
@@ -78,30 +77,18 @@ where
 pub struct AuthenticatedUser {
     pub user_id: uuid::Uuid,
     pub auth_method: AuthMethod,
-    pub permissions: Vec<Permission>,
     /// JTI of the JWT access token, if authenticated via JWT (None for API token auth).
     pub jti: Option<String>,
 }
 
 impl AuthenticatedUser {
     /// Creates a new [`AuthenticatedUser`].
-    pub fn new(
-        user_id: uuid::Uuid,
-        auth_method: AuthMethod,
-        permissions: Vec<Permission>,
-        jti: Option<String>,
-    ) -> Self {
+    pub fn new(user_id: uuid::Uuid, auth_method: AuthMethod, jti: Option<String>) -> Self {
         Self {
             user_id,
             auth_method,
-            permissions,
             jti,
         }
-    }
-
-    /// Returns `true` if the authenticated user holds the given permission.
-    pub fn has_permission(&self, perm: Permission) -> bool {
-        self.permissions.contains(&perm)
     }
 
     /// Returns the `(actor_type, actor_id)` pair for audit log entries.

@@ -7,7 +7,6 @@ use super::*;
 use crate::AppState;
 use crate::ServiceCredentialSources;
 use crate::auth::AuthMethod;
-use crate::auth::permissions::Permission;
 use crate::auth::registration::{RegistrationMode, RegistrationSettings};
 use crate::cert_signer::{AgentCertSigner, CertSignerError, SignedCertBundle};
 use crate::middleware::action::{
@@ -378,12 +377,7 @@ async fn merge_service_target_connected_returns_conflict() {
         .register(target.id, caps, None, None, None)
         .await;
 
-    let auth_user = AuthenticatedUser::new(
-        uuid::Uuid::now_v7(),
-        AuthMethod::Password,
-        vec![Permission::UpdateServices],
-        None,
-    );
+    let auth_user = AuthenticatedUser::new(uuid::Uuid::now_v7(), AuthMethod::Password, None);
     let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
     let response = merge_service(
@@ -441,12 +435,7 @@ async fn merge_service_succeeds_and_deactivates_source() {
     let state = test_state(db.clone(), tenant_id).await;
     let (target, source) = insert_target_and_source(&db, tenant_id).await;
 
-    let auth_user = AuthenticatedUser::new(
-        uuid::Uuid::now_v7(),
-        AuthMethod::Password,
-        vec![Permission::UpdateServices],
-        None,
-    );
+    let auth_user = AuthenticatedUser::new(uuid::Uuid::now_v7(), AuthMethod::Password, None);
     let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
     let response = merge_service(
@@ -500,12 +489,7 @@ async fn merge_service_writes_service_merge_audit_event() {
     let state = test_state(db.clone(), tenant_id).await;
     let (target, source) = insert_target_and_source(&db, tenant_id).await;
 
-    let auth_user = AuthenticatedUser::new(
-        uuid::Uuid::now_v7(),
-        AuthMethod::Password,
-        vec![Permission::UpdateServices],
-        None,
-    );
+    let auth_user = AuthenticatedUser::new(uuid::Uuid::now_v7(), AuthMethod::Password, None);
     let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
     let response = merge_service(
@@ -554,12 +538,7 @@ async fn merge_service_api_token_actor_writes_api_token_actor_type() {
     let state = test_state(db.clone(), tenant_id).await;
     let (target, source) = insert_target_and_source(&db, tenant_id).await;
 
-    let auth_user = AuthenticatedUser::new(
-        uuid::Uuid::now_v7(),
-        AuthMethod::ApiToken,
-        vec![Permission::UpdateServices],
-        None,
-    );
+    let auth_user = AuthenticatedUser::new(uuid::Uuid::now_v7(), AuthMethod::ApiToken, None);
     let token_id = uuid::Uuid::now_v7();
     let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
@@ -597,12 +576,7 @@ async fn approve_service_writes_service_approve_audit_event() {
     let state = test_state(db.clone(), tenant_id).await;
     let (_target, source) = insert_target_and_source(&db, tenant_id).await;
 
-    let auth_user = AuthenticatedUser::new(
-        uuid::Uuid::now_v7(),
-        AuthMethod::Password,
-        vec![Permission::ApproveServices],
-        None,
-    );
+    let auth_user = AuthenticatedUser::new(uuid::Uuid::now_v7(), AuthMethod::Password, None);
     let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
     let response = approve_service(
@@ -640,12 +614,7 @@ async fn update_service_missing_service_writes_denied_audit_event() {
     let tenant_id = uuid::Uuid::now_v7();
     insert_tenant(&db, tenant_id).await;
     let state = test_state(db.clone(), tenant_id).await;
-    let auth_user = AuthenticatedUser::new(
-        uuid::Uuid::now_v7(),
-        AuthMethod::Password,
-        vec![Permission::UpdateServices],
-        None,
-    );
+    let auth_user = AuthenticatedUser::new(uuid::Uuid::now_v7(), AuthMethod::Password, None);
     let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
     let missing_service_id = uuid::Uuid::now_v7();
 
@@ -690,12 +659,7 @@ async fn approve_service_missing_service_writes_denied_audit_event() {
     let tenant_id = uuid::Uuid::now_v7();
     insert_tenant(&db, tenant_id).await;
     let state = test_state(db.clone(), tenant_id).await;
-    let auth_user = AuthenticatedUser::new(
-        uuid::Uuid::now_v7(),
-        AuthMethod::Password,
-        vec![Permission::ApproveServices],
-        None,
-    );
+    let auth_user = AuthenticatedUser::new(uuid::Uuid::now_v7(), AuthMethod::Password, None);
     let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
     let missing_service_id = uuid::Uuid::now_v7();
 
@@ -742,12 +706,7 @@ async fn reject_service_writes_service_reject_audit_event() {
     let state = test_state(db.clone(), tenant_id).await;
     let (_target, source) = insert_target_and_source(&db, tenant_id).await;
 
-    let auth_user = AuthenticatedUser::new(
-        uuid::Uuid::now_v7(),
-        AuthMethod::Password,
-        vec![Permission::RejectServices],
-        None,
-    );
+    let auth_user = AuthenticatedUser::new(uuid::Uuid::now_v7(), AuthMethod::Password, None);
     let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
     let response = reject_service(
@@ -787,12 +746,7 @@ async fn deactivate_service_writes_service_deactivate_audit_event() {
     let state = test_state(db.clone(), tenant_id).await;
     let (target, _source) = insert_target_and_source(&db, tenant_id).await;
 
-    let auth_user = AuthenticatedUser::new(
-        uuid::Uuid::now_v7(),
-        AuthMethod::Password,
-        vec![Permission::RemoveServices],
-        None,
-    );
+    let auth_user = AuthenticatedUser::new(uuid::Uuid::now_v7(), AuthMethod::Password, None);
     let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
     let response = deactivate_service(
@@ -830,12 +784,7 @@ async fn deactivate_service_missing_service_writes_denied_audit_event() {
     let tenant_id = uuid::Uuid::now_v7();
     insert_tenant(&db, tenant_id).await;
     let state = test_state(db.clone(), tenant_id).await;
-    let auth_user = AuthenticatedUser::new(
-        uuid::Uuid::now_v7(),
-        AuthMethod::Password,
-        vec![Permission::RemoveServices],
-        None,
-    );
+    let auth_user = AuthenticatedUser::new(uuid::Uuid::now_v7(), AuthMethod::Password, None);
     let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
     let missing_service_id = uuid::Uuid::now_v7();
 
@@ -899,12 +848,7 @@ async fn set_update_freeze_writes_service_freeze_enable_audit_event() {
         .register(target.id, caps, None, None, None)
         .await;
 
-    let auth_user = AuthenticatedUser::new(
-        uuid::Uuid::now_v7(),
-        AuthMethod::Password,
-        vec![Permission::UpdateServices],
-        None,
-    );
+    let auth_user = AuthenticatedUser::new(uuid::Uuid::now_v7(), AuthMethod::Password, None);
     let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
     let response = set_update_freeze(
@@ -946,12 +890,7 @@ async fn set_update_freeze_not_connected_writes_denied_audit_event() {
     insert_tenant(&db, tenant_id).await;
     let state = test_state(db.clone(), tenant_id).await;
     let (target, _source) = insert_target_and_source(&db, tenant_id).await;
-    let auth_user = AuthenticatedUser::new(
-        uuid::Uuid::now_v7(),
-        AuthMethod::Password,
-        vec![Permission::UpdateServices],
-        None,
-    );
+    let auth_user = AuthenticatedUser::new(uuid::Uuid::now_v7(), AuthMethod::Password, None);
     let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
     let response = set_update_freeze(
@@ -999,12 +938,7 @@ async fn batch_services_invalid_request_writes_validation_failed_audit_event() {
     let state = test_state(db.clone(), tenant_id).await;
 
     let user_id = uuid::Uuid::now_v7();
-    let auth_user = AuthenticatedUser::new(
-        user_id,
-        AuthMethod::Password,
-        vec![Permission::ApproveServices],
-        None,
-    );
+    let auth_user = AuthenticatedUser::new(user_id, AuthMethod::Password, None);
     let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
     let access_ctx = state
         .access_engine
@@ -1050,12 +984,7 @@ async fn batch_services_permission_denied_writes_denied_audit_event() {
     let (target, _source) = insert_target_and_source(&db, tenant_id).await;
 
     let user_id = uuid::Uuid::now_v7();
-    let auth_user = AuthenticatedUser::new(
-        user_id,
-        AuthMethod::Password,
-        vec![Permission::ViewServices],
-        None,
-    );
+    let auth_user = AuthenticatedUser::new(user_id, AuthMethod::Password, None);
     let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
     let access_ctx = state
         .access_engine
@@ -1104,12 +1033,7 @@ async fn batch_services_approve_success_writes_success_audit_event() {
     let (_target, source) = insert_target_and_source(&db, tenant_id).await;
 
     let user_id = uuid::Uuid::now_v7();
-    let auth_user = AuthenticatedUser::new(
-        user_id,
-        AuthMethod::Password,
-        vec![Permission::ApproveServices],
-        None,
-    );
+    let auth_user = AuthenticatedUser::new(user_id, AuthMethod::Password, None);
     let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
     let patterns = vec![
@@ -1170,8 +1094,7 @@ async fn batch_services_authorization_unavailable_short_circuits_before_validate
     insert_tenant(&db, tenant_id).await;
     let state = test_state(db.clone(), tenant_id).await;
 
-    let auth_user =
-        AuthenticatedUser::new(uuid::Uuid::now_v7(), AuthMethod::Password, vec![], None);
+    let auth_user = AuthenticatedUser::new(uuid::Uuid::now_v7(), AuthMethod::Password, None);
     let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
     // Over MAX_BATCH_SIZE (100): `body.validate()` would reject this with
@@ -1291,12 +1214,7 @@ async fn merge_service_returns_400_when_target_embedded() {
     .await
     .expect("insert source service");
 
-    let auth_user = AuthenticatedUser::new(
-        uuid::Uuid::now_v7(),
-        AuthMethod::Password,
-        vec![Permission::UpdateServices],
-        None,
-    );
+    let auth_user = AuthenticatedUser::new(uuid::Uuid::now_v7(), AuthMethod::Password, None);
     let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
     let response = merge_service(
@@ -1388,12 +1306,7 @@ async fn merge_service_returns_400_when_source_embedded() {
     )
     .await;
 
-    let auth_user = AuthenticatedUser::new(
-        uuid::Uuid::now_v7(),
-        AuthMethod::Password,
-        vec![Permission::UpdateServices],
-        None,
-    );
+    let auth_user = AuthenticatedUser::new(uuid::Uuid::now_v7(), AuthMethod::Password, None);
     let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
     let response = merge_service(

@@ -1,7 +1,6 @@
 pub mod action;
 pub mod audit_log;
 pub mod etag;
-pub mod permission;
 pub mod rate_limit;
 pub mod request_id;
 pub mod request_log;
