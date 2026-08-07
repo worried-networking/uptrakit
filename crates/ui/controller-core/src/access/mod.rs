@@ -42,8 +42,8 @@ use uptrakit_shared_db::access_grants::{
 };
 use uptrakit_shared_db::entity::user_role;
 use uptrakit_shared_macros::impl_report_conversion;
-use uptrakit_shared_types::access::{Action, ActionPattern, Selector};
-use uptrakit_shared_types::access::{Decision, DenyReason, TargetRef, Visibility};
+use uptrakit_shared_types::access::{Action, ActionPattern, CATALOG, Decision, Selector};
+use uptrakit_shared_types::access::{DenyReason, TargetRef, Visibility};
 use uptrakit_wire::AccessInvalidatedPayload;
 
 /// Default TTL backstop for cached principal authority.
@@ -310,6 +310,37 @@ impl AccessEngine {
         } else {
             Visibility::None
         }
+    }
+
+    /// Expanded effective action list for principal-facing introspection
+    /// (`me`, login-family responses).
+    ///
+    /// Membership is derived through [`AccessEngine::authorize`] itself —
+    /// never a re-implementation of pattern matching — so the list can
+    /// never drift from real enforcement outcomes. Wildcard expansion,
+    /// scope intersection (vacuously true for scope-less credentials),
+    /// and the dynamic-registry gate all come from `authorize`.
+    /// M1 CONSTRAINT (pinned by test): the `target: None` derivation is
+    /// exact only while every grant selector is `Selector::All` — a
+    /// non-`All` grant makes its actions vanish from this list entirely.
+    /// M2.1 (selectors) must revisit this together with D13's visibility
+    /// summaries; until then over-reporting is impossible, only
+    /// under-reporting of selector-scoped grants.
+    #[must_use]
+    pub fn allowed_actions(&self, ctx: &AccessContext) -> Vec<Action> {
+        let built_ins = CATALOG.iter().flat_map(|entry| {
+            entry.verbs.iter().filter_map(|verb_entry| {
+                // Catalog literals always parse — the macro emits only
+                // valid pairs (same idiom as routes/access_catalog.rs).
+                verb_entry.action_str.parse::<Action>().ok()
+            })
+        });
+        let mut actions: Vec<Action> = built_ins
+            .chain(self.dynamic_actions())
+            .filter(|action| matches!(self.authorize(ctx, action, None), Decision::Allow))
+            .collect();
+        actions.sort_unstable_by_key(ToString::to_string);
+        actions
     }
 }
 
@@ -634,6 +665,105 @@ mod tests {
             populated_registry.authorize(&ctx, &action, None),
             Decision::Allow,
             "registering the action must allow once grant/scope pass"
+        );
+    }
+
+    fn engine_with_stub_registry() -> AccessEngine {
+        let action = Action::new(
+            Resource::surface("test-stub").expect("valid surface resource"),
+            Verb::Use,
+        )
+        .expect("dynamic action");
+        dummy_engine().with_registry(Arc::new(StubRegistry {
+            registered: vec![action],
+        }))
+    }
+
+    #[test]
+    fn allowed_actions_expands_wildcard_grant_to_concrete_catalog_verbs() {
+        let engine = dummy_engine();
+        let ctx = ctx_with(vec![resolved_grant("software:*")], None);
+        let actions = engine.allowed_actions(&ctx);
+        let strs: Vec<String> = actions.iter().map(ToString::to_string).collect();
+        assert!(
+            strs.contains(&"software:read".to_string()),
+            "read expanded: {strs:?}"
+        );
+        assert!(
+            strs.contains(&"software:update".to_string()),
+            "update expanded: {strs:?}"
+        );
+        assert!(
+            strs.iter().all(|s| s.starts_with("software:")),
+            "wildcard must not leak other resources: {strs:?}"
+        );
+    }
+
+    #[test]
+    fn allowed_actions_applies_scope_ceiling_intersection() {
+        let engine = dummy_engine();
+        let ctx = ctx_with(vec![resolved_grant("*:*")], scope_of(&["hosts:read"]));
+        let strs: Vec<String> = engine
+            .allowed_actions(&ctx)
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(
+            strs,
+            vec!["hosts:read".to_string()],
+            "scope must cap the grant"
+        );
+    }
+
+    #[test]
+    fn allowed_actions_is_sorted_and_omits_dynamic_without_registry() {
+        let engine = dummy_engine();
+        let ctx = ctx_with(vec![resolved_grant("*:*")], None);
+        let strs: Vec<String> = engine
+            .allowed_actions(&ctx)
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        let mut sorted = strs.clone();
+        sorted.sort_unstable();
+        assert_eq!(strs, sorted, "deterministic wire order");
+        assert!(
+            strs.iter()
+                .all(|s| !s.starts_with("surface.") && !s.starts_with("plugin.")),
+            "no registry configured => no dynamic entries: {strs:?}"
+        );
+    }
+
+    #[test]
+    fn allowed_actions_includes_registered_dynamic_action_when_granted() {
+        let engine = engine_with_stub_registry();
+        let ctx = ctx_with(vec![resolved_grant("surface.test-stub:use")], None);
+        let strs: Vec<String> = engine
+            .allowed_actions(&ctx)
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(strs, vec!["surface.test-stub:use".to_string()]);
+    }
+
+    #[test]
+    fn allowed_actions_under_reports_non_all_selector_grants_until_m2_1() {
+        let engine = dummy_engine();
+        let scoped_grant = ResolvedGrant {
+            id: Uuid::nil(),
+            tenant_id: Some(Uuid::nil()),
+            subject: GrantSubject::User(Uuid::nil()),
+            patterns: vec!["hosts:*".parse().expect("valid pattern")],
+            selector: Selector::Hosts {
+                ids: vec![Uuid::now_v7()],
+            },
+            description: None,
+        };
+        let ctx = ctx_with(vec![scoped_grant], None);
+        assert_eq!(
+            engine.allowed_actions(&ctx),
+            Vec::<Action>::new(),
+            "M1: a non-All selector grant's actions vanish from allowed_actions until M2.1"
         );
     }
 
