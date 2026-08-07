@@ -9,9 +9,11 @@ use uptrakit_shared_types::access::{Action, actions};
 
 /// Map a legacy [`Permission`] to the [`Action`]s it confers.
 ///
-/// Temporary M1 bridge: consumers are the M1.4–M1.7 transitional
-/// enforcement sites; removal site is M1.8. **No site may gate
-/// `access:manage` through this shim** — grant-admin authorization uses the
+/// Temporary M1 bridge: no non-test consumers remain now that M1.7 deleted
+/// `permission_extractor!` and every enforcement site now gates via
+/// `action_extractor!`. This function survives only until `Permission`
+/// itself is deleted in M1.8, at which point it is removed with it. **No
+/// site may gate `access:manage` through this shim** — grant-admin authorization uses the
 /// `access:manage` extractor directly. `ManageUsers` maps to `users:manage`
 /// only: mapping both would re-merge the `users:manage`/`access:manage`
 /// split for every transitional consumer during the transition window;

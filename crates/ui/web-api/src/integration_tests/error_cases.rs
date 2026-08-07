@@ -54,7 +54,6 @@ async fn expired_jwt_returns_401() {
     let claims = serde_json::json!({
         "sub": uuid::Uuid::now_v7().to_string(),
         "jti": uuid::Uuid::now_v7().to_string(),
-        "permissions": ["ViewSettings"],
         "auth_method": "password",
         "iat": 1_000_000,
         "exp": 1_000_001,

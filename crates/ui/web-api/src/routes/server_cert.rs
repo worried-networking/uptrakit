@@ -332,7 +332,6 @@ mod tests {
     #[cfg(feature = "db-sqlite")]
     use crate::auth::AuthMethod;
     #[cfg(feature = "db-sqlite")]
-    #[cfg(feature = "db-sqlite")]
     use crate::middleware::action::CanManageSystemSettings;
     #[cfg(feature = "db-sqlite")]
     use crate::middleware::require_auth::AuthenticatedUser;

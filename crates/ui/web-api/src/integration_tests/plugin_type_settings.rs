@@ -3,16 +3,16 @@
 //!
 //! # Why upsert/delete predicate-reject tests are absent
 //!
-//! The `PUT` and `DELETE` handlers are gated by `CanManageGlobalSettings`
-//! middleware *before* the visibility predicate runs.  A tenant viewer
-//! (ViewSettings only) receives 403 at the permission gate and never reaches
-//! the predicate.  An admin passes the predicate whenever the engine allows
-//! `system.settings:manage` — `is_plugin_visible_to_user` asks the
-//! `AccessEngine` for that action, not the JWT permission claim, so a role
-//! link alone is not enough: the covering grant must also be present.  There
-//! is therefore no reachable code path in the harness
+//! The `PUT` and `DELETE` handlers are gated by the `CanManageSystemSettings`
+//! action extractor *before* the visibility predicate runs.  A tenant user
+//! lacking `system.settings:manage` authority is denied there and never
+//! reaches the predicate.  An admin passes the predicate whenever the engine
+//! allows `system.settings:manage` — `is_plugin_visible_to_user` asks the
+//! `AccessEngine` for that action directly, so a role link alone is not
+//! enough: the covering grant must also be present.  There is therefore no
+//! reachable code path in the harness
 //! test matrix where the predicate would return `false` for upsert/delete —
-//! those tests would be vacuous duplicates of the existing permission-gate tests.
+//! those tests would be vacuous duplicates of the existing extractor-gate tests.
 
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use uptrakit_shared_db::entity::user_role;

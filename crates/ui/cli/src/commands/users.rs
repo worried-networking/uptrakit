@@ -46,9 +46,9 @@ pub enum UsersCommands {
 
 #[derive(Debug, Subcommand)]
 pub enum RolesCommands {
-    /// List all roles with their permissions
+    /// List all roles
     List,
-    /// Show role details including permissions
+    /// Show role details
     Show {
         /// Role UUID
         id: Uuid,

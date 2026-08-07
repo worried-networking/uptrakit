@@ -206,7 +206,7 @@ impl DeviceFlowStore {
                 // and the api_token insert commit atomically.
                 let (token_id, token) = issue_access_token(&txn, user_id, &token_name).await?;
                 // Seam 2: scope enforcement. Today a no-op; future migration
-                // maps the scope string to a Permission subset on the token.
+                // maps the scope string to an Action subset on the token.
                 apply_scope_to_token(token_id, flow.scope.as_deref());
                 txn.commit().await.context_to()?;
                 Ok(PollOutcome::Authorized { token, token_name })
@@ -493,8 +493,8 @@ pub fn validate_client_id(client_id: &str) -> std::result::Result<(), OAuthError
 /// Apply the requested `scope` parameter to a freshly-minted token.
 ///
 /// **Seam 2** — today this is a no-op stub: scopes are recorded on the flow
-/// row and echoed in audit, but no Permission narrowing happens. A future
-/// migration replaces this body with a real scope→Permission map.
+/// row and echoed in audit, but no Action narrowing happens. A future
+/// migration replaces this body with a real scope→Action map.
 pub fn apply_scope_to_token(_token_id: Uuid, _scope: Option<&str>) {
     // intentional no-op
 }

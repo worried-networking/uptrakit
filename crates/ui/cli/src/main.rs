@@ -189,7 +189,7 @@ enum Commands {
         #[command(subcommand)]
         command: UsersCommands,
     },
-    /// Manage roles and their permissions
+    /// Manage roles
     Roles {
         #[command(subcommand)]
         command: RolesCommands,

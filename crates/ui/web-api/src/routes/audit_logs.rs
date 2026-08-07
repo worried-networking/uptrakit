@@ -2,9 +2,10 @@
 //!
 //! Two endpoints are provided:
 //!
-//! - `GET /api/v1/audit-logs` — tenant-scoped entries, requires [`Permission::ViewAuditLogs`].
-//! - `GET /api/v1/system-audit-logs` — system-level entries, requires
-//!   [`Permission::ViewSystemAuditLogs`].
+//! - `GET /api/v1/audit-logs` — tenant-scoped entries, gated by [`CanReadAudit`]
+//!   (`audit:read`).
+//! - `GET /api/v1/system-audit-logs` — system-level entries, gated by
+//!   [`CanReadSystemAudit`] (`system.audit:read`).
 
 use axum::{
     Json,
