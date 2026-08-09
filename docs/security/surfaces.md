@@ -53,7 +53,7 @@ typed-permission-extractor rule, because the required action is runtime descript
 carry; the OpenAPI operations advertise the runtime-valued requirement via the boolean `x-action-dynamic: true`
 extension, paired with an authenticated-only security declaration — the enforced requirement itself lives in the
 registered descriptor/interaction, not in the spec. See [Authentication and
-Authorization](auth-and-authorization.md#runtime-valued-permission-extension-surfaces) for how this exception class
+Authorization](auth-and-authorization.md#runtime-valued-actions) for how this exception class
 is distinguished from the platform's other two documented extractor exceptions.
 
 Denied-audit entries record the failing value under the `required_action` key in `details_json` (renamed from

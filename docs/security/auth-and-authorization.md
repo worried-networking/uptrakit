@@ -1,7 +1,7 @@
 ---
 title: Authentication and Authorization
 weight: 40
-description: Authentication methods, JWT access token claims, role and permission model, and auth middleware behavior in Uptrakit.
+description: Authentication methods, JWT access token claims, the action-string grant authorization model, and auth middleware behavior in Uptrakit.
 ---
 
 # Authentication and Authorization
@@ -108,8 +108,8 @@ instead of defaulting; it mints no token and the response carries no permission/
 surfaces as an error rather than a silently degraded response.
 
 `register`, `login`, `refresh`, the OIDC mint, `me`, and the post-MFA/2FA session builders all resolve their
-response's `actions` list through `effective_actions()` / `AccessEngine::allowed_actions()` (see [Transition:
-action extractors](#transition-action-extractors-m14am14b)). None of them propagate a 500 for an `AccessEngine`
+response's `actions` list through `effective_actions()` / `AccessEngine::allowed_actions()` (see [Enforcement
+surfaces](#enforcement-surfaces)). None of them propagate a 500 for an `AccessEngine`
 failure on this path: the response still returns its normal success status with `actions: []` and
 `authority: "unavailable"`. This is deliberate and uniform across the family — the SPA treats any non-2xx from `me`
 as an unconditional logout, so a 500 there would eject an already-logged-in user on a transient DB blip, and the
@@ -162,354 +162,125 @@ leaves or rewrites the page URL. Fragment transport removes server-side logging
 exposure, but a compromised or observed client can still capture the token during its
 validity window.
 
-## Permissions Model - Detailed
+## Authorization Model
 
-Authorization uses a typed `Permission` enum (defined in `crates/shared/types/src/permissions.rs`, re-exported
-via `crates/shared/web-api-types/src/permissions.rs`) rather than raw role-name strings. There are 33 granular
-permissions organized by domain:
+Authorization is an action-string grant model enforced by a single decision point, the `AccessEngine`. See
+[ADR-0039](../adr/0039-replace-enum-rbac-with-action-string-grants-and-a-central-access-engine.md) for why the
+prior closed `Permission` enum was replaced. Every named authorization requirement in this codebase is a
+`resource:verb` catalog action string (e.g. "requires the `hosts:read` action"), never an enum variant or a bare
+permission name.
 
-> **Historical model.** The `permission_extractor!` mechanism this section documents
-> (`crates/ui/web-api/src/middleware/permission.rs`) was deleted in M1.7; no route family enforces through it any
-> more, and the JWT/response fields it relied on (the `permissions` claim, `UserResponse.permissions`) no longer
-> exist. The `Permission` enum and its backing tables are removed in M1.8. See [Transition: action
-> extractors](#transition-action-extractors-m14am14b) below for the live mechanism. The reference tables in this
-> section remain for migration/historical context.
+### Action vocabulary
 
-### Permissions reference
+An action is a `resource:verb` string. The verb side comes from a closed set defined in
+`crates/shared/types/src/access/verb.rs` (`read`, `create`, `update`, `delete`, `trigger`, `approve`, `reject`,
+`manage`, `use`); adding a verb is an architecture decision, not a routine change. The resource side is open: the
+`access_catalog!` macro in `crates/shared/types/src/access/catalog.rs` is the single source of truth for built-in
+resources, the per-resource verb validity matrix, per-action descriptions, `SelectorSupport` levels, and the typed
+`actions::*` constants (e.g. `actions::HOSTS_READ`) consumed everywhere an action is referenced in code.
 
-#### Services
+Two dynamic namespaces extend the vocabulary at runtime: `plugin.<plugin_type>` (registered by the plugin catalog)
+and `surface.<surface_id>` (registered by the shared surface runtime). Both admit the full closed verb set at the
+type level; which verbs are actually meaningful for a given dynamic resource is a registry-time concern, not a
+parse-time one.
 
-| Permission        | Serialized name    | Purpose                                                |
-| ----------------- | ------------------ | ------------------------------------------------------ |
-| `ViewServices`    | `view_services`    | View tenant services and their status                  |
-| `ApproveServices` | `approve_services` | Approve pending service enrollments                    |
-| `RejectServices`  | `reject_services`  | Reject pending service enrollments                     |
-| `RemoveServices`  | `remove_services`  | Deactivate/remove services                             |
-| `UpdateServices`  | `update_services`  | Update service settings (ping interval, freeze, merge) |
+The OpenAPI schema for `Action` is a documented open string, not a closed enum — the resource set can grow without
+a schema-breaking change. There is deliberately no `Other` catch-all: an action string that does not parse as
+`resource:verb` against the closed verb set and the catalog/dynamic-namespace grammar is a parse error, and a parse
+error is a deny.
 
-#### System services
+### Grant model
 
-| Permission              | Serialized name           | Purpose                                                |
-| ----------------------- | ------------------------- | ------------------------------------------------------ |
-| `ViewSystemServices`    | `view_system_services`    | View system services (MQTT bridge, external scheduler) |
-| `ApproveSystemServices` | `approve_system_services` | Approve pending system services                        |
-| `RejectSystemServices`  | `reject_system_services`  | Reject pending system services                         |
-| `RemoveSystemServices`  | `remove_system_services`  | Deactivate system services                             |
-| `UpdateSystemServices`  | `update_system_services`  | Update system service settings                         |
+Authority is stored as data in the `access_grants` table (`crates/shared/db/src/access_grants.rs`,
+`crates/shared/db/src/entity/access_grant.rs`), owned end-to-end by the access-grants query module — it
+deliberately does **not** implement `TenantScoped`, since it mixes tenant-scoped rows with global
+(`tenant_id NULL`) rows; tenant scoping is the query module's own job, not the shared trait's.
 
-#### Software
+Each grant carries a set of `ActionPattern`s (`ResourcePattern` × `VerbPattern`): `*` for every tenant-plane
+resource, an exact resource string, or a `<stem>.*` subtree match, each paired with `*` or a single closed-set
+verb. `system.`-prefixed resources are excluded from the `*` wildcard on both sides — a pattern must name the
+`system.` plane explicitly to match it. Every grant also carries a `Selector`; the type already models host- and
+software-scoped narrowing (tags, hosts, software items, item pairs), but the write path accepts only
+`Selector::All` until M2 — the narrowing variants are validated code today with no admission path yet.
 
-| Permission        | Serialized name    | Purpose                                      |
-| ----------------- | ------------------ | -------------------------------------------- |
-| `ViewSoftware`    | `view_software`    | View software items, plugin configs, history |
-| `CreateSoftware`  | `create_software`  | Create software items and plugin configs     |
-| `UpdateSoftware`  | `update_software`  | Edit software items and plugin configs       |
-| `DeleteSoftware`  | `delete_software`  | Delete software items and plugin configs     |
-| `TriggerChecks`   | `trigger_checks`   | Trigger version checks and autodiscovery     |
-| `TriggerUpdates`  | `trigger_updates`  | Trigger update execution (single and batch)  |
-| `ManageScheduler` | `manage_scheduler` | Manage scheduled tasks                       |
+Roles are data, not code: `roles.tenant_id` is `NULL` for the global built-in roles and non-`NULL` for
+tenant-defined custom roles, with per-scope name uniqueness enforced by a partial-unique index pair rather than a
+column constraint. A grant's subject is either a user or a role (`GrantSubject`); role-subject grants are always
+tenant-`NULL` since scope comes from `user_roles`, not the grant row.
 
-#### Hosts
+The built-in roles' seed grants are frozen literal pattern strings, guarded by the
+`seed_patterns_stay_valid_against_live_catalog` test — a catalog rename must never edit a seed literal in place;
+it ships a forward data migration instead, so historical seed rows keep meaning what they meant when written.
 
-| Permission        | Serialized name    | Purpose                         |
-| ----------------- | ------------------ | ------------------------------- |
-| `ViewHosts`       | `view_hosts`       | View hosts                      |
-| `UpdateHosts`     | `update_hosts`     | Update host properties and tags |
-| `DeactivateHosts` | `deactivate_hosts` | Deactivate hosts                |
+### AccessEngine
 
-#### Settings
+`AccessEngine` (`crates/ui/controller-core/src/access/mod.rs`) is the single access decision point. A decision
+runs, in order: dynamic-action registry lookup (for `plugin.*`/`surface.*` actions) → grant match against the
+principal's resolved authority → token scope ceiling → target/selector check. All four must pass for `Allow`.
 
-| Permission               | Serialized name            | Purpose                                             |
-| ------------------------ | -------------------------- | --------------------------------------------------- |
-| `ViewSettings`           | `view_settings`            | View all tenant settings (unified read)             |
-| `ManageAuthSettings`     | `manage_auth_settings`     | Manage registration, authentication, OIDC providers |
-| `ManageEnrollmentTokens` | `manage_enrollment_tokens` | Manage tenant enrollment tokens                     |
-| `ManageAgentCerts`       | `manage_agent_certs`       | Manage agent certificate settings                   |
-| `ManageGlobalSettings`   | `manage_global_settings`   | Manage global infrastructure settings               |
+Resolved per-principal authority is cached (`moka::sync::Cache`, keyed by `(tenant_id, user_id)`), bounded by
+entry count, with a first-party read-time staleness check against a 60-second TTL backstop rather than relying on
+the cache library's own expiry. Grant/role mutations invalidate the cache locally and publish
+`ControllerMessage::AccessInvalidated` for other controller instances to apply; the TTL backstop exists to bound
+staleness if an invalidation event is ever lost. When the engine or its backing DB is unavailable, callers must
+fail closed — HTTP 500, never a silent permit. Credentials with no scope concept (pre-M3 sessions) pass the scope
+term vacuously, preserving pre-scope behavior.
 
-#### Commands
+### Enforcement surfaces
 
-| Permission          | Serialized name       | Purpose                                                                |
-| ------------------- | --------------------- | ---------------------------------------------------------------------- |
-| `ManageCommands`    | `manage_commands`     | Modify command-bearing plugin config fields (code execution authority) |
-| `TestPluginConfigs` | `test_plugin_configs` | Test plugin configurations against hosts (dry-run validation)          |
+Most routes declare their action requirement via `action_extractor!`-generated types
+(`crates/ui/web-api/src/middleware/action.rs`), which resolve through `AccessEngine` and short-circuit with `401`
+when no principal is present, `403` on an engine deny (a fixed, generic denial body — no grant/selector detail),
+or `500` when engine authority is unavailable. `authorize_any` OR-gates a request across several alternative
+actions for endpoints that accept any one of them.
 
-> [!CAUTION]
-> `ManageCommands` grants effective code-execution authority on all managed hosts
-> assigned to the affected software items. Users with this permission can configure arbitrary shell
-> commands that execute on managed hosts. Assign with the same care as granting `root` access.
+Five sites gate on the engine directly instead of through a generated extractor: plugin type settings'
+`can_view_type_settings`, the plugin configs CRUD handlers, the `system_services.rs` batch handler, the
+`services/batch.rs` batch handler, and `visibility.rs::is_plugin_visible_to_user` (a visibility predicate, not a
+request-denying gate). The interactive-update WebSocket route checks the `updates:trigger` action before calling
+`on_upgrade()`, since `require_auth` cannot run on a route whose token arrives as a query parameter rather than a
+header. MCP authorization runs on the same engine: a connection-level `mcp:use` gate, plus per-tool actions
+declared in each tool's `ToolAuth` and enforced by `require_tool_auth()`.
 
-#### Notifications
+Converted routes declare a native OpenAPI `security(...)` requirement built from the catalog-generated scope
+dictionary, instead of a vendor extension; dynamic surface wrappers instead carry `x-action-dynamic: true`
+alongside an authenticated-only security form. `ci/verify_action_security_declarations.py` gates that every
+route's declared security matches its actual enforcement.
 
-| Permission            | Serialized name        | Purpose                                                      |
-| --------------------- | ---------------------- | ------------------------------------------------------------ |
-| `ViewNotifications`   | `view_notifications`   | View notification channels, rules, log                       |
-| `ManageNotifications` | `manage_notifications` | Create/modify notification channels and rules; SMTP settings |
+### Runtime-valued actions
 
-#### Audit logs
-
-| Permission            | Serialized name          | Purpose                              |
-| --------------------- | ------------------------ | ------------------------------------ |
-| `ViewAuditLogs`       | `view_audit_logs`        | View tenant-scoped audit log entries |
-| `ViewSystemAuditLogs` | `view_system_audit_logs` | View system-level audit log entries  |
-
-#### User management
-
-| Permission    | Serialized name | Purpose                      |
-| ------------- | --------------- | ---------------------------- |
-| `ManageUsers` | `manage_users`  | Manage user roles and access |
-
-#### Autodiscovery
-
-| Permission      | Serialized name  | Purpose                           |
-| --------------- | ---------------- | --------------------------------- |
-| `ManageIgnores` | `manage_ignores` | Manage autodiscovery ignore rules |
-
-### Built-in roles
-
-Eight built-in roles group permissions into logical responsibilities:
-
-| Role                   | Permissions                                                                                                                                                                         |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `viewer`               | `view_services`, `view_software`, `view_hosts`, `view_settings`                                                                                                                     |
-| `operator`             | `approve_services`, `reject_services`, `trigger_checks`, `trigger_updates`                                                                                                          |
-| `service_manager`      | `approve_services`, `reject_services`, `remove_services`, `update_services`                                                                                                         |
-| `software_manager`     | `create_software`, `update_software`, `delete_software`, `trigger_checks`, `trigger_updates`, `manage_scheduler`, `manage_ignores`, `test_plugin_configs`                           |
-| `host_manager`         | `update_hosts`, `deactivate_hosts`                                                                                                                                                  |
-| `settings_manager`     | `manage_auth_settings`, `manage_enrollment_tokens`, `manage_agent_certs`, `view_notifications`, `manage_notifications`, `view_audit_logs`, `manage_users`                           |
-| `command_manager`      | `manage_commands`, `test_plugin_configs`                                                                                                                                            |
-| `system_administrator` | `manage_global_settings`, `view_system_services`, `approve_system_services`, `reject_system_services`, `remove_system_services`, `update_system_services`, `view_system_audit_logs` |
-
-Built-in roles are marked with `is_built_in = true` in the `roles` table.
-
-### Role bundles
-
-Role bundles are code-defined (not stored in the database) and group one or more roles under a
-single name. They are exposed as advisory metadata via `GET /api/v1/access/catalog`; apply one to
-a user by assigning its roles through `PUT /api/v1/users/{id}/roles`.
-
-| Bundle          | Roles assigned                                                                                         | Use case                        |
-| --------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------- |
-| `read_only`     | `viewer`                                                                                               | Dashboard viewers, stakeholders |
-| `operator`      | `viewer`, `operator`                                                                                   | On-call staff                   |
-| `manager`       | `viewer`, `service_manager`, `software_manager`, `host_manager`                                        | Team leads                      |
-| `administrator` | `viewer`, `service_manager`, `software_manager`, `host_manager`, `settings_manager`, `command_manager` | Tenant administrators           |
-| `owner`         | All 8 roles                                                                                            | System owner                    |
-
-See [User Management API](https://github.com/worried-networking/uptrakit/tree/main/docs/api/) for the full endpoint reference and
-[User Management Guide](../end-user/user-management.md) for the end-user documentation.
-
-### First user setup
-
-The first registered user -- whether via password or OIDC -- receives all 8 built-in roles
-(equivalent to the `owner` bundle). Subsequent users receive only the `viewer` role by default.
-OIDC role mapping can override this.
+Surface `required_action` values are not known at compile time — they are supplied by the provider (plugin or
+service) as **registration data**. On the wire the field is still a plain string
+(`#[serde(alias = "required_permission")]` retained for backward compatibility with older wire payloads), but it
+is parsed exactly once, at registration admission, to a typed `Action`
+(`crates/ui/surface-proxy/src/registry.rs`). An unparseable value rejects the whole registration rather than
+admitting a partially-typed surface. From then on, enforcement runs the parsed `Action` through `AccessEngine`
+before dispatch, for both plugin- and service-backed surfaces alike.
 
 ### Lockout prevention
 
-The system prevents removing the last remaining `access:manage` or `system.access:manage` holder.
-Attempts to change roles, or to deactivate a user, in a way that would leave no user holding
-either action are rejected with HTTP 409 Conflict (reason codes `lockout_access_manage` /
-`lockout_system_access` -- see [Access Management API](../api/access-management.md#lockout-409-semantics)).
+The lockout guard is re-targeted to the `access:manage` (tenant plane) and `system.access:manage` (global plane)
+actions. `check_lockout` and `begin_guarded` (`crates/shared/db/src/access_grants.rs`) evaluate a pre-state vs.
+simulated post-state comparison of covering holders, in memory, inside the guard's own serialized transaction —
+sentinel-row locking on the default tenant's row serializes concurrent guarded mutations. The guard never calls
+`AccessEngine` itself (its cache and pooled-connection reads would escape the transaction and under-count
+holders), and it is skipped entirely for authority-adding mutations, which cannot shrink coverage under the
+allow-only grant model. Callers must treat any non-`Permitted` verdict as an obligation not to write the guarded
+mutation. A denial surfaces as HTTP 409 with reason code `lockout_access_manage` or `lockout_system_access` — see
+[Access Management API](../api/access-management.md#lockout-409-semantics).
 
-### How it works
+### Catalog introspection
 
-How the now-deleted legacy model worked, retained for historical/migration context (see the historical-model note
-above):
+`GET /api/v1/access/catalog` serves the authorization vocabulary as data — built-in and live dynamic actions with
+their descriptions and selector support, the code-defined role bundles, and the available scope presets — so
+clients never need a hardcoded copy. Canonical reference: [Access Management API](../api/access-management.md).
 
-1. `get_user_permissions()` (`middleware/require_auth.rs`, deleted in M1.7) resolved a user's permissions: user ->
-   user_roles -> role_permissions -> permissions table.
-1. The resolved `Vec<Permission>` was embedded in the JWT access token (`permissions` claim, removed in M1.7) and
-   returned in `UserResponse.permissions` (replaced by `actions` + `authority`, see [JWT Access Token Claims
-   Contract](#jwt-access-token-claims-contract) above).
-1. The `require_auth` middleware used to inject `AuthenticatedUser` with a `permissions` field decoded from the
-   JWT; `AuthenticatedUser` carries no such field today.
-1. Route handlers declared their permission requirement via a **typed Axum extractor** (e.g.
-   `CanViewHosts(_user): CanViewHosts`), generated by a macro in the now-deleted `middleware/permission.rs`. If
-   the user lacked the permission the extractor short-circuited with `403 Forbidden` before the handler body ran.
-   No DB round-trip was needed.
-1. Endpoints on the legacy model carried an `x-required-permission` OpenAPI extension (set in the
-   `#[utoipa::path]` annotation, e.g. `extensions(("x-required-permission" = json!("view_hosts")))`).
-   This made the required permission machine-readable in the generated OpenAPI spec.
-1. The frontend received permissions as `string[]` (e.g. `["view_settings", "view_services"]`) and used a
-   `Permission` TypeScript enum for checks; it now reads `actions: string[]` + `authority` from the `me`/login
-   response and checks membership directly against the branded action strings.
+### Deny events
 
-### Self-authenticated endpoints
-
-Some endpoints -- `create_api_token`, `list_api_tokens`, `revoke_api_token`, `logout`, and `me` -- are
-authenticated (require a valid Bearer token) but not governed by the RBAC permission model. Any authenticated
-user may call them regardless of their assigned roles. These endpoints use `Extension<AuthenticatedUser>`
-directly rather than a typed permission extractor, and carry only the authenticated-only security declaration:
-
-```rust
-security(("oauth2" = []), ("developer_token" = []))
-```
-
-No permission or action scope is listed, and no `x-required-permission`/`x-action-dynamic` extension is present —
-the empty scope list itself signals to automated permission-audit tooling that the endpoint requires only
-**authentication** (a valid token), not any specific RBAC permission or catalog action.
-
-### Runtime-valued permission extension (surfaces)
-
-Shared-surface interaction routes (`crates/ui/web-api/src/routes/surfaces.rs`) are a second, distinct exception to
-the typed-permission-extractor rule — separate from both the self-authenticated endpoints above and the
-`// APPROVED: custom auth path` token-extraction exception used by handlers like the WebSocket upgrade route (see
-[Coding Standards](../development/coding-standards.md)).
-
-Surface descriptors and interactions carry their own `required_action: Option<String>` as **registration data**
-supplied by the provider (plugin or service) — a canonical `resource:verb` catalog action string, not a value known
-at route-definition time. `SurfaceProxy` parses each declared value to a catalog `Action` at registration admission
-(an unparseable value rejects the whole registration); the registry stores the parsed `Action` index-aligned with
-the normalized registration. No fixed `CanXxx` extractor can express "whatever action this particular
-surface/interaction declares", so these handlers call `enforce_required_action()` in the handler body — running the
-resolved `Action` through `AccessEngine` against the resolved descriptor/interaction — instead of a typed
-extractor, and the `#[utoipa::path]` annotation declares the authenticated-only security form
-(`security(("oauth2" = []), ("developer_token" = []))`) plus a boolean marker instead of a fixed scope list:
-
-```rust
-extensions(("x-action-dynamic" = json!(true)))
-```
-
-The `x-action-dynamic: true` extension tells automated tooling that this operation's OpenAPI security requirement is
-intentionally authenticated-only — the real, enforced requirement is not statically expressible and lives in
-registration data (the surface descriptor's or interaction's `required_action`), not in the spec.
-
-This is checked at both the descriptor level and the interaction level, and — per [Shared Surface
-Security](surfaces.md#permission-model) — happens for every method (`GET`/`POST`/`PUT`/`DELETE`) on the interaction
-route family, before any `405` method-mismatch response, so a caller cannot fingerprint an interaction's registered
-methods by comparing `403` against `405`.
-
-| Exception class                 | Permission source                                     | OpenAPI marker                                 |
-| ------------------------------- | ----------------------------------------------------- | ---------------------------------------------- |
-| Self-authenticated endpoints    | None — any authenticated user is authorized           | none — empty-scope `security(...)` declaration |
-| `// APPROVED: custom auth path` | Not RBAC — bespoke auth (token extraction, WebSocket) | handler-specific, documented inline            |
-| Runtime-valued (surfaces)       | Registration data on the surface/interaction          | `x-action-dynamic: true`                       |
-
-Automated permission-audit tooling must treat `x-action-dynamic: true` as a marker that the operation's declared
-`security(...)` scopes are not the real, enforced requirement — a fixed catalog action cannot be extracted
-statically from the spec for these operations — not a defect in the generated OpenAPI spec.
-
-### Permission extractor reference
-
-| Extractor                   | Permission checked                   |
-| --------------------------- | ------------------------------------ |
-| `CanViewSettings`           | `Permission::ViewSettings`           |
-| `CanManageAuthSettings`     | `Permission::ManageAuthSettings`     |
-| `CanManageEnrollmentTokens` | `Permission::ManageEnrollmentTokens` |
-| `CanManageAgentCerts`       | `Permission::ManageAgentCerts`       |
-| `CanManageGlobalSettings`   | `Permission::ManageGlobalSettings`   |
-| `CanViewServices`           | `Permission::ViewServices`           |
-| `CanApproveServices`        | `Permission::ApproveServices`        |
-| `CanRejectServices`         | `Permission::RejectServices`         |
-| `CanRemoveServices`         | `Permission::RemoveServices`         |
-| `CanUpdateServices`         | `Permission::UpdateServices`         |
-| `CanViewSoftware`           | `Permission::ViewSoftware`           |
-| `CanCreateSoftware`         | `Permission::CreateSoftware`         |
-| `CanUpdateSoftware`         | `Permission::UpdateSoftware`         |
-| `CanDeleteSoftware`         | `Permission::DeleteSoftware`         |
-| `CanTriggerChecks`          | `Permission::TriggerChecks`          |
-| `CanTriggerUpdates`         | `Permission::TriggerUpdates`         |
-| `CanManageScheduler`        | `Permission::ManageScheduler`        |
-| `CanManageCommands`         | `Permission::ManageCommands`         |
-| `CanTestPluginConfigs`      | `Permission::TestPluginConfigs`      |
-| `CanViewHosts`              | `Permission::ViewHosts`              |
-| `CanUpdateHosts`            | `Permission::UpdateHosts`            |
-| `CanDeactivateHosts`        | `Permission::DeactivateHosts`        |
-| `CanViewNotifications`      | `Permission::ViewNotifications`      |
-| `CanManageNotifications`    | `Permission::ManageNotifications`    |
-| `CanViewSystemServices`     | `Permission::ViewSystemServices`     |
-| `CanApproveSystemServices`  | `Permission::ApproveSystemServices`  |
-| `CanRejectSystemServices`   | `Permission::RejectSystemServices`   |
-| `CanRemoveSystemServices`   | `Permission::RemoveSystemServices`   |
-| `CanUpdateSystemServices`   | `Permission::UpdateSystemServices`   |
-| `CanViewAuditLogs`          | `Permission::ViewAuditLogs`          |
-| `CanViewSystemAuditLogs`    | `Permission::ViewSystemAuditLogs`    |
-| `CanManageUsers`            | `Permission::ManageUsers`            |
-| `CanManageIgnores`          | `Permission::ManageIgnores`          |
-
-All extractors derive `Debug`, expose `pub AuthenticatedUser` as field 0 for handler use, and provide a
-`::new(user)` constructor for use in unit tests that call handlers directly (bypassing the HTTP layer).
-
-See also: [`docs/development/coding-standards.md`](https://github.com/worried-networking/uptrakit/tree/main/docs/development/)
-for the permission pattern conventions.
-
-### Adding a new permission
-
-**This workflow is no longer executable and must not be followed.** M1.7 deleted the artifacts steps 3
-and 5 edited (`crates/ui/web-api/src/middleware/permission.rs` and the frontend `Permission` enum), and
-no route family is on this model any more. All authorization work declares a catalog action and an
-`action_extractor!` type instead (see the next section). Recorded here only so historical migrations and
-commits stay readable:
-
-1. A variant was added to the `Permission` enum in `crates/shared/types/src/permissions.rs` (with
-   `as_str` / `from_str` / `description` arms). The enum itself is removed in M1.8.
-1. A DB migration inserted it into the `permissions` table and assigned it to the appropriate built-in
-   role(s) via `grant_permission()`, chosen by domain (software permissions to `software_manager`, host
-   permissions to `host_manager`).
-1. A `CanXxx => Permission::Xxx` entry was added to the `permission_extractor!` macro call — that macro
-   and its module were deleted in M1.7.
-1. The handler took `CanXxx(_user): CanXxx` and its `#[utoipa::path]` carried
-   `extensions(("x-required-permission" = json!("xxx")))`, since replaced by a native
-   `security(("oauth2" = ["resource:verb"]))` requirement.
-1. The variant was mirrored into a frontend `Permission` enum. The SPA now gates on branded action
-   strings (`hasAction` / `hasAnyAction` in `frontend/src/lib/api/local-types.ts`).
-
-### Transition: action extractors (M1.4a/M1.4b)
-
-This model was rolled out route family by route family and now backs every route family (see the completion
-note at the end of this section). Converted families enforce through `action_extractor!`-generated types
-(`crates/ui/web-api/src/middleware/action.rs`),
-backed by the `AccessEngine` (`crates/ui/controller-core/src/access/mod.rs`) rather than the JWT's
-embedded `permissions` claim — decisions reflect live DB grants on every request (immediate effect on
-grant/revoke, no re-login required), and denial always returns a fixed, generic `403 Forbidden` body
-(`"Insufficient permissions"`, no grant/selector detail). Their `#[utoipa::path]` annotation declares a
-native OpenAPI security requirement, e.g. `security(("oauth2" = ["hosts:read"]), ("developer_token" = []))`,
-instead of the `x-required-permission` extension. The `hosts` route family (`crates/ui/web-api/src/routes/hosts.rs`)
-is the first converted family and serves as the reference conversion.
-
-The M1.4b sweep (batches B1–B6) converted **all** route families except the `users.rs` / `roles.rs`
-handoffs, which M1.6a/M1.6b finished. OR-of-alternatives operations (batch actions,
-`list_plugin_types`, plugin-type-settings reads) declare one single-scope `oauth2` requirement per
-alternative and enforce inline via `authorize_any`, with no action extractor. Dynamic surface wrappers
-carry `x-action-dynamic: true` alongside the authenticated-only security form. The operator OAuth clients
-API and the admin events SSE stream also enforce through action extractors (`settings.auth:manage`,
-`services:read` respectively).
-
-MCP authorization has moved onto the same `AccessEngine` in parallel with the route-family sweep: both MCP auth paths
-(API token and OAuth JWT) build an `AccessContext` and gate the connection on the `mcp:use` action, and each MCP tool
-declares typed catalog actions in its `ToolAuth` that a single `require_tool_auth()` helper enforces — see the
-[OAuth MCP Development Guide](../development/oauth-mcp.md).
-
-Shared surfaces enforce on the same engine: `required_action` on surface descriptors and interactions is parsed to a
-catalog `Action` at registration admission and enforced by `enforce_required_action()` through `AccessEngine` before
-dispatch, for both plugin- and service-backed surfaces; provider-origin (service-initiated) calls are denied for
-action-gated interactions unless the interaction sets `provider_invocable`. See [Runtime-valued permission extension
-(surfaces)](#runtime-valued-permission-extension-surfaces) above for the full mechanism — this paragraph only
-cross-links it, the resolved-`Action` enforcement described there is the same one this transition covers.
-
-The interactive update WebSocket (`crates/ui/web-api/src/routes/interactive_ws.rs`) gates on the `updates:trigger`
-catalog action through `AccessEngine`, via `build_access_authority`. `require_auth` never runs on this route —
-browser WebSockets cannot set custom headers, so the auth token arrives as a `?token=` query parameter instead — so
-the check is an inline engine call rather than an extractor. A denial is a plain HTTP `403 Forbidden` returned
-**before** `ws.on_upgrade()`; there is no close-frame handshake. `AccessEngine`/DB unavailability fails closed as an
-HTTP `500` before upgrade, distinct from the `403` deny path.
-
-Five further inline (non-extractor) sites gate on the engine directly. Four share an `authorize_any()` OR-gate helper
-in `crates/ui/web-api/src/middleware/action.rs`, each incrementing `uptrakit_access_denies_total{reason=…}` exactly
-once on an overall deny: `routes/plugin_type_settings.rs::can_view_type_settings` (`settings:read` OR
-`system.settings:manage`), `routes/plugin_configs/crud.rs` (`software:read` OR `settings:read` OR
-`system.settings:manage`), the `routes/system_services.rs` batch handler (per action: `system.services:approve` /
-`system.services:reject` / `system.services:delete`), and the `routes/services/batch.rs` batch handler (per action:
-`services:approve` / `services:reject` / `services:delete`). The fifth, `visibility.rs::is_plugin_visible_to_user`,
-calls `AccessEngine::authorize()` directly for the single `system.settings:manage` action — it is a visibility
-predicate used to filter instance-scoped plugins out of listings, not a request-denying gate, so it returns a `bool`
-and does not increment the deny counter.
-
-The legacy `permission_extractor!` + `x-required-permission` model described above no longer backs
-any route family; the module was deleted in M1.7 (`middleware/permission.rs` no longer exists). Every
-handler now imports its extractor from `crate::middleware::action::CanXxx`; the `Permission` enum itself
-and its backing tables are removed in M1.8.
+`deny_event_worthy()` (`crates/shared/types/src/access/mod.rs`) is the single shared definition of which denials
+are audit-worthy, used identically by the web-api and MCP enforcement paths: denying a `system.`-plane action,
+`commands:manage`, `access:manage`, or `mcp:use` emits an `access.denied` audit Event. Every other deny produces a
+debug trace plus an increment of the `uptrakit_access_denies_total` counter, nothing more.
 
 ## System Service Credential Guard
 

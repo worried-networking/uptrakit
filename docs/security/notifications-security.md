@@ -238,8 +238,8 @@ These permissions enforce through the `action_extractor!` pattern (`CanReadNotif
 `CanManageNotifications`, `notifications:read` / `notifications:manage`) and declare a native
 `security(("oauth2" = [...]), ("developer_token" = []))` OpenAPI requirement rather than an
 `x-required-permission` extension. See
-[Auth and Authorization -- Permissions Model](auth-and-authorization.md#permissions-model---detailed) for the
-full RBAC architecture.
+[Auth and Authorization -- Authorization Model](auth-and-authorization.md#authorization-model) for the
+full authorization architecture.
 
 ## Tenant Isolation
 

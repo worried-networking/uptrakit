@@ -97,8 +97,8 @@ code execution on managed hosts via plugin configuration manipulation.
   software items, version tracking, and non-command config fields, but cannot alter
   the commands that execute on managed hosts. The `manage_commands` permission is
   granted only to the `owner` and `admin` roles. See
-  [Authentication and Authorization](../security/auth-and-authorization.md#permissions-model---detailed)
-  for the full permissions model.
+  [Authentication and Authorization](../security/auth-and-authorization.md#authorization-model)
+  for the full authorization model.
 - **Shell escape for substitution variables.** Dynamic values like
   `{package_identifier}` and `{version}` are shell-escaped via `shell_escape()`
   before substitution into templates. Injection through substitution variables is

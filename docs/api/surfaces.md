@@ -215,7 +215,7 @@ method-mapped interaction route enforce the dynamic `required_action` declared b
 through `AccessEngine`. The wrapper operations carry `x-action-dynamic: true` with an authenticated-only security
 declaration in OpenAPI — the runtime-valued requirement itself lives in the registered descriptor/interaction, not
 in the spec. See [Shared Surface Security](../security/surfaces.md) for the full model, and [Authentication and
-Authorization](../security/auth-and-authorization.md#runtime-valued-permission-extension-surfaces) for the
+Authorization](../security/auth-and-authorization.md#runtime-valued-actions) for the
 extractor-exception class this pattern belongs to.
 
 ### Provider-origin (wire-initiated) resolution
