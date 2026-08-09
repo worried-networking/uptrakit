@@ -10,6 +10,8 @@ This folder documents the controller HTTP API, service/controller wire protocol,
 | [HTTP Web API](http-web-api.md)                   | REST endpoints, request/response behavior, rate limits, and multi-tenancy notes.               |
 | [Settings Runtime](settings-runtime.md)           | Settings storage, reconciliation, snapshots, and runtime reload behavior.                      |
 | [Auth Flows](auth-flows.md)                       | Login/device authorization, token lifecycle, and enrollment-related auth flows.                |
+| [User Management API](user-management.md)         | User and role endpoints, and role assignment.                                                  |
+| [Access Management API](access-management.md)     | Grant and role management, and the access catalog.                                             |
 | [Services and Operations](services-operations.md) | Agent and MQTT service lifecycle operations, update execution, and state transitions.          |
 | [Notifications](notifications.md)                 | Notification channels, rules, delivery log, and Telegram callback endpoints.                   |
 | [Batch Actions](batch-actions.md)                 | Batch/group action endpoints for bulk management operations across all resources.              |

@@ -4,8 +4,8 @@ User lifecycle endpoints (list, read, activate/deactivate) require the `users:ma
 Role assignment and role CRUD require `access:manage` — see
 [Access Management](access-management.md). Both families are global (not tenant-scoped).
 
-See [Authentication and Authorization](../security/auth-and-authorization.md) for the full
-permission model, built-in roles, and role bundles.
+See [Authentication and Authorization](../security/auth-and-authorization.md#authorization-model)
+for the action vocabulary, grant model, built-in roles, and role bundles.
 
 ## User endpoints
 
@@ -51,7 +51,7 @@ Get a single user with their roles.
 Replace all role assignments for a user. The previous assignments are removed and the
 provided role IDs are assigned. Unlike the other endpoints on this page, this one gates
 on `access:manage`, not `users:manage` -- see [Access Management API](access-management.md)
-for the full grant/role/assignment gate reference and the M1.6a permission split.
+for the full grant/role/assignment gate reference.
 
 **Path parameters**: `id` -- user UUID.
 
@@ -105,9 +105,8 @@ and apply it via `PUT /api/v1/users/{id}/roles` above.
 
 ## Permission endpoints
 
-`GET /api/v1/permissions` was removed in M1.7 along with the wire `Permission` vocabulary. Look up the
-available action catalog via `GET /api/v1/access/catalog` (see [Access Management
-API](access-management.md#catalog-endpoint)).
+`GET /api/v1/permissions` was removed with the legacy permission model; introspect actions via
+`GET /api/v1/access/catalog` (see [Access Management API](access-management.md#catalog-endpoint)).
 
 ## Role endpoints
 

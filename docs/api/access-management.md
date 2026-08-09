@@ -1,17 +1,15 @@
 # Access Management API
 
-M1.6a split the legacy `manage_users` permission into two actions: `users:manage` (user
-lifecycle -- see [User Management API](user-management.md)) and `access:manage` (grants,
-roles, and role assignment -- this page). A third, fine-grained action,
-`system.access:manage`, additionally gates any mutation whose request body or stored
-row confers **system-plane** authority (a pattern whose resource starts with `system.`,
-e.g. `system.access:manage` or `system.*:*`).
+The authorization model splits the legacy manage-users permission into two actions:
+`users:manage` (user lifecycle -- see [User Management API](user-management.md)) and
+`access:manage` (grants, roles, and role assignment -- this page). A third, fine-grained
+action, `system.access:manage`, additionally gates any mutation whose request body or
+stored row confers **system-plane** authority (a pattern whose resource starts with
+`system.`, e.g. `system.access:manage` or `system.*:*`).
 
 This page documents the grant and role CRUD families and the role-assignment endpoint.
-It reflects what M1.6a actually shipped, not the original design.
-[Authentication and Authorization](../security/auth-and-authorization.md)
-still describes the pre-split model; it will be rewritten in M1.9 to cover the full
-`users:manage`/`access:manage`/`system.access:manage` picture.
+See [Authentication and Authorization](../security/auth-and-authorization.md#authorization-model)
+for the full `users:manage`/`access:manage`/`system.access:manage` picture.
 
 ## Grant endpoints
 
@@ -81,8 +79,8 @@ All role endpoints require `access:manage`.
 | `DELETE` | `/api/v1/roles/{id}` | `access:manage` | `system.access:manage` if the role carries a role-subject grant reaching the system plane |
 
 `GET /api/v1/roles` returns the global built-in roles plus the active tenant's custom
-roles. `RoleResponse` no longer carries a `permissions` field -- a role's effective grants
-are visible via `GET /api/v1/access/grants?subject_type=role&subject_id={role_id}`.
+roles. A role's effective grants are visible via
+`GET /api/v1/access/grants?subject_type=role&subject_id={role_id}`.
 
 ### Role name bounds (`CreateRoleRequest` / `UpdateRoleRequest`)
 
@@ -260,8 +258,8 @@ originating instance invalidates and publishes immediately on commit.
 ## See also
 
 - [User Management API](user-management.md) -- user lifecycle endpoints (`users:manage`).
-- [Authentication and Authorization](../security/auth-and-authorization.md) -- full
-  permission model; scheduled for a rewrite in M1.9 to cover this split.
+- [Authentication and Authorization](../security/auth-and-authorization.md#authorization-model) --
+  action vocabulary, grant model, and enforcement surfaces.
 
 ## Key files
 
