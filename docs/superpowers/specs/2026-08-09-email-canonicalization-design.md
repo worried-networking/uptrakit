@@ -55,6 +55,14 @@ the comparison-site conversion, and the migration ship in **one atomic change** 
 the migration runs at startup of a binary that already contains the converted code. The plan must not
 split the migration into a separate earlier-landing commit.
 
+**Rollback is the mirror-image lockout and is not safe**: redeploying the previous release after the
+migration has run leaves `users.email` lowercased while the old binary compares raw — same lockout,
+opposite direction — and `down()` deliberately cannot restore casing. Phrase the warning as a
+**pre-upgrade instruction** — "take a database backup before upgrading; rollback past this release
+is only possible by restoring it" — in the ADR, the release commit body, and the security doc; a
+restore-the-backup note read after upgrading arrives when the window has already closed. The
+migration's per-row info log (§3 step 2) gives the operator the record of what changed.
+
 ## Design
 
 ### 1. `MaskedEmail` v2 (`crates/shared/types/src/masked_email.rs`)
@@ -91,14 +99,20 @@ split the migration into a separate earlier-landing commit.
   which live in a child module of the same file, so no wider visibility is needed. Loaded rows must not
   silently diverge from persisted bytes; everything else goes through `FromStr`. The compiler, not a
   grep, enforces canonical ingress. All ~49 external `MaskedEmail::new(...)` call sites (5 production,
-  rest test fixtures) convert to `"a@b.c".parse::<MaskedEmail>()` + `?`/`expect` (test modules already
-  carry `#![expect(clippy::unwrap_used, clippy::expect_used, ...)]` — established pattern in this file's
-  own test module).
+  rest test fixtures) convert to `"a@b.c".parse::<MaskedEmail>()` + `?`/`expect` — `clippy.toml` sets
+  `allow-unwrap-in-tests = true` / `allow-expect-in-tests = true`, so `.expect()` inside `#[cfg(test)]`
+  modules needs no lint attribute. Do NOT add `#![expect(clippy::unwrap_used, ...)]` to `#[cfg(test)]`
+  modules for this: the lints never fire there, and workspace `unfulfilled_lint_expectations = "deny"`
+  makes an unfulfilled expectation a build error. (The boundary is the function, not the file:
+  `allow-*-in-tests` suppresses only inside `#[test]`-attributed fns — in `#[cfg(test)]` modules and
+  `tests/*.rs` binaries alike. A non-`#[test]` fixture/helper fn using `.expect()` needs an explicit
+  `#[expect(clippy::expect_used)]` wherever it lives — the existing attributes in
+  `crates/ui/mcp/tests/get_current_user_mcp.rs` are that case, not a file-location rule.)
 - **`impl From<&MaskedEmail> for sea_orm::Value`** (alongside the existing by-value impl) so
   `.eq(&req.email)` compiles — without it the path of least resistance at converted sites is
   `.eq(req.email.expose_email())`, re-introducing exactly the raw comparison this fix removes.
 - **OpenAPI**: no `ToSchema` derive. Retyped request fields annotate `#[schema(value_type = String)]`
-  (established pattern, e.g. `system_services.rs:25`), keeping `openapi.json` and the generated
+  (established pattern, e.g. `system_services.rs:31`), keeping `openapi.json` and the generated
   frontend types unchanged in shape.
 
 Unit tests (success + failure paths): `serde_json::from_str` canonicalization
@@ -155,6 +169,20 @@ path (`oidc_auth.rs:1655`) inserts typed values. Test-only comparison sites conv
 too (they are `.eq("owner@test.local")`-style fixtures; conversion keeps the CI gate allowlist at
 zero).
 
+**Claim parse failure is a new, named failure mode**: today the extraction
+(`oidc_auth.rs:2164`-area) treats only an _absent_ email as fatal (`oidc_no_email` redirect).
+Parsing the claim to `MaskedEmail` adds a rejection for malformed/oversized claims — redirect with
+its own error code (`oidc_invalid_email`), and record the behavior change: an IdP emitting a
+non-conforming email now fails login instead of proceeding to auto-create.
+
+**Email-change confirm becomes fallible**: `routes/auth.rs:2622/2647` decrypts the stored
+`new_email` ciphertext back to `String` and (post-retyping) must parse it to set `users.email`. By
+construction the value is canonical — every surviving `email_change_requests` row was created from a
+typed `MaskedEmail` after the migration (which deleted all pre-deploy rows) — so a parse failure is
+an internal-invariant violation: map it to 500 through the handler's existing error contract (no
+silent fallback, row retained for diagnosis). Name this arm so the implementer does not improvise
+mid-change.
+
 **Frontend** (trim fixes; backend canonicalizes regardless — this is UX consistency):
 
 - `frontend/src/routes/login/+page.svelte` and `register/+page.svelte`: both validate `email.trim()`
@@ -170,25 +198,50 @@ run where an abort rolls back the entire migration run; Postgres: plain transact
 
 1. **Delete all rows** from `email_change_requests`, `pending_oidc_registrations`, and
    `pending_account_links` (typed `delete_many`, no filter — every row in these tables is a pending
-   short-TTL artifact). `email_change_requests.new_email` is `EncryptedString` ciphertext and cannot
+   short-TTL artifact; an unfiltered DELETE emits no column list, so this entity use cannot drift
+   against replayed schema, unlike the SELECT/UPDATE in step 2). `email_change_requests.new_email` is `EncryptedString` ciphertext and cannot
    be normalized in place; the two pending tables store plaintext claim emails captured pre-deploy
    that would otherwise (a) be inserted non-canonically by the completion path and (b) defeat the
    `oidc_auth.rs:1611` race guard. All three are re-requestable within minutes; deletion is the
    correct disposition for each.
-2. **Collision pre-check and normalization in Rust, not SQL.** Load `(id, email)` for all users
-   (`SELECT` via SeaORM; the table is small — single-digit rows in the only live deployment). Group by
-   `MaskedEmail::canonical_form(email)`. If any group has more than one row: **abort loudly** with a
-   typed error naming each colliding group as user IDs plus **masked** emails; the runner's transaction
-   rolls back the whole run. Never merge. Otherwise, update each row whose stored value differs from
-   its canonical form (`update` per changed row — a per-row loop, justified inline: each row receives
-   a distinct computed value, the table is tiny, and this runs once at migration time; the N+1 rule
-   targets steady-state query paths).
+2. **Collision pre-check and normalization in Rust, not SQL — and entity-free.** The migration must
+   NOT use `user::Entity`/`user::Model`: a migration referencing the live entity is replayed on fresh
+   installs against the schema _as of this migration_, and breaks the moment a later migration adds a
+   `users` column the entity now carries (SELECT of a not-yet-existing column → every new install
+   fails). Use migration-local `Iden`s + `Query::select()` on exactly `(id, email)` reading raw
+   `QueryResult` rows, and `Query::update()` per changed row (the table is small — single-digit rows
+   in the only live deployment). Group loaded rows by `MaskedEmail::canonical_form(email)`. If any
+   group has more than one row: **abort loudly** with a typed error naming each colliding group as
+   user IDs plus **masked** emails; the runner's transaction rolls back the whole run. Never merge.
+   Otherwise, update each row whose stored value differs from its canonical form (a per-row loop,
+   justified inline: each row receives a distinct computed value, this runs once at migration time;
+   the N+1 rule targets steady-state query paths), logging each row at info level as user ID +
+   masked before/after in **intent tense** ("normalizing …") plus one post-success summary line —
+   the per-row lines are emitted inside the transaction, and past-tense wording would assert a fact
+   the rollback can undo while journald keeps the line.
    Normalization applies `canonical_form` only — it never validates or rejects an existing row.
+   Additionally, **warn (masked, non-fatal)** for any row whose canonical form fails the new
+   `FromStr` validation (e.g. >254 bytes, malformed): such a row survives the migration but no
+   ingress path can ever produce a matching parse again, making the account unreachable by
+   email-keyed login until an operator fixes the row — silence here would hide a lockout.
+   **On Postgres, run a second grouping pass** over the same loaded rows keyed by Unicode
+   `str::to_lowercase` and abort (same IDs + masked-emails error) on any group >1: the backstop
+   index's Postgres `lower()` is Unicode-aware, so a pair that is distinct under the ASCII invariant
+   (`Ä@x` / `ä@x`) passes the canonical pre-check yet kills `CREATE UNIQUE INDEX` in step 3 with a
+   raw duplicate-key error naming no rows — the friendly abort must catch it first. Zero extra
+   queries; SQLite skips the pass (its `lower()` is ASCII-only and cannot diverge).
+   The shared helper splits into two functions: `check_collisions(&C)` (read-only, returns the
+   grouped report) and `normalize(&C)` (writes; calls the checker first) — §5's source-side use
+   requires the read-only half alone.
 3. **Backstop index**: `CREATE UNIQUE INDEX uix_users_lower_email ON users (lower(email))` via
-   `execute_unprepared`, with the inline comment required by the raw-SQL policy (sea_query's
-   `Index::create()` cannot express functional indexes — same limitation and comment as the precedent
-   `m20260322_000001_hosts_lower_name_index.rs`). The existing BINARY unique constraint on `email`
-   stays. Created **after** normalization so it cannot fire on pre-existing case variants.
+   `execute_unprepared`, single statement on both backends (same shape as the precedent
+   `m20260322_000001_hosts_lower_name_index.rs`). The inline comment required by the raw-SQL policy
+   must name the limitation **accurately**: sea_query 1.0's `SqliteQueryBuilder` panics on expression
+   index columns (`IndexColumn::Expr` hits the trait-default `prepare_index_columns`), while
+   `PostgresQueryBuilder` supports them — so the typed builder cannot serve SQLite, and one raw
+   statement keeps both backends on a single code path. (The precedent's comment blames sea_query
+   generally; do not copy that wording.) The existing BINARY unique constraint on `email` stays.
+   Created **after** normalization so it cannot fire on pre-existing case variants.
 
 `down()`: drop the index (typed `Index::drop`, as in the precedent); the data normalization is
 documented as an irreversible no-op (lossy by design — original casing is gone). Cover `down()` on
@@ -208,8 +261,9 @@ unique-violation 500. This is a deliberate, documented property of a defense-in-
 the enforcement path; the application-level check (canonical comparison via the chokepoint) is the
 enforcement path and returns 409. SQLite `lower()` is ASCII-only and matches the invariant exactly.
 
-**Why Rust-side, not `Query::update()` + `Func::lower`** (deviation from the design text, which the
-invariant itself forces): SQL `lower()`/`trim()` are not the invariant's transform. On Postgres,
+**Why Rust-computed values, not SQL `lower()`/`trim()`** (deviation from the design text, which the
+invariant itself forces — the `Query::update()` builder itself is kept; only the SQL-side transform
+is rejected): SQL `lower()`/`trim()` are not the invariant's transform. On Postgres,
 `lower('Ä@x.com')` = `ä@x.com` — a value Rust ingress will never produce, so the migration would
 rewrite a login key into a form the converted comparison sites can never match: precisely the lockout
 the ordering constraint exists to prevent, plus false-positive collision aborts on legal
@@ -234,15 +288,48 @@ database migrations and exit") stays accurate. A collision abort thereby becomes
 pre-flight failure instead of a restart crash-loop. The existing `db-migrate` subcommand
 (cross-database copy) is unrelated and untouched by this item.
 
+Shape: mirror `DbMigrate`'s dispatch — extract a standalone handler (e.g.
+`async fn migrate_and_exit::run(&Args) -> ...` mapped to an `ExitCode` at the call site) that
+`async_main` calls, rather than inlining the logic. `async_main` parses `Args` from the real process
+environment and is not test-constructible; the extracted fn is what the AC6 test drives.
+
 ### 5. `db-migrate` copy tool: close the normalization bypass
 
 `db_migrate::run` migrates the empty target schema first, then `copy_one` streams `E::Model` rows
 verbatim — emails pass through the non-canonicalizing DB-read path. Copying a pre-normalization
 source (old backup, SQLite→Postgres recovery) would land non-canonical rows in a target whose
 migration is already recorded as applied and will never re-run — an unrecoverable lockout for the
-affected user. Fix: after the `users` table copy, run the same Rust normalize-with-collision-check
-routine as the migration (extract it into a shared helper in `uptrakit-shared-db` called by both);
-a collision aborts the copy run loudly before completion is reported.
+affected user. Fix — two parts, because a _post_-copy pass is structurally wrong here:
+
+- **Source-side collision pre-check before any write**: the target schema (migrated first) already
+  carries `uix_users_lower_email`, so a colliding source would die inside `insert_many` with a raw
+  unique-violation mid-copy — the designed loud abort would never execute. Run the shared
+  collision-check against the **source** connection before copying `users`, aborting with the same
+  IDs + masked-emails error.
+- **Canonicalize during the copy, not after**: `copy_one` batches with no wrapping transaction —
+  each `insert_many` commits. A crash between a verbatim `users` copy and a post-copy normalize
+  would persist exactly the lockout state this section exists to prevent. Instead, canonicalize each
+  user row's email as it is copied, so every committed batch already satisfies the invariant. Two
+  mechanics this requires (an implementer dead-ends without them): (a) `MaskedEmail` gains
+  `pub fn canonicalized(&self) -> MaskedEmail` — infallible re-canonicalization of an
+  already-loaded value via the private constructor; the only public `String → MaskedEmail` route is
+  the validating `FromStr`, which would hard-abort a recovery copy on exactly the non-conforming
+  rows §3 step 2 deliberately tolerates. (b) `copy_one` is generic over `E: EntityTrait` with no
+  per-field hook — the `users` table gets a dedicated copy path (or a per-descriptor row-mapper),
+  not a patch inside the generic loop.
+
+Part (a) uses §3's read-only `check_collisions` alone — never `normalize`, which writes and must not
+touch a source that may be a read-only backup.
+
+**Feature-gating constraint**: the shared helper is entity-free (§3's requirement carries over — it
+operates on `(id, email)` via migration-style `Iden`s/raw rows, never `user::Model`). The two
+consumers live behind _independent_ features —
+`#[cfg(feature = "migration")] pub mod migration` vs `#[cfg(feature = "db-migrate")] pub mod
+migrate_core_tables` — and most workspace crates enable `migration` without `db-migrate` (only
+`controller-runtime` enables both). The shared helper must therefore live in a module available under
+`#[cfg(any(feature = "migration", feature = "db-migrate"))]` (or unconditionally), never inside
+`migrate_core_tables.rs`, or isolated `-p` builds with `migration` alone fail to compile (the
+bare-crate clippy sweep in CI exists precisely for this failure class).
 
 ### 6. CI gate (`ci/verify_email_canonical_ingress.sh`)
 
@@ -252,7 +339,13 @@ Shape (house style of `verify_engine_owned_entities.sh` + the self-check hardeni
 - **Rule**: `user::Column::Email` used in a comparison/filter may appear only in the chokepoint file
   (`find_by_canonical_email`'s module). Matching is slurp-mode (`perl -0777` or `rg -U`) so a
   rustfmt-wrapped `.eq(` on its own line (the exact shape at `routes/auth.rs:2627` today) cannot slip
-  through a line-anchored pattern.
+  through a line-anchored pattern. Anchor the pattern to the `user::` path: bare `Column::Email` also
+  names `pending_oidc_registration::Column::Email` and `pending_account_link::Column::Email` (real
+  `String` columns, zero comparison sites today). Those two stay ungated — note the hole explicitly
+  in the gate's header comment so a future comparison site there is a conscious decision, not an
+  accident. Second pattern for the import bypass: a file containing a `use` of `entity::user`
+  (bringing `Column` in unqualified) plus a bare `Column::Email` comparison evades the path-anchored
+  pattern — match that combination too, or the gate is one `use` statement away from silence.
 - **Non-vacuity canary**: assert the pattern still matches the chokepoint file itself; zero matches ⇒
   "gate is stale/broken", exit 1.
 - **Allowlist**: target is zero rows (test sites converted to the chokepoint); if any row proves
@@ -293,10 +386,19 @@ a compile error, which a grep could only approximate.
   - Mixed-case fixture DB → normalized, index present, pending tables empty.
   - Collision fixture (`A@x.com` + `a@x.com`) → loud abort naming both rows, **whole run rolled
     back, `users` byte-unchanged** — asserted against `run_migrations` (the production runner), not
-    `run_migrations_debug`, which lacks the outer transaction on Postgres.
+    `run_migrations_debug`, which lacks the outer transaction on Postgres. On SQLite the fixture
+    must be a **file-backed** temp DB: `run_migrations` branches on `sqlite_main_db_file()`, and an
+    in-memory DB takes the caller-pool FK-ON branch — a different code path from production
+    (precedent: `run_migrations_file_sqlite_pool` test, `migration/mod.rs`).
   - `down()` on both backends (index dropped cleanly).
-- **`db-migrate` copy tool**: copy of a non-canonical source normalizes the target; collision source
-  aborts.
+- **`db-migrate` copy tool**: copy of a non-canonical source lands canonical rows in the target
+  (canonicalize-during-copy — every committed batch canonical); collision source aborts via the
+  source-side pre-check **before any write** reaches the target.
+- **`--migrate-and-exit`** (AC6): a test exercising the flag path itself — clean DB → exit 0;
+  collision-fixture DB → non-zero exit with the collision message on stderr. No test currently covers
+  any controller-runtime CLI dispatch path, so this is new scaffolding; drive the extracted handler
+  fn (§4's mandated shape) directly with constructed `Args` — asserting the outcome mapping is the
+  point, spawning the full binary is not required.
 - **OIDC redirect tests** (`oidc_auth.rs:2392`, `:2402`): existing literals use lowercase inputs and
   stay valid; add a mixed-case-input case asserting the redirect carries the canonical
   (percent-encoded) form.
@@ -323,7 +425,8 @@ invariant or a binding repo rule:
 
 1. **Normalization + pre-check in Rust instead of `Query::update()` + `Func::lower`** — Postgres
    `lower()` is Unicode-aware and diverges from the ASCII-only invariant: silent lockout +
-   false-positive aborts (§3). The "no raw SQL" intent is honored — the data pass is typed SeaORM;
+   false-positive aborts (§3). The "no raw SQL" intent is honored — the data pass is typed sea_query
+   builders over raw `QueryResult` rows (entity-free by §3's replay rule);
    the only raw SQL is the functional index, per the design's own cited precedent.
 2. **Two additional tables cleared** (`pending_oidc_registrations`, `pending_account_links`) — same
    rationale the design applies to `email_change_requests`; leaving them creates a post-deploy
@@ -341,8 +444,11 @@ invariant or a binding repo rule:
 
 - **New ADR** (via `adrs new "Canonical email form for user email addresses"` — never hand-numbered):
   records the invariant, the ASCII-only decision, the ingress-choke-point + private-constructor
-  mechanism, the backstop-index semantics note, and the out-of-scope list. Sections must satisfy
-  `adrs doctor` hard-fail (no placeholder tokens).
+  mechanism, the backstop-index semantics note, the **pre-upgrade backup instruction** ("take a
+  database backup before upgrading; rollback past this release is only possible by restoring it" —
+  also carried in the security-doc subsection), and the out-of-scope list.
+  Sections must satisfy `adrs doctor` hard-fail (no placeholder tokens). The release commit body
+  carries the same rollback note (release-plz `git_only` surfaces commit bodies in the changelog).
 - `docs/security/auth-and-authorization.md`: short "Canonical email form" subsection (invariant,
   enforcement point, backstop semantics, link to ADR).
 - `docs/development/quality-gates.md` + `AGENTS.md` quick-start block: new gate line (same commit as
@@ -365,8 +471,10 @@ invariant or a binding repo rule:
 4. Email-change to a case-variant of an existing address is refused.
 5. Migration collision abort is loud, names rows (IDs + masked emails), and is transactional — proven
    against a mixed-case fixture DB on both backends with the production runner.
-6. `--migrate-and-exit` performs the same migration the server would, against the same database, and
-   exits with a diagnosable status.
+6. `--migrate-and-exit` reuses the boot phases (config/directories/persistence) so it cannot resolve
+   a different database than the server, and exits with a diagnosable status (0 clean / non-zero +
+   collision message). "Same database" is guaranteed by construction (shared code path), asserted in
+   the test by driving the extracted handler — not re-proven end-to-end.
 7. CI gate rejects raw `Column::Email` comparisons (dry-run-proven) and passes on the converted tree.
 8. Explicit statement (this spec + the ADR): provider-alias normalization (gmail dots/plus) is out of
    scope.
