@@ -153,7 +153,8 @@ db_test!(
 async fn test_drop_permissions_down_recreates_schema(harness: &TestHarness) {
     use sea_orm::ConnectionTrait;
     use sea_orm::sea_query::{Alias, Query};
-    use uptrakit_shared_db::migration::{Migrator, MigratorTrait as _};
+    use sea_orm_migration::MigratorTrait as _;
+    use uptrakit_shared_db::migration::Migrator;
 
     let probe = |table: &str, col: &str| {
         Query::select()
