@@ -986,7 +986,7 @@ is injected into every action's params automatically.
 Actions that define an `api_submit` target (e.g., "Add Configuration") call the
 REST API directly instead of routing through the shared-surface action bridge.
 
-See also: [Shared Surfaces Guide](extensions.md),
+See also: [Shared Surfaces Guide](surfaces.md),
 [Shared Surface Development](https://github.com/worried-networking/uptrakit/tree/main/docs/development/).
 
 ## Batch Actions

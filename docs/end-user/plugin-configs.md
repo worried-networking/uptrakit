@@ -356,8 +356,6 @@ and emits one `DiscoveryTarget` per package pointing to a shared `"APK"` config.
 - `apk update` — for refreshing the package index
 - `apk add *` — for installing packages
 
-See [APK Plugin](plugins/apk.md) for full details.
-
 ### `package-manager.snap` configuration fields
 
 The Snap plugin tracks packages installed via `snapd`. Version detection and updates run on the

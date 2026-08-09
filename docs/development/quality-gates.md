@@ -247,7 +247,7 @@ contracts, not ad hoc route styling. `frontend/src/theme/tokens.ts` is the
 single source of truth for semantic token values (emitted as CSS custom
 properties through the `themeTokensPlugin` virtual module) and must stay
 aligned with the semantic token mappings described in
-[UI design language](ui-design-language.md). Built-in plus surface-backed
+[UI design language](ui/README.md). Built-in plus surface-backed
 desktop parity coverage is required for any visual change that touches those
 contracts, and the Playwright parity suite (`npm run test:e2e`) must pass on
 macOS + Chromium before merge.
