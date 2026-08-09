@@ -69,8 +69,8 @@ REST API or the CLI.
 # List all users
 uptrakit-cli users list
 
-# Get a specific user
-uptrakit-cli users get <user-id>
+# Show a specific user
+uptrakit-cli users show <user-id>
 ```
 
 ### Changing user roles
@@ -88,10 +88,10 @@ uptrakit-cli users set-roles <user-id> --names viewer,service_manager
 
 ```bash
 # Deactivate a user (prevents login, revokes sessions)
-uptrakit-cli users set-active <user-id> --active false
+uptrakit-cli users deactivate <user-id>
 
 # Reactivate a user
-uptrakit-cli users set-active <user-id> --active true
+uptrakit-cli users activate <user-id>
 ```
 
 ### Viewing roles and grants
