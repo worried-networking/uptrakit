@@ -68,10 +68,9 @@ authorization is an OR of alternatives (batch actions, `list_plugin_types`, plug
 enforce inline via `authorize_any` and declare one single-scope `oauth2` requirement per alternative, with
 **no** action extractor; dynamic surface wrappers declare the authenticated-only form
 (`security(("oauth2" = []), ("developer_token" = []))`) plus `extensions(("x-action-dynamic" = json!(true)))`.
-Every operation now declares the `oauth2`/`developer_token` security pair; the legacy `bearer_token` OpenAPI
-security scheme and the `x-required-permission` extension are retired — `src/middleware/permission.rs` and its
-`permission_extractor!` macro were deleted in M1.7; `Permission` itself and its backing tables were removed in
-M1.8. The sole exception in either model is handlers with a custom auth path (e.g. WebSocket handlers
+Every operation declares the `oauth2`/`developer_token` security pair; the legacy `bearer_token` OpenAPI
+security scheme and the `x-required-permission` extension are retired — `action_extractor!` is the sole route
+authorization mechanism, backed by the `AccessEngine`. The sole exception is handlers with a custom auth path (e.g. WebSocket handlers
 reading a `?token=` query parameter before the normal extractor chain runs) — these gate inline through the
 engine and must carry a `// APPROVED: custom auth path` comment. Full rationale in
 [`docs/security/auth-and-authorization.md`](../../../docs/security/auth-and-authorization.md).

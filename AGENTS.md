@@ -237,13 +237,12 @@ These are non-negotiable design constraints. Do not violate them.
 1. **Use `SsrfSafeResolver` for all outbound HTTP clients.** Any `reqwest::Client` sending to user-controlled URLs must set
    `.dns_resolver(Arc::new(SsrfSafeResolver::new()))` (or `::permissive()` for self-hosted; in `uptrakit_shared_types::ssrf` behind `http-ssrf`).
    See [SSRF Protection](docs/security/secure-development.md#ssrf-protection).
-1. **Use typed permission extractors for route authorization.** Never perform an inline authorization check in a handler body (there is no
+1. **Use typed action extractors for route authorization.** Never perform an inline authorization check in a handler body (there is no
    `has_permission`-style method); declare the requirement via an Axum extractor. Route families default to `action_extractor!`
    (`crates/ui/web-api/src/middleware/action.rs`), backed by the
-   `AccessEngine`, declaring a native `security(...)` OpenAPI requirement. The legacy `permission_extractor!`
-   module was deleted in M1.7; `Permission` itself and its tables are removed in M1.8. See
+   `AccessEngine`, declaring a native `security(...)` OpenAPI requirement. See
    [Authentication and Authorization](docs/security/auth-and-authorization.md).
-1. **Surface permissions are enforced at read/invoke time.** `required_action` (a catalog `resource:verb` action
+1. **Surface actions are enforced at read/invoke time.** `required_action` (a catalog `resource:verb` action
    string, parsed to `Action` at registration admission) on surface descriptors and interactions is enforced
    server-side via `AccessEngine` before dispatch, for both plugin- and service-backed surfaces; provider-origin
    (service-initiated) calls are denied for action-gated interactions unless the interaction opts in via
