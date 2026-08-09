@@ -145,3 +145,59 @@ db_test!(
     access_grant_storage_migrated,
     test_access_grant_storage_migrated
 );
+
+/// The M1.8 drop migration's `down()` recreates the legacy permission
+/// tables schema-only. PostgreSQL validates FK targets at creation time,
+/// so a wrong parent/child creation order in `down()` fails only on the
+/// Postgres leg — the shared-db in-memory tests cannot catch it.
+async fn test_drop_permissions_down_recreates_schema(harness: &TestHarness) {
+    use sea_orm::ConnectionTrait;
+    use sea_orm::sea_query::{Alias, Query};
+    use uptrakit_shared_db::migration::{Migrator, MigratorTrait as _};
+
+    let probe = |table: &str, col: &str| {
+        Query::select()
+            .column(Alias::new(col))
+            .from(Alias::new(table))
+            .to_owned()
+    };
+    const TABLES: [(&str, &str); 2] = [("permissions", "id"), ("role_permissions", "role_id")];
+
+    // Tip state: both tables dropped by the M1.8 migration.
+    for (table, col) in TABLES {
+        assert!(
+            harness.db.query_all(&probe(table, col)).await.is_err(),
+            "{table} must not exist at tip"
+        );
+    }
+
+    // down(): schema-only recreation — parent (`permissions`) before FK
+    // child (`role_permissions`); PostgreSQL enforces the order here.
+    Migrator::down(&harness.db, Some(1))
+        .await
+        .expect("drop migration down() must succeed");
+    for (table, col) in TABLES {
+        let rows = harness
+            .db
+            .query_all(&probe(table, col))
+            .await
+            .expect("recreated table must be queryable");
+        assert!(rows.is_empty(), "{table} must be recreated empty");
+    }
+
+    // Re-applying the migration drops them again.
+    Migrator::up(&harness.db, None)
+        .await
+        .expect("re-apply drop migration");
+    for (table, col) in TABLES {
+        assert!(
+            harness.db.query_all(&probe(table, col)).await.is_err(),
+            "{table} must be dropped again after re-up"
+        );
+    }
+}
+
+db_test!(
+    drop_permissions_down_recreates_schema,
+    test_drop_permissions_down_recreates_schema
+);

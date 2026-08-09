@@ -1,6 +1,11 @@
 use sea_orm::DatabaseConnection;
 use sea_orm_migration::prelude::*;
 
+/// Re-exported so consumers can drive [`Migrator`] (`up`/`down`) without
+/// taking a direct `sea-orm-migration` dependency — the struct is public but
+/// unusable without its trait in scope.
+pub use sea_orm_migration::MigratorTrait;
+
 pub mod helpers;
 
 mod m20260209_000001_initial;
