@@ -5,8 +5,9 @@ action extractors (M1.4a). Rules:
   R1  non-empty ("oauth2" = [scopes]) <=> the handler's action-extractor
       action set equals exactly those scopes (both directions).
   R2  empty ("oauth2" = []) => handler has NO action extractor.
-  R3  no operation carries BOTH x-required-permission and an oauth2
-      requirement (mixed worlds).
+  R3  no operation carries the retired x-required-permission extension at
+      all (M1.8 deleted the legacy vocabulary; any occurrence is a
+      reintroduction).
   R4  every oauth2 requirement is paired with ("developer_token" = []).
   R5  multiple ("oauth2" = [...]) groups on one operation encode OR
       alternatives (inline authorize_any enforcement): the handler must use
@@ -19,11 +20,10 @@ action extractors (M1.4a). Rules:
       The catalog check covers the closed built-in catalog only — dynamic
       plugin/surface scopes never appear in route declarations.
 
-Unconverted operations (bearer_token + x-required-permission) are ignored
-except by R3. No such operation survives — M1.6b retired the last of them
-and deregistered the bearer_token scheme — so this path is now defensive
-only, kept so a reintroduced legacy declaration degrades rather than
-crashes the checker (its parser is covered by the tests). Non-vacuity:
+The pre-M1.4b "unconverted operation" leniency is gone (M1.8): the
+x-required-permission extension is banned outright, before the
+action-module import gating, so a reintroduced legacy declaration fails
+in any file. Non-vacuity:
 empty extractor map, empty catalog map, or zero converted operations is a
 hard error. Parsing follows ci/verify_db_access_policy.py's
 balanced-attribute-scan pattern (standalone copy, no cross-import).
@@ -227,14 +227,14 @@ def _check_file(
     violations: list[str] = []
     converted = 0
     for attr, signature in _iter_operations(source):
+        if "x-required-permission" in attr:
+            violations.append(
+                f"{path}: R3 operation carries the retired x-required-permission extension"
+            )
+            continue
         if not uses_action_module:
-            if "x-required-permission" in attr and _oauth2_groups(attr) is not None:
-                violations.append(
-                    f"{path}: R3 operation mixes x-required-permission with oauth2"
-                )
             continue
         groups = _oauth2_groups(attr)
-        has_ext = "x-required-permission" in attr
         dynamic = '"x-action-dynamic"' in attr
         used = sorted(
             {
@@ -243,8 +243,6 @@ def _check_file(
                 if name in imported and re.search(rf"\b{name}\b", signature)
             }
         )
-        if groups is not None and has_ext:
-            violations.append(f"{path}: R3 operation mixes x-required-permission with oauth2")
         if dynamic and groups != [[]]:
             violations.append(
                 f"{path}: R5 x-action-dynamic operation must declare exactly one empty oauth2 group"

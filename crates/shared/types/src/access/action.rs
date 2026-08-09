@@ -127,8 +127,8 @@ impl<'de> serde::Deserialize<'de> for Action {
 // Open string schema: the action set is open (dynamic namespaces), so this
 // is deliberately NOT an enum schema — the grammar is documented and the
 // built-in catalog enumerated in the description (sourced from CATALOG,
-// never a hand-maintained list). Divergence from the `Permission` schema
-// treatment is mandated by the spec.
+// never a hand-maintained list). Divergence from the legacy permission
+// enum's closed-schema treatment is mandated by the spec.
 #[cfg(feature = "openapi")]
 impl utoipa::PartialSchema for Action {
     fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {

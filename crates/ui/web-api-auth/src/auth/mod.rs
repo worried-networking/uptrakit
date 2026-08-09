@@ -8,7 +8,6 @@ pub mod mfa_challenge;
 #[cfg(feature = "oidc")]
 pub mod oidc_state;
 pub mod password;
-pub mod permissions;
 pub mod rate_limit;
 pub mod refresh_cookie;
 pub mod registration;

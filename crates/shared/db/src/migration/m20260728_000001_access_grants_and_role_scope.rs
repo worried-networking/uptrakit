@@ -431,6 +431,16 @@ mod tests {
         .expect("migration index fits u32")
     }
 
+    fn drop_migration_index() -> u32 {
+        <u32 as std::convert::TryFrom<usize>>::try_from(
+            Migrator::migrations()
+                .iter()
+                .position(|m| m.name() == "m20260807_000001_drop_permissions_tables")
+                .expect("drop migration must be registered"),
+        )
+        .expect("migration index fits u32")
+    }
+
     async fn role_ids_by_name(db: &DatabaseConnection) -> BTreeMap<String, Uuid> {
         let rows = db
             .query_all(
@@ -557,10 +567,12 @@ mod tests {
         .await
         .expect("insert user_roles row");
 
-        // Run the remaining migrations (this one + the seed migration).
-        Migrator::up(&db, None)
+        // Run everything up to (but not including) the M1.8 drop migration
+        // — the tables this test counts must still exist at the stopping
+        // point. Bounded by name, never by a hardcoded step count.
+        Migrator::up(&db, Some(drop_migration_index() - migration_index()))
             .await
-            .expect("remaining migrations apply");
+            .expect("remaining migrations before the drop apply");
 
         let after = role_ids_by_name(&db).await;
         assert_eq!(before, after, "role ids must be preserved by the rebuild");
@@ -669,15 +681,72 @@ mod tests {
 
     /// up → down → up round-trip (guards the table-recreation reversal). The
     /// down() content assertions live in the seed migration's own tests.
+    /// Post-M1.8, `role_permissions` is empty at tip, so the down-direction
+    /// child-parking data-survival guard rides on `user_roles` (the other
+    /// `child_parking_plan()` entry) via a seeded assignment.
     #[tokio::test]
     async fn up_down_up_round_trips() {
         let db = test_db().await;
         Migrator::up(&db, None).await.expect("up");
-        // Roll back every migration from this one onward (itself plus
-        // whatever later migrations append additional access_grants rows,
-        // e.g. the M1.5 mcp:use backfill) — computed dynamically via
-        // `migration_index()` rather than hardcoded, so appending a future
-        // migration after this one cannot silently under-roll-back.
+
+        // Seed one user + assignment at tip so the down-chain parking has a
+        // surviving data row to prove itself on.
+        let tenant_id = default_tenant_id(&db).await;
+        let viewer_id = *role_ids_by_name(&db)
+            .await
+            .get("viewer")
+            .expect("viewer role exists");
+        let user_id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+        db.execute(
+            &Query::insert()
+                .into_table(Alias::new("users"))
+                .columns([
+                    Alias::new("id"),
+                    Alias::new("email"),
+                    Alias::new("first_name"),
+                    Alias::new("last_name"),
+                    Alias::new("is_active"),
+                    Alias::new("created_at"),
+                    Alias::new("updated_at"),
+                ])
+                .values_panic([
+                    Expr::value(user_id),
+                    Expr::value("m18@example.com"),
+                    Expr::value("M"),
+                    Expr::value("Eighteen"),
+                    Expr::value(true),
+                    Expr::value(now),
+                    Expr::value(now),
+                ])
+                .to_owned(),
+        )
+        .await
+        .expect("insert user");
+        db.execute(
+            &Query::insert()
+                .into_table(Alias::new("user_roles"))
+                .columns([
+                    Alias::new("tenant_id"),
+                    Alias::new("user_id"),
+                    Alias::new("role_id"),
+                    Alias::new("assigned_at"),
+                ])
+                .values_panic([
+                    Expr::value(tenant_id),
+                    Expr::value(user_id),
+                    Expr::value(viewer_id),
+                    Expr::value(now),
+                ])
+                .to_owned(),
+        )
+        .await
+        .expect("insert user_roles row");
+
+        // Roll back every migration from this one onward — computed
+        // dynamically via `migration_index()` rather than hardcoded, so
+        // appending a future migration after this one cannot silently
+        // under-roll-back.
         let total = Migrator::migrations().len();
         let steps = total - usize::try_from(migration_index()).expect("index fits usize");
         let steps = <u32 as std::convert::TryFrom<usize>>::try_from(steps).expect("steps fits u32");
@@ -697,16 +766,50 @@ mod tests {
             .await
             .expect("sqlite_master query");
         assert!(gone.is_none(), "access_grants must be dropped by down");
+        // The M1.8 drop's down() recreated role_permissions (schema-only),
+        // so the parking path below it ran against a real table…
+        let rp = db
+            .query_one(
+                &Query::select()
+                    .column(Alias::new("name"))
+                    .from(Alias::new("sqlite_master"))
+                    .and_where(Expr::col(Alias::new("type")).eq("table"))
+                    .and_where(Expr::col(Alias::new("name")).eq("role_permissions"))
+                    .to_owned(),
+            )
+            .await
+            .expect("sqlite_master query");
         assert!(
-            row_count(&db, "role_permissions").await > 0,
-            "role_permissions must survive the down-direction rebuild too"
+            rp.is_some(),
+            "role_permissions must exist after down (recreated by the drop's down())"
+        );
+        // …and the surviving child-parking entry proves data survival.
+        assert_eq!(
+            row_count(&db, "user_roles").await,
+            1,
+            "user_roles row must survive the down-direction rebuild"
         );
         Migrator::up(&db, None)
             .await
             .expect("re-apply after rollback");
-        assert!(
-            row_count(&db, "role_permissions").await > 0,
-            "role_permissions must survive the full round trip"
+        for table in ["permissions", "role_permissions"] {
+            let present = db
+                .query_one(
+                    &Query::select()
+                        .column(Alias::new("name"))
+                        .from(Alias::new("sqlite_master"))
+                        .and_where(Expr::col(Alias::new("type")).eq("table"))
+                        .and_where(Expr::col(Alias::new("name")).eq(table))
+                        .to_owned(),
+                )
+                .await
+                .expect("sqlite_master query");
+            assert!(present.is_none(), "{table} must be dropped again at tip");
+        }
+        assert_eq!(
+            row_count(&db, "user_roles").await,
+            1,
+            "user_roles row must survive the full round trip"
         );
     }
 }

@@ -217,8 +217,8 @@ pub async fn list_hosts(CanReadHosts(_user): CanReadHosts) -> Response {
         violations, converted = vasd._check_file("routes/hosts.rs", source, EXTRACTOR_ACTIONS, CATALOG_ACTIONS)
         r3 = [v for v in violations if "R3" in v]
         self.assertEqual(len(r3), 1)
-        self.assertIn("mixes x-required-permission with oauth2", r3[0])
-        self.assertEqual(converted, 1)
+        self.assertIn("retired x-required-permission extension", r3[0])
+        self.assertEqual(converted, 0)
 
     def test_mixed_x_required_permission_and_oauth2_in_legacy_file(self) -> None:
         # R3 is the one rule enforced even when the file has NOT imported
@@ -277,8 +277,9 @@ class CheckFileNonVacuityTests(unittest.TestCase):
         self.assertEqual(result, {})
 
     def test_zero_converted_operations_in_legacy_only_file(self) -> None:
-        # A file that never imports middleware::action contributes zero
-        # converted operations, even though it has utoipa::path items.
+        # A file that never imports middleware::action still fails on the
+        # retired extension (M1.8 ban) and contributes zero converted
+        # operations.
         source = """
 use crate::middleware::permission::CanViewHosts;
 
@@ -295,12 +296,13 @@ pub async fn list_host_tags(CanViewHosts(_user): CanViewHosts) -> Response {
 }
 """
         violations, converted = vasd._check_file("routes/host_tags.rs", source, EXTRACTOR_ACTIONS, CATALOG_ACTIONS)
-        self.assertEqual(violations, [])
+        self.assertEqual(len(violations), 1)
+        self.assertIn("retired x-required-permission extension", violations[0])
         self.assertEqual(converted, 0)
 
 
 class ImportGatingTests(unittest.TestCase):
-    def test_legacy_file_using_can_update_hosts_without_action_import_is_clean(self) -> None:
+    def test_legacy_file_using_can_update_hosts_without_action_import_fails_only_r3(self) -> None:
         # Parser trap: CanUpdateHosts is defined in BOTH middleware::action
         # and middleware::permission. Without a middleware::action import,
         # this must produce zero R1 violations — the import line is what
@@ -323,7 +325,8 @@ pub async fn update_host_tag(CanUpdateHosts(_user): CanUpdateHosts) -> Response 
         violations, converted = vasd._check_file("routes/host_tags.rs", source, EXTRACTOR_ACTIONS, CATALOG_ACTIONS)
         r1 = [v for v in violations if "R1" in v]
         self.assertEqual(r1, [])
-        self.assertEqual(violations, [])
+        self.assertEqual(len(violations), 1)
+        self.assertIn("retired x-required-permission extension", violations[0])
         self.assertEqual(converted, 0)
 
 

@@ -32,7 +32,6 @@ pub mod oauth;
 pub mod oidc_auth;
 pub mod oidc_providers;
 pub mod pagination;
-pub mod permissions;
 pub mod plugin_config_test;
 pub mod plugin_configs;
 pub mod plugin_type_settings;
@@ -89,7 +88,6 @@ mod tests {
     use crate::auth::{AuthResponse, AuthorityStatus, UserResponse};
     use crate::error::ErrorResponse;
     use crate::oidc_providers::CreateOidcProviderRequest;
-    use crate::permissions::Permission;
     use crate::plugin_configs::CreatePluginConfigRequest;
     use crate::registration::RegistrationMode;
     use crate::software_items::CreateSoftwareItemRequest;
@@ -97,119 +95,6 @@ mod tests {
     use strum::IntoEnumIterator;
     use uptrakit_shared_types::SecretString;
     use uuid::Uuid;
-
-    // ── 1. Permission enum round-trip ─────────────────────────────────────
-
-    #[test]
-    fn permission_serde_round_trip() {
-        for perm in Permission::iter() {
-            let json = serde_json::to_string(&perm).unwrap();
-            let deserialized: Permission = serde_json::from_str(&json).unwrap();
-            assert_eq!(deserialized, perm);
-        }
-    }
-
-    #[test]
-    fn permission_as_str_values() {
-        assert_eq!(Permission::ViewSettings.as_str(), "view_settings");
-        assert_eq!(
-            Permission::ManageAuthSettings.as_str(),
-            "manage_auth_settings"
-        );
-        assert_eq!(Permission::ViewServices.as_str(), "view_services");
-        assert_eq!(Permission::UpdateServices.as_str(), "update_services");
-        assert_eq!(
-            Permission::ManageGlobalSettings.as_str(),
-            "manage_global_settings"
-        );
-    }
-
-    #[test]
-    fn permission_from_str_valid() {
-        assert_eq!(
-            "view_settings".parse::<Permission>().ok(),
-            Some(Permission::ViewSettings)
-        );
-        assert_eq!(
-            "manage_auth_settings".parse::<Permission>().ok(),
-            Some(Permission::ManageAuthSettings)
-        );
-        assert_eq!(
-            "view_services".parse::<Permission>().ok(),
-            Some(Permission::ViewServices)
-        );
-        assert_eq!(
-            "update_services".parse::<Permission>().ok(),
-            Some(Permission::UpdateServices)
-        );
-        assert_eq!(
-            "manage_global_settings".parse::<Permission>().ok(),
-            Some(Permission::ManageGlobalSettings)
-        );
-    }
-
-    #[test]
-    fn permission_from_str_unknown_becomes_other() {
-        let p: Permission = "totally_unknown_perm".parse().unwrap();
-        assert!(matches!(p, Permission::Other(ref s) if s == "totally_unknown_perm"));
-    }
-
-    #[test]
-    fn permission_other_not_in_iter() {
-        for p in Permission::iter() {
-            assert!(
-                !matches!(p, Permission::Other(_)),
-                "Other should not appear in iter"
-            );
-        }
-    }
-
-    #[test]
-    fn permission_other_as_str_returns_inner() {
-        let p = Permission::Other("foo_bar".to_string());
-        assert_eq!(p.as_str(), "foo_bar");
-    }
-
-    #[test]
-    fn permission_display_matches_as_str() {
-        for perm in Permission::iter() {
-            assert_eq!(format!("{perm}"), perm.as_str());
-        }
-    }
-
-    #[test]
-    fn permission_iter_covers_all_variants() {
-        // 36 after ViewInstanceConfigState + ManageInstanceConfigState added
-        assert_eq!(Permission::iter().count(), 36);
-    }
-
-    #[test]
-    fn permission_iter_covers_all_variants_with_access_mcp() {
-        // 36 after ViewInstanceConfigState + ManageInstanceConfigState added
-        assert_eq!(Permission::iter().count(), 36);
-    }
-
-    #[test]
-    fn access_mcp_as_str() {
-        assert_eq!(Permission::AccessMcp.as_str(), "access_mcp");
-    }
-
-    #[test]
-    fn access_mcp_round_trips_from_str() {
-        let p: Permission = "access_mcp".parse().unwrap();
-        assert_eq!(p, Permission::AccessMcp);
-    }
-
-    #[test]
-    fn permission_as_str_round_trips_through_from_str() {
-        for perm in Permission::iter() {
-            let s = perm.as_str();
-            let parsed: Permission = s
-                .parse()
-                .expect("from_str should succeed for as_str output");
-            assert_eq!(parsed, perm);
-        }
-    }
 
     // ── 2. RegistrationMode enum round-trip ──────────────────────────────
 
@@ -782,7 +667,6 @@ mod tests {
         let _: ErrorResponse;
         let _: PaginatedResponse<String>;
         let _: PaginationParams;
-        let _ = Permission::ViewSettings;
         let _ = RegistrationMode::Open;
     }
 

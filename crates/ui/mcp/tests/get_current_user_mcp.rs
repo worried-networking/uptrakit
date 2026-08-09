@@ -690,9 +690,9 @@ async fn missing_access_mcp_permission_returns_403() {
     );
 }
 
-/// Engine-gate discriminator: legacy role_permissions still grant
-/// access_mcp, but the engine grant row is gone -> 403 only once the
-/// gate reads the engine.
+/// Engine-gate discriminator: the user still holds the role, but the
+/// engine grant row is deleted -> the engine (the only authority) denies
+/// with 403.
 #[tokio::test]
 async fn api_token_denied_when_mcp_use_grant_removed() {
     let app = McpTestApp::new().await;

@@ -827,9 +827,7 @@ mod tests {
 
     use super::*;
     use crate::test_harness::TestApp;
-    use crate::test_harness::fixtures::{
-        insert_host, register_and_get_token, seed_permissions_for_owner,
-    };
+    use crate::test_harness::fixtures::{insert_host, register_and_get_token};
     use http::StatusCode;
     use sea_orm::QueryOrder;
     use serde_json::Value;
@@ -859,7 +857,6 @@ mod tests {
     async fn add_tenant_discovery_allowlist_writes_create_audit_event() {
         let app = TestApp::new().await;
         let client = app.client();
-        seed_permissions_for_owner(&app.db, &["update_software"]).await;
         let token = register_and_get_token(&client).await;
 
         let (status, body): (StatusCode, Value) = client
@@ -903,7 +900,6 @@ mod tests {
     async fn add_tenant_discovery_allowlist_invalid_plugin_writes_validation_failed_audit_event() {
         let app = TestApp::new().await;
         let client = app.client();
-        seed_permissions_for_owner(&app.db, &["update_software"]).await;
         let token = register_and_get_token(&client).await;
 
         let status = client
@@ -941,7 +937,6 @@ mod tests {
     async fn add_host_discovery_allowlist_writes_create_audit_event() {
         let app = TestApp::new().await;
         let client = app.client();
-        seed_permissions_for_owner(&app.db, &["update_software"]).await;
         let token = register_and_get_token(&client).await;
         let host = insert_host(&app.db, app.tenant_id).await;
 
@@ -989,7 +984,6 @@ mod tests {
     async fn remove_host_discovery_allowlist_writes_delete_audit_event() {
         let app = TestApp::new().await;
         let client = app.client();
-        seed_permissions_for_owner(&app.db, &["update_software"]).await;
         let token = register_and_get_token(&client).await;
         let host = insert_host(&app.db, app.tenant_id).await;
 
@@ -1039,7 +1033,6 @@ mod tests {
     async fn remove_tenant_discovery_allowlist_missing_writes_denied_audit_event() {
         let app = TestApp::new().await;
         let client = app.client();
-        seed_permissions_for_owner(&app.db, &["update_software"]).await;
         let token = register_and_get_token(&client).await;
         let missing_id = Uuid::now_v7();
 

@@ -15,9 +15,7 @@
 
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use uptrakit_shared_db::access_grants::{GrantSubject, delete_grant, load_grants_for_principal};
-use uptrakit_shared_db::entity::{
-    host, oauth_client, permission, role, role_permission, service, service_host, user_role,
-};
+use uptrakit_shared_db::entity::{host, oauth_client, role, service, service_host, user_role};
 use uptrakit_web_api_types::SecretString;
 use uptrakit_web_api_types::auth::{AuthResponse, LoginRequest, RefreshResponse, RegisterRequest};
 
@@ -229,64 +227,6 @@ pub(crate) async fn insert_host(db: &DatabaseConnection, tenant_id: uuid::Uuid) 
     .insert(db)
     .await
     .expect("insert host")
-}
-
-/// Ensure the named permissions exist in the database and are linked to
-/// at least one role that the first registered user holds.
-///
-/// After the granular permissions migration all 32 permissions are already
-/// seeded with correct role assignments, so this is effectively a no-op in
-/// normal circumstances. It is kept for backwards-compatibility with tests
-/// that call it and as a safety net if a permission somehow wasn't seeded.
-pub(crate) async fn seed_permissions_for_owner(db: &DatabaseConnection, names: &[&str]) {
-    // Use the first built-in role we find — after migration the first
-    // registered user holds all 8 roles, so any role will do.
-    let any_role = role::Entity::find()
-        .filter(role::Column::IsBuiltIn.eq(true))
-        .one(db)
-        .await
-        .expect("find built-in role")
-        .expect("at least one built-in role must exist");
-
-    let now = time::OffsetDateTime::now_utc();
-    for name in names {
-        // Skip if already seeded by a migration.
-        let existing = permission::Entity::find()
-            .filter(permission::Column::Name.eq(*name))
-            .one(db)
-            .await
-            .expect("query permission");
-        let perm_id = if let Some(p) = existing {
-            p.id
-        } else {
-            let id = uuid::Uuid::now_v7();
-            permission::ActiveModel {
-                id: Set(id),
-                name: Set(name.to_string()),
-                description: Set(Some(name.to_string())),
-                created_at: Set(now),
-            }
-            .insert(db)
-            .await
-            .expect("insert permission");
-            id
-        };
-
-        // Link to a role (ignore if already linked).
-        let link_exists = role_permission::Entity::find_by_id((any_role.id, perm_id))
-            .one(db)
-            .await
-            .expect("query role_permission");
-        if link_exists.is_none() {
-            role_permission::ActiveModel {
-                role_id: Set(any_role.id),
-                permission_id: Set(perm_id),
-            }
-            .insert(db)
-            .await
-            .expect("insert role_permission");
-        }
-    }
 }
 
 /// Upsert a row into `instance_plugin_setting` AND publish the new snapshot

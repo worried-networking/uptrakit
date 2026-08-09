@@ -70,7 +70,7 @@ enforce inline via `authorize_any` and declare one single-scope `oauth2` require
 (`security(("oauth2" = []), ("developer_token" = []))`) plus `extensions(("x-action-dynamic" = json!(true)))`.
 Every operation now declares the `oauth2`/`developer_token` security pair; the legacy `bearer_token` OpenAPI
 security scheme and the `x-required-permission` extension are retired — `src/middleware/permission.rs` and its
-`permission_extractor!` macro were deleted in M1.7; `Permission` itself and its backing tables are removed in
+`permission_extractor!` macro were deleted in M1.7; `Permission` itself and its backing tables were removed in
 M1.8. The sole exception in either model is handlers with a custom auth path (e.g. WebSocket handlers
 reading a `?token=` query parameter before the normal extractor chain runs) — these gate inline through the
 engine and must carry a `// APPROVED: custom auth path` comment. Full rationale in
@@ -116,9 +116,9 @@ rationale in [Coding Standards — Tenant-Safe Database Queries](../../../docs/d
 
 New endpoint tests must use the shared `TestApp` harness in `src/test_harness/` (`TestApp` — in-memory
 SQLite, migrated schema, seeded tenant, fully wired Axum router; `TestClient` — ergonomic HTTP client
-over `tower::oneshot`; fixture helpers such as `register_user`, `insert_service`,
-`seed_permissions_for_owner`). Never duplicate a local `test_state()` or `build_test_state()` inline —
-extend the harness instead. Integration tests live in `src/integration_tests/` and are gated
+over `tower::oneshot`; fixture helpers such as `register_user`, `insert_service`). Never duplicate a local
+`test_state()` or `build_test_state()` inline — extend the harness instead. Integration tests live in
+`src/integration_tests/` and are gated
 `#[cfg(all(test, feature = "db-sqlite"))]`; add new test modules there rather than inline in the route
 file for anything that needs a full router + DB. See
 [Testing — REST API Integration Tests](../../../docs/development/testing.md#rest-api-integration-tests)

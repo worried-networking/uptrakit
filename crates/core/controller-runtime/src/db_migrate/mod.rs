@@ -218,7 +218,7 @@ mod tests {
         use sea_orm::{ConnectOptions, Database};
 
         // Set up source DB: run migrations so we get the seeded rows
-        // (1 tenant, 3 roles, 9 permissions, role_permission links, scheduled tasks).
+        // (1 tenant, seeded roles, access grants, scheduled tasks).
         let src = {
             let opt = ConnectOptions::new("sqlite::memory:");
             let db = Database::connect(opt).await.expect("source db");

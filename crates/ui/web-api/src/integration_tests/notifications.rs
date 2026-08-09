@@ -5,7 +5,7 @@
 #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
 
 use crate::test_harness::TestApp;
-use crate::test_harness::fixtures::{register_and_get_token, seed_permissions_for_owner};
+use crate::test_harness::fixtures::register_and_get_token;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Set,
 };
@@ -34,7 +34,6 @@ async fn tenant_audit_row_for_action(
 /// Seed notification permissions and register an owner user, returning the
 /// access token ready for authenticated requests.
 async fn setup_with_notification_perms(app: &TestApp) -> String {
-    seed_permissions_for_owner(&app.db, &["view_notifications", "manage_notifications"]).await;
     let client = app.client();
     register_and_get_token(&client).await
 }

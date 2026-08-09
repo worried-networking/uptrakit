@@ -27,8 +27,6 @@
 //! Full design: `.superpowers/authn-and-authz-refactoring/07-decision-and-enforcement.md`
 //! and `docs/superpowers/specs/2026-07-28-access-engine-design.md`.
 
-pub mod shim;
-
 use std::sync::Arc;
 use std::time::Duration;
 

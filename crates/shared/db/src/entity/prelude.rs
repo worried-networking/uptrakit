@@ -66,7 +66,6 @@ pub use super::pending_oidc_registration::{
 pub use super::pending_oidc_token_exchange::{
     Entity as PendingOidcTokenExchange, Model as PendingOidcTokenExchangeModel,
 };
-pub use super::permission::{Entity as Permission, Model as PermissionModel};
 pub use super::plugin_config::{Entity as PluginConfig, Model as PluginConfigModel};
 pub use super::plugin_type_setting::{
     Entity as PluginTypeSetting, Model as PluginTypeSettingModel,
@@ -74,7 +73,6 @@ pub use super::plugin_type_setting::{
 pub use super::revoked_token_jti::{Entity as RevokedTokenJti, Model as RevokedTokenJtiModel};
 pub use super::revoked_token_user::{Entity as RevokedTokenUser, Model as RevokedTokenUserModel};
 pub use super::role::{Entity as Role, Model as RoleModel};
-pub use super::role_permission::{Entity as RolePermission, Model as RolePermissionModel};
 pub use super::scheduled_task::{
     Entity as ScheduledTask, Model as ScheduledTaskModel, ScheduledTaskType,
 };

@@ -10,7 +10,7 @@ const mockUser = {
 	first_name: 'Admin',
 	last_name: 'User',
 	// Empty on purpose: the legacy fixture listed `manage_services`/`manage_hosts`/
-	// `manage_settings`/`manage_software`, none of which were real `Permission` variants,
+	// `manage_settings`/`manage_software`, none of which were real legacy permission variants,
 	// so it conferred nothing. These specs only exercise login, redirect, and home-page
 	// load — none needs a grant. Keeping the list empty preserves that deny-side surface;
 	// granting a superset here would mask a future gating regression on those actions.

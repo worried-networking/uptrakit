@@ -4,12 +4,11 @@
     reason = "integration test code: panics are acceptable in test helpers (db_test! macro means functions are not annotated #[test])"
 )]
 
-use crate::database_helpers::fixtures::{register_and_get_token, seed_permissions_for_owner};
+use crate::database_helpers::fixtures::register_and_get_token;
 use crate::database_helpers::harness::TestHarness;
 use crate::database_helpers::macros::db_test;
 
 async fn setup_with_notification_perms(harness: &TestHarness) -> String {
-    seed_permissions_for_owner(&harness.db, &["view_notifications", "manage_notifications"]).await;
     let client = harness.client();
     register_and_get_token(&client).await
 }

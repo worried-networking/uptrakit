@@ -87,6 +87,7 @@ mod m20260727_000001_plugin_type_id_grammar;
 mod m20260728_000001_access_grants_and_role_scope;
 mod m20260728_000002_seed_access_grants;
 mod m20260803_000001_seed_mcp_use_grants;
+mod m20260807_000001_drop_permissions_tables;
 
 pub struct Migrator;
 
@@ -178,6 +179,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260728_000001_access_grants_and_role_scope::Migration),
             Box::new(m20260728_000002_seed_access_grants::Migration),
             Box::new(m20260803_000001_seed_mcp_use_grants::Migration),
+            Box::new(m20260807_000001_drop_permissions_tables::Migration),
         ]
     }
 }
@@ -450,18 +452,17 @@ async fn run_on_dedicated_sqlite_pool(
 mod tests {
     use super::*;
     use sea_orm::{
-        ColumnTrait as _, ConnectOptions, Database, DatabaseConnection, EntityTrait as _,
-        PaginatorTrait as _, QueryFilter as _,
+        ConnectOptions, Database, DatabaseConnection, EntityTrait as _, PaginatorTrait as _,
     };
 
     use crate::entity::{
         audit_log, crl_cache, data_encryption_key, email_change_request, global_service_config,
         global_setting, host_discovery_allowlist, host_software_item, host_tag,
         host_tag_assignment, notification_channel, notification_log, notification_rule,
-        plugin_config, plugin_type_setting, revoked_token_jti, revoked_token_user, role_permission,
-        service, software_ignore, software_item, system_audit_log, system_enrollment_token,
-        system_service, system_service_certificate, tenant_discovery_allowlist,
-        tenant_service_config, update_batch, update_history,
+        plugin_config, plugin_type_setting, revoked_token_jti, revoked_token_user, service,
+        software_ignore, software_item, system_audit_log, system_enrollment_token, system_service,
+        system_service_certificate, tenant_discovery_allowlist, tenant_service_config,
+        update_batch, update_history,
     };
 
     async fn test_db() -> DatabaseConnection {
@@ -809,89 +810,6 @@ mod tests {
             "expected at least one discover_software task after migration, found {dhp_count}"
         );
 
-        // Verify manage_commands permission was created and assigned.
-        let perm_count_stmt = sea_orm_migration::prelude::Query::select()
-            .expr(sea_orm_migration::prelude::Func::count(
-                sea_orm_migration::prelude::Expr::col(Alias::new("id")),
-            ))
-            .from(Alias::new("permissions"))
-            .and_where(
-                sea_orm_migration::prelude::Expr::col(Alias::new("name")).eq("manage_commands"),
-            )
-            .to_owned();
-        let perm_rows = db.query_all(&perm_count_stmt).await.unwrap();
-        let perm_count: i64 = {
-            use sea_orm::TryGetable;
-            perm_rows
-                .first()
-                .map(|r| i64::try_get_by_index(r, 0).unwrap_or(0))
-                .unwrap_or(0)
-        };
-        assert_eq!(
-            perm_count, 1,
-            "manage_commands permission must exist after all migrations"
-        );
-
-        // Verify granular permissions exist after all migrations.
-        for perm_name in [
-            "view_services",
-            "approve_services",
-            "view_system_services",
-            "approve_system_services",
-            "manage_users",
-            "manage_ignores",
-            "view_notifications",
-            "manage_notifications",
-        ] {
-            let ss_perm_stmt = sea_orm_migration::prelude::Query::select()
-                .expr(sea_orm_migration::prelude::Func::count(
-                    sea_orm_migration::prelude::Expr::col(Alias::new("id")),
-                ))
-                .from(Alias::new("permissions"))
-                .and_where(sea_orm_migration::prelude::Expr::col(Alias::new("name")).eq(perm_name))
-                .to_owned();
-            let ss_rows = db.query_all(&ss_perm_stmt).await.unwrap();
-            let ss_count: i64 = {
-                use sea_orm::TryGetable;
-                ss_rows
-                    .first()
-                    .map(|r| i64::try_get_by_index(r, 0).unwrap_or(0))
-                    .unwrap_or(0)
-            };
-            assert_eq!(
-                ss_count, 1,
-                "{perm_name} permission must exist after all migrations"
-            );
-        }
-
-        // Verify old coarse permissions were removed.
-        for old_perm in [
-            "view_agents",
-            "manage_agents",
-            "manage_software",
-            "manage_hosts",
-        ] {
-            let old_stmt = sea_orm_migration::prelude::Query::select()
-                .expr(sea_orm_migration::prelude::Func::count(
-                    sea_orm_migration::prelude::Expr::col(Alias::new("id")),
-                ))
-                .from(Alias::new("permissions"))
-                .and_where(sea_orm_migration::prelude::Expr::col(Alias::new("name")).eq(old_perm))
-                .to_owned();
-            let old_rows = db.query_all(&old_stmt).await.unwrap();
-            let old_count: i64 = {
-                use sea_orm::TryGetable;
-                old_rows
-                    .first()
-                    .map(|r| i64::try_get_by_index(r, 0).unwrap_or(0))
-                    .unwrap_or(0)
-            };
-            assert_eq!(
-                old_count, 0,
-                "{old_perm} permission must NOT exist after granular migration"
-            );
-        }
-
         // Verify 8 new built-in roles exist.
         for role_name in [
             "viewer",
@@ -931,81 +849,14 @@ mod tests {
             .unwrap();
     }
 
-    /// After all migrations, command_manager role must have manage_commands.
-    #[tokio::test]
-    async fn manage_commands_assigned_to_command_manager() {
-        let opt = ConnectOptions::new("sqlite::memory:");
-        let db = Database::connect(opt).await.unwrap();
-        run_migrations(&db).await.unwrap();
-
-        let count_stmt = sea_orm_migration::prelude::Query::select()
-            .expr(sea_orm_migration::prelude::Func::count(
-                sea_orm_migration::prelude::Expr::col(Alias::new("rp.role_id")),
-            ))
-            .from_as(Alias::new("role_permissions"), Alias::new("rp"))
-            .join_as(
-                sea_orm_migration::prelude::JoinType::InnerJoin,
-                Alias::new("roles"),
-                Alias::new("r"),
-                sea_orm_migration::prelude::Expr::col((Alias::new("r"), Alias::new("id")))
-                    .equals((Alias::new("rp"), Alias::new("role_id"))),
-            )
-            .join_as(
-                sea_orm_migration::prelude::JoinType::InnerJoin,
-                Alias::new("permissions"),
-                Alias::new("p"),
-                sea_orm_migration::prelude::Expr::col((Alias::new("p"), Alias::new("id")))
-                    .equals((Alias::new("rp"), Alias::new("permission_id"))),
-            )
-            .and_where(
-                sea_orm_migration::prelude::Expr::col((Alias::new("r"), Alias::new("name")))
-                    .eq("command_manager"),
-            )
-            .and_where(
-                sea_orm_migration::prelude::Expr::col((Alias::new("p"), Alias::new("name")))
-                    .eq("manage_commands"),
-            )
-            .to_owned();
-
-        let rows = db.query_all(&count_stmt).await.unwrap();
-        let count: i64 = {
-            use sea_orm::TryGetable;
-            rows.first()
-                .map(|r| i64::try_get_by_index(r, 0).unwrap_or(0))
-                .unwrap_or(0)
-        };
-        assert_eq!(
-            count, 1,
-            "command_manager role must have manage_commands permission after all migrations"
-        );
-    }
-
-    /// After all migrations, the `role_permissions` entity query must succeed.
-    ///
-    /// This catches the TEXT/BLOB UUID mismatch: if any `permission_id` in
-    /// `role_permissions` is stored as a 36-char TEXT string, SeaORM fails
-    /// with `ParseByteLength { len: 36 }` when loading `role_permission::Model`.
-    #[tokio::test]
-    async fn role_permissions_entity_query_succeeds() {
-        let opt = ConnectOptions::new("sqlite::memory:");
-        let db = Database::connect(opt).await.unwrap();
-        run_migrations(&db).await.unwrap();
-
-        role_permission::Entity::find()
-            .all(&db)
-            .await
-            .expect("role_permissions entity query must succeed after all migrations");
-    }
-
     /// Verify that the repair migration converts TEXT-stored UUIDs to BLOBs.
     ///
     /// Steps:
     /// 1. Apply migrations 1–18 (all except the repair migration).
     /// 2. Manually inject a permission row with a TEXT-stored UUID and a
     ///    matching `role_permissions` row.
-    /// 3. Apply migration 19 (the repair).
+    /// 3. Apply exactly migration 19 (the repair; bounded — the M1.8 drop never runs here).
     /// 4. Assert `typeof(id) = 'blob'` for the injected permission.
-    /// 5. Assert the entity query still succeeds.
     #[tokio::test]
     async fn repair_migration_fixes_text_uuid_storage() {
         use sea_orm::{ConnectionTrait as _, Statement, TryGetable as _};
@@ -1093,8 +944,9 @@ mod tests {
         let type_str_before: String = String::try_get_by_index(&typeof_before, 0).unwrap();
         assert_eq!(type_str_before, "text", "pre-condition: id should be TEXT");
 
-        // Apply the remaining migration (the repair, index 19).
-        Migrator::up(&db, None)
+        // Apply exactly the repair migration (index 19) — bounded so the
+        // M1.8 drop at the tip never runs in this test.
+        Migrator::up(&db, Some(1))
             .await
             .expect("repair migration must succeed");
 
@@ -1112,12 +964,6 @@ mod tests {
             type_str_after, "blob",
             "after repair: permission id must be BLOB"
         );
-
-        // The entity query must now succeed without ParseByteLength errors.
-        role_permission::Entity::find()
-            .all(&db)
-            .await
-            .expect("role_permissions entity query must succeed after repair migration");
     }
 
     /// Verify that the datetime repair migration converts `+00:00:00`-formatted
@@ -1126,13 +972,10 @@ mod tests {
     /// Steps:
     /// 1. Apply migrations 1–19 (all except the datetime repair).
     /// 2. Inject a permission with `created_at = '2026-03-02 22:33:15.239039 +00:00:00'`.
-    /// 3. Apply migration 20 (the datetime repair).
-    /// 4. Load the permission via the entity API — this decodes `OffsetDateTime`
-    ///    and fails if the format is still broken.
+    /// 3. Apply exactly migration 20 (the datetime repair; bounded — the M1.8 drop never runs here).
+    /// 4. Assert the stored `created_at` string parses as RFC 3339.
     #[tokio::test]
     async fn repair_migration_fixes_created_at_format() {
-        use crate::entity::permission;
-
         let opt = ConnectOptions::new("sqlite::memory:");
         let db = Database::connect(opt).await.unwrap();
 
@@ -1167,19 +1010,29 @@ mod tests {
         .await
         .expect("injecting broken-datetime permission must succeed");
 
-        // Apply the datetime repair migration.
-        Migrator::up(&db, None)
+        // Apply exactly the datetime repair migration (index 20) — bounded
+        // so the M1.8 drop at the tip never runs in this test.
+        Migrator::up(&db, Some(1))
             .await
             .expect("datetime repair migration must succeed");
 
-        // Loading the permission via the entity API decodes OffsetDateTime.
-        // This fails with ColumnDecode if the format is still broken.
-        permission::Entity::find()
-            .filter(permission::Column::Name.eq("test_broken_datetime"))
-            .one(&db)
+        // The stored string must now be RFC 3339 — parseable the way
+        // SeaORM's OffsetDateTime decode would parse it.
+        use sea_orm::TryGetable;
+        let row = db
+            .query_one(
+                &Query::select()
+                    .column(Alias::new("created_at"))
+                    .from(Alias::new("permissions"))
+                    .and_where(Expr::col(Alias::new("name")).eq("test_broken_datetime"))
+                    .to_owned(),
+            )
             .await
-            .expect("permission entity query must succeed after datetime repair")
+            .expect("select repaired row")
             .expect("injected permission must still exist after repair");
+        let stored: String = String::try_get_by_index(&row, 0).expect("created_at string");
+        time::OffsetDateTime::parse(&stored, &time::format_description::well_known::Rfc3339)
+            .expect("created_at must be RFC 3339 after the repair");
     }
 
     /// Regression test: `run_migrations` must succeed against a file-based
@@ -1561,55 +1414,6 @@ mod tests {
                 .expect("probe should succeed")
                 .is_some(),
             "file-backed DB must probe as Some(path)"
-        );
-    }
-
-    /// The viewer role must NOT have manage_commands.
-    #[tokio::test]
-    async fn manage_commands_not_assigned_to_viewer_role() {
-        let opt = ConnectOptions::new("sqlite::memory:");
-        let db = Database::connect(opt).await.unwrap();
-        run_migrations(&db).await.unwrap();
-
-        let count_stmt = sea_orm_migration::prelude::Query::select()
-            .expr(sea_orm_migration::prelude::Func::count(
-                sea_orm_migration::prelude::Expr::col(Alias::new("rp.role_id")),
-            ))
-            .from_as(Alias::new("role_permissions"), Alias::new("rp"))
-            .join_as(
-                sea_orm_migration::prelude::JoinType::InnerJoin,
-                Alias::new("roles"),
-                Alias::new("r"),
-                sea_orm_migration::prelude::Expr::col((Alias::new("r"), Alias::new("id")))
-                    .equals((Alias::new("rp"), Alias::new("role_id"))),
-            )
-            .join_as(
-                sea_orm_migration::prelude::JoinType::InnerJoin,
-                Alias::new("permissions"),
-                Alias::new("p"),
-                sea_orm_migration::prelude::Expr::col((Alias::new("p"), Alias::new("id")))
-                    .equals((Alias::new("rp"), Alias::new("permission_id"))),
-            )
-            .and_where(
-                sea_orm_migration::prelude::Expr::col((Alias::new("r"), Alias::new("name")))
-                    .eq("viewer"),
-            )
-            .and_where(
-                sea_orm_migration::prelude::Expr::col((Alias::new("p"), Alias::new("name")))
-                    .eq("manage_commands"),
-            )
-            .to_owned();
-
-        let rows = db.query_all(&count_stmt).await.unwrap();
-        let count: i64 = {
-            use sea_orm::TryGetable;
-            rows.first()
-                .map(|r| i64::try_get_by_index(r, 0).unwrap_or(0))
-                .unwrap_or(0)
-        };
-        assert_eq!(
-            count, 0,
-            "viewer role must NOT have manage_commands permission"
         );
     }
 }

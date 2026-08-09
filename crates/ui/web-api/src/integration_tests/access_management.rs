@@ -38,8 +38,8 @@
 //!      `POST /api/v1/users/{id}/apply-preset`) were retired in M1.6b —
 //!      [`deleted_preset_routes_are_gone_not_stubbed`] proves they 404/405
 //!      rather than silently reappearing.
-//!    - `GET /api/v1/permissions` was deleted outright in M1.7 (the wire
-//!      `Permission` vocabulary retirement) — [`deleted_permissions_endpoint_is_gone`]
+//!    - `GET /api/v1/permissions` was deleted outright in M1.7 (the legacy
+//!      wire vocabulary retirement) — [`deleted_permissions_endpoint_is_gone`]
 //!      proves it 404s rather than silently reappearing.
 //!
 //! E11 needs no new test here: seed-read pairing (`settings_manager` ->

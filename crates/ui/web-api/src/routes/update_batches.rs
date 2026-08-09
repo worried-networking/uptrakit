@@ -799,7 +799,7 @@ mod tests {
     #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
 
     use crate::test_harness::TestApp;
-    use crate::test_harness::fixtures::{register_and_get_token, seed_permissions_for_owner};
+    use crate::test_harness::fixtures::register_and_get_token;
     use http::StatusCode;
     use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
     use serde_json::Value;
@@ -1032,7 +1032,6 @@ mod tests {
     async fn list_batches_authenticated_empty_db_returns_empty_list() {
         let app = TestApp::new().await;
         let client = app.client();
-        seed_permissions_for_owner(&app.db, &["view_software"]).await;
         let token = register_and_get_token(&client).await;
 
         let (status, body): (StatusCode, Value) = client
@@ -1061,7 +1060,6 @@ mod tests {
     async fn get_batch_not_found_returns_404() {
         let app = TestApp::new().await;
         let client = app.client();
-        seed_permissions_for_owner(&app.db, &["view_software"]).await;
         let token = register_and_get_token(&client).await;
 
         let id = uuid::Uuid::now_v7();
@@ -1077,7 +1075,6 @@ mod tests {
     async fn trigger_host_batch_update_not_found_returns_404() {
         let app = TestApp::new().await;
         let client = app.client();
-        seed_permissions_for_owner(&app.db, &["trigger_updates"]).await;
         let token = register_and_get_token(&client).await;
 
         let host_id = uuid::Uuid::now_v7();
@@ -1112,7 +1109,6 @@ mod tests {
     async fn trigger_item_batch_update_not_found_returns_404() {
         let app = TestApp::new().await;
         let client = app.client();
-        seed_permissions_for_owner(&app.db, &["trigger_updates"]).await;
         let token = register_and_get_token(&client).await;
 
         let item_id = uuid::Uuid::now_v7();
@@ -1151,7 +1147,6 @@ mod tests {
     async fn trigger_host_batch_update_writes_software_batch_update_triggered_audit_event() {
         let app = TestApp::new().await;
         let client = app.client();
-        seed_permissions_for_owner(&app.db, &["trigger_updates"]).await;
         let token = register_and_get_token(&client).await;
         let (host_id, _item_id) = insert_batchable_fixture(&app).await;
 
@@ -1193,7 +1188,6 @@ mod tests {
     async fn trigger_item_batch_update_writes_software_batch_update_triggered_audit_event() {
         let app = TestApp::new().await;
         let client = app.client();
-        seed_permissions_for_owner(&app.db, &["trigger_updates"]).await;
         let token = register_and_get_token(&client).await;
         let (_host_id, item_id) = insert_batchable_fixture(&app).await;
 
@@ -1231,7 +1225,6 @@ mod tests {
     async fn trigger_host_batch_update_zero_created_still_writes_noop_audit_event() {
         let app = TestApp::new().await;
         let client = app.client();
-        seed_permissions_for_owner(&app.db, &["trigger_updates"]).await;
         let token = register_and_get_token(&client).await;
         let host_id = insert_bare_host(&app).await;
 
@@ -1268,7 +1261,6 @@ mod tests {
     async fn trigger_item_batch_update_zero_created_still_writes_noop_audit_event() {
         let app = TestApp::new().await;
         let client = app.client();
-        seed_permissions_for_owner(&app.db, &["trigger_updates"]).await;
         let token = register_and_get_token(&client).await;
         let item_id = insert_bare_software_item(&app).await;
 

@@ -25,15 +25,6 @@ async fn test_migrations_run_and_tables_exist(harness: &TestHarness) {
         !roles.is_empty(),
         "built-in roles should exist after migrations"
     );
-
-    let permissions = uptrakit_shared_db::entity::permission::Entity::find()
-        .all(&harness.db)
-        .await
-        .expect("query permissions");
-    assert!(
-        !permissions.is_empty(),
-        "built-in permissions should exist after migrations"
-    );
 }
 
 db_test!(
@@ -58,8 +49,6 @@ async fn test_all_core_entities_queryable(harness: &TestHarness) {
     assert_queryable!(tenant::Entity);
     assert_queryable!(user::Entity);
     assert_queryable!(role::Entity);
-    assert_queryable!(permission::Entity);
-    assert_queryable!(role_permission::Entity);
     assert_queryable!(service::Entity);
     assert_queryable!(host::Entity);
     assert_queryable!(service_host::Entity);

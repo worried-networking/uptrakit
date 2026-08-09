@@ -491,7 +491,7 @@ mod tests {
     #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
 
     use crate::test_harness::TestApp;
-    use crate::test_harness::fixtures::{register_and_get_token, seed_permissions_for_owner};
+    use crate::test_harness::fixtures::register_and_get_token;
     use http::StatusCode;
     use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder};
     use serde_json::Value;
@@ -521,7 +521,6 @@ mod tests {
     async fn create_ignore_writes_software_ignore_create_audit_event() {
         let app = TestApp::new().await;
         let client = app.client();
-        seed_permissions_for_owner(&app.db, &["manage_ignores"]).await;
         let token = register_and_get_token(&client).await;
 
         let (status, body): (StatusCode, Value) = client
@@ -561,7 +560,6 @@ mod tests {
     async fn delete_ignore_writes_software_ignore_delete_audit_event() {
         let app = TestApp::new().await;
         let client = app.client();
-        seed_permissions_for_owner(&app.db, &["manage_ignores"]).await;
         let token = register_and_get_token(&client).await;
 
         let (create_status, create_body): (StatusCode, Value) = client
@@ -606,7 +604,6 @@ mod tests {
     async fn create_ignore_db_failure_writes_failed_audit_event() {
         let app = TestApp::new().await;
         let client = app.client();
-        seed_permissions_for_owner(&app.db, &["manage_ignores"]).await;
         let token = register_and_get_token(&client).await;
 
         app.db
@@ -646,7 +643,6 @@ mod tests {
     async fn delete_missing_ignore_writes_denied_audit_event() {
         let app = TestApp::new().await;
         let client = app.client();
-        seed_permissions_for_owner(&app.db, &["manage_ignores"]).await;
         let token = register_and_get_token(&client).await;
 
         let status = client
@@ -679,7 +675,6 @@ mod tests {
     async fn delete_ignore_db_failure_writes_failed_audit_event() {
         let app = TestApp::new().await;
         let client = app.client();
-        seed_permissions_for_owner(&app.db, &["manage_ignores"]).await;
         let token = register_and_get_token(&client).await;
 
         app.db
@@ -717,7 +712,6 @@ mod tests {
     async fn delete_ignore_delete_db_failure_writes_failed_audit_event() {
         let app = TestApp::new().await;
         let client = app.client();
-        seed_permissions_for_owner(&app.db, &["manage_ignores"]).await;
         let token = register_and_get_token(&client).await;
 
         let (create_status, create_body): (StatusCode, Value) = client
@@ -769,7 +763,6 @@ mod tests {
     async fn batch_ignores_invalid_action_writes_validation_failed_audit_event() {
         let app = TestApp::new().await;
         let client = app.client();
-        seed_permissions_for_owner(&app.db, &["manage_ignores"]).await;
         let token = register_and_get_token(&client).await;
 
         let status = client
@@ -804,7 +797,6 @@ mod tests {
     async fn batch_ignores_backend_failure_writes_failed_audit_event() {
         let app = TestApp::new().await;
         let client = app.client();
-        seed_permissions_for_owner(&app.db, &["manage_ignores"]).await;
         let token = register_and_get_token(&client).await;
 
         app.db
@@ -846,7 +838,6 @@ mod tests {
     async fn batch_ignores_success_writes_success_summary_audit_event() {
         let app = TestApp::new().await;
         let client = app.client();
-        seed_permissions_for_owner(&app.db, &["manage_ignores"]).await;
         let token = register_and_get_token(&client).await;
 
         let (_, body_a): (StatusCode, Value) = client
@@ -904,7 +895,6 @@ mod tests {
     async fn batch_ignores_partial_writes_partial_summary_audit_event() {
         let app = TestApp::new().await;
         let client = app.client();
-        seed_permissions_for_owner(&app.db, &["manage_ignores"]).await;
         let token = register_and_get_token(&client).await;
 
         let (_, body): (StatusCode, Value) = client
@@ -952,7 +942,6 @@ mod tests {
     async fn batch_ignores_all_failures_write_denied_summary_audit_event() {
         let app = TestApp::new().await;
         let client = app.client();
-        seed_permissions_for_owner(&app.db, &["manage_ignores"]).await;
         let token = register_and_get_token(&client).await;
 
         let (status, response): (StatusCode, Value) = client

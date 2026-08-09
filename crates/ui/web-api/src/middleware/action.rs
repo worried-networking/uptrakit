@@ -2,9 +2,9 @@
 //!
 //! Converted route families declare authorization with these extractors +
 //! native `security(("oauth2" = ["<action>"]), ("developer_token" = []))`
-//! requirements. The legacy macro-generated permission-extractor +
-//! `x-required-permission` model is fully retired from route families;
-//! `middleware/permission.rs` itself was deleted in M1.7.
+//! requirements. The legacy macro-generated permission-extractor model and
+//! its OpenAPI extension are fully retired; `middleware/permission.rs` was
+//! deleted in M1.7 and the legacy vocabulary itself in M1.8.
 //! Verdicts: 401 no principal, 403 `Decision::Deny`, 500 engine unavailable
 //! (fail-closed).
 

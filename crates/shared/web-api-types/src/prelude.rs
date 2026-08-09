@@ -56,5 +56,4 @@ pub use crate::notifications::{
 // ── Common ───────────────────────────────────────────────────────────
 pub use crate::error::ErrorResponse;
 pub use crate::pagination::{PaginatedResponse, PaginationParams};
-pub use crate::permissions::Permission;
 pub use crate::registration::RegistrationMode;
