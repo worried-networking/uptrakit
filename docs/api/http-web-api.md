@@ -18,7 +18,7 @@ Types are imported via `uptrakit_openapi_client::types::*` (re-exported from `up
   with a message describing the limit window.
 - Route handlers enforce authorization via typed Axum extractors. All route families (`CanReadHosts`, and the rest of
   `crates/ui/web-api/src/middleware/action.rs`) declare a native `oauth2`/`developer_token` OpenAPI security
-  requirement backed by an `AccessEngine` action-string grant. The legacy `permission_extractor!` model has been
+  requirement backed by an `AccessEngine` action-string grant. The legacy per-permission extractor-macro model has been
   fully replaced. See [Authentication and Authorization](../security/auth-and-authorization.md) for the full
   authorization model.
 

@@ -236,8 +236,8 @@ Two dedicated actions govern access to the notification subsystem:
 
 These actions enforce through the `action_extractor!` pattern (`CanReadNotifications`,
 `CanManageNotifications`) and declare a native
-`security(("oauth2" = [...]), ("developer_token" = []))` OpenAPI requirement rather than an
-`x-required-permission` extension. See
+`security(("oauth2" = [...]), ("developer_token" = []))` OpenAPI requirement rather than a legacy
+permission-name OpenAPI extension. See
 [Auth and Authorization -- Authorization Model](auth-and-authorization.md#authorization-model) for the
 full authorization architecture.
 

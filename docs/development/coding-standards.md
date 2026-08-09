@@ -1205,7 +1205,7 @@ through the `AccessEngine` and records the deny metric on a policy deny. The `ac
 pub async fn list_hosts(
     Extension(user): Extension<AuthenticatedUser>,
 ) -> Response {
-    if !user.has_permission(Permission::ViewHosts) {
+    if !user.has_permission("hosts:read") {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
     ...
@@ -2068,7 +2068,7 @@ pub(crate) fn parse_semver_tag(tag: &str) -> Option<semver::Version> { … }
 ### Cross-reference
 
 - [Error Handling](error-handling.md) — public error types follow the same rule: use `pub(crate)` for errors that never cross a crate boundary.
-- [Security](../../security/README.md) — avoid leaking internal types through `pub` that could expose security-sensitive implementation details.
+- [Security](../security/README.md) — avoid leaking internal types through `pub` that could expose security-sensitive implementation details.
 
 ## Reloadable Trait
 

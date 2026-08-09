@@ -56,8 +56,8 @@ fail. Callers must inspect both arrays to determine the outcome of each item.
 
 All endpoints require a valid Bearer token. The two per-action endpoints enforce inline via `authorize_any` and
 declare one single-scope `oauth2` requirement per permitted alternative (OR semantics); the single-action endpoints
-use the matching `action_extractor!` type and declare that one scope. Neither form carries an
-`x-required-permission` extension.
+use the matching `action_extractor!` type and declare that one scope. Neither form carries a legacy
+permission-name OpenAPI extension.
 
 ## Side Effects
 

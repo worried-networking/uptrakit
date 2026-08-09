@@ -300,7 +300,7 @@ For deterministic controller-side failure-path integration tests, the registry i
 - These descriptors are manually constructed in `registry/src/test_support.rs` (not generated via
   `declare_plugin!`) because they are test infrastructure, not first-party plugin crates.
 
-Decision rationale: [ADR-0022](../internal/changes/TASK-0012/ADR-0022.md).
+This carve-out is deliberate: it keeps deterministic failure-path fixtures out of the production catalog.
 
 ## Plugin Families
 

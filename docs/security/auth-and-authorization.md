@@ -166,7 +166,7 @@ validity window.
 
 Authorization is an action-string grant model enforced by a single decision point, the `AccessEngine`. See
 [ADR-0039](../adr/0039-replace-enum-rbac-with-action-string-grants-and-a-central-access-engine.md) for why the
-prior closed `Permission` enum was replaced. Every named authorization requirement in this codebase is a
+prior closed permission enum was replaced. Every named authorization requirement in this codebase is a
 `resource:verb` catalog action string (e.g. "requires the `hosts:read` action"), never an enum variant or a bare
 permission name.
 

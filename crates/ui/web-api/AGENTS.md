@@ -69,7 +69,7 @@ enforce inline via `authorize_any` and declare one single-scope `oauth2` require
 **no** action extractor; dynamic surface wrappers declare the authenticated-only form
 (`security(("oauth2" = []), ("developer_token" = []))`) plus `extensions(("x-action-dynamic" = json!(true)))`.
 Every operation declares the `oauth2`/`developer_token` security pair; the legacy `bearer_token` OpenAPI
-security scheme and the `x-required-permission` extension are retired — `action_extractor!` is the sole route
+security scheme and its accompanying permission-name OpenAPI extension are retired — `action_extractor!` is the sole route
 authorization mechanism, backed by the `AccessEngine`. The sole exception is handlers with a custom auth path (e.g. WebSocket handlers
 reading a `?token=` query parameter before the normal extractor chain runs) — these gate inline through the
 engine and must carry a `// APPROVED: custom auth path` comment. Full rationale in
