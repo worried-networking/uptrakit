@@ -107,7 +107,7 @@ graceful fallback.**
 instead of defaulting; it mints no token and the response carries no permission/action data, so a DB outage there
 surfaces as an error rather than a silently degraded response.
 
-`register`, `login`, `refresh`, the OIDC mint, `me`, and the post-MFA/2FA session builders all resolve their
+`register`, `login`, the OIDC mint, `me`, and the post-MFA/2FA session builders all resolve their
 response's `actions` list through `effective_actions()` / `AccessEngine::allowed_actions()` (see [Enforcement
 surfaces](#enforcement-surfaces)). None of them propagate a 500 for an `AccessEngine`
 failure on this path: the response still returns its normal success status with `actions: []` and
@@ -179,10 +179,11 @@ An action is a `resource:verb` string. The verb side comes from a closed set def
 resources, the per-resource verb validity matrix, per-action descriptions, `SelectorSupport` levels, and the typed
 `actions::*` constants (e.g. `actions::HOSTS_READ`) consumed everywhere an action is referenced in code.
 
-Two dynamic namespaces extend the vocabulary at runtime: `plugin.<plugin_type>` (registered by the plugin catalog)
-and `surface.<surface_id>` (registered by the shared surface runtime). Both admit the full closed verb set at the
-type level; which verbs are actually meaningful for a given dynamic resource is a registry-time concern, not a
-parse-time one.
+Two dynamic namespaces extend the vocabulary at parse time: `plugin.<plugin_type>` and `surface.<surface_id>`. Both
+admit the full closed verb set grammatically, but only one is backed by a live `DynamicActionRegistry` today —
+`SurfaceActionRegistry` registers `surface.<id>:use` iff a surface with that id is currently registered. Every
+other dynamic action (any other verb on `surface.*`, and all of `plugin.*`) is unregistered and therefore denies —
+fail closed, no dangling authority.
 
 The OpenAPI schema for `Action` is a documented open string, not a closed enum — the resource set can grow without
 a schema-breaking change. There is deliberately no `Other` catch-all: an action string that does not parse as
@@ -198,9 +199,10 @@ deliberately does **not** implement `TenantScoped`, since it mixes tenant-scoped
 
 Each grant carries a set of `ActionPattern`s (`ResourcePattern` × `VerbPattern`): `*` for every tenant-plane
 resource, an exact resource string, or a `<stem>.*` subtree match, each paired with `*` or a single closed-set
-verb. `system.`-prefixed resources are excluded from the `*` wildcard on both sides — a pattern must name the
-`system.` plane explicitly to match it. Every grant also carries a `Selector`; the type already models host- and
-software-scoped narrowing (tags, hosts, software items, item pairs), but the write path accepts only
+verb. `system.`-prefixed resources are excluded from the resource-side `*` wildcard (the verb-side `*` matches
+unconditionally) — a pattern must name the `system.` plane explicitly to match it. Every grant also carries a
+`Selector`; the type already models host- and software-scoped narrowing (tags, hosts, software items, item pairs),
+but the write path accepts only
 `Selector::All` until M2 — the narrowing variants are validated code today with no admission path yet.
 
 Roles are data, not code: `roles.tenant_id` is `NULL` for the global built-in roles and non-`NULL` for

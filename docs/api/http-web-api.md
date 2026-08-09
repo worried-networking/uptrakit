@@ -106,7 +106,7 @@ End-user endpoints (authenticated only — each user manages their own consents)
 - GET/PUT `/api/v1/settings/access` — combined registration + authentication settings (as of `1e515ec0d`).
 - GET/PUT `/api/v1/settings/service-certificates`
 - _(SMTP settings are managed via email plugin shared surface actions, not REST endpoints)_
-- GET/PUT `/api/v1/settings/nats` _(feature: `nats`)_ — NATS server URL (requires the `system.settings:manage` action).
+- GET/PUT `/api/v1/global-settings/nats` _(feature: `nats`)_ — NATS server URL (requires the `system.settings:manage` action).
   The URL is stored encrypted at rest. The response returns the masked URL with password replaced by `***`.
   Changes take effect after a controller restart (hot-reload not supported). See
   [Settings Runtime — NATS settings](settings-runtime.md#nats-settings-feature-nats) for full details.
@@ -616,15 +616,15 @@ Batch actions allow performing the same operation on multiple entities in a sing
 Unlike batch updates (which create tracked update batches with progress streaming), batch
 actions are simple multi-ID operations that return per-item success/failure results.
 
-| Method | Path                             | Supported actions                           | Action                                                                |
-| ------ | -------------------------------- | ------------------------------------------- | --------------------------------------------------------------------- |
-| `POST` | `/api/v1/services/batch`         | `approve`, `reject`, `deactivate`, `delete` | Per-action (e.g. `services:approve`, `services:delete`)               |
-| `POST` | `/api/v1/system-services/batch`  | `approve`, `reject`, `deactivate`, `delete` | Per-action (e.g. `system.services:approve`, `system.services:delete`) |
-| `POST` | `/api/v1/hosts/batch`            | `deactivate`, `delete`                      | `hosts:delete`                                                        |
-| `POST` | `/api/v1/software-items/batch`   | `delete`                                    | `software:delete`                                                     |
-| `POST` | `/api/v1/plugin-configs/batch`   | `delete`                                    | `commands:manage`                                                     |
-| `POST` | `/api/v1/software-ignores/batch` | `delete`                                    | `discovery.ignores:manage`                                            |
-| `POST` | `/api/v1/host-tags/batch`        | `delete`                                    | `hosts.tags:manage`                                                   |
+| Method | Path                                  | Supported actions                 | Action                                                                |
+| ------ | ------------------------------------- | --------------------------------- | --------------------------------------------------------------------- |
+| `POST` | `/api/v1/services/batch`              | `approve`, `reject`, `deactivate` | Per-action (e.g. `services:approve`, `services:delete`)               |
+| `POST` | `/api/v1/system-services/batch`       | `approve`, `reject`, `deactivate` | Per-action (e.g. `system.services:approve`, `system.services:delete`) |
+| `POST` | `/api/v1/hosts/batch`                 | `deactivate`                      | `hosts:delete`                                                        |
+| `POST` | `/api/v1/software-items/batch`        | `delete`                          | `software:delete`                                                     |
+| `POST` | `/api/v1/plugin-configs/batch`        | `delete`                          | `commands:manage`                                                     |
+| `POST` | `/api/v1/autodiscovery/ignores/batch` | `delete`                          | `discovery.ignores:manage`                                            |
+| `POST` | `/api/v1/host-tags/batch`             | `delete`                          | `hosts.tags:manage`                                                   |
 
 See [Batch Actions API](batch-actions.md) for full request/response schema and error handling.
 
@@ -818,9 +818,10 @@ See [Audit Logs API Reference](audit-logs.md) for the full specification.
 
 ## Service Operations
 
-- `/api/v1/agents/{id}/version-check`: trigger a version check (requires the `checks:trigger` action).
-- `/api/v1/agents/{id}/execute-update`: send `execute_update` (requires the `updates:trigger` action).
-- `/api/v1/mqtt/tenants`: manage MQTT tenant assignments (requires the `settings.auth:manage` action).
+- `/api/v1/software-items/{id}/hosts/{host_id}/check-versions`: trigger a version check for one host
+  (requires the `checks:trigger` action).
+- `/api/v1/software-items/{id}/hosts/{host_id}/update`: trigger an update for one host (requires the
+  `updates:trigger` action).
 
 Update history records each attempt and stores the full command output for auditing.
 

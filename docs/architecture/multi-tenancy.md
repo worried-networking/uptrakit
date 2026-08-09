@@ -36,9 +36,14 @@ The following tables have a `tenant_id UUID NOT NULL` column with a FK to `tenan
 
 ## Tables NOT changed (remain global)
 
-`users`, `roles`, `sessions`, `api_tokens`, `global_settings`, `pending_*` tables, `host_software_items`,
+`users`, `sessions`, `api_tokens`, `global_settings`, `pending_*` tables, `host_software_items`,
 `available_versions`. Note: `service_certificates` and `service_hosts` are tenant-scoped through the `services`
 table FK.
+
+`roles` is neither fully global nor fully tenant-scoped: `roles.tenant_id` is `NULL` for the global built-in roles
+and non-`NULL` for tenant-defined custom roles, with per-scope name uniqueness enforced by a partial-unique index
+pair rather than a column constraint. See
+[Authorization Model](../security/auth-and-authorization.md#authorization-model).
 
 `access_grants` (the `AccessEngine`-owned authorization store) is neither tenant-scoped nor global in the usual
 sense: it mixes tenant-plane rows with system-plane rows (`tenant_id NULL`) in one table, so it deliberately does

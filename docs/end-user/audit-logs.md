@@ -168,10 +168,10 @@ before → after on each line).
 
 ## Required Actions
 
-| Action              | Role             | Endpoint   |
-| ------------------- | ---------------- | ---------- |
-| `audit:read`        | `owner`, `admin` | Tenant log |
-| `system.audit:read` | `owner` only     | System log |
+| Action              | Role                                        | Endpoint   |
+| ------------------- | ------------------------------------------- | ---------- |
+| `audit:read`        | `viewer` (via `*:read`), `settings_manager` | Tenant log |
+| `system.audit:read` | `system_administrator` (via `system.*:*`)   | System log |
 
 A user without either grant will see a "You do not have permission" message and the
 Audit Logs nav link will not appear in the sidebar.

@@ -33,7 +33,7 @@ has full control. Subsequent users receive only the **viewer** role by default.
 ## Role bundles
 
 Role bundles name a predefined set of roles. They are advisory metadata served by
-`uptrakit-cli api GET /api/v1/access/catalog` -- look up a bundle's roles there, then assign
+`uptrakit api GET /api/v1/access/catalog` -- look up a bundle's roles there, then assign
 them with `users set-roles` (see below).
 
 | Bundle            | Roles                                                                                      | Typical use case                |
@@ -50,7 +50,7 @@ Role and grant management is API/CLI-only in v1 -- there is no web UI for creati
 roles or editing grants yet. Assign a user's roles by name with:
 
 ```bash
-uptrakit-cli users set-roles <user-id> --names <comma-separated-role-names>
+uptrakit users set-roles <user-id> --names <comma-separated-role-names>
 ```
 
 Grants -- the `resource:verb` action patterns attached to a role or a user -- are managed
@@ -67,41 +67,41 @@ REST API or the CLI.
 
 ```bash
 # List all users
-uptrakit-cli users list
+uptrakit users list
 
 # Show a specific user
-uptrakit-cli users show <user-id>
+uptrakit users show <user-id>
 ```
 
 ### Changing user roles
 
 ```bash
 # Replace a user's roles (role IDs are positional, space-separated)
-uptrakit-cli users set-roles <user-id> <id1> <id2>
+uptrakit users set-roles <user-id> <id1> <id2>
 
 # Look up a role bundle's role composition in the catalog, then apply it by name
-uptrakit-cli api GET /api/v1/access/catalog
-uptrakit-cli users set-roles <user-id> --names viewer,service_manager
+uptrakit api GET /api/v1/access/catalog
+uptrakit users set-roles <user-id> --names viewer,service_manager
 ```
 
 ### Activating and deactivating users
 
 ```bash
 # Deactivate a user (prevents login, revokes sessions)
-uptrakit-cli users deactivate <user-id>
+uptrakit users deactivate <user-id>
 
 # Reactivate a user
-uptrakit-cli users activate <user-id>
+uptrakit users activate <user-id>
 ```
 
 ### Viewing roles and grants
 
 ```bash
 # List all roles
-uptrakit-cli roles list
+uptrakit roles list
 
 # List the available action catalog (actions, categories, role bundles)
-uptrakit-cli api GET /api/v1/access/catalog
+uptrakit api GET /api/v1/access/catalog
 ```
 
 ## Lockout prevention

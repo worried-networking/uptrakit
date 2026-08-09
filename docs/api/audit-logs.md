@@ -189,10 +189,10 @@ Both endpoints use the standard paginated response format:
 
 ## Required Actions
 
-| Action              | Granted to       | Endpoint                        |
-| ------------------- | ---------------- | ------------------------------- |
-| `audit:read`        | `owner`, `admin` | `GET /api/v1/audit-logs`        |
-| `system.audit:read` | `owner` only     | `GET /api/v1/system-audit-logs` |
+| Action              | Granted to                                  | Endpoint                        |
+| ------------------- | ------------------------------------------- | ------------------------------- |
+| `audit:read`        | `viewer` (via `*:read`), `settings_manager` | `GET /api/v1/audit-logs`        |
+| `system.audit:read` | `system_administrator` (via `system.*:*`)   | `GET /api/v1/system-audit-logs` |
 
 A user without either grant receives `403 Forbidden`.
 

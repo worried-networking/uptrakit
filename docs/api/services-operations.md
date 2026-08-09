@@ -129,16 +129,18 @@ the credential guard, enrollment token mechanics, and the two-tier service model
 
 ### Endpoints
 
-| Method | Path                                   | Description                                                                                                       |
-| ------ | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| GET    | `/api/v1/system-services`              | List system services (requires `system.services:read`). Filterable by `capability` and `status`. Paginated.       |
-| GET    | `/api/v1/system-services/{id}`         | Get a single system service by UUID (requires `system.services:read`).                                            |
-| PUT    | `/api/v1/system-services/{id}`         | Update configurable settings: `ping_interval_seconds`, `cert_lifetime_hours` (requires `system.services:update`). |
-| POST   | `/api/v1/system-services/{id}/approve` | Approve a pending system service (requires `system.services:approve`).                                            |
-| POST   | `/api/v1/system-services/{id}/reject`  | Reject a pending system service (requires `system.services:reject`).                                              |
-| DELETE | `/api/v1/system-services/{id}`         | Deactivate a system service (requires `system.services:delete`).                                                  |
-| GET    | `/api/v1/settings/system-services`     | Get the global enrollment token (requires `system.settings:manage`).                                              |
-| PUT    | `/api/v1/settings/system-services`     | Set or clear the global enrollment token (requires `system.settings:manage`).                                     |
+| Method | Path                                    | Description                                                                                                       |
+| ------ | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/v1/system-services`               | List system services (requires `system.services:read`). Filterable by `capability` and `status`. Paginated.       |
+| GET    | `/api/v1/system-services/{id}`          | Get a single system service by UUID (requires `system.services:read`).                                            |
+| PUT    | `/api/v1/system-services/{id}`          | Update configurable settings: `ping_interval_seconds`, `cert_lifetime_hours` (requires `system.services:update`). |
+| POST   | `/api/v1/system-services/{id}/approve`  | Approve a pending system service (requires `system.services:approve`).                                            |
+| POST   | `/api/v1/system-services/{id}/reject`   | Reject a pending system service (requires `system.services:reject`).                                              |
+| DELETE | `/api/v1/system-services/{id}`          | Deactivate a system service (requires `system.services:delete`).                                                  |
+| GET    | `/api/v1/system-enrollment-tokens`      | List system enrollment tokens (requires `system.settings:manage`).                                                |
+| POST   | `/api/v1/system-enrollment-tokens`      | Create a system enrollment token (requires `system.settings:manage`).                                             |
+| GET    | `/api/v1/system-enrollment-tokens/{id}` | Get a system enrollment token (requires `system.settings:manage`).                                                |
+| DELETE | `/api/v1/system-enrollment-tokens/{id}` | Revoke a system enrollment token (requires `system.settings:manage`).                                             |
 
 ### Deactivation
 

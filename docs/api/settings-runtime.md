@@ -60,7 +60,7 @@ Most CLI arguments are reconciled with DB-persisted values at startup. The recon
 ### OIDC provider bootstrap
 
 The controller supports bootstrapping an OIDC provider at startup via CLI flags. This solves the chicken-and-egg problem
-where configuring OIDC requires the `system.settings:manage` action, but the first user needs to log in via OIDC.
+where configuring OIDC requires the `settings.auth:manage` action, but the first user needs to log in via OIDC.
 
 | CLI flag                               | Default                       | Description                                                              |
 | -------------------------------------- | ----------------------------- | ------------------------------------------------------------------------ |
@@ -238,21 +238,14 @@ other controller instances. Each revocation site bumps `revocation_version` in t
 
 ### Settings API endpoints
 
-| Endpoint                                                                                  | Action                   | Purpose                                                    |
-| ----------------------------------------------------------------------------------------- | ------------------------ | ---------------------------------------------------------- |
-| `GET /api/v1/settings/network`                                                            | `system.settings:manage` | Read network settings                                      |
-| `PUT /api/v1/settings/network`                                                            | `system.settings:manage` | Update network settings (includes `pki_addr`)              |
-| `GET /api/v1/settings/mqtt`                                                               | `settings:read`          | List all MQTT client configurations                        |
-| `POST /api/v1/settings/mqtt`                                                              | `system.settings:manage` | Create MQTT client configuration (checks per-tenant limit) |
-| `GET /api/v1/settings/mqtt/limit`                                                         | `settings:read`          | Get max MQTT clients per tenant limit                      |
-| `PUT /api/v1/settings/mqtt/limit`                                                         | `system.settings:manage` | Update max MQTT clients per tenant limit                   |
-| `GET /api/v1/settings/mqtt/{id}`                                                          | `settings:read`          | Get a specific MQTT client configuration                   |
-| `PUT /api/v1/settings/mqtt/{id}`                                                          | `system.settings:manage` | Update MQTT client configuration                           |
-| `DELETE /api/v1/settings/mqtt/{id}`                                                       | `system.settings:manage` | Delete MQTT client configuration                           |
-| _(SMTP settings are managed via email plugin shared surface actions, not REST endpoints)_ |                          |                                                            |
-| `POST /api/v1/settings/rotate-ca`                                                         | `system.settings:manage` | Trigger immediate CA rotation                              |
-| `POST /api/v1/settings/renew-server-certificate`                                          | `system.settings:manage` | Renew server TLS certificate                               |
-| `GET /api/v1/system/alerts`                                                               | `system.settings:manage` | Get system alerts (CA/cert status)                         |
+| Endpoint                                                                                  | Action                   | Purpose                                       |
+| ----------------------------------------------------------------------------------------- | ------------------------ | --------------------------------------------- |
+| `GET /api/v1/global-settings/network`                                                     | `system.settings:manage` | Read network settings                         |
+| `PUT /api/v1/global-settings/network`                                                     | `system.settings:manage` | Update network settings (includes `pki_addr`) |
+| _(SMTP settings are managed via email plugin shared surface actions, not REST endpoints)_ |                          |                                               |
+| `POST /api/v1/global-settings/ca/rotate`                                                  | `system.settings:manage` | Trigger immediate CA rotation                 |
+| `POST /api/v1/settings/renew-server-certificate`                                          | `system.settings:manage` | Renew server TLS certificate                  |
+| `GET /api/v1/system/alerts`                                                               | `system.settings:manage` | Get system alerts (CA/cert status)            |
 
 ### PKI API endpoints (unauthenticated)
 
@@ -544,9 +537,10 @@ MQTT services use the unified service entity:
 | POST   | `/api/v1/services/{id}/approve`                          | `services:approve`                  | Approve a pending service                             |
 | POST   | `/api/v1/services/{id}/reject`                           | `services:reject`                   | Reject a pending service                              |
 | DELETE | `/api/v1/services/{id}`                                  | `services:delete`                   | Deactivate a service                                  |
-| POST   | `/api/v1/services/enrollment-token`                      | `settings.enrollment-tokens:manage` | Create enrollment token (shared by all service types) |
-| DELETE | `/api/v1/services/enrollment-token`                      | `settings.enrollment-tokens:manage` | Revoke enrollment token                               |
-| GET    | `/api/v1/services/enrollment-token/status`               | `settings.enrollment-tokens:manage` | Check enrollment token status                         |
+| POST   | `/api/v1/enrollment-tokens`                              | `settings.enrollment-tokens:manage` | Create enrollment token (shared by all service types) |
+| GET    | `/api/v1/enrollment-tokens`                              | `settings.enrollment-tokens:manage` | List enrollment tokens                                |
+| GET    | `/api/v1/enrollment-tokens/{id}`                         | `settings.enrollment-tokens:manage` | Get a single enrollment token                         |
+| DELETE | `/api/v1/enrollment-tokens/{id}`                         | `settings.enrollment-tokens:manage` | Revoke enrollment token                               |
 
 **Key files:**
 

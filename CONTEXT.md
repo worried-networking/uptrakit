@@ -221,7 +221,7 @@ A string that names an action class an OAuth Client may perform on the MCP Resou
 values: `mcp:read`, `mcp:write` (`McpScope`). Distinct from **Action**, which names what a User
 can do regardless of which client they use. MCP connections gate on the `mcp:use` action; individual
 MCP tools additionally require their own per-tool catalog actions declared on `ToolAuth`. Effective
-rights = OAuth scope ∩ per-tool actions.
+rights = OAuth scope ∩ the user's granted actions.
 _Avoid_: using `Scope` bare for either concept without the `(OAuth)` / `(Action)` qualifier in code
 comments or docs.
 

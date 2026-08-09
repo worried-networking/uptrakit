@@ -1388,11 +1388,10 @@ software-items name filter. Follow these rules; see
   `params(("id" = Uuid, Path, …), ("host_id" = Uuid, Path, …), DeleteHostAssignmentParams)`.
 - **Enum schemas: source `enum_values` from one place.** A manual `utoipa::PartialSchema` must derive its
   values from the same source as the serde wire format — `Self::all()` (via `strum::EnumIter`) for plain
-  enums (see `crates/shared/types/src/access/` for the current closed action-model enums), or the `wire_safe_enum!` macro's `$wire`
-  list (`crates/shared/macros/src/lib.rs`). For an enum with an `Other(String)` catch-all (which can't
-  derive `EnumIter`), hardcoding is unavoidable — pair it with a guard test asserting the schema equals
-  the `as_str()` set (`PluginRole` + `plugin_role_schema_enum_values_match_wire_strings`,
-  `crates/shared/types/src/plugin_role.rs`).
+  enums, or the `wire_safe_enum!` macro's `$wire` list (`crates/shared/macros/src/lib.rs`). For an enum
+  with an `Other(String)` catch-all (which can't derive `EnumIter`), hardcoding is unavoidable — pair it
+  with a guard test asserting the schema equals the `as_str()` set (`PluginRole` +
+  `plugin_role_schema_enum_values_match_wire_strings`, `crates/shared/types/src/plugin_role.rs`).
 - **Regenerate + commit both artifacts** after any change — see the "REST API contract staleness gates"
   section in [quality-gates.md](quality-gates.md) (`./scripts/regen-api.sh`).
 

@@ -97,7 +97,7 @@ code execution on managed hosts via plugin configuration manipulation.
   both). Users holding only the software actions can manage software items, version
   tracking, and non-command config fields, but cannot alter the commands that execute
   on managed hosts. The `commands:manage` action is
-  granted only to the `owner` and `admin` roles by default. See
+  granted only to the `command_manager` role by default. See
   [Authentication and Authorization](../security/auth-and-authorization.md#authorization-model)
   for the full authorization model.
 - **Shell escape for substitution variables.** Dynamic values like
