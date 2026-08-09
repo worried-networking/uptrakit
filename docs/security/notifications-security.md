@@ -99,11 +99,11 @@ SMTP extension actions return `has_password: bool` rather than the actual passwo
 same convention used by MQTT (`has_password`) and OIDC (`has_client_secret`). Both global and per-tenant
 SMTP responses use this masking pattern.
 
-### Permission requirements
+### Authorization requirements
 
 SMTP settings are managed via extension actions within the email notification plugin.
-The extension manifests gate access through `ManageSettings` and `ViewSettings` permissions
-on the relevant action definitions.
+The extension manifest gates both viewing and modifying the SMTP defaults surface behind
+the `system.settings:manage` action (`CanManageSystemSettings`).
 
 ### Key files
 
@@ -160,7 +160,7 @@ webhook requests.
 | `crates/plugins/notifications/webhook/src/lib.rs` | `validate_config()` with URL and header validation |
 | `crates/core/controller/src/cli.rs`               | `--allow-private-notification-urls` CLI flag       |
 
-The threat model: a user with `manage_notifications` permission can configure a webhook URL
+The threat model: a user holding the `notifications:manage` action can configure a webhook URL
 targeting internal services (cloud metadata endpoints, private IPs) to probe the internal network
 or exfiltrate operational data. Mitigations include `is_private_host()` URL validation,
 `SsrfSafeResolver` DNS rebinding protection, a security-header blocklist, and redirect blocking.
@@ -225,17 +225,17 @@ Action tokens enable one-time interactive actions (e.g. "Install Update") from n
 
 The UNIQUE index on `action_token` prevents duplicate tokens at the database level.
 
-## Permissions
+## Authorization
 
-Two dedicated permissions govern access to the notification subsystem:
+Two dedicated actions govern access to the notification subsystem:
 
-| Permission            | Serialized name        | Grants                                                           |
-| --------------------- | ---------------------- | ---------------------------------------------------------------- |
-| `ViewNotifications`   | `view_notifications`   | Read channels, rules, and delivery log                           |
-| `ManageNotifications` | `manage_notifications` | Create, update, delete channels and rules; test channel delivery |
+| Action                 | Grants                                                           |
+| ---------------------- | ---------------------------------------------------------------- |
+| `notifications:read`   | Read channels, rules, and delivery log                           |
+| `notifications:manage` | Create, update, delete channels and rules; test channel delivery |
 
-These permissions enforce through the `action_extractor!` pattern (`CanReadNotifications`,
-`CanManageNotifications`, `notifications:read` / `notifications:manage`) and declare a native
+These actions enforce through the `action_extractor!` pattern (`CanReadNotifications`,
+`CanManageNotifications`) and declare a native
 `security(("oauth2" = [...]), ("developer_token" = []))` OpenAPI requirement rather than an
 `x-required-permission` extension. See
 [Auth and Authorization -- Authorization Model](auth-and-authorization.md#authorization-model) for the

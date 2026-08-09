@@ -15,8 +15,10 @@
    browser extension, or compromised proxy).
 2. The attacker replays the token within its 15-minute validity window to make
    authenticated API requests as the victim user.
-3. The token contains embedded permissions, so the attacker operates with the victim's
-   full authorization scope without any database lookup.
+3. The token itself carries no embedded permissions; each request is authorized
+   against the victim's current grants by `AccessEngine`, so the attacker operates
+   with the victim's full authorization scope as evaluated at request time (subject
+   to `AccessEngine`'s decision cache, TTL 60 seconds).
 
 ### Refresh token theft
 
@@ -56,9 +58,12 @@
 - **Account linking hijack.** A captured OIDC link token allows the attacker to link
   their external identity to the victim's account, gaining permanent access via OIDC
   login.
-- **Permission staleness.** JWT access tokens carry embedded permissions that are not
-  re-validated for 15 minutes. A user whose permissions are revoked retains their old
-  permissions until the token expires.
+- **Authority staleness.** JWT access tokens carry no embedded permissions; each
+  request is authorized against current grants via `AccessEngine`, whose decision
+  cache has a 60-second TTL backstop (`ACCESS_CACHE_TTL`). A user whose grants are
+  revoked normally loses access immediately via an `AccessInvalidated` event, but in
+  the worst case (a lost invalidation event) retains stale access for up to 60 seconds
+  — not the token's 15-minute lifetime.
 
 ## Current mitigations
 
@@ -99,9 +104,12 @@ SameSite=Strict` cookies scoped to `/api/v1/auth`, preventing XSS-based theft
   address bar and browser history after the redirect. Fragment transport removes
   server-side leakage, but the 10-minute window still provides an exploitation
   opportunity on a compromised or observed client.
-- **Permission staleness window.** After a role change, the user's old permissions
-  remain embedded in active JWT tokens for up to 15 minutes. During this window, a
-  demoted user retains elevated access, and a promoted user lacks new permissions.
+- **Authority staleness window.** JWT tokens carry no embedded permissions — every
+  request is evaluated against current grants by `AccessEngine`. Decisions are cached
+  for up to 60 seconds (`ACCESS_CACHE_TTL`); `AccessInvalidated` events flush the cache
+  immediately on a role or grant change, but if such an event is lost, a demoted user
+  can retain elevated access, or a promoted user can lack new access, for up to that
+  60-second backstop window.
 - **SHA-256 for API tokens.** API tokens are stored as SHA-256 hashes (fast), not
   Argon2id (slow). With 256-bit token entropy, offline brute-force is infeasible,
   but SHA-256 provides weaker resistance to preimage attacks than Argon2id if token
@@ -116,11 +124,13 @@ SameSite=Strict` cookies scoped to `/api/v1/auth`, preventing XSS-based theft
 - Add rate limiting to the API token authentication path, similar to the existing auth
   endpoint limits.
 - Consider reducing the access token lifetime from 15 minutes to 5 minutes to narrow
-  the staleness and replay windows.
+  the replay window (authority staleness is governed separately by `AccessEngine`'s
+  cache TTL, not token lifetime).
 - Add optional token binding to client characteristics (e.g., IP address or
   User-Agent fingerprint) for sensitive administrative operations.
-- Implement a "forced re-authentication" mechanism that invalidates all active tokens
-  for a user when their role is changed, closing the permission staleness window.
+- Reduce `AccessEngine`'s cache TTL below 60 seconds, or add an explicit
+  cache-bypass path for high-sensitivity operations, to shrink the authority
+  staleness window that persists after a lost `AccessInvalidated` event.
 - Add access log monitoring for API tokens that detects usage from unexpected IP
   addresses or at unusual rates.
 

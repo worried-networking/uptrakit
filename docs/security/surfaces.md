@@ -13,7 +13,7 @@ description:
 Shared surfaces let plugins and connected services project UI capabilities through the controller. Security is enforced
 by a fail-closed contract admission model plus per-request authorization and transport controls.
 
-## Permission model
+## Authorization model
 
 Authorization is evaluated at two levels, both carried on the wire as `required_action: Option<String>` — a
 canonical `resource:verb` catalog action string:
@@ -60,10 +60,9 @@ Denied-audit entries record the failing value under the `required_action` key in
 `required_permission`); the `reason_code` literal `missing_required_permission` and the `permission_scope` key are
 deliberately unchanged.
 
-Frontend filtering is convenience only; server checks are authoritative. **Known regression (until M1.7):** the SPA's
-client-side filter still compares action strings against legacy permission names, so action-gated surfaces are
-hidden in the web UI for all users regardless of their actual access. Server-side enforcement via `AccessEngine` is
-unaffected — this is a display-only gap, not an authorization bypass.
+Frontend filtering is convenience only; server checks are authoritative. The SPA's client-side filter
+(`filterSurfacesByAction()`) compares action strings against the current user's real grants, so this is
+in sync with server-side enforcement via `AccessEngine`.
 
 ### GET query strings and sensitive data
 

@@ -97,8 +97,8 @@ invocation:
 - **Compile-time feature gate**: the endpoint is only available when the `reset-data` Cargo
   feature is enabled on `uptrakit-web-api` (propagated from `uptrakit-controller`). It is
   enabled by default but can be excluded from production builds.
-- **Permission check**: requires the `CanManageGlobalSettings` permission, the most privileged
-  settings-level permission in the RBAC model.
+- **Authorization check**: requires the `CanManageSystemSettings` extractor (`system.settings:manage`
+  action), the most privileged settings-level action in the authorization model.
 - **Explicit confirmation**: the request body must contain `confirm: "RESET"` (case-sensitive).
   Any other value is rejected with HTTP 400.
 - **Transactional execution**: all deletions run in a single database transaction; a failure

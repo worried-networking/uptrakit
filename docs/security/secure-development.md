@@ -178,9 +178,9 @@ The rejection gate is in `crates/ui/web-api/src/routes/plugin_configs.rs`
 (`collect_dangerous_patterns`, `format_dangerous_pattern_rejection`).
 
 When disabled via `--allow-dangerous-commands`, detected patterns still appear in
-semantic audit details for plugin config create/update outcomes. The underlying threat: an authenticated user with `manage_commands`
-permission can craft plugin configs (shell commands, Docker `post_pull_command`, or hook plugin
-commands) that execute arbitrary code on managed hosts. Mitigations include permission separation, dangerous
+semantic audit details for plugin config create/update outcomes. The underlying threat: an authenticated user holding the `commands:manage`
+action can craft plugin configs (shell commands, Docker `post_pull_command`, or hook plugin
+commands) that execute arbitrary code on managed hosts. Mitigations include action separation, dangerous
 pattern rejection, command length limits, and semantic audit logging.
 
 ## SSRF Protection

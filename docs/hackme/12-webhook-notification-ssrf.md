@@ -4,12 +4,12 @@
 | -------------- | --------------------------------------------------------- |
 | Severity       | Medium                                                    |
 | Attack surface | Notifications (webhook channel)                           |
-| Prerequisites  | Authenticated user with `manage_notifications` permission |
+| Prerequisites  | Authenticated user with the `notifications:manage` action |
 | STRIDE         | Information Disclosure                                    |
 
 ## Attack description
 
-1. An attacker with `manage_notifications` permission creates a webhook notification
+1. An attacker holding the `notifications:manage` action creates a webhook notification
    channel with a URL targeting an internal network resource:
    `http://169.254.169.254/latest/meta-data/iam/security-credentials/`
 2. The attacker creates a notification rule that triggers on a common event (e.g.,
@@ -51,8 +51,8 @@
   `proxy-authorization`, `x-forwarded-for`, `x-forwarded-host`, `x-real-ip`. This
   blocklist is always enforced regardless of the `--allow-private-notification-urls`
   setting.
-- **Authentication required.** Webhook channel creation requires `manage_notifications`
-  permission. Only authorized users can configure webhook URLs.
+- **Authentication required.** Webhook channel creation requires the
+  `notifications:manage` action. Only authorized users can configure webhook URLs.
 - **HMAC signature.** When a `secret` is configured, outbound requests include an
   `X-Uptrakit-Signature: sha256=<hex>` header for payload authenticity. However, this
   protects the receiver, not the sender.

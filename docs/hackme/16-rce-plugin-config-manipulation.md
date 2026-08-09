@@ -1,11 +1,11 @@
 # ATK-16: RCE via Plugin Config Manipulation
 
-| Field          | Value                                                                               |
-| -------------- | ----------------------------------------------------------------------------------- |
-| Severity       | Critical                                                                            |
-| Attack surface | Plugin system / command execution                                                   |
-| Prerequisites  | Authenticated user with `manage_commands` permission (previously `manage_software`) |
-| STRIDE         | Elevation of Privilege                                                              |
+| Field          | Value                                                                             |
+| -------------- | --------------------------------------------------------------------------------- |
+| Severity       | Critical                                                                          |
+| Attack surface | Plugin system / command execution                                                 |
+| Prerequisites  | Authenticated user with the `commands:manage` action (previously manage-software) |
+| STRIDE         | Elevation of Privilege                                                            |
 
 ## Attack description
 
@@ -91,12 +91,13 @@ code execution on managed hosts via plugin configuration manipulation.
 
 ## Current mitigations
 
-- **Separate `manage_commands` permission.** _(Implemented)_ Creating or modifying
-  plugin configs requires the dedicated `manage_commands` permission, which is
-  distinct from `manage_software`. Users with `manage_software` alone can manage
-  software items, version tracking, and non-command config fields, but cannot alter
-  the commands that execute on managed hosts. The `manage_commands` permission is
-  granted only to the `owner` and `admin` roles. See
+- **Separate `commands:manage` action.** _(Implemented)_ Creating or modifying
+  plugin configs requires the dedicated `commands:manage` action, distinct from the
+  `software:*` actions (previously a single manage-software permission covered
+  both). Users holding only the software actions can manage software items, version
+  tracking, and non-command config fields, but cannot alter the commands that execute
+  on managed hosts. The `commands:manage` action is
+  granted only to the `owner` and `admin` roles by default. See
   [Authentication and Authorization](../security/auth-and-authorization.md#authorization-model)
   for the full authorization model.
 - **Shell escape for substitution variables.** Dynamic values like
@@ -165,10 +166,10 @@ code execution on managed hosts via plugin configuration manipulation.
 
 ## Residual risk
 
-- **`manage_commands` still equals RCE.** The permission separation reduces the blast
-  radius (fewer users can modify command-bearing fields), but users with
-  `manage_commands` retain full effective RCE on all assigned hosts. Assigning this
-  permission should be treated with the same care as granting `root` access.
+- **`commands:manage` still equals RCE.** The action split reduces the blast
+  radius (fewer users can modify command-bearing fields), but users holding
+  `commands:manage` retain full effective RCE on all assigned hosts. Granting this
+  action should be treated with the same care as granting `root` access.
 - **Command content blocking can be disabled.** Dangerous command rejection is on by
   default, but operators can disable it with `--allow-dangerous-commands`. There is
   no allowlist or blocklist beyond the built-in pattern set.

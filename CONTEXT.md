@@ -70,18 +70,18 @@ Scope** (see below) that determines who manages it.
 _Avoid_: integration, adapter, extension
 
 **Plugin Scope**:
-Either **Tenant-Scoped** (the default — configured by Operators with tenant-level permissions
+Either **Tenant-Scoped** (the default — configured by Operators with tenant-level actions
 through `plugin_configs`/`plugin_type_settings`) or **Instance-Scoped** (configured only by
-Operators with `ManageGlobalSettings`; settings live in `global_settings`; if disabled, the
-Plugin is invisible and inert for tenant Operators). Distinct from `GlobalProviderConsumer`,
-which is an unrelated cross-plugin shared-resource mechanism.
+Operators holding the `system.settings:manage` action; settings live in `global_settings`; if
+disabled, the Plugin is invisible and inert for tenant Operators). Distinct from
+`GlobalProviderConsumer`, which is an unrelated cross-plugin shared-resource mechanism.
 _Avoid_: "global plugin" in code/spec (term collision with `global_settings` and
 `GlobalProviderConsumer`); UI label may still read "Global Plugins".
 
 **Instance-Scoped Plugin**:
 A Plugin whose enable/disable state and configuration are managed exclusively at the instance
-level via `global_settings`, gated by `ManageGlobalSettings`. When disabled, no API surface,
-Surface, or runtime hook exposes its existence to tenant Operators.
+level via `global_settings`, gated by the `system.settings:manage` action. When disabled, no API
+surface, Surface, or runtime hook exposes its existence to tenant Operators.
 _Avoid_: global plugin (in code), system plugin, root plugin
 
 **Effective Enablement**:
@@ -129,6 +129,16 @@ _Avoid_: verifier reload (overloaded with graceful-reload terminology).
 **Operator**:
 A person using the Dashboard or CLI to manage Updates and Hosts.
 _Avoid_: user, admin (too generic)
+
+**Action**:
+Authorization vocabulary term: a `resource:verb` string validated against the catalog
+(`crates/shared/types/src/access/catalog.rs`); unknown or unparseable actions deny.
+
+**Grant**:
+A data record (`access_grants`) conferring authority: action patterns plus a selector, held by
+a User or role subject.
+_Avoid_: bare "permission" (deleted RBAC concept); "Consent Grant" (distinct OAuth-scope-approval
+concept, see below).
 
 **MQTT Service**:
 The Service that exposes an MQTT interface for third-party integrations (e.g. Home Assistant).
@@ -185,8 +195,8 @@ _Avoid_: domain (overloaded), namespace (Kubernetes overload).
 **Consent Grant**:
 A User's persisted approval of an OAuth Client's scope set, recorded in `oauth_consents`. Revocable
 from the User's Authorized Apps view or via cascade when the OAuth Client is revoked.
-_Avoid_: authorization (already overloaded in OAuth context), permission grant (collides with
-Permission).
+_Avoid_: authorization (already overloaded in OAuth context), bare "grant" (collides with the
+access-control **Grant** term above).
 
 **MCP Authorization Server**:
 The OAuth 2.1 Authorization Server embedded in the Controller. Issues access and refresh tokens for
@@ -208,10 +218,12 @@ _Avoid_: application, third party (too vague), integration (conflicts with Plugi
 
 **Scope (OAuth)**:
 A string that names an action class an OAuth Client may perform on the MCP Resource Server. v1
-values: `mcp:read`, `mcp:write`. Distinct from **Permission**, which names what a User can do
-regardless of which client they use. Effective rights = `scope ∩ Permission`.
-_Avoid_: using `Scope` bare for either concept without the `(OAuth)` / `(Permission)` qualifier in
-code comments or docs.
+values: `mcp:read`, `mcp:write` (`McpScope`). Distinct from **Action**, which names what a User
+can do regardless of which client they use. MCP connections gate on the `mcp:use` action; individual
+MCP tools additionally require their own per-tool catalog actions declared on `ToolAuth`. Effective
+rights = OAuth scope ∩ per-tool actions.
+_Avoid_: using `Scope` bare for either concept without the `(OAuth)` / `(Action)` qualifier in code
+comments or docs.
 
 **Config Section**:
 Logical grouping of settings whose lifetime is bound together for reload; one `Arc<SectionConfig>`
@@ -311,5 +323,5 @@ variants: `InvalidField { field, message }`, `InvalidIdentifier`, `Contract`.
   an image tag; for GitHub-based items it maps to a GitHub release. The term is canonical
   regardless of the underlying mechanism.
 - **"scope"** — two distinct concepts exist: **Scope (OAuth)** (action class on the MCP Resource
-  Server) and **Permission** (user right). Always qualify when ambiguous; the typed enum names
-  (`McpScope`, `Permission`) keep code clear.
+  Server) and **Action** (a `resource:verb` catalog string). Always qualify when ambiguous; the
+  typed names (`McpScope`, `Action`) keep code clear.

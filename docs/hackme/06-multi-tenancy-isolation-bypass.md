@@ -74,8 +74,8 @@ Specific vectors in the current architecture:
   `X-Tenant-Id` header, but there is no mechanism to validate that the authenticated
   user belongs to the specified tenant.
 - **Global settings are shared.** Critical infrastructure settings (trusted proxies,
-  PKI address, JWT signing key) are inherently global. A tenant admin with
-  `manage_global_settings` permission can affect all tenants.
+  PKI address, JWT signing key) are inherently global. A tenant admin holding the
+  `system.settings:manage` action can affect all tenants.
 - **Scheduler is per-tenant but shares plugin credentials.** The scheduler filters by
   `tenant_id` in queries, but plugin configs containing API tokens are not isolated
   per tenant in the plugin execution layer.
@@ -86,7 +86,7 @@ Specific vectors in the current architecture:
   ensure `TenantContext` is used correctly and no queries bypass `TenantDb`.
 - Implement user-to-tenant membership mapping and validate the `X-Tenant-Id` header
   against the user's tenant memberships.
-- Separate `manage_global_settings` from tenant-level permissions entirely, requiring
+- Separate `system.settings:manage` from tenant-level actions entirely, requiring
   a super-admin role that is not assignable within any single tenant.
 - Add integration tests that create two tenants and verify that API requests from one
   tenant cannot read, modify, or trigger actions in the other.

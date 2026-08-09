@@ -4,12 +4,12 @@
 | -------------- | ---------------------------------------------------- |
 | Severity       | High                                                 |
 | Attack surface | Command execution (plugin system)                    |
-| Prerequisites  | Authenticated user with `manage_software` permission |
+| Prerequisites  | Authenticated user with the `commands:manage` action |
 | STRIDE         | Elevation of Privilege                               |
 
 ## Attack description
 
-1. An attacker with `manage_software` API access creates a plugin config with a
+1. An attacker with `commands:manage` API access creates a plugin config with a
    plugin type that supports arbitrary shell commands (e.g., `generic.shell`).
 2. The attacker embeds malicious bash in the `version_command` or `update_command`
    field. For example:
@@ -44,7 +44,7 @@ The same attack applies to:
 ## Current mitigations
 
 - **Authentication and authorization.** Plugin config writes require the
-  `manage_software` permission. Only users with this permission can create or modify
+  `commands:manage` action. Only users holding it can create or modify
   plugin configs.
 - **Shell escape for dynamic values.** Plugin template substitution uses
   `shell_escape()` for dynamic values like `{package_identifier}`, `{version}`, and
@@ -69,13 +69,13 @@ The same attack applies to:
 
 - **Shell plugin commands are unvalidated by design.** The `generic.shell` plugin's
   `version_command` and `update_command` accept any shell command. This is intentional
-  (the plugin's purpose is operator-supplied scripts), but it means
-  `manage_software` permission is effectively equivalent to remote code execution.
+  (the plugin's purpose is operator-supplied scripts), but it means holding the
+  `commands:manage` action is effectively equivalent to remote code execution.
 - **Custom hook commands bypass all validation.** The `commands` array in both legacy
   and structured hook formats passes through without content inspection.
 - **`post_pull_command` in Docker plugin is unvalidated.** The template string accepts
   any bash command. Validation only checks it is non-empty.
-- **`manage_software` is a broad permission.** Users with this permission can modify
+- **`commands:manage` is a broad action.** Users holding it can modify
   any plugin config for any software item in their tenant, affecting all hosts
   assigned to those items.
 - **SSH agent amplification.** For SSH-managed hosts, commands execute on remote
@@ -87,7 +87,7 @@ The same attack applies to:
 
 ## Recommended improvements
 
-- Document explicitly in operator and security guides that `manage_software` grants
+- Document explicitly in operator and security guides that `commands:manage` grants
   effective RCE on all managed hosts and should be treated as a privileged
   administrative capability.
 - Add an audit log entry when plugin configs with command-bearing fields

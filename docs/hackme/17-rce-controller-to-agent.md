@@ -104,8 +104,8 @@ The same attack applies via:
   file; when `false`, it removes it. The optional `reason` field is logged. This
   removes the requirement for local shell access during an incident.
 - **REST API for remote freeze.** _(Implemented)_ The
-  `POST /api/v1/services/{id}/update-freeze` endpoint allows administrators with
-  `manage_agents` permission to enable or disable the update freeze on connected
+  `POST /api/v1/services/{id}/update-freeze` endpoint allows administrators holding
+  the `services:update` action to enable or disable the update freeze on connected
   agents via the web API or CLI (`uptrakit-cli services update-freeze`). The
   endpoint validates that the service exists, is connected, and sends the wire
   message over the active WebSocket.
@@ -148,9 +148,9 @@ The same attack applies via:
 - ~~Expose a remote freeze API on the controller~~ — **Implemented.** The
   `POST /api/v1/services/{id}/update-freeze` REST endpoint sends
   `SetUpdateFreeze` wire messages to connected agents, requiring the
-  `manage_agents` permission. The CLI exposes this as
+  `services:update` action. The CLI exposes this as
   `uptrakit-cli services update-freeze --enable/--disable`. See
-  `crates/ui/web-api/src/routes/services.rs` (`set_update_freeze`).
+  `crates/ui/web-api/src/routes/services/lifecycle.rs` (`set_update_freeze`).
 - Add anomaly detection on agents for unusual command patterns (e.g., hooks that
   download and execute external scripts, commands targeting sensitive system files,
   or updates at unusual times).

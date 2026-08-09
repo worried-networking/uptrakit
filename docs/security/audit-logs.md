@@ -47,8 +47,8 @@ Two immutable tables separate scopes:
 
 Access control:
 
-- `view_audit_logs` -> `GET /api/v1/audit-logs`
-- `view_system_audit_logs` -> `GET /api/v1/system-audit-logs`
+- `audit:read` -> `GET /api/v1/audit-logs`
+- `system.audit:read` -> `GET /api/v1/system-audit-logs`
 
 ## Trust boundaries for forwarded runtime events
 

@@ -21,22 +21,22 @@ execution.
 
 | Surface                              | Mitigation                                         |
 | ------------------------------------ | -------------------------------------------------- |
-| Unauthorized stdin access            | `ManageSoftware` permission required               |
+| Unauthorized stdin access            | `updates:trigger` action required                  |
 | Session hijacking                    | Single-writer enforcement; authenticated WebSocket |
 | Stdin data interception              | TLS encryption on all WebSocket connections        |
 | Denial of service via stdin flooding | Rate limit: 1000 messages/sec; 64 KB per message   |
 | Cross-tenant access                  | Tenant-scoped update history validation            |
 | NATS message injection               | `UpdateStdinData` is not NATS-publishable          |
 
-## Permission Model
+## Authorization Model
 
-- **Viewing output**: `ViewSoftware` (unchanged from non-interactive mode).
-- **Sending stdin / connecting interactively**: `ManageSoftware`.
-- **Triggering interactive updates**: same permissions as non-interactive triggers.
+- **Viewing output**: `software:read` (unchanged from non-interactive mode).
+- **Sending stdin / connecting interactively**: `updates:trigger`.
+- **Triggering interactive updates**: same action as non-interactive triggers.
 
-No new `Permission` variant was introduced. The `ManageSoftware` permission already
-implies code execution trust (it allows triggering updates that run arbitrary commands
-on hosts).
+No new catalog action was introduced. Interactive stdin access is gated on the same
+`updates:trigger` action as triggering updates. `updates:trigger` already implies code
+execution trust (it allows triggering updates that run arbitrary commands on hosts).
 
 ## Authentication
 

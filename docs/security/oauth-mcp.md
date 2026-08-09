@@ -20,7 +20,7 @@ DCR allows any network-reachable caller to register an OAuth client without auth
 who can reach `/oauth/register` can create a client named "uptrakit Security Update Required" with a
 `client_uri` that resembles the controller domain. Because the consent screen displays
 Operator-controlled strings from the client record, DCR turns the consent screen into a phishing
-primitive bounded only by the Operator's existing Permission grants. `Permission::TriggerUpdates` is
+primitive bounded only by the Operator's existing grants. `updates:trigger` is
 effectively root-on-fleet, making this a high-severity vector.
 
 ### Phishing via CIMD Silent Re-Keying
@@ -33,7 +33,7 @@ codes to the attacker's server.
 ### Token Theft
 
 A stolen access token (15-minute TTL by default) allows the attacker to call any MCP tool the token's
-scopes and Permissions allow, for up to 15 minutes after theft. A stolen refresh token allows
+scopes and the Operator's grants allow, for up to 15 minutes after theft. A stolen refresh token allows
 indefinite access until the family is revoked.
 
 ### Multi-Controller Secret Drift

@@ -4,12 +4,12 @@
 | -------------- | ---------------------------------------------------- |
 | Severity       | Medium                                               |
 | Attack surface | Plugin system (API base URLs)                        |
-| Prerequisites  | Authenticated user with `manage_software` permission |
+| Prerequisites  | Authenticated user with the `commands:manage` action |
 | STRIDE         | Information Disclosure                               |
 
 ## Attack description
 
-1. An authenticated user with `manage_software` permission creates or updates a plugin
+1. An authenticated user holding the `commands:manage` action creates or updates a plugin
    config for the GitHub, GitLab, or Forgejo release plugin.
 2. The user sets `api_base_url` to an internal network address, attempting to reach
    services not intended to be publicly accessible from the controller.
@@ -52,7 +52,7 @@ requests to cloud metadata endpoints.
   `connect_timeout(10s)` and `timeout(60s)`, preventing indefinite connections to
   slow or unresponsive internal services.
 - **Authentication required.** Plugin config creation and modification require the
-  `manage_software` permission, limiting the attack to authenticated and authorized
+  `commands:manage` action, limiting the attack to authenticated and authorized
   users.
 
 ## Residual risk
