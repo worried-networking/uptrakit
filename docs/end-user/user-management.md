@@ -1,33 +1,34 @@
 ---
 title: User Management
 weight: 240
-description: Uptrakit uses a granular role-based access control system with 32 permissions grouped into 8 built-in roles, with code-defined role bundles for common use cases.
+description: Uptrakit uses an action-based grant authorization system -- roles are named bundles of grant patterns, with seeded built-in roles, per-tenant custom roles, and code-defined role bundles for common use cases.
 ---
 
 # User Management
 
-Uptrakit uses a granular role-based access control (RBAC) system with 32 permissions grouped
-into 8 built-in roles. Users are assigned one or more roles, and each role grants a specific
-set of permissions. Role bundles name convenient role groupings for common use cases.
+Uptrakit uses an action-based grant authorization system. Roles are named bundles of grant
+patterns -- seeded built-in roles plus per-tenant custom roles (roles are data, not code).
+Users are assigned one or more roles, and each role's grants determine which `resource:verb`
+actions the user can perform. Role bundles name convenient role groupings for common use cases.
 
 ## First user setup
 
-The first user to register (via password or OIDC) automatically receives all 8 built-in
+The first user to register (via password or OIDC) automatically receives all built-in
 roles, equivalent to the **owner** role bundle. This ensures the initial administrator
 has full control. Subsequent users receive only the **viewer** role by default.
 
 ## Built-in roles
 
-| Role                     | Purpose                   | Key permissions                                                                            |
-| ------------------------ | ------------------------- | ------------------------------------------------------------------------------------------ |
-| **viewer**               | Read-only access          | View services, software, hosts, settings                                                   |
-| **operator**             | Day-to-day operations     | Approve/reject services, trigger checks and updates                                        |
-| **service_manager**      | Full service lifecycle    | Approve, reject, remove, update services                                                   |
-| **software_manager**     | Software management       | Create, edit, delete software; trigger checks/updates; manage scheduler and ignore rules   |
-| **host_manager**         | Host management           | Update host properties/tags, deactivate hosts                                              |
-| **settings_manager**     | Tenant administration     | Auth settings, enrollment tokens, certificates, notifications, audit logs, user management |
-| **command_manager**      | Command configuration     | Modify command-bearing plugin config fields (equivalent to root access on managed hosts)   |
-| **system_administrator** | Infrastructure management | Global settings, system services, system audit logs                                        |
+| Role                     | Purpose                   | Key actions                                                                            |
+| ------------------------ | ------------------------- | -------------------------------------------------------------------------------------- |
+| **viewer**               | Read-only access          | `*:read`                                                                               |
+| **operator**             | Day-to-day operations     | `services:approve`, `services:reject`, `checks:trigger`, `updates:trigger`             |
+| **service_manager**      | Full service lifecycle    | `services:*`                                                                           |
+| **software_manager**     | Software management       | `software:*`, `scheduler:manage`, `discovery.ignores:manage`, `plugin-configs:trigger` |
+| **host_manager**         | Host management           | `hosts:*`, `hosts.tags:manage`                                                         |
+| **settings_manager**     | Tenant administration     | `settings.*:manage`, `notifications:*`, `audit:read`, `users:manage`, `access:manage`  |
+| **command_manager**      | Command configuration     | `commands:manage`, `plugin-configs:trigger`                                            |
+| **system_administrator** | Infrastructure management | `system.*:*`                                                                           |
 
 ## Role bundles
 
@@ -41,7 +42,21 @@ them with `users set-roles` (see below).
 | **operator**      | viewer, operator                                                                           | On-call staff                   |
 | **manager**       | viewer, service_manager, software_manager, host_manager                                    | Team leads                      |
 | **administrator** | viewer, service_manager, software_manager, host_manager, settings_manager, command_manager | Tenant administrators           |
-| **owner**         | All 8 roles                                                                                | System owners                   |
+| **owner**         | All built-in roles                                                                         | System owners                   |
+
+## Custom roles and grants
+
+Role and grant management is API/CLI-only in v1 -- there is no web UI for creating custom
+roles or editing grants yet. Assign a user's roles by name with:
+
+```bash
+uptrakit-cli users set-roles <user-id> --names <comma-separated-role-names>
+```
+
+Grants -- the `resource:verb` action patterns attached to a role or a user -- are managed
+through the access API; see [Access Management API](../api/access-management.md) for grant
+and role CRUD endpoints. The catalog endpoint (`GET /api/v1/access/catalog`) lists the full
+action catalog and the code-defined role bundles.
 
 ## Managing users
 
@@ -79,7 +94,7 @@ uptrakit-cli users set-active <user-id> --active false
 uptrakit-cli users set-active <user-id> --active true
 ```
 
-### Viewing roles and permissions
+### Viewing roles and grants
 
 ```bash
 # List all roles
@@ -108,7 +123,7 @@ deactivation. Attempts that would violate this rule are rejected with an error.
 
 ## Related documentation
 
-- [Authentication and Authorization](../security/auth-and-authorization.md) -- full
-  permission model, role definitions, and security details
+- [Authentication and Authorization](../security/auth-and-authorization.md#authorization-model) --
+  authorization model, role definitions, and security details
 - [User Management API](https://github.com/worried-networking/uptrakit/tree/main/docs/api/) -- REST API reference for all
   user management endpoints
