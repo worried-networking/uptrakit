@@ -28,9 +28,10 @@ All foundation work is done. Summary of what was delivered:
   settings store.
 - **Core Data Models** — Host, SoftwareItem, Version (semver + custom), UpdateRecord, validation,
   repositories/DAOs.
-- **User Authentication & Authorization** — Argon2id passwords, JWT + session tokens, full RBAC
-  (33 granular permissions, 8 built-in roles, 5 access presets), OIDC, rate limiting, audit logging.
-  Auth API (register, login, logout, me), user management API (users, roles, permissions, presets).
+- **User Authentication & Authorization** — Argon2id passwords, JWT + session tokens, action-string
+  authorization decided by the `AccessEngine` over `access_grants` rows held by users and built-in or
+  custom roles, OIDC, rate limiting, audit logging. Auth API (register, login, logout, me), user
+  management API (users, roles), access management API (grants, role assignment, action catalog).
   OpenAPI/Swagger docs.
 - **Agent Authentication & Security** — mTLS with auto-issued client certificates, CA pinning,
   dual-CA rotation (6-month window, 24h check), partitioned CRLs, OCSP, certificate expiration

@@ -310,6 +310,6 @@ provide defense-in-depth against abuse.
 
 - [Secrets and Encryption](secrets-and-encryption.md) -- encryption-at-rest, master key handling,
   `EncryptedString` semantics
-- [Auth and Authorization](auth-and-authorization.md) -- JWT authentication, RBAC permission model, typed
-  permission extractors
+- [Auth and Authorization](auth-and-authorization.md) -- JWT authentication, the action/grant authorization
+  model, typed action extractors
 - [Secure Development](secure-development.md) -- secure coding expectations for contributors

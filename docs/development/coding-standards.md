@@ -1914,7 +1914,7 @@ Emit semantic audit entries for operations that:
 
 - Creates, modifies, or deletes plugin configs containing command-bearing fields (`version_command`, `update_command`, `post_pull_command`, hook
   `commands`)
-- Modifies RBAC permissions or role assignments
+- Modifies access grants or role assignments
 - Changes credential-bearing settings (SMTP passwords, OIDC secrets, NATS URLs)
 - Approves or revokes services with credential capabilities
 

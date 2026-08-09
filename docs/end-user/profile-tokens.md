@@ -147,7 +147,7 @@ context.
 ## Related Documentation
 
 - [Auth Flows](https://github.com/worried-networking/uptrakit/tree/main/docs/api/) — token issuance, storage, and denylist behavior.
-- [Auth and Authorization](../security/auth-and-authorization.md) — permissions model and
-  roles.
+- [Auth and Authorization](../security/auth-and-authorization.md) — the action/grant authorization
+  model and roles.
 - [CLI Usage Guide](cli-usage.md) — `auth token` commands and `--token` / `UPTRAKIT_TOKEN`
   usage.

@@ -517,9 +517,10 @@ See [SSE Events — Developer Guide](docs/development/sse-events.md) for impleme
 The HTTP API is composed of three independent crates under `crates/ui/`:
 
 - **`uptrakit-web-api-auth`** (`crates/ui/web-api-auth/`): authentication subsystem (~5k lines). Contains the `auth` module (JWT, sessions, OIDC,
-  tokens, permissions, registration), `SettingKey`, and `settings_store`. Raw-key settings functions (`upsert_setting_raw`, `load_settings_by_prefix`,
+  tokens, registration), `SettingKey`, and `settings_store`. Raw-key settings functions (`upsert_setting_raw`, `load_settings_by_prefix`,
   etc.) live in `uptrakit-shared-db::raw_settings` so that notification plugins can access settings without depending on `web-api-auth`. The `oidc`
-  feature gates `openidconnect` dependency. Authorization uses 32 granular permissions grouped into 8 built-in roles with 5 access presets. See
+  feature gates `openidconnect` dependency. Authorization is decided by the `AccessEngine` over `resource:verb` action strings and `access_grants`
+  rows held by users and roles. See
   [Authentication and Authorization](docs/security/auth-and-authorization.md).
 
 - **`uptrakit-web-api-queries`** (`crates/ui/web-api-queries/`): database query logic (~10.5k lines). Contains all query modules, `TenantDb`

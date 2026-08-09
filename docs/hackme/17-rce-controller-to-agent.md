@@ -75,7 +75,7 @@ The same attack applies via:
   `host_machine_id` matches its own. A compromised controller must know the target
   host's machine ID (easily obtained from the database).
 - **Controller access protection.** The controller is protected by HTTPS, JWT
-  authentication, RBAC permissions, and rate limiting. Multiple layers must be
+  authentication, action-based authorization, and rate limiting. Multiple layers must be
   breached to reach the message injection point.
 - **Agent-side execution freeze file.** _(Implemented)_ Both the `uptrakit-agent`
   and `uptrakit-agent-ssh` binaries check for the presence of a freeze file at

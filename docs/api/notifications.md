@@ -600,6 +600,6 @@ Types are defined in `crates/shared/web-api-types/src/notifications.rs`:
 ## Related Documentation
 
 - [HTTP Web API](http-web-api.md) -- API overview, error responses, pagination
-- [Auth and Authorization](../security/auth-and-authorization.md) -- permissions model (`notifications:manage`, `notifications:read`)
+- [Auth and Authorization](../security/auth-and-authorization.md) -- action/grant authorization model (`notifications:manage`, `notifications:read`)
 - [Notifications Security](../security/notifications-security.md) -- secret storage, config encryption, and callback verification
 - [Notifications Development](../development/notifications.md) -- architecture, dispatcher design, and adding new channel types

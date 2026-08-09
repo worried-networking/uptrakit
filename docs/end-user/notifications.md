@@ -337,5 +337,5 @@ delivery log but cannot make changes.
 - [Notifications API](https://github.com/worried-networking/uptrakit/tree/main/docs/api/) -- REST endpoint reference for all notification
   operations.
 - [CLI Usage Guide](cli-usage.md) -- full CLI command reference including notification subcommands.
-- [Auth and Authorization](../security/auth-and-authorization.md) -- permissions model, roles, and
-  access control.
+- [Auth and Authorization](../security/auth-and-authorization.md) -- the action/grant authorization
+  model, roles, and access control.

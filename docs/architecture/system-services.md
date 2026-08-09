@@ -264,6 +264,6 @@ of `service_type`.
 
 - [Services and Operations](../api/services-operations.md) — REST endpoint details for both tiers
 - [HTTP Web API](../api/http-web-api.md) — full endpoint reference
-- [Authentication and Authorization](../security/auth-and-authorization.md) — permissions model
+- [Authentication and Authorization](../security/auth-and-authorization.md) — action/grant authorization model
 - [Wire Protocol](../api/wire-protocol.md) — capabilities and enrollment flow
 - [Scheduler Architecture](scheduler.md) — external scheduler as a system service

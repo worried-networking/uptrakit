@@ -344,7 +344,8 @@ Channel-agnostic subsystem: producers emit internal `NotificationEvent` values; 
 dropped with a warn) matches tenant-scoped rules and hands a `DeliveryMessage` to the channel. Channels are plugins under
 `crates/plugins/notifications/` (`declare_plugin!` + `NotificationTransport` role trait); `channel_type` is a runtime-validated string, never an enum.
 HTML-escape all user-controlled values via `escape_html()`. See [docs/development/notifications.md](docs/development/notifications.md); platform-wide
-RBAC (variants in `crates/shared/types/src/permissions.rs`) is in [docs/security/auth-and-authorization.md](docs/security/auth-and-authorization.md).
+authorization (action catalog in `crates/shared/types/src/access/catalog.rs`) is in
+[docs/security/auth-and-authorization.md](docs/security/auth-and-authorization.md).
 
 ### Audit log subsystem
 

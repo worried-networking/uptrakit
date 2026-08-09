@@ -49,7 +49,7 @@ Read and invoke enforce the dynamic descriptor/interaction actions in-handler vi
 runs the resolved `Action` through `AccessEngine`: `None` action allows; `Ready` authority + `Allow` decision
 allows; `Ready` + deny returns `403` and increments the `uptrakit_access_denies_total` counter; `Unavailable`
 authority returns `500` (fail-closed, never silently permissive). This is a documented exception to the platform's
-typed-permission-extractor rule, because the required action is runtime descriptor data no static extractor can
+typed-action-extractor rule, because the required action is runtime descriptor data no static extractor can
 carry; the OpenAPI operations advertise the runtime-valued requirement via the boolean `x-action-dynamic: true`
 extension, paired with an authenticated-only security declaration — the enforced requirement itself lives in the
 registered descriptor/interaction, not in the spec. See [Authentication and
