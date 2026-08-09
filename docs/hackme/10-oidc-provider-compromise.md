@@ -29,9 +29,9 @@
 
 - **Account takeover.** If the attacker's forged `oidc_subject` matches an existing
   OIDC link, they gain full access to that user's account.
-- **Privilege escalation to owner.** Via role claim manipulation, the attacker maps
-  their account to the `owner` role bundle, gaining every action its built-in roles
-  grant, including `system.settings:manage` (via `system_administrator`).
+- **Privilege escalation.** Via role claim manipulation, the attacker maps their
+  account to a privileged built-in role such as `system_administrator`, gaining every
+  action it is granted, including `system.settings:manage`.
 - **Mass account creation.** With `auto_create_users` enabled, the attacker creates
   an arbitrary number of accounts with elevated roles.
 - **Persistent access.** Once an OIDC link is established, the attacker can log in
