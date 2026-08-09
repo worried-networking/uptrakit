@@ -114,7 +114,7 @@ For development details on the `ServiceHandler` trait, see [Service Lifecycle](.
 
 - Most tables are tenant-scoped (`tenant_id` required). `services`, `hosts`, `plugin_configs`, `software_items`, `settings`, and `mqtt_clients` all
   include the tenant column.
-- Tables without tenant scope include `users`, `roles`, `permissions`, `api_tokens`, and `pending_*` entities.
+- Tables without tenant scope include `users`, `roles`, `access_grants`, `api_tokens`, and `pending_*` entities.
 - `TenantContext` reads `X-Tenant-Id` or defaults to `AppState.default_tenant_id`. API handlers use it to filter data.
 
 ## System Services
@@ -131,14 +131,14 @@ the credential guard, enrollment token mechanics, and the two-tier service model
 
 | Method | Path                                   | Description                                                                                                       |
 | ------ | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| GET    | `/api/v1/system-services`              | List system services (requires `view_system_services`). Filterable by `capability` and `status`. Paginated.       |
-| GET    | `/api/v1/system-services/{id}`         | Get a single system service by UUID (requires `view_system_services`).                                            |
-| PUT    | `/api/v1/system-services/{id}`         | Update configurable settings: `ping_interval_seconds`, `cert_lifetime_hours` (requires `manage_system_services`). |
-| POST   | `/api/v1/system-services/{id}/approve` | Approve a pending system service (requires `manage_system_services`).                                             |
-| POST   | `/api/v1/system-services/{id}/reject`  | Reject a pending system service (requires `manage_system_services`).                                              |
-| DELETE | `/api/v1/system-services/{id}`         | Deactivate a system service (requires `manage_system_services`).                                                  |
-| GET    | `/api/v1/settings/system-services`     | Get the global enrollment token (requires `manage_system_services`).                                              |
-| PUT    | `/api/v1/settings/system-services`     | Set or clear the global enrollment token (requires `manage_system_services`).                                     |
+| GET    | `/api/v1/system-services`              | List system services (requires `system.services:read`). Filterable by `capability` and `status`. Paginated.       |
+| GET    | `/api/v1/system-services/{id}`         | Get a single system service by UUID (requires `system.services:read`).                                            |
+| PUT    | `/api/v1/system-services/{id}`         | Update configurable settings: `ping_interval_seconds`, `cert_lifetime_hours` (requires `system.services:update`). |
+| POST   | `/api/v1/system-services/{id}/approve` | Approve a pending system service (requires `system.services:approve`).                                            |
+| POST   | `/api/v1/system-services/{id}/reject`  | Reject a pending system service (requires `system.services:reject`).                                              |
+| DELETE | `/api/v1/system-services/{id}`         | Deactivate a system service (requires `system.services:delete`).                                                  |
+| GET    | `/api/v1/settings/system-services`     | Get the global enrollment token (requires `system.settings:manage`).                                              |
+| PUT    | `/api/v1/settings/system-services`     | Set or clear the global enrollment token (requires `system.settings:manage`).                                     |
 
 ### Deactivation
 

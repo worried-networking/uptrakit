@@ -22,15 +22,15 @@ Each entry records:
 
 ## Two log tables
 
-| Log         | Contents              | Who can view                        |
-| ----------- | --------------------- | ----------------------------------- |
-| Tenant Logs | Tenant-scoped actions | Users with `view_audit_logs`        |
-| System Logs | Global/system actions | Users with `view_system_audit_logs` |
+| Log         | Contents              | Who can view                   |
+| ----------- | --------------------- | ------------------------------ |
+| Tenant Logs | Tenant-scoped actions | Users with `audit:read`        |
+| System Logs | Global/system actions | Users with `system.audit:read` |
 
 ## Viewing audit logs in the UI
 
 Navigate to **Audit Logs** in the sidebar. The link is visible to users with the
-`view_audit_logs` or `view_system_audit_logs` permission.
+`audit:read` or `system.audit:read` action.
 
 ### Tab bar
 
@@ -152,7 +152,7 @@ uptrakit audit-logs list --correlation-id <uuid>
 uptrakit audit-logs list --action-kind stateful
 uptrakit audit-logs list --action-kind event
 
-# List system audit log entries (requires view_system_audit_logs)
+# List system audit log entries (requires system.audit:read)
 uptrakit audit-logs system list
 uptrakit audit-logs system list --action-type system.service.update_freeze.apply
 ```
@@ -166,14 +166,14 @@ uptrakit --output json audit-logs list --per-page 50
 For stateful entries, `uptrakit audit-logs show <id>` displays a compact diff (changed keys only,
 before → after on each line).
 
-## Permissions required
+## Required Actions
 
-| Permission               | Role             | Endpoint   |
-| ------------------------ | ---------------- | ---------- |
-| `view_audit_logs`        | `owner`, `admin` | Tenant log |
-| `view_system_audit_logs` | `owner` only     | System log |
+| Action              | Role             | Endpoint   |
+| ------------------- | ---------------- | ---------- |
+| `audit:read`        | `owner`, `admin` | Tenant log |
+| `system.audit:read` | `owner` only     | System log |
 
-A user without either permission will see a "You do not have permission" message and the
+A user without either grant will see a "You do not have permission" message and the
 Audit Logs nav link will not appear in the sidebar.
 
 ## See also

@@ -28,9 +28,9 @@ The endpoint supports two authentication methods (checked in order):
 
 Both JWT session tokens and API tokens are accepted.
 
-### Permissions
+### Required Action
 
-The authenticated user must have the `TriggerUpdates` permission. Stdin forwarding is
+The authenticated user must have the `updates:trigger` action. Stdin forwarding is
 equivalent to code execution on the target host.
 
 ### Preconditions

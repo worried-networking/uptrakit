@@ -204,7 +204,7 @@ Manage backend-generated enrollment tokens for infrastructure services. A system
 presents a valid token at enrollment is automatically approved; without a token it is queued as
 `pending` for manual review. Tokens are Argon2id-hashed and shown only once at creation.
 
-All commands require the `manage_system_services` permission.
+All commands require the `system.settings:manage` action.
 
 ```sh
 # List all system enrollment tokens (paginated)

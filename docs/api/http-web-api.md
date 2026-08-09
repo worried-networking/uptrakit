@@ -16,11 +16,11 @@ Types are imported via `uptrakit_openapi_client::types::*` (re-exported from `up
   hardcoded string identifiers. This ensures UUID validation at the serialization boundary.
 - Rate limiting applies per-IP via the `api_rate_limits` table (see `crates/ui/web-api-auth/src/auth/rate_limit.rs`). Rate limited endpoints return `429`
   with a message describing the limit window.
-- Route handlers enforce permissions via typed Axum extractors. Converted operations (`CanReadHosts`, and the rest of
+- Route handlers enforce authorization via typed Axum extractors. All route families (`CanReadHosts`, and the rest of
   `crates/ui/web-api/src/middleware/action.rs`) declare a native `oauth2`/`developer_token` OpenAPI security
-  requirement. The legacy `permission_extractor!` model (`crates/ui/web-api/src/middleware/permission.rs`) no longer
-  backs any route family. See [Authentication and Authorization](../security/auth-and-authorization.md) for the full
-  permission model.
+  requirement backed by an `AccessEngine` action-string grant. The legacy `permission_extractor!` model has been
+  fully replaced. See [Authentication and Authorization](../security/auth-and-authorization.md) for the full
+  authorization model.
 
 ## Error Response Shape
 
@@ -106,12 +106,12 @@ End-user endpoints (authenticated only — each user manages their own consents)
 - GET/PUT `/api/v1/settings/access` — combined registration + authentication settings (as of `1e515ec0d`).
 - GET/PUT `/api/v1/settings/service-certificates`
 - _(SMTP settings are managed via email plugin shared surface actions, not REST endpoints)_
-- GET/PUT `/api/v1/settings/nats` _(feature: `nats`)_ — NATS server URL (requires `CanManageGlobalSettings`).
+- GET/PUT `/api/v1/settings/nats` _(feature: `nats`)_ — NATS server URL (requires the `system.settings:manage` action).
   The URL is stored encrypted at rest. The response returns the masked URL with password replaced by `***`.
   Changes take effect after a controller restart (hot-reload not supported). See
   [Settings Runtime — NATS settings](settings-runtime.md#nats-settings-feature-nats) for full details.
 - POST `/api/v1/settings/reset-data` _(feature: `reset-data`)_ — destructive reset of all tenant-scoped
-  data (requires `CanManageGlobalSettings`). See [Reset Data](#reset-data) below.
+  data (requires the `system.settings:manage` action). See [Reset Data](#reset-data) below.
 
 Settings persist in the `settings` table and are reconciled with CLI arguments following priority rules defined in
 [docs/api/settings-runtime.md](settings-runtime.md). Runtime changes propagate immediately via a `tokio::sync::watch` channel (`SettingsSnapshot`).
@@ -126,7 +126,7 @@ Settings persist in the `settings` table and are reconciled with CLI arguments f
 - `DELETE /api/v1/services/{id}`: deactivate (soft-delete) a service.
 - `POST /api/v1/services/{target_id}/merge`: merge a source into a target.
 - `POST /api/v1/services/{id}/update-freeze`: enable or disable the update freeze on a connected
-  service. Requires `update_services`. The freeze file blocks `ExecuteUpdate` and
+  service. Requires the `services:update` action. The freeze file blocks `ExecuteUpdate` and
   `ExecuteBatchUpdate` messages on the agent side, providing an emergency stop against
   RCE via a compromised controller without terminating the WebSocket connection.
 - `/api/v1/enrollment-tokens`: CRUD endpoints for enrollment tokens (create, list, get, revoke).
@@ -146,18 +146,18 @@ Settings persist in the `settings` table and are reconciled with CLI arguments f
 - `POST /api/v1/software-items/{id}/hosts`: assign a software item to one or more hosts. Each host
   assignment carries a list of role-specific plugin assignments (`plugins: Vec<HostPluginRoleAssignment>`),
   where each role entry specifies the `role`, `plugin_type`, optional `plugin_config_id` (or inline `plugin_config`),
-  `package_identifier`, optional `config`, and `execution_site`. Requires `create_software`.
+  `package_identifier`, optional `config`, and `execution_site`. Requires the `software:update` action.
 - `PUT /api/v1/software-items/{id}/hosts/{host_id}`: update a specific role assignment for a host --
   change the plugin type, plugin config, package identifier, per-assignment config, or execution site. The request body
-  includes `role` to identify which role to update. Requires `update_software`.
+  includes `role` to identify which role to update. Requires the `software:update` action.
 - `DELETE /api/v1/software-items/{id}/hosts/{host_id}[?ignore=true]`: remove a host assignment.
   Pass `?ignore=true` to also create a software ignore rule for the software item's
-  name. Requires `delete_software`.
+  name. Requires the `software:update` action.
 - `/api/v1/update-history`: read-only history with filters by host, software item, or status.
-- `POST /api/v1/hosts/{id}/discover`: trigger software discovery on a specific host. Requires `trigger_checks`.
-- `POST /api/v1/plugin-configs/{id}/discover`: trigger discovery for a specific plugin config. Requires `trigger_checks`.
+- `POST /api/v1/hosts/{id}/discover`: trigger software discovery on a specific host. Requires the `checks:trigger` action.
+- `POST /api/v1/plugin-configs/{id}/discover`: trigger discovery for a specific plugin config. Requires the `checks:trigger` action.
 - `POST /api/v1/plugin-configs/test`: test a plugin configuration without saving it (dry-run). Requires
-  `test_plugin_configs`. See [Plugin Config Test Endpoint](#plugin-config-test-endpoint) below.
+  the `plugin-configs:trigger` action. See [Plugin Config Test Endpoint](#plugin-config-test-endpoint) below.
 
 `PluginConfigResponse` includes a `capabilities: Vec<String>` field listing the snake_case capability strings
 declared by the plugin type (e.g. `["discover_local_software"]`). Clients should use this field to determine
@@ -168,14 +168,14 @@ Discovery-capable plugin types are `releases.docker`, `package-manager.homebrew`
 
 - `/api/v1/software-ignores`: CRUD for permanent suppression rules. See [Autodiscovery API](autodiscovery.md) for full details.
 - `/api/v1/discovery-allowlist`: tenant-wide list of plugin types permitted to run during host
-  discovery. `GET` requires `view_software`; `POST`/`DELETE` require `update_software`.
+  discovery. `GET` requires the `software:read` action; `POST`/`DELETE` require `software:update`.
 - `/api/v1/hosts/{id}/discovery-allowlist`: per-host override of the tenant-wide allowlist.
-  Same permission requirements. When a host has its own entries the tenant-wide list is ignored
+  Same action requirements. When a host has its own entries the tenant-wide list is ignored
   entirely for that host. When neither list has entries all discovery-capable plugins run (default).
   See [Discovery Allowlist API](discovery-allowlist.md) for full details.
 - `/api/v1/plugin-type-settings`: tenant-level per-plugin-type settings (discovery preferences, behavioral
-  defaults). `GET` requires `view_settings` or `manage_global_settings`; `PUT`/`DELETE` require
-  `manage_global_settings`.
+  defaults). `GET` requires `settings:read` or `system.settings:manage`; `PUT`/`DELETE` require
+  `system.settings:manage`.
   - `GET /api/v1/plugin-type-settings` -- list all plugin types with active type settings for the tenant.
   - `GET /api/v1/plugin-type-settings/:plugin_type` -- get the current type settings for a specific plugin type.
     Returns `404` if no settings exist for the plugin type.
@@ -195,7 +195,7 @@ field. The `service_label` is a human-readable display name derived from the ser
 
 ### `PUT /api/v1/services/{id}`
 
-Update a service's configurable settings. Requires the `UpdateServices` permission.
+Update a service's configurable settings. Requires the `services:update` action.
 
 **Path parameters**: `id` -- service UUID.
 
@@ -259,7 +259,7 @@ settings. The operation runs in a single database transaction. After the databas
 broadcasts `ControllerMessage::ResetData` to all connected services with the `ResetData` capability (e.g. SSH
 agents clear their local host list and Proxmox state) and emits a `DataReset` admin SSE event.
 
-**Permission**: `CanManageGlobalSettings`.
+**Action**: `system.settings:manage`.
 
 **Request body**:
 
@@ -299,13 +299,13 @@ The `confirm` field must be exactly `"RESET"` (case-sensitive). Any other value 
 
 - Tenant-aware tables store `tenant_id` (e.g., `services`, `hosts`, `plugin_configs`, `plugin_type_settings`, `software_items`, `settings`, `mqtt_clients`).
 - `TenantContext` middleware extracts `X-Tenant-Id` from the request or falls back to the default tenant (`AppState.default_tenant_id`).
-- Global tables like `users`, `roles`, `permissions`, `user_roles`, `role_permissions`, `api_tokens`, and `pending_*`
+- Global tables like `users`, `roles`, `access_grants`, `user_roles`, `api_tokens`, and `pending_*`
   remain unscoped.
 
 ## Update Output Streaming (SSE)
 
 `GET /api/v1/update-history/{id}/output/stream` — Server-Sent Events (SSE) endpoint for real-time update
-output streaming. Requires the `ViewSoftware` permission (same as the update history endpoints). Supports
+output streaming. Requires the `software:read` action (same as the update history endpoints). Supports
 both session cookie and API token (Bearer) authentication.
 
 This endpoint is a standard HTTP streaming endpoint using the `text/event-stream` content type — it is
@@ -389,7 +389,7 @@ after one completes (or fails), the next is dispatched.
 
 ### `POST /api/v1/hosts/{host_id}/batch-update`
 
-Trigger a host-wide batch update for all outdated software items on a host. Requires `TriggerUpdates`.
+Trigger a host-wide batch update for all outdated software items on a host. Requires the `updates:trigger` action.
 
 **Request body** (`HostBatchUpdateRequest`):
 
@@ -436,7 +436,7 @@ If no eligible items are found, returns `200` with `batch_id: null` and `total_c
 
 ### `POST /api/v1/software-items/{id}/batch-update`
 
-Trigger an item-wide batch update to roll out a software item version to hosts. Requires `TriggerUpdates`.
+Trigger an item-wide batch update to roll out a software item version to hosts. Requires the `updates:trigger` action.
 
 **Request body** (`ItemBatchUpdateRequest`):
 
@@ -454,7 +454,7 @@ Trigger an item-wide batch update to roll out a software item version to hosts. 
 
 ### `GET /api/v1/update-batches`
 
-List update batches with optional filters and pagination. Requires `ViewSoftware`.
+List update batches with optional filters and pagination. Requires the `software:read` action.
 
 **Query parameters**: `status` (optional), `page`, `per_page`.
 
@@ -486,14 +486,14 @@ List update batches with optional filters and pagination. Requires `ViewSoftware
 
 ### `GET /api/v1/update-batches/{id}`
 
-Get a single update batch with per-item update details. Requires `ViewSoftware`.
+Get a single update batch with per-item update details. Requires the `software:read` action.
 
 **Response** (`200`): `UpdateBatchDetailResponse` (extends summary with `updates` array).
 
 ### Batch Progress Streaming (SSE)
 
 `GET /api/v1/update-batches/{id}/stream` — Server-Sent Events endpoint for real-time batch
-progress. Requires `ViewSoftware`. Same authentication as the update output SSE endpoint.
+progress. Requires the `software:read` action. Same authentication as the update output SSE endpoint.
 
 Three event types are emitted:
 
@@ -545,7 +545,7 @@ Types are defined in `crates/shared/web-api-types/src/update_batches.rs`:
 `POST /api/v1/plugin-configs/test` -- test a plugin configuration without saving it. The endpoint
 validates the config against the target plugin and, depending on the plugin type, either runs the
 test on the controller (for release plugins with `ControllerSideFetchReleases`) or forwards it to
-an agent via the wire protocol (for agent-side plugins). Requires the `TestPluginConfigs` permission.
+an agent via the wire protocol (for agent-side plugins). Requires the `plugin-configs:trigger` action.
 
 The test is correlated via `ConfigTestProxy` (same request/response correlation pattern as `ExtensionProxy`).
 For agent-side tests, the controller sends a `test_plugin_config` wire message to the agent owning the
@@ -616,15 +616,15 @@ Batch actions allow performing the same operation on multiple entities in a sing
 Unlike batch updates (which create tracked update batches with progress streaming), batch
 actions are simple multi-ID operations that return per-item success/failure results.
 
-| Method | Path                             | Supported actions                           | Permission                                                        |
-| ------ | -------------------------------- | ------------------------------------------- | ----------------------------------------------------------------- |
-| `POST` | `/api/v1/services/batch`         | `approve`, `reject`, `deactivate`, `delete` | Per-action (e.g. `ApproveServices`, `RemoveServices`)             |
-| `POST` | `/api/v1/system-services/batch`  | `approve`, `reject`, `deactivate`, `delete` | Per-action (e.g. `ApproveSystemServices`, `RemoveSystemServices`) |
-| `POST` | `/api/v1/hosts/batch`            | `deactivate`, `delete`                      | `DeactivateHosts`                                                 |
-| `POST` | `/api/v1/software-items/batch`   | `delete`                                    | `DeleteSoftware`                                                  |
-| `POST` | `/api/v1/plugin-configs/batch`   | `delete`                                    | `DeleteSoftware`                                                  |
-| `POST` | `/api/v1/software-ignores/batch` | `delete`                                    | `ManageIgnores`                                                   |
-| `POST` | `/api/v1/host-tags/batch`        | `delete`                                    | `DeactivateHosts`                                                 |
+| Method | Path                             | Supported actions                           | Action                                                                |
+| ------ | -------------------------------- | ------------------------------------------- | --------------------------------------------------------------------- |
+| `POST` | `/api/v1/services/batch`         | `approve`, `reject`, `deactivate`, `delete` | Per-action (e.g. `services:approve`, `services:delete`)               |
+| `POST` | `/api/v1/system-services/batch`  | `approve`, `reject`, `deactivate`, `delete` | Per-action (e.g. `system.services:approve`, `system.services:delete`) |
+| `POST` | `/api/v1/hosts/batch`            | `deactivate`, `delete`                      | `hosts:delete`                                                        |
+| `POST` | `/api/v1/software-items/batch`   | `delete`                                    | `software:delete`                                                     |
+| `POST` | `/api/v1/plugin-configs/batch`   | `delete`                                    | `commands:manage`                                                     |
+| `POST` | `/api/v1/software-ignores/batch` | `delete`                                    | `discovery.ignores:manage`                                            |
+| `POST` | `/api/v1/host-tags/batch`        | `delete`                                    | `hosts.tags:manage`                                                   |
 
 See [Batch Actions API](batch-actions.md) for full request/response schema and error handling.
 
@@ -633,14 +633,14 @@ See [Batch Actions API](batch-actions.md) for full request/response schema and e
 Host tags provide user-defined labels for organizing hosts within a tenant. See
 [Host Tags API](host-tags.md) for the full endpoint reference with request/response examples.
 
-- `GET /api/v1/host-tags` -- list tags with pagination and search (`?search=`). Requires
-  `ViewHosts`.
-- `POST /api/v1/host-tags` -- create a tag. Requires `UpdateHosts`.
-- `GET /api/v1/host-tags/{id}` -- get a single tag. Requires `ViewHosts`.
-- `PUT /api/v1/host-tags/{id}` -- update a tag. Requires `UpdateHosts`.
-- `DELETE /api/v1/host-tags/{id}` -- soft-delete a tag. Requires `DeactivateHosts`.
-- `POST /api/v1/host-tags/batch` -- batch delete tags. Requires `DeactivateHosts`.
-- `PUT /api/v1/hosts/{id}/tags` -- set (replace-all) tags on a host. Requires `UpdateHosts`.
+- `GET /api/v1/host-tags` -- list tags with pagination and search (`?search=`). Requires the
+  `hosts:read` action.
+- `POST /api/v1/host-tags` -- create a tag. Requires the `hosts.tags:manage` action.
+- `GET /api/v1/host-tags/{id}` -- get a single tag. Requires the `hosts:read` action.
+- `PUT /api/v1/host-tags/{id}` -- update a tag. Requires the `hosts.tags:manage` action.
+- `DELETE /api/v1/host-tags/{id}` -- soft-delete a tag. Requires the `hosts.tags:manage` action.
+- `POST /api/v1/host-tags/batch` -- batch delete tags. Requires the `hosts.tags:manage` action.
+- `PUT /api/v1/hosts/{id}/tags` -- set (replace-all) tags on a host. Requires the `hosts.tags:manage` action.
 
 ### Key files
 
@@ -662,7 +662,7 @@ request/response examples.
 - `GET /api/v1/users/{id}` -- get a single user with roles.
 - `PUT /api/v1/users/{id}/roles` -- replace a user's role assignments. Requires `access:manage`.
 - `PUT /api/v1/users/{id}/active` -- activate or deactivate a user.
-- `GET /api/v1/permissions` -- removed in M1.7; use `GET /api/v1/access/catalog` instead.
+- `GET /api/v1/permissions` -- removed with the legacy permission model; use `GET /api/v1/access/catalog` instead.
 - `GET /api/v1/roles` -- list all roles for the active tenant plus the global built-ins.
   Requires `access:manage`.
 - `GET /api/v1/roles/{id}` -- get a single role. Requires `access:manage`.
@@ -697,26 +697,26 @@ System services are tenant-agnostic infrastructure components (MQTT bridge, exte
 They are stored in the `system_services` table and managed independently of tenant services.
 See [System Services Architecture](../architecture/system-services.md) for the full design.
 
-- `GET /api/v1/system-services`: list system services (requires `view_system_services`).
+- `GET /api/v1/system-services`: list system services (requires the `system.services:read` action).
   Filterable by `?capability=update_tracking` or `?status=pending`. Paginated.
 - `GET /api/v1/system-services/{id}`: get a single system service by UUID
-  (requires `view_system_services`).
+  (requires the `system.services:read` action).
 - `PUT /api/v1/system-services/{id}`: update configurable settings — `ping_interval_seconds` and
-  `cert_lifetime_hours` (requires `update_system_services`). Same field semantics as
+  `cert_lifetime_hours` (requires the `system.services:update` action). Same field semantics as
   `PUT /api/v1/services/{id}`: `0` clears the override, positive value sets it, omit to keep current.
 - `POST /api/v1/system-services/{id}/approve`: approve a pending system service
-  (requires `approve_system_services`).
+  (requires the `system.services:approve` action).
 - `POST /api/v1/system-services/{id}/reject`: reject a pending system service
-  (requires `reject_system_services`).
+  (requires the `system.services:reject` action).
 - `DELETE /api/v1/system-services/{id}`: deactivate (soft-delete) a system service, revoke its
-  certificates, and bump the CRL (requires `remove_system_services`). Returns `204 No Content`.
+  certificates, and bump the CRL (requires the `system.services:delete` action). Returns `204 No Content`.
 
 ### System Enrollment Token Endpoints
 
 System enrollment tokens allow infrastructure services to enroll with automatic approval instead of
 waiting for manual operator review. They are global (not tenant-scoped), backend-generated,
 Argon2id-hashed, and shown only once at creation — matching the security model of tenant enrollment
-tokens. All endpoints require `manage_system_services`.
+tokens. All endpoints require the `system.settings:manage` action.
 
 - `POST /api/v1/system-enrollment-tokens`: create a new system enrollment token. Returns
   `201 Created` with `SystemEnrollmentTokenCreatedResponse` (includes the plaintext `token` field —
@@ -782,9 +782,9 @@ Read-only access to the audit trail. Both endpoints use the same filter paramete
 See [Audit Logs API Reference](audit-logs.md) for the full specification.
 
 - `GET /api/v1/audit-logs`: list tenant-scoped audit log entries
-  (requires `view_audit_logs`). Returns `PaginatedResponse<AuditLogResponse>`.
+  (requires the `audit:read` action). Returns `PaginatedResponse<AuditLogResponse>`.
 - `GET /api/v1/system-audit-logs`: list system-level audit log entries
-  (requires `view_system_audit_logs`). Returns `PaginatedResponse<SystemAuditLogResponse>`.
+  (requires the `system.audit:read` action). Returns `PaginatedResponse<SystemAuditLogResponse>`.
 
 ### `SystemServiceResponse` fields
 
@@ -818,9 +818,9 @@ See [Audit Logs API Reference](audit-logs.md) for the full specification.
 
 ## Service Operations
 
-- `/api/v1/agents/{id}/version-check`: trigger a version check (requires `TriggerChecks`).
-- `/api/v1/agents/{id}/execute-update`: send `execute_update` (requires `TriggerUpdates`).
-- `/api/v1/mqtt/tenants`: manage MQTT tenant assignments (requires `ManageAuthSettings`).
+- `/api/v1/agents/{id}/version-check`: trigger a version check (requires the `checks:trigger` action).
+- `/api/v1/agents/{id}/execute-update`: send `execute_update` (requires the `updates:trigger` action).
+- `/api/v1/mqtt/tenants`: manage MQTT tenant assignments (requires the `settings.auth:manage` action).
 
 Update history records each attempt and stores the full command output for auditing.
 
@@ -862,7 +862,7 @@ across all update types.
 
 ## Software Item Version Check Endpoints
 
-These endpoints trigger granular per-item version checks. Both require the `TriggerChecks` permission.
+These endpoints trigger granular per-item version checks. Both require the `checks:trigger` action.
 
 ### `POST /api/v1/software-items/{id}/check-versions`
 
@@ -965,7 +965,7 @@ See [Software Item Entity](../architecture/software-item-entity.md) for the full
 
 ## Scheduler Endpoints
 
-All scheduler endpoints require the `ManageScheduler` permission.
+All scheduler endpoints require the `scheduler:manage` action.
 
 ### `GET /api/v1/scheduler/tasks`
 
@@ -1058,18 +1058,18 @@ Types are defined in `crates/shared/web-api-types/src/scheduler.rs`:
 Full CRUD for notification channels, rules, and a delivery log. See [Notifications API](notifications.md) for
 the complete endpoint reference with request/response examples.
 
-- `POST /api/v1/notifications/channels`: create a channel (requires `ManageNotifications`).
-- `GET /api/v1/notifications/channels`: list channels, paginated (requires `ViewNotifications`).
-- `GET /api/v1/notifications/channels/{id}`: get a channel (requires `ViewNotifications`).
-- `PUT /api/v1/notifications/channels/{id}`: update a channel (requires `ManageNotifications`).
-- `DELETE /api/v1/notifications/channels/{id}`: delete a channel (requires `ManageNotifications`).
-- `POST /api/v1/notifications/channels/{id}/test`: send a test notification (requires `ManageNotifications`).
-- `POST /api/v1/notifications/rules`: create a rule (requires `ManageNotifications`).
-- `GET /api/v1/notifications/rules`: list rules, paginated and filterable (requires `ViewNotifications`).
-- `GET /api/v1/notifications/rules/{id}`: get a rule (requires `ViewNotifications`).
-- `PUT /api/v1/notifications/rules/{id}`: update a rule (requires `ManageNotifications`).
-- `DELETE /api/v1/notifications/rules/{id}`: delete a rule (requires `ManageNotifications`).
-- `GET /api/v1/notifications/log`: list delivery log, paginated (requires `ViewNotifications`).
+- `POST /api/v1/notifications/channels`: create a channel (requires the `notifications:manage` action).
+- `GET /api/v1/notifications/channels`: list channels, paginated (requires the `notifications:read` action).
+- `GET /api/v1/notifications/channels/{id}`: get a channel (requires the `notifications:read` action).
+- `PUT /api/v1/notifications/channels/{id}`: update a channel (requires the `notifications:manage` action).
+- `DELETE /api/v1/notifications/channels/{id}`: delete a channel (requires the `notifications:manage` action).
+- `POST /api/v1/notifications/channels/{id}/test`: send a test notification (requires the `notifications:manage` action).
+- `POST /api/v1/notifications/rules`: create a rule (requires the `notifications:manage` action).
+- `GET /api/v1/notifications/rules`: list rules, paginated and filterable (requires the `notifications:read` action).
+- `GET /api/v1/notifications/rules/{id}`: get a rule (requires the `notifications:read` action).
+- `PUT /api/v1/notifications/rules/{id}`: update a rule (requires the `notifications:manage` action).
+- `DELETE /api/v1/notifications/rules/{id}`: delete a rule (requires the `notifications:manage` action).
+- `GET /api/v1/notifications/log`: list delivery log, paginated (requires the `notifications:read` action).
 - `POST /api/v1/notifications/callback/{channel_type}/{channel_id}`: generic notification
   callback (public, plugin-specific verification).
 
@@ -1239,7 +1239,7 @@ without an existing query struct, use `Query<PaginationParams>` as a new extract
 
 Two SSE (Server-Sent Events) endpoints provide real-time push notifications:
 
-- `GET /api/v1/events/stream` — Authenticated (requires `ViewServices` permission). Pushes admin events for the
+- `GET /api/v1/events/stream` — Authenticated (requires the `services:read` action). Pushes admin events for the
   user's tenant (host/service/software changes, version checks, updates, discovery).
 
 See [SSE Events API](sse-events.md) for full event format documentation.

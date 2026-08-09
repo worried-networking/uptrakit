@@ -22,15 +22,15 @@ This is faster than using the context menu on each item individually.
 
 ## Available batch actions by page
 
-| Page            | Actions                     | Permission required    |
-| --------------- | --------------------------- | ---------------------- |
-| Services        | Approve, Reject, Deactivate | Manage Agents          |
-| System Services | Approve, Reject, Deactivate | Manage System Services |
-| Software        | Ignore, Delete              | Manage Software        |
-| Hosts           | Deactivate                  | Manage Hosts           |
-| Plugin Configs  | Delete                      | Manage Software        |
-| Host Tags       | Delete                      | Manage Hosts           |
-| Ignore Rules    | Delete                      | Manage Software        |
+| Page            | Actions                     | Required action                                                                           |
+| --------------- | --------------------------- | ----------------------------------------------------------------------------------------- |
+| Services        | Approve, Reject, Deactivate | Per-action: `services:approve`, `services:reject`, `services:delete`                      |
+| System Services | Approve, Reject, Deactivate | Per-action: `system.services:approve`, `system.services:reject`, `system.services:delete` |
+| Software        | Ignore, Delete              | `software:delete`                                                                         |
+| Hosts           | Deactivate                  | `hosts:delete`                                                                            |
+| Plugin Configs  | Delete                      | `commands:manage`                                                                         |
+| Host Tags       | Delete                      | `hosts.tags:manage`                                                                       |
+| Ignore Rules    | Delete                      | `discovery.ignores:manage`                                                                |
 
 ### Context-dependent actions
 

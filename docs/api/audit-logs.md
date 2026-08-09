@@ -5,7 +5,7 @@ The audit log API exposes two read-only list endpoints over semantic audit entri
 - Tenant scope: `GET /api/v1/audit-logs`
 - System scope: `GET /api/v1/system-audit-logs`
 
-Both require authentication and explicit permission.
+Both require authentication and an explicit action grant.
 
 ## Endpoints
 
@@ -13,7 +13,7 @@ Both require authentication and explicit permission.
 
 Lists tenant-scoped semantic audit entries.
 
-**Required permission:** `view_audit_logs`
+**Required action:** `audit:read`
 
 #### Query parameters
 
@@ -112,7 +112,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 Lists system-level semantic audit entries.
 
-**Required permission:** `view_system_audit_logs`
+**Required action:** `system.audit:read`
 
 #### Query parameters
 
@@ -187,14 +187,14 @@ Both endpoints use the standard paginated response format:
 
 ---
 
-## Permissions
+## Required Actions
 
-| Permission               | Granted to       | Endpoint                        |
-| ------------------------ | ---------------- | ------------------------------- |
-| `view_audit_logs`        | `owner`, `admin` | `GET /api/v1/audit-logs`        |
-| `view_system_audit_logs` | `owner` only     | `GET /api/v1/system-audit-logs` |
+| Action              | Granted to       | Endpoint                        |
+| ------------------- | ---------------- | ------------------------------- |
+| `audit:read`        | `owner`, `admin` | `GET /api/v1/audit-logs`        |
+| `system.audit:read` | `owner` only     | `GET /api/v1/system-audit-logs` |
 
-A user with neither permission receives `403 Forbidden`.
+A user without either grant receives `403 Forbidden`.
 
 ---
 

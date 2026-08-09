@@ -17,7 +17,7 @@ GET /api/v1/events/stream
 
 ### Authentication
 
-Bearer token required. The authenticated user must have the `ViewServices` permission.
+Bearer token required. The authenticated user must have the `services:read` action.
 
 ### Keep-Alive
 

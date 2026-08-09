@@ -25,7 +25,7 @@ and recommended approach.
 
 - The agent (or SSH agent) must advertise the `InteractiveUpdates` capability. Standard
   builds include this by default. You can verify the capability in the service detail view.
-- The admin must have the `ManageSoftware` permission (stdin forwarding is equivalent
+- The admin must have the `updates:trigger` action (stdin forwarding is equivalent
   to code execution on the target host).
 
 ## Triggering an Interactive Update

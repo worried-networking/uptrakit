@@ -12,30 +12,30 @@ model.
 
 ### Channels
 
-| Method | Path                                       | Permission            | Description               |
-| ------ | ------------------------------------------ | --------------------- | ------------------------- |
-| POST   | `/api/v1/notifications/channels`           | `ManageNotifications` | Create a channel          |
-| GET    | `/api/v1/notifications/channels`           | `ViewNotifications`   | List channels (paginated) |
-| GET    | `/api/v1/notifications/channels/{id}`      | `ViewNotifications`   | Get channel by ID         |
-| PUT    | `/api/v1/notifications/channels/{id}`      | `ManageNotifications` | Update channel            |
-| DELETE | `/api/v1/notifications/channels/{id}`      | `ManageNotifications` | Delete channel            |
-| POST   | `/api/v1/notifications/channels/{id}/test` | `ManageNotifications` | Test channel delivery     |
+| Method | Path                                       | Action                 | Description               |
+| ------ | ------------------------------------------ | ---------------------- | ------------------------- |
+| POST   | `/api/v1/notifications/channels`           | `notifications:manage` | Create a channel          |
+| GET    | `/api/v1/notifications/channels`           | `notifications:read`   | List channels (paginated) |
+| GET    | `/api/v1/notifications/channels/{id}`      | `notifications:read`   | Get channel by ID         |
+| PUT    | `/api/v1/notifications/channels/{id}`      | `notifications:manage` | Update channel            |
+| DELETE | `/api/v1/notifications/channels/{id}`      | `notifications:manage` | Delete channel            |
+| POST   | `/api/v1/notifications/channels/{id}/test` | `notifications:manage` | Test channel delivery     |
 
 ### Rules
 
-| Method | Path                               | Permission            | Description                        |
-| ------ | ---------------------------------- | --------------------- | ---------------------------------- |
-| POST   | `/api/v1/notifications/rules`      | `ManageNotifications` | Create a rule                      |
-| GET    | `/api/v1/notifications/rules`      | `ViewNotifications`   | List rules (paginated, filterable) |
-| GET    | `/api/v1/notifications/rules/{id}` | `ViewNotifications`   | Get rule by ID                     |
-| PUT    | `/api/v1/notifications/rules/{id}` | `ManageNotifications` | Update rule                        |
-| DELETE | `/api/v1/notifications/rules/{id}` | `ManageNotifications` | Delete rule                        |
+| Method | Path                               | Action                 | Description                        |
+| ------ | ---------------------------------- | ---------------------- | ---------------------------------- |
+| POST   | `/api/v1/notifications/rules`      | `notifications:manage` | Create a rule                      |
+| GET    | `/api/v1/notifications/rules`      | `notifications:read`   | List rules (paginated, filterable) |
+| GET    | `/api/v1/notifications/rules/{id}` | `notifications:read`   | Get rule by ID                     |
+| PUT    | `/api/v1/notifications/rules/{id}` | `notifications:manage` | Update rule                        |
+| DELETE | `/api/v1/notifications/rules/{id}` | `notifications:manage` | Delete rule                        |
 
 ### Log
 
-| Method | Path                        | Permission          | Description                   |
-| ------ | --------------------------- | ------------------- | ----------------------------- |
-| GET    | `/api/v1/notifications/log` | `ViewNotifications` | List delivery log (paginated) |
+| Method | Path                        | Action               | Description                   |
+| ------ | --------------------------- | -------------------- | ----------------------------- |
+| GET    | `/api/v1/notifications/log` | `notifications:read` | List delivery log (paginated) |
 
 ### Public (not JWT-authenticated)
 
@@ -600,6 +600,6 @@ Types are defined in `crates/shared/web-api-types/src/notifications.rs`:
 ## Related Documentation
 
 - [HTTP Web API](http-web-api.md) -- API overview, error responses, pagination
-- [Auth and Authorization](../security/auth-and-authorization.md) -- permissions model (`ManageNotifications`, `ViewNotifications`)
+- [Auth and Authorization](../security/auth-and-authorization.md) -- permissions model (`notifications:manage`, `notifications:read`)
 - [Notifications Security](../security/notifications-security.md) -- secret storage, config encryption, and callback verification
 - [Notifications Development](../development/notifications.md) -- architecture, dispatcher design, and adding new channel types

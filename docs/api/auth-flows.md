@@ -53,8 +53,8 @@ authenticate even when password auth is disabled (OIDC-only environments).
 
 ## Access and Refresh Tokens
 
-- Access tokens are short-lived and stored in memory only. They carry resolved permissions (`Vec<Permission>`) that the controller embeds when issuing
-  the JWT.
+- Access tokens are short-lived and stored in memory only. They carry no authorization data; the `AccessEngine`
+  resolves authority per request instead of embedding it in the JWT.
 - Refresh tokens are hashed (`sha256`) in the database, stored in `HttpOnly; Secure; SameSite=Strict` cookies, and rotated on every use, revoking the
   predecessor.
 - Logout adds entries to the in-memory `TokenDenylist` to deny future requests for the remaining lifetime (15 min).

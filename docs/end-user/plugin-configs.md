@@ -465,7 +465,7 @@ commands, or credentials work correctly. This dry-run test does not create or mo
 ### Web UI
 
 When creating or editing a plugin config, click the **Test** button in the modal. The button
-is visible when your user account has the `test_plugin_configs` permission (included in the
+is visible when your user account has the `plugin-configs:trigger` action (included in the
 `command_manager` and `software_manager` roles).
 
 - For **controller-side plugins** (GitHub Releases, GitLab, Forgejo, Docker, npm, Cargo), the test
@@ -529,8 +529,8 @@ Type settings are managed via the **Settings → Plugin Configs → Type Default
 web UI, or directly via the REST API (`/api/v1/plugin-type-settings`). When no type settings are
 configured for a plugin type, built-in defaults apply.
 
-Reading type defaults requires `view_settings` or `manage_global_settings`. Editing or resetting
-them requires `manage_global_settings`.
+Reading type defaults requires `settings:read` or `system.settings:manage`. Editing or resetting
+them requires `system.settings:manage`.
 
 **How type settings interact with plugin configs:** When computing the effective configuration
 for a plugin operation, the system merges three layers (broadest to narrowest):
@@ -552,7 +552,7 @@ Each row shows:
 
 - The **plugin type** identifier.
 - The **current settings** stored for that type, or "Default" if no overrides have been saved.
-- **Edit** and **Reset** buttons (visible to users with `manage_global_settings`).
+- **Edit** and **Reset** buttons (visible to users with `system.settings:manage`).
 
 **Editing type defaults:**
 

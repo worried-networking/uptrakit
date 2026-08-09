@@ -18,7 +18,7 @@ Before connecting an MCP client:
   ask your administrator.
 - Your user account must exist on the controller. If you do not have an account, ask your administrator
   to create one for you.
-- Your account must have at least the `AccessMcp` permission. Ask your administrator if you are
+- Your account must have at least the `mcp:use` action. Ask your administrator if you are
   unsure.
 
 ## Connect Claude Desktop

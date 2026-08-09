@@ -141,7 +141,7 @@ uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> bootstrap -
 The `--target-provider-id` flag is only required for targeted surfaces (like `ssh-agent.hosts`).
 Universal surfaces omit it.
 
-## Permissions
+## Required Actions
 
 Surfaces declare a `required_action` that gates visibility and access. If your account's
 role does not grant the required action, the surface will not appear in the UI or CLI
@@ -150,14 +150,6 @@ output.
 Individual actions within a surface may also require specific actions. You will see a
 "You do not have permission" error if you attempt to invoke an action without the required
 one.
-
-> **Known issue (until M1.7):** the web UI's client-side filter still compares against the
-> old permission names, so a surface or action gated by a `required_action` can be hidden
-> from the UI even for users who actually have access. This is a display-only gap — the
-> server always enforces the real requirement, so no unauthorized action can succeed even
-> if the UI hides it. If you believe you should see a surface that isn't appearing, confirm
-> your access via the CLI (`uptrakit surfaces list`) or ask an administrator to check your
-> role's granted actions.
 
 ## Targeted vs universal surfaces
 

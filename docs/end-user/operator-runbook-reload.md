@@ -45,7 +45,7 @@ detects the incremented `settings_version` within 2 s and triggers a reload.
 GET /api/v1/instance/config-state
 ```
 
-Requires the `view_instance_config_state` permission. The response includes:
+Requires the `system.config-state:read` action. The response includes:
 
 - `coordinator_state` — one of `idle`, `reloading`, or `degraded`
 - `file_digest` — SHA-256 of the last successfully loaded TOML
@@ -56,7 +56,7 @@ Requires the `view_instance_config_state` permission. The response includes:
 
 Navigate to **Settings → Instance Configuration**. The tab shows the config file path, current
 coordinator state, and a scrollable list of recent events. A **Clear Degraded** button is visible
-when the coordinator is in the `degraded` state (requires `manage_instance_config_state`).
+when the coordinator is in the `degraded` state (requires `system.config-state:manage`).
 
 ## Failure Matrix
 
@@ -124,7 +124,7 @@ settings route for these fields. On a reload:
 2. Fix the underlying issue (bad config value, temporary resource unavailability, etc.).
 3. Clear the degraded flag:
    - **Dashboard:** Settings → Instance Configuration → **Clear Degraded** button
-     (requires `manage_instance_config_state`).
+     (requires `system.config-state:manage`).
    - **API:** `POST /api/v1/instance/config-reload/clear-degraded`.
 4. Re-trigger a reload (SIGHUP, file-edit, or Dashboard mutation) to apply the corrected config.
 

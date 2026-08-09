@@ -4,7 +4,7 @@ Enrollment tokens allow services (agents, MQTT bridges, SSH agents) to enroll wi
 automatic approval. Each token is a named, revocable credential with optional capability
 scoping, usage limits, and time-to-live.
 
-All endpoints require the `ManageEnrollmentTokens` permission.
+All endpoints require the `settings.enrollment-tokens:manage` action.
 
 ## Overview
 

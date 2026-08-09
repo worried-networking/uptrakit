@@ -5,15 +5,15 @@ authenticated user's tenant.
 
 ## Endpoints
 
-| Method   | Path                      | Permission        | Description                            |
-| -------- | ------------------------- | ----------------- | -------------------------------------- |
-| `GET`    | `/api/v1/host-tags`       | `ViewHosts`       | List host tags (paginated, searchable) |
-| `POST`   | `/api/v1/host-tags`       | `UpdateHosts`     | Create a host tag                      |
-| `GET`    | `/api/v1/host-tags/{id}`  | `ViewHosts`       | Get a single host tag                  |
-| `PUT`    | `/api/v1/host-tags/{id}`  | `UpdateHosts`     | Update a host tag                      |
-| `DELETE` | `/api/v1/host-tags/{id}`  | `DeactivateHosts` | Soft-delete a host tag                 |
-| `POST`   | `/api/v1/host-tags/batch` | `DeactivateHosts` | Batch delete host tags                 |
-| `PUT`    | `/api/v1/hosts/{id}/tags` | `UpdateHosts`     | Set (replace-all) tags on a host       |
+| Method   | Path                      | Action              | Description                            |
+| -------- | ------------------------- | ------------------- | -------------------------------------- |
+| `GET`    | `/api/v1/host-tags`       | `hosts:read`        | List host tags (paginated, searchable) |
+| `POST`   | `/api/v1/host-tags`       | `hosts.tags:manage` | Create a host tag                      |
+| `GET`    | `/api/v1/host-tags/{id}`  | `hosts:read`        | Get a single host tag                  |
+| `PUT`    | `/api/v1/host-tags/{id}`  | `hosts.tags:manage` | Update a host tag                      |
+| `DELETE` | `/api/v1/host-tags/{id}`  | `hosts.tags:manage` | Soft-delete a host tag                 |
+| `POST`   | `/api/v1/host-tags/batch` | `hosts.tags:manage` | Batch delete host tags                 |
+| `PUT`    | `/api/v1/hosts/{id}/tags` | `hosts.tags:manage` | Set (replace-all) tags on a host       |
 
 ## List host tags
 

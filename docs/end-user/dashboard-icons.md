@@ -36,7 +36,7 @@ opt in or out for their own scope.
 
 ### Layer 1 — Instance owner enables the plugin
 
-An instance owner (Operator with `manage_global_settings`) enables Dashboard Icons in the web UI under **Settings → Plugin Configs → Instance
+An instance owner (Operator with `system.settings:manage`) enables Dashboard Icons in the web UI under **Settings → Plugin Configs → Instance
 Plugins**. Toggling the plugin on requires a **controller restart** before it takes effect. While the change is pending, the row in the UI shows a
 **Pending restart** badge.
 
@@ -110,13 +110,13 @@ startup and refreshed automatically every 6 hours. No manual cache management is
 
 If the GitHub API is temporarily unavailable, the controller continues using the last successfully fetched index.
 
-## Permissions
+## Required Actions
 
-| Operation                                                   | Required Permission                         |
+| Operation                                                   | Required Action                             |
 | ----------------------------------------------------------- | ------------------------------------------- |
-| View Dashboard Icons type defaults                          | `view_settings` or `manage_global_settings` |
-| Enable or disable Dashboard Icons at the **instance** level | `manage_global_settings`                    |
-| Override Dashboard Icons for a tenant via **Type Defaults** | `manage_global_settings`                    |
+| View Dashboard Icons type defaults                          | `settings:read` or `system.settings:manage` |
+| Enable or disable Dashboard Icons at the **instance** level | `system.settings:manage`                    |
+| Override Dashboard Icons for a tenant via **Type Defaults** | `system.settings:manage`                    |
 
 ## Related Documentation
 

@@ -111,10 +111,10 @@ software item ID, or plugin type. Rules can be enabled or disabled independently
 The **Notification Log** tab displays a read-only table of all delivery attempts with their
 status (delivered, failed, or pending), timestamps, and error messages for failed deliveries.
 
-### Permissions
+### Required Actions
 
-The notification tabs are visible only to users with the `view_notifications` permission.
-Creating, editing, and deleting channels and rules requires `manage_notifications`.
+The notification tabs are visible only to users with the `notifications:read` action.
+Creating, editing, and deleting channels and rules requires `notifications:manage`.
 
 ## Setting Up a Webhook Channel
 
@@ -319,17 +319,17 @@ format for programmatic inspection:
 uptrakit notifications log -o json | jq '.items[] | select(.status == "failed")'
 ```
 
-## Permissions
+## Required Actions
 
-Notification operations require the following permissions:
+Notification operations require the following actions:
 
-| Permission             | Grants access to                                     |
+| Action                 | Grants access to                                     |
 | ---------------------- | ---------------------------------------------------- |
-| `view_notifications`   | List and view channels, rules, and the delivery log. |
-| `manage_notifications` | Create, update, delete, and test channels and rules. |
+| `notifications:read`   | List and view channels, rules, and the delivery log. |
+| `notifications:manage` | Create, update, delete, and test channels and rules. |
 
-Users without `view_notifications` cannot see any notification resources. Users with
-`view_notifications` but without `manage_notifications` can inspect the configuration and
+Users without `notifications:read` cannot see any notification resources. Users with
+`notifications:read` but without `notifications:manage` can inspect the configuration and
 delivery log but cannot make changes.
 
 ## Related Documentation

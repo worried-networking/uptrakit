@@ -90,7 +90,7 @@ curl -s -X PUT -H "Authorization: Bearer <token>" \
   }'
 ```
 
-Requires the `ManageSettings` permission.
+Requires the `system.settings:manage` action.
 
 ## Exporting the CA Certificate
 
