@@ -198,7 +198,6 @@ Enums currently annotated with `#[non_exhaustive]`:
 - `ServiceStatus`
 - `BatchStatus`
 - `UpdateStatus`
-- `Permission`
 - `RoleBundle`
 
 **`uptrakit-wire`:**
@@ -905,7 +904,7 @@ See also: `crates/ui/web-api/src/service_connections.rs` for the reference imple
 - Treat custom scripts and command execution paths as handling untrusted input; validate before execution to avoid shell injection.
 - Agent connections are outbound-only, unprivileged, and rely on explicit sudo allowlists for privileged update commands.
 - Logs should contain operational summaries only; do not store full command output internally.
-- New protected routes must check the typed `Permission` enum rather than comparing raw role names.
+- New protected routes must use a typed action extractor backed by the `Action` catalog rather than comparing raw role names.
 - Document every behavioral change either in code or via an external docs page (e.g., update `docs/api` or `docs/development`).
 
 Refer to [docs/security/secure-development.md](../security/secure-development.md) when the change touches PKI, secrets, reverse proxies, or filesystem
@@ -1032,7 +1031,7 @@ impl FromStr for MyType {
 
 ### Conventions
 
-- **Error type naming:** `Parse{TypeName}Error` (e.g., `ParsePermissionError`, `ParseMqttTransportError`).
+- **Error type naming:** `Parse{TypeName}Error` (e.g., `ParseActionError`, `ParseMqttTransportError`).
 - **Error derivation:** Use `thiserror::Error` in crates that depend on `thiserror`. In crates without `thiserror` (e.g., `uptrakit-wire`),
   implement `Display` and `Error` manually.
 - **Call sites:** Prefer `s.parse::<MyType>()` over explicit `MyType::from_str(s)`.
@@ -1389,7 +1388,7 @@ software-items name filter. Follow these rules; see
   `params(("id" = Uuid, Path, …), ("host_id" = Uuid, Path, …), DeleteHostAssignmentParams)`.
 - **Enum schemas: source `enum_values` from one place.** A manual `utoipa::PartialSchema` must derive its
   values from the same source as the serde wire format — `Self::all()` (via `strum::EnumIter`) for plain
-  enums (`Permission`, `crates/shared/types/src/permissions.rs`), or the `wire_safe_enum!` macro's `$wire`
+  enums (see `crates/shared/types/src/access/` for the current closed action-model enums), or the `wire_safe_enum!` macro's `$wire`
   list (`crates/shared/macros/src/lib.rs`). For an enum with an `Other(String)` catch-all (which can't
   derive `EnumIter`), hardcoding is unavoidable — pair it with a guard test asserting the schema equals
   the `as_str()` set (`PluginRole` + `plugin_role_schema_enum_values_match_wire_strings`,

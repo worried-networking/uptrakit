@@ -367,7 +367,7 @@ See [HTTP Web API](../api/http-web-api.md#scheduler-endpoints) for endpoint deta
 | PUT    | `/api/v1/scheduler/tasks/{id}`         | Update interval/jitter/enabled/config |
 | POST   | `/api/v1/scheduler/tasks/{id}/trigger` | Trigger immediate execution           |
 
-All endpoints require the `ManageSoftware` permission.
+All endpoints require the `scheduler:manage` action (`CanManageScheduler`).
 
 ## Security Considerations
 
@@ -378,7 +378,7 @@ All endpoints require the `ManageSoftware` permission.
 - Task claims have a 10-minute stale timeout to prevent permanent locking if a controller crashes.
 - Each task execution is bounded by a 2-hour per-task timeout (`TASK_EXECUTION_TIMEOUT`). A task that exceeds
   this receives `SchedulerError::TaskTimedOut` and its claim is released immediately.
-- REST API endpoints are protected by JWT authentication and the `ManageSoftware` permission.
+- REST API endpoints are protected by JWT authentication and the `scheduler:manage` action.
 - Interval and jitter values are validated before persistence (`interval_seconds > 0`, `jitter_seconds >= 0`).
 
 ## Related Documentation

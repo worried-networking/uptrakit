@@ -144,17 +144,17 @@ Extends `SoftwareItemResponse` with:
 
 ## REST API
 
-| Method | Path                                                 | Permission     | Status | Description                                                                                                              |
-| :----- | :--------------------------------------------------- | :------------- | :----- | :----------------------------------------------------------------------------------------------------------------------- |
-| POST   | `/api/v1/software-items`                             | ManageSoftware | 201    | Create a new software item (name + enabled only)                                                                         |
-| GET    | `/api/v1/software-items`                             | ViewSoftware   | 200    | List active software items; supports `?featured=true\|false` filter                                                      |
-| GET    | `/api/v1/software-items/{id}`                        | ViewSoftware   | 200    | Get software item with assigned hosts + per-host plugin info                                                             |
-| PUT    | `/api/v1/software-items/{id}`                        | ManageSoftware | 200    | Update name and/or enabled flag                                                                                          |
-| DELETE | `/api/v1/software-items/{id}`                        | ManageSoftware | 204    | Soft-delete the software item                                                                                            |
-| POST   | `/api/v1/software-items/{id}/hosts`                  | ManageSoftware | 200    | Assign to additional host(s); each assignment carries a list of role-specific plugin assignments                         |
-| PUT    | `/api/v1/software-items/{id}/hosts/{host_id}`        | ManageSoftware | 200    | Update a specific role assignment (plugin type, plugin config, package identifier, config, or execution site) for a host |
-| DELETE | `/api/v1/software-items/{id}/hosts/{host_id}`        | ManageSoftware | 204    | Unassign from a host; add `?ignore=true` to also create an ignore rule                                                   |
-| POST   | `/api/v1/software-items/{id}/hosts/{host_id}/update` | ManageSoftware | 200    | Trigger a software update on a specific host; returns `TriggerUpdateResponse`                                            |
+| Method | Path                                                 | Action            | Status | Description                                                                                                              |
+| :----- | :--------------------------------------------------- | :---------------- | :----- | :----------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/api/v1/software-items`                             | `software:create` | 201    | Create a new software item (name + enabled only)                                                                         |
+| GET    | `/api/v1/software-items`                             | `software:read`   | 200    | List active software items; supports `?featured=true\|false` filter                                                      |
+| GET    | `/api/v1/software-items/{id}`                        | `software:read`   | 200    | Get software item with assigned hosts + per-host plugin info                                                             |
+| PUT    | `/api/v1/software-items/{id}`                        | `software:update` | 200    | Update name and/or enabled flag                                                                                          |
+| DELETE | `/api/v1/software-items/{id}`                        | `software:delete` | 204    | Soft-delete the software item                                                                                            |
+| POST   | `/api/v1/software-items/{id}/hosts`                  | `software:update` | 200    | Assign to additional host(s); each assignment carries a list of role-specific plugin assignments                         |
+| PUT    | `/api/v1/software-items/{id}/hosts/{host_id}`        | `software:update` | 200    | Update a specific role assignment (plugin type, plugin config, package identifier, config, or execution site) for a host |
+| DELETE | `/api/v1/software-items/{id}/hosts/{host_id}`        | `software:update` | 204    | Unassign from a host; add `?ignore=true` to also create an ignore rule                                                   |
+| POST   | `/api/v1/software-items/{id}/hosts/{host_id}/update` | `updates:trigger` | 200    | Trigger a software update on a specific host; returns `TriggerUpdateResponse`                                            |
 
 ## Validation rules
 

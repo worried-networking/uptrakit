@@ -74,11 +74,10 @@ production frontend code under `frontend/src/**`, and in-scope manifest dependen
 `docs/**`, test-only code, examples, and migrations. Those exemptions do not apply to production files that merely
 contain `test` in their name.
 
-For the M1.4b closing sweep: a route family's `action_extractor!` entries and its handler conversions should land in
-the same commit, but `ci/verify_action_security_declarations.py` stays green either way — the import-gating in its
-`_check_file` skips R1 for any file that has not imported `middleware::action`, and a file can never import
-same-named extractors from both `middleware::action` and `middleware::permission` unqualified (a compile error), so
-the import line always disambiguates fully.
+A route family's `action_extractor!` entries and its handler conversions should land in the same commit.
+`ci/verify_action_security_declarations.py`'s R1 check attributes an action to a handler only when the extractor
+name is actually imported from `middleware::action` in that file — the import-gating in its `_check_file` skips R1
+for any file that has not imported `middleware::action`.
 
 ### OIDC feature toggle
 

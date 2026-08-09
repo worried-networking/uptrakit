@@ -162,7 +162,7 @@ Toggle via **Global Settings > Zero-Configuration Discovery** in the web UI, or 
 - `GET /api/v1/global-settings/zeroconf` -- returns `ZeroconfSettingsResponse`
 - `PUT /api/v1/global-settings/zeroconf` -- accepts `UpdateZeroconfSettingsRequest`
 
-Both endpoints require the `manage_global_settings` permission.
+Both endpoints require the `system.settings:manage` action (`CanManageSystemSettings`).
 
 Changes via the API update the database and in-memory snapshot but do **not** hot-reload the mDNS advertiser.
 The controller must be restarted for changes to take effect.

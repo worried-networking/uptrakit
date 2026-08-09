@@ -36,9 +36,14 @@ The following tables have a `tenant_id UUID NOT NULL` column with a FK to `tenan
 
 ## Tables NOT changed (remain global)
 
-`users`, `roles`, `permissions`, `role_permissions`, `sessions`, `api_tokens`, `global_settings`, `pending_*` tables,
-`host_software_items`, `available_versions`. Note: `service_certificates` and `service_hosts` are tenant-scoped through
-the `services` table FK.
+`users`, `roles`, `sessions`, `api_tokens`, `global_settings`, `pending_*` tables, `host_software_items`,
+`available_versions`. Note: `service_certificates` and `service_hosts` are tenant-scoped through the `services`
+table FK.
+
+`access_grants` (the `AccessEngine`-owned authorization store) is neither tenant-scoped nor global in the usual
+sense: it mixes tenant-plane rows with system-plane rows (`tenant_id NULL`) in one table, so it deliberately does
+not implement `TenantScoped` — the query module (`crate::access_grants`) enforces plane/tenant filtering itself
+rather than the generic trait. See [Authorization Model](../security/auth-and-authorization.md#authorization-model).
 
 ## TenantContext extractor
 

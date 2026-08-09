@@ -138,7 +138,7 @@ At enrollment time, if the service provides a token:
    produces `Pending`.
 
 REST API: `POST/GET /api/v1/system-enrollment-tokens`, `GET/DELETE
-/api/v1/system-enrollment-tokens/{id}` (requires `manage_system_services`). OpenAPI client:
+/api/v1/system-enrollment-tokens/{id}` (requires the `system.settings:manage` action). OpenAPI client:
 `crates/shared/openapi-client/src/system_enrollment_tokens.rs`. CLI: `uptrakit
 system-enrollment-tokens list|create|show|revoke`. Full request/response shapes and the
 enrollment-behaviour table are documented in
@@ -238,20 +238,22 @@ when a `service_id` query parameter is present.
               REST: /api/v1/services   REST: /api/v1/system-services
 ```
 
-| Property                     | Tenant services                      | System services                                       |
-| ---------------------------- | ------------------------------------ | ----------------------------------------------------- |
-| Database table               | `services`                           | `system_services`                                     |
-| `tenant_id`                  | Required                             | None                                                  |
-| `enrollment_token_id`        | FK to `enrollment_tokens`            | None                                                  |
-| `system_enrollment_token_id` | None                                 | Audit-only link to `system_enrollment_tokens` (no FK) |
-| Enrollment token storage     | Argon2id hash in `enrollment_tokens` | Argon2id hash in `system_enrollment_tokens`           |
-| Token comparison             | Argon2id verify                      | Argon2id verify                                       |
-| Token returned to operator   | No (hash only)                       | Yes, once, at creation (plaintext)                    |
-| Certificate table            | `service_certificates`               | `system_service_certificates`                         |
-| Merge support                | Yes                                  | No                                                    |
-| REST path prefix             | `/api/v1/services`                   | `/api/v1/system-services`                             |
-| Required permission (view)   | `view_agents`                        | `view_system_services`                                |
-| Required permission (manage) | `manage_agents`                      | `manage_system_services`                              |
+| Property                     | Tenant services                        | System services                                       |
+| ---------------------------- | -------------------------------------- | ----------------------------------------------------- |
+| Database table               | `services`                             | `system_services`                                     |
+| `tenant_id`                  | Required                               | None                                                  |
+| `enrollment_token_id`        | FK to `enrollment_tokens`              | None                                                  |
+| `system_enrollment_token_id` | None                                   | Audit-only link to `system_enrollment_tokens` (no FK) |
+| Enrollment token storage     | Argon2id hash in `enrollment_tokens`   | Argon2id hash in `system_enrollment_tokens`           |
+| Token comparison             | Argon2id verify                        | Argon2id verify                                       |
+| Token returned to operator   | No (hash only)                         | Yes, once, at creation (plaintext)                    |
+| Certificate table            | `service_certificates`                 | `system_service_certificates`                         |
+| Merge support                | Yes                                    | No                                                    |
+| REST path prefix             | `/api/v1/services`                     | `/api/v1/system-services`                             |
+| Action (read)                | `services:read`                        | `system.services:read`                                |
+| Action (approve/reject)      | `services:approve` / `services:reject` | `system.services:approve` / `system.services:reject`  |
+| Action (update)              | `services:update`                      | `system.services:update`                              |
+| Action (delete)              | `services:delete`                      | `system.services:delete`                              |
 
 ## Frontend
 

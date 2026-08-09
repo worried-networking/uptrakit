@@ -180,10 +180,10 @@ upstream versions on the controller via public HTTP APIs, requiring no local pac
 ### Plugin Scopes
 
 Every Plugin has a scope (`Tenant` — default — or `Instance`). Tenant-scoped plugins are configured per-tenant via `plugin_configs` and
-`plugin_type_settings`. Instance-scoped plugins (e.g. `enhancement.dashboard-icons`) are configured exclusively by Operators with
-`ManageGlobalSettings`; their state lives in `instance_plugin_setting` and is loaded once at controller boot. When an instance-scoped plugin is
-disabled, its singleton is never constructed and tenant Operators see no evidence of its existence (route handlers, surfaces, and SSE filtered via a
-single visibility predicate).
+`plugin_type_settings`. Instance-scoped plugins (e.g. `enhancement.dashboard-icons`) are configured exclusively by Operators holding
+the `system.settings:manage` action; their state lives in `instance_plugin_setting` and is loaded once at controller boot. When an
+instance-scoped plugin is disabled, its singleton is never constructed and tenant Operators see no evidence of its existence (route
+handlers, surfaces, and SSE filtered via a single visibility predicate).
 
 See ADR `docs/adr/0006-instance-scoped-plugins.md` and the development guide `docs/development/plugin-guidelines.md`.
 

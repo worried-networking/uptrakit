@@ -119,7 +119,9 @@ the bottom-sheet overflow.
 `frontend/src/lib/stores/software-updates.svelte.ts` store:
 
 ```typescript
-badge: item.href === "/software" ? formatBadge(getUpdatableSoftwareCount()) : undefined;
+badge: item.href === "/software"
+  ? formatBadge(getUpdatableSoftwareCount())
+  : undefined;
 ```
 
 `formatBadge` returns `undefined` for null/0, `String(count)` for 1–99, and `"99+"` for ≥100. Badges render as
@@ -127,7 +129,7 @@ badge: item.href === "/software" ? formatBadge(getUpdatableSoftwareCount()) : un
 primary uses `shrink-0 pl-1.5` (no `ml-auto`) to avoid conflicting with `justify-center`.
 
 The software-updates store fetches the count once on auth (idempotent — safe to call from a re-running `$effect`) and is wired in `+layout.svelte`
-behind `Permission.ViewSoftware`. Future SSE live-update of the count can be added inside the store by subscribing to `software_item_updated` and
+behind the `software:read` action (`hasAction(getUser(), Actions.SOFTWARE_READ)`). Future SSE live-update of the count can be added inside the store by subscribing to `software_item_updated` and
 `version_check_completed` events without any layout changes.
 
 Built-in nav priorities (lower number = higher priority = shown first on mobile):

@@ -319,7 +319,7 @@ via `GET /api/v1/plugin-types`:
   `host_id` and run tests on the target host. The proxy pattern (`ConfigTestProxy` in
   `crates/ui/web-api/src/config_test_proxy.rs`) mirrors `ServiceSurfaceProxy`. Wire messages:
   `TestPluginConfig` / `TestPluginConfigResult` (session-targeted, not NATS-publishable). Gated
-  by `Permission::TestPluginConfigs`. See
+  by the `plugin-configs:trigger` action (`CanTriggerPluginConfigs`). See
   [Config Testing](config-testing.md) for the full endpoint and test-kind reference.
 
 Update lifecycle hooks are standalone plugin assignments with roles `PreUpdateHook` and

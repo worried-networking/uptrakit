@@ -5,7 +5,7 @@ Enhancement plugin that enriches newly created Software Items with icon URLs fro
 
 ## Scope
 
-`PluginScope::Instance` — the kill switch is owned by users with `ManageGlobalSettings` and configured via
+`PluginScope::Instance` — the kill switch is owned by users holding the `system.settings:manage` action and configured via
 `/api/v1/instance-plugins`. The pre-existing tenant `type_settings` opt-out remains: when an instance owner has
 enabled the plugin, individual tenants can still opt out by setting `{ "enabled": false }` in plugin type settings.
 

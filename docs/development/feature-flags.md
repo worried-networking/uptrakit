@@ -128,7 +128,8 @@ Uses tenant-scoped plugin type settings on `enhancement.dashboard-icons`; `enabl
 ### `reset-data` (controller)
 
 Destructive data reset endpoint (`POST /api/v1/settings/reset-data`). Propagates to
-`uptrakit-web-api/reset-data`. Requires `CanManageGlobalSettings` permission and `confirm: "RESET"`
+`uptrakit-web-api/reset-data`. Requires the `system.settings:manage` action (`CanManageSystemSettings`)
+and `confirm: "RESET"`
 in the request body. Broadcasts `ResetData` to connected services after clearing tenant data.
 
 ## Web-API Feature Flags
@@ -183,5 +184,5 @@ logic. No additional dependencies.
   feature flags must never subtract functionality via `#[cfg(not(feature = "X"))]`; use `cfg!()`
   in expression position instead.
 - [Coding Standards § Contribution Monotonicity](coding-standards.md#contribution-monotonicity) — descriptor
-  contributions are additionally feature-*monotonic*: a feature may only add plugin contributions, never suppress
+  contributions are additionally feature-_monotonic_: a feature may only add plugin contributions, never suppress
   them. See [ADR-0032](../adr/0032-plugin-contribution-monotonicity.md).

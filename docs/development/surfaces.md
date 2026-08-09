@@ -126,15 +126,15 @@ parse rejects the **whole registration**, not just the offending surface or inte
 surface a provider submitted in that `SurfaceRegistration`/bootstrap call is rejected together, with
 reason code `SchemaOrLimitFailure`.
 
-**Upgrade ordering across the M1.5 `required_action` boundary: controller before satellites.** Only
+**Upgrade ordering across the `required_action` boundary: controller before satellites.** Only
 out-of-process providers cross this boundary at different times — the MQTT service and agent-side
 plugins invoked through agents — because they register over the wire against whatever controller
 version they happen to connect to. Compiled-in plugins and built-ins ship inside the controller
 binary itself and have zero exposure window; they always match the controller's parser. Roll the
 controller out first, and expect an availability gap for every unupgraded satellite that gates
 anything: the `#[serde(default, alias = "required_permission", …)]` attribute accepts the legacy
-_key_, but not the legacy _value_ — `update_hosts`, `view_notifications` and friends are not
-`resource:verb` strings, so they fail the admission parse and reject that satellite's **whole
+_key_, but not the legacy _value_ — old snake_case permission names are not `resource:verb`
+strings, so they fail the admission parse and reject that satellite's **whole
 registration** (`SchemaOrLimitFailure`). Only a satellite whose surfaces are entirely ungated
 registers unchanged against a newer controller; a gated one stays dark until it is upgraded. That
 direction fails **closed** — the surfaces disappear, they never appear unguarded. The **rollback**

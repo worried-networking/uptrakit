@@ -169,15 +169,15 @@ directly. The get endpoint verifies the record's tenant matches the requesting t
 
 ## REST API
 
-| Method | Path                                       | Permission     | Description                                                    |
-| :----- | :----------------------------------------- | :------------- | :------------------------------------------------------------- |
-| GET    | `/api/v1/update-history`                   | ViewSoftware   | List records (filterable by host_id, software_item_id, status) |
-| GET    | `/api/v1/update-history/{id}`              | ViewSoftware   | Get single record                                              |
-| POST   | `/api/v1/hosts/{host_id}/batch-update`     | ManageSoftware | Trigger host-wide batch update                                 |
-| POST   | `/api/v1/software-items/{id}/batch-update` | ManageSoftware | Trigger item-wide batch update                                 |
-| GET    | `/api/v1/update-batches`                   | ViewSoftware   | List batches (filterable by status)                            |
-| GET    | `/api/v1/update-batches/{id}`              | ViewSoftware   | Get batch with per-item details                                |
-| GET    | `/api/v1/update-batches/{id}/stream`       | ViewSoftware   | SSE stream for batch progress                                  |
+| Method | Path                                       | Action            | Description                                                    |
+| :----- | :----------------------------------------- | :---------------- | :------------------------------------------------------------- |
+| GET    | `/api/v1/update-history`                   | `software:read`   | List records (filterable by host_id, software_item_id, status) |
+| GET    | `/api/v1/update-history/{id}`              | `software:read`   | Get single record                                              |
+| POST   | `/api/v1/hosts/{host_id}/batch-update`     | `updates:trigger` | Trigger host-wide batch update                                 |
+| POST   | `/api/v1/software-items/{id}/batch-update` | `updates:trigger` | Trigger item-wide batch update                                 |
+| GET    | `/api/v1/update-batches`                   | `software:read`   | List batches (filterable by status)                            |
+| GET    | `/api/v1/update-batches/{id}`              | `software:read`   | Get batch with per-item details                                |
+| GET    | `/api/v1/update-batches/{id}/stream`       | `software:read`   | SSE stream for batch progress                                  |
 
 Responses include denormalized `host_name` and `software_item_name` fields.
 

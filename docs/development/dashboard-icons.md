@@ -143,11 +143,11 @@ The tenant override is stored in the shared `plugin_type_settings` table under p
 
 Dashboard Icons uses the generic plugin type settings endpoints:
 
-| Method   | Path                                                       | Permission                                  | Description                                                     |
+| Method   | Path                                                       | Action                                      | Description                                                     |
 | -------- | ---------------------------------------------------------- | ------------------------------------------- | --------------------------------------------------------------- |
-| `GET`    | `/api/v1/plugin-type-settings/enhancement.dashboard-icons` | `view_settings` or `manage_global_settings` | Returns the current tenant override for Dashboard Icons         |
-| `PUT`    | `/api/v1/plugin-type-settings/enhancement.dashboard-icons` | `manage_global_settings`                    | Upserts `{ "config": { "enabled": bool } }`                     |
-| `DELETE` | `/api/v1/plugin-type-settings/enhancement.dashboard-icons` | `manage_global_settings`                    | Deletes the tenant override and reverts to the built-in default |
+| `GET`    | `/api/v1/plugin-type-settings/enhancement.dashboard-icons` | `settings:read` or `system.settings:manage` | Returns the current tenant override for Dashboard Icons         |
+| `PUT`    | `/api/v1/plugin-type-settings/enhancement.dashboard-icons` | `system.settings:manage`                    | Upserts `{ "config": { "enabled": bool } }`                     |
+| `DELETE` | `/api/v1/plugin-type-settings/enhancement.dashboard-icons` | `system.settings:manage`                    | Deletes the tenant override and reverts to the built-in default |
 
 The generic request/response types live under `crates/shared/web-api-types/src/plugin_type_settings.rs`.
 

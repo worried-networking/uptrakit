@@ -612,22 +612,22 @@ which delegates to the typed `PluginConfig::with_secrets_masked()`.
 
 ## REST API endpoints
 
-Route handlers enforce the `view_notifications` / `manage_notifications` permission strings below via typed
-extractors. The corresponding `Permission` enum variants (`ViewNotifications`, `ManageNotifications`) are defined
-in `crates/shared/types/src/permissions.rs` alongside the full set of platform permissions -- see that file for
-the authoritative variant list rather than hardcoding a count here. For the roles/bundles that grant these
-permissions, see [Authentication and Authorization](../security/auth-and-authorization.md).
+Route handlers enforce the `notifications:read` / `notifications:manage` actions below via typed extractors
+(`CanReadNotifications`, `CanManageNotifications`). The full built-in action catalog is defined in
+`crates/shared/types/src/access/catalog.rs` -- see that file for the authoritative action list rather than
+hardcoding a count here. For the roles/grants that carry these actions, see
+[Authentication and Authorization](../security/auth-and-authorization.md).
 
 ### Channels
 
 | Method   | Path                                       | Permission             | Description               |
 | -------- | ------------------------------------------ | ---------------------- | ------------------------- |
-| `POST`   | `/api/v1/notifications/channels`           | `manage_notifications` | Create channel            |
-| `GET`    | `/api/v1/notifications/channels`           | `view_notifications`   | List channels (paginated) |
-| `GET`    | `/api/v1/notifications/channels/{id}`      | `view_notifications`   | Get channel by ID         |
-| `PUT`    | `/api/v1/notifications/channels/{id}`      | `manage_notifications` | Update channel            |
-| `DELETE` | `/api/v1/notifications/channels/{id}`      | `manage_notifications` | Delete channel            |
-| `POST`   | `/api/v1/notifications/channels/{id}/test` | `manage_notifications` | Send test notification    |
+| `POST`   | `/api/v1/notifications/channels`           | `notifications:manage` | Create channel            |
+| `GET`    | `/api/v1/notifications/channels`           | `notifications:read`   | List channels (paginated) |
+| `GET`    | `/api/v1/notifications/channels/{id}`      | `notifications:read`   | Get channel by ID         |
+| `PUT`    | `/api/v1/notifications/channels/{id}`      | `notifications:manage` | Update channel            |
+| `DELETE` | `/api/v1/notifications/channels/{id}`      | `notifications:manage` | Delete channel            |
+| `POST`   | `/api/v1/notifications/channels/{id}/test` | `notifications:manage` | Send test notification    |
 
 Channel create/update/test validate the channel type against a live transport
 (`plugin_ops.transport(...)`) because they must interpret the submitted config. **Delete intentionally
@@ -641,17 +641,17 @@ effectively enabled; only the direct, permission-gated DELETE endpoint stays rea
 
 | Method   | Path                               | Permission             | Description                        |
 | -------- | ---------------------------------- | ---------------------- | ---------------------------------- |
-| `POST`   | `/api/v1/notifications/rules`      | `manage_notifications` | Create rule                        |
-| `GET`    | `/api/v1/notifications/rules`      | `view_notifications`   | List rules (paginated, filterable) |
-| `GET`    | `/api/v1/notifications/rules/{id}` | `view_notifications`   | Get rule by ID                     |
-| `PUT`    | `/api/v1/notifications/rules/{id}` | `manage_notifications` | Update rule                        |
-| `DELETE` | `/api/v1/notifications/rules/{id}` | `manage_notifications` | Delete rule                        |
+| `POST`   | `/api/v1/notifications/rules`      | `notifications:manage` | Create rule                        |
+| `GET`    | `/api/v1/notifications/rules`      | `notifications:read`   | List rules (paginated, filterable) |
+| `GET`    | `/api/v1/notifications/rules/{id}` | `notifications:read`   | Get rule by ID                     |
+| `PUT`    | `/api/v1/notifications/rules/{id}` | `notifications:manage` | Update rule                        |
+| `DELETE` | `/api/v1/notifications/rules/{id}` | `notifications:manage` | Delete rule                        |
 
 ### Log and callbacks
 
 | Method | Path                                                         | Permission               | Description                   |
 | ------ | ------------------------------------------------------------ | ------------------------ | ----------------------------- |
-| `GET`  | `/api/v1/notifications/log`                                  | `view_notifications`     | List delivery log (paginated) |
+| `GET`  | `/api/v1/notifications/log`                                  | `notifications:read`     | List delivery log (paginated) |
 | `POST` | `/api/v1/notifications/callback/{channel_type}/{channel_id}` | Public (plugin-verified) | Generic notification callback |
 
 The callback endpoint is not authenticated via JWT. It is not a surface interaction either: it resolves
@@ -998,7 +998,7 @@ API calls, following the same pattern as MQTT and OIDC settings.
 - [Notifications Security](../security/notifications-security.md)
 - [Notifications End-User Guide](../end-user/notifications.md)
 - [Authentication and Authorization](../security/auth-and-authorization.md) -- permission model, roles, and role
-  bundles that gate `view_notifications` / `manage_notifications`
+  bundles that gate `notifications:read` / `notifications:manage`
 - [User Management API](../api/user-management.md) -- endpoint reference for managing which users hold the
   notification permissions
 - [Coding Standards](coding-standards.md)

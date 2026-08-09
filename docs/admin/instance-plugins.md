@@ -1,6 +1,6 @@
 # Instance Plugins
 
-This page is for instance owners — Operators holding the `ManageGlobalSettings` permission. Tenant Operators do not see Instance Plugins in the
+This page is for instance owners — Operators holding the `system.settings:manage` action. Tenant Operators do not see Instance Plugins in the
 Settings tab.
 
 ## What is an Instance-Scoped Plugin?
@@ -34,7 +34,7 @@ Two new audit actions are emitted when you change instance plugin state:
 - `instance_plugin.config_upserted` — whenever you save a configuration. Raw config fields are not included in the audit details (only the field
   count).
 
-Both events are visible in the system-level audit log to anyone with `ViewSystemAuditLogs`.
+Both events are visible in the system-level audit log to anyone with the `system.audit:read` action.
 
 ## Tenant-side opt-out
 

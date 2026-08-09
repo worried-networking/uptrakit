@@ -318,7 +318,7 @@ crates/ui/web-api/src/
   test_harness/
     mod.rs          — TestApp, setup_migrated_db, build_test_state, NoopCertSigner
     http_client.rs  — TestClient (tower::oneshot wrapper with ergonomic API)
-    fixtures.rs     — register_user, insert_service, seed_permissions_for_owner, etc.
+    fixtures.rs     — register_user, insert_service, stage_user_with_grant, etc.
   integration_tests/
     mod.rs           — module declarations
     auth_flow.rs     — registration, login, refresh, token rotation, logout
@@ -343,10 +343,13 @@ All modules are gated behind `#[cfg(all(test, feature = "db-sqlite"))]`.
 - **`TestClient`**: thin wrapper around `tower::ServiceExt::oneshot()` with methods
   like `get()`, `post_json()`, `put_json()`, `delete()`, `bearer()`, `send_json()`,
   and `send_status()`.
-- **`seed_permissions_for_owner()`**: inserts permissions not present in the initial
-  migration (e.g., `view_notifications`, `manage_notifications`) and assigns them to
-  the `owner` role. Use this when testing endpoints gated by permissions added in
-  later migrations.
+- **`stage_user_with_grant(app, email, patterns, tenant_id)`**: registers a user (registration
+  must already be open — call `open_registration()` first), strips their auto-assigned roles, then
+  inserts a single `access_grants` row scoped to the given action `patterns` (with
+  `Selector::All`) and invalidates the access engine's cached authority for that user, so the
+  grant is the only source of authority for the returned token. `tenant_id` is `Some(app.tenant_id)`
+  for tenant-plane pattern sets and `None` for system-plane sets. Returns `(user_id, access_token)`.
+  Use this when testing an endpoint gated by a specific action string in isolation.
 
 ### Adding new tests
 
@@ -354,8 +357,8 @@ All modules are gated behind `#[cfg(all(test, feature = "db-sqlite"))]`.
    `integration_tests/mod.rs`.
 2. Use `TestApp::new().await` to get a fully initialized app.
 3. Use `register_and_get_token(&client)` for authenticated requests.
-4. For endpoints requiring non-default permissions, call
-   `seed_permissions_for_owner()` before registration.
+4. For endpoints gated by an action the default `owner` role does not carry, use
+   `stage_user_with_grant()` to register a user holding exactly that grant.
 5. WebSocket tests must use `tokio::net::TcpListener` + `axum::serve()` (HTTP
    upgrade does not work via `tower::oneshot`).
 

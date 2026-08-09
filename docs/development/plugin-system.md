@@ -167,7 +167,8 @@ than by config ID:
 | `PUT`    | `/api/v1/plugin-type-settings/:plugin_type` | Upsert type settings (create or update).         |
 | `DELETE` | `/api/v1/plugin-type-settings/:plugin_type` | Reset to built-in defaults (deletes the row).    |
 
-All endpoints require the `update_software` permission. Handlers live in
+`GET` endpoints require the `settings:read` or `system.settings:manage` action; `PUT`/`DELETE`
+require `system.settings:manage` (`CanManageSystemSettings`). Handlers live in
 `crates/ui/web-api/src/routes/plugin_type_settings.rs`; the merge itself is implemented in
 `crates/ui/web-api-queries/src/queries/plugin_configs.rs`.
 

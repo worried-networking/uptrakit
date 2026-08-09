@@ -172,7 +172,7 @@ The generated `ConfigTestOps` is stored in `PluginDescriptor.config_test` as
 POST /api/v1/plugin-configs/test
 ```
 
-**Permission:** `test_plugin_configs`
+**Action:** `plugin-configs:trigger` (`CanTriggerPluginConfigs`)
 
 **Request body (`TestPluginConfigRequest`):**
 
@@ -238,7 +238,7 @@ Config tests execute real operations against real targets:
 
 Mitigations in place:
 
-- **Authorization** -- the endpoint requires the `test_plugin_configs` permission.
+- **Authorization** -- the endpoint requires the `plugin-configs:trigger` action.
 - **Dangerous command rejection** -- the route handler checks for dangerous patterns in
   command fields before dispatching (controlled by `reject_dangerous_commands` config flag).
 - **Config validation** -- the merged config is validated against the plugin's schema before

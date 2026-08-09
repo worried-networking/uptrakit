@@ -868,14 +868,14 @@ handler's `on_surface_action_response` method calls `proxy.complete()` to delive
 
 ### Surface descriptor
 
-| Property   | Value                                             |
-| ---------- | ------------------------------------------------- |
-| ID         | `ssh-agent.hosts`                                 |
-| Label      | SSH Hosts                                         |
-| Placement  | Page (nav_section: `management`, icon: `server`)  |
-| Permission | `manage_hosts`                                    |
-| Targeting  | Targeted (user selects which SSH agent instance)  |
-| UI         | DataTable with host columns + row/primary actions |
+| Property  | Value                                             |
+| --------- | ------------------------------------------------- |
+| ID        | `ssh-agent.hosts`                                 |
+| Label     | SSH Hosts                                         |
+| Placement | Page (nav_section: `management`, icon: `server`)  |
+| Action    | `hosts:update`                                    |
+| Targeting | Targeted (user selects which SSH agent instance)  |
+| UI        | DataTable with host columns + row/primary actions |
 
 ### Actions
 

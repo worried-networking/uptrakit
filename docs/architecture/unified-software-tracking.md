@@ -185,11 +185,13 @@ The `software_states` wire message carries:
 
 ## Permissions
 
-All software items (featured and non-featured) use the same permissions:
+All software items (featured and non-featured) use the same actions:
 
-- `ViewSoftware` -- view items, versions, and update history.
-- `ManageSoftware` -- create, update, delete, trigger updates, manage ignore rules.
-- `ViewHosts` -- see aggregate update counts on host list.
+- `software:read` -- view items, versions, and update history.
+- `software:create` / `software:update` / `software:delete` -- create, update (including host
+  assignment and ignore-rule changes), and delete.
+- `updates:trigger` -- trigger updates.
+- `hosts:read` -- see aggregate update counts on host list.
 
 ## Related documentation
 

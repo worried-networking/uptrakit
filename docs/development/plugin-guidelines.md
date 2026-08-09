@@ -57,7 +57,7 @@ where its configuration lives.
 
 | Aspect                   | `Tenant` (default)                               | `Instance`                                                     |
 | ------------------------ | ------------------------------------------------ | -------------------------------------------------------------- |
-| Who configures it        | Tenant Operators                                 | Instance owners (`ManageGlobalSettings` only)                  |
+| Who configures it        | Tenant Operators                                 | Instance owners (`system.settings:manage` only)                |
 | Per-tenant override      | Via `plugin_type_settings` (existing)            | Via `plugin_type_settings` (still allowed when enabled)        |
 | Instance-wide knobs      | None                                             | Optional via `instance_config: Some(&MY_INSTANCE_CONFIG_OPS)`  |
 | Storage when disabled    | N/A — tenant disables via `plugin_type_settings` | Row absent (or `enabled = false`) in `instance_plugin_setting` |

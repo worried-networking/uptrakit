@@ -254,12 +254,12 @@ See [unified software tracking](unified-software-tracking.md) for the full data 
 
 ## REST API
 
-| Method | Path                      | Permission  | Action                                        |
-| :----- | :------------------------ | :---------- | :-------------------------------------------- |
-| GET    | `/api/v1/hosts`           | ViewHosts   | List non-deactivated hosts with linked agents |
-| GET    | `/api/v1/hosts/{id}`      | ViewHosts   | Get single host with linked agents            |
-| PUT    | `/api/v1/hosts/{id}`      | ManageHosts | Update friendly_name                          |
-| DELETE | `/api/v1/hosts/{id}`      | ManageHosts | Soft-delete (set deactivated_at)              |
-| PUT    | `/api/v1/hosts/{id}/tags` | ManageHosts | Set (replace-all) tags on a host              |
+| Method | Path                      | Action              | Description                                   |
+| :----- | :------------------------ | :------------------ | :-------------------------------------------- |
+| GET    | `/api/v1/hosts`           | `hosts:read`        | List non-deactivated hosts with linked agents |
+| GET    | `/api/v1/hosts/{id}`      | `hosts:read`        | Get single host with linked agents            |
+| PUT    | `/api/v1/hosts/{id}`      | `hosts:update`      | Update friendly_name                          |
+| DELETE | `/api/v1/hosts/{id}`      | `hosts:delete`      | Soft-delete (set deactivated_at)              |
+| PUT    | `/api/v1/hosts/{id}/tags` | `hosts.tags:manage` | Set (replace-all) tags on a host              |
 
 See also [host tags API](../api/host-tags.md) for tag management endpoints.
