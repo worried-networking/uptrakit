@@ -19,7 +19,7 @@ const FAILURE_COOLDOWN: Duration = Duration::from_secs(60);
 /// Extra grace beyond a request's own deadline before the backstop sweep reaps it.
 /// Generous on purpose: the sweep is a last-resort GC for genuinely-orphaned entries
 /// a live timeout path would already have removed — it must never contend the normal
-/// per-request timeout (up to `MAX_TIMEOUT_SECONDS`).
+/// per-request timeout (up to `MAX_TIMEOUT_SECONDS` in `proxy/validation.rs`).
 pub(super) const IN_FLIGHT_SWEEP_MARGIN: Duration = Duration::from_secs(60);
 
 // Fields are pub(super) as an artifact of the mechanical decomposition — mutate pending state

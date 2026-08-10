@@ -1,3 +1,9 @@
+#![expect(
+    clippy::let_underscore_must_use,
+    reason = "test discards: an aborted task's join outcome, idempotent master-key init, and \
+              invoke() calls asserted on their side effects rather than their own result"
+)]
+
 use std::sync::Arc as StdArc;
 
 use async_trait::async_trait;

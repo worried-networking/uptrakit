@@ -1,3 +1,8 @@
+#![expect(
+    clippy::let_underscore_must_use,
+    reason = "fire-and-forget send intentionally drops the result"
+)]
+
 use std::sync::Arc;
 use std::time::Duration;
 
