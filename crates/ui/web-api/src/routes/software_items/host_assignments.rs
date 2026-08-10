@@ -157,8 +157,8 @@ pub async fn assign_hosts(
             item_queries::SoftwareItemQueryError::DuplicateHostAssignment => {
                 error_response(StatusCode::CONFLICT, "Duplicate host assignment")
             }
-            item_queries::SoftwareItemQueryError::MissingPluginSource(msg) => {
-                error_response(StatusCode::BAD_REQUEST, msg.as_str())
+            item_queries::SoftwareItemQueryError::MissingPluginSource(_) => {
+                error_response(StatusCode::BAD_REQUEST, ctx.to_string())
             }
             item_queries::SoftwareItemQueryError::EmptyName
             | item_queries::SoftwareItemQueryError::DuplicateItem
@@ -560,8 +560,8 @@ pub async fn update_host_assignment(
             item_queries::SoftwareItemQueryError::DuplicateHostAssignment => {
                 error_response(StatusCode::CONFLICT, "Duplicate host assignment")
             }
-            item_queries::SoftwareItemQueryError::MissingPluginSource(msg) => {
-                error_response(StatusCode::BAD_REQUEST, msg.as_str())
+            item_queries::SoftwareItemQueryError::MissingPluginSource(_) => {
+                error_response(StatusCode::BAD_REQUEST, ctx.to_string())
             }
             item_queries::SoftwareItemQueryError::EmptyName
             | item_queries::SoftwareItemQueryError::DuplicateItem

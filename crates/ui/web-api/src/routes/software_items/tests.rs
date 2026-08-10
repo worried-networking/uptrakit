@@ -48,8 +48,8 @@ use uptrakit_plugin_infrastructure_registry::{
     build_catalog,
 };
 use uptrakit_shared_db::entity::{
-    audit_log, host_software_item, host_software_item_plugin, service, software_item,
-    update_history,
+    audit_log, host_software_item, host_software_item_plugin, plugin_config, service,
+    software_item, update_history,
 };
 use uptrakit_web_api_types::PluginRole;
 use uuid::Uuid;
@@ -619,6 +619,204 @@ async fn update_host_assignment_missing_item_writes_denied_audit_event() {
     assert_eq!(
         row.outcome,
         uptrakit_audit_log::AuditOutcome::Denied.as_str()
+    );
+}
+
+#[tokio::test]
+async fn zero_source_patch_keeps_config_backed_plugin_source() {
+    let (db, tenant_id, state, tenant_db) = setup_state().await;
+    let host = crate::test_harness::fixtures::insert_host(&db, tenant_id).await;
+    let item_id = Uuid::now_v7();
+    insert_software_item_row(&db, tenant_id, item_id).await;
+    let host_software_item_id = insert_host_assignment(&db, host.id, item_id).await;
+
+    let plugin_config_id = Uuid::now_v7();
+    let now = OffsetDateTime::now_utc();
+    plugin_config::ActiveModel {
+        id: Set(plugin_config_id),
+        tenant_id: Set(tenant_id),
+        name: Set("Test Apt Config".to_string()),
+        plugin_type: Set("package-manager.apt".to_string()),
+        config: Set(serde_json::json!({})),
+        enabled: Set(true),
+        created_at: Set(now),
+        updated_at: Set(now),
+        deactivated_at: Set(None),
+    }
+    .insert(&db)
+    .await
+    .expect("insert test plugin_config");
+
+    host_software_item_plugin::ActiveModel {
+        id: Set(Uuid::now_v7()),
+        host_id: Set(host.id),
+        software_item_id: Set(item_id),
+        host_software_item_id: Set(host_software_item_id),
+        plugin_config_id: Set(Some(plugin_config_id)),
+        plugin_type: Set("package-manager.apt".to_string()),
+        role: Set("detect_version".to_string()),
+        ordinal: Set(0),
+        package_identifier: Set("nginx".to_string()),
+        config: Set(None),
+        execution_site: Set("auto".to_string()),
+        created_at: Set(now),
+        updated_at: Set(now),
+    }
+    .insert(&db)
+    .await
+    .expect("insert config-backed detect_version plugin");
+
+    let response = update_host_assignment(
+        State(Arc::clone(&state)),
+        tenant_db,
+        CanUpdateSoftware::new(test_auth_user()),
+        None,
+        Path((item_id, host.id)),
+        Unvalidated::new_for_test(UpdateHostAssignmentRequest {
+            role: PluginRole::DetectVersion,
+            ordinal: 0,
+            plugin_config_id: None,
+            plugin_config: None,
+            plugin_type: None,
+            package_identifier: Some("renamed-pkg".to_string()),
+            config_override: Default::default(),
+            execution_site: None,
+        }),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read response body");
+    let body: serde_json::Value = serde_json::from_slice(&bytes).expect("deserialize body");
+    let host_summary = body["hosts"]
+        .as_array()
+        .expect("hosts array")
+        .iter()
+        .find(|h| h["host_id"] == serde_json::json!(host.id))
+        .expect("host summary present");
+    let plugin_entry = host_summary["plugins"]
+        .as_array()
+        .expect("plugins array")
+        .iter()
+        .find(|p| p["role"] == serde_json::json!("detect_version"))
+        .expect("detect_version plugin entry present");
+    assert_eq!(
+        plugin_entry["plugin_config_id"],
+        serde_json::json!(plugin_config_id)
+    );
+    assert_eq!(
+        plugin_entry["package_identifier"],
+        serde_json::json!("renamed-pkg")
+    );
+}
+
+#[tokio::test]
+async fn zero_source_patch_keeps_type_only_plugin_source() {
+    let (db, tenant_id, state, tenant_db) = setup_state().await;
+    let host = crate::test_harness::fixtures::insert_host(&db, tenant_id).await;
+    let item_id = Uuid::now_v7();
+    insert_software_item_row(&db, tenant_id, item_id).await;
+    let host_software_item_id = insert_host_assignment(&db, host.id, item_id).await;
+    insert_detect_version_plugin(&db, host.id, item_id, host_software_item_id, "auto").await;
+
+    let response = update_host_assignment(
+        State(Arc::clone(&state)),
+        tenant_db,
+        CanUpdateSoftware::new(test_auth_user()),
+        None,
+        Path((item_id, host.id)),
+        Unvalidated::new_for_test(UpdateHostAssignmentRequest {
+            role: PluginRole::DetectVersion,
+            ordinal: 0,
+            plugin_config_id: None,
+            plugin_config: None,
+            plugin_type: None,
+            package_identifier: Some("renamed-pkg".to_string()),
+            config_override: Default::default(),
+            execution_site: None,
+        }),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read response body");
+    let body: serde_json::Value = serde_json::from_slice(&bytes).expect("deserialize body");
+    let host_summary = body["hosts"]
+        .as_array()
+        .expect("hosts array")
+        .iter()
+        .find(|h| h["host_id"] == serde_json::json!(host.id))
+        .expect("host summary present");
+    let plugin_entry = host_summary["plugins"]
+        .as_array()
+        .expect("plugins array")
+        .iter()
+        .find(|p| p["role"] == serde_json::json!("detect_version"))
+        .expect("detect_version plugin entry present");
+    assert_eq!(plugin_entry["plugin_config_id"], serde_json::Value::Null);
+    assert_eq!(
+        plugin_entry["plugin_type"],
+        serde_json::json!("package-manager.apt")
+    );
+    assert_eq!(
+        plugin_entry["package_identifier"],
+        serde_json::json!("renamed-pkg")
+    );
+}
+
+#[tokio::test]
+async fn zero_source_patch_with_no_existing_row_is_rejected() {
+    let (db, tenant_id, state, tenant_db) = setup_state().await;
+    let host = crate::test_harness::fixtures::insert_host(&db, tenant_id).await;
+    let item_id = Uuid::now_v7();
+    insert_software_item_row(&db, tenant_id, item_id).await;
+    insert_host_assignment(&db, host.id, item_id).await;
+
+    let response = update_host_assignment(
+        State(Arc::clone(&state)),
+        tenant_db,
+        CanUpdateSoftware::new(test_auth_user()),
+        None,
+        Path((item_id, host.id)),
+        Unvalidated::new_for_test(UpdateHostAssignmentRequest {
+            role: PluginRole::FetchReleases,
+            ordinal: 0,
+            plugin_config_id: None,
+            plugin_config: None,
+            plugin_type: None,
+            package_identifier: None,
+            config_override: Default::default(),
+            execution_site: None,
+        }),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read response body");
+    let body: uptrakit_web_api_types::error::ErrorResponse =
+        serde_json::from_slice(&bytes).expect("deserialize error response");
+    assert!(
+        body.error.contains("no plugin source"),
+        "expected 'no plugin source' in error message, got: {}",
+        body.error
+    );
+
+    let row = tenant_audit_row_for_action_and_outcome(
+        &db,
+        SOFTWARE_ITEM_UPDATE_HOST_ASSIGNMENT_AUDIT_ACTION,
+        uptrakit_audit_log::AuditOutcome::ValidationFailed.as_str(),
+    )
+    .await;
+    let details = row.details_json.expect("details");
+    assert_eq!(
+        details["reason_code"],
+        serde_json::json!("software_item.missing_plugin_source")
     );
 }
 

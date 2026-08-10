@@ -261,10 +261,11 @@ pub struct UpdateHostAssignmentRequest {
     pub ordinal: i32,
     /// UUID of an existing plugin config to use.
     pub plugin_config_id: Option<Uuid>,
-    /// Inline plugin config to create and link (mutually exclusive with `plugin_config_id` and `plugin_type`).
+    /// Inline plugin config to create and link. At most one of plugin_config_id,
+    /// plugin_config, plugin_type may be set; omit all three to keep the existing plugin source.
     pub plugin_config: Option<CreatePluginConfigRequest>,
-    /// Plugin type for a truly inline assignment with no shared config row
-    /// (mutually exclusive with `plugin_config_id` and `plugin_config`).
+    /// Plugin type for a truly inline assignment with no shared config row.
+    /// At most one source may be set; omitting all three keeps the existing plugin source.
     /// The full plugin config is supplied via `config_override`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin_type: Option<PluginTypeId>,
@@ -703,10 +704,10 @@ impl Validate for UpdateHostAssignmentRequest {
         .into_iter()
         .filter(|set| *set)
         .count();
-        if sources != 1 {
+        if sources > 1 {
             return Err(ValidationError {
                 field: "plugin_config_id",
-                message: "exactly one of plugin_config_id, plugin_config, plugin_type must be set"
+                message: "at most one of plugin_config_id, plugin_config, plugin_type may be set"
                     .to_string(),
             });
         }
@@ -1531,23 +1532,25 @@ mod tests {
     }
 
     #[test]
-    fn update_host_assignment_rejects_zero_and_two_config_sources() {
-        let mut req = valid_update_host_assignment();
-        req.plugin_config_id = None;
-        req.plugin_config = None;
-        req.plugin_type = None;
-        assert!(req.validate().is_err());
+    fn update_host_assignment_accepts_zero_and_one_config_source() {
+        // Zero sources = "keep the existing plugin source" (spec item 1).
+        let mut zero = valid_update_host_assignment();
+        zero.plugin_config_id = None;
+        zero.plugin_config = None;
+        zero.plugin_type = None;
+        assert!(zero.validate().is_ok());
 
-        let mut two = valid_update_host_assignment();
-        two.plugin_config_id = Some(sample_uuid());
-        two.plugin_type = Some(valid_plugin_type_id());
-        assert!(two.validate().is_err());
+        let one = valid_update_host_assignment();
+        assert!(one.validate().is_ok());
     }
 
     #[test]
-    fn update_host_assignment_accepts_exactly_one_config_source() {
-        let req = valid_update_host_assignment();
-        assert!(req.validate().is_ok());
+    fn update_host_assignment_rejects_two_config_sources() {
+        let mut two = valid_update_host_assignment();
+        two.plugin_config_id = Some(sample_uuid());
+        two.plugin_type = Some(valid_plugin_type_id());
+        let err = two.validate().expect_err("two sources must be rejected");
+        assert_eq!(err.field, "plugin_config_id");
     }
 
     #[test]

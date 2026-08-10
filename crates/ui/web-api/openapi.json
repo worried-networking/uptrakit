@@ -18289,7 +18289,7 @@
               },
               {
                 "$ref": "#/components/schemas/CreatePluginConfigRequest",
-                "description": "Inline plugin config to create and link (mutually exclusive with `plugin_config_id` and `plugin_type`)."
+                "description": "Inline plugin config to create and link. At most one of plugin_config_id,\nplugin_config, plugin_type may be set; omit all three to keep the existing plugin source."
               }
             ]
           },
@@ -18308,7 +18308,7 @@
               },
               {
                 "$ref": "#/components/schemas/PluginTypeId",
-                "description": "Plugin type for a truly inline assignment with no shared config row\n(mutually exclusive with `plugin_config_id` and `plugin_config`).\nThe full plugin config is supplied via `config_override`."
+                "description": "Plugin type for a truly inline assignment with no shared config row.\nAt most one source may be set; omitting all three keeps the existing plugin source.\nThe full plugin config is supplied via `config_override`."
               }
             ]
           },
