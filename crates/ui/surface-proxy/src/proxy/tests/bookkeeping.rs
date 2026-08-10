@@ -2,7 +2,9 @@ use std::time::{Duration, Instant};
 
 use uuid::Uuid;
 
-use super::super::{IdempotencyKey, PendingRegistration, PendingRequest, PendingState};
+use super::super::bookkeeping::{
+    IdempotencyKey, PendingRegistration, PendingRequest, PendingState,
+};
 
 fn idem_key(key: &str) -> IdempotencyKey {
     IdempotencyKey {
@@ -99,7 +101,7 @@ fn cleanup_expired_reaps_orphaned_in_flight_past_deadline_plus_margin() {
     let (tx, _rx) = tokio::sync::oneshot::channel();
     // Deadline already elapsed by more than the sweep margin ⇒ genuinely orphaned.
     let elapsed_deadline = Instant::now()
-        .checked_sub(super::super::IN_FLIGHT_SWEEP_MARGIN + Duration::from_secs(1))
+        .checked_sub(super::super::bookkeeping::IN_FLIGHT_SWEEP_MARGIN + Duration::from_secs(1))
         .expect("test clock is far enough past boot to subtract the sweep margin");
     state.register_pending(PendingRegistration {
         request_id,
