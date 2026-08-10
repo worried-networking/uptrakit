@@ -2398,6 +2398,47 @@ mod tests {
     }
 
     #[test]
+    fn bootstrap_builtin_accepts_provider_invocable_under_gated_descriptor() {
+        let registry = registry();
+        let mut registration = registration_for_plugin_same_surface("builtin.provider-a");
+        registration.provider.provider_kind = surfaces::ProviderKind::BuiltIn;
+        registration.provider.provider_namespace = "controller".to_string();
+        registration.surfaces[0].descriptor.provider_kind = surfaces::ProviderKind::BuiltIn;
+        registration.surfaces[0].interactions[0].required_action = None;
+        registration.surfaces[0].interactions[0].provider_invocable = true;
+        // ControllerLocal is deliberately rejected for non-Plugin kinds
+        // (registry.rs:963, pinned by
+        // bootstrap_builtin_rejects_controller_local_sensitive_fields_without_runtime_support);
+        // switch the fixture's transport so admission exercises the
+        // provider_invocable gate, not the transport gate. ProviderProxied
+        // has no kind gate and the interaction carries no sensitive_fields.
+        registration.surfaces[0].interactions[0].transport =
+            surfaces::InteractionTransport::ProviderProxied;
+        // ProviderProxied is capability-gated independently of provider kind
+        // (protocol.rs:558-567); the reused plugin fixture does not declare it.
+        registration
+            .capabilities
+            .0
+            .insert(surfaces::Capability::ProviderInitiatedActions);
+        // Preconditions: without these the test silently degrades into a
+        // duplicate of the plugin-kind test and pins nothing.
+        assert_eq!(
+            registration.surfaces[0].descriptor.provider_kind,
+            surfaces::ProviderKind::BuiltIn
+        );
+        assert!(
+            registration.surfaces[0]
+                .descriptor
+                .required_action
+                .is_some()
+        );
+        assert!(registration.surfaces[0].interactions[0].provider_invocable);
+        registry.bootstrap_builtin(registration).expect(
+            "builtin-kind provider_invocable under a gated descriptor must stay registrable",
+        );
+    }
+
+    #[test]
     fn register_service_rejects_unparseable_interaction_required_action() {
         let registry = registry();
         let mut registration = registration_for_service("service.provider-a", tenant_a());

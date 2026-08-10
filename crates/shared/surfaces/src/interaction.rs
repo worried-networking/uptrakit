@@ -585,6 +585,19 @@ mod tests {
             unpermissioned_service.validate_for_provider(ProviderKind::Service),
             Ok(())
         ));
+
+        let mut builtin_owned = InteractionDescriptor::new(
+            InteractionId::new("act3").unwrap(),
+            InteractionKind::DataLoad,
+            "Act3",
+            InteractionTransport::ControllerLocal,
+        );
+        builtin_owned.required_action = Some("update_hosts".to_string());
+        builtin_owned.provider_invocable = true;
+        assert!(matches!(
+            builtin_owned.validate_for_provider(ProviderKind::BuiltIn),
+            Ok(())
+        ));
     }
 
     #[test]
