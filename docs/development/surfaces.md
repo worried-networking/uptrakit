@@ -195,11 +195,10 @@ the effective deadline — the declared budget or the caller's override — is v
 1..=300 s and rejected outright, never clamped, when it falls outside that range. Two timers
 enforce deadlines:
 
-- **Controller-side** (`crates/ui/surface-proxy/src/proxy.rs`, `resolve_timeout` in
-  `proxy/validation.rs`): the effective deadline. An out-of-range value fails invocation with
-  `SchemaValidationFailed` before the request is ever dispatched; an in-range value starts the
-  controller's timer, and on elapse the controller abandons the pending request and notifies the
-  provider with `SurfaceActionCancel { reason: Timeout }`.
+- **Controller-side** (`resolve_timeout` in `crates/ui/surface-proxy/src/proxy.rs`): the effective deadline. An
+  out-of-range value fails invocation with `SchemaValidationFailed` before the request is ever dispatched; an
+  in-range value starts the controller's timer, and on elapse the controller abandons the pending request and
+  notifies the provider with `SurfaceActionCancel { reason: Timeout }`.
 - **Agent-side** (SSH agent runtime, `surface_runtime.rs`): each spawned surface task is wrapped in
   `tokio::time::timeout` with a flat 330 s backstop (`AGENT_SURFACE_TASK_TIMEOUT` = the proxy's
   maximum request deadline + 30 s headroom, pinned by a `const _: () = assert!(...)` next to the

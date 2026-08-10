@@ -101,6 +101,10 @@ Registration admission rejects the flag on `Service`-kind interactions that carr
 surface whose descriptor carries one (Plugin/BuiltIn-owned interactions only may combine the flag with a gate);
 per-caller narrowing is deliberately outside the flag — a future optional allowlist field composes with it.
 
+The invoke-time gate itself is provider-kind-agnostic by design: it keys on `CallerOrigin::Provider`, not
+`ProviderKind`. Kind-based permissiveness (Plugin/BuiltIn may combine `provider_invocable` with a gate) is enforced
+— and test-pinned — at registration admission only.
+
 A service therefore cannot provider-invoke interactions on its **own** descriptor-gated surfaces — no service-side
 opt-in exists for that shape; such surfaces are user/HTTP-driven only.
 
