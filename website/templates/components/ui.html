@@ -1,6 +1,6 @@
-{% macro callout(kind, title, body) %}
+{% component ui.callout(kind: string, title: string = "") %}
   <aside class="callout callout--{{ kind }}" role="note">
     {% if title %}<span class="callout__title">{{ title }}</span>{% endif %}
-    <div>{{ body | safe }}</div>
+    <div>{{ body }}</div>
   </aside>
-{% endmacro callout %}
+{% endcomponent ui.callout %}

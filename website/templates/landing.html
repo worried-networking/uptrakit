@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-{% import "macros/ui.html" as ui %}
 
 {% block title %}Uptrakit — track upstream updates across your homelab{% endblock %}
 {% block description %}Self-hosted update tracking toolkit for Linux homelabs and small fleets. Tracks installed software versions, checks upstream releases, and runs updates on your terms.{% endblock %}
@@ -21,11 +20,9 @@
   </div>
 </section>
 
-{{ ui::callout(
-  kind="warning",
-  title="Alpha",
-  body="<p>APIs may change. No formal third-party security audit yet. Use at your own risk.</p>"
-) }}
+{% <ui.callout kind="warning" title="Alpha"> %}
+  <p>APIs may change. No formal third-party security audit yet. Use at your own risk.</p>
+{% </ui.callout> %}
 
 <section class="section">
   <h2 class="section__heading">What it does</h2>

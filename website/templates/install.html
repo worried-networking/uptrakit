@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-{% import "macros/ui.html" as ui %}
 
 {% block title %}Install Uptrakit (alpha){% endblock %}
 {% block description %}Local evaluation install for Uptrakit using Docker Compose. Production deploys live in the canonical deployment guide.{% endblock %}
@@ -55,11 +54,9 @@ openssl rand -hex 32 &gt; master.key &amp;&amp; chmod 600 master.key</code></pre
   </div>
 </div>
 
-{{ ui::callout(
-  kind="warning",
-  title="Production deploys need more",
-  body="<p>This snippet runs the controller alone. Production setups need a reverse proxy in front of the controller, an enrollment flow for agents, and depending on profile (mqtt, scheduler, postgres, full) one or more support services. The canonical deployment guide is in the repo.</p>"
-) }}
+{% <ui.callout kind="warning" title="Production deploys need more"> %}
+  <p>This snippet runs the controller alone. Production setups need a reverse proxy in front of the controller, an enrollment flow for agents, and depending on profile (mqtt, scheduler, postgres, full) one or more support services. The canonical deployment guide is in the repo.</p>
+{% </ui.callout> %}
 
 <p>
   Full reference: <a href="/docs/end-user/deployment/">Deployment Guides</a>

@@ -14,10 +14,12 @@ See `docs/superpowers/specs/2026-04-27-website-phase-1-design.md` for the design
 
 ## Local development
 
-Install Zola once:
+Install Zola once. The version must match the CI pin in `.github/workflows/website.yml`
+(currently `0.23.2`); the templates use Tera 2 components and `get_env`, so anything below
+`0.23.2` fails at `zola check`:
 
 ```bash
-cargo install zola --version 0.22.1
+cargo install zola --version 0.23.2
 # or, on macOS (version may lag):
 brew install zola
 ```
@@ -74,8 +76,13 @@ Dependabot bumps `taiki-e/install-action` itself but does not parse the
 `tool: zola@<version>` string. To bump Zola:
 
 1. Check the latest release: <https://github.com/getzola/zola/releases>.
-2. Edit the `tool:` line in `.github/workflows/website.yml`.
-3. Run `zola build` locally to confirm no template/syntax regressions.
+2. Edit the `tool:` line in `.github/workflows/website.yml` **and** the `cargo install`
+   line above, then upgrade the local binary to the same version — a skew between the two
+   makes the pre-commit `zola check` fail on files the commit never touched.
+3. Run `zola check` and `zola build` locally to confirm no template/syntax regressions.
+   A major bump can change the bundled Tera version (0.23 moved to Tera 2, which removed
+   macros in favour of components); check
+   <https://github.com/Keats/tera/blob/master/MIGRATION.md> when that happens.
 4. Open a PR.
 
 ## Bumping Pagefind
@@ -98,7 +105,7 @@ To bump Pagefind to a new major version:
 | `config.toml` | Zola configuration |
 | `content/` | Page content + per-page front-matter |
 | `templates/` | Tera templates |
-| `templates/macros/ui.html` | Shared callout macro |
+| `templates/components/ui.html` | Shared `ui.callout` Tera component |
 | `static/` | Files copied verbatim into the build (CNAME, favicon, robots.txt, css/) |
 
 For phase-2 plans (docs hub at `/docs/`), see follow-up specs in
