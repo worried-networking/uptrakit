@@ -267,15 +267,31 @@ pub async fn update_software_item(
     Path(item_id): Path<Uuid>,
     body: Unvalidated<UpdateSoftwareItemRequest>,
 ) -> Response {
-    let req = match body.require_valid() {
-        Ok(req) => req,
-        Err(e) => {
-            return error_response(StatusCode::BAD_REQUEST, e.to_string());
-        }
-    };
     let api_token_id = api_token_id.map(|value| value.0);
     let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
     let tenant_id = tenant_db.tenant_id();
+
+    let req = match body.require_valid() {
+        Ok(req) => req,
+        Err(e) => {
+            if let Ok(entry) = AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+                SOFTWARE_ITEM_UPDATE_AUDIT_ACTION,
+            )
+            .tenant_scope(tenant_id)
+            .actor(actor_type, actor_id)
+            .target("software_item", item_id.to_string(), None)
+            .outcome(AuditOutcome::ValidationFailed)
+            .details(serde_json::json!({
+                "software_item_id": item_id,
+                "reason_code": "invalid_request",
+            }))
+            .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
+            return error_response(StatusCode::BAD_REQUEST, e.to_string());
+        }
+    };
 
     let name_changed = req.name.is_some();
     let featured_changed = req.featured.is_some();

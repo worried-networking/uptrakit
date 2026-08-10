@@ -474,6 +474,43 @@ async fn update_software_item_missing_item_writes_denied_audit_event() {
 }
 
 #[tokio::test]
+async fn update_software_item_validation_reject_is_audited() {
+    let (db, tenant_id, state, tenant_db) = setup_state().await;
+    let item_id = Uuid::now_v7();
+    insert_software_item_row(&db, tenant_id, item_id).await;
+
+    let response = update_software_item(
+        State(Arc::clone(&state)),
+        tenant_db,
+        CanUpdateSoftware::new(test_auth_user()),
+        None,
+        Path(item_id),
+        Unvalidated::new_for_test(UpdateSoftwareItemRequest {
+            name: None,
+            featured: None,
+            icon_url: uptrakit_web_api_types::software_items::IconUrlPatch::Set(
+                "http://example.com/icon.png".to_string(),
+            ),
+        }),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let row = tenant_audit_row_for_action_and_outcome(
+        &db,
+        SOFTWARE_ITEM_UPDATE_AUDIT_ACTION,
+        uptrakit_audit_log::AuditOutcome::ValidationFailed.as_str(),
+    )
+    .await;
+    let details = row.details_json.expect("details");
+    assert_eq!(details["reason_code"], serde_json::json!("invalid_request"));
+    assert_eq!(
+        details["software_item_id"],
+        serde_json::json!(item_id.to_string())
+    );
+}
+
+#[tokio::test]
 async fn delete_software_item_missing_item_writes_denied_audit_event() {
     let (db, _tenant_id, state, tenant_db) = setup_state().await;
     let missing_item_id = Uuid::now_v7();
