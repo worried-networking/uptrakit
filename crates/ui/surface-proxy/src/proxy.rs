@@ -311,7 +311,8 @@ impl SurfaceProxy {
         let idem_key = build_idempotency_key(&request, &caller_origin);
 
         if matches!(&caller_origin, surfaces::CallerOrigin::Provider { .. })
-            && resolved.interaction_required_action.is_some()
+            && (resolved.descriptor_required_action.is_some()
+                || resolved.interaction_required_action.is_some())
             && !resolved.interaction.provider_invocable
         {
             return Err(SurfaceProxyError::PermissionDenied(

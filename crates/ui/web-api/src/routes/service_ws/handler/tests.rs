@@ -561,6 +561,9 @@ async fn surface_action_success_emits_success_tenant_audit_row() {
     insert_test_service_row(&db, tenant_id, service_id, "uptrakit-agent-ssh").await;
     let mut registration = test_surface_registration("service.provider-a", tenant_id);
     registration.surfaces[0].interactions[0].required_action = None;
+    // Routing/audit-focused test: fully ungated fixture. The gated-descriptor
+    // provider-origin class is covered by the descriptor-gate tests.
+    registration.surfaces[0].descriptor.required_action = None;
     state
         .surface_proxy_deps
         .registry
@@ -681,6 +684,9 @@ async fn surface_action_provider_unavailable_emits_failed_tenant_audit_row() {
     insert_test_service_row(&db, tenant_id, service_id, "uptrakit-agent-ssh").await;
     let mut registration = test_surface_registration("service.provider-a", tenant_id);
     registration.surfaces[0].interactions[0].required_action = None;
+    // Routing/audit-focused test: fully ungated fixture. The gated-descriptor
+    // provider-origin class is covered by the descriptor-gate tests.
+    registration.surfaces[0].descriptor.required_action = None;
     state
         .surface_proxy_deps
         .registry

@@ -143,6 +143,69 @@ fn plugin_registration_with_required_action(
     }
 }
 
+/// Plugin-kind registration whose **descriptor** is action-gated while the
+/// member interaction is ungated — the shape the descriptor-gate fix closes
+/// for provider-origin callers. Plugin-kind is load-bearing: admission
+/// (task 1) rejects the service-kind version of this shape, so a service
+/// fixture here would assert a state no real registration can reach.
+fn plugin_registration_descriptor_gated(
+    provider_id: &str,
+    provider_invocable: bool,
+) -> surfaces::SurfaceRegistration {
+    surfaces::SurfaceRegistration {
+        provider: surfaces::ProviderIdentity {
+            provider_id: provider_id.to_string(),
+            provider_kind: surfaces::ProviderKind::Plugin,
+            provider_namespace: "plugin".to_string(),
+        },
+        framework_generation: surfaces::FrameworkGeneration::new(1, 0),
+        capabilities: surfaces::CapabilitySet::from_capabilities([
+            surfaces::Capability::TextBlockNode,
+            surfaces::Capability::UniversalTargeting,
+            surfaces::Capability::MutationAction,
+        ]),
+        effective_tenant_binding: surfaces::EffectiveTenantBinding {
+            scope: surfaces::Scope::Tenant,
+            tenant_id: Some(tenant_id().to_string()),
+        },
+        surfaces: vec![surfaces::RegisteredSurface {
+            descriptor: surfaces::SurfaceDescriptor::builder()
+                .surface_id(surfaces::SurfaceId::new("proxmox.guest.desc_gated_panel").unwrap())
+                .label("Desc-Gated Panel")
+                .priority(100)
+                .slot(surfaces::SLOT_SETTINGS_BELOW_GLOBAL)
+                .scope(surfaces::Scope::Global)
+                .targeting(surfaces::Targeting::Universal)
+                .required_action(actions::HOSTS_READ)
+                .provider_kind(surfaces::ProviderKind::Plugin)
+                .required_capabilities(surfaces::CapabilitySet::from_capabilities([
+                    surfaces::Capability::TextBlockNode,
+                    surfaces::Capability::MutationAction,
+                    surfaces::Capability::UniversalTargeting,
+                ]))
+                .root_node(surfaces::SurfaceNode::TextBlock {
+                    text: "ok".to_string(),
+                })
+                .build(),
+            interactions: vec![{
+                let mut i = surfaces::InteractionDescriptor::new(
+                    surfaces::InteractionId::new("refresh").unwrap(),
+                    surfaces::InteractionKind::MutationAction,
+                    "Action",
+                    surfaces::InteractionTransport::ControllerLocal,
+                );
+                i.provider_invocable = provider_invocable;
+                i.input_schema = Some(surfaces::SchemaContract::Object);
+                i.result_schema = Some(surfaces::SchemaContract::Object);
+                i.timeout_seconds = Some(30);
+                i
+            }],
+            data_sources: vec![],
+        }],
+        encryption_metadata: None,
+    }
+}
+
 fn registry() -> SurfaceRegistry {
     SurfaceRegistry::new(SurfaceRegistryConfig {
         allowed_controller_queries: HashSet::new(),
@@ -558,6 +621,9 @@ async fn invoke_provider_origin_can_route_to_another_provider() {
     let service_a = Uuid::now_v7();
     let mut reg_a = registration("service.provider-a", tenant_id());
     reg_a.surfaces[0].interactions[0].required_action = None;
+    // Routing/audit-focused test: fully ungated fixture. The gated-descriptor
+    // provider-origin class is covered by the descriptor-gate tests.
+    reg_a.surfaces[0].descriptor.required_action = None;
     registry
         .register_service(service_a, "uptrakit-agent-ssh", Some(tenant_id()), reg_a)
         .expect("service.provider-a registration should succeed");
@@ -565,6 +631,9 @@ async fn invoke_provider_origin_can_route_to_another_provider() {
     let service_b = Uuid::now_v7();
     let mut reg_b = registration("service.provider-b", tenant_id());
     reg_b.surfaces[0].interactions[0].required_action = None;
+    // Routing/audit-focused test: fully ungated fixture. The gated-descriptor
+    // provider-origin class is covered by the descriptor-gate tests.
+    reg_b.surfaces[0].descriptor.required_action = None;
     registry
         .register_service(service_b, "uptrakit-agent-ssh", Some(tenant_id()), reg_b)
         .expect("service.provider-b registration should succeed");
@@ -820,6 +889,9 @@ async fn invoke_provider_origin_self_target_when_target_none() {
     let service_a = Uuid::now_v7();
     let mut reg_a = registration("service.provider-a", tenant_id());
     reg_a.surfaces[0].interactions[0].required_action = None;
+    // Routing/audit-focused test: fully ungated fixture. The gated-descriptor
+    // provider-origin class is covered by the descriptor-gate tests.
+    reg_a.surfaces[0].descriptor.required_action = None;
     registry
         .register_service(service_a, "uptrakit-agent-ssh", Some(tenant_id()), reg_a)
         .expect("service.provider-a registration should succeed");
@@ -1132,4 +1204,156 @@ async fn provider_proxied_repeated_cancellation_does_not_accumulate_budget() {
         proxy.pending.lock().in_flight_per_provider.is_empty(),
         "cancelled requests must not accumulate provider budget"
     );
+}
+
+/// The class the descriptor-gate fix closes: descriptor-gated surface,
+/// ungated interaction, no provider_invocable. RED (invoke succeeds) until
+/// the gate consults descriptor_required_action; GREEN (PermissionDenied)
+/// after.
+#[tokio::test(start_paused = true)]
+async fn invoke_provider_origin_denied_for_descriptor_gated_surface() {
+    let registry = registry();
+    let service_connections = ServiceConnectionRegistry::new();
+    let proxy = SurfaceProxy::new()
+        .with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new_without_database(
+            Arc::new(TestPluginInvoker {
+                response: serde_json::json!({"routed": true}),
+                seen: Arc::new(Mutex::new(Vec::new())),
+            }),
+        )))
+        .with_provider_visibility(Arc::new(AllProvidersVisible));
+
+    let service_a = Uuid::now_v7();
+    registry
+        .register_service(
+            service_a,
+            "uptrakit-agent-ssh",
+            Some(tenant_id()),
+            registration("service.provider-a", tenant_id()),
+        )
+        .expect("service.provider-a registration should succeed");
+
+    registry
+        .bootstrap_plugin(plugin_registration_descriptor_gated("provider-b", false))
+        .expect("provider-b registration should succeed");
+
+    let request = SurfaceInvokeRequest {
+        method: None,
+        tenant_id: tenant_id(),
+        surface_id: "proxmox.guest.desc_gated_panel".to_string(),
+        interaction_id: "refresh".to_string(),
+        idempotency_key: "idem-desc-gated-denied".to_string(),
+        target_provider_id: Some("provider-b".to_string()),
+        caller_origin: SurfaceCallerOrigin::Provider {
+            service_id: service_a,
+        },
+        params: serde_json::Map::new(),
+        encrypted_sensitive_params: None,
+    };
+
+    let result = proxy
+        .invoke(
+            &service_connections,
+            &registry,
+            request,
+            Some(Duration::from_secs(5)),
+        )
+        .await;
+    assert!(matches!(
+        result,
+        Err(SurfaceProxyError::PermissionDenied(_))
+    ));
+}
+
+/// Escape hatch intact under the corrected gate: same descriptor-gated
+/// shape, interaction opting in via provider_invocable (plugin-kind — the
+/// only kind admission allows to combine the flag with a gate).
+#[tokio::test(start_paused = true)]
+async fn invoke_provider_origin_allowed_for_descriptor_gated_surface_when_provider_invocable() {
+    let registry = registry();
+    let service_connections = ServiceConnectionRegistry::new();
+    let proxy = SurfaceProxy::new()
+        .with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new_without_database(
+            Arc::new(TestPluginInvoker {
+                response: serde_json::json!({"routed": true}),
+                seen: Arc::new(Mutex::new(Vec::new())),
+            }),
+        )))
+        .with_provider_visibility(Arc::new(AllProvidersVisible));
+
+    let service_a = Uuid::now_v7();
+    registry
+        .register_service(
+            service_a,
+            "uptrakit-agent-ssh",
+            Some(tenant_id()),
+            registration("service.provider-a", tenant_id()),
+        )
+        .expect("service.provider-a registration should succeed");
+
+    registry
+        .bootstrap_plugin(plugin_registration_descriptor_gated("provider-b", true))
+        .expect("provider-b registration should succeed");
+
+    let request = SurfaceInvokeRequest {
+        method: None,
+        tenant_id: tenant_id(),
+        surface_id: "proxmox.guest.desc_gated_panel".to_string(),
+        interaction_id: "refresh".to_string(),
+        idempotency_key: "idem-desc-gated-invocable".to_string(),
+        target_provider_id: Some("provider-b".to_string()),
+        caller_origin: SurfaceCallerOrigin::Provider {
+            service_id: service_a,
+        },
+        params: serde_json::Map::new(),
+        encrypted_sensitive_params: None,
+    };
+
+    let response = proxy
+        .invoke(
+            &service_connections,
+            &registry,
+            request,
+            Some(Duration::from_secs(5)),
+        )
+        .await
+        .expect("provider_invocable interaction on a gated descriptor should allow provider-origin invoke");
+    assert!(response.success);
+}
+
+/// A service invoking its own descriptor-gated surface (interaction ungated,
+/// no provider_invocable — admission forbids the flag for this shape) is
+/// denied: the descriptor gate applies to self-targeted provider-origin
+/// calls too, and services have no escape hatch under a gated descriptor.
+#[tokio::test(start_paused = true)]
+async fn invoke_provider_origin_self_target_denied_for_descriptor_gated_surface() {
+    let registry = registry();
+    let service_connections = ServiceConnectionRegistry::new();
+    let proxy = Arc::new(SurfaceProxy::new());
+
+    let service_a = Uuid::now_v7();
+    let mut reg_a = registration("service.provider-a", tenant_id());
+    reg_a.surfaces[0].interactions[0].required_action = None; // descriptor gate stays
+    registry
+        .register_service(service_a, "uptrakit-agent-ssh", Some(tenant_id()), reg_a)
+        .expect("service.provider-a registration should succeed");
+
+    let mut request = request_with_idem("idem-self-target-desc-gated");
+    request.target_provider_id = None;
+    request.caller_origin = SurfaceCallerOrigin::Provider {
+        service_id: service_a,
+    };
+
+    let result = proxy
+        .invoke(
+            &service_connections,
+            &registry,
+            request,
+            Some(Duration::from_secs(5)),
+        )
+        .await;
+    assert!(matches!(
+        result,
+        Err(SurfaceProxyError::PermissionDenied(_))
+    ));
 }

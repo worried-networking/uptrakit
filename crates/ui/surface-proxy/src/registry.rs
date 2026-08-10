@@ -1157,6 +1157,22 @@ impl SurfaceRegistry {
             .unwrap_or(0)
     }
 
+    #[cfg(test)]
+    fn provider_surface_descriptor_actions(&self, provider_id: &str) -> Vec<Option<Action>> {
+        self.inner
+            .lock()
+            .providers
+            .get(provider_id)
+            .map(|entry| {
+                entry
+                    .surface_actions
+                    .iter()
+                    .map(|set| set.descriptor.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     #[cfg(any(test, feature = "testing"))]
     pub fn register_provider_for_test(
         &self,
@@ -2139,6 +2155,29 @@ mod tests {
         assert_eq!(
             resolved.interaction.http_method,
             surfaces::InteractionHttpMethod::Post
+        );
+    }
+
+    /// `descriptor_required_action`/`interaction_required_action` are
+    /// security-load-bearing for the provider-origin gate; a future refactor
+    /// that stores `surface_actions` apart from `surfaces` must not skew the
+    /// index alignment (or silently drop a gate to `None` — which the gate
+    /// would read as "ungated" and allow).
+    #[test]
+    fn surface_actions_mirror_registered_descriptor_gates() {
+        let registry = registry();
+        let registration = registration_for_service("service.provider-a", tenant_a());
+        registry
+            .register_service(
+                Uuid::now_v7(),
+                "uptrakit-agent-ssh",
+                Some(tenant_a()),
+                registration,
+            )
+            .expect("registration should succeed");
+        assert_eq!(
+            registry.provider_surface_descriptor_actions("service.provider-a"),
+            vec![Some(actions::SOFTWARE_READ)]
         );
     }
 
