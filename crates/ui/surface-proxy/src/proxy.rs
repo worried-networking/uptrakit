@@ -14,14 +14,12 @@ use parking_lot::Mutex;
 
 mod bookkeeping;
 mod controller_local;
+mod dispatch;
 mod idempotency;
 mod local_executor;
 mod resolution;
 mod validation;
-use bookkeeping::{
-    CachedIdempotent, IdempotencyGuard, IdempotencyKey, PendingGuard, PendingRegistration,
-    PendingState,
-};
+use bookkeeping::{CachedIdempotent, IdempotencyKey, PendingState};
 pub use controller_local::map_surface_action_error;
 pub use controller_local::{CONTROLLER_LOCAL_EXECUTOR_TABLE, ExecutorTier};
 use idempotency::{build_idempotency_key, fingerprint_request};
@@ -32,10 +30,7 @@ pub use local_executor::{
 use resolution::{
     caller_origin_for_request, implicit_target_provider_for_request, map_lookup_error,
 };
-use validation::{
-    resolve_timeout, validate_input_schema, validate_result_limits, validate_result_schema,
-    validate_sensitive_fields,
-};
+use validation::{resolve_timeout, validate_input_schema, validate_sensitive_fields};
 
 #[cfg(test)]
 mod tests;
@@ -275,141 +270,27 @@ impl SurfaceProxy {
 
         match &resolved.interaction.transport {
             surfaces::InteractionTransport::ControllerLocal => {
-                if matches!(
-                    resolved.interaction.transport,
-                    surfaces::InteractionTransport::ControllerLocal
-                ) && resolved.provider_kind != surfaces::ProviderKind::Plugin
-                {
-                    return Err(SurfaceProxyError::SchemaValidationFailed(
-                        "controller_local transport is only supported for plugin providers"
-                            .to_string(),
-                    ));
-                }
-
-                let request_id = Uuid::now_v7();
-                {
-                    let mut state = self.pending.lock();
-                    state.cleanup_expired();
-                    state.ensure_idempotency_available(&idem_key, request_fingerprint)?;
-                    state.reserve_idempotency(
-                        idem_key.clone(),
-                        request_fingerprint,
-                        request_id,
-                        std::time::Instant::now() + timeout,
-                    );
-                }
-
-                let _idem_guard =
-                    IdempotencyGuard::new(Arc::clone(&self.pending), idem_key.clone(), request_id);
-
-                let local_request = surfaces::SurfaceActionRequest {
-                    request_id,
-                    tenant_id: request.tenant_id.to_string(),
-                    surface_id: resolved.descriptor.surface_id.clone(),
-                    interaction_id: resolved.interaction.interaction_id.clone(),
-                    method: resolved.interaction.effective_http_method(),
-                    idempotency_key: request.idempotency_key.clone(),
-                    target_provider_id: Some(resolved.provider_id.clone()),
+                self.execute_local_invocation(
+                    &resolved,
+                    &request,
                     caller_origin,
-                    params: request.params.clone(),
-                    encrypted_sensitive_params: request.encrypted_sensitive_params.clone(),
-                };
-                let local_result = self.local_executor.execute(&resolved, &local_request).await;
-                let result = local_result?;
-                validate_result_schema(&resolved.interaction, Some(&result))?;
-                validate_result_limits(&result)?;
-                let response = surfaces::SurfaceActionResponse {
-                    request_id: local_request.request_id,
-                    success: true,
-                    result: Some(result),
-                    error: None,
-                };
-                self.store_cached_response(idem_key, request_fingerprint, response.clone());
-                Ok(response)
+                    idem_key,
+                    request_fingerprint,
+                    timeout,
+                )
+                .await
             }
             surfaces::InteractionTransport::ProviderProxied => {
-                let Some(service_id) = resolved.service_id else {
-                    return Err(SurfaceProxyError::NoProvider);
-                };
-                if !service_connections.is_connected(&service_id).await
-                    || service_connections.is_yielded(&service_id)
-                {
-                    return Err(SurfaceProxyError::NoProvider);
-                }
-
-                let request_id = Uuid::now_v7();
-                let (tx, rx) = tokio::sync::oneshot::channel();
-
-                {
-                    let mut state = self.pending.lock();
-                    state.cleanup_expired();
-                    state.ensure_provider_not_rate_limited(&resolved.provider_id)?;
-                    state.ensure_budget(&resolved.provider_id, request.tenant_id)?;
-                    state.ensure_idempotency_available(&idem_key, request_fingerprint)?;
-                    state.register_pending(PendingRegistration {
-                        request_id,
-                        provider_id: &resolved.provider_id,
-                        tenant_id: request.tenant_id,
-                        idempotency_key: idem_key.clone(),
-                        request_fingerprint,
-                        deadline: std::time::Instant::now() + timeout,
-                        sender: tx,
-                    });
-                }
-
-                let _cleanup_guard = PendingGuard::new(Arc::clone(&self.pending), request_id);
-
-                let outbound = surfaces::SurfaceActionRequest {
-                    request_id,
-                    tenant_id: request.tenant_id.to_string(),
-                    surface_id: resolved.descriptor.surface_id.clone(),
-                    interaction_id: resolved.interaction.interaction_id.clone(),
-                    method: resolved.interaction.effective_http_method(),
-                    idempotency_key: request.idempotency_key.clone(),
-                    target_provider_id: Some(resolved.provider_id.clone()),
+                self.execute_proxied_invocation(
+                    service_connections,
+                    &resolved,
+                    &request,
                     caller_origin,
-                    params: request.params.clone(),
-                    encrypted_sensitive_params: request.encrypted_sensitive_params.clone(),
-                };
-
-                let sent = service_connections
-                    .send(
-                        &service_id,
-                        ControllerMessage::SurfaceActionRequest(outbound),
-                    )
-                    .await;
-                if !sent {
-                    self.fail_pending_request(&resolved.provider_id, request_id);
-                    return Err(SurfaceProxyError::SendFailed);
-                }
-
-                let response = match tokio::time::timeout(timeout, rx).await {
-                    Ok(Ok(response)) => response,
-                    Ok(Err(_)) => {
-                        self.record_provider_failure(&resolved.provider_id);
-                        return Err(SurfaceProxyError::ServiceDisconnected);
-                    }
-                    Err(_) => {
-                        self.timeout_pending_request(
-                            service_connections,
-                            service_id,
-                            &resolved.provider_id,
-                            request_id,
-                        )
-                        .await;
-                        return Err(SurfaceProxyError::Timeout);
-                    }
-                };
-
-                if response.success {
-                    validate_result_schema(&resolved.interaction, response.result.as_ref())?;
-                    if let Some(result) = response.result.as_ref() {
-                        validate_result_limits(result)?;
-                    }
-                }
-
-                self.store_cached_response(idem_key, request_fingerprint, response.clone());
-                Ok(response)
+                    idem_key,
+                    request_fingerprint,
+                    timeout,
+                )
+                .await
             }
             &_ => {
                 tracing::warn!("unknown interaction transport — update match arm");
