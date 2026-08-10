@@ -40,4 +40,4 @@
 - [0037 — Discovery never overwrites detected versions of active items](0037-discovery-never-overwrites-detected-versions-of-active-items.md)
 - [0038 — Type-state request body validation via Unvalidated extractor](0038-type-state-request-body-validation-via-unvalidated-extractor.md)
 - [0039 — Replace Enum RBAC With Action String Grants And A Central Access Engine](0039-replace-enum-rbac-with-action-string-grants-and-a-central-access-engine.md)
-- [40. Provider-origin surface invocation enforces the descriptor action gate](0040-provider-origin-surface-invocation-enforces-the-descriptor-action-gate.md)
+- [0040 — Provider-Origin Surface Invocation Enforces the Descriptor Action Gate](0040-provider-origin-surface-invocation-enforces-the-descriptor-action-gate.md)

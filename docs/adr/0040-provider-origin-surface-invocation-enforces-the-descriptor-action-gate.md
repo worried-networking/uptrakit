@@ -1,4 +1,4 @@
-# 40. Provider-origin surface invocation enforces the descriptor action gate
+# 0040 — Provider-Origin Surface Invocation Enforces the Descriptor Action Gate
 
 Date: 2026-08-10
 
