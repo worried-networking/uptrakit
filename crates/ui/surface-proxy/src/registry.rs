@@ -2163,10 +2163,38 @@ mod tests {
     /// that stores `surface_actions` apart from `surfaces` must not skew the
     /// index alignment (or silently drop a gate to `None` — which the gate
     /// would read as "ungated" and allow).
+    ///
+    /// Two surfaces are registered — the first gated with `SOFTWARE_READ`,
+    /// the second left ungated (`None`) — and the positional `assert_eq!`
+    /// on the full vector fails on any reorder, off-by-one, or a gate
+    /// silently dropped to `None`. The second surface uses a distinct
+    /// `surface_id` and a distinct slot (`settings.below.global`) from the
+    /// first (`software.tabs`).
     #[test]
     fn surface_actions_mirror_registered_descriptor_gates() {
         let registry = registry();
-        let registration = registration_for_service("service.provider-a", tenant_a());
+        let mut registration = registration_for_service("service.provider-a", tenant_a());
+        registration.surfaces.push(surfaces::RegisteredSurface {
+            descriptor: surfaces::SurfaceDescriptor::builder()
+                .surface_id(surfaces::SurfaceId::new("ssh.guest.panel.extra").unwrap())
+                .label("SSH Guest Panel Extra")
+                .priority(100)
+                .slot(surfaces::SLOT_SETTINGS_BELOW_GLOBAL)
+                .scope(surfaces::Scope::Tenant)
+                .targeting(surfaces::Targeting::Targeted)
+                .provider_kind(surfaces::ProviderKind::Service)
+                .required_capabilities(surfaces::CapabilitySet::from_capabilities([
+                    surfaces::Capability::TextBlockNode,
+                    surfaces::Capability::TargetedTargeting,
+                    surfaces::Capability::MutationAction,
+                ]))
+                .root_node(surfaces::SurfaceNode::TextBlock {
+                    text: "ok-extra".to_string(),
+                })
+                .build(),
+            interactions: vec![],
+            data_sources: vec![],
+        });
         registry
             .register_service(
                 Uuid::now_v7(),
@@ -2177,7 +2205,8 @@ mod tests {
             .expect("registration should succeed");
         assert_eq!(
             registry.provider_surface_descriptor_actions("service.provider-a"),
-            vec![Some(actions::SOFTWARE_READ)]
+            vec![Some(actions::SOFTWARE_READ), None],
+            "surface_actions must mirror both registered surfaces positionally"
         );
     }
 

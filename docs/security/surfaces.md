@@ -45,9 +45,9 @@ unauthorized caller cannot probe an interaction's registered method set by compa
 methods. See [Shared Surface API](../api/surfaces.md#resolution-order-and-405-semantics) for the full resolution
 order and the two distinct `Allow`-header shapes.
 
-Both invoke paths — HTTP and provider-origin — now enforce the descriptor action check in addition to the
-interaction action check; previously only the HTTP path did (see [Provider-origin
-invocation](#provider-origin-invocation)).
+Both invoke paths — HTTP and provider-origin — enforce the descriptor action check in addition to the interaction
+action check (see [Provider-origin invocation](#provider-origin-invocation); history in
+[ADR-0040](../adr/0040-provider-origin-surface-invocation-enforces-the-descriptor-action-gate.md)).
 
 Read and invoke enforce the dynamic descriptor/interaction actions in-handler via `enforce_required_action`, which
 runs the resolved `Action` through `AccessEngine`: `None` action allows; `Ready` authority + `Allow` decision

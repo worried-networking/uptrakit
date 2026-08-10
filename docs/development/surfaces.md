@@ -322,8 +322,10 @@ The tenant-facing `SurfaceRegistry` methods (`list_surfaces_for_tenant`,
 parameter — a caller cannot resolve without deciding plugin visibility. Production callers pass the
 controller's `PluginEffectiveEnablement` (stored on `SurfaceProxyDeps`); `SurfaceProxy` stores the
 filter at construction (`with_provider_visibility`, deny-all default) for its internal resolution,
-which is the only gate on the provider-origin leg. Tests that don't exercise enablement use the
-`testing`-gated `AllProvidersVisible`. Service- and BuiltIn-kind providers are never consulted.
+which is the only _effective-enablement_ gate on the provider-origin leg — the descriptor/interaction
+action gate is separate (see [Provider-origin invocation](../security/surfaces.md#provider-origin-invocation)).
+Tests that don't exercise enablement use the `testing`-gated `AllProvidersVisible`. Service- and
+BuiltIn-kind providers are never consulted.
 
 ### Declaring an interaction's method
 
