@@ -55,8 +55,8 @@ EVENT_RE = re.compile(
 # text.
 PATH_ATTR_RE = re.compile(
     r"#\[path[ \t]*=[ \t]*\"([^\"]+)\"\][ \t\r\n]*"
-    r"(?:#\[(?:[^\[\]]|\[[^\]]*\])*\][ \t\r\n]*)*"
-    r"(?:pub(?:\([^)]*\))?[ \t]+)?mod[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*;"
+    r"(?:#\[(?:\"[^\"]*\"|[^\[\]]|\[[^\]]*\])*\][ \t\r\n]*)*"
+    r"(?:pub(?:\([^)]*\))?[ \t]+)?mod[ \t\r\n]+([A-Za-z_][A-Za-z0-9_]*)[ \t\r\n]*;"
 )
 # include!("literal.rs") — treat the literal as a visit.
 INCLUDE_RE = re.compile(r"include!\s*\(\s*\"([^\"]+\.rs)\"\s*\)")
@@ -135,7 +135,11 @@ def sanitize(src: str, blank_strings: bool = True) -> str:
             # brace/mod depth tracking in `visit()`, and the interior is
             # never meaningful to PATH_ATTR_RE/INCLUDE_RE.
             if i + 1 < n and src[i + 1] == "\\":
-                j = src.find("'", i + 2)
+                # Start the search at i+3: in `'\''` the escaped quote sits at
+                # i+2, and finding it would leave the real closing quote
+                # unconsumed — a stray `'` that then mis-consumes the text
+                # after it as another char literal.
+                j = src.find("'", i + 3)
                 if j == -1:
                     i = n
                 else:
@@ -179,6 +183,13 @@ def load_allowlist(path: Path) -> tuple[set[str], set[str], str | None]:
                 set(),
                 set(),
                 f"allowlist entry {entry!r} has both `path` and `decl` — use two separate entries",
+            )
+        key = "path" if has_path else "decl" if has_decl else None
+        if key is not None and not isinstance(entry[key], str):
+            return (
+                set(),
+                set(),
+                f"allowlist entry {entry!r} has a non-string `{key}`",
             )
         if has_path:
             allowed_paths.add(entry["path"])

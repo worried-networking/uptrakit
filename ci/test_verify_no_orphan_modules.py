@@ -1,6 +1,7 @@
 """Unit tests for ci/verify_no_orphan_modules.py.
 
-Fixtures live in ci/testdata/no_orphan_modules/{pass,fail}. Each test copies a
+Fixtures live in ci/testdata/no_orphan_modules/ — `pass` and `fail/*` plus
+per-scenario `pass_*` trees. Each test copies a
 fixture tree into a throwaway git repo (the gate enumerates candidates via
 `git ls-files`, so fixture files must be tracked somewhere) and runs the gate
 as a subprocess, asserting on exit code and message prefixes.
@@ -169,6 +170,22 @@ class NoOrphanModulesGateTests(unittest.TestCase):
         self.assertIn("both", result.stderr)
         self.assertIn("path", result.stderr)
         self.assertIn("decl", result.stderr)
+
+    def test_non_string_allowlist_value_is_config_error(self):
+        # A malformed (non-string) `decl` must be reported as a config error
+        # (exit 2). An uncaught AttributeError would exit 1 instead — the
+        # gate's "orphan violations" code — misreporting a config mistake as
+        # a code violation.
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".toml", delete=False
+        ) as allowlist:
+            allowlist.write(
+                '[[allow]]\ndecl = 42\nreason = "non-string decl"\n'
+            )
+            allowlist_path = allowlist.name
+        result = run_gate(FIXTURES / "pass", ["--allowlist", allowlist_path])
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("non-string `decl`", result.stderr)
 
 
 if __name__ == "__main__":
