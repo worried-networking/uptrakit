@@ -7,7 +7,6 @@
     reason = "fire-and-forget send intentionally drops the result"
 )]
 
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -15,6 +14,7 @@ use parking_lot::Mutex;
 
 mod bookkeeping;
 mod controller_local;
+mod idempotency;
 mod local_executor;
 mod resolution;
 mod validation;
@@ -24,6 +24,7 @@ use bookkeeping::{
 };
 pub use controller_local::map_surface_action_error;
 pub use controller_local::{CONTROLLER_LOCAL_EXECUTOR_TABLE, ExecutorTier};
+use idempotency::{build_idempotency_key, fingerprint_request};
 pub use local_executor::{
     PluginSurfaceActionInvoker, PluginSurfaceLocalExecutor, SurfaceInvokerContext,
     SurfaceLocalActionExecutor,
@@ -520,42 +521,4 @@ impl SurfaceProxy {
             },
         );
     }
-}
-
-fn build_idempotency_key(
-    request: &SurfaceInvokeRequest,
-    caller_origin: &surfaces::CallerOrigin,
-) -> IdempotencyKey {
-    IdempotencyKey {
-        tenant_id: request.tenant_id,
-        surface_id: request.surface_id.clone(),
-        interaction_id: request.interaction_id.clone(),
-        caller_key: match caller_origin {
-            surfaces::CallerOrigin::UserSession {
-                user_id,
-                session_id,
-            } => format!("user:{user_id}:{session_id}"),
-            surfaces::CallerOrigin::BuiltInSystem { principal } => {
-                format!("system:{principal}")
-            }
-            surfaces::CallerOrigin::Provider { provider_id } => {
-                format!("provider:{provider_id}")
-            }
-        },
-        idempotency_key: request.idempotency_key.clone(),
-    }
-}
-
-fn fingerprint_request(
-    params: &serde_json::Map<String, serde_json::Value>,
-    encrypted: Option<&surfaces::EncryptedSensitiveParams>,
-) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    serde_json::Value::Object(params.clone())
-        .to_string()
-        .hash(&mut hasher);
-    encrypted
-        .map(|value| (&value.key_id, &value.ciphertext_b64))
-        .hash(&mut hasher);
-    hasher.finish()
 }
