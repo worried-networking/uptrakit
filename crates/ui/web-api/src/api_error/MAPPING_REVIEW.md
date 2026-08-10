@@ -108,6 +108,7 @@ including intentional pre-migration status-code deltas.
 | `SoftwareItemQueryError::EmptyName` | 400 | static | `software_item.empty_name` | — |
 | `SoftwareItemQueryError::HostNotFound` | 400 | static | `software_item.host_not_found` | Uuid payload not surfaced — generic static message |
 | `SoftwareItemQueryError::PluginConfigNotFound` | 400 | static | `software_item.plugin_config_not_found` | — |
+| `SoftwareItemQueryError::MissingPluginSource` | 400 | static | `software_item.missing_plugin_source` | Route-level match surfaces the dynamic role/ordinal message |
 | `SoftwareItemQueryError::IncompatibleHost` | 400 | dynamic_display | `software_item.incompatible_host` | Human-readable compatibility reason from plugin checks; no secrets |
 | `SoftwareItemQueryError::InvalidPackageIdentifier` | 400 | dynamic_display | `software_item.invalid_package_identifier` | Package ID string from request — caller-controlled |
 | `SoftwareItemQueryError::InvalidConfigOverride` | 400 | dynamic_display | `software_item.invalid_config_override` | Config schema validation message — no secrets |

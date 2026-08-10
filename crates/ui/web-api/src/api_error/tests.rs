@@ -1387,6 +1387,7 @@ const ALL_IMPL_CODES: &[&str] = &[
     "software_item.invalid_execution_site",
     "software_item.invalid_inline_plugin_config",
     "software_item.invalid_package_identifier",
+    "software_item.missing_plugin_source",
     "software_item.not_found",
     "software_item.plugin_assignment_not_found",
     "software_item.plugin_config_not_found",

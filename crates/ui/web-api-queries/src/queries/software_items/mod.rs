@@ -73,6 +73,9 @@ pub enum SoftwareItemQueryError {
     /// A plugin assignment (role, ordinal) does not exist.
     #[error("plugin assignment not found")]
     PluginAssignmentNotFound,
+    /// Zero-source update with no existing assignment to fall back to.
+    #[error("no plugin source in request and no existing assignment: {0}")]
+    MissingPluginSource(String),
     /// Merge preview/execution validation failed.
     #[error("invalid merge request: {0}")]
     InvalidMergeRequest(String),
@@ -114,6 +117,10 @@ impl SoftwareItemQueryError {
             Self::PluginConfigNotFound => (
                 uptrakit_audit_log::AuditOutcome::ValidationFailed,
                 "software_item.plugin_config_not_found",
+            ),
+            Self::MissingPluginSource(_) => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "software_item.missing_plugin_source",
             ),
             Self::DuplicateHostAssignment => (
                 uptrakit_audit_log::AuditOutcome::ValidationFailed,

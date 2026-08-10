@@ -398,6 +398,12 @@ impl From<Report<SoftwareItemQueryError>> for ApiError {
                 "software_item.plugin_config_not_found",
                 None,
             ),
+            MissingPluginSource(_) => ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "No plugin source in the request and no existing assignment to fall back to.",
+                "software_item.missing_plugin_source",
+                None,
+            ),
             IncompatibleHost(_) => ApiError::new(
                 StatusCode::BAD_REQUEST,
                 // SAFETY: IncompatibleHost contains a human-readable reason

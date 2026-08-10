@@ -157,7 +157,19 @@ pub async fn assign_hosts(
             item_queries::SoftwareItemQueryError::DuplicateHostAssignment => {
                 error_response(StatusCode::CONFLICT, "Duplicate host assignment")
             }
-            _ => error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
+            item_queries::SoftwareItemQueryError::MissingPluginSource(msg) => {
+                error_response(StatusCode::BAD_REQUEST, msg.as_str())
+            }
+            item_queries::SoftwareItemQueryError::EmptyName
+            | item_queries::SoftwareItemQueryError::DuplicateItem
+            | item_queries::SoftwareItemQueryError::InvalidInlinePluginConfig(_)
+            | item_queries::SoftwareItemQueryError::InvalidExecutionSite(_)
+            | item_queries::SoftwareItemQueryError::PluginAssignmentNotFound
+            | item_queries::SoftwareItemQueryError::InvalidMergeRequest(_)
+            | item_queries::SoftwareItemQueryError::IncompatibleHost(_)
+            | item_queries::SoftwareItemQueryError::Db(_) => {
+                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            }
         };
     }
 
@@ -548,7 +560,19 @@ pub async fn update_host_assignment(
             item_queries::SoftwareItemQueryError::DuplicateHostAssignment => {
                 error_response(StatusCode::CONFLICT, "Duplicate host assignment")
             }
-            _ => error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
+            item_queries::SoftwareItemQueryError::MissingPluginSource(msg) => {
+                error_response(StatusCode::BAD_REQUEST, msg.as_str())
+            }
+            item_queries::SoftwareItemQueryError::EmptyName
+            | item_queries::SoftwareItemQueryError::DuplicateItem
+            | item_queries::SoftwareItemQueryError::InvalidInlinePluginConfig(_)
+            | item_queries::SoftwareItemQueryError::InvalidExecutionSite(_)
+            | item_queries::SoftwareItemQueryError::PluginAssignmentNotFound
+            | item_queries::SoftwareItemQueryError::InvalidMergeRequest(_)
+            | item_queries::SoftwareItemQueryError::IncompatibleHost(_)
+            | item_queries::SoftwareItemQueryError::Db(_) => {
+                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            }
         };
     }
 
