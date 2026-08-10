@@ -8,7 +8,9 @@ use uptrakit_wire::{ControllerMessage, surfaces};
 
 use crate::registry::ResolvedSurfaceAction;
 
-use super::bookkeeping::{IdempotencyGuard, IdempotencyKey, PendingGuard, PendingRegistration};
+use super::bookkeeping::{
+    CachedIdempotent, IdempotencyGuard, IdempotencyKey, PendingGuard, PendingRegistration,
+};
 use super::validation::{validate_result_limits, validate_result_schema};
 use super::{SurfaceInvokeRequest, SurfaceProxy, SurfaceProxyError};
 
@@ -171,5 +173,85 @@ impl SurfaceProxy {
 
         self.store_cached_response(idem_key, request_fingerprint, response.clone());
         Ok(response)
+    }
+
+    pub fn complete(&self, request_id: Uuid, response: surfaces::SurfaceActionResponse) {
+        let sender = self.pending.lock().take_pending(&request_id);
+        if let Some(sender) = sender {
+            let _ = sender.send(response);
+        }
+    }
+
+    async fn timeout_pending_request(
+        &self,
+        service_connections: &ServiceConnectionRegistry,
+        service_id: Uuid,
+        provider_id: &str,
+        request_id: Uuid,
+    ) {
+        let removed = {
+            let mut state = self.pending.lock();
+            state.remove_pending(&request_id)
+        };
+        if removed {
+            let _ = service_connections
+                .send(
+                    &service_id,
+                    ControllerMessage::SurfaceActionCancel(surfaces::SurfaceActionCancel {
+                        request_id,
+                        target_provider_id: provider_id.to_string(),
+                        reason: surfaces::SurfaceActionCancelReason::Timeout,
+                    }),
+                )
+                .await;
+            self.record_provider_failure(provider_id);
+        }
+    }
+
+    fn fail_pending_request(&self, provider_id: &str, request_id: Uuid) {
+        let removed = {
+            let mut state = self.pending.lock();
+            state.remove_pending(&request_id)
+        };
+        if removed {
+            self.record_provider_failure(provider_id);
+        }
+    }
+
+    fn record_provider_failure(&self, provider_id: &str) {
+        let mut state = self.pending.lock();
+        state.record_provider_failure(provider_id);
+    }
+
+    pub(super) fn try_get_cached_response(
+        &self,
+        key: &IdempotencyKey,
+        request_fingerprint: u64,
+    ) -> Option<surfaces::SurfaceActionResponse> {
+        let mut state = self.pending.lock();
+        state.cleanup_expired();
+        let cached = state.idempotency_cache.get(key)?;
+        if cached.request_fingerprint == request_fingerprint {
+            return Some(cached.response.clone());
+        }
+        None
+    }
+
+    fn store_cached_response(
+        &self,
+        key: IdempotencyKey,
+        request_fingerprint: u64,
+        response: surfaces::SurfaceActionResponse,
+    ) {
+        let mut state = self.pending.lock();
+        state.cleanup_expired();
+        state.idempotency_cache.insert(
+            key,
+            CachedIdempotent {
+                request_fingerprint,
+                response,
+                stored_at: std::time::Instant::now(),
+            },
+        );
     }
 }
