@@ -62,13 +62,41 @@ PATH_ATTR_RE = re.compile(
 INCLUDE_RE = re.compile(r"include!\s*\(\s*\"([^\"]+\.rs)\"\s*\)")
 
 
+def raw_string_prefix_len(src: str, i: int) -> int:
+    """Length of the raw-string prefix opening at `i`, or 0 if none opens there.
+
+    Covers `r"…"` / `r#"…"#` and their prefixed forms `br"…"` (byte) and
+    `cr"…"` (C string) — all four are raw, so the `\\` escape handling of the
+    ordinary string branch would run past their real terminator. `i` points at
+    the first prefix character. The character before the prefix must not be an
+    identifier character, or an identifier ending in `r` (`for`, `bar`)
+    immediately followed by a string would be misread as a raw string.
+    """
+    n = len(src)
+    j = i
+    if src[j] in "bc":
+        j += 1
+        if j >= n or src[j] != "r":
+            return 0
+    elif src[j] != "r":
+        return 0
+    j += 1  # past the `r`
+    if j >= n or src[j] not in "#\"":
+        return 0
+    prev = src[i - 1] if i > 0 else ""
+    if prev.isalnum() or prev == "_":
+        return 0
+    return j - i
+
+
 def sanitize(src: str, blank_strings: bool = True) -> str:
     """Blank out comment interiors (and, by default, string interiors),
     length-preserved.
 
     Keeps braces inside strings/comments from corrupting module-depth
     tracking. Handles //, nested /* */, "..." with escapes, char literals,
-    lifetimes, and raw strings r#"..."#. Comments are always blanked; pass
+    lifetimes, and raw strings r#"..."# (plus the br/cr prefixed forms).
+    Comments are always blanked; pass
     `blank_strings=False` to keep string-literal content intact (e.g. so
     `PATH_ATTR_RE`/`INCLUDE_RE` can still read a path/filename out of a
     string) while still blanking out any comment content, including a
@@ -100,8 +128,8 @@ def sanitize(src: str, blank_strings: bool = True) -> str:
                     j += 1
             blank(i, j)
             i = j
-        elif c == "r" and i + 1 < n and src[i + 1] in "#\"" and (i == 0 or not src[i - 1].isalnum() and src[i - 1] != "_"):
-            j = i + 1
+        elif c in "brc" and (prefix := raw_string_prefix_len(src, i)):
+            j = i + prefix
             hashes = 0
             while j < n and src[j] == "#":
                 hashes, j = hashes + 1, j + 1

@@ -112,6 +112,17 @@ class NoOrphanModulesGateTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("no-orphan-modules clean", result.stdout)
 
+    def test_prefixed_raw_strings_do_not_corrupt_depth_tracking(self):
+        # Finding 6: sanitize() recognised `r"…"` but rejected the prefixed
+        # raw forms `br"…"` / `cr"…"` (the identifier-boundary guard read the
+        # `b`/`c` as an identifier char). Those literals then took the
+        # escape-aware ordinary-string path, which stops at the first bare
+        # `"` inside `br#"a"b{"#` — leaking the `{` into brace-depth tracking
+        # — and runs past a trailing `\` into the following code.
+        result = run_gate(FIXTURES / "pass_raw_string_prefixes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("no-orphan-modules clean", result.stdout)
+
     def test_path_attr_single_line_and_interleaved_cfg_resolve(self):
         # Finding 2: PATH_ATTR_RE previously required the `#[path]` attribute
         # to be immediately followed by the `mod` line on the very next

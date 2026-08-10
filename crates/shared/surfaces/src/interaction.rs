@@ -585,7 +585,10 @@ mod tests {
             unpermissioned_service.validate_for_provider(ProviderKind::Service),
             Ok(())
         ));
+    }
 
+    #[test]
+    fn validate_for_provider_accepts_provider_invocable_for_builtin() {
         let mut builtin_owned = InteractionDescriptor::new(
             InteractionId::new("act3").unwrap(),
             InteractionKind::DataLoad,
@@ -594,6 +597,9 @@ mod tests {
         );
         builtin_owned.required_action = Some("update_hosts".to_string());
         builtin_owned.provider_invocable = true;
+        // The gate tests `== ProviderKind::Service`, so BuiltIn falls through
+        // permissively like Plugin; pinned here so a later kind-agnostic
+        // rewrite cannot silently tighten it.
         assert!(matches!(
             builtin_owned.validate_for_provider(ProviderKind::BuiltIn),
             Ok(())
