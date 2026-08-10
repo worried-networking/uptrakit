@@ -45,6 +45,10 @@ unauthorized caller cannot probe an interaction's registered method set by compa
 methods. See [Shared Surface API](../api/surfaces.md#resolution-order-and-405-semantics) for the full resolution
 order and the two distinct `Allow`-header shapes.
 
+Both invoke paths — HTTP and provider-origin — now enforce the descriptor action check in addition to the
+interaction action check; previously only the HTTP path did (see [Provider-origin
+invocation](#provider-origin-invocation)).
+
 Read and invoke enforce the dynamic descriptor/interaction actions in-handler via `enforce_required_action`, which
 runs the resolved `Action` through `AccessEngine`: `None` action allows; `Ready` authority + `Allow` decision
 allows; `Ready` + deny returns `403` and increments the `uptrakit_access_denies_total` counter; `Unavailable`
@@ -85,17 +89,20 @@ connection/registration logs show the rejection reason; end users see no trace o
 ### Provider-origin invocation
 
 Provider-origin (service-initiated) calls carry no user; they are gated by tenant scope plus the provider-permission
-gate: an interaction with `required_action` is denied to `CallerOrigin::Provider` unless it sets
-`provider_invocable`.
+gate: provider-origin calls are denied when **the surface descriptor or the interaction** carries `required_action`,
+unless the interaction sets `provider_invocable` — symmetric with the HTTP path's two-layer enforcement.
 
 `provider_invocable = true` means **any same-tenant provider with the `UiSurfaces` capability may invoke the
 interaction, subject only to tenant scope** and the standard idempotency/timeout/rate controls. It is a deliberate
 privilege expansion, accepted because tenant services are co-trusted (enrolled by the tenant admin), writes are
 tenant-scoped and recoverable, and every provider-origin invocation is audit-attributed to the calling service.
 
-Registration admission rejects the flag on permissioned interactions from `Service`-kind providers (Plugin/BuiltIn-owned
-interactions only); per-caller narrowing is deliberately outside the flag — a future optional allowlist field composes
-with it.
+Registration admission rejects the flag on `Service`-kind interactions that carry `required_action` **or** sit on a
+surface whose descriptor carries one (Plugin/BuiltIn-owned interactions only may combine the flag with a gate);
+per-caller narrowing is deliberately outside the flag — a future optional allowlist field composes with it.
+
+A service therefore cannot provider-invoke interactions on its **own** descriptor-gated surfaces — no service-side
+opt-in exists for that shape; such surfaces are user/HTTP-driven only.
 
 Handlers of flagged interactions must not treat provider origin as privileged beyond tenant membership.
 

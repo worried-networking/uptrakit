@@ -105,12 +105,13 @@ In service handlers:
 4. Respond with `ServiceMessage::SurfaceActionResponse`.
 
 Service-initiated action calls are supported via `ServiceMessage::SurfaceActionRequest`, with
-correlated `ControllerMessage::SurfaceActionResponse` — but only when the target interaction has no
-`required_action` or opts in via `InteractionDescriptor.provider_invocable`. `provider_invocable` is
-a wire field with a fail-closed default: omitted on the wire, it deserializes to `false`, so an
-action-gated interaction stays closed to provider-origin calls until it explicitly opts in.
-Registration admission rejects the flag on action-gated interactions owned by `Service`-kind
-providers — only `Plugin`/`BuiltIn` providers may combine it with `required_action`. See
+correlated `ControllerMessage::SurfaceActionResponse` — but only when neither the target interaction
+nor its surface descriptor carries `required_action`, or the interaction opts in via
+`InteractionDescriptor.provider_invocable`. `provider_invocable` is a wire field with a fail-closed
+default: omitted on the wire, it deserializes to `false`, so an action-gated interaction stays closed
+to provider-origin calls until it explicitly opts in. Registration admission rejects the flag on
+`Service`-kind interactions that are action-gated or sit on an action-gated surface descriptor —
+only `Plugin`/`BuiltIn` providers may combine it with `required_action`. See
 [Surface Security](../security/surfaces.md#provider-origin-invocation) for the caller-origin gate.
 
 Authoring: gates are declared from catalog `Action` consts, not permission strings. Two authoring

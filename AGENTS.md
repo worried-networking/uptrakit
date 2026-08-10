@@ -245,8 +245,9 @@ These are non-negotiable design constraints. Do not violate them.
 1. **Surface actions are enforced at read/invoke time.** `required_action` (a catalog `resource:verb` action
    string, parsed to `Action` at registration admission) on surface descriptors and interactions is enforced
    server-side via `AccessEngine` before dispatch, for both plugin- and service-backed surfaces; provider-origin
-   (service-initiated) calls are denied for action-gated interactions unless the interaction opts in via
-   `provider_invocable` — see [Surface Security](docs/security/surfaces.md#provider-origin-invocation).
+   (service-initiated) calls are denied for interactions that are action-gated or sit on an action-gated surface
+   unless the interaction opts in via `provider_invocable` — see
+   [Surface Security](docs/security/surfaces.md#provider-origin-invocation).
 1. **Do not test upstream crate behavior.** Tests verify internal logic only, not dependency behavior (`thiserror` formatting, `serde` roundtrips
    on plain derives, `argon2` randomness). See the decision table in [Testing](docs/development/testing.md).
 1. **Time-dependent tests must use `start_paused = true` — never real sleeps.** A test is time-dependent when it calls a `tokio::time::*` API; use
