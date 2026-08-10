@@ -11,7 +11,8 @@ controller `SurfaceRegistry` and shared frontend renderer.
 - Contract types: `crates/shared/surfaces/`
 - Wire barrel: `crates/shared/wire/src/surfaces.rs`
 - Controller registry and admission: `crates/ui/web-api/src/surface_registry.rs`
-- Controller dispatch/correlation: `crates/ui/surface-proxy/src/proxy.rs` (crate `uptrakit-surface-proxy`)
+- Controller dispatch/correlation: `crates/ui/surface-proxy/src/proxy.rs` (crate `uptrakit-surface-proxy`;
+  submodules `proxy/{validation,resolution,idempotency,bookkeeping,dispatch}.rs`)
 - REST endpoints: `crates/ui/web-api/src/routes/surfaces.rs`
 - Frontend runtime store: `frontend/src/lib/surfaces/registry.svelte.ts`
 - Frontend shared renderer: `frontend/src/lib/components/surfaces/`
@@ -195,7 +196,7 @@ the effective deadline — the declared budget or the caller's override — is v
 1..=300 s and rejected outright, never clamped, when it falls outside that range. Two timers
 enforce deadlines:
 
-- **Controller-side** (`resolve_timeout` in `crates/ui/surface-proxy/src/proxy.rs`): the effective deadline. An
+- **Controller-side** (`resolve_timeout` in `crates/ui/surface-proxy/src/proxy/validation.rs`): the effective deadline. An
   out-of-range value fails invocation with `SchemaValidationFailed` before the request is ever dispatched; an
   in-range value starts the controller's timer, and on elapse the controller abandons the pending request and
   notifies the provider with `SurfaceActionCancel { reason: Timeout }`.
