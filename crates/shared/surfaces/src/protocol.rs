@@ -398,7 +398,28 @@ fn validate_interaction_provider_rules(
 ) -> Result<(), SurfaceRegistrationError> {
     interaction
         .validate_for_provider(surface.descriptor.provider_kind)
-        .map_err(|err| invalid_contract(err.to_string()))
+        .map_err(|err| invalid_contract(err.to_string()))?;
+
+    // Presence-only read of the wire string `descriptor.required_action` is
+    // sound at admission: the registry parses it to a typed `Action` right
+    // after contract validation and rejects unparseable values, so a
+    // present-but-invalid gate never reaches the runtime path. The
+    // `provider_kind` consulted here is trustworthy only via a two-hop pin:
+    // `validate_surface_provider_kind` pins descriptor.provider_kind to the
+    // registration's provider_kind, and the registry's
+    // `validate_registration_basics` pins that to the trusted connection
+    // source_kind. Do not simplify either hop away.
+    if interaction.provider_invocable
+        && surface.descriptor.provider_kind == ProviderKind::Service
+        && surface.descriptor.required_action.is_some()
+    {
+        return Err(invalid_contract(format!(
+            "interaction `{}` in surface `{}` sets provider_invocable under an \
+             action-gated surface descriptor — not allowed for service-registered surfaces",
+            interaction.interaction_id, surface.descriptor.surface_id
+        )));
+    }
+    Ok(())
 }
 
 fn validate_surface_data_source_rules<'a>(

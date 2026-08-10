@@ -111,6 +111,10 @@ pub struct InteractionDescriptor {
     /// this interaction even when `required_action` is set. Fail-closed:
     /// absent on the wire deserializes to `false`. Honored only for
     /// `Plugin`/`BuiltIn`-registered interactions — see `validate_for_provider`.
+    /// For `Service`-kind providers the flag is additionally rejected at
+    /// surface-level admission when the home surface descriptor carries
+    /// `required_action` (enforced in `protocol.rs`'s registration
+    /// validation, not here).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub provider_invocable: bool,
 }
@@ -244,7 +248,11 @@ impl InteractionDescriptor {
     /// Returns
     /// [`InteractionValidationError::ProviderInvocableForbiddenForServiceProviders`]
     /// when a `Service` provider sets `provider_invocable` on an interaction
-    /// that also declares `required_action`.
+    /// that also declares `required_action`. The descriptor-level companion
+    /// rule (rejecting `provider_invocable` when the *surface descriptor*
+    /// carries `required_action`) lives in
+    /// `protocol.rs::validate_interaction_provider_rules`, because this
+    /// method never sees the surface descriptor.
     pub fn validate_for_provider(
         &self,
         provider_kind: ProviderKind,

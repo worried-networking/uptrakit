@@ -2278,6 +2278,58 @@ mod tests {
     }
 
     #[test]
+    fn register_service_rejects_provider_invocable_under_gated_descriptor() {
+        let registry = registry();
+        let mut registration = registration_for_service("service.provider-a", tenant_a());
+        registration.surfaces[0].interactions[0].required_action = None;
+        registration.surfaces[0].interactions[0].provider_invocable = true;
+        let err = registry
+            .register_service(
+                Uuid::now_v7(),
+                "uptrakit-agent-ssh",
+                Some(tenant_a()),
+                registration,
+            )
+            .expect_err("provider_invocable under a gated descriptor must be rejected");
+        let rejection = rejection(err);
+        assert!(
+            rejection.reasons.iter().any(|reason| reason.code
+                == SurfaceProviderRejectionCode::SchemaOrLimitFailure
+                && reason.message.contains("provider_invocable")),
+            "rejection reasons: {:?}",
+            rejection.reasons
+        );
+    }
+
+    #[test]
+    fn register_service_accepts_provider_invocable_when_fully_ungated() {
+        let registry = registry();
+        let mut registration = registration_for_service("service.provider-a", tenant_a());
+        registration.surfaces[0].descriptor.required_action = None;
+        registration.surfaces[0].interactions[0].required_action = None;
+        registration.surfaces[0].interactions[0].provider_invocable = true;
+        registry
+            .register_service(
+                Uuid::now_v7(),
+                "uptrakit-agent-ssh",
+                Some(tenant_a()),
+                registration,
+            )
+            .expect("ungated provider_invocable service interaction must stay registrable");
+    }
+
+    #[test]
+    fn bootstrap_plugin_accepts_provider_invocable_under_gated_descriptor() {
+        let registry = registry();
+        let mut registration = registration_for_plugin_same_surface("plugin.provider-a");
+        registration.surfaces[0].interactions[0].required_action = None;
+        registration.surfaces[0].interactions[0].provider_invocable = true;
+        registry.bootstrap_plugin(registration).expect(
+            "plugin-kind provider_invocable under a gated descriptor must stay registrable",
+        );
+    }
+
+    #[test]
     fn register_service_rejects_unparseable_interaction_required_action() {
         let registry = registry();
         let mut registration = registration_for_service("service.provider-a", tenant_a());
