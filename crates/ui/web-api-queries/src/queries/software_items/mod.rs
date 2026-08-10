@@ -554,7 +554,7 @@ pub use crud::approve_software_item_in_tx;
 
 pub use host_assignments::{
     assign_hosts, assign_hosts_in_tx, load_host_assignment, unassign_host, unassign_host_in_tx,
-    update_host_assignment, update_host_assignment_in_tx,
+    update_host_assignment_in_tx,
 };
 
 pub use merge::{execute_merge_software_items, preview_merge_software_items};

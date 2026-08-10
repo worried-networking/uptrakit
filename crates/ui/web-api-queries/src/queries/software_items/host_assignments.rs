@@ -495,7 +495,23 @@ pub async fn update_host_assignment_in_tx(
 
     let now = OffsetDateTime::now_utc();
 
-    if let Some(pt) = req.plugin_type {
+    let existing_is_type_only = existing_plugin
+        .as_ref()
+        .is_some_and(|ep| ep.plugin_config_id.is_none());
+    let request_is_zero_source =
+        req.plugin_type.is_none() && req.plugin_config_id.is_none() && req.plugin_config.is_none();
+    // "Keep the existing plugin source" must hold for both row shapes: a
+    // zero-source request on a type-only row routes to the type-only branch
+    // with the stored plugin_type (a no-row role/ordinal keeps rejecting).
+    let effective_plugin_type: Option<String> = match req.plugin_type {
+        Some(pt) => Some(pt.to_string()),
+        None if request_is_zero_source && existing_is_type_only => {
+            existing_plugin.as_ref().map(|ep| ep.plugin_type.clone())
+        }
+        None => None,
+    };
+
+    if let Some(pt) = effective_plugin_type {
         // Type-only inline assignment: no plugin_configs row is created.
         let effective_override =
             resolve_type_only_inline_override(&req.config_override, existing_override.clone());
@@ -559,6 +575,14 @@ pub async fn update_host_assignment_in_tx(
             config_override: req.config_override.clone().resolve(existing_override),
             execution_site: effective_exec_site.clone(),
         };
+
+        if synthetic.plugin_config_id.is_none() && synthetic.plugin_config.is_none() {
+            bail!(SoftwareItemQueryError::MissingPluginSource(format!(
+                "role={}, ordinal={}",
+                req.role.as_str(),
+                req.ordinal
+            )));
+        }
 
         let (plugin_config_id, config) =
             resolve_plugin_config_txn(ops, txn, tenant_id, &synthetic).await?;
@@ -688,216 +712,6 @@ pub async fn assign_hosts(
                 now,
             )
             .await?;
-        }
-    }
-
-    txn.commit().await.context_to()?;
-
-    let item = find_active_item(tenant_db.db(), tenant_db.tenant_id(), id)
-        .await
-        .ok_or_else(|| report!(SoftwareItemQueryError::NotFound))?;
-
-    let hosts = try_load_item_hosts(tenant_db.db(), tenant_db.tenant_id(), id).await?;
-    let host_count = hosts.len() as u64;
-    let plugins = load_plugins(tenant_db.db(), id).await;
-    let latest_version = load_latest_version_for_item(tenant_db.db(), id).await;
-    let update_available = hosts.iter().any(|h| h.update_available);
-
-    Ok(build_detail_response(
-        item,
-        plugins,
-        host_count,
-        latest_version,
-        update_available,
-        hosts,
-    ))
-}
-
-/// Update a single role assignment for an existing host-software-item pair.
-#[tracing::instrument(skip_all, fields(%id, %host_id))]
-pub async fn update_host_assignment(
-    ops: &dyn PluginConfigOps,
-    tenant_db: &TenantDb,
-    id: Uuid,
-    host_id: Uuid,
-    req: UpdateHostAssignmentRequest,
-) -> super::Result<SoftwareItemDetailResponse> {
-    find_active_item(tenant_db.db(), tenant_db.tenant_id(), id)
-        .await
-        .ok_or_else(|| report!(SoftwareItemQueryError::NotFound))?;
-
-    let hsi_link = HostSoftwareItem::find()
-        .filter(host_software_item::Column::HostId.eq(host_id))
-        .filter(host_software_item::Column::SoftwareItemId.eq(id))
-        .one(tenant_db.db())
-        .await
-        .context_to()?
-        .ok_or_else(|| report!(SoftwareItemQueryError::NotFound))?;
-    let hsi_id = hsi_link.id;
-
-    let existing_plugin = HostSoftwareItemPlugin::find()
-        .filter(host_software_item_plugin::Column::HostId.eq(host_id))
-        .filter(host_software_item_plugin::Column::SoftwareItemId.eq(id))
-        .filter(host_software_item_plugin::Column::Role.eq(req.role.as_str()))
-        .filter(host_software_item_plugin::Column::Ordinal.eq(req.ordinal))
-        .one(tenant_db.db())
-        .await
-        .context_to()?;
-
-    let (existing_pcid, existing_pkg, existing_override, existing_exec_site) =
-        if let Some(ref ep) = existing_plugin {
-            (
-                ep.plugin_config_id,
-                Some(ep.package_identifier.clone()),
-                parse_stored_config_override(ep.config.clone())?,
-                Some(ep.execution_site.clone()),
-            )
-        } else {
-            (None, None, None, None)
-        };
-
-    let effective_pkg = req
-        .package_identifier
-        .clone()
-        .or(existing_pkg.clone())
-        .unwrap_or_default();
-    let effective_exec_site = req
-        .execution_site
-        .clone()
-        .or(existing_exec_site)
-        .unwrap_or_else(|| "auto".to_string());
-
-    validate_execution_site(&effective_exec_site, &req.role)?;
-
-    // Load host model for compatibility validation.
-    let host_model = tenant_db
-        .find_by_id::<host::Entity, _>(host_id)
-        .filter(host::Column::DeactivatedAt.is_null())
-        .one(tenant_db.db())
-        .await
-        .context_to()?
-        .ok_or_else(|| report!(SoftwareItemQueryError::HostNotFound(host_id)))?;
-
-    let txn = tenant_db.db().begin().await.context_to()?;
-    let now = OffsetDateTime::now_utc();
-
-    if let Some(pt) = req.plugin_type {
-        // Type-only inline assignment: no plugin_configs row is created.
-        let effective_override =
-            resolve_type_only_inline_override(&req.config_override, existing_override.clone());
-
-        validate_assignment(
-            ops,
-            pt.as_str(),
-            None,
-            &effective_pkg,
-            effective_override.as_ref(),
-        )?;
-
-        validate_host_compatibility(
-            ops,
-            &host_model,
-            pt.as_str(),
-            &req.role,
-            &effective_exec_site,
-        )?;
-
-        match existing_plugin {
-            Some(existing) => {
-                let mut active: host_software_item_plugin::ActiveModel = existing.into();
-                active.plugin_config_id = Set(None);
-                active.plugin_type = Set(pt.to_string());
-                active.package_identifier = Set(effective_pkg);
-                if !req.config_override.is_keep() {
-                    active.config = Set(req.config_override.clone().into_option().map(Into::into));
-                }
-                active.execution_site = Set(effective_exec_site);
-                active.updated_at = Set(now);
-                active.update(&txn).await.context_to()?;
-            }
-            None => {
-                let plugin_row = host_software_item_plugin::ActiveModel {
-                    id: Set(generate_uuid()),
-                    host_id: Set(host_id),
-                    software_item_id: Set(id),
-                    host_software_item_id: Set(hsi_id),
-                    plugin_config_id: Set(None),
-                    plugin_type: Set(pt.to_string()),
-                    role: Set(req.role.as_str().to_string()),
-                    ordinal: Set(req.ordinal),
-                    package_identifier: Set(effective_pkg),
-                    config: Set(req.config_override.into_option().map(Into::into)),
-                    execution_site: Set(effective_exec_site),
-                    created_at: Set(now),
-                    updated_at: Set(now),
-                };
-                plugin_row.insert(&txn).await.context_to()?;
-            }
-        }
-    } else {
-        // Config-based assignment.
-        let synthetic = HostPluginRoleAssignment {
-            role: req.role.clone(),
-            ordinal: req.ordinal,
-            plugin_config_id: req.plugin_config_id.or(existing_pcid),
-            plugin_config: req.plugin_config,
-            package_identifier: effective_pkg.clone(),
-            config_override: req.config_override.clone().resolve(existing_override),
-            execution_site: effective_exec_site.clone(),
-        };
-
-        let (plugin_config_id, config) =
-            resolve_plugin_config_txn(ops, &txn, tenant_db.tenant_id(), &synthetic).await?;
-
-        validate_assignment(
-            ops,
-            &config.plugin_type,
-            Some(&config.config),
-            &synthetic.package_identifier,
-            synthetic.config_override.as_ref(),
-        )?;
-
-        validate_host_compatibility(
-            ops,
-            &host_model,
-            &config.plugin_type,
-            &req.role,
-            &effective_exec_site,
-        )?;
-
-        match existing_plugin {
-            Some(existing) => {
-                let mut active: host_software_item_plugin::ActiveModel = existing.into();
-                active.plugin_config_id = Set(Some(plugin_config_id));
-                active.plugin_type = Set(config.plugin_type.clone());
-                active.package_identifier = Set(synthetic.package_identifier);
-
-                if !req.config_override.is_keep() {
-                    active.config = Set(req.config_override.clone().into_option().map(Into::into));
-                }
-
-                active.execution_site = Set(synthetic.execution_site);
-                active.updated_at = Set(now);
-                active.update(&txn).await.context_to()?;
-            }
-            None => {
-                let plugin_row = host_software_item_plugin::ActiveModel {
-                    id: Set(generate_uuid()),
-                    host_id: Set(host_id),
-                    software_item_id: Set(id),
-                    host_software_item_id: Set(hsi_id),
-                    plugin_config_id: Set(Some(plugin_config_id)),
-                    plugin_type: Set(config.plugin_type.clone()),
-                    role: Set(req.role.as_str().to_string()),
-                    ordinal: Set(req.ordinal),
-                    package_identifier: Set(synthetic.package_identifier),
-                    config: Set(synthetic.config_override.map(Into::into)),
-                    execution_site: Set(synthetic.execution_site),
-                    created_at: Set(now),
-                    updated_at: Set(now),
-                };
-                plugin_row.insert(&txn).await.context_to()?;
-            }
         }
     }
 
@@ -1226,36 +1040,6 @@ mod tests {
                 Err(super::SoftwareItemQueryError::HostNotFound(id)) if *id == host_b
             ),
             "cross-tenant host must be rejected as HostNotFound, got {result:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn update_host_assignment_rejects_foreign_tenant_host() {
-        use crate::tenant_db::TenantDb;
-        let db = idor_db().await;
-        let (tenant_a, item_a) = seed_tenant_with_item(&db, "a").await;
-        let (tenant_b, _item_b) = seed_tenant_with_item(&db, "b").await;
-        let host_b = seed_host(&db, tenant_b).await;
-        seed_link(&db, host_b, item_a).await;
-
-        let tenant_db = TenantDb::new(db.clone(), tenant_a);
-        let result = super::update_host_assignment(
-            &StubOps,
-            &tenant_db,
-            item_a,
-            host_b,
-            foreign_update_req(),
-        )
-        .await;
-
-        // `SoftwareItemDetailResponse` has no `Debug`, so match on the error context
-        // directly rather than `{result:?}`-formatting the whole result.
-        assert!(
-            matches!(
-                result.as_ref().map_err(|e| e.current_context()),
-                Err(super::SoftwareItemQueryError::HostNotFound(id)) if *id == host_b
-            ),
-            "cross-tenant host must be rejected as HostNotFound(host_b), got Ok or a different error"
         );
     }
 
