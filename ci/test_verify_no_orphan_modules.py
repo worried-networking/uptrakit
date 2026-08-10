@@ -101,6 +101,75 @@ class NoOrphanModulesGateTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_char_literal_brace_does_not_corrupt_depth_tracking(self):
+        # Finding 1: an inline module containing a `'{'` (and `b'{'`) char
+        # literal must not shift inline-module depth tracking. Before the
+        # fix, sanitize() left the literal's brace in the "sanitized" text,
+        # so the subsequent `mod a;` resolved one directory too deep and the
+        # gate reported a bogus resolver gap instead of exiting clean.
+        result = run_gate(FIXTURES / "pass_char_literal_in_inline_mod")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("no-orphan-modules clean", result.stdout)
+
+    def test_path_attr_single_line_and_interleaved_cfg_resolve(self):
+        # Finding 2: PATH_ATTR_RE previously required the `#[path]` attribute
+        # to be immediately followed by the `mod` line on the very next
+        # line. Both a single-line `#[path = "..."] mod x;` and an
+        # interleaved `#[cfg(...)]` between `#[path]` and `mod` are valid
+        # Rust that rustc accepts; the gate must resolve both explicitly
+        # instead of falling back to (and failing on) the default filename.
+        result = run_gate(FIXTURES / "pass_path_attr_shapes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("no-orphan-modules clean", result.stdout)
+
+    def test_commented_out_include_does_not_mask_a_real_orphan(self):
+        # Finding 5: INCLUDE_RE/PATH_ATTR_RE previously ran against raw
+        # source, so a commented-out `include!("dead.rs")` still counted as
+        # a visit and hid a genuinely orphaned dead.rs behind a fake clean
+        # result.
+        result = run_gate(FIXTURES / "fail" / "commented_out_include")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("orphan module: app/src/dead.rs", result.stderr)
+
+    def test_stale_allowlist_decl_file_half_is_config_error(self):
+        # Finding 3: a `decl` entry whose file half matches no tracked file
+        # is the same hazard as a stale `path` entry (it silently
+        # pre-authorizes a future resolver gap at that path) and must be
+        # rejected the same way.
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".toml", delete=False
+        ) as allowlist:
+            allowlist.write(
+                '[[allow]]\ndecl = "app/src/never_existed.rs::ghost"\n'
+                'reason = "stale entry for a file that is gone"\n'
+            )
+            allowlist_path = allowlist.name
+        result = run_gate(FIXTURES / "pass", ["--allowlist", allowlist_path])
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("matches no tracked file", result.stderr)
+
+    def test_allowlist_entry_with_both_path_and_decl_is_config_error(self):
+        # Finding 4: `if "path" ... elif "decl"` silently dropped the decl
+        # half of an entry carrying both keys. It must be a config error
+        # telling the author to split it into two entries.
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".toml", delete=False
+        ) as allowlist:
+            allowlist.write(
+                '[[allow]]\npath = "app/src/proxy/bookkeeping.rs"\n'
+                'decl = "app/src/proxy/bookkeeping.rs::ghost"\n'
+                'reason = "both keys set — should be rejected"\n'
+            )
+            allowlist_path = allowlist.name
+        result = run_gate(
+            FIXTURES / "fail" / "same_stem_orphan",
+            ["--allowlist", allowlist_path],
+        )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("both", result.stderr)
+        self.assertIn("path", result.stderr)
+        self.assertIn("decl", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

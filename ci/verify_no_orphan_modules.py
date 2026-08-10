@@ -47,23 +47,32 @@ EXIT_CONFIG_ERROR = 2
 EVENT_RE = re.compile(
     r"\bmod[ \t\n]+([A-Za-z_][A-Za-z0-9_]*)[ \t\n]*([;{])|([{}])"
 )
-# #[path = "..."] immediately preceding a `mod name;`. Matched against the
-# RAW source (the sanitizer blanks string interiors, including attribute
-# paths), as is INCLUDE_RE; only brace/mod tracking uses sanitized text.
+# #[path = "..."] preceding a `mod name;`, tolerating arbitrary whitespace
+# (including newlines) and any run of further attributes in between (e.g. a
+# `#[cfg(...)]` interleaved between `#[path]` and `mod`). Matched against
+# comment-blanked, string-preserving sanitized source (see `attrs` in
+# `visit()`), as is INCLUDE_RE; only brace/mod tracking uses fully sanitized
+# text.
 PATH_ATTR_RE = re.compile(
-    r"#\[path[ \t]*=[ \t]*\"([^\"]+)\"\][ \t]*\n[ \t]*"
+    r"#\[path[ \t]*=[ \t]*\"([^\"]+)\"\][ \t\r\n]*"
+    r"(?:#\[(?:[^\[\]]|\[[^\]]*\])*\][ \t\r\n]*)*"
     r"(?:pub(?:\([^)]*\))?[ \t]+)?mod[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*;"
 )
 # include!("literal.rs") — treat the literal as a visit.
 INCLUDE_RE = re.compile(r"include!\s*\(\s*\"([^\"]+\.rs)\"\s*\)")
 
 
-def sanitize(src: str) -> str:
-    """Blank out comment and string interiors, length-preserved.
+def sanitize(src: str, blank_strings: bool = True) -> str:
+    """Blank out comment interiors (and, by default, string interiors),
+    length-preserved.
 
     Keeps braces inside strings/comments from corrupting module-depth
     tracking. Handles //, nested /* */, "..." with escapes, char literals,
-    lifetimes, and raw strings r#"..."#.
+    lifetimes, and raw strings r#"..."#. Comments are always blanked; pass
+    `blank_strings=False` to keep string-literal content intact (e.g. so
+    `PATH_ATTR_RE`/`INCLUDE_RE` can still read a path/filename out of a
+    string) while still blanking out any comment content, including a
+    comment that itself looks like a `"..."` string.
     """
     out = list(src)
     i, n = 0, len(src)
@@ -100,7 +109,8 @@ def sanitize(src: str) -> str:
                 close = '"' + "#" * hashes
                 k = src.find(close, j + 1)
                 k = n if k == -1 else k + len(close)
-                blank(i + 1, k)
+                if blank_strings:
+                    blank(i + 1, k)
                 i = k
             else:
                 i += 1
@@ -114,15 +124,25 @@ def sanitize(src: str) -> str:
                     break
                 else:
                     j += 1
-            blank(i + 1, j - 1)
+            if blank_strings:
+                blank(i + 1, j - 1)
             i = j
         elif c == "'":
             # char literal ('x', '\n') vs lifetime ('a) — a closing quote
-            # within 3 chars (or an escape) marks a literal.
+            # within 3 chars (or an escape) marks a literal. Always blank
+            # the interior (regardless of blank_strings): an unblanked
+            # brace inside a char literal — e.g. '{' or b'{' — corrupts
+            # brace/mod depth tracking in `visit()`, and the interior is
+            # never meaningful to PATH_ATTR_RE/INCLUDE_RE.
             if i + 1 < n and src[i + 1] == "\\":
                 j = src.find("'", i + 2)
-                i = (n if j == -1 else j + 1)
+                if j == -1:
+                    i = n
+                else:
+                    blank(i + 1, j)
+                    i = j + 1
             elif i + 2 < n and src[i + 2] == "'":
+                blank(i + 1, i + 2)
                 i += 3
             else:
                 i += 1  # lifetime — skip the quote only
@@ -152,9 +172,17 @@ def load_allowlist(path: Path) -> tuple[set[str], set[str], str | None]:
         reason = entry.get("reason", "")
         if not isinstance(reason, str) or not reason.strip():
             return set(), set(), f"allowlist entry {entry!r} is missing a non-empty `reason`"
-        if "path" in entry:
+        has_path = "path" in entry
+        has_decl = "decl" in entry
+        if has_path and has_decl:
+            return (
+                set(),
+                set(),
+                f"allowlist entry {entry!r} has both `path` and `decl` — use two separate entries",
+            )
+        if has_path:
             allowed_paths.add(entry["path"])
-        elif "decl" in entry:
+        elif has_decl:
             allowed_decls.add(entry["decl"])
         else:
             return set(), set(), f"allowlist entry {entry!r} needs `path` or `decl`"
@@ -198,6 +226,10 @@ def visit(
     visited.add(file)
     raw = file.read_text(encoding="utf-8", errors="replace")
     src = sanitize(raw)
+    # Comments blanked but string interiors intact, so a commented-out
+    # `include!("dead.rs")` or `#[path = "dead.rs"]` cannot mask a real
+    # orphan, while a genuine path/filename string is still readable.
+    attrs = sanitize(raw, blank_strings=False)
     parent = file.parent
     # Crate roots (every cargo target src_path: lib.rs, main.rs, each
     # tests/*.rs, examples/*.rs, benches/*.rs, build.rs) and mod.rs resolve
@@ -207,8 +239,8 @@ def visit(
     is_root = file in roots or file.name in ("lib.rs", "main.rs", "mod.rs")
     base = parent if is_root else parent / file.stem
 
-    explicit = {name: parent / rel for rel, name in PATH_ATTR_RE.findall(raw)}
-    for rel in INCLUDE_RE.findall(raw):
+    explicit = {name: parent / rel for rel, name in PATH_ATTR_RE.findall(attrs)}
+    for rel in INCLUDE_RE.findall(attrs):
         visit(parent / rel, visited, unresolved, roots)
 
     depth = 0
@@ -275,11 +307,21 @@ def main() -> int:
 
     tracked_rel = {str(p.relative_to(root)) for p in tracked}
     stale_allow = sorted(allowed_paths - tracked_rel)
-    if stale_allow:
+    stale_decls = sorted(
+        decl for decl in allowed_decls if decl.rsplit("::", 1)[0] not in tracked_rel
+    )
+    if stale_allow or stale_decls:
         for entry in stale_allow:
             print(
                 f"no-orphan-modules config error: allowlist path `{entry}` matches no tracked file — "
                 "remove the stale entry (a dead entry silently pre-authorizes a future orphan at that path)",
+                file=sys.stderr,
+            )
+        for entry in stale_decls:
+            print(
+                f"no-orphan-modules config error: allowlist decl `{entry}` file half matches no tracked "
+                "file — remove the stale entry (a dead entry silently pre-authorizes a future resolver "
+                "gap at that path)",
                 file=sys.stderr,
             )
         return EXIT_CONFIG_ERROR
