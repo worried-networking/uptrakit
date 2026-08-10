@@ -1,3 +1,7 @@
+//! Idempotency key *derivation* only. The key type itself (`IdempotencyKey`), its reservation
+//! state, and `IdempotencyGuard` live in `proxy/bookkeeping.rs` with the rest of the in-flight
+//! state machine.
+
 use std::hash::{Hash, Hasher};
 
 use uptrakit_wire::surfaces;

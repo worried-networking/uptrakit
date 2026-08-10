@@ -274,7 +274,7 @@ impl PendingState {
     }
 }
 
-pub(super) fn decrement_counter<K: Eq + Hash + Clone>(map: &mut HashMap<K, usize>, key: &K) {
+fn decrement_counter<K: Eq + Hash + Clone>(map: &mut HashMap<K, usize>, key: &K) {
     if let Some(counter) = map.get_mut(key) {
         *counter = counter.saturating_sub(1);
         if *counter == 0 {

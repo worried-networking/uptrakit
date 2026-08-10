@@ -4,11 +4,11 @@ use uptrakit_wire::surfaces;
 
 use super::SurfaceProxyError;
 
-pub(super) const DEFAULT_TIMEOUT_SECONDS: u16 = 30;
-pub(super) const MIN_TIMEOUT_SECONDS: u16 = 1;
-pub(super) const MAX_TIMEOUT_SECONDS: u16 = 300;
-pub(super) const MAX_RESULT_BYTES: usize = 1024 * 1024;
-pub(super) const MAX_RESULT_ROWS: usize = 200;
+const DEFAULT_TIMEOUT_SECONDS: u16 = 30;
+const MIN_TIMEOUT_SECONDS: u16 = 1;
+const MAX_TIMEOUT_SECONDS: u16 = 300;
+const MAX_RESULT_BYTES: usize = 1024 * 1024;
+const MAX_RESULT_ROWS: usize = 200;
 
 pub(super) fn validate_input_schema(
     interaction: &surfaces::InteractionDescriptor,
