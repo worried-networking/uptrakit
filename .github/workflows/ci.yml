@@ -95,6 +95,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "rust-all-features"
+      - run: python3 -m unittest ci/test_verify_no_orphan_modules.py
+      - run: python3 ci/verify_no_orphan_modules.py
       - run: cargo check --no-default-features --features db-sqlite
       - run: cargo check --all-features
       - run: cargo clippy --all-targets --all-features -- -D warnings

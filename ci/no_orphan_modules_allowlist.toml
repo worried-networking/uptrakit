@@ -1,0 +1,37 @@
+# Allowlist for ci/verify_no_orphan_modules.py.
+# Every entry MUST carry a non-empty `reason`. Entries are exact repo-relative
+# paths (Class A) or "file::mod_name" declaration ids (Class B).
+# Paths under ci/testdata/ are excluded from the scan entirely and must never
+# be allowlisted here (a ci/testdata/ entry is reported as a stale path).
+
+[[allow]]
+path = "crates/shared/audit-log/tests/typestate_compile_fail/event_with_before.rs"
+reason = "trybuild compile-fail fixture: consumed by tests/typestate.rs compile_fail glob, intentionally never mod-declared"
+
+[[allow]]
+path = "crates/shared/audit-log/tests/typestate_compile_fail/missing_after.rs"
+reason = "trybuild compile-fail fixture: consumed by tests/typestate.rs compile_fail glob, intentionally never mod-declared"
+
+[[allow]]
+path = "crates/shared/audit-log/tests/typestate_compile_fail/truncatable_on_non_serialize.rs"
+reason = "trybuild compile-fail fixture: consumed by tests/typestate.rs compile_fail glob, intentionally never mod-declared"
+
+[[allow]]
+path = "crates/shared/audit-log/tests/typestate_compile_fail/wrong_kind_to_emit.rs"
+reason = "trybuild compile-fail fixture: consumed by tests/typestate.rs compile_fail glob, intentionally never mod-declared"
+
+[[allow]]
+path = "xtask/tests/audit_fixtures/clean/crates/shared/audit-log/src/action_type.rs"
+reason = "xtask audit-coverage test fixture tree: read by xtask/tests/audit_integration.rs, never compiled"
+
+[[allow]]
+path = "xtask/tests/audit_fixtures/clean/crates/web/src/routes.rs"
+reason = "xtask audit-coverage test fixture tree: read by xtask/tests/audit_integration.rs, never compiled"
+
+[[allow]]
+path = "xtask/tests/audit_fixtures/missing_entry/crates/shared/audit-log/src/action_type.rs"
+reason = "xtask audit-coverage test fixture tree: read by xtask/tests/audit_integration.rs, never compiled"
+
+[[allow]]
+path = "xtask/tests/audit_fixtures/missing_entry/crates/web/src/routes.rs"
+reason = "xtask audit-coverage test fixture tree: read by xtask/tests/audit_integration.rs, never compiled"
