@@ -873,7 +873,7 @@ action.
 | `crates/ui/web-api-auth/src/settings_store.rs`            | Typed settings store using the `SettingKey` enum; delegates raw-key functions to `uptrakit_shared_db::raw_settings` for non-notification settings                                        |
 | `crates/shared/openapi-client/src/notifications.rs`       | Typed HTTP client methods for the notifications REST API                                                                                                                                 |
 | `crates/ui/cli/src/commands/notifications.rs`             | CLI `notifications` command group                                                                                                                                                        |
-| `crates/ui/surface-proxy/src/proxy.rs`                    | Shared-surface interaction dispatch to plugin `handle_surface_action()`                                                                                                                  |
+| `crates/ui/surface-proxy/src/proxy/local_executor.rs`     | Shared-surface interaction dispatch to plugin `handle_surface_action()`                                                                                                                  |
 
 ## Shared surface integration
 
