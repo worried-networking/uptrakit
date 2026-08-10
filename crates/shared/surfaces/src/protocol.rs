@@ -267,6 +267,7 @@ fn validate_surface_interaction_rules(
         validate_interaction_method(surface, interaction)?;
         validate_interaction_params(surface, interaction)?;
         validate_interaction_provider_rules(surface, interaction)?;
+        validate_descriptor_gated_provider_invocable(surface, interaction)?;
     }
 
     Ok(interaction_methods)
@@ -398,17 +399,28 @@ fn validate_interaction_provider_rules(
 ) -> Result<(), SurfaceRegistrationError> {
     interaction
         .validate_for_provider(surface.descriptor.provider_kind)
-        .map_err(|err| invalid_contract(err.to_string()))?;
+        .map_err(|err| invalid_contract(err.to_string()))
+}
 
-    // Presence-only read of the wire string `descriptor.required_action` is
-    // sound at admission: the registry parses it to a typed `Action` right
-    // after contract validation and rejects unparseable values, so a
-    // present-but-invalid gate never reaches the runtime path. The
-    // `provider_kind` consulted here is trustworthy only via a two-hop pin:
-    // `validate_surface_provider_kind` pins descriptor.provider_kind to the
-    // registration's provider_kind, and the registry's
-    // `validate_registration_basics` pins that to the trusted connection
-    // source_kind. Do not simplify either hop away.
+/// Descriptor-level companion to
+/// [`InteractionDescriptor::validate_for_provider`], which sees only the
+/// interaction and so cannot check the surface it belongs to: a `Service`
+/// provider may not set `provider_invocable` on an interaction whose home
+/// surface descriptor is action-gated.
+///
+/// Presence-only read of the wire string `descriptor.required_action` is
+/// sound at admission: the registry parses it to a typed `Action` right
+/// after contract validation and rejects unparseable values, so a
+/// present-but-invalid gate never reaches the runtime path. The
+/// `provider_kind` consulted here is trustworthy only via a two-hop pin:
+/// `validate_surface_provider_kind` pins descriptor.provider_kind to the
+/// registration's provider_kind, and the registry's
+/// `validate_registration_basics` pins that to the trusted connection
+/// source_kind. Do not simplify either hop away.
+fn validate_descriptor_gated_provider_invocable(
+    surface: &RegisteredSurface,
+    interaction: &InteractionDescriptor,
+) -> Result<(), SurfaceRegistrationError> {
     if interaction.provider_invocable
         && surface.descriptor.provider_kind == ProviderKind::Service
         && surface.descriptor.required_action.is_some()

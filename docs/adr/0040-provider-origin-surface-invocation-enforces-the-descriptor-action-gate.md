@@ -44,13 +44,14 @@ Provider-origin invocation is denied when **either** the surface descriptor or t
 `resolved.descriptor_required_action.is_some() || resolved.interaction_required_action.is_some()`, so the
 provider-origin path enforces the same two-layer model the HTTP path already enforced.
 
-Registration admission is tightened to match: `validate_interaction_provider_rules`
-(`crates/shared/surfaces/src/protocol.rs`) additionally rejects a `Service`-kind registration when an
-interaction sets `provider_invocable` and its home surface descriptor carries `required_action`, even if
-the interaction's own gate is unset. `Plugin`/`BuiltIn`-kind providers are unaffected by this admission
-rule — `provider_invocable` under a gated descriptor remains registrable for them, preserving the escape
-hatch for the flows it exists for (for example the proxmox `match`/`unmatched-guests` interactions, which
-are invoked by services on a plugin-owned surface within tenant co-trust).
+Registration admission is tightened to match: a sibling rule
+`validate_descriptor_gated_provider_invocable` (`crates/shared/surfaces/src/protocol.rs`) rejects a
+`Service`-kind registration when an interaction sets `provider_invocable` and its home surface descriptor
+carries `required_action`, even if the interaction's own gate is unset. `Plugin`/`BuiltIn`-kind providers
+are unaffected by this admission rule — `provider_invocable` under a gated descriptor remains registrable
+for them, preserving the escape hatch for the flows it exists for (for example the proxmox
+`match`/`unmatched-guests` interactions, which are invoked by services on a plugin-owned surface within
+tenant co-trust).
 
 The combined effect: wherever any gate exists on a surface — descriptor, interaction, or both — a service
 can only reach it in provider-origin mode through an interaction that both belongs to a plugin/built-in

@@ -251,8 +251,8 @@ impl InteractionDescriptor {
     /// that also declares `required_action`. The descriptor-level companion
     /// rule (rejecting `provider_invocable` when the *surface descriptor*
     /// carries `required_action`) lives in
-    /// `protocol.rs::validate_interaction_provider_rules`, because this
-    /// method never sees the surface descriptor.
+    /// `protocol.rs::validate_descriptor_gated_provider_invocable`, because
+    /// this method never sees the surface descriptor.
     pub fn validate_for_provider(
         &self,
         provider_kind: ProviderKind,
