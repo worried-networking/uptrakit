@@ -229,14 +229,17 @@ pub trait PluginConfigOps: PluginMetadataOps {
     }
 
     /// Mask secrets in plugin configuration JSON for API responses.
+    ///
+    /// Key-set masking: only paths present in the object are replaced with
+    /// `"***"`; sparse objects never gain keys. Unknown plugin type is a
+    /// passthrough (unreachable in practice — responses are filtered to
+    /// cataloged plugins).
     fn mask_config_secrets(
         &self,
         id: &PluginTypeId,
         config: &serde_json::Value,
     ) -> serde_json::Value {
-        self.get(id)
-            .map(|d| (d.config.mask_secrets)(config))
-            .unwrap_or_else(|| config.clone())
+        crate::secret_paths::mask_present_keys(config, &self.sensitive_paths(id))
     }
 
     /// Restore masked secrets from existing configuration.
@@ -246,9 +249,7 @@ pub trait PluginConfigOps: PluginMetadataOps {
         incoming: &mut serde_json::Value,
         existing: &serde_json::Value,
     ) {
-        if let Some(d) = self.get(id) {
-            (d.config.restore_secrets)(incoming, existing);
-        }
+        crate::secret_paths::restore_masked_keys(incoming, existing, &self.sensitive_paths(id));
     }
 
     /// Sample/default configuration JSON.
@@ -388,6 +389,29 @@ pub trait PluginConfigOps: PluginMetadataOps {
     ) -> Option<String> {
         let paths = self.sensitive_paths(id);
         crate::secret_paths::first_sensitive_path_present(config, &paths)
+    }
+
+    /// Prune-only variant hygiene (spec §5): remove sensitive paths present
+    /// in `config` but absent from its typed round-trip. Returns pruned paths.
+    fn prune_stale_sensitive_keys(
+        &self,
+        id: &PluginTypeId,
+        config: &mut serde_json::Value,
+    ) -> Vec<String> {
+        let Ok(round_trip) = self.normalize_config(id, config) else {
+            return Vec::new();
+        };
+        let stale: Vec<String> = self
+            .sensitive_paths(id)
+            .into_iter()
+            .filter(|p| {
+                let single = std::slice::from_ref(p);
+                crate::secret_paths::first_sensitive_path_present(config, single).is_some()
+                    && crate::secret_paths::first_sensitive_path_present(&round_trip, single)
+                        .is_none()
+            })
+            .collect();
+        crate::secret_paths::strip_sensitive_paths(config, &stale)
     }
 }
 

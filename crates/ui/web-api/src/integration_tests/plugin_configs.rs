@@ -20,7 +20,6 @@ use sea_orm::{ActiveModelTrait, Set};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use std::collections::BTreeSet;
 use uptrakit_shared_db::entity::audit_log;
-#[cfg(feature = "dashboard-icons")]
 use uptrakit_shared_db::entity::plugin_config;
 use uptrakit_shared_db::entity::{service, user_role};
 use uptrakit_shared_types::access::actions;
@@ -330,6 +329,169 @@ async fn update_config_returns_200_and_writes_audit_event() {
     );
     assert_eq!(details["enabled"], serde_json::json!(false));
     assert_eq!(details["contains_command_fields"], serde_json::json!(false));
+}
+
+/// Regression test (task 6a spec §5): the frontend submits the FULL auth
+/// object shape on every save, including keys from the previously-selected
+/// variant carrying the masked sentinel. A Basic→Bearer switch must not let
+/// the stale `auth.password` survive `restore_config_secrets`' sentinel
+/// refill — the write-path prune must strip it before persistence.
+#[tokio::test]
+async fn docker_basic_to_bearer_switch_drops_stale_password() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let (create_status, created): (_, serde_json::Value) = client
+        .post_json(
+            "/api/v1/plugin-configs",
+            &serde_json::json!({
+                "name": "Docker Registry",
+                "plugin_type": "releases.docker",
+                "config": {
+                    "auth": {"type": "basic", "username": "u", "password": "pw-1"}
+                }
+            }),
+        )
+        .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
+        .send_json()
+        .await;
+    assert_eq!(create_status, http::StatusCode::CREATED);
+    let id = created["id"].as_str().expect("id");
+
+    let (update_status, _body): (_, serde_json::Value) = client
+        .put_json(
+            &format!("/api/v1/plugin-configs/{id}"),
+            &serde_json::json!({
+                "config": {
+                    "auth": {
+                        "type": "bearer",
+                        "token": "tok-2",
+                        "password": "***",
+                        "username": "u"
+                    }
+                }
+            }),
+        )
+        .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
+        .send_json()
+        .await;
+    assert_eq!(update_status, http::StatusCode::OK);
+
+    let stored = plugin_config::Entity::find_by_id(Uuid::parse_str(id).expect("uuid"))
+        .one(&app.db)
+        .await
+        .expect("query plugin_config")
+        .expect("plugin_config row exists");
+
+    let auth = stored.config.get("auth").expect("auth key present");
+    assert!(
+        auth.get("password").is_none(),
+        "stale Basic password must be pruned after the Basic->Bearer switch, got: {auth:?}"
+    );
+    assert_eq!(auth["token"], serde_json::json!("tok-2"));
+}
+
+/// Regression test (task 6a spec §5): stored config JSON must stay sparse
+/// after an update — the legacy typed round-trip materialized every
+/// `#[serde(default)]` field (`include_prereleases`, `tag_strip_prefix`,
+/// `verify_attestation`, `make_executable`) even when the request never sent
+/// them. Only fields the caller actually sent may end up in the stored row.
+#[tokio::test]
+async fn github_update_stays_sparse_no_materialized_defaults() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let (create_status, created): (_, serde_json::Value) = client
+        .post_json(
+            "/api/v1/plugin-configs",
+            &serde_json::json!({
+                "name": "Sparse GitHub Config",
+                "plugin_type": "releases.github",
+                "config": {}
+            }),
+        )
+        .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
+        .send_json()
+        .await;
+    assert_eq!(create_status, http::StatusCode::CREATED);
+    let id = created["id"].as_str().expect("id");
+
+    let (update_status, _body): (_, serde_json::Value) = client
+        .put_json(
+            &format!("/api/v1/plugin-configs/{id}"),
+            &serde_json::json!({
+                "config": {"tag_strip_prefix": "release-"}
+            }),
+        )
+        .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
+        .send_json()
+        .await;
+    assert_eq!(update_status, http::StatusCode::OK);
+
+    let stored = plugin_config::Entity::find_by_id(Uuid::parse_str(id).expect("uuid"))
+        .one(&app.db)
+        .await
+        .expect("query plugin_config")
+        .expect("plugin_config row exists");
+
+    let obj = stored.config.as_object().expect("config is object");
+    assert_eq!(
+        obj.keys().map(String::as_str).collect::<Vec<_>>(),
+        vec!["tag_strip_prefix"],
+        "stored config must contain exactly the keys the request sent, got: {obj:?}"
+    );
+    assert_eq!(
+        stored.config["tag_strip_prefix"],
+        serde_json::json!("release-")
+    );
+}
+
+/// Intent pin (task 6a spec §5.2): `resolve_effective_config` merge
+/// semantics don't change across the flip, but WHICH stored shape a profile
+/// takes does — this pins the later-wins result for both. An
+/// expanded-with-defaults profile (the legacy stored shape) shadows the
+/// type-settings layer even for a field the operator never touched; a
+/// sparse profile (the post-flip stored shape) lets the type-settings value
+/// show through. This test passes before and after the flip — it documents
+/// the merge semantics, it does not gate them.
+#[test]
+fn apt_effective_config_intent_pin_expanded_vs_sparse_profile() {
+    let type_settings = serde_json::json!({"discovery_filter": "manual"});
+
+    // Legacy shape: the field is present with its default value even though
+    // the operator never set it, because the old restore path performed a
+    // full typed round-trip that materializes every `#[serde(default)]` field.
+    let expanded_profile = serde_json::json!({"discovery_filter": "all"});
+    let expanded_effective = uptrakit_config_merge::resolve_effective_config(
+        Some(&type_settings),
+        Some(&expanded_profile),
+        None,
+    );
+    assert_eq!(
+        expanded_effective["discovery_filter"],
+        serde_json::json!("all"),
+        "an expanded profile's materialized default shadows the type-settings layer"
+    );
+
+    // Post-flip shape: the field is absent because the operator never set
+    // it, so the type-settings layer shows through unshadowed.
+    let sparse_profile = serde_json::json!({});
+    let sparse_effective = uptrakit_config_merge::resolve_effective_config(
+        Some(&type_settings),
+        Some(&sparse_profile),
+        None,
+    );
+    assert_eq!(
+        sparse_effective["discovery_filter"],
+        serde_json::json!("manual"),
+        "a sparse profile lets the type-settings layer show through"
+    );
 }
 
 #[tokio::test]

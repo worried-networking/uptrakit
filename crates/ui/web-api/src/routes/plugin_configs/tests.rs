@@ -131,17 +131,21 @@ fn mask_null_token_becomes_masked() {
     });
     let masked =
         catalog().mask_config_secrets(&PluginTypeId::from_static("releases.github"), &config);
-    // with_secrets_masked always sets auth_token to "***"
+    // Key present (even with a null value) still gets masked to "***".
     assert_eq!(masked["auth_token"], SECRET_MASK);
 }
 
 #[test]
-fn mask_without_token_field_adds_masked() {
+fn mask_without_token_field_stays_absent() {
     let config = serde_json::json!({});
     let masked =
         catalog().mask_config_secrets(&PluginTypeId::from_static("releases.github"), &config);
-    // with_secrets_masked always adds auth_token as "***"
-    assert_eq!(masked["auth_token"], SECRET_MASK);
+    // Key-set masking is sparse-preserving: a sensitive path absent from the
+    // input never gets injected into the output.
+    assert!(
+        masked.get("auth_token").is_none(),
+        "sparse config must not gain an auth_token key, got: {masked:?}"
+    );
 }
 
 #[test]
@@ -345,7 +349,8 @@ fn mask_docker_no_auth() {
     let config = serde_json::json!({});
     let masked =
         catalog().mask_config_secrets(&PluginTypeId::from_static("releases.docker"), &config);
-    // None auth stays absent (serialized with skip_serializing_if)
+    // Key-set masking is sparse-preserving: no "auth" key in the input means
+    // no "auth" key gets injected into the output.
     assert!(masked.get("auth").is_none());
 }
 
@@ -354,8 +359,10 @@ fn mask_docker_null_auth() {
     let config = serde_json::json!({ "auth": null });
     let masked =
         catalog().mask_config_secrets(&PluginTypeId::from_static("releases.docker"), &config);
-    // JSON null deserializes to None, which stays absent after masking
-    assert!(masked.get("auth").is_none());
+    // Key-set masking only rewrites leaf paths ("auth.password"/"auth.token")
+    // that are reachable through a JSON object; "auth": null has no object to
+    // descend into, so it passes through untouched rather than being dropped.
+    assert_eq!(masked["auth"], serde_json::Value::Null);
 }
 
 #[test]

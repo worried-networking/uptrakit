@@ -218,7 +218,7 @@ pub async fn create_plugin_config(
     tenant_db: TenantDb,
     CanManageCommands(user): CanManageCommands,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
-    Validated(req): Validated<CreatePluginConfigRequest>,
+    Validated(mut req): Validated<CreatePluginConfigRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
@@ -240,6 +240,11 @@ pub async fn create_plugin_config(
     {
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
+
+    let _pruned = state
+        .plugin
+        .plugin_ops
+        .prune_stale_sensitive_keys(&plugin_type_id, &mut req.config);
 
     // Reject dangerous command patterns when operator policy is enabled.
     if state.reject_dangerous_commands && !config_risk.dangerous_matches.is_empty() {

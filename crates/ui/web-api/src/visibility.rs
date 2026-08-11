@@ -141,6 +141,14 @@ mod test_support {
         v.clone()
     }
     fn noop_restore(_: &mut serde_json::Value, _: &serde_json::Value) {}
+    fn noop_normalize(
+        v: &serde_json::Value,
+    ) -> Result<
+        serde_json::Value,
+        uptrakit_plugin_infrastructure_registry::PluginConfigValidationError,
+    > {
+        Ok(v.clone())
+    }
     fn noop_sample() -> serde_json::Value {
         serde_json::json!({})
     }
@@ -165,10 +173,12 @@ mod test_support {
             capabilities: &[],
             scope: PluginScope::Tenant,
             instance_config: None,
+            sensitive_paths: &[],
             config: ConfigOps {
                 validate: noop_validate,
                 mask_secrets: noop_mask,
                 restore_secrets: noop_restore,
+                normalize: noop_normalize,
                 sample: noop_sample,
                 form_schema: noop_form_schema,
                 validate_identifier: noop_validate_identifier,
@@ -213,10 +223,12 @@ mod test_support {
             capabilities: &[],
             scope: PluginScope::Instance,
             instance_config: None,
+            sensitive_paths: &[],
             config: ConfigOps {
                 validate: noop_validate,
                 mask_secrets: noop_mask,
                 restore_secrets: noop_restore,
+                normalize: noop_normalize,
                 sample: noop_sample,
                 form_schema: noop_form_schema,
                 validate_identifier: noop_validate_identifier,

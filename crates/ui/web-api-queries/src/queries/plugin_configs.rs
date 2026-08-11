@@ -216,6 +216,7 @@ pub async fn update_plugin_config_in_tx(
     }
     if let Some(mut config) = req.config {
         ops.restore_config_secrets(&type_id, &mut config, model.config.as_ref());
+        let _pruned = ops.prune_stale_sensitive_keys(&type_id, &mut config);
         model.config = Set(config);
     }
     if let Some(enabled) = req.enabled {
@@ -259,9 +260,11 @@ pub async fn delete_plugin_config_in_tx(
 pub async fn create_plugin_config(
     ops: &dyn PluginConfigOps,
     tenant_db: &TenantDb,
-    req: CreatePluginConfigRequest,
+    mut req: CreatePluginConfigRequest,
 ) -> Result<PluginConfigResponse> {
     let now = OffsetDateTime::now_utc();
+    let type_id = req.plugin_type.clone();
+    let _pruned = ops.prune_stale_sensitive_keys(&type_id, &mut req.config);
     let model = plugin_config::ActiveModel {
         id: Set(generate_uuid()),
         tenant_id: Set(tenant_db.tenant_id()),
@@ -382,6 +385,7 @@ pub async fn update_plugin_config(
     if let Some(mut config) = req.config {
         // Re-apply secret restoration on the actual value being persisted.
         ops.restore_config_secrets(&type_id, &mut config, model.config.as_ref());
+        let _pruned = ops.prune_stale_sensitive_keys(&type_id, &mut config);
         model.config = Set(config);
     }
     if let Some(enabled) = req.enabled {
