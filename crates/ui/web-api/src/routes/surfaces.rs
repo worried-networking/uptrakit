@@ -16,7 +16,7 @@ use uptrakit_web_api_types::surfaces::{
     InvokeSurfaceInteractionRequest, ListSurfacesQuery, ReadSurfaceInteractionQuery,
     SurfaceProviderAvailability, SurfaceProviderInfo, SurfaceReadResponse, SurfaceResponse,
 };
-use uptrakit_web_api_types::validation::ValidationError;
+use uptrakit_web_api_types::validation::{Validate, ValidationError};
 use uptrakit_wire::surfaces;
 use uuid::Uuid;
 
@@ -293,10 +293,13 @@ impl axum::extract::FromRequestParts<Arc<AppState>> for GetInteractionRequest {
     }
 }
 
-/// Per-method-family input to [`dispatch_surface_interaction`]: a JSON body
-/// (POST/PUT/DELETE) or raw GET query pairs (GET/HEAD, pre-coercion).
+/// Per-method-family input to [`dispatch_surface_interaction`]: an
+/// unvalidated JSON body (POST/PUT/DELETE, `None` for an absent optional
+/// body) or raw GET query pairs (GET/HEAD, pre-coercion). Semantic
+/// (`Validate`) validation of the body happens at the step-5 choke point,
+/// after step-3 permission checks — never before.
 enum InteractionInput {
-    Body(InvokeSurfaceInteractionRequest),
+    Body(Option<Unvalidated<InvokeSurfaceInteractionRequest>>),
     Get {
         raw_query: Vec<(String, String)>,
         is_head: bool,
@@ -351,15 +354,19 @@ async fn dispatch_surface_interaction(
         }
     };
 
-    // Step 1: split the GET envelope, or read the body's envelope fields.
+    // Step 1: split the GET envelope, or peek the body's envelope fields
+    // without unlocking (validating) the payload — see `peek_envelope`.
     let (target_provider_id, timeout_seconds, rest, is_head, body) = match input {
-        InteractionInput::Body(body) => (
-            body.target_provider_id.clone(),
-            body.timeout_seconds,
-            None,
-            false,
-            Some(body),
-        ),
+        InteractionInput::Body(body) => {
+            let (target_provider_id, timeout_seconds) = match body.as_ref() {
+                Some(unvalidated) => {
+                    let envelope = unvalidated.peek_envelope();
+                    (envelope.target_provider_id, envelope.timeout_seconds)
+                }
+                None => (None, None),
+            };
+            (target_provider_id, timeout_seconds, None, false, body)
+        }
         InteractionInput::Get { raw_query, is_head } => {
             let (envelope, rest) = match split_get_envelope(raw_query) {
                 Ok(pair) => pair,
@@ -505,26 +512,60 @@ async fn dispatch_surface_interaction(
         return with_private_no_store(StatusCode::OK.into_response());
     }
 
-    // Step 5: GET coercion (422 short-circuits) or direct body read.
-    let (mut params, idempotency_key, encrypted_sensitive_params) = match body {
-        Some(body) => {
+    // Step 5: GET coercion (422 short-circuits) or the body-path choke point.
+    let (mut params, idempotency_key, encrypted_sensitive_params) = match rest {
+        Some(rest) => {
+            let params = match coerce_get_params(rest, &resolved.interaction.params) {
+                Ok(params) => params,
+                Err(response) => return wrap(*response),
+            };
+            (params, Uuid::now_v7().to_string(), None)
+        }
+        None => {
+            // Choke point (spec 2026-08-06 items 4+5): SEMANTIC validation
+            // (`Validate` rules) runs here, AFTER the step-3 permission
+            // checks, so an unauthorized caller gets 403 before any semantic
+            // 400. Deserialization failures are rejected by Unvalidated<T>'s
+            // FromRequest impl before any handler code runs and are
+            // deliberately out of scope — never claim "403 before any 400".
+            // The None arm's constructed default is validated too: a rule
+            // that fails the server-built default must surface here, not
+            // bypass validation through a second silent path.
+            let body = match body {
+                Some(body) => match body.require_valid() {
+                    Ok(body) => body,
+                    Err(e) => {
+                        return wrap(validation_failed_response(
+                            &ctx.state,
+                            ctx.tenant_ctx.tenant_id,
+                            &ctx.auth_user,
+                            ctx.api_token_id,
+                            &e,
+                        ));
+                    }
+                },
+                None => {
+                    let default = InvokeSurfaceInteractionRequest::default();
+                    if let Err(e) = default.validate() {
+                        return wrap(validation_failed_response(
+                            &ctx.state,
+                            ctx.tenant_ctx.tenant_id,
+                            &ctx.auth_user,
+                            ctx.api_token_id,
+                            &e,
+                        ));
+                    }
+                    default
+                }
+            };
             let idempotency_key = body
                 .idempotency_key
-                .clone()
                 .unwrap_or_else(|| Uuid::now_v7().to_string());
             (
                 body.params,
                 idempotency_key,
                 body.encrypted_sensitive_params,
             )
-        }
-        None => {
-            let params =
-                match coerce_get_params(rest.unwrap_or_default(), &resolved.interaction.params) {
-                    Ok(params) => params,
-                    Err(response) => return wrap(*response),
-                };
-            (params, Uuid::now_v7().to_string(), None)
         }
     };
     // Path segment overwrites any `id` carried in the query/body.
@@ -620,23 +661,24 @@ async fn dispatch_surface_interaction(
     ))
 }
 
-/// Shared `Err` arm for every method-mapped interaction handler's
-/// `body.require_valid()` call: emits a `SURFACE_ACTION_INVOKE` /
-/// `ValidationFailed` audit event (mirroring the file's established
-/// `AuditEntry::<Event>::builder_event(...).tenant_scope(...).actor(...).outcome(ValidationFailed)`
-/// chain) and returns the `400` response. This fires before the interaction
-/// is resolved, so only tenant scope and actor are available/needed.
+/// Shared choke-point Err arm for body-path semantic validation: emits a
+/// `SURFACE_ACTION_INVOKE` / `ValidationFailed` audit event with full actor
+/// attribution (api_token_id included — the pre-restructure version hardcoded
+/// `audit_actor(None)`) and returns the `400`. Takes primitives, not
+/// `&InteractionCallCtx`, so the attribution unit test can call it without
+/// fabricating an `AccessAuthority`.
 fn validation_failed_response(
     state: &AppState,
-    tenant_ctx: &TenantContext,
+    tenant_id: Uuid,
     auth_user: &AuthenticatedUser,
+    api_token_id: Option<AuthenticatedApiTokenId>,
     e: &ValidationError,
 ) -> Response {
-    let (actor_type, actor_id) = auth_user.audit_actor(None);
+    let (actor_type, actor_id) = auth_user.audit_actor(api_token_id);
     if let Ok(entry) = uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
         uptrakit_audit_log::AuditActionType::SURFACE_ACTION_INVOKE,
     )
-    .tenant_scope(tenant_ctx.tenant_id)
+    .tenant_scope(tenant_id)
     .actor(actor_type, actor_id)
     .outcome(uptrakit_audit_log::AuditOutcome::ValidationFailed)
     .details(serde_json::json!({ "reason_code": "invalid_request" }))
@@ -742,10 +784,6 @@ pub async fn invoke_surface_interaction(
     Path((surface_id, interaction_id)): Path<(String, String)>,
     body: Unvalidated<InvokeSurfaceInteractionRequest>,
 ) -> Response {
-    let body = match body.require_valid() {
-        Ok(body) => body,
-        Err(e) => return validation_failed_response(&state, &tenant_ctx, &auth_user, &e),
-    };
     dispatch_surface_interaction(
         InteractionCallCtx {
             state,
@@ -758,7 +796,7 @@ pub async fn invoke_surface_interaction(
         surface_id,
         interaction_id,
         None,
-        InteractionInput::Body(body),
+        InteractionInput::Body(Some(body)),
     )
     .await
 }
@@ -800,13 +838,6 @@ pub async fn update_surface_interaction(
     Path((surface_id, interaction_id)): Path<(String, String)>,
     body: Option<Unvalidated<InvokeSurfaceInteractionRequest>>,
 ) -> Response {
-    let body = match body {
-        Some(body) => match body.require_valid() {
-            Ok(body) => body,
-            Err(e) => return validation_failed_response(&state, &tenant_ctx, &auth_user, &e),
-        },
-        None => InvokeSurfaceInteractionRequest::default(),
-    };
     dispatch_surface_interaction(
         InteractionCallCtx {
             state,
@@ -860,13 +891,6 @@ pub async fn delete_surface_interaction(
     Path((surface_id, interaction_id)): Path<(String, String)>,
     body: Option<Unvalidated<InvokeSurfaceInteractionRequest>>,
 ) -> Response {
-    let body = match body {
-        Some(body) => match body.require_valid() {
-            Ok(body) => body,
-            Err(e) => return validation_failed_response(&state, &tenant_ctx, &auth_user, &e),
-        },
-        None => InvokeSurfaceInteractionRequest::default(),
-    };
     dispatch_surface_interaction(
         InteractionCallCtx {
             state,
@@ -1004,13 +1028,6 @@ pub async fn update_surface_interaction_item(
     Path((surface_id, interaction_id, item_id)): Path<(String, String, String)>,
     body: Option<Unvalidated<InvokeSurfaceInteractionRequest>>,
 ) -> Response {
-    let body = match body {
-        Some(body) => match body.require_valid() {
-            Ok(body) => body,
-            Err(e) => return validation_failed_response(&state, &tenant_ctx, &auth_user, &e),
-        },
-        None => InvokeSurfaceInteractionRequest::default(),
-    };
     dispatch_surface_interaction(
         InteractionCallCtx {
             state,
@@ -1065,13 +1082,6 @@ pub async fn delete_surface_interaction_item(
     Path((surface_id, interaction_id, item_id)): Path<(String, String, String)>,
     body: Option<Unvalidated<InvokeSurfaceInteractionRequest>>,
 ) -> Response {
-    let body = match body {
-        Some(body) => match body.require_valid() {
-            Ok(body) => body,
-            Err(e) => return validation_failed_response(&state, &tenant_ctx, &auth_user, &e),
-        },
-        None => InvokeSurfaceInteractionRequest::default(),
-    };
     dispatch_surface_interaction(
         InteractionCallCtx {
             state,
@@ -1204,6 +1214,9 @@ fn map_proxy_error(error: SurfaceProxyError) -> Response {
 
 /// Envelope keys pulled out of a GET query string before the remaining pairs
 /// are coerced into interaction `params` — see [`split_get_envelope`].
+///
+/// Field-for-field twin of web-api-types' `InvokeRoutingEnvelope` — a field
+/// change to either struct must update the other.
 struct GetInvokeEnvelope {
     target_provider_id: Option<String>,
     timeout_seconds: Option<u16>,
@@ -2521,6 +2534,48 @@ mod tests {
         assert_eq!(details["reason_code"], "invalid_provider");
         assert!(details.get("provider_kind").is_none());
         assert!(details.get("params").is_none());
+    }
+
+    /// Item 4 (spec 2026-08-06): `validation_failed_response` takes
+    /// primitives, not `&InteractionCallCtx`, precisely so this test can
+    /// call it directly without fabricating an `AccessAuthority` — and so it
+    /// can prove the choke point attributes a `ValidationFailed` audit row to
+    /// the calling API token, not `audit_actor(None)` (the pre-restructure
+    /// bug: attribution was hardcoded to `None` regardless of caller).
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn validation_failed_response_attributes_api_token_actor() {
+        let (state, db, tenant_id, _staged_admin_id) =
+            build_surface_route_test_state_with_db_audit().await;
+        let api_token_id = AuthenticatedApiTokenId(Uuid::now_v7());
+
+        let response = validation_failed_response(
+            &state,
+            tenant_id,
+            &test_api_token_auth_user(),
+            Some(api_token_id),
+            &ValidationError {
+                field: "params",
+                message: "x".to_string(),
+            },
+        );
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let row = tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::SURFACE_ACTION_INVOKE,
+        )
+        .await;
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::ApiToken.as_str()
+        );
+        assert_eq!(row.actor_id, Some(api_token_id.0));
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed.as_str()
+        );
     }
 
     #[cfg(feature = "db-sqlite")]
