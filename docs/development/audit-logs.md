@@ -58,8 +58,8 @@ rolls back along with the mutation it describes. Use for all Stateful-class acti
 whenever the handler reads any row before writing (the snapshot SELECT qualifies) — in practice
 this means every Stateful transaction, since `begin_immediate()` is the workspace's sole
 sanctioned transaction opener. Without `BEGIN IMMEDIATE`, SQLite raises `SQLITE_BUSY_SNAPSHOT`
-(error code 5, bypasses `busy_timeout`) when another writer commits between the snapshot read
-and the audit INSERT. See the coding-standards database section for the full `begin_immediate()`
+(extended result code 517, bypasses `busy_timeout`) when another writer commits between the
+snapshot read and the audit INSERT. See the coding-standards database section for the full `begin_immediate()`
 rule.
 
 **Journald post-commit flush:** the journald backend cannot write inside a

@@ -1796,8 +1796,8 @@ let txn = db
 staying on a plain writer-writer lock, may bypass the ban with `#[expect(clippy::disallowed_methods, reason =
 "...")]`, where the reason names either the write-only rationale or the specific `TransactionOptions` field
 needed. The only current users of this escape hatch are `begin_immediate()`'s own internal
-`begin_with_options()` call and the `uptrakit-db-tx` test module's canary/negative-control call sites (see
-below) — no production call site outside `uptrakit-db-tx` opts out of `begin_immediate()`.
+`begin_with_options()` call and the canary/negative-control call sites in the `uptrakit-db-tx` test modules
+`tests` and `busy_snapshot_tests` (see below) — no production call site outside `uptrakit-db-tx` opts out of `begin_immediate()`.
 
 **Canary:** `crates/shared/db-tx/src/lib.rs`'s `mod tests` exercises all eleven banned paths, each under its own
 `#[expect(clippy::disallowed_methods, ...)]`. If a future `sea_orm` upgrade renames or relocates a banned
