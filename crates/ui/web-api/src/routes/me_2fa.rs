@@ -459,7 +459,8 @@ pub async fn totp_confirm(
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
-    // Pre-hash recovery codes outside the transaction (Argon2id is CPU-intensive).
+    // Hash recovery codes on a blocking thread (Argon2id is CPU-intensive); the
+    // BEGIN IMMEDIATE write lock opened above stays held for the duration.
     let plaintext_codes = generate_recovery_codes();
     let codes_to_hash = plaintext_codes.clone();
     let code_hashes = match tokio::task::spawn_blocking(move || {

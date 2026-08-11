@@ -104,8 +104,9 @@ during the landing.
 - `BEGIN IMMEDIATE` becomes load-bearing for snapshot capture, not merely a best-practice
   recommendation. Any stateful transaction that reads the before-snapshot must be opened with
   `begin_with_options(TransactionOptions { sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate), ..Default::default() })`
-  to prevent `SQLITE_BUSY_SNAPSHOT` (error code 5, bypasses `busy_timeout`) on SQLite when another
-  writer commits between the snapshot SELECT and the audit INSERT. This rule already exists in
+  to prevent `SQLITE_BUSY_SNAPSHOT` (extended result code 517, primary code 5, bypasses
+  `busy_timeout`) on SQLite when another writer commits between the snapshot SELECT and the audit
+  INSERT. This rule already exists in
   `docs/development/coding-standards.md`; V2 makes non-compliance a correctness bug rather than a
   performance hint.
 - V1 audit rows are dropped at migration time. The V2 migration drops the V1 audit tables and

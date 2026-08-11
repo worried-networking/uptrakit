@@ -41,7 +41,7 @@ impl MigrationTrait for Migration {
         // Read-then-write inside one transaction. Per the snapshot rule
         // "BEGIN IMMEDIATE for read-then-write", we use SqliteTransactionMode::Immediate
         // so that a concurrent writer between SELECT and DELETE does not produce
-        // SQLITE_BUSY_SNAPSHOT (code 5). No-op on Postgres.
+        // SQLITE_BUSY_SNAPSHOT (extended result code 517, primary code 5). No-op on Postgres.
         let txn = begin_immediate(manager.get_connection()).await?;
 
         let rows = crate::entity::global_setting::Entity::find()

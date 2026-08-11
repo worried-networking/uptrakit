@@ -565,8 +565,16 @@ pub async fn upsert_protection_audit(
     audit: &ProtectionAudit,
 ) -> Result<()> {
     let now = OffsetDateTime::now_utc();
+    // BEGIN IMMEDIATE prevents SQLITE_BUSY_SNAPSHOT and serializes the
+    // read-then-write upsert against a concurrent save (composite-PK race).
+    let txn = begin_immediate(db).await.map_err(|e| {
+        rootcause::report!(ProxmoxError::Database(format!(
+            "failed to begin transaction for protection audit upsert: {e}"
+        )))
+    })?;
+
     let existing = ProxmoxProtectionAudit::find_by_id(audit.update_history_id)
-        .one(db)
+        .one(&txn)
         .await
         .map_err(|e| {
             rootcause::report!(ProxmoxError::Database(format!(
@@ -589,7 +597,7 @@ pub async fn upsert_protection_audit(
         active.detail = Set(audit.detail.clone());
         active.error_message = Set(audit.error_message.clone());
         active.updated_at = Set(now);
-        active.update(db).await.map_err(|e| {
+        active.update(&txn).await.map_err(|e| {
             rootcause::report!(ProxmoxError::Database(format!(
                 "failed to update protection audit row: {e}"
             )))
@@ -612,12 +620,18 @@ pub async fn upsert_protection_audit(
             created_at: Set(now),
             updated_at: Set(now),
         };
-        active.insert(db).await.map_err(|e| {
+        active.insert(&txn).await.map_err(|e| {
             rootcause::report!(ProxmoxError::Database(format!(
                 "failed to insert protection audit row: {e}"
             )))
         })?;
     }
+
+    txn.commit().await.map_err(|e| {
+        rootcause::report!(ProxmoxError::Database(format!(
+            "failed to commit protection audit upsert: {e}"
+        )))
+    })?;
 
     Ok(())
 }

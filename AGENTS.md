@@ -264,6 +264,9 @@ These are non-negotiable design constraints. Do not violate them.
    `find_via_tenant_join::<Target, Scoped>(relation)`. See [Coding Standards](docs/development/coding-standards.md) (Tenant-Safe Database Queries).
 1. **Batch queries instead of per-item loops.** Never SELECT/UPDATE per item in a loop (N+1). Load with `.is_in(ids)` then join in memory; for bulk
    updates use a single `update_many().filter(Column::Id.is_in(ids))`. See [Coding Standards](docs/development/coding-standards.md).
+1. **`begin_immediate()` is the sole SQLite transaction opener.** All eleven raw sea-orm transaction-opener paths (`.begin()`,
+   `begin_with_options()`, etc.) are `clippy.toml`-banned workspace-wide; use `uptrakit_shared_db::begin_immediate()` for every transaction. See
+   [Coding Standards](docs/development/coding-standards.md).
 
 ## Subsystem contracts
 

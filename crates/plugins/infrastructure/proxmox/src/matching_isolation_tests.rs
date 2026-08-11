@@ -50,7 +50,7 @@ pub(crate) async fn insert_tenant(db: &DatabaseConnection) -> Uuid {
     id
 }
 
-async fn insert_host(db: &DatabaseConnection, tenant_id: Uuid) -> Uuid {
+pub(crate) async fn insert_host(db: &DatabaseConnection, tenant_id: Uuid) -> Uuid {
     let id = Uuid::now_v7();
     let now = OffsetDateTime::now_utc();
     uptrakit_shared_db::entity::host::ActiveModel {
