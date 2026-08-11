@@ -12,6 +12,12 @@
 //!
 //! All Docker-specific logic (`ImageRef` parsing, `#container` suffix handling,
 //! `validate_identifier` SSRF guard) lives here and does not leak to callers.
+//!
+//! No query in this module may be built from the raw connection: these tables
+//! carry no `tenant_id` column, so every query goes through `ctx.tenant_db()`
+//! join helpers, scoped through both `TenantScoped` parents (`software_item`
+//! and `host`). The raw handle remains only as the executor and for
+//! `begin_immediate`.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -146,9 +152,12 @@ async fn handle_switch_tag(
     request: DockerSwitchTagRequest,
 ) -> std::result::Result<serde_json::Value, SurfaceActionError> {
     use sea_orm::{
-        ActiveModelTrait as _, ColumnTrait as _, EntityTrait as _, QueryFilter as _, Set,
+        ActiveModelTrait as _, ColumnTrait as _, JoinType, QueryFilter as _, QuerySelect as _,
+        RelationTrait as _, Set,
     };
-    use uptrakit_shared_db::entity::{host_software_item, host_software_item_plugin};
+    use uptrakit_shared_db::entity::{
+        host, host_software_item, host_software_item_plugin, software_item,
+    };
 
     let host_id = request.host_id;
     let software_item_id = request.software_item_id;
@@ -163,7 +172,8 @@ async fn handle_switch_tag(
     validate_identifier(&new_image_ref)
         .map_err(|e| SurfaceActionError::InvalidInput(format!("invalid image reference: {e}")))?;
 
-    let db = ctx.tenant_db().db();
+    let tenant_db = ctx.tenant_db();
+    let db = tenant_db.db();
 
     // Use BEGIN IMMEDIATE so SQLite promotes to RESERVED lock before the first read,
     // preventing SQLITE_BUSY_SNAPSHOT when another connection commits mid-transaction.
@@ -171,7 +181,15 @@ async fn handle_switch_tag(
         SurfaceActionError::ControllerIntegration(format!("failed to begin transaction: {e}"))
     })?;
 
-    let plugin_rows = host_software_item_plugin::Entity::find()
+    let plugin_rows = tenant_db
+        .find_via_tenant_join::<host_software_item_plugin::Entity, software_item::Entity>(
+            host_software_item_plugin::Relation::SoftwareItem.def(),
+        )
+        .join(
+            JoinType::InnerJoin,
+            host_software_item_plugin::Relation::Host.def(),
+        )
+        .filter(host::Column::TenantId.eq(tenant_db.tenant_id()))
         .filter(host_software_item_plugin::Column::HostId.eq(host_id))
         .filter(host_software_item_plugin::Column::SoftwareItemId.eq(software_item_id))
         .all(&txn)
@@ -188,7 +206,15 @@ async fn handle_switch_tag(
         ));
     }
 
-    let hsi_row = host_software_item::Entity::find()
+    let hsi_row = tenant_db
+        .find_via_tenant_join::<host_software_item::Entity, software_item::Entity>(
+            host_software_item::Relation::SoftwareItem.def(),
+        )
+        .join(
+            JoinType::InnerJoin,
+            host_software_item::Relation::Host.def(),
+        )
+        .filter(host::Column::TenantId.eq(tenant_db.tenant_id()))
         .filter(host_software_item::Column::HostId.eq(host_id))
         .filter(host_software_item::Column::SoftwareItemId.eq(software_item_id))
         .one(&txn)
@@ -521,13 +547,16 @@ mod tests {
         .expect("seed host_software_item");
     }
 
-    /// Docker call sites pass `DOCKER_RELEASES_CONFIG_TYPE` and ordinal 0;
-    /// Task 2's skip test seeds one non-Docker row (any other type string, e.g.
-    /// "package_managers.apt") with ordinal 1 — `uq_hsip_hsi_role_ordinal` is
-    /// UNIQUE on `(host_software_item_id, role, ordinal)`
-    /// (m20260318_000001_host_software_item_qualifier.rs:681-687), so two rows
-    /// under the same hsi with the same role must differ in ordinal or the
-    /// insert panics at seed time.
+    /// Docker call sites pass `DOCKER_RELEASES_CONFIG_TYPE` and ordinal 0.
+    /// The live unique index is `uq_hsip_host_item_role_ordinal` on
+    /// `(host_id, software_item_id, role, ordinal)` (verified against the
+    /// running SQLite schema — NOT `host_software_item_id`-scoped, despite
+    /// the index created by `m20260318_000001_host_software_item_qualifier.rs`'s
+    /// `up()`; a later migration in the chain keeps the original
+    /// `(host_id, software_item_id, role, ordinal)` form live), so any two
+    /// rows sharing `(host_id, software_item_id, role)` — even across
+    /// different `host_software_item_id` values — must use distinct ordinals
+    /// or the insert panics at seed time.
     ///
     /// Deviation from the plan's 8-param signature (clippy::too_many_arguments
     /// caps at 7 and is deny-level): the `id` parameter is dropped and
@@ -747,5 +776,308 @@ mod tests {
             out["new_image_ref"], "",
             "5b: added host join must reject a foreign host"
         );
+    }
+
+    async fn load_pkg_id(db: &DatabaseConnection, host_id: Uuid, software_item_id: Uuid) -> String {
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+        host_software_item_plugin::Entity::find()
+            .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+            .filter(host_software_item_plugin::Column::SoftwareItemId.eq(software_item_id))
+            .one(db)
+            .await
+            .expect("query plugin row")
+            .expect("plugin row exists")
+            .package_identifier
+    }
+
+    #[tokio::test]
+    async fn switch_tag_same_tenant_updates_rows() {
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        seed_tenant(&db, tenant_id).await;
+
+        // Production multi-container shape (spec case 4): two hsi rows for the
+        // pair with distinct qualifiers (the qualifier IS the container name), a
+        // Docker plugin row under each with distinct #container suffixes, plus
+        // one non-Docker plugin row that the update loop must skip.
+        let host_id = Uuid::now_v7();
+        let software_item_id = Uuid::now_v7();
+        seed_host(&db, host_id, tenant_id).await;
+        seed_software_item(&db, software_item_id, tenant_id).await;
+        let hsi_web = Uuid::now_v7();
+        let hsi_worker = Uuid::now_v7();
+        seed_host_software_item(&db, hsi_web, host_id, software_item_id, Some("web")).await;
+        seed_host_software_item(&db, hsi_worker, host_id, software_item_id, Some("worker")).await;
+        seed_plugin_row(
+            &db,
+            host_id,
+            software_item_id,
+            hsi_web,
+            DOCKER_RELEASES_CONFIG_TYPE,
+            "nginx:1.0#web",
+            0,
+        )
+        .await;
+        seed_plugin_row(
+            &db,
+            host_id,
+            software_item_id,
+            hsi_worker,
+            DOCKER_RELEASES_CONFIG_TYPE,
+            "nginx:1.0#worker",
+            1,
+        )
+        .await;
+        // Ordinal 2: the live unique index is `uq_hsip_host_item_role_ordinal`
+        // on `(host_id, software_item_id, role, ordinal)` — NOT
+        // `host_software_item_id`-scoped (verified against the running SQLite
+        // schema; the m20260318 migration's up() creates a
+        // host_software_item_id-scoped index but a later migration in this
+        // chain restores/keeps the (host_id, software_item_id, role, ordinal)
+        // form as the live constraint). All three rows here share the same
+        // `(host_id, software_item_id, role="fetch_releases")`, so each needs
+        // a distinct ordinal regardless of which `host_software_item_id` it
+        // belongs to.
+        seed_plugin_row(
+            &db,
+            host_id,
+            software_item_id,
+            hsi_web,
+            "package_managers.apt",
+            "nginx",
+            2,
+        )
+        .await;
+
+        let controller = TestController {
+            tenant_db: TenantDb::new(db.clone(), tenant_id),
+        };
+        let ctx = SurfaceActionContext {
+            controller: &controller,
+        };
+        let req = DockerSwitchTagRequest {
+            host_id,
+            software_item_id,
+            new_image_ref: "nginx:2.0".to_string(),
+        };
+
+        handle_switch_tag(&ctx, req).await.expect("switch ok");
+
+        // All Docker plugin rows rewritten, per-row #container suffix preserved.
+        let plugin_rows = host_software_item_plugin::Entity::find()
+            .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+            .all(&db)
+            .await
+            .expect("load plugin rows");
+        let mut docker_ids: Vec<_> = plugin_rows
+            .iter()
+            .filter(|r| r.plugin_type == DOCKER_RELEASES_CONFIG_TYPE)
+            .map(|r| r.package_identifier.as_str())
+            .collect();
+        docker_ids.sort_unstable();
+        assert_eq!(docker_ids, ["nginx:2.0#web", "nginx:2.0#worker"]);
+
+        // Non-Docker row skipped.
+        let apt_row = plugin_rows
+            .iter()
+            .find(|r| r.plugin_type == "package_managers.apt")
+            .expect("apt row exists");
+        assert_eq!(
+            apt_row.package_identifier, "nginx",
+            "non-Docker row must be skipped"
+        );
+
+        // Exactly one of the two hsi rows updated (`.one()` picks arbitrarily;
+        // which one is not asserted). The updated row has its version state
+        // cleared and update_category set to "unknown".
+        let hsi_rows = host_software_item::Entity::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .all(&db)
+            .await
+            .expect("load hsi rows");
+        assert_eq!(hsi_rows.len(), 2);
+        let updated: Vec<_> = hsi_rows
+            .iter()
+            .filter(|r| r.package_identifier.as_deref() == Some("nginx:2.0"))
+            .collect();
+        assert_eq!(
+            updated.len(),
+            1,
+            "exactly one hsi row updated (pre-existing multi-qualifier quirk, pinned on purpose)"
+        );
+        // .first().expect(): `indexing_slicing` is denied workspace-wide; do not
+        // trade this for an `#[expect]` (in-test coverage would make it unfulfilled).
+        let updated_row = updated.first().expect("len asserted above");
+        assert_eq!(updated_row.update_category, "unknown");
+        assert!(updated_row.installed_version.is_none());
+        assert!(updated_row.installed_display_version.is_none());
+        assert!(updated_row.latest_version.is_none());
+    }
+
+    #[tokio::test]
+    async fn switch_tag_cross_tenant_rejected_and_unchanged() {
+        let db = setup_db().await;
+        let victim = Uuid::now_v7();
+        let attacker = Uuid::now_v7();
+        seed_tenant(&db, victim).await;
+        seed_tenant(&db, attacker).await;
+        let (host_id, software_item_id) = seed_full_chain(&db, victim, "nginx:1.0").await;
+
+        let controller = TestController {
+            tenant_db: TenantDb::new(db.clone(), attacker),
+        };
+        let ctx = SurfaceActionContext {
+            controller: &controller,
+        };
+        let req = DockerSwitchTagRequest {
+            host_id,
+            software_item_id,
+            new_image_ref: "evil:latest".to_string(),
+        };
+
+        let err = handle_switch_tag(&ctx, req).await.expect_err("must reject");
+        // Pin the exact reject string: it is the spec's error contract (mapped
+        // to AuditOutcome::Denied in surface-proxy). A bare variant match would
+        // also accept tx-begin/load failures and mask a broken deny path.
+        assert!(matches!(
+            &err,
+            SurfaceActionError::ControllerIntegration(msg)
+                if msg == "no plugin assignments found for this host"
+        ));
+        // Victim plugin row untouched.
+        assert_eq!(
+            load_pkg_id(&db, host_id, software_item_id).await,
+            "nginx:1.0"
+        );
+        // Spec case 2 also requires the victim's host_software_item row —
+        // package_identifier AND version columns — asserted unchanged.
+        {
+            use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+            let hsi = host_software_item::Entity::find()
+                .filter(host_software_item::Column::HostId.eq(host_id))
+                .filter(host_software_item::Column::SoftwareItemId.eq(software_item_id))
+                .one(&db)
+                .await
+                .expect("query hsi row")
+                .expect("hsi row exists");
+            assert_eq!(hsi.package_identifier.as_deref(), Some("nginx:1.0"));
+            assert_eq!(hsi.installed_version.as_deref(), Some("1.0"));
+            assert_eq!(hsi.latest_version.as_deref(), Some("1.1"));
+            assert_eq!(hsi.update_category, "patch");
+        }
+    }
+
+    // Spec case 5 — mismatched-parent write guard, BOTH orientations. Each row
+    // is unreachable via the API (host_software_item rows are only created for a
+    // same-tenant (host, software_item) pair); fabricated directly to prove BOTH
+    // anchors are enforced. Caller = tenant A (`attacker`), victim = tenant B.
+
+    /// Spec 5a — `host∈A`, `software_item∈B`. Catches a `host`-anchored mutant
+    /// (drops the `software_item` filter → would leak the write).
+    #[tokio::test]
+    async fn switch_tag_mismatched_parents_host_a_item_b_rejected() {
+        let db = setup_db().await;
+        let victim = Uuid::now_v7();
+        let attacker = Uuid::now_v7();
+        seed_tenant(&db, victim).await;
+        seed_tenant(&db, attacker).await;
+
+        let host_id = Uuid::now_v7();
+        let item_id = Uuid::now_v7();
+        let hsi_id = Uuid::now_v7();
+        seed_host(&db, host_id, attacker).await; // host owned by A (attacker)
+        seed_software_item(&db, item_id, victim).await; // item owned by B (victim)
+        seed_host_software_item(&db, hsi_id, host_id, item_id, None).await;
+        seed_plugin_row(
+            &db,
+            host_id,
+            item_id,
+            hsi_id,
+            DOCKER_RELEASES_CONFIG_TYPE,
+            "nginx:1.0",
+            0,
+        )
+        .await;
+
+        let controller = TestController {
+            tenant_db: TenantDb::new(db.clone(), attacker),
+        };
+        let ctx = SurfaceActionContext {
+            controller: &controller,
+        };
+        let req = DockerSwitchTagRequest {
+            host_id,
+            software_item_id: item_id,
+            new_image_ref: "evil:latest".to_string(),
+        };
+
+        let err = handle_switch_tag(&ctx, req)
+            .await
+            .expect_err("must reject 5a");
+        // Pin the exact reject string: it is the spec's error contract (mapped
+        // to AuditOutcome::Denied in surface-proxy). A bare variant match would
+        // also accept tx-begin/load failures and mask a broken deny path.
+        assert!(matches!(
+            &err,
+            SurfaceActionError::ControllerIntegration(msg)
+                if msg == "no plugin assignments found for this host"
+        ));
+        assert_eq!(load_pkg_id(&db, host_id, item_id).await, "nginx:1.0");
+    }
+
+    /// Spec 5b (higher-value) — `host∈B`, `software_item∈A`. Catches a
+    /// `software_item`-anchored mutant that keeps the anchor but drops the added
+    /// `host` defense-in-depth join → would leak the write.
+    #[tokio::test]
+    async fn switch_tag_mismatched_parents_host_b_item_a_rejected() {
+        let db = setup_db().await;
+        let victim = Uuid::now_v7();
+        let attacker = Uuid::now_v7();
+        seed_tenant(&db, victim).await;
+        seed_tenant(&db, attacker).await;
+
+        let host_id = Uuid::now_v7();
+        let item_id = Uuid::now_v7();
+        let hsi_id = Uuid::now_v7();
+        seed_host(&db, host_id, victim).await; // host owned by B (victim)
+        seed_software_item(&db, item_id, attacker).await; // item owned by A (attacker)
+        seed_host_software_item(&db, hsi_id, host_id, item_id, None).await;
+        seed_plugin_row(
+            &db,
+            host_id,
+            item_id,
+            hsi_id,
+            DOCKER_RELEASES_CONFIG_TYPE,
+            "nginx:1.0",
+            0,
+        )
+        .await;
+
+        let controller = TestController {
+            tenant_db: TenantDb::new(db.clone(), attacker),
+        };
+        let ctx = SurfaceActionContext {
+            controller: &controller,
+        };
+        let req = DockerSwitchTagRequest {
+            host_id,
+            software_item_id: item_id,
+            new_image_ref: "evil:latest".to_string(),
+        };
+
+        let err = handle_switch_tag(&ctx, req)
+            .await
+            .expect_err("must reject 5b");
+        // Pin the exact reject string: it is the spec's error contract (mapped
+        // to AuditOutcome::Denied in surface-proxy). A bare variant match would
+        // also accept tx-begin/load failures and mask a broken deny path.
+        assert!(matches!(
+            &err,
+            SurfaceActionError::ControllerIntegration(msg)
+                if msg == "no plugin assignments found for this host"
+        ));
+        assert_eq!(load_pkg_id(&db, host_id, item_id).await, "nginx:1.0");
     }
 }

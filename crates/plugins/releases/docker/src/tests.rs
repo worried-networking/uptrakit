@@ -193,6 +193,12 @@ fn docker_item_host_actions_surface_keeps_form_preload_contract() {
         switch_tag.required_action.as_deref(),
         Some(uptrakit_shared_types::access::actions::SOFTWARE_UPDATE_STR)
     );
+    assert!(
+        !switch_tag.provider_invocable,
+        "switch-tag must not be provider-invocable: a system service skips the \
+         enrolled-tenant identity check, so the provider-origin gate is what \
+         blocks payload-declared tenants"
+    );
     assert_eq!(
         switch_tag.input_schema,
         Some(surfaces::SchemaContract::Object)
@@ -230,6 +236,10 @@ fn docker_item_host_actions_surface_keeps_form_preload_contract() {
     assert_eq!(
         get_current_tag.required_action.as_deref(),
         Some(uptrakit_shared_types::access::actions::SOFTWARE_UPDATE_STR)
+    );
+    assert!(
+        !get_current_tag.provider_invocable,
+        "current-tag must not be provider-invocable (same provider-origin gate)"
     );
     assert_eq!(get_current_tag.input_schema, None);
     assert_eq!(
