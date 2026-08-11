@@ -10,8 +10,6 @@ cd "$(dirname "$0")/.."
 ROUTES_DIR="crates/ui/web-api/src/routes"
 WEB_API_SRC="crates/ui/web-api/src"
 ALLOWLIST="ci/verify_no_raw_body_extractors_allowlist.txt"
-# Shrink-only ratchet: decrement as Stage 2 converts sites; never increment.
-MAX_ALLOWLIST_ENTRIES=33
 
 if ! command -v perl >/dev/null 2>&1; then
   echo "perl is required for verify_no_raw_body_extractors.sh" >&2
@@ -19,7 +17,9 @@ if ! command -v perl >/dev/null 2>&1; then
 fi
 
 TMP_SIGS="$(mktemp)"
-trap 'rm -f "$TMP_SIGS"' EXIT
+TMP_BASE=""
+TMP_CUR=""
+trap 'rm -f "$TMP_SIGS" ${TMP_BASE:+"$TMP_BASE"} ${TMP_CUR:+"$TMP_CUR"}' EXIT
 
 # Extract every async fn signature, flattened to one line, return type stripped.
 # Signature extraction is anchored to COLUMN 0: rustfmt (CI-enforced via
@@ -127,16 +127,117 @@ while IFS='|' read -r al_class al_path al_regex; do
     fi
   done <"$TMP_SIGS"
   if [ "$hit" -eq 0 ]; then
-    echo "STALE allowlist entry (site converted or renamed — delete the row, decrement MAX_ALLOWLIST_ENTRIES): $al_class|$al_path|$al_regex" >&2
+    echo "STALE allowlist entry (site converted or renamed — delete the row): $al_class|$al_path|$al_regex" >&2
     violations=1
   fi
 done <"$ALLOWLIST"
 
-# Shrink-only ratchet.
-entry_count=$(grep -cE '^raw_(extractor|body)\|' "$ALLOWLIST" || true)
-if [ "$entry_count" -gt "$MAX_ALLOWLIST_ENTRIES" ]; then
-  echo "Allowlist grew ($entry_count > $MAX_ALLOWLIST_ENTRIES) — additions prohibited (shrink-only ratchet)" >&2
-  violations=1
+# Shrink-only history check (spec 2026-08-06 item 6): every current allowlist
+# row must already exist at a baseline outside the commit's control.
+# Two modes:
+#  - Explicit BASE_REF argument (CI): baseline = that ref's TIP. Safe on PRs
+#    because actions/checkout resolves the PR MERGE ref (refs/pull/N/merge) —
+#    the compared tree already contains main's deletions. Pinning `ref:` to a
+#    head SHA in the workflow would false-fail old branches after Stage-2 row
+#    deletions.
+#  - No argument (local runs): baseline = merge-base(HEAD, <fallback ref>) —
+#    deliberately weaker so a local tree branched before a Stage-2 deletion
+#    does not false-fail for rows it never touched. The strict surface is CI.
+# Failure precedence: named BASE_REF that does not resolve => HARD FAIL (an
+# explicitly requested baseline must not fail open); bare-SHA BASE_REF that
+# does not resolve (null SHA on new-branch push, orphaned github.event.before
+# after a force-push) => loud warn + skip; no argument and no fallback
+# resolvable (offline/shallow) => loud warn + skip. Off-CI warn-and-skip is
+# the accepted residual. Rename support: an added row is legal only as a
+# BIJECTIVE match to a removed base row with the same class+regex at another
+# path (file moves/facade splits); ambiguous or doubly-claimed base rows fail.
+# The allowlist row set is the mechanically frozen thing; amending THIS script
+# is the review-gated escape hatch (none anticipated).
+BASE_REF="${1:-}"
+baseline_commit=""
+history_skip_reason=""
+if [ -n "$BASE_REF" ]; then
+  if git rev-parse --verify --quiet "${BASE_REF}^{commit}" >/dev/null; then
+    baseline_commit="$BASE_REF"
+  else
+    case "$BASE_REF" in
+      *[!0-9a-f]*)
+        echo "FATAL: explicit BASE_REF '$BASE_REF' does not resolve — refusing to skip an explicitly requested baseline" >&2
+        exit 1
+        ;;
+      *)
+        history_skip_reason="unresolvable SHA baseline '$BASE_REF' (null/orphaned — normal on new-branch or force-push events)"
+        ;;
+    esac
+  fi
+else
+  fallback=""
+  head_ref="$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null || true)"
+  for cand in "${head_ref#refs/remotes/}" origin/main origin/master; do
+    if [ -n "$cand" ] && git rev-parse --verify --quiet "${cand}^{commit}" >/dev/null; then
+      fallback="$cand"
+      break
+    fi
+  done
+  if [ -n "$fallback" ]; then
+    baseline_commit="$(git merge-base HEAD "$fallback" 2>/dev/null || true)"
+    [ -z "$baseline_commit" ] && history_skip_reason="no merge-base with $fallback"
+  else
+    history_skip_reason="no baseline ref resolvable (offline or shallow clone)"
+  fi
+fi
+
+if [ -z "$baseline_commit" ]; then
+  echo "WARNING: allowlist history sub-check SKIPPED (${history_skip_reason}); STALE and violation checks still ran" >&2
+else
+  TMP_BASE="$(mktemp)"
+  TMP_CUR="$(mktemp)"
+  # File-absence and zero-matching-rows are DIFFERENT cases: `git show` failing
+  # means no baseline file (warn-skip); a present file with zero rows is the
+  # legal Stage-2 end state and MUST still enforce (every current row is then
+  # an addition) — piping git show straight into grep would conflate the two
+  # via pipefail and silently disable the check exactly when it matters most.
+  if ! base_content="$(git show "${baseline_commit}:${ALLOWLIST}" 2>/dev/null)"; then
+    echo "WARNING: allowlist history sub-check SKIPPED (allowlist absent at baseline ${baseline_commit})" >&2
+  else
+    printf '%s\n' "$base_content" | grep -E '^raw_(extractor|body)\|' | sort >"$TMP_BASE" || true
+    # `|| true`: zero matching rows (Stage 2's end state) is a legal, non-error
+    # outcome — without it, pipefail would kill the gate silently right here.
+    grep -E '^raw_(extractor|body)\|' "$ALLOWLIST" | sort >"$TMP_CUR" || true
+    additions="$(comm -23 "$TMP_CUR" "$TMP_BASE")"
+    removals="$(comm -13 "$TMP_CUR" "$TMP_BASE")"
+    consumed=""
+    # Match by class+regex only (NOT path) — deliberately NOT routed through
+    # `awk -v`: -v assignments interpret backslash escapes (`\b` becomes a
+    # literal backspace byte) while a field read via awk's own `-F` splitting
+    # does not, so a key built with `-v` from a row containing the near-
+    # universal `fn <name>\b` regex form silently mismatched every field
+    # read from input — breaking rename/split matching for virtually every
+    # real row. Comparing via bash string equality avoids the reinterpretation.
+    while IFS='|' read -r add_class add_path add_regex; do
+      [ -z "$add_class" ] && continue
+      row="${add_class}|${add_path}|${add_regex}"
+      key="${add_class}|${add_regex}"
+      match_count=0
+      while IFS='|' read -r rm_class _ rm_regex; do
+        [ -z "$rm_class" ] && continue
+        if [ "${rm_class}|${rm_regex}" = "$key" ]; then
+          match_count=$((match_count + 1))
+        fi
+      done <<<"$removals"
+      if [ "$match_count" -ne 1 ]; then
+        echo "VIOLATION: allowlist row not in baseline ${baseline_commit} (additions prohibited; ambiguous/absent rename match): $row" >&2
+        violations=1
+        continue
+      fi
+      if printf '%s\n' "$consumed" | grep -Fxq "$key"; then
+        echo "VIOLATION: two added rows claim the same renamed base row (a split must not grow the set): $row" >&2
+        violations=1
+        continue
+      fi
+      consumed="$(printf '%s\n%s' "$consumed" "$key")"
+    done <<<"$additions"
+  fi
 fi
 
 # Residual check: every raw_extractor (legacy B1) fn must still call .validate()

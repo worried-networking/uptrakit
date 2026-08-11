@@ -1065,10 +1065,14 @@ the entity family does not audit validation failures.
 
 A raw `Json<T>`/`Form<T>` body parameter (or a raw `Request`/`Bytes` body read) in `crates/ui/web-api/src/routes/` is banned, CI-enforced by
 `bash ci/verify_no_raw_body_extractors.sh`. The gate carries an allowlist (`ci/verify_no_raw_body_extractors_allowlist.txt`) covering the legacy
-handlers that still call `.validate()` manually plus a small set of enumerated raw-body reads. What the script actually enforces is a shrink-only
-row-_count_ ceiling (`MAX_ALLOWLIST_ENTRIES`), not a frozen row _set_ — it cannot detect a commit that deletes one legacy row while adding a
-different, unconverted handler's row, since the count stays flat. Adding a new handler to the allowlist is prohibited by convention and code review,
-not by the script; see [ADR-0038](../adr/0038-type-state-request-body-validation-via-unvalidated-extractor.md) for the full boundary.
+handlers that still call `.validate()` manually plus a small set of enumerated raw-body reads. The allowlist row _set_ — not just its count — is
+mechanically frozen: every current row must already exist at a baseline outside the commit's control (a baseline-subset check with bijective rename
+support, so a file-move or facade split can carry its row to a new path without being treated as an addition). CI passes the pull request's base ref,
+or the push event's prior `before` SHA on `main`, as that baseline; runs off CI degrade to the merge-base of the default branch, or — if no baseline
+is resolvable at all, e.g. offline or a shallow clone — warn and skip the sub-check while the other checks still run. A commit that deletes one
+legacy allowlist row while adding a different, unconverted one is caught: the new row cannot match any row removed at the baseline, so it is flagged
+as an addition regardless of the row count staying flat. The remaining, deliberately review-gated escape hatch is amending the gate script itself;
+see [ADR-0038](../adr/0038-type-state-request-body-validation-via-unvalidated-extractor.md) for the full boundary.
 
 ### Validate trait
 

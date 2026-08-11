@@ -71,6 +71,8 @@ jobs:
       - ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - run: sudo apt-get install -y ripgrep
       - run: python3 -m unittest ci/test_check_plugin_semantic_boundary.py
       - run: python3 -m unittest ci/test_verify_action_security_declarations.py
@@ -83,8 +85,20 @@ jobs:
       - run: bash ci/verify_engine_owned_entities.sh
       - run: python3 ci/verify_action_security_declarations.py
       - run: bash ci/verify_agents_md_budget.sh
+      - run: bash ci/test_verify_no_raw_body_extractors.sh
+      # fetch-depth: 0 + per-event BASE_REF are load-bearing for the gate's
+      # history check; a named BASE_REF that fails to resolve HARD-FAILS by
+      # design (do not "fix" a checkout hiccup by relaxing the hard fail —
+      # an explicitly requested baseline must never fail open).
       - name: Verify no raw body extractors (routes/ only)
-        run: bash ci/verify_no_raw_body_extractors.sh
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            bash ci/verify_no_raw_body_extractors.sh "origin/${{ github.base_ref }}"
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            bash ci/verify_no_raw_body_extractors.sh "${{ github.event.before }}"
+          else
+            bash ci/verify_no_raw_body_extractors.sh
+          fi
 
   backend-lint:
     runs-on:

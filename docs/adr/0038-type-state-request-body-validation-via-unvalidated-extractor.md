@@ -50,7 +50,8 @@ Twenty-three handlers were converted from raw extractors to `Unvalidated<T>`/`Un
 across commits 6ed5bf6e5, 7a0f64d92, e5d16cb4e, 249a15a19, and bcc565ccf. A new CI gate,
 `ci/verify_no_raw_body_extractors.sh`, now bans raw `Json<T>`/`Form<T>` parameters (and
 unreviewed `FromRequest` impls) anywhere in `routes/`, against a frozen, shrink-only allowlist
-(`ci/verify_no_raw_body_extractors_allowlist.txt`, capped at `MAX_ALLOWLIST_ENTRIES=34`). The
+(`ci/verify_no_raw_body_extractors_allowlist.txt`, frozen against a baseline outside the commit's
+control — BASE_REF tip in CI, merge-base locally). The
 allowlist rows fall into two classes: 29 legacy handlers that already call `.validate()` manually
 on a raw-extracted body (`raw_extractor` rows — deferred to a future Stage 2 conversion, and
 checked by the gate's residual pass to ensure the `.validate()` call is still present), and 5
@@ -74,7 +75,7 @@ body is now compile-blocked, not just discouraged: the type has no accessor othe
 `require_valid()`, so the class of bug that motivated this ADR cannot recur at those call sites
 short of deleting the `Validate` bound itself. `ci/verify_no_raw_body_extractors.sh` extends that
 guarantee forward — a new mutating handler cannot introduce a fresh raw `Json<T>`/`Form<T>`
-parameter without either converting or adding a justified, ratchet-capped allowlist row.
+parameter without converting it; the gate-script amendment is the only review-gated exception.
 
 The coverage is not total, and this ADR states the boundary precisely rather than rounding up.
 The 5 `raw_body` sites are gate-enumerated, not compile-blocked: they read `Bytes`/`Request`
@@ -82,16 +83,27 @@ directly, so there is no `Validate`-bound type for the compiler to gate on, and 
 protection there is limited to noticing if the raw extractor disappears (a stale-allowlist check)
 or if a `raw_extractor` row's `.validate()` call is deleted (the residual check) — it does not,
 and cannot, verify that a `raw_body` handler validates its bytes correctly, only that the
-allowlist entry still corresponds to a real raw read. Separately, the ratchet enforces a row
-_count_ ceiling (`MAX_ALLOWLIST_ENTRIES`), not a frozen row _set_: a single commit that deletes
-one legacy allowlist row while adding a different, unconverted one keeps the count unchanged and
-so passes both the staleness check (the new row matches a real raw-extractor signature) and the
-ratchet (the count didn't grow), even though no site was actually converted. That substitution is
-not caught by the script — it is a code-review concern, and reviewers of future allowlist diffs
-need to check that a row removal corresponds to an actual `Unvalidated<T>` conversion, not a swap.
+allowlist entry still corresponds to a real raw read. Separately, the allowlist row _set_ — not
+just its count — is mechanically frozen: every current row must already exist at a baseline
+outside the commit's control (a baseline-subset check with bijective rename support, so a
+file-move or facade split can carry its row to a new path without being treated as an addition).
+CI passes the pull request's base ref, or the push event's prior `before` SHA on `main`, as that
+baseline; runs off CI degrade to the merge-base of the default branch, or — if no baseline is
+resolvable at all, e.g. offline or a shallow clone — warn and skip the sub-check while the other
+checks still run. A commit that deletes one legacy allowlist row while adding a different,
+unconverted one is caught: the new row cannot match any row removed at the baseline, so it is
+flagged as an addition regardless of the row count staying flat. The remaining, deliberately
+review-gated escape hatch is amending the gate script itself.
 
 Finally, `require_valid()` returning `Err` is enforced to produce a rejection, but the gate does
 not — and structurally cannot — verify _which_ rejection a handler builds from that error, or
 whether it correctly mirrors `AuditOutcome::ValidationFailed` for handlers whose success path is
 audited. Getting the failure-mapping choice (plain 400 vs. audit-mirrored 400) right for a given
 handler remains a review-time concern, not a gate-enforced one.
+
+`InvokeSurfaceInteractionRequest`'s `Validate` impl is `Ok(())` today — the choke point in
+`surfaces.rs` (step 5) runs `require_valid()` unconditionally, but nothing yet exercises the
+precedence between an action-gate `403` and a semantic `400` on the same request. The first real
+`Validate` rule added to `InvokeSurfaceInteractionRequest` must add the discriminating test proving
+the `403` still wins over a `400` when both conditions hold (see the dispatch choke-point comment
+in `surfaces.rs`); that obligation is deferred, not forgotten.

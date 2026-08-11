@@ -56,7 +56,7 @@ bash ci/verify_typed_audit_actions.sh                                # Dynamic a
 bash ci/verify_handler_state_contract.sh                             # No handler mixes State<Arc<AppState>> with sub-state
 python3 ci/verify_db_access_policy.py                                # db_access_policy.toml consistent with routes/
 bash ci/verify_agents_md_budget.sh                                   # AGENTS.md files within size budgets
-bash ci/verify_no_raw_body_extractors.sh                             # Request bodies go through Unvalidated<T>/Validated<T> (see coding-standards.md § Request Type Validation)
+bash ci/verify_no_raw_body_extractors.sh                             # Request bodies go through Unvalidated<T>/Validated<T>; allowlist frozen against a git baseline (see coding-standards.md § Request Type Validation)
 python3 ci/verify_no_orphan_modules.py                               # Every tracked .rs reachable via mod resolution (no orphan modules)
 bash ci/verify_no_new_cfg_not_feature.sh                             # Additive-only feature flags: no new negated-feature cfg outside allowlist
 python3 ci/verify_action_security_declarations.py                    # Operation oauth2 scope lists match handler action extractors
