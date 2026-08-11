@@ -35,7 +35,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use sea_orm::{DatabaseConnection, TransactionTrait};
+    use sea_orm::{
+        DatabaseConnection, DatabaseExecutor, DatabaseTransaction, DbErr, TransactionTrait,
+    };
 
     /// Canary: proves the clippy `disallowed-methods` bans still resolve.
     ///
@@ -43,9 +45,28 @@ mod tests {
     /// unresolvable `clippy.toml` path degrades to a config warning that
     /// `-D warnings` does not deny — but these expectations then go
     /// unfulfilled and `unfulfilled_lint_expectations = "deny"` fails the
-    /// build instead.
+    /// build instead. Every one of the eleven banned paths gets its own call
+    /// site below, each under its own `#[expect]`, so a rename anywhere in
+    /// the list is caught — not just in the three most commonly used
+    /// methods.
+    // A closure that ignores its `&DatabaseTransaction` argument gets a
+    // rustc region-inference failure ("implementation of AsyncFnOnce is not
+    // general enough") against the `for<'c> AsyncFnOnce(&'c
+    // DatabaseTransaction) -> ...` bound on the six *_async methods below —
+    // a known rustc limitation, not a real HRTB mismatch. A named fn item
+    // is generic over the borrow's lifetime by construction and sidesteps
+    // it, so the *_async canary sites pass this instead of a closure.
     #[expect(dead_code, reason = "canary is never called")]
-    async fn canary(db: &DatabaseConnection) {
+    async fn canary_txn_noop(_inner: &DatabaseTransaction) -> Result<(), DbErr> {
+        Ok(())
+    }
+
+    // `tx` is a parameter, not constructed here: DatabaseTransaction has no
+    // public constructor other than the begin*() family already exercised
+    // above, and canary is never called, so an unused parameter typechecks
+    // without ever needing a real instance.
+    #[expect(dead_code, reason = "canary is never called")]
+    async fn canary(db: &DatabaseConnection, tx: &DatabaseTransaction) {
         #[expect(
             clippy::disallowed_methods,
             reason = "canary: proves the TransactionTrait::begin ban still resolves"
@@ -63,14 +84,78 @@ mod tests {
             reason = "canary: proves the TransactionTrait::begin_with_config ban still resolves"
         )]
         let _r3 = db.begin_with_config(None, None).await;
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "canary: proves the TransactionTrait::transaction ban still resolves"
+        )]
+        let _r4 = db
+            .transaction::<_, (), DbErr>(|_tx| Box::pin(async move { Ok(()) }))
+            .await;
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "canary: proves the TransactionTrait::transaction_with_config ban still resolves"
+        )]
+        let _r5 = db
+            .transaction_with_config::<_, (), DbErr>(
+                |_tx| Box::pin(async move { Ok(()) }),
+                None,
+                None,
+            )
+            .await;
+
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "canary: proves the DatabaseTransaction::transaction_async ban still resolves"
+        )]
+        let _r6 = tx.transaction_async::<_, (), DbErr>(canary_txn_noop).await;
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "canary: proves the DatabaseTransaction::transaction_with_config_async ban still resolves"
+        )]
+        let _r7 = tx
+            .transaction_with_config_async::<_, (), DbErr>(canary_txn_noop, None, None)
+            .await;
+
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "canary: proves the DatabaseConnection::transaction_async ban still resolves"
+        )]
+        let _r8 = db.transaction_async::<_, (), DbErr>(canary_txn_noop).await;
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "canary: proves the DatabaseConnection::transaction_with_config_async ban still resolves"
+        )]
+        let _r9 = db
+            .transaction_with_config_async::<_, (), DbErr>(canary_txn_noop, None, None)
+            .await;
+
+        // DatabaseExecutor::from(&DatabaseConnection) is a plain enum-variant
+        // constructor (no begin*() call involved), so it's free to build
+        // here without needing its own #[expect].
+        let exec = DatabaseExecutor::from(db);
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "canary: proves the DatabaseExecutor::transaction_async ban still resolves"
+        )]
+        let _r10 = exec
+            .transaction_async::<_, (), DbErr>(canary_txn_noop)
+            .await;
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "canary: proves the DatabaseExecutor::transaction_with_config_async ban still resolves"
+        )]
+        let _r11 = exec
+            .transaction_with_config_async::<_, (), DbErr>(canary_txn_noop, None, None)
+            .await;
     }
 }
 
 #[cfg(test)]
 mod busy_snapshot_tests {
-    // execute_unprepared is the approved raw-execution exception here: db-tx
-    // defines no SeaORM entities; every statement is sea_query-built, never
-    // string-concatenated.
+    // Every statement below is sea_query-built (no string concatenation,
+    // no injection surface). execute_unprepared is used only because this
+    // entity-less crate has no SeaORM Statement/backend plumbing to send a
+    // built query through any other way.
     //
     // No #![expect(clippy::expect_used)] here (deviation from the brief's
     // verbatim snippet): clippy.toml's `allow-expect-in-tests = true`
@@ -102,6 +187,11 @@ mod busy_snapshot_tests {
         SqlxSqliteConnector::from_sqlx_sqlite_pool(pool)
     }
 
+    // Hand-creates the table instead of run_migrations() (the project norm
+    // for fresh SQLite DBs): this leaf crate defines no entities/migrations
+    // to run, and the two-connection race below needs both pools sharing
+    // one on-disk DB *file* — sqlite::memory: gives each pool its own
+    // private in-memory DB, so it can't be shared this way.
     async fn setup(path: &std::path::Path) -> (DatabaseConnection, DatabaseConnection) {
         let a = connect(path).await;
         let b = connect(path).await;
