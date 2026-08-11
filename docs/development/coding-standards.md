@@ -1061,6 +1061,16 @@ These two are not co-equal defaults. `Unvalidated<T>` is the default for mutatio
 `ValidationFailed` audit event, return a non-400 status, or defer validation until after an authorization check. Reach for `Validated<T>` only when
 the entity family does not audit validation failures.
 
+### Reason-code namespaces
+
+`"validation_error"` is an **HTTP error-envelope code** (`ApiError` paths, consumed by API clients);
+`"invalid_request"` is an **audit details `reason_code`** (consumed by audit review). They are different namespaces
+by design — renaming either would churn recorded audit rows or the API error contract for zero information gain.
+Second axis: action families with site-namespaced reason codes (e.g. `SOFTWARE_UPDATE_TRIGGERED`'s
+`trigger_update.*`, produced beside `TriggerUpdateError::trigger_audit_classification`) keep that prefix on their
+validation-reject rows (`trigger_update.invalid_request`), while the generic `require_valid()` mirror family uses
+bare `invalid_request`. Follow the action family's convention when one exists, the mirror convention otherwise.
+
 ### Raw body extractors are banned
 
 A raw `Json<T>`/`Form<T>` body parameter (or a raw `Request`/`Bytes` body read) in `crates/ui/web-api/src/routes/` is banned, CI-enforced by

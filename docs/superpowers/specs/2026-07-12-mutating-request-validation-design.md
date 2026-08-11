@@ -11,6 +11,9 @@ superseded designs.
 `crates/ui/web-api/src/routes/*` (convert the bypass handlers), `ci/verify_no_raw_body_extractors.sh` (+ frozen
 allowlist) + its wiring, one ADR. No new deps, no wire change.
 
+> **Resolved by:** the formerly-parked owner decisions and minor deferrals in this design were resolved in
+> [2026-08-06-mutating-request-validation-hardening-design.md](2026-08-06-mutating-request-validation-hardening-design.md).
+
 ## Problem
 
 Audit `audit-2026-07-11` L1246 (MEDIUM · stability · effort M · web-api-routes · verified): some mutating (Update /
