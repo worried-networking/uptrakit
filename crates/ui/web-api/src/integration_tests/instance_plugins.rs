@@ -294,3 +294,195 @@ async fn upsert_config_validates_against_validate_trait() {
 // descriptor into the catalog — a significant harness change that is out of
 // scope for the initial integration-test pass. Add a real instance_config
 // descriptor to a future plugin and cover this path then.
+
+/// Stub Instance-scoped plugin descriptor + catalog for the secret-masking
+/// test below.
+///
+/// Task 5's registry assertion (`type_settings_and_instance_plugins_are_secret_free`)
+/// proves no *real* plugin has a sensitive instance-config path today (the
+/// deferred TODO above is exactly this gap — no live instance_config
+/// descriptor exists yet), so this test injects a synthetic descriptor with
+/// an explicit `sensitive_paths: &["auth_token"]` rather than searching for a
+/// real leak — this is defense-in-depth for future secret-bearing
+/// instance-config plugins.
+mod secret_masking_fixture {
+    use std::sync::{Arc, OnceLock};
+
+    use uptrakit_plugin_infrastructure_core::InstanceConfigOps;
+    use uptrakit_plugin_infrastructure_registry::{
+        CatalogConfig, ConfigModel, ConfigOps, FormFieldDescriptor, InstancePluginStates,
+        PluginCatalog, PluginConfigValidationError, PluginDescriptor, PluginFamily, PluginOps,
+        PluginScope, RoleCreators,
+    };
+
+    pub(crate) const TYPE_ID: &str = "test.secret.instance-config";
+
+    fn noop_validate(_: &serde_json::Value) -> Result<(), PluginConfigValidationError> {
+        Ok(())
+    }
+    fn noop_normalize(
+        v: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginConfigValidationError> {
+        Ok(v.clone())
+    }
+    fn noop_sample() -> serde_json::Value {
+        serde_json::json!({})
+    }
+    fn noop_form_schema() -> Vec<FormFieldDescriptor> {
+        vec![]
+    }
+    fn noop_validate_identifier(_: &str) -> Result<(), PluginConfigValidationError> {
+        Ok(())
+    }
+    fn noop_instance_config_validate(
+        _: &serde_json::Value,
+    ) -> Result<(), PluginConfigValidationError> {
+        Ok(())
+    }
+
+    static INSTANCE_CONFIG_OPS: InstanceConfigOps = InstanceConfigOps {
+        form_schema: noop_form_schema,
+        sample: noop_sample,
+        validate: noop_instance_config_validate,
+    };
+
+    static DESCRIPTOR: OnceLock<PluginDescriptor> = OnceLock::new();
+
+    fn descriptor() -> &'static PluginDescriptor {
+        DESCRIPTOR.get_or_init(|| PluginDescriptor {
+            type_id: TYPE_ID,
+            display_name: "Test Instance Config Secret Plugin",
+            family: PluginFamily::Software,
+            config_model: ConfigModel::None,
+            capabilities: &[],
+            scope: PluginScope::Instance,
+            instance_config: Some(&INSTANCE_CONFIG_OPS),
+            sensitive_paths: &["auth_token"],
+            config: ConfigOps {
+                validate: noop_validate,
+                normalize: noop_normalize,
+                sample: noop_sample,
+                form_schema: noop_form_schema,
+                validate_identifier: noop_validate_identifier,
+            },
+            roles: RoleCreators {
+                discoverer: None,
+                version_detector: None,
+                release_fetcher: None,
+                package_indexer: None,
+                update_executor: None,
+                lifecycle_hook: None,
+                notification_transport: None,
+                software_item_lifecycle: None,
+                controller_update_protection: None,
+                controller_update_hook: None,
+                infra: None,
+                installed_version_enricher: None,
+            },
+            surfaces: None,
+            type_settings: None,
+            config_test: None,
+            sudo: None,
+            raw_settings_keys: &[],
+            global_provider_consumers: &[],
+            migrations: None,
+            agent_migrations: None,
+            agent_surfaces: None,
+            reset_tenant_data: None,
+            db_migrate_tables: None,
+        })
+    }
+
+    /// Build a `PluginOps` catalog containing only this stub descriptor —
+    /// injected via `TestApp::with_plugin_surfaces` so the real catalog
+    /// (which is provably secret-free per Task 5) is never on the hook for
+    /// exercising this code path.
+    ///
+    /// Returns the fallible catalog build so callers (all `#[tokio::test]`
+    /// fn bodies) can `.expect()` it themselves — `.expect()` outside a
+    /// `#[test]` fn body is clippy-denied workspace-wide.
+    pub(crate) fn plugin_ops() -> uptrakit_plugin_infrastructure_core::Result<Arc<dyn PluginOps>> {
+        PluginCatalog::new(
+            vec![descriptor()],
+            &CatalogConfig::default(),
+            InstancePluginStates::from_pairs([(TYPE_ID, true)]),
+        )
+        .map(|catalog| Arc::new(catalog) as Arc<dyn PluginOps>)
+    }
+}
+
+#[tokio::test]
+async fn instance_plugin_config_masked_and_restored() {
+    let app = TestApp::with_plugin_surfaces(Some(
+        secret_masking_fixture::plugin_ops()
+            .expect("build stub plugin catalog for instance-config masking test"),
+    ))
+    .await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let seed_status = client
+        .put_json(
+            &format!(
+                "/api/v1/instance-plugins/{}/config",
+                secret_masking_fixture::TYPE_ID
+            ),
+            &serde_json::json!({ "config": { "auth_token": "t1", "filter": "x" } }),
+        )
+        .bearer(&token)
+        .send_status()
+        .await;
+    assert_eq!(seed_status, http::StatusCode::OK, "seed PUT must succeed");
+
+    let (get_status, get_body): (_, serde_json::Value) = client
+        .get(&format!(
+            "/api/v1/instance-plugins/{}",
+            secret_masking_fixture::TYPE_ID
+        ))
+        .bearer(&token)
+        .send_json()
+        .await;
+    assert_eq!(get_status, http::StatusCode::OK);
+    assert_eq!(
+        get_body["current_config"]["auth_token"],
+        serde_json::json!("***"),
+        "sensitive path must be masked on GET"
+    );
+    assert_eq!(
+        get_body["current_config"]["filter"],
+        serde_json::json!("x"),
+        "non-sensitive path must pass through unmasked"
+    );
+
+    let sentinel_status = client
+        .put_json(
+            &format!(
+                "/api/v1/instance-plugins/{}/config",
+                secret_masking_fixture::TYPE_ID
+            ),
+            &serde_json::json!({ "config": { "auth_token": "***", "filter": "y" } }),
+        )
+        .bearer(&token)
+        .send_status()
+        .await;
+    assert_eq!(
+        sentinel_status,
+        http::StatusCode::OK,
+        "sentinel PUT must be accepted"
+    );
+
+    let snapshot = app.state.instance_plugin_snapshot.load();
+    let stored = snapshot
+        .get(secret_masking_fixture::TYPE_ID)
+        .expect("row must exist in snapshot after PUT");
+    assert_eq!(
+        stored.config["auth_token"],
+        serde_json::json!("t1"),
+        "sentinel must be restored to the real stored secret"
+    );
+    assert_eq!(
+        stored.config["filter"],
+        serde_json::json!("y"),
+        "non-sensitive field must be updated"
+    );
+}

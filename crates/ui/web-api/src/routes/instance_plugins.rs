@@ -43,7 +43,7 @@ fn build_summary(
     let row = snapshot.get(id.as_str());
     let enabled = row.map(|r| r.enabled).unwrap_or(false);
     let current_config = row
-        .map(|r| r.config.clone())
+        .map(|r| ops.mask_config_secrets(id, &r.config))
         .unwrap_or_else(|| serde_json::json!({}));
     let updated_at = row.map(|r| r.updated_at);
 
@@ -304,7 +304,7 @@ pub async fn upsert_instance_plugin_config(
     Path(plugin_type): Path<String>,
     CanManageSystemSettings(user): CanManageSystemSettings,
     api_token_id: Option<axum::Extension<AuthenticatedApiTokenId>>,
-    Validated(req): Validated<UpsertInstancePluginConfigRequest>,
+    Validated(mut req): Validated<UpsertInstancePluginConfigRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|v| v.0);
     let id = PluginTypeId::new(&plugin_type);
@@ -320,6 +320,18 @@ pub async fn upsert_instance_plugin_config(
             "This plugin has no instance configuration schema",
         );
     };
+
+    let snapshot = state.instance_plugin_snapshot.load();
+    if let Some(existing_row) = snapshot.get(id.as_str()) {
+        ops.restore_config_secrets(&id, &mut req.config, &existing_row.config);
+    }
+
+    if let Err(e) = ops.assert_no_sentinel(&id, &req.config) {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            format!("Invalid instance config: {e}"),
+        );
+    }
 
     if let Err(e) = (instance_config_ops.validate)(&req.config) {
         return error_response(

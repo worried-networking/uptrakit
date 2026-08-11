@@ -24,18 +24,26 @@ use uptrakit_web_api_types::plugin_type_settings::{
     PluginTypeSettingsResponse, UpsertPluginTypeSettingsRequest,
 };
 
-/// Convert a `plugin_type_setting::Model` into the API response type.
+/// Convert a `plugin_type_setting::Model` into the API response type, with
+/// sensitive paths masked via `ops.mask_config_secrets`.
 fn model_to_response(
+    ops: &dyn PluginOps,
     model: uptrakit_shared_db::entity::plugin_type_setting::Model,
 ) -> PluginTypeSettingsResponse {
+    let plugin_type = PluginTypeId::new(model.plugin_type);
+    let config = ops.mask_config_secrets(&plugin_type, &model.config);
     PluginTypeSettingsResponse {
-        plugin_type: PluginTypeId::new(model.plugin_type),
-        config: model.config,
+        plugin_type,
+        config,
         created_at: model.created_at,
         updated_at: model.updated_at,
     }
 }
 
+/// Restores masked secrets from `existing_config` (when a stored row is
+/// present), rejects a lingering mask sentinel, then validates the plugin
+/// type and its config. `config` is mutated in place by the restore step —
+/// callers must persist the (possibly restored) value afterward.
 #[expect(
     clippy::result_large_err,
     reason = "error variant carries a Response which is large but unavoidable at this API boundary"
@@ -43,7 +51,8 @@ fn model_to_response(
 fn validate_type_settings_payload(
     plugin_ops: &dyn PluginOps,
     plugin_type: &PluginTypeId,
-    config: &serde_json::Value,
+    config: &mut serde_json::Value,
+    existing_config: Option<&serde_json::Value>,
 ) -> Result<(), (&'static str, Response)> {
     if plugin_ops.get(plugin_type).is_none() {
         return Err((
@@ -61,6 +70,20 @@ fn validate_type_settings_payload(
                     "Plugin type '{}' does not support type settings",
                     plugin_type
                 ),
+            ),
+        ));
+    }
+
+    if let Some(existing) = existing_config {
+        plugin_ops.restore_config_secrets(plugin_type, config, existing);
+    }
+
+    if let Err(e) = plugin_ops.assert_no_sentinel(plugin_type, config) {
+        return Err((
+            "plugin_type_settings_invalid",
+            error_response(
+                StatusCode::BAD_REQUEST,
+                format!("Invalid plugin type settings: {e}"),
             ),
         ));
     }
@@ -141,7 +164,7 @@ pub async fn list_plugin_type_settings(
                         })
                         .unwrap_or(false)
                 })
-                .map(model_to_response)
+                .map(|m| model_to_response(plugin_ops.0.as_ref(), m))
                 .collect();
             (StatusCode::OK, Json(responses)).into_response()
         }
@@ -203,7 +226,11 @@ pub async fn get_plugin_type_settings(
 
     match pts_queries::get_type_settings(tenant_db.db(), tenant_db.tenant_id(), &plugin_type).await
     {
-        Ok(Some(model)) => (StatusCode::OK, Json(model_to_response(model))).into_response(),
+        Ok(Some(model)) => (
+            StatusCode::OK,
+            Json(model_to_response(plugin_ops.0.as_ref(), model)),
+        )
+            .into_response(),
         Ok(None) => error_response(
             StatusCode::NOT_FOUND,
             "No settings found for this plugin type",
@@ -274,7 +301,7 @@ pub async fn upsert_plugin_type_settings(
     Path(plugin_type): Path<String>,
     CanManageSystemSettings(user): CanManageSystemSettings,
     write_ctx: WriteAuthContext,
-    Validated(req): Validated<UpsertPluginTypeSettingsRequest>,
+    Validated(mut req): Validated<UpsertPluginTypeSettingsRequest>,
 ) -> Response {
     let WriteAuthContext {
         api_token_id,
@@ -299,9 +326,39 @@ pub async fn upsert_plugin_type_settings(
         return error_response(StatusCode::NOT_FOUND, "Unknown plugin type");
     }
 
-    if let Err((reason_code, rejection)) =
-        validate_type_settings_payload(plugin_ops.0.as_ref(), &plugin_type_id, &req.config)
-    {
+    let existing =
+        match pts_queries::get_type_settings(tenant_db.db(), tenant_id, &plugin_type).await {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::error!("Failed to load existing plugin type settings: {e}");
+                if let Ok(entry) = AuditEntry::<Event>::builder_event(
+                    uptrakit_audit_log::AuditActionType::PLUGIN_TYPE_SETTINGS_UPSERT,
+                )
+                .tenant_scope(tenant_id)
+                .actor(actor_type, actor_id)
+                .target(
+                    "plugin_type_settings",
+                    plugin_type.clone(),
+                    Some(plugin_type.clone()),
+                )
+                .outcome(AuditOutcome::Failed)
+                .details(serde_json::json!({
+                    "reason_code": "plugin_type_settings_upsert_failed"
+                }))
+                .build()
+                {
+                    state.audit_emitter.emit_event(entry);
+                }
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
+
+    if let Err((reason_code, rejection)) = validate_type_settings_payload(
+        plugin_ops.0.as_ref(),
+        &plugin_type_id,
+        &mut req.config,
+        existing.as_ref().map(|m| &m.config),
+    ) {
         if let Ok(entry) = AuditEntry::<Event>::builder_event(
             uptrakit_audit_log::AuditActionType::PLUGIN_TYPE_SETTINGS_UPSERT,
         )
@@ -402,7 +459,11 @@ pub async fn upsert_plugin_type_settings(
     }
     hook.flush_after_commit().await;
 
-    (StatusCode::OK, Json(model_to_response(after_model))).into_response()
+    (
+        StatusCode::OK,
+        Json(model_to_response(plugin_ops.0.as_ref(), after_model)),
+    )
+        .into_response()
 }
 
 /// Delete plugin type settings, resetting to defaults.

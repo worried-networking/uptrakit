@@ -20,8 +20,8 @@ use uptrakit_shared_types::access::actions;
 
 use crate::test_harness::TestApp;
 use crate::test_harness::fixtures::{
-    open_registration, register_user, revoke_role_grants_covering, role_id_by_name,
-    stage_user_with_only_role, stage_zero_role_user,
+    open_registration, register_and_get_token, register_user, revoke_role_grants_covering,
+    role_id_by_name, stage_user_with_only_role, stage_zero_role_user,
 };
 #[cfg(feature = "dashboard-icons")]
 use crate::test_harness::fixtures::{register_admin_and_tenant_user, register_user_with_only_role};
@@ -308,5 +308,262 @@ async fn system_administrator_sees_disabled_instance_plugin_viewer_does_not() {
             .any(|row| row["plugin_type"] == "enhancement.dashboard-icons"),
         "viewer (settings:read only, no system.settings:manage) must not see the disabled \
          instance-scoped plugin"
+    );
+}
+
+/// Stub plugin descriptor + catalog for the secret-masking tests below.
+///
+/// Task 5's registry assertion (`type_settings_and_instance_plugins_are_secret_free`)
+/// proves no *real* plugin has a sensitive type-settings path today, so these
+/// tests inject a synthetic Tenant-scoped descriptor with an explicit
+/// `sensitive_paths: &["auth_token"]` rather than searching for a real leak —
+/// this is defense-in-depth for future secret-bearing type-settings plugins.
+mod secret_masking_fixture {
+    use std::sync::{Arc, OnceLock};
+
+    use uptrakit_plugin_infrastructure_core::TypeSettingsOps;
+    use uptrakit_plugin_infrastructure_registry::{
+        CatalogConfig, ConfigModel, ConfigOps, FormFieldDescriptor, InstancePluginStates,
+        PluginCatalog, PluginConfigValidationError, PluginDescriptor, PluginFamily, PluginOps,
+        PluginScope, RoleCreators,
+    };
+
+    pub(crate) const TYPE_ID: &str = "test.secret.type-settings";
+
+    fn noop_validate(_: &serde_json::Value) -> Result<(), PluginConfigValidationError> {
+        Ok(())
+    }
+    fn noop_normalize(
+        v: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginConfigValidationError> {
+        Ok(v.clone())
+    }
+    fn noop_sample() -> serde_json::Value {
+        serde_json::json!({})
+    }
+    fn noop_form_schema() -> Vec<FormFieldDescriptor> {
+        vec![]
+    }
+    fn noop_validate_identifier(_: &str) -> Result<(), PluginConfigValidationError> {
+        Ok(())
+    }
+
+    static TYPE_SETTINGS_OPS: TypeSettingsOps = TypeSettingsOps {
+        form_schema: noop_form_schema,
+        sample: noop_sample,
+    };
+
+    static DESCRIPTOR: OnceLock<PluginDescriptor> = OnceLock::new();
+
+    fn descriptor() -> &'static PluginDescriptor {
+        DESCRIPTOR.get_or_init(|| PluginDescriptor {
+            type_id: TYPE_ID,
+            display_name: "Test Type Settings Secret Plugin",
+            family: PluginFamily::Software,
+            config_model: ConfigModel::None,
+            capabilities: &[],
+            scope: PluginScope::Tenant,
+            instance_config: None,
+            sensitive_paths: &["auth_token"],
+            config: ConfigOps {
+                validate: noop_validate,
+                normalize: noop_normalize,
+                sample: noop_sample,
+                form_schema: noop_form_schema,
+                validate_identifier: noop_validate_identifier,
+            },
+            roles: RoleCreators {
+                discoverer: None,
+                version_detector: None,
+                release_fetcher: None,
+                package_indexer: None,
+                update_executor: None,
+                lifecycle_hook: None,
+                notification_transport: None,
+                software_item_lifecycle: None,
+                controller_update_protection: None,
+                controller_update_hook: None,
+                infra: None,
+                installed_version_enricher: None,
+            },
+            surfaces: None,
+            type_settings: Some(&TYPE_SETTINGS_OPS),
+            config_test: None,
+            sudo: None,
+            raw_settings_keys: &[],
+            global_provider_consumers: &[],
+            migrations: None,
+            agent_migrations: None,
+            agent_surfaces: None,
+            reset_tenant_data: None,
+            db_migrate_tables: None,
+        })
+    }
+
+    /// Build a `PluginOps` catalog containing only this stub descriptor —
+    /// injected via `TestApp::with_plugin_surfaces` so the real catalog
+    /// (which is provably secret-free per Task 5) is never on the hook for
+    /// exercising this code path.
+    ///
+    /// Returns the fallible catalog build so callers (all `#[tokio::test]`
+    /// fn bodies) can `.expect()` it themselves — `.expect()` outside a
+    /// `#[test]` fn body is clippy-denied workspace-wide.
+    pub(crate) fn plugin_ops() -> uptrakit_plugin_infrastructure_core::Result<Arc<dyn PluginOps>> {
+        PluginCatalog::new(
+            vec![descriptor()],
+            &CatalogConfig::default(),
+            InstancePluginStates::all_disabled(),
+        )
+        .map(|catalog| Arc::new(catalog) as Arc<dyn PluginOps>)
+    }
+}
+
+#[tokio::test]
+async fn type_settings_get_masks_sensitive_paths() {
+    let app = TestApp::with_plugin_surfaces(Some(
+        secret_masking_fixture::plugin_ops()
+            .expect("build stub plugin catalog for type-settings masking tests"),
+    ))
+    .await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    uptrakit_web_api_queries::queries::plugin_type_settings::upsert_type_settings(
+        app.state.db(),
+        app.tenant_id,
+        secret_masking_fixture::TYPE_ID,
+        serde_json::json!({ "auth_token": "t1", "filter": "x" }),
+    )
+    .await
+    .expect("seed plugin type settings row");
+
+    let (status, body): (_, serde_json::Value) = app
+        .client()
+        .get(&format!(
+            "/api/v1/plugin-type-settings/{}",
+            secret_masking_fixture::TYPE_ID
+        ))
+        .bearer(&token)
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::OK, "expected masked settings row");
+    assert_eq!(
+        body["config"]["auth_token"],
+        serde_json::json!("***"),
+        "sensitive path must be masked on GET"
+    );
+    assert_eq!(
+        body["config"]["filter"],
+        serde_json::json!("x"),
+        "non-sensitive path must pass through unmasked"
+    );
+}
+
+#[tokio::test]
+async fn type_settings_put_sentinel_preserves_secret_and_stays_sparse() {
+    let app = TestApp::with_plugin_surfaces(Some(
+        secret_masking_fixture::plugin_ops()
+            .expect("build stub plugin catalog for type-settings masking tests"),
+    ))
+    .await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    uptrakit_web_api_queries::queries::plugin_type_settings::upsert_type_settings(
+        app.state.db(),
+        app.tenant_id,
+        secret_masking_fixture::TYPE_ID,
+        serde_json::json!({ "auth_token": "t1", "filter": "x" }),
+    )
+    .await
+    .expect("seed plugin type settings row");
+
+    let status = app
+        .client()
+        .put_json(
+            &format!(
+                "/api/v1/plugin-type-settings/{}",
+                secret_masking_fixture::TYPE_ID
+            ),
+            &serde_json::json!({ "config": { "auth_token": "***", "filter": "y" } }),
+        )
+        .bearer(&token)
+        .send_status()
+        .await;
+
+    assert_eq!(
+        status,
+        http::StatusCode::OK,
+        "sentinel PUT must be accepted"
+    );
+
+    let stored = uptrakit_web_api_queries::queries::plugin_type_settings::get_type_settings(
+        app.state.db(),
+        app.tenant_id,
+        secret_masking_fixture::TYPE_ID,
+    )
+    .await
+    .expect("load stored plugin type settings")
+    .expect("row must exist after PUT");
+
+    assert_eq!(
+        stored.config["auth_token"],
+        serde_json::json!("t1"),
+        "sentinel must be restored to the real stored secret"
+    );
+    assert_eq!(
+        stored.config["filter"],
+        serde_json::json!("y"),
+        "non-sensitive field must be updated"
+    );
+
+    let stored_keys: std::collections::BTreeSet<&str> = stored
+        .config
+        .as_object()
+        .expect("stored config must be an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        stored_keys,
+        std::collections::BTreeSet::from(["auth_token", "filter"]),
+        "stored config must contain exactly the submitted keys — a serde-default expansion \
+         adding keys is the regression this test exists to catch"
+    );
+}
+
+#[tokio::test]
+async fn type_settings_put_sentinel_with_no_stored_row_is_rejected() {
+    let app = TestApp::with_plugin_surfaces(Some(
+        secret_masking_fixture::plugin_ops()
+            .expect("build stub plugin catalog for type-settings masking tests"),
+    ))
+    .await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let (status, body): (_, serde_json::Value) = app
+        .client()
+        .put_json(
+            &format!(
+                "/api/v1/plugin-type-settings/{}",
+                secret_masking_fixture::TYPE_ID
+            ),
+            &serde_json::json!({ "config": { "auth_token": "***" } }),
+        )
+        .bearer(&token)
+        .send_json()
+        .await;
+
+    assert_eq!(
+        status,
+        http::StatusCode::BAD_REQUEST,
+        "sentinel PUT with no stored row must be rejected: {body}"
+    );
+    let message = body["error"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("still contains the masked sentinel"),
+        "error message must name the sentinel: {body}"
     );
 }
