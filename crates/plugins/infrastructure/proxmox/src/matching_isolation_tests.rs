@@ -3,6 +3,8 @@
 //! `MockDatabase` cannot prove tenant filtering (it ignores WHERE clauses), so
 //! these tests run the shared-db + proxmox migrations and assert foreign rows'
 //! post-state directly.
+//!
+//! Also hosts the shared real-SQLite helpers used by sibling SQLite test modules.
 
 #![expect(
     clippy::expect_used,
@@ -17,7 +19,7 @@ use uuid::Uuid;
 use crate::entity::proxmox_host_mapping;
 use crate::matching::{manual_match, unmatch};
 
-async fn setup_db() -> DatabaseConnection {
+pub(crate) async fn setup_db() -> DatabaseConnection {
     let db = sea_orm::Database::connect("sqlite::memory:")
         .await
         .expect("connect in-memory sqlite");
@@ -30,7 +32,7 @@ async fn setup_db() -> DatabaseConnection {
     db
 }
 
-async fn insert_tenant(db: &DatabaseConnection) -> Uuid {
+pub(crate) async fn insert_tenant(db: &DatabaseConnection) -> Uuid {
     let id = Uuid::now_v7();
     let now = OffsetDateTime::now_utc();
     uptrakit_shared_db::entity::tenant::ActiveModel {
@@ -73,7 +75,7 @@ async fn insert_host(db: &DatabaseConnection, tenant_id: Uuid) -> Uuid {
     id
 }
 
-async fn insert_plugin_config(db: &DatabaseConnection, tenant_id: Uuid) -> Uuid {
+pub(crate) async fn insert_plugin_config(db: &DatabaseConnection, tenant_id: Uuid) -> Uuid {
     let id = Uuid::now_v7();
     let now = OffsetDateTime::now_utc();
     uptrakit_shared_db::entity::plugin_config::ActiveModel {

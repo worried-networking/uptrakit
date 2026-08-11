@@ -174,10 +174,18 @@ pub async fn upsert_global_default(
     policy: &ProtectionPolicy,
 ) -> Result<()> {
     let now = OffsetDateTime::now_utc();
+    // BEGIN IMMEDIATE prevents SQLITE_BUSY_SNAPSHOT and serializes the
+    // read-then-write upsert against a concurrent save (composite-PK race).
+    let txn = begin_immediate(db).await.map_err(|e| {
+        rootcause::report!(ProxmoxError::Database(format!(
+            "failed to begin transaction for global protection defaults upsert: {e}"
+        )))
+    })?;
+
     let existing = ProxmoxProtectionDefault::find()
         .filter(proxmox_protection_default::Column::TenantId.eq(tenant_id))
         .filter(proxmox_protection_default::Column::PluginConfigId.eq(plugin_config_id))
-        .one(db)
+        .one(&txn)
         .await
         .map_err(|e| {
             rootcause::report!(ProxmoxError::Database(format!(
@@ -192,7 +200,7 @@ pub async fn upsert_global_default(
         active.snapshot_timeout_seconds = Set(policy.snapshot_timeout_seconds);
         active.backup_timeout_seconds = Set(policy.backup_timeout_seconds);
         active.updated_at = Set(now);
-        active.update(db).await.map_err(|e| {
+        active.update(&txn).await.map_err(|e| {
             rootcause::report!(ProxmoxError::Database(format!(
                 "failed to update global protection defaults: {e}"
             )))
@@ -208,12 +216,18 @@ pub async fn upsert_global_default(
             created_at: Set(now),
             updated_at: Set(now),
         };
-        active.insert(db).await.map_err(|e| {
+        active.insert(&txn).await.map_err(|e| {
             rootcause::report!(ProxmoxError::Database(format!(
                 "failed to insert global protection defaults: {e}"
             )))
         })?;
     }
+
+    txn.commit().await.map_err(|e| {
+        rootcause::report!(ProxmoxError::Database(format!(
+            "failed to commit global protection defaults upsert: {e}"
+        )))
+    })?;
 
     Ok(())
 }
@@ -270,10 +284,18 @@ pub async fn upsert_item_override(
     policy: &ProtectionPolicy,
 ) -> Result<()> {
     let now = OffsetDateTime::now_utc();
+    // BEGIN IMMEDIATE prevents SQLITE_BUSY_SNAPSHOT and serializes the
+    // read-then-write upsert against a concurrent save (composite-PK race).
+    let txn = begin_immediate(db).await.map_err(|e| {
+        rootcause::report!(ProxmoxError::Database(format!(
+            "failed to begin transaction for per-item protection override upsert: {e}"
+        )))
+    })?;
+
     let existing = ProxmoxProtectionItemOverride::find()
         .filter(proxmox_protection_item_override::Column::SoftwareItemId.eq(software_item_id))
         .filter(proxmox_protection_item_override::Column::PluginConfigId.eq(plugin_config_id))
-        .one(db)
+        .one(&txn)
         .await
         .map_err(|e| {
             rootcause::report!(ProxmoxError::Database(format!(
@@ -288,7 +310,7 @@ pub async fn upsert_item_override(
         active.snapshot_timeout_seconds = Set(policy.snapshot_timeout_seconds);
         active.backup_timeout_seconds = Set(policy.backup_timeout_seconds);
         active.updated_at = Set(now);
-        active.update(db).await.map_err(|e| {
+        active.update(&txn).await.map_err(|e| {
             rootcause::report!(ProxmoxError::Database(format!(
                 "failed to update per-item protection override: {e}"
             )))
@@ -304,12 +326,18 @@ pub async fn upsert_item_override(
             created_at: Set(now),
             updated_at: Set(now),
         };
-        active.insert(db).await.map_err(|e| {
+        active.insert(&txn).await.map_err(|e| {
             rootcause::report!(ProxmoxError::Database(format!(
                 "failed to insert per-item protection override: {e}"
             )))
         })?;
     }
+
+    txn.commit().await.map_err(|e| {
+        rootcause::report!(ProxmoxError::Database(format!(
+            "failed to commit per-item protection override upsert: {e}"
+        )))
+    })?;
 
     Ok(())
 }

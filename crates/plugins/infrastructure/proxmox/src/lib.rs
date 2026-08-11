@@ -30,6 +30,8 @@ pub mod matching;
 mod matching_isolation_tests;
 pub mod plugin;
 pub mod policy_store;
+#[cfg(all(test, feature = "migrations"))]
+mod policy_store_sqlite_tests;
 pub(crate) mod protection_store;
 pub mod pve_setup;
 pub(crate) mod reset;
