@@ -35,7 +35,7 @@ pub struct ListUpdateHistoryInput {
     pub host_id: Option<String>,
     /// Filter by software item UUID (optional).
     pub software_item_id: Option<String>,
-    /// Filter by status: queued, pending, in_progress, completed, failed (optional).
+    /// Filter by status: queued, pending, in_progress, awaiting_restart, completed, failed, interrupted (optional).
     pub status: Option<String>,
     /// Page number (1-indexed, default 1).
     pub page: Option<u64>,

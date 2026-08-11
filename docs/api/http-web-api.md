@@ -850,16 +850,18 @@ Update history records each attempt and stores the full command output for audit
 
 **`UpdateStatus` values** in history responses:
 
-| Value         | Meaning                                                                                                             |
-| :------------ | :------------------------------------------------------------------------------------------------------------------ |
-| `queued`      | Batch item waiting for a preceding item on the same host to complete. Counts as `update_in_progress` in MQTT state. |
-| `pending`     | Dispatched to the agent; not yet started. Holds the per-host active lock.                                           |
-| `in_progress` | Agent is executing the update. Holds the per-host active lock.                                                      |
-| `completed`   | Update succeeded (terminal).                                                                                        |
-| `failed`      | Update failed (terminal).                                                                                           |
+| Value              | Meaning                                                                                                                                                 |
+| :----------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `queued`           | Batch item waiting for a preceding item on the same host to complete. Counts as `update_in_progress` in MQTT state.                                     |
+| `pending`          | Dispatched to the agent; not yet started. Holds the per-host active lock.                                                                               |
+| `in_progress`      | Agent is executing the update. Holds the per-host active lock.                                                                                          |
+| `awaiting_restart` | Update applied but a system restart is required before it takes effect (not terminal). Holds the per-host active lock.                                  |
+| `completed`        | Update succeeded (terminal).                                                                                                                            |
+| `failed`           | Update failed (terminal): the agent reported a real failure outcome.                                                                                    |
+| `interrupted`      | Outcome unknown (terminal): the executing connection was lost or the update exceeded its time budget before reporting a result. Distinct from `failed`. |
 
-Triggers return **HTTP 409** if another update (`pending` or `in_progress`) already exists for the target host,
-across all update types.
+Triggers return **HTTP 409** if another update in a host-blocking status (`pending`, `in_progress`, or
+`awaiting_restart`) already exists for the target host, across all update types.
 
 ## Software Item Version Check Endpoints
 

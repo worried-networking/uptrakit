@@ -730,8 +730,7 @@ mod tests {
                 None,
             );
             assert_eq!(
-                resp.status.as_str(),
-                status.as_str(),
+                resp.status, status,
                 "status {status:?} must survive build_response unchanged \
                  (AwaitingRestart previously came back as pending)"
             );

@@ -213,7 +213,6 @@ Enums currently annotated with `#[non_exhaustive]`:
 
 - `AlertSeverity`
 - `TriggerUpdateStatus`
-- `UpdateStatus`
 - `RegistrationMode`
 - `NotificationEventType`, `NotificationDeliveryStatus`
 

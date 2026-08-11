@@ -54,25 +54,26 @@ transitions to a terminal state. This avoids expensive subqueries in the list en
 
 ## Status enum
 
-The `UpdateStatus` enum is defined in two places:
+There is one canonical `UpdateStatus` enum, defined in `crates/shared/types/src/update_status.rs`. It carries
+its `sea_orm::DeriveActiveEnum` mapping under the `sea-orm` feature and its `utoipa::ToSchema` under the
+`openapi` feature. Both the DB entity (`crates/shared/db/src/entity/update_history.rs`) and
+`uptrakit-web-api-types` (`crates/shared/web-api-types/src/update_history.rs`, which re-exports the type) use
+this one definition, so DB and API statuses cannot drift apart — there is no DB↔API conversion step.
 
-- **Entity level** (`crates/shared/db/src/entity/update_history.rs`): `DeriveActiveEnum` with
-  `sea_orm(rs_type = "String")`. Variants: `Queued`, `Pending`, `InProgress`, `Completed`, `Failed`.
-- **API level** (`crates/shared/web-api-types/src/update_history.rs`): `serde(rename_all = "snake_case")` with
-  `as_str()` / `from_str()` methods. Conversion between DB and API enums happens in the route handler's
-  `db_status_to_api` helper.
-
-| Variant      | String        | Meaning                                                  | Terminal? | Active lock? |
-| :----------- | :------------ | :------------------------------------------------------- | :-------: | :----------: |
-| `Queued`     | `queued`      | Waiting for host to become free (batch or single update) |    No     |      No      |
-| `Pending`    | `pending`     | Dispatched; agent not yet started                        |    No     |   **Yes**    |
-| `InProgress` | `in_progress` | Agent executing the update                               |    No     |   **Yes**    |
-| `Completed`  | `completed`   | Update succeeded                                         |    Yes    |      No      |
-| `Failed`     | `failed`      | Update failed                                            |    Yes    |      No      |
+| Variant           | String             | Meaning                                                                             | Terminal? | Active lock? |
+| :---------------- | :----------------- | :---------------------------------------------------------------------------------- | :-------: | :----------: |
+| `Queued`          | `queued`           | Waiting for host to become free (batch or single update)                            |    No     |      No      |
+| `Pending`         | `pending`          | Dispatched; agent not yet started                                                   |    No     |   **Yes**    |
+| `InProgress`      | `in_progress`      | Agent executing the update                                                          |    No     |   **Yes**    |
+| `AwaitingRestart` | `awaiting_restart` | Update applied; a system restart is required before it takes effect                 |    No     |   **Yes**    |
+| `Completed`       | `completed`        | Update succeeded                                                                    |    Yes    |      No      |
+| `Failed`          | `failed`           | Update failed                                                                       |    Yes    |      No      |
+| `Interrupted`     | `interrupted`      | Outcome unknown — connection lost or time budget exceeded before reporting a result |    Yes    |      No      |
 
 **Active lock** means the row counts toward the per-host lock (i.e. no further update may be
 triggered for that host while such a row exists). The partial unique index
-`uix_update_history_host_active` covers exactly these two statuses.
+`uix_update_history_host_active` covers three statuses:
+`WHERE status IN ('pending', 'in_progress', 'awaiting_restart')`.
 
 ## Output lifecycle
 

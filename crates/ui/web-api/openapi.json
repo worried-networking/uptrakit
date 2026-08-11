@@ -10172,7 +10172,7 @@
           {
             "name": "status",
             "in": "query",
-            "description": "Filter by status (pending, in_progress, completed, failed).",
+            "description": "Filter by status (queued, pending, in_progress, awaiting_restart, completed, failed, interrupted).",
             "required": false,
             "schema": {
               "oneOf": [

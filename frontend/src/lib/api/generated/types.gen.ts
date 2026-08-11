@@ -10178,7 +10178,7 @@ export type ListUpdateHistoryData = {
          */
         software_item_id?: string | null;
         /**
-         * Filter by status (pending, in_progress, completed, failed).
+         * Filter by status (queued, pending, in_progress, awaiting_restart, completed, failed, interrupted).
          */
         status?: null | UpdateStatus;
         /**

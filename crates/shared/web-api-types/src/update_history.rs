@@ -12,7 +12,7 @@ pub struct UpdateHistoryQuery {
     pub host_id: Option<Uuid>,
     /// Filter by software item UUID.
     pub software_item_id: Option<Uuid>,
-    /// Filter by status (pending, in_progress, completed, failed).
+    /// Filter by status (queued, pending, in_progress, awaiting_restart, completed, failed, interrupted).
     pub status: Option<UpdateStatus>,
     /// Page number (1-indexed). Defaults to 1.
     pub page: Option<u64>,
