@@ -293,15 +293,17 @@ The `PluginConfig` trait unifies configuration validation, form schema, and iden
 former `ConfigFormSchema` and `SecretMasking` traits. Secret masking is not a trait method -- see [Secret masking](#secret-masking) below.
 
 ```rust
-pub trait PluginConfig: Serialize + DeserializeOwned + Clone + Send + Sync {
-    /// Validate the configuration. Called during plugin creation.
-    fn validate(&self) -> Result<(), String>;
-
-    /// Return typed form field definitions for the frontend.
-    fn form_schema() -> Vec<FormField>;
+pub trait PluginConfig:
+    Serialize + DeserializeOwned + Default + Clone + Send + Sync + 'static
+{
+    /// Validate the configuration after deserialization.
+    fn validate(&self) -> Result<(), PluginConfigValidationError> { Ok(()) }
 
     /// Validate a package identifier for this plugin type.
-    fn validate_identifier(_value: &str) -> Result<(), String> { Ok(()) }
+    fn validate_identifier(_value: &str) -> Result<(), PluginConfigValidationError> { Ok(()) }
+
+    /// Return typed form field definitions for the frontend.
+    fn form_schema() -> Vec<FormFieldDescriptor> { vec![] }
 }
 ```
 
@@ -359,14 +361,14 @@ these as structured forms instead of raw JSON textareas.
 
 ```rust
 impl PluginConfig for GitHubConfig {
-    fn form_schema() -> Vec<FormField> {
+    fn form_schema() -> Vec<FormFieldDescriptor> {
         vec![
-            FormField::new("auth_token", "Auth Token")
-                .with_type(FieldType::Password)
+            FormFieldDescriptor::new("auth_token", "Auth Token")
+                .with_type(FormFieldType::Password)
                 .sensitive()
                 .with_help_text("Personal access token for private repos"),
-            FormField::new("include_prereleases", "Include Pre-releases")
-                .with_type(FieldType::Toggle)
+            FormFieldDescriptor::new("include_prereleases", "Include Pre-releases")
+                .with_type(FormFieldType::Toggle)
                 .with_help_text("Include draft/pre-release versions"),
         ]
     }
@@ -383,7 +385,7 @@ For nested configuration objects (e.g., Docker's `auth` enum), use dot-separated
 - `auth.username` -- text field visible when `auth._type` is `"basic"`
 - `auth.password` -- password field visible when `auth._type` is `"basic"`
 
-Use `FormField::with_visible_when()` for conditional visibility based on another field's value.
+Use `FormFieldDescriptor::with_visible_when()` for conditional visibility based on another field's value.
 
 The schema is served to the frontend via `GET /api/v1/plugin-types` in the `config_form_fields` array of `PluginTypeInfo`.
 
@@ -420,14 +422,15 @@ Plugin configuration uses a **two-tier model**:
 
 ```rust
 impl TypeSettings for AptConfig {
-    fn type_settings_form_schema() -> Vec<FormField> {
+    fn type_settings_form_schema() -> Vec<FormFieldDescriptor> {
         vec![
-            FormField::new("discovery_filter", "Discovery Filter")
-                .with_type(FieldType::Select)
+            FormFieldDescriptor::new("discovery_filter", "Discovery Filter")
+                .with_type(FormFieldType::Select)
                 .with_options(vec![
-                    ("manual", "Manual packages only"),
-                    ("all", "All installed packages"),
-                ]),
+                    FormSelectOptionDescriptor::new("all", "All installed packages"),
+                    FormSelectOptionDescriptor::new("manual", "Manually installed only"),
+                ])
+                .with_help_text("Which packages to discover during autodiscovery"),
         ]
     }
 
