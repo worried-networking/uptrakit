@@ -1747,9 +1747,11 @@ A silently-zero count on DB failure hides errors. Propagate DB errors with `?` o
 **Background — SQLITE_BUSY_SNAPSHOT:** SQLite WAL mode allows one writer and many concurrent
 readers. When a `BEGIN DEFERRED` transaction reads a row, it establishes a snapshot at the WAL
 position at that moment. If a separate connection commits a write before the first transaction
-tries to write, SQLite detects that the snapshot is stale and returns `SQLITE_BUSY` (error code
-5) **immediately** — it bypasses `busy_timeout` entirely because retrying cannot help: the
-snapshot can never become current without restarting the transaction.
+tries to write, SQLite detects that the snapshot is stale and returns `SQLITE_BUSY_SNAPSHOT`
+(extended result code 517, primary code 5) **immediately** — it bypasses `busy_timeout` entirely
+because retrying cannot help: the snapshot can never become current without restarting the
+transaction. The extended code is what distinguishes it from an ordinary `SQLITE_BUSY` (5) lock
+wait; `crates/shared/db-tx/src/lib.rs` pins both codes in its two-connection tests.
 
 The symptom is a `database is locked` error with a 2–5 ms latency on an operation that is supposed to wait up to 5 seconds. It is easy to miss in
 testing because it only triggers under concurrent load.
@@ -1776,7 +1778,11 @@ active_model.update(&txn).await?;            // write — safe, no BUSY_SNAPSHOT
 
 // ✗ Wrong — banned via clippy.toml disallowed-methods; BEGIN DEFERRED opens a
 //   snapshot on first read that a concurrent commit can invalidate before the
-//   write → SQLITE_BUSY_SNAPSHOT (code 517) instead of an ordinary busy_timeout wait
+//   write → SQLITE_BUSY_SNAPSHOT (517) instead of an ordinary busy_timeout wait
+let txn = db.begin().await.context_to()?;
+
+// ✗ Also wrong — same mode as begin_immediate(), but hand-rolled: banned so the
+//   helper stays the single opener the canary and the escape hatch can police
 let txn = db
     .begin_with_options(TransactionOptions {
         sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
