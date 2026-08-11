@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.6](https://github.com/worried-networking/uptrakit/compare/uptrakit-agent-ssh-v0.0.5...uptrakit-agent-ssh-v0.0.6) - 2026-08-11
+
+### Added
+
+- *(surfaces)* [**breaking**] required_permission becomes required_action, typed and engine-enforced
+- *(surfaces)* method on SurfaceActionRequest; proxy stamps effective method; per-field body validation
+- *(surfaces)* ActionRef two-form reader + method disambiguation on reference nodes
+- *(command)* expose child_pid on InteractiveHandle and pub kill_process_group
+- *(agent-ssh)* add russh client keepalive (15s/4x)
+- *(backoff)* [**breaking**] rewrite API with consuming guard pattern
+
+### Fixed
+
+- *(build-info)* align --version with binary crate via build_info! macro
+- *(agent-ssh-runtime)* bound spawned surface tasks with an agent-side timeout backstop
+- *(agent-ssh-runtime)* run plugin agent migrations again
+- *(agent-ssh)* bridge interactive channels via bounded proxy pairs resolved in the forwarder task
+- *(agent-runtime)* resolve interactive channels in the event loop select
+- *(update-liveness)* verify-pass fixes for Interrupted terminal handling
+- *(agent-ssh)* enforce update timeout on interactive PTY loop
+- *(agent-core)* bound and group-kill interactive PTY child on cancellation
+- *(agent-core)* interactive updates return immediately; UpdateStarted carries dispatch intent
+- *(agent-core)* PTY promotion targets only the update command via update_exec_runtime seam
+
+### Other
+
+- *(db)* convert all bare begin() call sites to begin_immediate()
+- *(surfaces)* guard declared required_action values over compiled registrations
+- *(plugins)* [**breaking**] plugin type IDs adopt dot-separated kebab-case grammar
+- *(agent-ssh-runtime)* [**breaking**] ssh-hosts surface IDs adopt REST-noun convention
+- *(agent-ssh-runtime)* refresh ssh-hosts golden fixture for http_method field
+- *(agent-ssh)* placement-driven surface assembly from AgentInteraction declarations
+- *(agent-ssh)* pin ssh-agent.hosts wire registration as golden fixture
+- *(wire)* align asyncapi interactive semantics + document cfg(not) select! exception
+- *(plugins)* sweep stray plugin type IDs in Rust comments
+- *(agent-core)* deadlock and PTY-targeting regressions with stub lifecycle-hook plugin
+- *(agent-core)* migrate version_check retry to backon
+- *(backoff)* [**breaking**] drop AttemptGuard, ship plain methods
+
 ## [0.0.5](https://github.com/worried-networking/uptrakit/compare/uptrakit-agent-ssh-v0.0.4...uptrakit-agent-ssh-v0.0.5) - 2026-06-05
 
 ### Fixed

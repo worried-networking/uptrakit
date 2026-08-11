@@ -7,6 +7,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.3](https://github.com/worried-networking/uptrakit/compare/uptrakit-service-sdk-v0.0.2...uptrakit-service-sdk-v0.0.3) - 2026-08-11
+
+### Added
+
+- *(surfaces)* method on SurfaceActionRequest; proxy stamps effective method; per-field body validation
+- *(service-sdk)* add backon dep + reconnect_backoff_builder
+- *(backoff)* [**breaking**] rewrite API with consuming guard pattern
+- *(service-sdk)* rebind identity on Approved.service_id mismatch
+- *(surfaces)* [**breaking**] required_permission becomes required_action, typed and engine-enforced
+- *(wire)* AccessInvalidated controller-to-controller cache-flush event
+- *(wire)* generated asyncapi.yaml with golden staleness gate
+- *(wire)* test-only AsyncAPI 3.0 document generator (spec_gen)
+- *(wire)* manual wire-format JsonSchema impls for custom-serde enums
+- *(wire)* additive schema feature with JsonSchema derives across wire/shared-types/surfaces
+- *(surfaces)* ActionRef two-form reader + method disambiguation on reference nodes
+- *(surfaces)* ParamFieldDescriptor + params declarations with wire bounds
+- *(web-api)* [**breaking**] remove the access-preset endpoints and consumers
+- *(web-api)* emit access.denied audit Events for qualifying denials
+- *(web-api)* [**breaking**] users:manage/access:manage split with engine-backed lockout guard
+- *(shared-types)* add system.access:manage catalog action
+- *(types)* iterate DenyReason via strum::EnumIter in label test
+- *(types)* DenyReason::as_str + Display for deny labels
+- *(types)* access decision types (TargetRef, Decision, DenyReason, Visibility)
+- *(types)* grant patterns with wildcard matching and write-time validity
+- *(types)* Action with parse-time matrix rejection, serde, and typed catalog constants
+- *(types)* access catalog macro, Resource, and built-in action matrix
+- *(types)* access Selector, SelectorSupport, and bounded-size constants
+- *(types)* access module scaffold with Verb and kebab-segment grammar
+- *(types)* add terminal UpdateStatus::Interrupted (outcome unknown)
+- *(web-api)* typed-slot dispatch for InstalledVersionEnricher
+- *(plugin-types)* add EnrichInstalledVersion capability
+- *(surfaces)* admission rejects provider_invocable under a gated descriptor
+- *(surfaces)* (id,method) uniqueness, kind/method matrix, params rules, method-aware reference resolution
+- *(surfaces)* add InteractionHttpMethod + http_method on InteractionDescriptor
+- *(surfaces)* add provider_invocable opt-in to InteractionDescriptor
+
+### Fixed
+
+- *(service-sdk)* also bound and cancel the WebSocket upgrade in connect_ws
+- *(service-sdk)* make enrollment WS waits Ctrl+C-interruptible
+- *(wire)* fold $defs before rewrite, guard message-name collisions, sort spec_gen output
+- *(wire)* restructure schema_tests for clippy test-lint allowlist, dedupe AttestationStatus wire strings
+- *(surfaces)* bound reference-node http_method wire strings (WireValidate invariant)
+- *(web-api-types)* emit serde wire strings in ToSchema for catch-all enums
+- *(ci)* recognize prefixed raw strings in the no-orphan-modules sanitizer
+- *(surfaces)* guard skew on the real descriptor, align the orphaned prepare gate
+
+### Other
+
+- *(service-sdk)* consume uptrakit-zeroconf for browse and contract
+- *(service-sdk)* migrate lifecycle backoff to backon; drop Backoff re-export
+- *(service-sdk)* acquire UNIX_SIGNAL_TEST_SEM in ws SignalWatcher tests
+- *(backoff)* [**breaking**] drop AttemptGuard, ship plain methods
+- *(wire)* seal AccessInvalidatedPayload with #[non_exhaustive] + new()
+- *(wire)* [**breaking**] remove dev-era deserialize-only serde aliases
+- *(wire)* restore autodiscovery wire tests removed with conformance machinery
+- *(wire)* retire sample-based AsyncApiSpec conformance machinery
+- *(wire)* migrate asyncapi.yaml narrative prose into wire-protocol.md
+- *(plugins)* [**breaking**] plugin type IDs adopt dot-separated kebab-case grammar
+- *(surfaces)* [**breaking**] delete dead DirectBuiltInApi transport variant
+- *(wire)* align asyncapi interactive semantics + document cfg(not) select! exception
+- *(wire)* UpdateStarted.interactive carries dispatch intent
+- ADR 0020 + glossary + asyncapi notes for service-merge redirect
+- *(auth)* [**breaking**] delete the legacy Permission model and its tables
+- *(shared-types)* rename AccessPreset to RoleBundle
+- *(types)* clarify CatalogEntry constructor-exception citation
+- *(plugins)* [**breaking**] delete legacy surface_actions machinery; surfaces: arm is single-source
+- *(agent-core)* deadlock and PTY-targeting regressions with stub lifecycle-hook plugin
+- slim root AGENTS.md to invariants + pointers; fix stale facts
+- *(web-api-types)* guard PluginRole schema drift; point staleness msg to regen-api.sh
+- *(surfaces)* pin BuiltIn-kind admission permissiveness for the ADR-0040 gates
+- *(surfaces)* split descriptor-gated provider_invocable admission rule
+- *(surfaces)* tighten method-model admission tests (raw-json wire path, reserved-key coverage, message substrings)
+
 ## [0.0.2](https://github.com/worried-networking/uptrakit/compare/uptrakit-service-sdk-v0.0.1...uptrakit-service-sdk-v0.0.2) - 2026-05-05
 
 ### Added

@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.5](https://github.com/worried-networking/uptrakit/compare/uptrakit-scheduler-v0.0.4...uptrakit-scheduler-v0.0.5) - 2026-08-11
+
+### Added
+
+- *(scheduler-runtime)* heartbeat-backed claim leases via live-task set
+- *(db)* host_software_items discovery provenance + hysteresis columns
+
+### Fixed
+
+- *(build-info)* align --version with binary crate via build_info! macro
+- *(scheduler-runtime)* purge expired sessions in AuthCleanupExecutor
+- *(scheduler-runtime)* ownership-scoped release_claim with lost-claim detection
+
+### Other
+
+- *(db)* convert all bare begin() call sites to begin_immediate()
+- *(deps)* update Rust dependencies, bump rand to 0.10 and syn to 3
+- *(plugins)* [**breaking**] plugin type IDs adopt dot-separated kebab-case grammar
+- *(scheduler-runtime)* drive heartbeat fatal-path and beat-failure through real extracted fns
+- *(adr)* discovery-based uninstall reconciliation lifecycle
+
 ## [0.0.4](https://github.com/worried-networking/uptrakit/compare/uptrakit-scheduler-v0.0.3...uptrakit-scheduler-v0.0.4) - 2026-06-04
 
 ### Added

@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.5](https://github.com/worried-networking/uptrakit/compare/uptrakit-cli-v0.0.4...uptrakit-cli-v0.0.5) - 2026-08-11
+
+### Added
+
+- *(web-api)* [**breaking**] retire the wire-level Permission vocabulary
+- *(cli)* accept role names in users set-roles
+- *(web-api)* [**breaking**] remove the access-preset endpoints and consumers
+- *(web-api)* [**breaking**] role CRUD on access:manage with reshaped RoleResponse
+- *(cli)* zeroconf controller discovery in auth login
+- *(cli)* method-aware selection for multi-method surface interactions
+- *(cli)* method-aware surface interaction dispatch + typed client methods
+- *(surfaces)* [**breaking**] read model at GET /surfaces/{surface_id}; register surface routes in OpenAPI
+
+### Fixed
+
+- *(build-info)* align --version with binary crate via build_info! macro
+
+### Other
+
+- scrub remaining Permission-model residue after M1.7
+- *(plugins)* sweep stray plugin type IDs in Rust comments
+- *(plugins)* [**breaking**] plugin type IDs adopt dot-separated kebab-case grammar
+- *(agent-ssh-runtime)* [**breaking**] ssh-hosts surface IDs adopt REST-noun convention
+- *(arch)* remove abandoned Sentrux; cargo-machete advisory gate
+
 ## [0.0.4](https://github.com/worried-networking/uptrakit/compare/uptrakit-cli-v0.0.3...uptrakit-cli-v0.0.4) - 2026-06-04
 
 ### Added
