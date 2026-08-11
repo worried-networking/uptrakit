@@ -31,6 +31,7 @@ pub mod plugin_config;
 pub mod plugin_ops;
 pub mod registration;
 pub mod roles;
+pub mod secret_paths;
 pub mod serde_helpers;
 mod surface_form_authoring;
 #[cfg(feature = "testing")]
@@ -126,6 +127,7 @@ pub use form_schema::{
 };
 pub use host_requirements::{HostCompatibilityError, HostRequirements, RoleKey};
 pub use roles::ReleaseFetchContext;
+pub use secret_paths::SECRET_SENTINEL;
 
 // Re-export ConfigTestKind so plugin crates don't need a direct internal-wire dependency
 pub use host_runtime::{
