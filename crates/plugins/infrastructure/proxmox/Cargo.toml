@@ -62,6 +62,8 @@ tokio = { workspace = true, features = ["macros", "rt"] }
 httpmock = { workspace = true }
 uptrakit-shared-db = { workspace = true, features = ["migration", "db-sqlite"] }
 uptrakit-plugin-infrastructure-core = { workspace = true, features = ["testing", "agent-infra"] }
+sqlx = { workspace = true, features = ["sqlite", "runtime-tokio"] }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

@@ -7,7 +7,9 @@
     reason = "test-only module: panics are how tests learn about DB setup bugs"
 )]
 
-use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, Set};
+use std::time::Duration;
+
+use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, Set, SqlxSqliteConnector};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -196,4 +198,97 @@ async fn double_upsert_protection_audit_updates_the_single_row() {
     assert_eq!(rows[0].artifact_kind.as_deref(), Some("snapshot"));
     assert_eq!(rows[0].artifact_ref.as_deref(), Some("snap-1"));
     assert_eq!(rows[0].detail.as_deref(), Some("snapshot taken"));
+}
+
+/// Opens a real on-disk sqlite connection pool (WAL + busy_timeout), the same
+/// idiom as `uptrakit-db-tx`'s `busy_snapshot_tests`: a `MockDatabase` cannot
+/// model real SQLite locking, and `sqlite::memory:` gives each connection its
+/// own private database rather than one shared file two connections can race
+/// against.
+async fn connect(path: &std::path::Path) -> DatabaseConnection {
+    let opts = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(path)
+        .create_if_missing(true)
+        .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+        .busy_timeout(Duration::from_millis(2000));
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(opts)
+        .await
+        .expect("connect sqlite");
+    SqlxSqliteConnector::from_sqlx_sqlite_pool(pool)
+}
+
+/// The double-upsert tests above run both calls sequentially on one
+/// connection, so they stay green even if `upsert_global_default`'s
+/// `begin_immediate()`/`commit()` wrap is deleted — they never exercise two
+/// writers actually racing. This test does: two real connections over one
+/// shared on-disk database both call the real `upsert_global_default` for
+/// the same `(tenant_id, plugin_config_id)` key concurrently.
+///
+/// Without `BEGIN IMMEDIATE`, each connection's read-then-write runs as two
+/// separate autocommitted statements, so both connections can read "no row"
+/// before either has written — the second writer's INSERT then hits the
+/// composite-PK conflict on `(tenant_id, plugin_config_id)` and returns an
+/// error instead of taking the update arm. With `BEGIN IMMEDIATE`, the write
+/// lock is taken at `BEGIN`, so the loser blocks until the winner commits,
+/// then re-reads under the lock and always takes the update arm: both calls
+/// succeed and exactly one row (matching one writer's policy, never a torn
+/// mix of both) survives.
+#[tokio::test]
+async fn concurrent_global_default_upserts_do_not_conflict() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("policy.db");
+
+    let a = connect(&path).await;
+    uptrakit_shared_db::migration::run_migrations_with_plugins(
+        &a,
+        crate::ProxmoxPlugin::controller_migrations,
+    )
+    .await
+    .expect("shared + proxmox migrations should run");
+    let b = connect(&path).await;
+
+    let tenant_id = insert_tenant(&a).await;
+    let plugin_config_id = insert_plugin_config(&a, tenant_id).await;
+    let snapshot = snapshot_policy();
+    let backup = backup_policy();
+
+    let (r1, r2) = tokio::join!(
+        upsert_global_default(&a, tenant_id, plugin_config_id, &snapshot),
+        upsert_global_default(&b, tenant_id, plugin_config_id, &backup),
+    );
+
+    assert!(
+        r1.is_ok(),
+        "connection a's upsert must not fail on a concurrent writer: {r1:?}"
+    );
+    assert!(
+        r2.is_ok(),
+        "connection b's upsert must not fail on a concurrent writer: {r2:?}"
+    );
+
+    let rows = proxmox_protection_default::Entity::find()
+        .all(&a)
+        .await
+        .expect("load rows");
+    assert_eq!(
+        rows.len(),
+        1,
+        "exactly one row must survive concurrent upserts"
+    );
+
+    let matches_snapshot = rows[0].mode == ProtectionMode::Snapshot.as_str()
+        && rows[0].backup_target_key.is_none()
+        && rows[0].snapshot_timeout_seconds == Some(60)
+        && rows[0].backup_timeout_seconds.is_none();
+    let matches_backup = rows[0].mode == ProtectionMode::Backup.as_str()
+        && rows[0].backup_target_key.as_deref() == Some("pve1:local:dir")
+        && rows[0].snapshot_timeout_seconds.is_none()
+        && rows[0].backup_timeout_seconds == Some(1200);
+    assert!(
+        matches_snapshot || matches_backup,
+        "surviving row must coherently match one writer's policy, never a torn mix: {:?}",
+        rows[0]
+    );
 }
