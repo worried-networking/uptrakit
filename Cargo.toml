@@ -154,6 +154,7 @@ uptrakit-config-reload = { path = "crates/shared/config-reload", version = "0.1.
 uptrakit-wire = { path = "crates/shared/wire", version = "0.0.2" }
 uptrakit-surfaces = { path = "crates/shared/surfaces", version = "0.0.2" }
 uptrakit-tenant-db = { path = "crates/shared/tenant-db", version = "0.0.1" }
+uptrakit-db-tx = { path = "crates/shared/db-tx", version = "0.0.1" }
 uptrakit-web-api = { path = "crates/ui/web-api", version = "0.0.1", default-features = false }
 uptrakit-web-api-auth = { path = "crates/ui/web-api-auth", version = "0.0.1", default-features = false }
 uptrakit-web-api-queries = { path = "crates/ui/web-api-queries", version = "0.0.1", default-features = false }

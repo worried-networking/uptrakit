@@ -7502,6 +7502,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "uptrakit-db-tx"
+version = "0.0.1"
+dependencies = [
+ "sea-orm",
+]
+
+[[package]]
 name = "uptrakit-directories"
 version = "0.0.1"
 dependencies = [
@@ -8507,6 +8514,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uptrakit-crypto",
+ "uptrakit-db-tx",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
  "uptrakit-tenant-db",

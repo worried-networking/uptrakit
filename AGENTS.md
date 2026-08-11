@@ -112,6 +112,7 @@ uptrakit/
 │   │   ├── command/                    # uptrakit-command          (lib) — CommandExecutor, sudo-aware execution, StdioTunnel, RemoteExecutor
 │   │   ├── crypto/                     # uptrakit-crypto           (lib) — AES-256-GCM at-rest encryption, envelope encryption, EncryptedString
 │   │   ├── db/                         # uptrakit-shared-db        (lib) — SeaORM entities, TenantDb, migrations (feature `migration`)
+│   │   ├── db-tx/                      # uptrakit-db-tx            (lib) — begin_immediate(), sole transaction opener (clippy-enforced)
 │   │   ├── directories/               # uptrakit-directories      (lib) — cross-platform directory management
 │   │   ├── surfaces/                   # uptrakit-surfaces         (lib) — shared UI surface contract types
 │   │   ├── macros/                     # uptrakit-shared-macros    (lib) — impl_report_conversion!

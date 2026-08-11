@@ -27,6 +27,7 @@ thiserror = { workspace = true }
 time = { workspace = true }
 tracing = { workspace = true }
 uptrakit-crypto = { workspace = true, features = ["sea-orm"] }
+uptrakit-db-tx = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 uptrakit-shared-types = { workspace = true, features = ["sea-orm"] }
 uptrakit-tenant-db = { workspace = true }
