@@ -13,4 +13,22 @@ allow-indexing-slicing-in-tests = true
 # flushes the cache atomically.
 disallowed-methods = [
     { path = "rustls::client::Resumption::in_memory_sessions", reason = "use uptrakit_service_sdk::session_store::CertScopedClientSessionStore — TLS 1.3 resumption with a swappable client cert must invalidate on rotation" },
+    # SQLite BEGIN DEFERRED on a read-then-write transaction fails with
+    # SQLITE_BUSY_SNAPSHOT (bypasses busy_timeout) whenever another connection
+    # commits between the read and the write. begin_immediate() opens
+    # BEGIN IMMEDIATE (a mode no-op on Postgres and on savepoints) and is the
+    # workspace's sole sanctioned transaction opener. Escape hatch:
+    # #[expect(clippy::disallowed_methods, reason = "...")] naming either a
+    # write-only rationale or the non-default TransactionOptions field needed.
+    { path = "sea_orm::TransactionTrait::begin", reason = "use begin_immediate() (uptrakit-db-tx; re-exported by uptrakit-shared-db) — BEGIN DEFERRED causes SQLITE_BUSY_SNAPSHOT on read-then-write" },
+    { path = "sea_orm::TransactionTrait::begin_with_config", reason = "use begin_immediate() — begin_with_config(None, None) opens BEGIN DEFERRED" },
+    { path = "sea_orm::TransactionTrait::begin_with_options", reason = "use begin_immediate() — TransactionOptions::default() opens BEGIN DEFERRED" },
+    { path = "sea_orm::TransactionTrait::transaction", reason = "use begin_immediate() — the closure API opens BEGIN DEFERRED" },
+    { path = "sea_orm::TransactionTrait::transaction_with_config", reason = "use begin_immediate() — the closure API opens BEGIN DEFERRED" },
+    { path = "sea_orm::DatabaseTransaction::transaction_async", reason = "use begin_immediate() — the closure API opens BEGIN DEFERRED" },
+    { path = "sea_orm::DatabaseTransaction::transaction_with_config_async", reason = "use begin_immediate() — the closure API opens BEGIN DEFERRED" },
+    { path = "sea_orm::DatabaseConnection::transaction_async", reason = "use begin_immediate() — the closure API opens BEGIN DEFERRED" },
+    { path = "sea_orm::DatabaseConnection::transaction_with_config_async", reason = "use begin_immediate() — the closure API opens BEGIN DEFERRED" },
+    { path = "sea_orm::DatabaseExecutor::transaction_async", reason = "use begin_immediate() — the closure API opens BEGIN DEFERRED" },
+    { path = "sea_orm::DatabaseExecutor::transaction_with_config_async", reason = "use begin_immediate() — the closure API opens BEGIN DEFERRED" },
 ]

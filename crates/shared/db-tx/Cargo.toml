@@ -11,5 +11,11 @@ publish = false
 [dependencies]
 sea-orm = { workspace = true }
 
+[dev-dependencies]
+sea-orm = { workspace = true, features = ["sqlx-sqlite"] }
+sqlx = { workspace = true, features = ["sqlite", "runtime-tokio"] }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
+
 [lints]
 workspace = true

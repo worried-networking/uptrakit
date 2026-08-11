@@ -7507,6 +7507,9 @@ name = "uptrakit-db-tx"
 version = "0.0.1"
 dependencies = [
  "sea-orm",
+ "sqlx",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
