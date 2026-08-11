@@ -286,6 +286,109 @@ pub trait PluginConfigOps: PluginMetadataOps {
             .and_then(|d| d.type_settings.map(|ts| (ts.sample)()))
             .unwrap_or_default()
     }
+
+    /// Effective sensitive dotted paths for a plugin: the UNION of the
+    /// schema-derived set (a field is sensitive when `sensitive == true` OR
+    /// its type is `Password`/`SshPrivateKey`, across the config,
+    /// type-settings, and instance-config form schemas) and the descriptor's
+    /// explicit `sensitive_paths` declarations. Explicit declarations may
+    /// only add, never shrink, the derived set. Sorted and deduplicated.
+    /// Unknown plugin type yields an empty set (masking is a passthrough).
+    fn sensitive_paths(&self, id: &PluginTypeId) -> Vec<String> {
+        let Some(desc) = self.get(id) else {
+            return Vec::new();
+        };
+        let mut paths: Vec<String> = desc
+            .sensitive_paths
+            .iter()
+            .map(|p| (*p).to_string())
+            .collect();
+        let schemas = [
+            Some((desc.config.form_schema)()),
+            desc.type_settings.map(|ts| (ts.form_schema)()),
+            desc.instance_config.map(|ic| (ic.form_schema)()),
+        ];
+        for schema in schemas.into_iter().flatten() {
+            for field in schema {
+                let secret_typed = matches!(
+                    field.field_type,
+                    crate::form_schema::FormFieldType::Password
+                        | crate::form_schema::FormFieldType::SshPrivateKey
+                );
+                if field.sensitive || secret_typed {
+                    paths.push(crate::secret_paths::normalize_form_key(&field.key));
+                }
+            }
+        }
+        paths.sort();
+        paths.dedup();
+        paths
+    }
+
+    /// Reject a config write whose incoming value still carries the mask
+    /// sentinel at a sensitive path (i.e. the client echoed back a masked
+    /// value that could not be resolved against a stored config).
+    fn assert_no_sentinel(
+        &self,
+        id: &PluginTypeId,
+        config: &serde_json::Value,
+    ) -> std::result::Result<(), PluginConfigValidationError> {
+        let paths = self.sensitive_paths(id);
+        match crate::secret_paths::first_sentinel_path(config, &paths) {
+            Some(path) => Err(PluginConfigValidationError::Contract(format!(
+                "sensitive field '{path}' still contains the masked sentinel \"{sentinel}\"; \
+                 re-enter the secret value",
+                sentinel = crate::secret_paths::SECRET_SENTINEL
+            ))),
+            None => Ok(()),
+        }
+    }
+
+    /// True when any sensitive path differs between the incoming and stored
+    /// configs (covers add, change, and removal of a credential).
+    fn sensitive_value_changed_for(
+        &self,
+        id: &PluginTypeId,
+        incoming: &serde_json::Value,
+        stored: &serde_json::Value,
+    ) -> bool {
+        let paths = self.sensitive_paths(id);
+        crate::secret_paths::sensitive_value_changed(incoming, stored, &paths)
+    }
+
+    /// Deserialize→reserialize a config through its typed representation to
+    /// prune stale variant keys. Unknown plugin types are a passthrough.
+    fn normalize_config(
+        &self,
+        id: &PluginTypeId,
+        config: &serde_json::Value,
+    ) -> std::result::Result<serde_json::Value, PluginConfigValidationError> {
+        match self.get(id) {
+            Some(desc) => (desc.config.normalize)(config),
+            None => Ok(config.clone()),
+        }
+    }
+
+    /// Remove every sensitive path present in `config`; returns the paths
+    /// actually removed (autodiscovery strip-and-warn).
+    fn strip_sensitive_paths_from(
+        &self,
+        id: &PluginTypeId,
+        config: &mut serde_json::Value,
+    ) -> Vec<String> {
+        let paths = self.sensitive_paths(id);
+        crate::secret_paths::strip_sensitive_paths(config, &paths)
+    }
+
+    /// First sensitive path present in `config`, if any (layer-3 reject).
+    fn first_sensitive_path_in(
+        &self,
+        id: &PluginTypeId,
+        config: &serde_json::Value,
+    ) -> Option<String> {
+        let paths = self.sensitive_paths(id);
+        crate::secret_paths::first_sensitive_path_present(config, &paths)
+    }
 }
 
 // ── Trait 3: PluginSurfaceActionOps ─────────────────────────────────────────
@@ -428,5 +531,148 @@ mod update_hook_ops_tests {
     fn default_impl_returns_none() {
         let ops = TestOps;
         assert!(ops.controller_update_hook().is_none());
+    }
+}
+
+#[cfg(test)]
+mod sensitive_paths_tests {
+    use super::*;
+    use crate::descriptor::{ConfigModel, ConfigOps, PluginScope, RoleCreators};
+    use crate::form_schema::FormFieldType;
+
+    fn noop_validate(
+        _: &serde_json::Value,
+    ) -> std::result::Result<(), PluginConfigValidationError> {
+        Ok(())
+    }
+
+    fn noop_mask(config: &serde_json::Value) -> serde_json::Value {
+        config.clone()
+    }
+
+    fn noop_restore(_: &mut serde_json::Value, _: &serde_json::Value) {}
+
+    fn noop_normalize(
+        config: &serde_json::Value,
+    ) -> std::result::Result<serde_json::Value, PluginConfigValidationError> {
+        Ok(config.clone())
+    }
+
+    fn noop_sample() -> serde_json::Value {
+        serde_json::json!({})
+    }
+
+    fn noop_validate_identifier(_: &str) -> std::result::Result<(), PluginConfigValidationError> {
+        Ok(())
+    }
+
+    fn stub_form_schema() -> Vec<FormFieldDescriptor> {
+        vec![
+            FormFieldDescriptor::new("auth._type", "Auth Type"),
+            FormFieldDescriptor::new("api_token", "API Token").with_type(FormFieldType::Password),
+            FormFieldDescriptor::new("webhook_secret", "Webhook Secret").sensitive(),
+        ]
+    }
+
+    static STUB_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
+        type_id: "stub.plugin",
+        display_name: "Stub Plugin",
+        family: PluginFamily::Software,
+        config_model: ConfigModel::PluginConfig,
+        capabilities: &[],
+        scope: PluginScope::Tenant,
+        instance_config: None,
+        sensitive_paths: &["extra_declared"],
+        config: ConfigOps {
+            validate: noop_validate,
+            mask_secrets: noop_mask,
+            restore_secrets: noop_restore,
+            normalize: noop_normalize,
+            sample: noop_sample,
+            form_schema: stub_form_schema,
+            validate_identifier: noop_validate_identifier,
+        },
+        roles: RoleCreators {
+            discoverer: None,
+            version_detector: None,
+            release_fetcher: None,
+            package_indexer: None,
+            update_executor: None,
+            lifecycle_hook: None,
+            notification_transport: None,
+            software_item_lifecycle: None,
+            controller_update_protection: None,
+            controller_update_hook: None,
+            infra: None,
+            installed_version_enricher: None,
+        },
+        surfaces: None,
+        type_settings: None,
+        config_test: None,
+        sudo: None,
+        raw_settings_keys: &[],
+        global_provider_consumers: &[],
+        migrations: None,
+        agent_migrations: None,
+        agent_surfaces: None,
+        reset_tenant_data: None,
+        db_migrate_tables: None,
+    };
+
+    struct StubOps;
+
+    impl PluginMetadataOps for StubOps {
+        fn get(&self, id: &PluginTypeId) -> Option<&PluginDescriptor> {
+            if id.as_str() == STUB_DESCRIPTOR.type_id {
+                Some(&STUB_DESCRIPTOR)
+            } else {
+                None
+            }
+        }
+
+        fn all(&self) -> Vec<&PluginDescriptor> {
+            vec![&STUB_DESCRIPTOR]
+        }
+
+        fn instance_enabled(&self, _id: &PluginTypeId) -> bool {
+            true
+        }
+    }
+
+    impl PluginConfigOps for StubOps {}
+
+    #[test]
+    fn derivation_unions_schema_and_declarations() {
+        let ops = StubOps;
+        let id = PluginTypeId::new("stub.plugin".to_string());
+        let paths = ops.sensitive_paths(&id);
+        // Password-typed without .sensitive() IS included — no live plugin
+        // currently has such a field (every Password field also calls
+        // .sensitive(), e.g. proxmox config.rs:108-111), so this guards the
+        // future case where an author sets the type but forgets the flag;
+        // .sensitive() Text included; explicit declaration included; plain Text
+        // ("auth.type" after `_`-normalization) excluded. Sorted + deduped.
+        assert_eq!(paths, vec!["api_token", "extra_declared", "webhook_secret"]);
+    }
+
+    #[test]
+    fn unknown_plugin_has_no_paths_and_mask_is_passthrough() {
+        let ops = StubOps;
+        let id = PluginTypeId::new("no.such".to_string());
+        assert!(ops.sensitive_paths(&id).is_empty());
+    }
+
+    #[test]
+    fn sentinel_assert_names_the_path() {
+        let ops = StubOps;
+        let id = PluginTypeId::new("stub.plugin".to_string());
+        let err = ops
+            .assert_no_sentinel(&id, &serde_json::json!({"api_token": "***"}))
+            .expect_err("sentinel must be rejected");
+        assert_eq!(
+            err.to_string(),
+            "sensitive field 'api_token' still contains the masked sentinel \"***\"; \
+             re-enter the secret value"
+        );
     }
 }
