@@ -455,3 +455,106 @@ async fn delete_channel_succeeds_for_unknown_channel_type() {
         "delete must succeed for a channel whose plugin type is not compiled in"
     );
 }
+
+/// Guards the fix for a real production leak: masking happens on read
+/// (`mask_channel_config`) but until this fix nothing restored the masked
+/// sentinel on write, so a GET->PUT round-trip through the UI persisted the
+/// literal `"***"` as the live secret.
+#[tokio::test]
+async fn update_channel_echoing_sentinel_preserves_stored_secret() {
+    let app = TestApp::new().await;
+    let token = setup_with_notification_perms(&app).await;
+    let client = app.client();
+
+    let (status, created): (_, serde_json::Value) = client
+        .post_json(
+            "/api/v1/notifications/channels",
+            &serde_json::json!({
+                "name": "Secret Webhook",
+                "channel_type": "webhook",
+                "config": {
+                    "url": "https://example.com/hook",
+                    "secret": "s-1"
+                }
+            }),
+        )
+        .bearer(&token)
+        .send_json()
+        .await;
+    assert_eq!(status, http::StatusCode::CREATED);
+    let id = created["id"].as_str().expect("id");
+
+    let (status, fetched): (_, serde_json::Value) = client
+        .get(&format!("/api/v1/notifications/channels/{id}"))
+        .bearer(&token)
+        .send_json()
+        .await;
+    assert_eq!(status, http::StatusCode::OK);
+    assert_eq!(
+        fetched["config"]["secret"], "***",
+        "masking must be live before this test's write-path assertion is meaningful"
+    );
+
+    let status = client
+        .put_json(
+            &format!("/api/v1/notifications/channels/{id}"),
+            &serde_json::json!({
+                "config": {
+                    "url": "https://example.com/hook2",
+                    "secret": "***"
+                }
+            }),
+        )
+        .bearer(&token)
+        .send_status()
+        .await;
+    assert_eq!(status, http::StatusCode::OK);
+
+    let row = uptrakit_shared_db::entity::notification_channel::Entity::find_by_id(
+        uuid::Uuid::parse_str(id).expect("valid channel id"),
+    )
+    .one(&app.db)
+    .await
+    .expect("query channel row")
+    .expect("channel row exists");
+    let stored: serde_json::Value =
+        serde_json::from_str(row.config.expose_secret()).expect("stored config is valid JSON");
+    assert_eq!(
+        stored["secret"], "s-1",
+        "PUT echoing the masked sentinel must not overwrite the stored secret"
+    );
+    assert_eq!(
+        stored["url"], "https://example.com/hook2",
+        "non-sensitive fields in the same PUT must still apply"
+    );
+}
+
+#[tokio::test]
+async fn create_channel_with_sentinel_is_400() {
+    let app = TestApp::new().await;
+    let token = setup_with_notification_perms(&app).await;
+    let client = app.client();
+
+    let (status, body): (_, serde_json::Value) = client
+        .post_json(
+            "/api/v1/notifications/channels",
+            &serde_json::json!({
+                "name": "Sentinel Webhook",
+                "channel_type": "webhook",
+                "config": {
+                    "url": "https://example.com/hook",
+                    "secret": "***"
+                }
+            }),
+        )
+        .bearer(&token)
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::BAD_REQUEST);
+    let message = body["error"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("still contains the masked sentinel"),
+        "unexpected error body: {body}"
+    );
+}

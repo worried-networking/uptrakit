@@ -119,6 +119,10 @@ pub async fn create_channel_in_tx(
     }
 
     plugin_ops
+        .assert_no_sentinel(&channel_type_id, &config_value)
+        .map_err(|e| report!(ChannelQueryError::InvalidConfig(e.to_string())))?;
+
+    plugin_ops
         .validate_config(&channel_type_id, &config_value)
         .map_err(|e| report!(ChannelQueryError::InvalidConfig(e.to_string())))?;
 
@@ -184,9 +188,15 @@ pub async fn update_channel_in_tx(
         let config = config
             .to_object_map()
             .map_err(|e| report!(ChannelQueryError::InvalidConfig(e.to_string())))?;
-        let config_value = json_object_map_to_value(&config);
+        let mut config_value = json_object_map_to_value(&config);
 
         let channel_type_id = uptrakit_shared_types::notification_plugin_type(&before.channel_type);
+        let stored: serde_json::Value = serde_json::from_str(before.config.expose_secret())
+            .map_err(|e| report!(ChannelQueryError::InvalidConfig(e.to_string())))?;
+        plugin_ops.restore_config_secrets(&channel_type_id, &mut config_value, &stored);
+        plugin_ops
+            .assert_no_sentinel(&channel_type_id, &config_value)
+            .map_err(|e| report!(ChannelQueryError::InvalidConfig(e.to_string())))?;
         plugin_ops
             .validate_config(&channel_type_id, &config_value)
             .map_err(|e| report!(ChannelQueryError::InvalidConfig(e.to_string())))?;
@@ -260,6 +270,10 @@ pub async fn create_channel(
             req.channel_type.clone()
         )));
     }
+
+    plugin_ops
+        .assert_no_sentinel(&channel_type_id, &config_value)
+        .map_err(|e| report!(ChannelQueryError::InvalidConfig(e.to_string())))?;
 
     plugin_ops
         .validate_config(&channel_type_id, &config_value)
@@ -376,11 +390,17 @@ pub async fn update_channel(
         let config = config
             .to_object_map()
             .map_err(|e| report!(ChannelQueryError::InvalidConfig(e.to_string())))?;
-        let config_value = json_object_map_to_value(&config);
+        let mut config_value = json_object_map_to_value(&config);
 
         // Validate with channel impl
         let channel_type_id =
             uptrakit_shared_types::notification_plugin_type(&existing.channel_type);
+        let stored: serde_json::Value = serde_json::from_str(existing.config.expose_secret())
+            .map_err(|e| report!(ChannelQueryError::InvalidConfig(e.to_string())))?;
+        plugin_ops.restore_config_secrets(&channel_type_id, &mut config_value, &stored);
+        plugin_ops
+            .assert_no_sentinel(&channel_type_id, &config_value)
+            .map_err(|e| report!(ChannelQueryError::InvalidConfig(e.to_string())))?;
         plugin_ops
             .validate_config(&channel_type_id, &config_value)
             .map_err(|e| report!(ChannelQueryError::InvalidConfig(e.to_string())))?;
