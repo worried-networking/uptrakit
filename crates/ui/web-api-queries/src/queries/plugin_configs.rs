@@ -146,7 +146,8 @@ pub async fn find_raw_active_config_txn(
 /// Insert a new plugin config inside a caller-managed `BEGIN IMMEDIATE` transaction.
 ///
 /// All validation (plugin type support, config validity, dangerous command patterns)
-/// must be done by the caller before opening the transaction.
+/// and the stale-sensitive-key prune must be done by the caller before opening the
+/// transaction; only the sentinel assertion is enforced here, immediately before insert.
 #[tracing::instrument(skip_all)]
 pub async fn create_plugin_config_in_tx(
     tx: &DatabaseTransaction,

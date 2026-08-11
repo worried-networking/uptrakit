@@ -174,7 +174,11 @@ async fn resolve_plugin_config_txn(
                     e.to_string()
                 ));
             }
-            if let Err(e) = ops.assert_no_sentinel(&id, &inline.config) {
+            // Same locked profile write-path order as the dedicated create route:
+            // validate → prune → sentinel-assert.
+            let mut config = inline.config.clone();
+            let _pruned = ops.prune_stale_sensitive_keys(&id, &mut config);
+            if let Err(e) = ops.assert_no_sentinel(&id, &config) {
                 bail!(SoftwareItemQueryError::InvalidInlinePluginConfig(
                     e.to_string()
                 ));
@@ -186,7 +190,7 @@ async fn resolve_plugin_config_txn(
                 tenant_id: Set(tenant_id),
                 name: Set(inline.name.clone()),
                 plugin_type: Set(inline.plugin_type.to_string()),
-                config: Set(inline.config.clone()),
+                config: Set(config),
                 enabled: Set(inline.enabled),
                 created_at: Set(now),
                 updated_at: Set(now),

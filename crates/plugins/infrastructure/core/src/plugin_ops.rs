@@ -393,13 +393,21 @@ pub trait PluginConfigOps: PluginMetadataOps {
 
     /// Prune-only variant hygiene (spec §5): remove sensitive paths present
     /// in `config` but absent from its typed round-trip. Returns pruned paths.
+    ///
+    /// A config that does not round-trip is left untouched: every write path
+    /// validates before pruning, so a normalize failure here means the value
+    /// is already rejected (or will be by the sentinel assertion that follows).
     fn prune_stale_sensitive_keys(
         &self,
         id: &PluginTypeId,
         config: &mut serde_json::Value,
     ) -> Vec<String> {
-        let Ok(round_trip) = self.normalize_config(id, config) else {
-            return Vec::new();
+        let round_trip = match self.normalize_config(id, config) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::debug!(plugin_type = %id, error = %e, "skipping sensitive-key prune");
+                return Vec::new();
+            }
         };
         let stale: Vec<String> = self
             .sensitive_paths(id)
