@@ -82,6 +82,39 @@ while IFS=$'\t' read -r file sig; do
   fi
 done <"$TMP_SIGS"
 
+# Third-door tripwires (spec 2026-08-06 item 7): `String` and `Multipart`
+# body params implement FromRequest and consume the body, bypassing the
+# extractor-keyed RAW_PATTERN above.
+# - Multipart: any visibility, any position (zero current uses; pure tripwire).
+# - String: LAST-param position only (the only position axum treats as a body
+#   extractor) and BARE `pub` only — deliberately narrower than RAW_PATTERN's
+#   any-visibility matching, to avoid poisoning the gate on the pub(super)
+#   service_ws helpers (handle_authenticated, send_ws_with_timeout,
+#   select_best_output) and private helpers whose String params are ordinary
+#   arguments. Documented residuals (review-visible, none exist today): a
+#   pub(crate)-visible routed handler taking a trailing String (the six
+#   pub(crate) OAuth handlers take none); String in non-last position; a
+#   signature whose PARAMETER LIST contains `->` (fn-pointer/closure param —
+#   the extractor's `s/->.*//s` truncates the tail, blinding the trailing-
+#   String pattern); and wrapper forms like TypedMultipart<T> or
+#   Option<Multipart> that don't match `: Multipart` directly.
+MULTIPART_PATTERN=':[[:space:]]*(axum::extract::)?Multipart[[:space:]]*(<|[,)])'
+STRING_LAST_PARAM_PATTERN=':[[:space:]]*String[[:space:]]*,?[[:space:]]*\)'
+while IFS=$'\t' read -r file sig; do
+  if printf '%s' "$sig" | grep -Eq 'Next[[:space:]]*[,)]'; then
+    continue
+  fi
+  if printf '%s' "$sig" | grep -Eq "$MULTIPART_PATTERN"; then
+    echo "VIOLATION: Multipart body param (use Unvalidated<T>/Validated<T>): $file: $sig" >&2
+    violations=1
+  fi
+  if printf '%s' "$sig" | grep -Eq '^pub[[:space:]]+async[[:space:]]+fn' &&
+    printf '%s' "$sig" | grep -Eq "$STRING_LAST_PARAM_PATTERN"; then
+    echo "VIOLATION: trailing String body param on a pub handler (use Unvalidated<T>/Validated<T>): $file: $sig" >&2
+    violations=1
+  fi
+done <"$TMP_SIGS"
+
 # Stale-entry check: every allowlist row must still match a flagged signature.
 while IFS='|' read -r al_class al_path al_regex; do
   case "$al_class" in ''|'#'*) continue ;; esac
