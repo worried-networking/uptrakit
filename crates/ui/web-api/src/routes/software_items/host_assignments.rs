@@ -29,6 +29,51 @@ use super::audit::{
 };
 use super::{AssignHostsRequest, SoftwareItemDetailResponse, UpdateHostAssignmentRequest};
 
+/// Maps a host-assignment write failure to its HTTP response.
+///
+/// Shared by `assign_hosts` and `update_host_assignment`: the mapping is
+/// identical apart from the `NotFound` wording, which each handler supplies.
+/// One exhaustive match means a new `SoftwareItemQueryError` variant cannot be
+/// classified on one route and fall through to a 500 on the other.
+fn host_assignment_error_response(
+    ctx: &item_queries::SoftwareItemQueryError,
+    not_found_message: &str,
+) -> Response {
+    match ctx {
+        item_queries::SoftwareItemQueryError::NotFound => {
+            error_response(StatusCode::NOT_FOUND, not_found_message)
+        }
+        item_queries::SoftwareItemQueryError::HostNotFound(_) => {
+            error_response(StatusCode::NOT_FOUND, "Host not found")
+        }
+        item_queries::SoftwareItemQueryError::PluginConfigNotFound => {
+            error_response(StatusCode::NOT_FOUND, "Plugin config not found")
+        }
+        item_queries::SoftwareItemQueryError::InvalidPackageIdentifier(msg) => {
+            error_response(StatusCode::BAD_REQUEST, msg.as_str())
+        }
+        item_queries::SoftwareItemQueryError::InvalidConfigOverride(msg) => {
+            error_response(StatusCode::BAD_REQUEST, msg.as_str())
+        }
+        item_queries::SoftwareItemQueryError::DuplicateHostAssignment => {
+            error_response(StatusCode::CONFLICT, "Duplicate host assignment")
+        }
+        item_queries::SoftwareItemQueryError::MissingPluginSource(_) => {
+            error_response(StatusCode::BAD_REQUEST, ctx.to_string())
+        }
+        item_queries::SoftwareItemQueryError::EmptyName
+        | item_queries::SoftwareItemQueryError::DuplicateItem
+        | item_queries::SoftwareItemQueryError::InvalidInlinePluginConfig(_)
+        | item_queries::SoftwareItemQueryError::InvalidExecutionSite(_)
+        | item_queries::SoftwareItemQueryError::PluginAssignmentNotFound
+        | item_queries::SoftwareItemQueryError::InvalidMergeRequest(_)
+        | item_queries::SoftwareItemQueryError::IncompatibleHost(_)
+        | item_queries::SoftwareItemQueryError::Db(_) => {
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+        }
+    }
+}
+
 /// Assign a software item to additional hosts.
 ///
 /// Each host in `host_assignments` carries its own `plugin_config_id`,
@@ -137,40 +182,7 @@ pub async fn assign_hosts(
         {
             state.audit_emitter.emit_event(entry);
         }
-        let ctx = err.current_context();
-        return match ctx {
-            item_queries::SoftwareItemQueryError::NotFound => {
-                error_response(StatusCode::NOT_FOUND, "Software item not found")
-            }
-            item_queries::SoftwareItemQueryError::HostNotFound(_) => {
-                error_response(StatusCode::NOT_FOUND, "Host not found")
-            }
-            item_queries::SoftwareItemQueryError::PluginConfigNotFound => {
-                error_response(StatusCode::NOT_FOUND, "Plugin config not found")
-            }
-            item_queries::SoftwareItemQueryError::InvalidPackageIdentifier(msg) => {
-                error_response(StatusCode::BAD_REQUEST, msg.as_str())
-            }
-            item_queries::SoftwareItemQueryError::InvalidConfigOverride(msg) => {
-                error_response(StatusCode::BAD_REQUEST, msg.as_str())
-            }
-            item_queries::SoftwareItemQueryError::DuplicateHostAssignment => {
-                error_response(StatusCode::CONFLICT, "Duplicate host assignment")
-            }
-            item_queries::SoftwareItemQueryError::MissingPluginSource(_) => {
-                error_response(StatusCode::BAD_REQUEST, ctx.to_string())
-            }
-            item_queries::SoftwareItemQueryError::EmptyName
-            | item_queries::SoftwareItemQueryError::DuplicateItem
-            | item_queries::SoftwareItemQueryError::InvalidInlinePluginConfig(_)
-            | item_queries::SoftwareItemQueryError::InvalidExecutionSite(_)
-            | item_queries::SoftwareItemQueryError::PluginAssignmentNotFound
-            | item_queries::SoftwareItemQueryError::InvalidMergeRequest(_)
-            | item_queries::SoftwareItemQueryError::IncompatibleHost(_)
-            | item_queries::SoftwareItemQueryError::Db(_) => {
-                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-            }
-        };
+        return host_assignment_error_response(err.current_context(), "Software item not found");
     }
 
     let hook = state.audit_emitter.commit_hook();
@@ -539,41 +551,10 @@ pub async fn update_host_assignment(
         {
             state.audit_emitter.emit_event(entry);
         }
-        let ctx = err.current_context();
-        return match ctx {
-            item_queries::SoftwareItemQueryError::NotFound => error_response(
-                StatusCode::NOT_FOUND,
-                "Software item or host assignment not found",
-            ),
-            item_queries::SoftwareItemQueryError::HostNotFound(_) => {
-                error_response(StatusCode::NOT_FOUND, "Host not found")
-            }
-            item_queries::SoftwareItemQueryError::PluginConfigNotFound => {
-                error_response(StatusCode::NOT_FOUND, "Plugin config not found")
-            }
-            item_queries::SoftwareItemQueryError::InvalidPackageIdentifier(msg) => {
-                error_response(StatusCode::BAD_REQUEST, msg.as_str())
-            }
-            item_queries::SoftwareItemQueryError::InvalidConfigOverride(msg) => {
-                error_response(StatusCode::BAD_REQUEST, msg.as_str())
-            }
-            item_queries::SoftwareItemQueryError::DuplicateHostAssignment => {
-                error_response(StatusCode::CONFLICT, "Duplicate host assignment")
-            }
-            item_queries::SoftwareItemQueryError::MissingPluginSource(_) => {
-                error_response(StatusCode::BAD_REQUEST, ctx.to_string())
-            }
-            item_queries::SoftwareItemQueryError::EmptyName
-            | item_queries::SoftwareItemQueryError::DuplicateItem
-            | item_queries::SoftwareItemQueryError::InvalidInlinePluginConfig(_)
-            | item_queries::SoftwareItemQueryError::InvalidExecutionSite(_)
-            | item_queries::SoftwareItemQueryError::PluginAssignmentNotFound
-            | item_queries::SoftwareItemQueryError::InvalidMergeRequest(_)
-            | item_queries::SoftwareItemQueryError::IncompatibleHost(_)
-            | item_queries::SoftwareItemQueryError::Db(_) => {
-                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-            }
-        };
+        return host_assignment_error_response(
+            err.current_context(),
+            "Software item or host assignment not found",
+        );
     }
 
     let hook = state.audit_emitter.commit_hook();

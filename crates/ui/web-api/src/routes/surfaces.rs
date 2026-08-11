@@ -16,7 +16,7 @@ use uptrakit_web_api_types::surfaces::{
     InvokeSurfaceInteractionRequest, ListSurfacesQuery, ReadSurfaceInteractionQuery,
     SurfaceProviderAvailability, SurfaceProviderInfo, SurfaceReadResponse, SurfaceResponse,
 };
-use uptrakit_web_api_types::validation::{Validate, ValidationError};
+use uptrakit_web_api_types::validation::{InvokeRoutingEnvelope, Validate, ValidationError};
 use uptrakit_wire::surfaces;
 use uuid::Uuid;
 
@@ -1212,25 +1212,17 @@ fn map_proxy_error(error: SurfaceProxyError) -> Response {
     }
 }
 
-/// Envelope keys pulled out of a GET query string before the remaining pairs
-/// are coerced into interaction `params` — see [`split_get_envelope`].
-///
-/// Field-for-field twin of web-api-types' `InvokeRoutingEnvelope` — a field
-/// change to either struct must update the other.
-struct GetInvokeEnvelope {
-    target_provider_id: Option<String>,
-    timeout_seconds: Option<u16>,
-}
-
 /// The envelope plus the leftover (non-envelope) query pairs, as split by
-/// [`split_get_envelope`].
-type GetEnvelopeSplit = (GetInvokeEnvelope, Vec<(String, String)>);
+/// [`split_get_envelope`]. The GET path reuses the body path's
+/// [`InvokeRoutingEnvelope`] rather than declaring a twin, so widening the
+/// envelope stays a single reviewed change at the trait's home.
+type GetEnvelopeSplit = (InvokeRoutingEnvelope, Vec<(String, String)>);
 
 /// Splits raw GET query pairs into envelope keys (`target_provider_id`,
 /// `timeout_seconds`) and the remaining pairs destined for `coerce_get_params`.
 /// Duplicate keys: last one wins (fold in encounter order).
 fn split_get_envelope(raw: Vec<(String, String)>) -> Result<GetEnvelopeSplit, Box<Response>> {
-    let mut envelope = GetInvokeEnvelope {
+    let mut envelope = InvokeRoutingEnvelope {
         target_provider_id: None,
         timeout_seconds: None,
     };

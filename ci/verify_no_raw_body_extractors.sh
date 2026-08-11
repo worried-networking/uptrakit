@@ -160,15 +160,22 @@ if [ -n "$BASE_REF" ]; then
   if git rev-parse --verify --quiet "${BASE_REF}^{commit}" >/dev/null; then
     baseline_commit="$BASE_REF"
   else
-    case "$BASE_REF" in
-      *[!0-9a-f]*)
-        echo "FATAL: explicit BASE_REF '$BASE_REF' does not resolve — refusing to skip an explicitly requested baseline" >&2
-        exit 1
-        ;;
-      *)
-        history_skip_reason="unresolvable SHA baseline '$BASE_REF' (null/orphaned — normal on new-branch or force-push events)"
-        ;;
+    # Only a FULL object id (40 hex for sha1, 64 for sha256) earns the
+    # warn-and-skip path: that is what CI push events hand us, and it is the
+    # only shape that can be the null/orphaned SHA. A short hex string is far
+    # more likely a mistyped or deleted branch name (`git branch decafbad`),
+    # which must stay a hard FATAL rather than silently disabling the check.
+    case "${#BASE_REF}:$BASE_REF" in
+      40:*[!0-9a-f]* | 64:*[!0-9a-f]*) is_full_oid=0 ;;
+      40:* | 64:*) is_full_oid=1 ;;
+      *) is_full_oid=0 ;;
     esac
+    if [ "$is_full_oid" -eq 1 ]; then
+      history_skip_reason="unresolvable SHA baseline '$BASE_REF' (null/orphaned — normal on new-branch or force-push events)"
+    else
+      echo "FATAL: explicit BASE_REF '$BASE_REF' does not resolve — refusing to skip an explicitly requested baseline" >&2
+      exit 1
+    fi
   fi
 else
   fallback=""
@@ -257,6 +264,11 @@ while IFS='|' read -r al_class al_path al_regex; do
   # puts a top-level fn's closing `}` at column 0; everything nested is
   # indented). Column-0 anchoring means a `.validate()` inside a test module
   # can never satisfy this check — no test-cfg parsing needed.
+  # A row whose file is gone is a STALE row, and the stale-entry check above
+  # already reported it. Without this guard perl reads nothing and the empty
+  # body trips RESIDUAL too — telling the author to "restore the call" in a
+  # file that no longer exists, instead of to delete the row.
+  [ -f "$al_path" ] || continue
   body=$(perl -0777 -ne '
     if (/(?:^|\n)((?:pub(?:\([^)]*\))?\s+)?async\s+fn\s+'"$fn_name"'\b.*?\n\})/s) { print $1; }
   ' "$al_path")

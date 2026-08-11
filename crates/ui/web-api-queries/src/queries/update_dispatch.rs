@@ -2166,4 +2166,27 @@ mod tests {
             .expect("host B's active link must still resolve");
         assert_eq!(result_b.hsi_link.host_id, host_b_id);
     }
+
+    /// Ties the pre-dispatch validation-reject reason code to the reason-code
+    /// family that `trigger_audit_classification` actually emits: the prefix is
+    /// read back off a live classifier result, so renaming the family on either
+    /// side alone fails here.
+    #[test]
+    fn invalid_request_reason_shares_the_classifier_family_prefix() {
+        let (_, classified) =
+            super::TriggerUpdateError::HostNotAssigned.trigger_audit_classification();
+        let classifier_family = classified
+            .split_once('.')
+            .expect("classifier reason codes are `family.detail`")
+            .0;
+        let invalid_request_family = super::TRIGGER_UPDATE_INVALID_REQUEST_REASON
+            .split_once('.')
+            .expect("the invalid-request reason code is `family.detail`")
+            .0;
+
+        assert_eq!(
+            invalid_request_family, classifier_family,
+            "TRIGGER_UPDATE_INVALID_REQUEST_REASON must stay in the same reason-code family as trigger_audit_classification"
+        );
+    }
 }

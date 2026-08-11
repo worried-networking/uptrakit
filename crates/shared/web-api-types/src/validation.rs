@@ -27,8 +27,11 @@ pub(crate) mod sealed {
 // private `mod sealed` would E0603 there); still unimplementable outside
 // the crate, so the seal holds.
 
-/// Body-path routing envelope; field-for-field twin of web-api's
-/// `GetInvokeEnvelope` (`crates/ui/web-api/src/routes/surfaces.rs`).
+/// Routing envelope for both invoke paths: projected out of an
+/// `Unvalidated<T>` body by [`RoutingEnvelope`], and built directly from the
+/// GET query string by web-api's `split_get_envelope`
+/// (`crates/ui/web-api/src/routes/surfaces.rs`) — one type, so the two paths
+/// cannot drift apart.
 /// Declared beside [`RoutingEnvelope`] so the carve-out's breadth is fixed
 /// here: widening what pre-validation code can see means adding a field to
 /// THIS struct — a reviewed change at the trait's own home, never a per-impl
