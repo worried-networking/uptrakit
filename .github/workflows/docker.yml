@@ -13,6 +13,14 @@ on:
   pull_request:
     branches: [main]
 
+# Only pull_request runs are cancellable: they build throwaway images. Runs on
+# main and on release tags push manifests to ghcr.io, and cancelling one
+# mid-push can leave a partially-written multi-arch manifest behind, so they
+# queue instead of superseding each other.
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ghcr.io/worried-networking

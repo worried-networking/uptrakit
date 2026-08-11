@@ -17,6 +17,14 @@ on:
         required: false
         default: ""
 
+# Serialize, never cancel. Two release-plz runs racing on main can cut
+# duplicate tags, release pages, and release PRs, so a second run waits for the
+# first to finish. Cancelling is never correct here: a killed run can leave a
+# tag pushed with no release page, or a release page with partial assets.
+concurrency:
+  group: release-plz
+  cancel-in-progress: false
+
 permissions:
   contents: write
   pull-requests: write

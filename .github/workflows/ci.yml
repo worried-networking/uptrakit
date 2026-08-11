@@ -5,6 +5,19 @@ on:
     branches: ['**']
   pull_request:
 
+# The release-plz workflow pushes up to three commits to a release branch in
+# quick succession (version bump, frontend version bump, asyncapi regeneration).
+# Without a concurrency group each push spawns a full CI run, and the runs on
+# the intermediate SHAs report failures for state that is already fixed at the
+# branch head (e.g. the asyncapi_yaml_is_up_to_date golden test). Superseded
+# runs are cancelled everywhere except main, where every merge commit keeps its
+# own verdict. Push and pull_request events land in different groups because
+# github.ref differs (refs/heads/* vs refs/pull/*/merge), so they never cancel
+# each other.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   conventional-commits:
     if: github.event_name == 'pull_request'

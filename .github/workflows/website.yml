@@ -21,13 +21,15 @@ permissions:
   pages: write
   id-token: write
 
-concurrency:
-  group: pages
-  cancel-in-progress: false
-
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Building the site touches nothing outside the runner, so superseded builds
+    # are cancellable per ref. main is exempt: its build feeds the deploy job
+    # below, and every commit that reaches production keeps its own verdict.
+    concurrency:
+      group: website-build-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -75,6 +77,13 @@ jobs:
     needs: build
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    # GitHub Pages allows one in-flight deployment per site, so this stays a
+    # single global group with cancellation off — a cancelled deploy-pages run
+    # can leave the Pages environment locked mid-publish. Only the deploy job
+    # carries it now; PR builds no longer queue behind a production deploy.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

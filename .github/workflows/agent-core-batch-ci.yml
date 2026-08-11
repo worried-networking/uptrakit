@@ -4,6 +4,13 @@ on:
   push:
   pull_request:
 
+# Same rationale as ci.yml: release-plz pushes several commits to a release
+# branch back to back, and only the branch head is worth testing. Superseded
+# runs are cancelled everywhere except main, which keeps a verdict per merge.
+concurrency:
+  group: agent-core-batch-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   agent-core-batch-failure-path:
     runs-on:
