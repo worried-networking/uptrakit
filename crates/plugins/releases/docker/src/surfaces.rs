@@ -98,22 +98,30 @@ async fn handle_get_current_tag(
     ctx: &SurfaceActionContext<'_>,
     request: DockerItemHostRequest,
 ) -> std::result::Result<serde_json::Value, SurfaceActionError> {
-    use sea_orm::ColumnTrait as _;
-    use sea_orm::EntityTrait as _;
-    use sea_orm::QueryFilter as _;
-    use uptrakit_shared_db::entity::host_software_item_plugin;
+    use sea_orm::{
+        ColumnTrait as _, JoinType, QueryFilter as _, QuerySelect as _, RelationTrait as _,
+    };
+    use uptrakit_shared_db::entity::{host, host_software_item_plugin, software_item};
 
     let host_id = request.host_id;
     let software_item_id = request.software_item_id;
 
     tracing::debug!(%host_id, %software_item_id, "fetching current Docker tag");
 
-    let db = ctx.tenant_db().db();
-    let plugin_rows = host_software_item_plugin::Entity::find()
+    let tenant_db = ctx.tenant_db();
+    let plugin_rows = tenant_db
+        .find_via_tenant_join::<host_software_item_plugin::Entity, software_item::Entity>(
+            host_software_item_plugin::Relation::SoftwareItem.def(),
+        )
+        .join(
+            JoinType::InnerJoin,
+            host_software_item_plugin::Relation::Host.def(),
+        )
+        .filter(host::Column::TenantId.eq(tenant_db.tenant_id()))
         .filter(host_software_item_plugin::Column::HostId.eq(host_id))
         .filter(host_software_item_plugin::Column::SoftwareItemId.eq(software_item_id))
         .filter(host_software_item_plugin::Column::PluginType.eq(DOCKER_RELEASES_CONFIG_TYPE))
-        .all(db)
+        .all(tenant_db.db())
         .await
         .map_err(|e| SurfaceActionError::ControllerIntegration(e.to_string()))?;
 
@@ -382,5 +390,362 @@ mod tests {
     #[test]
     fn extract_container_suffix_without_suffix() {
         assert_eq!(extract_container_suffix("ghcr.io/example/app:1.0"), None);
+    }
+
+    // ── Tenant-isolation harness ────────────────────────────────────────────
+
+    use sea_orm::{ActiveModelTrait, Database, DatabaseConnection, Set};
+    use time::OffsetDateTime;
+    use uptrakit_plugin_infrastructure_core::SurfaceActionContext;
+    use uptrakit_shared_db::entity::{
+        host, host_software_item, host_software_item_plugin, software_item, tenant,
+    };
+    use uptrakit_tenant_db::TenantDb;
+    use uuid::Uuid;
+
+    struct TestController {
+        tenant_db: TenantDb,
+    }
+
+    impl uptrakit_plugin_infrastructure_core::SurfaceActionController for TestController {
+        fn tenant_id(&self) -> Uuid {
+            self.tenant_db.tenant_id()
+        }
+        fn user_id(&self) -> Option<Uuid> {
+            None
+        }
+        fn tenant_db(&self) -> &TenantDb {
+            &self.tenant_db
+        }
+    }
+
+    async fn setup_db() -> DatabaseConnection {
+        let db = Database::connect("sqlite::memory:")
+            .await
+            .expect("connect sqlite memory");
+        uptrakit_shared_db::migration::run_migrations(&db)
+            .await
+            .expect("run migrations");
+        db
+    }
+
+    async fn seed_tenant(db: &DatabaseConnection, id: Uuid) {
+        let now = OffsetDateTime::now_utc();
+        tenant::ActiveModel {
+            id: Set(id),
+            name: Set(format!("tenant-{id}")),
+            slug: Set(id.to_string()),
+            is_default: Set(false),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("seed tenant");
+    }
+
+    async fn seed_host(db: &DatabaseConnection, id: Uuid, tenant_id: Uuid) {
+        let now = OffsetDateTime::now_utc();
+        host::ActiveModel {
+            id: Set(id),
+            tenant_id: Set(tenant_id),
+            machine_id: Set(id.to_string()),
+            hostname: Set("test-host".to_string()),
+            friendly_name: Set("Test Host".to_string()),
+            os_type: Set(None),
+            os_version: Set(None),
+            architecture: Set(None),
+            ip_address: Set(None),
+            host_features: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("seed host");
+    }
+
+    async fn seed_software_item(db: &DatabaseConnection, id: Uuid, tenant_id: Uuid) {
+        let now = OffsetDateTime::now_utc();
+        software_item::ActiveModel {
+            id: Set(id),
+            tenant_id: Set(tenant_id),
+            name: Set("nginx".to_string()),
+            featured: Set(false),
+            icon_url: Set(None),
+            last_checked_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+            awaiting_restart_timeout: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("seed software_item");
+    }
+
+    async fn seed_host_software_item(
+        db: &DatabaseConnection,
+        id: Uuid,
+        host_id: Uuid,
+        software_item_id: Uuid,
+        qualifier: Option<&str>,
+    ) {
+        let now = OffsetDateTime::now_utc();
+        host_software_item::ActiveModel {
+            id: Set(id),
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_id),
+            qualifier: Set(qualifier.map(str::to_string)),
+            plugin_config_id: Set(None),
+            package_identifier: Set(Some("nginx:1.0".to_string())),
+            installed_version: Set(Some("1.0".to_string())),
+            installed_version_detected_at: Set(Some(now)),
+            installed_display_version: Set(Some("1.0".to_string())),
+            latest_version: Set(Some("1.1".to_string())),
+            latest_version_fetched_at: Set(Some(now)),
+            latest_release_metadata: Set(None),
+            last_updated_at: Set(None),
+            linked_at: Set(now),
+            update_category: Set("patch".to_string()),
+            deactivated_at: Set(None),
+            last_discovered_at: Set(None),
+            discovery_source: Set(None),
+            missing_since: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("seed host_software_item");
+    }
+
+    /// Docker call sites pass `DOCKER_RELEASES_CONFIG_TYPE` and ordinal 0;
+    /// Task 2's skip test seeds one non-Docker row (any other type string, e.g.
+    /// "package_managers.apt") with ordinal 1 — `uq_hsip_hsi_role_ordinal` is
+    /// UNIQUE on `(host_software_item_id, role, ordinal)`
+    /// (m20260318_000001_host_software_item_qualifier.rs:681-687), so two rows
+    /// under the same hsi with the same role must differ in ordinal or the
+    /// insert panics at seed time.
+    ///
+    /// Deviation from the plan's 8-param signature (clippy::too_many_arguments
+    /// caps at 7 and is deny-level): the `id` parameter is dropped and
+    /// generated internally, since every plan call site passed a throwaway
+    /// `Uuid::now_v7()` and never read it back.
+    async fn seed_plugin_row(
+        db: &DatabaseConnection,
+        host_id: Uuid,
+        software_item_id: Uuid,
+        host_software_item_id: Uuid,
+        plugin_type: &str,
+        package_identifier: &str,
+        ordinal: i32,
+    ) {
+        let id = Uuid::now_v7();
+        let now = OffsetDateTime::now_utc();
+        host_software_item_plugin::ActiveModel {
+            id: Set(id),
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_id),
+            host_software_item_id: Set(host_software_item_id),
+            plugin_config_id: Set(None),
+            plugin_type: Set(plugin_type.to_string()),
+            role: Set("fetch_releases".to_string()),
+            ordinal: Set(ordinal),
+            package_identifier: Set(package_identifier.to_string()),
+            config: Set(None),
+            execution_site: Set("auto".to_string()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(db)
+        .await
+        .expect("seed host_software_item_plugin");
+    }
+
+    /// Convenience: seed a full tenant→host+item→hsi→docker-plugin chain, all
+    /// four rows owned by `tenant_id`. Returns (host_id, software_item_id).
+    async fn seed_full_chain(
+        db: &DatabaseConnection,
+        tenant_id: Uuid,
+        package_identifier: &str,
+    ) -> (Uuid, Uuid) {
+        let host_id = Uuid::now_v7();
+        let item_id = Uuid::now_v7();
+        let hsi_id = Uuid::now_v7();
+        seed_host(db, host_id, tenant_id).await;
+        seed_software_item(db, item_id, tenant_id).await;
+        seed_host_software_item(db, hsi_id, host_id, item_id, None).await;
+        seed_plugin_row(
+            db,
+            host_id,
+            item_id,
+            hsi_id,
+            DOCKER_RELEASES_CONFIG_TYPE,
+            package_identifier,
+            0,
+        )
+        .await;
+        (host_id, item_id)
+    }
+
+    #[tokio::test]
+    async fn get_current_tag_same_tenant_returns_image_ref() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        seed_tenant(&db, tenant_id).await;
+        // Suffixed seed: spec case 3 requires the returned reference to have
+        // the `#container` suffix STRIPPED, so the fixture must carry one —
+        // an unsuffixed seed would leave `strip_container_suffix` unexercised
+        // on the scoped path.
+        let (host_id, software_item_id) = seed_full_chain(&db, tenant_id, "nginx:1.0#web").await;
+
+        let controller = TestController {
+            tenant_db: TenantDb::new(db.clone(), tenant_id),
+        };
+        let ctx = SurfaceActionContext {
+            controller: &controller,
+        };
+        let req = DockerItemHostRequest {
+            host_id,
+            software_item_id,
+        };
+
+        let out = handle_get_current_tag(&ctx, req).await.expect("read ok");
+        assert_eq!(out["new_image_ref"], "nginx:1.0", "suffix must be stripped");
+    }
+
+    #[tokio::test]
+    async fn get_current_tag_cross_tenant_returns_empty() {
+        let db = setup_db().await;
+        let victim = Uuid::now_v7();
+        let attacker = Uuid::now_v7();
+        seed_tenant(&db, victim).await;
+        seed_tenant(&db, attacker).await;
+        // Chain belongs to the victim tenant.
+        let (host_id, software_item_id) = seed_full_chain(&db, victim, "nginx:1.0").await;
+
+        // Controller scoped to the attacker tenant, replaying the victim's UUIDs.
+        let controller = TestController {
+            tenant_db: TenantDb::new(db.clone(), attacker),
+        };
+        let ctx = SurfaceActionContext {
+            controller: &controller,
+        };
+        let req = DockerItemHostRequest {
+            host_id,
+            software_item_id,
+        };
+
+        let out = handle_get_current_tag(&ctx, req).await.expect("read ok");
+        assert_eq!(
+            out["new_image_ref"], "",
+            "cross-tenant read must not leak the tag"
+        );
+    }
+
+    // Spec case 5 — mismatched-parent, BOTH orientations. A single orientation
+    // only pins one of the two single-anchor mutants, so both are required.
+    // Caller = tenant A (`attacker`), victim = tenant B (`victim`). Each row is
+    // an *unreachable* state via the API (host_software_item rows are only
+    // created for a same-tenant (host, software_item) pair); the tests fabricate
+    // the row directly to prove BOTH anchors are enforced independently.
+
+    /// Spec 5a — `host∈A`, `software_item∈B`. Catches a `host`-anchored
+    /// single-parent mutant (drops the `software_item` filter → would leak).
+    #[tokio::test]
+    async fn get_current_tag_mismatched_parents_host_a_item_b_returns_empty() {
+        let db = setup_db().await;
+        let victim = Uuid::now_v7();
+        let attacker = Uuid::now_v7();
+        seed_tenant(&db, victim).await;
+        seed_tenant(&db, attacker).await;
+
+        let host_id = Uuid::now_v7();
+        let item_id = Uuid::now_v7();
+        let hsi_id = Uuid::now_v7();
+        seed_host(&db, host_id, attacker).await; // host owned by A (attacker)
+        seed_software_item(&db, item_id, victim).await; // item owned by B (victim)
+        seed_host_software_item(&db, hsi_id, host_id, item_id, None).await;
+        seed_plugin_row(
+            &db,
+            host_id,
+            item_id,
+            hsi_id,
+            DOCKER_RELEASES_CONFIG_TYPE,
+            "nginx:1.0",
+            0,
+        )
+        .await;
+
+        // Controller scoped to `attacker`: owns the host (host anchor passes) but
+        // not the item (software_item anchor fails) → empty read.
+        let controller = TestController {
+            tenant_db: TenantDb::new(db.clone(), attacker),
+        };
+        let ctx = SurfaceActionContext {
+            controller: &controller,
+        };
+        let req = DockerItemHostRequest {
+            host_id,
+            software_item_id: item_id,
+        };
+
+        let out = handle_get_current_tag(&ctx, req).await.expect("read ok");
+        assert_eq!(
+            out["new_image_ref"], "",
+            "5a: software_item anchor must reject a foreign item"
+        );
+    }
+
+    /// Spec 5b (higher-value) — `host∈B`, `software_item∈A`. Catches a
+    /// `software_item`-anchored single-parent mutant that keeps the chosen anchor
+    /// but drops the **added** `host` defense-in-depth join. Because the fix
+    /// anchors on `software_item`, the most likely future regression is removing
+    /// the "extra" chained host join — only 5b keeps that mutant dead.
+    #[tokio::test]
+    async fn get_current_tag_mismatched_parents_host_b_item_a_returns_empty() {
+        let db = setup_db().await;
+        let victim = Uuid::now_v7();
+        let attacker = Uuid::now_v7();
+        seed_tenant(&db, victim).await;
+        seed_tenant(&db, attacker).await;
+
+        let host_id = Uuid::now_v7();
+        let item_id = Uuid::now_v7();
+        let hsi_id = Uuid::now_v7();
+        seed_host(&db, host_id, victim).await; // host owned by B (victim)
+        seed_software_item(&db, item_id, attacker).await; // item owned by A (attacker)
+        seed_host_software_item(&db, hsi_id, host_id, item_id, None).await;
+        seed_plugin_row(
+            &db,
+            host_id,
+            item_id,
+            hsi_id,
+            DOCKER_RELEASES_CONFIG_TYPE,
+            "nginx:1.0",
+            0,
+        )
+        .await;
+
+        // Controller scoped to `attacker`: owns the item (software_item anchor
+        // passes) but not the host (host anchor fails) → empty read.
+        let controller = TestController {
+            tenant_db: TenantDb::new(db.clone(), attacker),
+        };
+        let ctx = SurfaceActionContext {
+            controller: &controller,
+        };
+        let req = DockerItemHostRequest {
+            host_id,
+            software_item_id: item_id,
+        };
+
+        let out = handle_get_current_tag(&ctx, req).await.expect("read ok");
+        assert_eq!(
+            out["new_image_ref"], "",
+            "5b: added host join must reject a foreign host"
+        );
     }
 }

@@ -38,6 +38,7 @@ uuid = { workspace = true }
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "time", "test-util"] }
 uptrakit-command = { workspace = true }
+uptrakit-shared-db = { workspace = true, features = ["migration", "db-sqlite"] }
 
 [lints]
 workspace = true
