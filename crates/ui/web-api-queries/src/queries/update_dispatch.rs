@@ -93,6 +93,12 @@ pub enum TriggerUpdateError {
 pub type Result<T> = std::result::Result<T, rootcause::Report<TriggerUpdateError>>;
 impl_report_conversion!(sea_orm::DbErr => TriggerUpdateError::Database);
 
+/// Reason code for a request rejected by `require_valid()` before dispatch.
+/// Lives beside `trigger_audit_classification` so the `trigger_update.*`
+/// family namespace stays in one place (the classifier returns inline
+/// literals; there is no const table).
+pub const TRIGGER_UPDATE_INVALID_REQUEST_REASON: &str = "trigger_update.invalid_request";
+
 impl TriggerUpdateError {
     /// Returns the audit classification `(outcome, reason_code)` for a single-host
     /// trigger update failure.
@@ -2159,5 +2165,13 @@ mod tests {
             .await
             .expect("host B's active link must still resolve");
         assert_eq!(result_b.hsi_link.host_id, host_b_id);
+    }
+
+    #[test]
+    fn invalid_request_reason_carries_the_family_prefix() {
+        assert!(
+            super::TRIGGER_UPDATE_INVALID_REQUEST_REASON.starts_with("trigger_update."),
+            "validation-reject reason must stay in the trigger_update.* family namespace"
+        );
     }
 }

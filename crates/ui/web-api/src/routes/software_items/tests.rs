@@ -1302,6 +1302,74 @@ async fn trigger_update_with_api_token_actor_writes_api_token_actor_id() {
 }
 
 #[tokio::test]
+async fn trigger_update_validation_reject_is_audited() {
+    let db = setup_migrated_db().await;
+    let tenant_id = insert_default_tenant(&db).await;
+    let state = build_test_state_without_real_protection(db.clone(), tenant_id).await;
+
+    let host = crate::test_harness::fixtures::insert_host(&db, tenant_id).await;
+    let service = crate::test_harness::fixtures::insert_service(
+        &db,
+        tenant_id,
+        service::ServiceStatus::Approved,
+    )
+    .await;
+    crate::test_harness::fixtures::link_service_host(&db, service.id, host.id).await;
+
+    let item_id = Uuid::now_v7();
+    insert_software_item_row(&db, tenant_id, item_id).await;
+
+    let auth_user = AuthenticatedUser::new(Uuid::now_v7(), AuthMethod::Password, None);
+    let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
+
+    let response = trigger_update(
+        State(Arc::clone(&state)),
+        tenant_db,
+        CanTriggerUpdates::new(auth_user),
+        None,
+        Path((item_id, host.id)),
+        Unvalidated::new_for_test(TriggerUpdateRequest {
+            to_version: "A".repeat(9000),
+            release_info: None,
+            interactive: false,
+        }),
+    )
+    .await;
+
+    let error = match response {
+        Ok(response) => panic!(
+            "trigger_update should fail validation, got status {}",
+            response.into_response().status()
+        ),
+        Err(err) => err,
+    };
+    let error_response = error.into_response();
+    assert_eq!(error_response.status(), StatusCode::BAD_REQUEST);
+
+    let bytes = axum::body::to_bytes(error_response.into_body(), usize::MAX)
+        .await
+        .expect("read response body");
+    let body: uptrakit_web_api_types::error::ErrorResponse =
+        serde_json::from_slice(&bytes).expect("deserialize error response");
+    assert_eq!(body.code.as_deref(), Some("validation_error"));
+
+    let row = tenant_audit_row_for_action_and_outcome(
+        &db,
+        uptrakit_audit_log::AuditActionType::SOFTWARE_UPDATE_TRIGGERED,
+        uptrakit_audit_log::AuditOutcome::ValidationFailed.as_str(),
+    )
+    .await;
+    assert_eq!(row.target_type.as_deref(), Some("software_item"));
+    assert_eq!(row.target_id.as_deref(), Some(item_id.to_string().as_str()));
+    let details = row.details_json.expect("details");
+    assert_eq!(details["host_id"], serde_json::json!(host.id));
+    assert_eq!(
+        details["reason_code"],
+        serde_json::json!("trigger_update.invalid_request")
+    );
+}
+
+#[tokio::test]
 async fn check_versions_writes_software_version_check_triggered_audit_event() {
     let db = setup_migrated_db().await;
     let tenant_id = insert_default_tenant(&db).await;

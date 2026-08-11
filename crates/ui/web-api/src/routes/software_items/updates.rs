@@ -2,7 +2,7 @@ use crate::AppState;
 use crate::api_error::ApiError;
 use crate::extract::Unvalidated;
 use crate::middleware::action::CanTriggerUpdates;
-use crate::middleware::require_auth::AuthenticatedApiTokenId;
+use crate::middleware::require_auth::{AuthenticatedApiTokenId, authenticated_user_audit_actor};
 use crate::queries::update_types::ActorType;
 use crate::tenant_db::TenantDb;
 use axum::{
@@ -43,9 +43,29 @@ pub async fn trigger_update(
     Path((item_id, host_id)): Path<(Uuid, Uuid)>,
     body: Unvalidated<TriggerUpdateRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let api_token_id = api_token_id.map(|value| value.0);
+    let (audit_actor_type, audit_actor_id) = authenticated_user_audit_actor(&user, api_token_id);
+
     let req = match body.require_valid() {
         Ok(req) => req,
         Err(e) => {
+            if let Ok(entry) =
+                uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+                    uptrakit_audit_log::AuditActionType::SOFTWARE_UPDATE_TRIGGERED,
+                )
+                .tenant_scope(tenant_db.tenant_id())
+                .actor(audit_actor_type, audit_actor_id)
+                .target("software_item", item_id.to_string(), None)
+                .outcome(uptrakit_audit_log::AuditOutcome::ValidationFailed)
+                .details(serde_json::json!({
+                    "host_id": host_id,
+                    "reason_code":
+                        crate::queries::update_dispatch::TRIGGER_UPDATE_INVALID_REQUEST_REASON,
+                }))
+                .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 e.to_string(),
@@ -54,7 +74,6 @@ pub async fn trigger_update(
             ));
         }
     };
-    let api_token_id = api_token_id.map(|value| value.0);
     let (update_actor_type, update_actor_id) = match api_token_id {
         Some(token_id) => (ActorType::ApiToken, token_id.0.to_string()),
         None => (ActorType::User, user.user_id.to_string()),
