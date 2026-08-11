@@ -13,9 +13,9 @@ The Docker plugin's two surface actions on `docker.item-host-actions`
 (`crates/plugins/releases/docker/src/surfaces.rs`) run every query against the raw connection —
 `ctx.tenant_db().db()` — with filters built exclusively from caller-supplied form params:
 
-1. **`get-current-tag` (read, IDOR).** `handle_get_current_tag` loads
+1. **`current-tag` (read, IDOR).** `handle_get_current_tag` loads
    `host_software_item_plugin` rows filtered on `HostId.eq(host_id)`,
-   `SoftwareItemId.eq(software_item_id)`, `PluginType.eq("releases_docker")` — no tenant
+   `SoftwareItemId.eq(software_item_id)`, `PluginType.eq("releases.docker")` — no tenant
    predicate. A tenant-A caller with `UpdateSoftware` permission who supplies tenant-B UUIDs reads
    tenant B's image reference (registry host, repository path, tag — including private registry
    layouts).
@@ -72,7 +72,7 @@ Tenant-Safe Database Queries).
 
 Identical to the Proxmox finding: the surface API hands every action a tenant-enforcing handle —
 `SurfaceActionContext::tenant_db()` returns `&TenantDb`
-(`crates/plugins/infrastructure/core/src/descriptor.rs:191`) — and the handler immediately unwraps
+(`crates/plugins/infrastructure/core/src/descriptor.rs:188`) — and the handler immediately unwraps
 it to the raw connection (`ctx.tenant_db().db()`), discarding the tenant. No plugins-API change is
 required; the fix is to stop unwrapping.
 
@@ -81,13 +81,23 @@ required; the fix is to stop unwrapping.
 Every dispatch path constructs the context from an authenticated tenant, so fixing the queries
 inside the handlers covers all invocation routes:
 
-- **Dashboard/REST**: `PluginSurfaceLocalExecutor` Tier-2 allowlist
-  (`crates/ui/surface-proxy/src/proxy/local_executor.rs:273`) →
-  `PluginOpsSurfaceActionInvoker::invoke` builds `AppStateSurfaceActionController` from the
-  session's `tenant_id` (`local_executor.rs:78`); a `None` tenant is rejected before dispatch.
+- **Dashboard/REST**: `PluginOpsSurfaceActionInvoker::invoke` parses `request.tenant_id`
+  (`crates/ui/surface-proxy/src/proxy/local_executor.rs:151`) and builds
+  `AppStateSurfaceActionController` from it (`local_executor.rs:83`); a missing DB/tenant is
+  rejected before dispatch. `switch-tag` routes through the Tier-2 audit allowlist
+  (`local_executor.rs:253`); `current-tag` falls through to the Tier-3 generic invoke
+  (`local_executor.rs:316`) — both build the invoker context from the same parsed tenant.
 - **Service WS**: `handle_surface_action_request`
-  (`crates/ui/web-api/src/routes/service_ws/handler/message_processor.rs:526`) uses
-  `service_tenant_id` from the enrolled service identity, not payload data.
+  (`crates/ui/web-api/src/routes/service_ws/handler/message_processor.rs:526`) parses the tenant
+  from `payload.tenant_id` and, for **tenant** services, rejects any mismatch against the enrolled
+  `service_tenant_id` (`message_processor.rs:601`). **System** services (`service_tenant_id =
+  None`) skip that identity check — for them the payload-declared tenant flows through. What
+  blocks Docker on this path is the provider-origin gate: both Docker interactions declare
+  `required_action = software:update` (`plugin.rs:296`, `:320`, `:390`) and neither sets
+  `provider_invocable`, so provider-origin invocation of an action-gated interaction is denied
+  before dispatch (`crates/ui/surface-proxy/src/proxy.rs:253`). The in-handler tenant scoping is
+  therefore the correct fix for every path that _can_ dispatch, and the test plan pins the
+  `provider_invocable = false` assumption the system-service path relies on (test case 6).
 
 The vulnerability is exclusively the missing tenant predicate inside the two handlers; there is no
 second resolver or sibling path that re-reaches these tables for Docker (grep: `surfaces.rs` is the
@@ -116,7 +126,7 @@ Feasibility facts (verified in code):
   this exact table; the added host predicate is the defense-in-depth layer, not the anchor.
 - Composing a chained manual `InnerJoin` onto a `find_via_tenant_join` result is an established
   pattern, not a novel construction:
-  `crates/ui/web-api-queries/src/queries/services.rs` (~:784; the chained join at ~:787 — line
+  `crates/ui/web-api-queries/src/queries/services.rs` (:783; the chained join at :787 — line
   numbers are hints, grep `find_via_tenant_join` in that file) anchors `service_host` via `service`,
   then chains `.join(JoinType::InnerJoin, …Relation::Host.def())` with a follow-on `host::` filter.
   The Docker sites are structurally identical; the second join's filter targets `host::Column::TenantId`
@@ -124,22 +134,24 @@ Feasibility facts (verified in code):
 - Both inner joins are 1:1 per row (`belongs_to` on an FK), so no duplicate rows are introduced.
   SeaORM table-qualifies all generated column references, so the `host_id` column name existing on
   both the join table and — indirectly — the joined parents is not ambiguous.
-- `ctx.tenant_id()` (`descriptor.rs:180`) and `TenantDb::tenant_id()` (`tenant_db.rs:25`) both
+- `ctx.tenant_id()` (`descriptor.rs:177`) and `TenantDb::tenant_id()` (`tenant_db.rs:25`) both
   expose the caller tenant for the second predicate.
 - The Docker crate already depends on `uptrakit-tenant-db` and `uptrakit-shared-db`
   (`crates/plugins/releases/docker/Cargo.toml`); no dependency change for production code. Explicit
   import diff for `surfaces.rs` (the chains do NOT compile without these — `.join()` is a
-  `QuerySelect` trait method, `.def()` needs `RelationTrait`; neither handler imports them today):
-  `use sea_orm::{JoinType, QuerySelect, RelationTrait};` plus
-  `use uptrakit_shared_db::entity::{host, software_item};` — the same trait set `services.rs`
-  imports for its own chained join (verified at its lines 2-5). Import bookkeeping, exact (both
-  handlers currently import `ColumnTrait`, `EntityTrait`, `QueryFilter` — `get-current-tag` at
-  lines 170-172, `switch-tag` in the grouped block at line 210):
-  - **Retain** `ColumnTrait` (the `Column::…eq()`/`host::Column::TenantId.eq()` predicates) and
-    `QueryFilter` (the post-join `.filter(…)`). Both are still used after the refactor.
-  - **Drop** `EntityTrait`: its _only_ uses in each handler are the three
+  `QuerySelect` trait method, `.def()` needs `RelationTrait`; neither handler imports them today).
+  Both handlers use **function-scoped** `use` blocks, not module-level imports:
+  `handle_get_current_tag` at lines 100-103 (`use sea_orm::ColumnTrait as _;` /
+  `EntityTrait as _` / `QueryFilter as _` plus the `host_software_item_plugin` entity import),
+  `handle_switch_tag` in the grouped block at lines 139-143. Add to each function's block:
+  `JoinType`, `QuerySelect as _`, `RelationTrait as _` (the same trait set `services.rs` uses for
+  its own chained join, module-level at its lines 2-5), and extend the
+  `uptrakit_shared_db::entity` import with `host` and `software_item`.
+  - **Retain** `ColumnTrait as _` (the `Column::…eq()`/`host::Column::TenantId.eq()` predicates)
+    and `QueryFilter as _` (the post-join `.filter(…)`). Both are still used after the refactor.
+  - **Drop** `EntityTrait as _`: its _only_ uses in each handler are the three
     `host_software_item_plugin::Entity::find()` / `host_software_item::Entity::find()` calls
-    (`surfaces.rs:181`, `:242`, `:259`) — the exact sites being replaced by
+    (`surfaces.rs:111`, `:172`, `:189`) — the exact sites being replaced by
     `ctx.tenant_db().find_via_tenant_join::<…>()`, whose `Target::find()` happens _inside_ the
     helper. With those gone, no direct `Entity::` method remains in either body, so leaving
     `EntityTrait as _` imported trips `unused_imports` under `warnings = "deny"`. Remove it in the
@@ -148,7 +160,7 @@ Feasibility facts (verified in code):
 
 ### The three query sites (each read, each different — exact replacements)
 
-1. **`handle_get_current_tag` plugin-row load (`surfaces.rs:181`)** — executes against the plain
+1. **`handle_get_current_tag` plugin-row load (`surfaces.rs:111`)** — executes against the plain
    connection, filters include `PluginType`:
 
    ```rust
@@ -167,12 +179,16 @@ Feasibility facts (verified in code):
    ```
 
    The `find_via_tenant_join` call supplies the `software_item` tenant predicate; the chained
-   `.join(...Relation::Host...)` + `.filter(host::Column::TenantId...)` adds the host one.
+   `.join(...Relation::Host...)` + `.filter(host::Column::TenantId...)` adds the host one. Also
+   remove the now-unused `let db = ctx.tenant_db().db();` binding at `surfaces.rs:110` — nothing
+   else in `handle_get_current_tag` references it after the rewrite, and leaving it trips
+   `unused_variables` under `warnings = "deny"`. (No equivalent removal at sites 2/3: `db` stays
+   alive in `handle_switch_tag` for `db.begin_with_options(…)`.)
 
-2. **`handle_switch_tag` plugin-row load (`surfaces.rs:242`)** — same two-parent join, no
+2. **`handle_switch_tag` plugin-row load (`surfaces.rs:172`)** — same two-parent join, no
    `PluginType` filter (the loop skips non-Docker rows), executes `.all(&txn)`.
 
-3. **`handle_switch_tag` `host_software_item` load (`surfaces.rs:259`)** — Target is
+3. **`handle_switch_tag` `host_software_item` load (`surfaces.rs:189`)** — Target is
    `host_software_item::Entity`; anchor relation `host_software_item::Relation::SoftwareItem.def()`,
    second join `host_software_item::Relation::Host.def()` + `host::Column::TenantId` filter,
    executes `.one(&txn)`. Preserve the existing `.one()` semantics exactly — do not switch to
@@ -206,14 +222,16 @@ produced. The per-row update loop stays a loop — each row receives a distinct
 `package_identifier` (its `#container` suffix is preserved), so the batch-update rule does not
 apply.
 
-Add one line to the module doc of `surfaces.rs` stating that all queries must go through
-`ctx.tenant_db()` join helpers because these tables have no `tenant_id` column.
+Add one line to the module doc of `surfaces.rs` stating that no query may be _built_ from the raw
+connection — queries against these tables must go through `ctx.tenant_db()` join helpers because
+the tables have no `tenant_id` column. (The raw handle itself legitimately remains as the
+executor and for `begin_with_options`.)
 
 ### Error contract on foreign-tenant IDs (no change to error surface)
 
 Tenant-scoped queries return zero rows for foreign IDs, which lands on existing paths:
 
-- `get-current-tag`: empty `new_image_ref` — byte-identical to today's absent-assignment response;
+- `current-tag`: empty `new_image_ref` — byte-identical to today's absent-assignment response;
   no existence oracle.
 - `switch-tag`: the existing `"no plugin assignments found for this host"`
   `ControllerIntegration` error, before any write. Matches the not-found-on-foreign-id convention
@@ -223,21 +241,35 @@ Tenant-scoped queries return zero rows for foreign IDs, which lands on existing 
 
 Deliberately preserved behaviors (explicitly not in scope of the fix): no `deactivated_at` filter
 is added for the host (current behavior accepts deactivated hosts; changing that is a separate
-product decision), and the `plugin_type` skip stays in the loop for site 2.
+product decision), and the `plugin_type` skip stays in the loop for site 2. One recorded
+failure-mode change: the added `INNER JOIN`s make the handlers fail-closed on a row whose `host`
+or `software_item` parent is missing — runtime connections enforce `foreign_keys=true`, so such
+orphans cannot exist in practice; fail-closed is the correct direction if one ever did.
+
+Accepted side effect: a mismatched-parent row (`host.tenant_id != software_item.tenant_id`, the
+shape the sibling `assign_hosts` gap can produce) becomes unreachable by **both** tenants through
+these actions, surfacing as the generic "no plugin assignments" error rather than a distinct
+diagnostic. No detection/repair sweep is included: the producer is closed by the
+web-api-queries spec, and the single live deployment is single-tenant, so no such row can exist
+in practice. If one is ever suspected, a one-off join query comparing the two parents' tenant IDs
+across `host_software_items` finds it.
 
 ### Alternative considered
 
 Upfront host-ownership guard (one `TenantDb::find_by_id::<host::Entity>` check at each handler
 entry, queries unchanged). Rejected with the user: it reintroduces a separately-droppable tenant
-check next to unscoped queries — the exact mechanism class the Proxmox spec revision rejected — and
-a future edit adding a third query would silently inherit nothing.
+check next to unscoped queries — the exact mechanism class the Proxmox spec revision rejected.
+Honest limit of the chosen fix: it makes each **existing** query tenant-scoped by construction
+(no separately-droppable guard line), but a future edit adding a **new** query to these handlers
+inherits nothing under either design — that residual is exactly what the CI gate noted in Out of
+scope would close, and is why it stays noted there rather than silently dropped.
 
 ## Tests
 
 Real in-memory SQLite with the workspace's established pattern — `Database::connect("sqlite::memory:")`
 
 - `uptrakit_shared_db::migration::run_migrations(&db)` (as in
-  `crates/ui/web-api-queries/src/queries/hosts.rs:485`). Manifest change, stated precisely: a **new**
+  `crates/ui/web-api-queries/src/queries/hosts.rs:488`). Manifest change, stated precisely: a **new**
   `[dev-dependencies]` entry — the crate has `uptrakit-shared-db` under `[dependencies]` only (no
   features) and its dev-deps today are just `tokio` + `uptrakit-command`; this adds the dual-entry
   pattern `web-api-queries/Cargo.toml` already uses (plain prod dep + featured dev dep). Workspace
@@ -250,28 +282,37 @@ uptrakit-shared-db = { workspace = true, features = ["migration", "db-sqlite"] }
 
 FK constraints are enforced in these DBs, so fixtures must seed the full parent chain per tenant:
 `tenant` → `host` + `software_item` → `host_software_item` → `host_software_item_plugin`
-(with `plugin_type = "releases_docker"` and a `#container`-suffixed `package_identifier` on at
-least one row). No encrypted columns are involved, so `enable_plaintext_mode()` is not needed.
+(with `plugin_type = "releases.docker"` and a `#container`-suffixed `package_identifier` on at
+least one row). For test case 4's two-qualifier fixture, seed a Docker plugin row under **each**
+of the two `host_software_item` rows, with **distinct** `#container` suffixes — otherwise the
+"all plugin rows rewritten" half of its assertion is vacuous and the cross-qualifier fan-out is
+unobservable. No encrypted columns are involved, so `enable_plaintext_mode()` is not needed.
 
 The production `AppStateSurfaceActionController` lives in `uptrakit-surface-proxy`, which the
 Docker crate cannot depend on (dependency direction: surface-proxy → plugins). Tests instead define
 a ~10-line test-local impl of the `SurfaceActionController` trait
-(`crates/plugins/infrastructure/core/src/roles.rs:391` — three methods: `tenant_id`, `user_id`,
+(`crates/plugins/infrastructure/core/src/roles.rs:416` — three methods: `tenant_id`, `user_id`,
 `tenant_db`) holding a `TenantDb::new(db.clone(), tenant_id)`; the same pattern infra-core's own
 tests use (`descriptor.rs` test module — note that precedent stubs `tenant_db()` with
 `unimplemented!()` since its suite never touches the DB; this spec's version returning a real
 `TenantDb` is a superset, there is no worked real-DB example to copy verbatim). Cases (two tenants, A = caller, B = victim):
 
-1. **Cross-tenant read blocked**: `get-current-tag` with tenant-B `host_id`/`software_item_id`
+1. **Cross-tenant read blocked**: `current-tag` with tenant-B `host_id`/`software_item_id`
    returns empty `new_image_ref`.
 2. **Cross-tenant write blocked**: `switch-tag` with tenant-B IDs returns the
    "no plugin assignments" error AND tenant B's `host_software_item_plugin.package_identifier`,
    `host_software_item.package_identifier`, and version columns are asserted unchanged.
-3. **Same-tenant read works**: `get-current-tag` with tenant-A IDs returns the stored reference
+3. **Same-tenant read works**: `current-tag` with tenant-A IDs returns the stored reference
    with the `#container` suffix stripped.
 4. **Same-tenant write works**: `switch-tag` with tenant-A IDs rewrites all Docker plugin rows
    (suffix preserved per row), clears the item's version state, sets
-   `update_category = "unknown"`, and skips a seeded non-Docker plugin row.
+   `update_category = "unknown"`, and skips a seeded non-Docker plugin row. Seed the
+   production-realistic multi-container shape — two `host_software_item` rows for the pair with
+   distinct `qualifier` values (the `qualifier` column _is_ the container name) — and assert
+   set-level current behavior: all Docker plugin rows rewritten, **exactly one** of the two
+   `host_software_item` rows updated (`.one()` picks arbitrarily; which one is not asserted).
+   This documents the pre-existing multi-qualifier quirk (see Out of scope) instead of masking
+   it with a single-row fixture.
 5. **Mismatched-parent row blocked — both orientations (both-anchor regression guard)**: assert
    **both** parent-mismatch orientations, because a single orientation only pins one of the two
    single-anchor mutants. Seed two mismatched `host_software_item` + `host_software_item_plugin`
@@ -285,11 +326,18 @@ tests use (`descriptor.rs` test module — note that precedent stubs `tenant_db(
      alone suffices. Only 5b keeps that mutant dead.
 
    For each orientation a tenant-A caller supplying that host/software-item pair reads empty
-   (`get-current-tag`) and the `switch-tag` write is refused with the "no plugin assignments" error
+   (`current-tag`) and the `switch-tag` write is refused with the "no plugin assignments" error
    and no row mutated. One orientation alone leaves a single-anchor mutant alive, so both are
    required. This guard stays meaningful even after the `assign_hosts` fix lands: the
    `host.tenant_id == software_item.tenant_id` invariant is not enforceable at the DB layer (no
    cross-table FK/CHECK ties `host.tenant_id` to `software_item.tenant_id`), so a future regression of that invariant would re-open the hole it covers.
+
+6. **Provider-origin invocation stays gated (descriptor assertion)**: assert that both Docker
+   interactions (`switch-tag`, `current-tag`) declare a `required_action` and do **not** set
+   `provider_invocable`. This pins the assumption the Service-WS entry-point analysis relies on:
+   a system service (which skips the enrolled-tenant identity check) must keep being denied at
+   the provider-origin gate (`proxy.rs:253`) before dispatch. No DB needed — pure descriptor
+   inspection alongside the existing descriptor tests in `tests.rs`.
 
 No tokio time APIs are involved → no `start_paused`. Existing unit tests in `surfaces.rs` (action
 descriptors, param parsing, suffix helpers) are unaffected.
@@ -323,9 +371,17 @@ descriptors, param parsing, suffix helpers) are unaffected.
 - Promoting two-parent tenant scoping to a shared `TenantDb` helper
   (e.g. `find_via_two_tenant_joins`) and applying it uniformly to every single-parent reader of
   these join tables — notably `plugin_types_for_role`
-  (`crates/ui/web-api-queries/src/queries/host_software_item_plugins/mod.rs:66`). Warranted once the
-  pattern recurs; this spec deliberately keeps the Docker fix inline (matching the `services.rs:783`
-  composition precedent) rather than introducing a new shared API for two call sites.
+  (`crates/ui/web-api-queries/src/queries/host_software_item_plugins/mod.rs:66`). Committed
+  trigger: the **next** occurrence of this pattern in any crate promotes it to the shared helper;
+  this spec deliberately keeps the Docker fix inline (matching the `services.rs:783` composition
+  precedent) rather than introducing a new shared API for two call sites.
+- Multi-qualifier `switch-tag` data-consistency quirk (pre-existing, not security): for a
+  multi-container pair, the handler rewrites `package_identifier` on plugin rows for **all**
+  qualifiers but updates exactly one arbitrary `host_software_item` row via `.one()`, leaving the
+  other qualifiers' rows with stale version state and the old item-level `package_identifier`.
+  Fixing it needs a `qualifier` param or an `.all()` fan-out (or driving site 3 off the plugin
+  rows' `host_software_item_id` FK) — a behavior change this security fix must not smuggle in.
+  Test case 4 pins the current behavior so the quirk stays visible.
 - Host `deactivated_at` filtering in these actions (pre-existing behavior, separate decision).
 - Web-api-queries host-assignment scoping (covered by
   `2026-07-11-web-api-queries-tenant-scoping-design.md`).
