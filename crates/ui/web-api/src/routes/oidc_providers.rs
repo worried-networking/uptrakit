@@ -11,13 +11,11 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{
-    ColumnTrait, QueryFilter, QueryOrder, SqliteTransactionMode, TransactionOptions,
-    TransactionTrait,
-};
+use sea_orm::{ColumnTrait, QueryFilter, QueryOrder};
 use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, Event, Stateful};
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_db::entity::oidc_provider;
 use uptrakit_web_api_queries::queries::oidc_providers::{
     CreateOidcProviderParams, OidcProviderView, UpdateOidcProviderParams,
@@ -229,14 +227,7 @@ pub async fn create_provider(
     let now = OffsetDateTime::now_utc();
     let provider_id = generate_uuid();
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to begin transaction for oidc provider create: {e}");
@@ -632,14 +623,7 @@ pub async fn update_provider(
     let now = OffsetDateTime::now_utc();
     let before_view = OidcProviderView::from(&provider);
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to begin transaction for oidc provider update: {e}");
@@ -804,14 +788,7 @@ pub async fn delete_provider(
 
     // ── BEGIN IMMEDIATE tx ────────────────────────────────────────────────────
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to begin transaction for oidc provider delete: {e}");
@@ -1005,14 +982,7 @@ pub async fn activate_provider(
 
     let now = OffsetDateTime::now_utc();
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to begin transaction for oidc provider activate: {e}");
@@ -1233,14 +1203,7 @@ pub async fn deactivate_provider(
     let now = OffsetDateTime::now_utc();
     let before_view = OidcProviderView::from(&provider);
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to begin transaction for oidc provider deactivate: {e}");

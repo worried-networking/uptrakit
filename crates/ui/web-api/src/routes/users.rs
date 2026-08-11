@@ -23,10 +23,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set, SqliteTransactionMode,
-    TransactionOptions, TransactionTrait,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -337,14 +334,7 @@ pub async fn update_user_roles(
     let current_role_ids: Vec<Uuid> = current_roles.iter().map(|r| r.id).collect();
 
     // Replace roles in a transaction (IMMEDIATE to avoid SQLITE_BUSY_SNAPSHOT).
-    let txn = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let txn = match begin_immediate(state.db()).await {
         Ok(t) => t,
         Err(e) => {
             tracing::error!("Failed to start transaction: {e}");
@@ -686,14 +676,7 @@ pub async fn update_user_active(
     }
 
     // Open a BEGIN IMMEDIATE transaction: we read-then-write the user row.
-    let txn = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let txn = match begin_immediate(state.db()).await {
         Ok(t) => t,
         Err(e) => {
             tracing::error!("Failed to start transaction: {e}");

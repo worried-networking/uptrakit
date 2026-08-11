@@ -1,7 +1,7 @@
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, JoinType, PaginatorTrait, QueryFilter, QueryOrder,
-    QuerySelect, RelationTrait, Set, SqliteTransactionMode, TransactionOptions, TransactionTrait,
+    QuerySelect, RelationTrait, Set,
     sea_query::{Expr, OnConflict},
 };
 use thiserror::Error;
@@ -423,14 +423,7 @@ pub async fn deactivate_service(
     id: Uuid,
     default_tenant_id: Uuid,
 ) -> Result<bool> {
-    let txn = tenant_db
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-        .context_to()?;
+    let txn = begin_immediate(tenant_db.db()).await.context_to()?;
 
     let Some(svc) = tenant_db
         .find_by_id::<service::Entity, _>(id)
@@ -674,14 +667,7 @@ pub async fn merge_service(
         bail!(ServiceQueryError::TargetConnected);
     }
 
-    let txn = tenant_db
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-        .context_to()?;
+    let txn = begin_immediate(tenant_db.db()).await.context_to()?;
 
     // Find target service (must be approved, not deactivated, mergeable).
     let target = tenant_db

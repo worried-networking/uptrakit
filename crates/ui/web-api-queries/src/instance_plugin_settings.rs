@@ -3,12 +3,10 @@
 //! `docs/superpowers/specs/2026-05-10-instance-scoped-plugins-design.md`.
 
 use std::collections::HashMap;
+use uptrakit_shared_db::begin_immediate;
 
 use rootcause::prelude::*;
-use sea_orm::{
-    ActiveModelTrait, ConnectionTrait, DatabaseConnection, EntityTrait, Set, SqliteTransactionMode,
-    TransactionOptions, TransactionTrait,
-};
+use sea_orm::{ActiveModelTrait, ConnectionTrait, DatabaseConnection, EntityTrait, Set};
 use thiserror::Error;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::instance_plugin_setting::{ActiveModel, Entity, Model};
@@ -116,13 +114,7 @@ pub async fn set_enabled(
     plugin_type_id: &str,
     new_enabled: bool,
 ) -> Result<(Option<bool>, Model)> {
-    let txn = db
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-        .context_to()?;
+    let txn = begin_immediate(db).await.context_to()?;
 
     let existing = Entity::find_by_id(plugin_type_id.to_string())
         .one(&txn)
@@ -164,13 +156,7 @@ pub async fn upsert_config(
     plugin_type_id: &str,
     new_config: serde_json::Value,
 ) -> Result<Model> {
-    let txn = db
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-        .context_to()?;
+    let txn = begin_immediate(db).await.context_to()?;
 
     let existing = Entity::find_by_id(plugin_type_id.to_string())
         .one(&txn)

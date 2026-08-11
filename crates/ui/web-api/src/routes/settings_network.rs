@@ -16,10 +16,11 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use ipnet::IpNet;
-use sea_orm::{ConnectionTrait, SqliteTransactionMode, TransactionOptions, TransactionTrait};
+use sea_orm::ConnectionTrait;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use uptrakit_audit_log::{AuditEntry, AuditOutcome, Event, Stateful};
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_web_api_queries::queries::global_settings::GlobalSettingView;
 
 pub use uptrakit_web_api_types::settings_network::{
@@ -237,14 +238,7 @@ pub async fn update_network_settings(
 
     // Open a BEGIN IMMEDIATE transaction so that all global_setting writes and
     // the audit row land atomically.
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to begin tx for network settings update: {e}");

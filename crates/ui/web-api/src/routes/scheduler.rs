@@ -2,9 +2,9 @@ use axum::extract::{Path, State};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use http::StatusCode;
-use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
 use std::sync::Arc;
 use uptrakit_audit_log::{AuditEntry, AuditOutcome, Event, Stateful};
+use uptrakit_shared_db::begin_immediate;
 use uuid::Uuid;
 
 use crate::AppState;
@@ -162,14 +162,7 @@ pub async fn update_scheduled_task(
     let requested_enabled = req.enabled;
     let requested_config = req.task_config.clone();
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!(error = %e, "failed to begin transaction for scheduled task update");

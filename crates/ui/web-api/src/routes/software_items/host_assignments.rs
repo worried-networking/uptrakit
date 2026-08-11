@@ -16,9 +16,9 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
 use std::sync::Arc;
 use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, Stateful};
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_web_api_queries::queries::software_items::SoftwareItemView;
 use uptrakit_web_api_types::PluginRole;
 use uuid::Uuid;
@@ -145,14 +145,7 @@ pub async fn assign_hosts(
     let item_view = SoftwareItemView::from(&item_model);
     let assignment_count = req.host_assignments.len();
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!(error = %e, "Failed to begin transaction for assign_hosts");
@@ -302,14 +295,7 @@ pub async fn unassign_host(
         None
     };
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!(error = %e, "Failed to begin transaction for unassign_host");
@@ -508,14 +494,7 @@ pub async fn update_host_assignment(
 
     let item_view = SoftwareItemView::from(&item_model);
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!(error = %e, "Failed to begin transaction for update_host_assignment");
@@ -689,14 +668,7 @@ pub async fn delete_plugin_assignment(
 
     let item_view = SoftwareItemView::from(&item_model);
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!(error = %e, "Failed to begin transaction for delete_plugin_assignment");

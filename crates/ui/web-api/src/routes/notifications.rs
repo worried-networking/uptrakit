@@ -13,11 +13,11 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
 use serde::Deserialize;
 use std::sync::Arc;
 use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, Stateful};
 use uptrakit_plugin_infrastructure_registry::{DeliveryMessage, SurfaceActionContext};
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_web_api_types::pagination::PaginationParams;
 use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
@@ -225,14 +225,7 @@ pub async fn create_channel(
         return Ok(error_response(StatusCode::BAD_REQUEST, e.to_string()));
     }
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to begin transaction for notification channel create: {e}");
@@ -435,14 +428,7 @@ pub async fn update_channel(
         return Ok(error_response(StatusCode::BAD_REQUEST, e.to_string()));
     }
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to begin transaction for notification channel update: {e}");
@@ -589,14 +575,7 @@ pub async fn delete_channel(
     let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
     let tenant_id = tenant_db.tenant_id();
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to begin transaction for notification channel delete: {e}");
@@ -911,14 +890,7 @@ pub async fn create_rule(
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to begin transaction for notification rule create: {e}");
@@ -1117,14 +1089,7 @@ pub async fn update_rule(
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to begin transaction for notification rule update: {e}");
@@ -1247,14 +1212,7 @@ pub async fn delete_rule(
     let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
     let tenant_id = tenant_db.tenant_id();
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to begin transaction for notification rule delete: {e}");

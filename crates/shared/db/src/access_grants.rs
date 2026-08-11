@@ -61,10 +61,10 @@ use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DatabaseConnection,
     DatabaseTransaction, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set,
-    SqliteTransactionMode, TransactionOptions, TransactionTrait,
 };
 use std::collections::{HashMap, HashSet};
 use time::OffsetDateTime;
+use uptrakit_db_tx::begin_immediate;
 use uptrakit_shared_types::access::bounds::{
     MAX_GRANT_DESCRIPTION_LEN, MAX_GRANTS_PER_SUBJECT, PatternSetError, validate_patterns,
 };
@@ -787,12 +787,7 @@ pub async fn check_lockout(
 /// `BEGIN IMMEDIATE` returns `SQLITE_BUSY` or deadlocks against the outer
 /// transaction.
 pub async fn begin_guarded(db: &DatabaseConnection) -> Result<DatabaseTransaction> {
-    db.begin_with_options(TransactionOptions {
-        sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-        ..Default::default()
-    })
-    .await
-    .context_to()
+    begin_immediate(db).await.context_to()
 }
 
 /// Lock the global sentinel row. Zero rows ⇒ hard error, never pass-through.

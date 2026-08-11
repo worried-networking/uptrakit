@@ -6,6 +6,7 @@
 //! - `DELETE /api/v1/autodiscovery/ignores/{id}` — remove rule
 
 use std::sync::Arc;
+use uptrakit_shared_db::begin_immediate;
 
 use crate::AppState;
 use crate::error_response::error_response;
@@ -20,7 +21,6 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
 use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, Event, Stateful};
 use uuid::Uuid;
 
@@ -97,14 +97,7 @@ pub async fn create_autodiscovery_ignore(
     let tenant_id = tenant_db.tenant_id();
     let name = req.name.trim().to_string();
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!(error = %e, "Failed to begin transaction for software ignore create");
@@ -255,14 +248,7 @@ pub async fn delete_autodiscovery_ignore(
     let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
     let tenant_id = tenant_db.tenant_id();
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!(error = %e, "Failed to begin transaction for software ignore delete");

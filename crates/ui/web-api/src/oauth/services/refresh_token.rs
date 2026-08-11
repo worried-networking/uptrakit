@@ -14,8 +14,7 @@ use rand::RngExt;
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, JoinType,
-    QueryFilter, QuerySelect, RelationTrait, Set, SqliteTransactionMode, TransactionOptions,
-    TransactionTrait,
+    QueryFilter, QuerySelect, RelationTrait, Set,
 };
 use std::sync::Arc;
 use thiserror::Error;
@@ -23,6 +22,7 @@ use time::{Duration, OffsetDateTime};
 use uptrakit_audit_log::{
     AuditActionType, AuditEmitter, AuditEntry, AuditOutcome, Event, RegisteredAuditAction,
 };
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_db::entity::{oauth_consent, oauth_refresh_token, user_role};
 use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_web_api_auth::auth::token::hash_token;
@@ -257,14 +257,7 @@ impl OAuthRefreshTokenService {
         let now = (self.clock)();
         let token_hash = hash_token(refresh_token);
 
-        let txn = self
-            .db
-            .begin_with_options(TransactionOptions {
-                sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-                ..Default::default()
-            })
-            .await
-            .context_to()?;
+        let txn = begin_immediate(&self.db).await.context_to()?;
 
         let row = oauth_refresh_token::Entity::find()
             .filter(oauth_refresh_token::Column::TokenHash.eq(&token_hash))

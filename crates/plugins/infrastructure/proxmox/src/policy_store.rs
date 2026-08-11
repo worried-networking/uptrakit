@@ -11,7 +11,6 @@ use proxmox_protection_item_override::Entity as ProxmoxProtectionItemOverride;
 use proxmox_resource_scaling_record::Entity as ProxmoxResourceScalingRecord;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
-    SqliteTransactionMode, TransactionOptions, TransactionTrait,
 };
 use time::OffsetDateTime;
 use uptrakit_shared_db::begin_immediate;
@@ -660,17 +659,11 @@ pub async fn load_scaling_record(
 /// Upsert a scaling record. Uses `BEGIN IMMEDIATE` to prevent `SQLITE_BUSY_SNAPSHOT`.
 pub async fn upsert_scaling_record(db: &DatabaseConnection, record: &ScalingRecord) -> Result<()> {
     let now = OffsetDateTime::now_utc();
-    let txn = db
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-        .map_err(|e| {
-            rootcause::report!(ProxmoxError::Database(format!(
-                "failed to begin transaction for scaling record upsert: {e}"
-            )))
-        })?;
+    let txn = begin_immediate(db).await.map_err(|e| {
+        rootcause::report!(ProxmoxError::Database(format!(
+            "failed to begin transaction for scaling record upsert: {e}"
+        )))
+    })?;
 
     let existing = ProxmoxResourceScalingRecord::find_by_id(record.update_history_id)
         .one(&txn)

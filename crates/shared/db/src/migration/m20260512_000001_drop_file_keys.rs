@@ -1,8 +1,6 @@
-use sea_orm::{
-    ColumnTrait, EntityTrait, QueryFilter, SqliteTransactionMode, TransactionOptions,
-    TransactionTrait,
-};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use sea_orm_migration::prelude::*;
+use uptrakit_db_tx::begin_immediate;
 
 /// Drop `global_settings` rows whose keys have moved to TOML config.
 ///
@@ -44,13 +42,7 @@ impl MigrationTrait for Migration {
         // "BEGIN IMMEDIATE for read-then-write", we use SqliteTransactionMode::Immediate
         // so that a concurrent writer between SELECT and DELETE does not produce
         // SQLITE_BUSY_SNAPSHOT (code 5). No-op on Postgres.
-        let txn = manager
-            .get_connection()
-            .begin_with_options(TransactionOptions {
-                sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-                ..Default::default()
-            })
-            .await?;
+        let txn = begin_immediate(manager.get_connection()).await?;
 
         let rows = crate::entity::global_setting::Entity::find()
             .filter(

@@ -8,11 +8,9 @@
 //! `Interrupted` state.
 
 use rootcause::prelude::*;
-use sea_orm::{
-    ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, SqliteTransactionMode,
-    TransactionOptions, TransactionTrait, sea_query::Expr,
-};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, sea_query::Expr};
 use time::OffsetDateTime;
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_db::entity::update_history;
 use uuid::Uuid;
 
@@ -45,13 +43,7 @@ pub async fn reap_overdue_updates(
     // select and the update share one write-intent txn (coding-standards.md
     // SQLite rule — BEGIN DEFERRED would risk SQLITE_BUSY_SNAPSHOT). Mirrors
     // `maybe_complete_batch` in `update_batches/dispatch.rs`.
-    let txn = db
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-        .context_to()?;
+    let txn = begin_immediate(db).await.context_to()?;
 
     let candidates = update_history::Entity::find()
         .filter(update_history::Column::Status.eq(update_history::UpdateStatus::InProgress))

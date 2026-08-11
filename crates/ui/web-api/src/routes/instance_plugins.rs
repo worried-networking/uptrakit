@@ -5,6 +5,7 @@
 //! in-memory [`InstancePluginSnapshot`] in `AppState`.
 
 use std::sync::Arc;
+use uptrakit_shared_db::begin_immediate;
 
 use axum::{
     Json,
@@ -12,7 +13,6 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
 use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, Stateful};
 use uptrakit_plugin_infrastructure_registry::{PluginDescriptor, PluginOps, PluginScope};
 use uptrakit_shared_types::PluginTypeId;
@@ -193,14 +193,7 @@ pub async fn set_instance_plugin_enabled(
 
     let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!(error = %e, "Failed to begin transaction for instance plugin toggle");
@@ -337,14 +330,7 @@ pub async fn upsert_instance_plugin_config(
 
     let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!(error = %e, "Failed to begin transaction for instance plugin config upsert");

@@ -2,11 +2,9 @@ use super::token::{generate_secure_token, generate_uuid, hash_token};
 use super::{AuthError, Result};
 use async_trait::async_trait;
 use rootcause::prelude::*;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
-    SqliteTransactionMode, TransactionOptions, TransactionTrait,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use time::{Duration, OffsetDateTime};
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_db::entity::{prelude::*, session};
 use uptrakit_shared_types::SessionTokenType;
 
@@ -115,14 +113,7 @@ impl SessionService {
 
         // Wrap find → revoke → insert in a transaction to prevent token-reuse
         // races in multi-controller HA deployments.
-        let txn = self
-            .db
-            .begin_with_options(TransactionOptions {
-                sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-                ..Default::default()
-            })
-            .await
-            .context_to()?;
+        let txn = begin_immediate(&self.db).await.context_to()?;
 
         // Find the session by refresh token hash
         let session_model = Session::find()

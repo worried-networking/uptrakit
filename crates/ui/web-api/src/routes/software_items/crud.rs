@@ -20,12 +20,10 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{
-    ColumnTrait, EntityTrait, QueryFilter, SqliteTransactionMode, TransactionOptions,
-    TransactionTrait,
-};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
 use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, Stateful};
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_db::entity::software_item;
 use uptrakit_web_api_queries::queries::software_items::SoftwareItemView;
 use uptrakit_web_api_types::events::AdminEvent;
@@ -65,14 +63,7 @@ pub async fn create_software_item(
     let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
     let tenant_id = tenant_db.tenant_id();
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!(error = %e, "Failed to begin transaction for software item create");
@@ -297,14 +288,7 @@ pub async fn update_software_item(
     let featured_changed = req.featured.is_some();
     let icon_url_changed = !req.icon_url.is_keep();
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!(error = %e, "Failed to begin transaction for software item update");
@@ -480,14 +464,7 @@ pub async fn delete_software_item(
     let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
     let tenant_id = tenant_db.tenant_id();
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!(error = %e, "Failed to begin transaction for software item delete");
@@ -651,14 +628,7 @@ pub async fn approve_software_item(
         return error_response(StatusCode::CONFLICT, "Software item is already featured");
     }
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!(error = %e, "Failed to begin transaction for software item approve");

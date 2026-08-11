@@ -4,9 +4,9 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
 use std::sync::Arc;
 use time::OffsetDateTime;
+use uptrakit_shared_db::begin_immediate;
 use uuid::Uuid;
 
 use crate::AppState;
@@ -112,14 +112,7 @@ pub async fn create_enrollment_token(
         .expires_in_seconds
         .map(|secs| OffsetDateTime::now_utc() + time::Duration::seconds(secs as i64));
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!(error = %e, "Failed to begin transaction for enrollment token create");
@@ -315,14 +308,7 @@ pub async fn revoke_enrollment_token(
     let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
     let tenant_id = tenant_db.tenant_id();
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!(error = %e, "Failed to begin transaction for enrollment token revoke");

@@ -3,6 +3,8 @@
     reason = "fire-and-forget cleanup sends on error paths intentionally drop results"
 )]
 
+use uptrakit_shared_db::begin_immediate;
+
 use crate::AppState;
 use crate::api_error::ApiError;
 use crate::auth::mfa_challenge::create_mfa_challenge;
@@ -23,7 +25,6 @@ use axum::{
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, Set,
-    SqliteTransactionMode, TransactionOptions, TransactionTrait,
 };
 use std::sync::Arc;
 use time::OffsetDateTime;
@@ -295,14 +296,7 @@ pub async fn register(
 
     // Run user creation + first-user check + role assignment inside a transaction
     // to prevent the race where two concurrent registrations both see count == 0.
-    let txn = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let txn = match begin_immediate(state.db()).await {
         Ok(txn) => txn,
         Err(e) => {
             tracing::error!("Failed to start transaction: {e}");
@@ -898,7 +892,6 @@ mod tests {
         ColumnTrait, ConnectOptions, ConnectionTrait, Database, DatabaseConnection, EntityTrait,
         QueryFilter, QueryOrder,
     };
-    use uptrakit_shared_db::begin_immediate;
     use uptrakit_shared_db::entity::{audit_log, tenant};
 
     async fn setup_test_db() -> DatabaseConnection {
@@ -2573,9 +2566,7 @@ pub async fn confirm_email_change(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<ConfirmEmailChangeQuery>,
 ) -> Response {
-    use sea_orm::{
-        ActiveModelTrait, ColumnTrait, EntityTrait as _, QueryFilter, Set, TransactionTrait,
-    };
+    use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait as _, QueryFilter, Set};
     use uptrakit_shared_db::entity::{email_change_request, prelude::*};
 
     let raw_token = params.token;
@@ -2583,14 +2574,7 @@ pub async fn confirm_email_change(
     let token_hash = crate::auth::token::hash_token(&raw_token);
     let now = time::OffsetDateTime::now_utc();
 
-    let txn = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let txn = match begin_immediate(state.db()).await {
         Ok(t) => t,
         Err(e) => {
             tracing::error!(error = %e, "failed to begin transaction");

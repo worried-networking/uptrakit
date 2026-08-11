@@ -11,9 +11,9 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
 use std::sync::Arc;
 use uptrakit_audit_log::{AuditEntry, AuditOutcome, Event, Stateful};
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_web_api_queries::queries::tenant_settings::TenantSettingView;
 
 pub use uptrakit_web_api_types::settings_agent_certs::{
@@ -165,14 +165,7 @@ pub async fn update_agent_certificate_settings(
             );
         }
 
-        let tx = match state
-            .db()
-            .begin_with_options(TransactionOptions {
-                sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-                ..Default::default()
-            })
-            .await
-        {
+        let tx = match begin_immediate(state.db()).await {
             Ok(tx) => tx,
             Err(e) => {
                 tracing::error!("Failed to begin tx for agent cert lifetime update: {e}");
@@ -274,14 +267,7 @@ pub async fn update_agent_certificate_settings(
     if let Some(hours) = req.renewal_window_hours {
         if hours == 0 {
             // Reset to automatic mode: remove the override from the DB.
-            let tx = match state
-                .db()
-                .begin_with_options(TransactionOptions {
-                    sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-                    ..Default::default()
-                })
-                .await
-            {
+            let tx = match begin_immediate(state.db()).await {
                 Ok(tx) => tx,
                 Err(e) => {
                     tracing::error!("Failed to begin tx for agent cert renewal window delete: {e}");
@@ -377,14 +363,7 @@ pub async fn update_agent_certificate_settings(
             state.settings.set_renewal_window_hours_override(None).await;
             renewal_window_reset_to_auto = true;
         } else {
-            let tx = match state
-                .db()
-                .begin_with_options(TransactionOptions {
-                    sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-                    ..Default::default()
-                })
-                .await
-            {
+            let tx = match begin_immediate(state.db()).await {
                 Ok(tx) => tx,
                 Err(e) => {
                     tracing::error!("Failed to begin tx for agent cert renewal window upsert: {e}");

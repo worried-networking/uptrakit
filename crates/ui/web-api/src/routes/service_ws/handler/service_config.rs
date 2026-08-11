@@ -13,10 +13,10 @@
 #![expect(clippy::indexing_slicing, reason = "index is computed to be in bounds")]
 
 use std::sync::Arc;
+use uptrakit_shared_db::begin_immediate;
 
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{Sink, SinkExt};
-use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
 
 use uptrakit_audit_log::{
     AbsentView, AuditActionType, AuditActorType, AuditEntry, AuditOutcome, AuditView, Event,
@@ -272,14 +272,7 @@ pub(super) async fn handle_store_service_config(
 
     // Open a BEGIN IMMEDIATE transaction (read-then-write requires IMMEDIATE to
     // avoid SQLITE_BUSY_SNAPSHOT on concurrent writes).
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::warn!(
@@ -470,14 +463,7 @@ pub(super) async fn handle_delete_service_config(
     let scope = service_config_scope_label(tenant_id);
 
     // Open a BEGIN IMMEDIATE transaction.
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::warn!(

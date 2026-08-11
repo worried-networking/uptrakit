@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use uptrakit_shared_db::begin_immediate;
 
 use axum::{
     Extension, Json,
@@ -6,7 +7,6 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
 use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, Event, Stateful};
 use uptrakit_web_api_queries::queries::tenant_settings::TenantSettingView;
 use uptrakit_web_api_types::settings_access::{
@@ -188,14 +188,7 @@ pub async fn update_access_settings(
         || before_reg.require_token_for_oidc;
 
     // ── 4. BEGIN IMMEDIATE transaction — write both settings atomically ───────
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to begin tx for access settings update: {e}");

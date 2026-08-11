@@ -3,11 +3,11 @@
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, ExprTrait, FromQueryResult, PaginatorTrait,
-    QueryFilter, QueryOrder, QuerySelect, RelationTrait, Set, SqliteTransactionMode,
-    TransactionOptions, TransactionTrait,
+    QueryFilter, QueryOrder, QuerySelect, RelationTrait, Set,
 };
 use std::collections::HashMap;
 use time::OffsetDateTime;
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, prelude::*, software_item,
 };
@@ -444,14 +444,7 @@ pub async fn create_software_item(
     tenant_db: &TenantDb,
     req: CreateSoftwareItemRequest,
 ) -> super::Result<SoftwareItemResponse> {
-    let txn = tenant_db
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-        .context_to()?;
+    let txn = begin_immediate(tenant_db.db()).await.context_to()?;
 
     let duplicate = SoftwareItem::find()
         .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id()))

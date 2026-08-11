@@ -3,13 +3,11 @@
 //! Per spec §12.2: single-use consume with `BEGIN IMMEDIATE`; 10-minute TTL.
 
 use rootcause::prelude::*;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set, SqliteTransactionMode,
-    TransactionOptions, TransactionTrait,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use std::sync::Arc;
 use thiserror::Error;
 use time::{Duration, OffsetDateTime};
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_db::entity::oauth_authorization_request;
 use uptrakit_shared_macros::impl_report_conversion;
 use uuid::Uuid;
@@ -101,14 +99,7 @@ impl OAuthAuthorizationRequestService {
     ) -> Result<Option<oauth_authorization_request::Model>> {
         let now = (self.clock)();
 
-        let txn = self
-            .db
-            .begin_with_options(TransactionOptions {
-                sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-                ..Default::default()
-            })
-            .await
-            .context_to()?;
+        let txn = begin_immediate(&self.db).await.context_to()?;
 
         let row = oauth_authorization_request::Entity::find()
             .filter(oauth_authorization_request::Column::RequestId.eq(request_id))

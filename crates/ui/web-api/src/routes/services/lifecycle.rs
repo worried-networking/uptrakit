@@ -18,9 +18,9 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
 use std::sync::Arc;
 use uptrakit_audit_log::{AuditEntry, AuditOutcome, Stateful};
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_web_api_queries::queries::services::ServiceView;
 use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_web_api_types::validation::Validate;
@@ -58,14 +58,7 @@ pub async fn approve_service(
     let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
     let tenant_id = tenant_db.tenant_id();
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to begin transaction for service approve: {e}");
@@ -239,14 +232,7 @@ pub async fn reject_service(
     let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
     let tenant_id = tenant_db.tenant_id();
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to begin transaction for service reject: {e}");
@@ -428,14 +414,7 @@ pub async fn deactivate_service(
     let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
     let tenant_id = tenant_db.tenant_id();
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to begin transaction for service deactivate: {e}");

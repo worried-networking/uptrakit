@@ -38,11 +38,12 @@
 //! transition worth its own audit entry.
 
 use std::collections::HashSet;
+use uptrakit_shared_db::begin_immediate;
 
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, PaginatorTrait, QueryFilter,
-    Set, SqliteTransactionMode, TransactionOptions, TransactionTrait,
+    Set,
 };
 use time::OffsetDateTime;
 use uptrakit_audit_log::{
@@ -117,13 +118,7 @@ pub(super) async fn reconcile_plugin_result(
     );
 
     let hook = audit.commit_hook();
-    let tx = db
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-        .context_to()?;
+    let tx = begin_immediate(db).await.context_to()?;
 
     let candidates = HostSoftwareItem::find()
         .filter(host_software_item::Column::HostId.eq(host_id))

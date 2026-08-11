@@ -3,7 +3,7 @@
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, DatabaseConnection, EntityTrait, PaginatorTrait,
-    QueryFilter, QueryOrder, Set, SqliteTransactionMode, TransactionOptions, TransactionTrait,
+    QueryFilter, QueryOrder, Set,
     sea_query::{Expr, ExprTrait},
 };
 use std::sync::Arc;
@@ -295,13 +295,7 @@ async fn maybe_complete_batch(
     batch_id: Uuid,
     tenant_id: Uuid,
 ) -> std::result::Result<Option<BatchCompletionInfo>, rootcause::Report<TriggerUpdateError>> {
-    let txn = db
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-        .context_to()?;
+    let txn = begin_immediate(db).await.context_to()?;
 
     let pending_count = UpdateHistory::find()
         .filter(update_history::Column::BatchId.eq(batch_id))

@@ -15,10 +15,10 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
 use std::sync::Arc;
 use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, AuditView, Event, Stateful};
 use uptrakit_plugin_infrastructure_registry::{ConfigModel, PluginDescriptor};
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_types::PluginTypeId;
 use uptrakit_shared_types::access::actions;
 use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
@@ -266,14 +266,7 @@ pub async fn create_plugin_config(
         );
     }
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to begin transaction for plugin config create: {e}");
@@ -572,14 +565,7 @@ pub async fn update_plugin_config(
         );
     }
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to begin transaction for plugin config update: {e}");
@@ -738,14 +724,7 @@ pub async fn delete_plugin_config(
     let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
     let tenant_id = tenant_db.tenant_id();
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to begin transaction for plugin config delete: {e}");

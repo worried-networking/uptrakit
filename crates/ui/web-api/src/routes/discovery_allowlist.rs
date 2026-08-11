@@ -9,6 +9,7 @@
 //! - `DELETE /api/v1/hosts/{id}/discovery-allowlist/{entry_id}`   — remove host-specific entry
 
 use std::sync::Arc;
+use uptrakit_shared_db::begin_immediate;
 
 use axum::{
     Extension, Json,
@@ -16,10 +17,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{
-    ColumnTrait, EntityTrait, QueryFilter, SqliteTransactionMode, TransactionOptions,
-    TransactionTrait,
-};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use uuid::Uuid;
 
 use crate::AppState;
@@ -120,14 +118,7 @@ pub async fn add_tenant_discovery_allowlist_entry(
     };
     let plugin_type_str = req.plugin_type.to_string();
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!(error = %e, "Failed to begin transaction for tenant allowlist create");
@@ -280,14 +271,7 @@ pub async fn remove_tenant_discovery_allowlist_entry(
     let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
     let tenant_id = tenant_db.tenant_id();
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!(error = %e, "Failed to begin transaction for tenant allowlist delete");
@@ -545,14 +529,7 @@ pub async fn add_host_discovery_allowlist_entry(
         }
     }
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!(error = %e, "Failed to begin transaction for host allowlist create");
@@ -710,14 +687,7 @@ pub async fn remove_host_discovery_allowlist_entry(
     let (actor_type, actor_id) = authenticated_user_audit_actor(&user, api_token_id);
     let tenant_id = tenant_db.tenant_id();
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!(error = %e, "Failed to begin transaction for host allowlist delete");

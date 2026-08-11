@@ -15,6 +15,7 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use uptrakit_shared_db::begin_immediate;
 
 use serde::de::DeserializeOwned;
 
@@ -138,7 +139,6 @@ async fn handle_switch_tag(
 ) -> std::result::Result<serde_json::Value, SurfaceActionError> {
     use sea_orm::{
         ActiveModelTrait as _, ColumnTrait as _, EntityTrait as _, QueryFilter as _, Set,
-        SqliteTransactionMode, TransactionOptions, TransactionTrait as _,
     };
     use uptrakit_shared_db::entity::{host_software_item, host_software_item_plugin};
 
@@ -159,15 +159,9 @@ async fn handle_switch_tag(
 
     // Use BEGIN IMMEDIATE so SQLite promotes to RESERVED lock before the first read,
     // preventing SQLITE_BUSY_SNAPSHOT when another connection commits mid-transaction.
-    let txn = db
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-        .map_err(|e| {
-            SurfaceActionError::ControllerIntegration(format!("failed to begin transaction: {e}"))
-        })?;
+    let txn = begin_immediate(db).await.map_err(|e| {
+        SurfaceActionError::ControllerIntegration(format!("failed to begin transaction: {e}"))
+    })?;
 
     let plugin_rows = host_software_item_plugin::Entity::find()
         .filter(host_software_item_plugin::Column::HostId.eq(host_id))

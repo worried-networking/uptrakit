@@ -23,10 +23,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{
-    ColumnTrait, DatabaseTransaction, EntityTrait, QueryFilter, SqliteTransactionMode,
-    TransactionOptions, TransactionTrait,
-};
+use sea_orm::{ColumnTrait, DatabaseTransaction, EntityTrait, QueryFilter};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use uptrakit_audit_log::{
@@ -37,6 +34,7 @@ use uptrakit_shared_db::access_grants::{
     begin_guarded, check_lockout, delete_grant, insert_grant, list_grants, load_grant,
     patterns_reach_system_plane, update_grant,
 };
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_db::entity::prelude::UserRole;
 use uptrakit_shared_db::entity::user_role;
 use uptrakit_shared_types::access::ActionPattern;
@@ -110,14 +108,7 @@ pub async fn create_access_grant(
         _ => None,
     };
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to begin transaction for grant create: {e}");

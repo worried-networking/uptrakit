@@ -5,9 +5,9 @@ use proxmox_scaling_default::Entity as ProxmoxScalingDefault;
 use proxmox_scaling_item_override::Entity as ProxmoxScalingItemOverride;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
-    SqliteTransactionMode, TransactionOptions, TransactionTrait,
 };
 use time::OffsetDateTime;
+use uptrakit_shared_db::begin_immediate;
 use uuid::Uuid;
 
 use crate::error::{ProxmoxError, Result};
@@ -198,17 +198,11 @@ pub(crate) async fn upsert_scaling_global_default(
     policy: &ScalingPolicy,
 ) -> Result<()> {
     let now = OffsetDateTime::now_utc();
-    let txn = db
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-        .map_err(|e| {
-            rootcause::report!(ProxmoxError::Database(format!(
-                "failed to begin transaction for scaling global default upsert: {e}"
-            )))
-        })?;
+    let txn = begin_immediate(db).await.map_err(|e| {
+        rootcause::report!(ProxmoxError::Database(format!(
+            "failed to begin transaction for scaling global default upsert: {e}"
+        )))
+    })?;
 
     let existing = ProxmoxScalingDefault::find()
         .filter(proxmox_scaling_default::Column::TenantId.eq(tenant_id))
@@ -271,17 +265,11 @@ pub(crate) async fn upsert_scaling_item_override(
     policy: &ScalingPolicy,
 ) -> Result<()> {
     let now = OffsetDateTime::now_utc();
-    let txn = db
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-        .map_err(|e| {
-            rootcause::report!(ProxmoxError::Database(format!(
-                "failed to begin transaction for scaling item override upsert: {e}"
-            )))
-        })?;
+    let txn = begin_immediate(db).await.map_err(|e| {
+        rootcause::report!(ProxmoxError::Database(format!(
+            "failed to begin transaction for scaling item override upsert: {e}"
+        )))
+    })?;
 
     let existing = ProxmoxScalingItemOverride::find()
         .filter(proxmox_scaling_item_override::Column::TenantId.eq(tenant_id))

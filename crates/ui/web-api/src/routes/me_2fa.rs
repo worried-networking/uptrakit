@@ -21,7 +21,6 @@ use axum::{
 };
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter, Set,
-    SqliteTransactionMode, TransactionOptions, TransactionTrait,
 };
 
 use crate::AppState;
@@ -112,14 +111,7 @@ async fn re_auth_ok(
         }
     } else if let Some(code) = totp_code {
         // BEGIN IMMEDIATE: load active TOTP row and update last_used_step.
-        let txn = match state
-            .db()
-            .begin_with_options(TransactionOptions {
-                sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-                ..Default::default()
-            })
-            .await
-        {
+        let txn = match begin_immediate(state.db()).await {
             Ok(t) => t,
             Err(e) => {
                 tracing::error!("re_auth_ok: failed to begin transaction: {e}");
@@ -288,14 +280,7 @@ pub async fn totp_enroll(
     };
 
     // BEGIN IMMEDIATE: delete any pending row, insert the new one.
-    let txn = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let txn = match begin_immediate(state.db()).await {
         Ok(t) => t,
         Err(e) => {
             tracing::error!("totp_enroll: failed to begin transaction: {e}");
@@ -416,14 +401,7 @@ pub async fn totp_confirm(
     let user_id = user.user_id;
 
     // BEGIN IMMEDIATE: load pending row, verify code, activate, replace recovery codes.
-    let txn = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let txn = match begin_immediate(state.db()).await {
         Ok(t) => t,
         Err(e) => {
             tracing::error!("totp_confirm: failed to begin transaction: {e}");
@@ -694,14 +672,7 @@ pub async fn regenerate_recovery_codes(
     };
 
     // BEGIN IMMEDIATE: replace recovery codes (DB operations only).
-    let txn = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let txn = match begin_immediate(state.db()).await {
         Ok(t) => t,
         Err(e) => {
             tracing::error!("regenerate_recovery_codes: failed to begin transaction: {e}");

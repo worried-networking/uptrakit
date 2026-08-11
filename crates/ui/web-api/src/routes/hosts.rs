@@ -13,12 +13,10 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{
-    ColumnTrait, EntityTrait, QueryFilter, RelationTrait, SqliteTransactionMode,
-    TransactionOptions, TransactionTrait,
-};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, RelationTrait};
 use std::sync::Arc;
 use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, Stateful};
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_db::entity::{host, prelude::*, service, service_host};
 use uptrakit_web_api_queries::queries::hosts::{
     HostView, deactivate_host_in_tx, update_host_in_tx,
@@ -147,14 +145,7 @@ pub async fn update_host(
         }
     };
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to begin transaction for host update: {e}");
@@ -269,14 +260,7 @@ pub async fn deactivate_host(
     let (actor_type, actor_id) = authenticated_user_audit_actor(&caller, api_token_id);
     let tenant_id = tenant_db.tenant_id();
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to begin transaction for host deactivate: {e}");

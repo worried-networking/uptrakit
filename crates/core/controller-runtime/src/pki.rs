@@ -6,13 +6,14 @@
 use std::fs;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
+use uptrakit_shared_db::begin_immediate;
 
 use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, Issuer, KeyPair};
 use rootcause::prelude::*;
 use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter,
-    Set, SqliteTransactionMode, TransactionOptions, TransactionTrait,
+    Set,
 };
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -241,13 +242,7 @@ pub(crate) async fn load_or_init_managed_ca(
         return load_managed_ca_state(db).await;
     }
 
-    let tx = db
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-        .context_to::<PkiError>()?;
+    let tx = begin_immediate(db).await.context_to::<PkiError>()?;
     let current = load_active_ca_fingerprint(&tx).await?;
     if current.is_some() {
         tx.rollback().await.context_to::<PkiError>()?;
@@ -375,13 +370,7 @@ pub(crate) async fn rotate_managed_ca(
     pki_addr: Option<&str>,
     expected_active_fp: &str,
 ) -> Result<RotationOutcome> {
-    let tx = db
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-        .context_to::<PkiError>()?;
+    let tx = begin_immediate(db).await.context_to::<PkiError>()?;
     let current_active = load_active_ca_fingerprint(&tx).await?;
     let Some(current_active) = current_active else {
         tx.rollback().await.context_to::<PkiError>()?;

@@ -13,11 +13,11 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
 use std::sync::Arc;
 use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, Event, Stateful};
 use uptrakit_controller_core::access::{AccessContext, AccessEngine};
 use uptrakit_plugin_infrastructure_registry::PluginOps;
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_types::PluginTypeId;
 use uptrakit_shared_types::access::{DenyReason, actions};
 use uptrakit_web_api_types::plugin_type_settings::{
@@ -321,14 +321,7 @@ pub async fn upsert_plugin_type_settings(
         return rejection;
     }
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to begin transaction for plugin type settings upsert: {e}");
@@ -459,14 +452,7 @@ pub async fn delete_plugin_type_settings(
         );
     }
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to begin transaction for plugin type settings delete: {e}");

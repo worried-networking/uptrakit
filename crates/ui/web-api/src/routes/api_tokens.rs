@@ -12,10 +12,10 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
 use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, Stateful};
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_web_api_queries::queries::api_tokens::{
     ApiTokenView, create_api_token_in_tx, revoke_api_token_in_tx,
 };
@@ -62,14 +62,7 @@ pub async fn create_api_token(
     let id = generate_uuid();
     let created_at = OffsetDateTime::now_utc();
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to begin transaction for api token create: {e}");
@@ -203,14 +196,7 @@ pub async fn revoke_api_token(
     let (actor_type, actor_id) = authenticated_user_audit_actor(&auth_user, api_token_id);
     let tenant_id = tenant.tenant_id;
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to begin transaction for api token revoke: {e}");

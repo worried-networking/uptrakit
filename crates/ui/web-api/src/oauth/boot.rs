@@ -7,12 +7,13 @@
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter,
-    Set, SqliteTransactionMode, TransactionOptions, TransactionTrait,
+    Set,
 };
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use thiserror::Error;
 use time::OffsetDateTime;
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_db::entity::oauth_controller_instance;
 use uptrakit_shared_macros::impl_report_conversion;
 use uuid::Uuid;
@@ -310,13 +311,7 @@ pub async fn boot_oauth_state(db: &DatabaseConnection) -> Result<super::OAuthSta
         .unwrap_or(false);
 
     // ── Step 4: BEGIN IMMEDIATE — secret read-or-generate + peer registration ──
-    let tx = db
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-        .context_to()?;
+    let tx = begin_immediate(db).await.context_to()?;
 
     let signing_secret = crate::settings_store::load_or_generate_oauth_signing_secret(&tx)
         .await

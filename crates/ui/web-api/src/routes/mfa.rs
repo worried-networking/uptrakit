@@ -28,9 +28,9 @@ use axum::{
 };
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter, Set,
-    SqliteTransactionMode, TransactionOptions, TransactionTrait,
 };
 use std::sync::Arc;
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{user_recovery_code, user_totp};
 use uptrakit_web_api_types::SecretString;
@@ -188,14 +188,7 @@ pub async fn mfa_verify(
     Validated(req): Validated<MfaVerifyRequest>,
 ) -> Response {
     // ── BEGIN IMMEDIATE transaction (read-then-write: load + update challenge) ──
-    let txn = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let txn = match begin_immediate(state.db()).await {
         Ok(t) => t,
         Err(e) => {
             tracing::error!("Failed to begin MFA verify transaction: {e}");
@@ -552,14 +545,7 @@ pub async fn mfa_send_email(
     // BEGIN IMMEDIATE: load challenge, validate, load user email, store OTP hash.
     // This prevents a TOCTOU race where two concurrent requests both pass validity
     // checks and overwrite each other's hash.
-    let txn = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let txn = match begin_immediate(state.db()).await {
         Ok(t) => t,
         Err(e) => {
             tracing::error!("Failed to begin transaction for mfa_send_email: {e}");

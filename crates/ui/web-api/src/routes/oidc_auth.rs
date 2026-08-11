@@ -21,13 +21,11 @@ use openidconnect::{
     RedirectUrl, Scope, TokenResponse,
     core::{CoreClient, CoreProviderMetadata, CoreResponseType},
 };
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set,
-    SqliteTransactionMode, TransactionOptions, TransactionTrait,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set};
 use serde::Deserialize;
 use std::sync::Arc;
 use time::OffsetDateTime;
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{oidc_provider, user_oidc_link};
 use uptrakit_shared_types::MaskedEmail;
@@ -826,14 +824,7 @@ async fn resolve_or_create_oidc_user(
 
     // Resolve user inside a transaction to prevent the race where two concurrent
     // OIDC callbacks both see user_count == 1 and both get the owner role.
-    let txn = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let txn = match begin_immediate(state.db()).await {
         Ok(txn) => txn,
         Err(e) => {
             tracing::error!(error = %e, "Failed to start OIDC callback transaction");
@@ -1579,14 +1570,7 @@ pub async fn oidc_complete_registration(
 
     // 3. Wrap user creation + first-user check + role assignment in a transaction
     // to prevent the race where two concurrent registrations both see count == 0.
-    let txn = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let txn = match begin_immediate(state.db()).await {
         Ok(txn) => txn,
         Err(e) => {
             tracing::error!(error = %e, "Failed to start OIDC complete-registration transaction");

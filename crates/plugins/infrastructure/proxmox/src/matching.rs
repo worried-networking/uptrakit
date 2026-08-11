@@ -5,12 +5,10 @@
 
 use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
+use uptrakit_shared_db::begin_immediate;
 
 use sea_orm::sea_query::Expr;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, QueryFilter, Set, SqliteTransactionMode, TransactionOptions,
-    TransactionTrait,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, QueryFilter, Set};
 use uuid::Uuid;
 
 use crate::entity::proxmox_host_mapping;
@@ -326,18 +324,11 @@ async fn apply_match(
 ) -> Result<()> {
     // BEGIN IMMEDIATE prevents SQLITE_BUSY_SNAPSHOT when another connection
     // commits between our read and write.
-    let tx = tenant_db
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-        .map_err(|e| {
-            rootcause::report!(ProxmoxError::Database(format!(
-                "failed to begin Proxmox match transaction: {e}"
-            )))
-        })?;
+    let tx = begin_immediate(tenant_db.db()).await.map_err(|e| {
+        rootcause::report!(ProxmoxError::Database(format!(
+            "failed to begin Proxmox match transaction: {e}"
+        )))
+    })?;
 
     tracing::debug!(
         %mapping_id,

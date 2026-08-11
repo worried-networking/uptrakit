@@ -5,6 +5,7 @@
 //! mDNS/DNS-SD. Changes take effect after the controller is restarted.
 
 use std::sync::Arc;
+use uptrakit_shared_db::begin_immediate;
 
 use axum::{
     Extension, Json,
@@ -12,7 +13,6 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
 use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, Event, Stateful};
 use uptrakit_web_api_queries::queries::global_settings::GlobalSettingView;
 
@@ -156,14 +156,7 @@ pub async fn update_zeroconf_settings(
     };
 
     // Open a single BEGIN IMMEDIATE transaction for all zeroconf writes.
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to begin tx for zeroconf settings update: {e}");

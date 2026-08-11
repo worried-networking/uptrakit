@@ -11,12 +11,10 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{
-    ColumnTrait, EntityTrait, QueryFilter, SqliteTransactionMode, TransactionOptions,
-    TransactionTrait,
-};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
 use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, Event, Stateful};
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_db::entity::host;
 use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
@@ -139,14 +137,7 @@ pub async fn create_host_tag(
         None => tag_queries::auto_color(&tenant_db).await,
     };
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to begin transaction for host tag create: {e}");
@@ -293,14 +284,7 @@ pub async fn update_host_tag(
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to begin transaction for host tag update: {e}");
@@ -454,14 +438,7 @@ pub async fn delete_host_tag(
     let (actor_type, actor_id) = authenticated_user_audit_actor(&caller, api_token_id);
     let tenant_id = tenant_db.tenant_id();
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to begin transaction for host tag delete: {e}");

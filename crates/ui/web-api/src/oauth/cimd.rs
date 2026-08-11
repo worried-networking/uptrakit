@@ -11,11 +11,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
+use uptrakit_shared_db::begin_immediate;
 
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel, QueryFilter,
-    Set, SqliteTransactionMode, TransactionOptions, TransactionTrait,
+    Set,
 };
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -273,14 +274,7 @@ impl CimdFetcher {
         // -------------------------------------------------------------------
         // Step 4: BEGIN IMMEDIATE — read existing, then write
         // -------------------------------------------------------------------
-        let txn = self
-            .db
-            .begin_with_options(TransactionOptions {
-                sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-                ..Default::default()
-            })
-            .await
-            .context_to()?;
+        let txn = begin_immediate(&self.db).await.context_to()?;
 
         let existing = oauth_client::Entity::find_by_id(url.to_owned())
             .one(&txn)

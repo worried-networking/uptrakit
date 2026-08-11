@@ -15,12 +15,10 @@ use proxmox_backup_target_cache::Entity as ProxmoxBackupTargetCache;
 use proxmox_protection_audit::Entity as ProxmoxProtectionAudit;
 use proxmox_protection_default::Entity as ProxmoxProtectionDefault;
 use proxmox_protection_item_override::Entity as ProxmoxProtectionItemOverride;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
-    SqliteTransactionMode, TransactionOptions, TransactionTrait as _,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use time::OffsetDateTime;
 use uptrakit_plugin_infrastructure_core::error::{PluginError, Result};
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_db::entity::{plugin_config, prelude::*};
 use uuid::Uuid;
 
@@ -294,12 +292,7 @@ impl ProxmoxProtectionStore for DbProxmoxProtectionStore<'_> {
         let now = OffsetDateTime::now_utc();
         // BEGIN IMMEDIATE prevents SQLITE_BUSY_SNAPSHOT when another connection
         // commits between our read and write.
-        let txn = self
-            .db
-            .begin_with_options(TransactionOptions {
-                sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-                ..Default::default()
-            })
+        let txn = begin_immediate(self.db)
             .await
             .map_err(plugin_internal_error)?;
 

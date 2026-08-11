@@ -7,14 +7,12 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use rand::RngExt;
 use rootcause::prelude::*;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set, SqliteTransactionMode,
-    TransactionOptions, TransactionTrait,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use std::sync::Arc;
 use thiserror::Error;
 use time::{Duration, OffsetDateTime};
 use uptrakit_audit_log::{AuditActionType, AuditEmitter, AuditEntry, AuditOutcome};
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_db::entity::oauth_authorization_code;
 use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_web_api_auth::auth::token::hash_token;
@@ -195,14 +193,7 @@ impl OAuthAuthorizationCodeService {
         let now = (self.clock)();
         let code_hash = hash_token(code);
 
-        let txn = self
-            .db
-            .begin_with_options(TransactionOptions {
-                sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-                ..Default::default()
-            })
-            .await
-            .context_to()?;
+        let txn = begin_immediate(&self.db).await.context_to()?;
 
         let row = oauth_authorization_code::Entity::find()
             .filter(oauth_authorization_code::Column::CodeHash.eq(&code_hash))

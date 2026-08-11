@@ -2,10 +2,11 @@ use rand::RngExt;
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter,
-    Set, SqliteTransactionMode, TransactionOptions, TransactionTrait,
+    Set,
 };
 use thiserror::Error;
 use time::OffsetDateTime;
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_db::entity::api_token;
 use uptrakit_shared_db::entity::pending_device_flow;
 use uptrakit_shared_db::entity::prelude::PendingDeviceFlow;
@@ -155,14 +156,7 @@ impl DeviceFlowStore {
         }
         let hash = hash_token(device_code);
 
-        let txn = self
-            .db
-            .begin_with_options(TransactionOptions {
-                sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-                ..Default::default()
-            })
-            .await
-            .context_to()?;
+        let txn = begin_immediate(&self.db).await.context_to()?;
 
         let flow_opt = PendingDeviceFlow::find()
             .filter(pending_device_flow::Column::DeviceCodeHash.eq(&hash))
@@ -281,14 +275,7 @@ impl DeviceFlowStore {
         let normalized = user_code.replace('-', "").to_uppercase();
         let now = OffsetDateTime::now_utc();
 
-        let txn = self
-            .db
-            .begin_with_options(TransactionOptions {
-                sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-                ..Default::default()
-            })
-            .await
-            .context_to()?;
+        let txn = begin_immediate(&self.db).await.context_to()?;
 
         let flow_opt = PendingDeviceFlow::find()
             .filter(pending_device_flow::Column::UserCode.eq(&normalized))
@@ -362,14 +349,7 @@ impl DeviceFlowStore {
         let normalized = user_code.replace('-', "").to_uppercase();
         let now = OffsetDateTime::now_utc();
 
-        let txn = self
-            .db
-            .begin_with_options(TransactionOptions {
-                sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-                ..Default::default()
-            })
-            .await
-            .context_to()?;
+        let txn = begin_immediate(&self.db).await.context_to()?;
 
         // Find the flow by user code
         let flow = PendingDeviceFlow::find()

@@ -25,13 +25,13 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
 use std::sync::Arc;
 use uptrakit_audit_log::{AbsentView, AuditActionType, AuditEntry, AuditOutcome, Stateful};
 use uptrakit_shared_db::access_grants::{
     GrantSubject, GuardedMutation, LockoutVerdict, begin_guarded, check_lockout,
     delete_grants_for_role, list_grants, patterns_reach_system_plane,
 };
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_db::entity::role;
 use uuid::Uuid;
 
@@ -124,14 +124,7 @@ pub async fn create_role(
         return Ok(response);
     }
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to begin transaction for role create: {e}");
@@ -253,14 +246,7 @@ pub async fn update_role(
         return Ok(response);
     }
 
-    let tx = match state
-        .db()
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-    {
+    let tx = match begin_immediate(state.db()).await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("Failed to begin transaction for role update: {e}");
