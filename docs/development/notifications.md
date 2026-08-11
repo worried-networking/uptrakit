@@ -119,11 +119,14 @@ pub trait PluginConfig:
     Serialize + DeserializeOwned + Default + Clone + Send + Sync + 'static
 {
     fn validate(&self) -> Result<(), String> { Ok(()) }
-    fn with_secrets_masked(self) -> Self { self }
-    fn restore_secrets_from(&mut self, _existing: &Self) {}
     fn form_schema() -> Vec<FormField> { vec![] }
 }
 ```
+
+The trait has no secret-masking methods. Secret masking is schema-driven: a form field marked
+`.sensitive()` (or typed `Password`/`SshPrivateKey`) is masked and restored automatically, and a channel
+type declares any additional secret paths via `sensitive_paths: [...]` in `declare_plugin!` -- see
+[plugin-guidelines.md](plugin-guidelines.md#secret-masking) for the full contract.
 
 Concrete config structs:
 
@@ -144,6 +147,7 @@ declare_plugin!(WebhookPlugin, WebhookChannelConfig, "notifications.webhook", {
     display_name: "Webhook",
     family: PluginFamily::Notification,
     config_model: ConfigModel::NotificationChannel,
+    sensitive_paths: ["secret"],
     roles: [NotificationTransport],
     notification_transport: create_webhook_transport,
     raw_settings_keys: &[],
@@ -152,6 +156,9 @@ declare_plugin!(WebhookPlugin, WebhookChannelConfig, "notifications.webhook", {
     },
 });
 ```
+
+`sensitive_paths: ["secret"]` declares `secret` as masked/restored; no code in `WebhookChannelConfig`
+implements masking.
 
 `surfaces:` is the single source for both the surface/interaction registrations served to
 `SurfaceRegistry` and the exact-id dispatch map `PluginCatalog` derives for `PluginHandled`
@@ -268,21 +275,11 @@ impl PluginConfig for SlackChannelConfig {
         }
         Ok(())
     }
-
-    fn with_secrets_masked(mut self) -> Self {
-        if !self.webhook_url.is_empty() {
-            self.webhook_url = "***".to_string();
-        }
-        self
-    }
-
-    fn restore_secrets_from(&mut self, existing: &Self) {
-        if self.webhook_url == "***" {
-            self.webhook_url = existing.webhook_url.clone();
-        }
-    }
 }
 ```
+
+No masking/restore methods to implement -- `webhook_url` is declared sensitive in `declare_plugin!`
+below, which is the entire masking mechanism.
 
 ### 3. Implement `NotificationTransport`
 
@@ -350,6 +347,7 @@ declare_plugin!(SlackPlugin, SlackChannelConfig, "slack", {
     display_name: "Slack",
     family: PluginFamily::Notification,
     config_model: ConfigModel::NotificationChannel,
+    sensitive_paths: ["webhook_url"],
     roles: [NotificationTransport],
     notification_transport: create_slack_transport,
     raw_settings_keys: &[],
@@ -362,8 +360,9 @@ declare_plugin!(SlackPlugin, SlackChannelConfig, "slack", {
 Key requirements:
 
 - HTTP client **must** set `.connect_timeout(10s)` and `.timeout(60s)` (see [coding-standards.md](coding-standards.md)).
-- `with_secrets_masked()` must replace all secret fields with `"***"`.
-- `restore_secrets_from()` must restore secrets when the incoming value is `"***"`.
+- Declare every secret-bearing config field via `sensitive_paths: [...]` in `declare_plugin!` (or mark
+  its form field `.sensitive()`/`Password`/`SshPrivateKey`, if the config has a form schema); the runtime
+  masks and restores it automatically -- no masking code to write.
 - Use `report!()` / `bail!()` macros for error creation, never `Report::new()` directly.
 - No `unwrap()` in production code.
 
@@ -461,7 +460,10 @@ prefix) and passes it to all plugins -- no channel-type-specific logic in the di
 
 ### 8. Add tests
 
-- Unit tests for `PluginConfig` methods: `validate()`, `with_secrets_masked()`, `restore_secrets_from()` (sync tests, no `start_paused`).
+- Unit tests for `PluginConfig::validate()` (sync tests, no `start_paused`).
+- A descriptor test asserting `DESCRIPTOR.sensitive_paths` matches the declared secret fields (see
+  `descriptor_declares_sensitive_paths` in the webhook/telegram plugin tests for the pattern); the
+  catalog-wide `secret_path_parity` test additionally verifies masking end to end.
 - Descriptor tests verifying `DESCRIPTOR.type_id`, `DESCRIPTOR.family`, `DESCRIPTOR.config_model`, and `DESCRIPTOR.config.*` function pointers.
 - Delivery tests using `httpmock` for HTTP assertions.
 - Serde round-trip tests for config structs.
@@ -607,8 +609,11 @@ All three tables implement `TenantScoped`. IDs use UUIDv7 for time-ordered index
 
 Channel configs are stored as `EncryptedString` in the database. The config is serialized to JSON, encrypted, and
 stored. When reading, the config is decrypted via `config.expose_secret()` and then parsed. API responses always
-return masked configs (secrets replaced with `"***"`) via the descriptor's `config.mask_secrets` function pointer,
-which delegates to the typed `PluginConfig::with_secrets_masked()`.
+return masked configs (secrets replaced with `"***"`) via `PluginConfigOps::mask_config_secrets`, which masks every
+path in the channel type's `sensitive_paths` (schema-derived ∪ declared) that is present in the object. On update, the
+incoming config is restored against the stored config (`restore_config_secrets`) and then rejected if any sensitive
+path still carries the sentinel (`assert_no_sentinel`); create has no stored config to restore from, so any sentinel
+in a create request is rejected outright.
 
 ## REST API endpoints
 
@@ -675,8 +680,8 @@ Telegram plugin verifies the `X-Telegram-Bot-Api-Secret-Token` header against th
   against a blocklist of security-sensitive names (`authorization`, `cookie`, `host`, etc.), and requires
   `headers` to be an object if present. SSRF host validation is enforced at the HTTP client level via
   `SsrfSafeResolver` (unless `allow_private_urls` is set in `CatalogConfig`).
-- `PluginConfig::with_secrets_masked()` replaces the `secret` field with `"***"`.
-- `PluginConfig::restore_secrets_from()` restores `secret` when the incoming value is `"***"`.
+- `secret` is masked and restored automatically: `WebhookPlugin`'s `declare_plugin!` declares
+  `sensitive_paths: ["secret"]`.
 
 ## Email plugin details
 
@@ -811,7 +816,8 @@ action.
 
 - `EmailChannelConfig::validate()`: parses `to_addresses`, rejects empty lists and invalid email
   formats (must contain `@`).
-- `EmailChannelConfig::with_secrets_masked()`: no-op; per-channel config contains no secrets.
+- No `sensitive_paths` declared: per-channel config (`to_addresses`) contains no secrets. SMTP
+  credentials live in the separate global/tenant settings layers, not the per-channel config.
 
 ## Telegram plugin details
 
@@ -823,17 +829,20 @@ action.
 - When `DeliveryMessage.actions` is non-empty, buttons are rendered as Telegram inline keyboard buttons
   with `callback_data` set to the action token.
 - `TelegramChannelConfig::validate()` requires non-empty `bot_token` and `chat_id`.
-- `TelegramChannelConfig::with_secrets_masked()` replaces `bot_token` and `webhook_secret` with `"***"`.
+- `bot_token` and `webhook_secret` are masked and restored automatically: `TelegramPlugin`'s
+  `declare_plugin!` declares `sensitive_paths: ["bot_token", "webhook_secret"]`.
 
 ## Testing
 
 - **Unit tests** exist in every module: `events.rs`, `message_builder.rs`, and each plugin crate
   (`webhook`, `telegram`, `email`), `notifications.rs` (web-api-types).
 - **Config tests** verify `PluginConfig` methods and descriptor-level `ConfigOps` function pointers
-  (`DESCRIPTOR.config.validate`, `DESCRIPTOR.config.mask_secrets`, `DESCRIPTOR.config.restore_secrets`).
+  (`DESCRIPTOR.config.validate`, `DESCRIPTOR.config.normalize`, `DESCRIPTOR.config.sample`,
+  `DESCRIPTOR.config.form_schema`, `DESCRIPTOR.config.validate_identifier`), plus
+  `DESCRIPTOR.sensitive_paths` for the declared secret fields.
 - **Descriptor tests** verify `DESCRIPTOR.type_id`, `DESCRIPTOR.family`, `DESCRIPTOR.config_model`,
   role availability (`DESCRIPTOR.roles.notification_transport.is_some()`), and surface ownership.
-- **Plugin tests** use standard `#[test]` for sync methods (`validate()`, `with_secrets_masked()`).
+- **Plugin tests** use standard `#[test]` for sync methods (`validate()`).
   Use `httpmock` for delivery assertions in async tests. Email delivery tests verify error conversion
   against non-routable SMTP hosts (the test waits up to 60 s for connection timeout).
 - **Serde round-trip tests** cover all enum variants (`NotificationEventType`,
@@ -848,8 +857,9 @@ action.
 | File                                                      | Purpose                                                                                                                                                                                  |
 | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `crates/plugins/infrastructure/core/src/roles.rs`         | `PluginMeta` trait, `NotificationTransport` role trait                                                                                                                                   |
-| `crates/plugins/infrastructure/core/src/plugin_config.rs` | `PluginConfig` trait (validate, mask, restore, form schema)                                                                                                                              |
-| `crates/plugins/infrastructure/core/src/descriptor.rs`    | `PluginDescriptor`, `PluginFamily`, `ConfigModel`, `CatalogConfig`, `CreateTransportFn`, `ConfigOps`                                                                                     |
+| `crates/plugins/infrastructure/core/src/plugin_config.rs` | `PluginConfig` trait (validate, validate_identifier, form schema)                                                                                                                        |
+| `crates/plugins/infrastructure/core/src/secret_paths.rs`  | Schema-driven sensitive-path masking/restore helpers (`mask_present_keys`, `restore_masked_keys`, `SECRET_SENTINEL`)                                                                     |
+| `crates/plugins/infrastructure/core/src/descriptor.rs`    | `PluginDescriptor` (incl. `sensitive_paths`), `PluginFamily`, `ConfigModel`, `CatalogConfig`, `CreateTransportFn`, `ConfigOps`                                                           |
 | `crates/plugins/infrastructure/core/src/macros.rs`        | `declare_plugin!` macro                                                                                                                                                                  |
 | `crates/plugins/notifications/core/src/lib.rs`            | `DeliveryMessage`, `MessageAction`, `NotificationPluginError`, `escape_html()`                                                                                                           |
 | `crates/plugins/notifications/core/src/list_channels.rs`  | Shared `list_channels` helper (behind `extensions` feature)                                                                                                                              |
@@ -912,9 +922,10 @@ controller `SurfaceRegistry` at startup and renders through `frontend/src/lib/co
 
 The `uptrakit-notification-plugin-core` crate provides a shared `list_channels` module (behind
 the `extensions` feature) that all notification plugins use for paginated channel listing with
-config flattening. It queries channels by type, decrypts config, masks secrets via the
-descriptor's `config.mask_secrets` function pointer, and flattens all top-level config keys
-into the row object. The shared surface table definitions reference these flattened keys.
+config flattening. It queries channels by type, decrypts config, masks secrets via a
+caller-supplied `mask_fn` callback (`PluginConfigOps::mask_config_secrets`), and flattens all
+top-level config keys into the row object. The shared surface table definitions reference these
+flattened keys.
 
 ### Surface IDs
 

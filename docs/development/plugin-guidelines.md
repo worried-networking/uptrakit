@@ -289,19 +289,13 @@ declare_plugin! {
 
 ## The `PluginConfig` Trait
 
-The `PluginConfig` trait unifies configuration validation, secret masking, form schema, and identifier validation into a single trait. It replaces the
-former `ConfigFormSchema` and `SecretMasking` traits.
+The `PluginConfig` trait unifies configuration validation, form schema, and identifier validation into a single trait. It replaces the
+former `ConfigFormSchema` and `SecretMasking` traits. Secret masking is not a trait method -- see [Secret masking](#secret-masking) below.
 
 ```rust
 pub trait PluginConfig: Serialize + DeserializeOwned + Clone + Send + Sync {
     /// Validate the configuration. Called during plugin creation.
     fn validate(&self) -> Result<(), String>;
-
-    /// Return a copy with secret fields replaced by "***".
-    fn with_secrets_masked(self) -> Self { self }
-
-    /// Restore secret fields from an existing config where `self` contains "***" sentinels.
-    fn restore_secrets_from(&mut self, _existing: &Self) {}
 
     /// Return typed form field definitions for the frontend.
     fn form_schema() -> Vec<FormField>;
@@ -313,32 +307,50 @@ pub trait PluginConfig: Serialize + DeserializeOwned + Clone + Send + Sync {
 
 ### Secret masking
 
-Plugins with no secrets (Homebrew, Proxmox Helper Scripts) use the default no-op implementations of `with_secrets_masked()` and
-`restore_secrets_from()`.
-
-Plugins with secrets (GitHub, Docker) override both methods with field-level masking logic:
+Secret masking is schema-driven, not per-plugin code. A plugin author does not write masking or restore
+logic -- marking a form field `.sensitive()` (or typing it `Password`/`SshPrivateKey`) **is** the masking
+mechanism:
 
 ```rust
-impl PluginConfig for GitHubConfig {
-    fn with_secrets_masked(mut self) -> Self {
-        if self.auth_token.is_some() {
-            self.auth_token = Some("***".to_string());
-        }
-        self
-    }
-
-    fn restore_secrets_from(&mut self, existing: &Self) {
-        if self.auth_token.as_deref() == Some("***") {
-            self.auth_token = existing.auth_token.clone();
-        }
-    }
-
-    // ... other methods
-}
+FormFieldDescriptor::new("auth_token", "Auth Token").with_type(FormFieldType::Password)
 ```
 
-The registry uses generic helpers `mask_secrets_for::<T>()` and `restore_secrets_for::<T>()` that deserialize the JSON config, apply the trait
-methods, and re-serialize. This eliminates duplicated deserialize-method-serialize boilerplate per plugin.
+A plugin with no form schema for the field (or a config field that isn't expressed as a form field)
+declares it explicitly via `sensitive_paths: [...]` in `declare_plugin!` instead:
+
+```rust
+declare_plugin!(TelegramPlugin, TelegramChannelConfig, "notifications.telegram", {
+    // ...
+    sensitive_paths: ["bot_token", "webhook_secret"],
+    // ...
+});
+```
+
+`PluginConfigOps::sensitive_paths(&id)` computes the effective set as the union of:
+
+1. the schema-derived paths -- scanned across the config, type-settings, and instance-config form
+   schemas, where a field counts as sensitive when `field.sensitive` is `true` **or** its `field_type`
+   is `Password`/`SshPrivateKey`;
+2. the descriptor's explicit `sensitive_paths` declaration.
+
+Explicit declarations may only add to the derived set, never shrink it. The result is sorted and
+deduplicated; an unknown plugin type yields an empty set (masking is a passthrough). Dotted paths
+address nested fields (e.g. `auth.password`); form keys are normalized via
+`secret_paths::normalize_form_key`, which mirrors the frontend's `unflattenConfig`
+(`PluginConfigsTab.svelte`): each segment of a multi-segment key drops one leading `_`.
+
+Masking and restore are generic key-set operations over that path list (`crates/plugins/infrastructure/core/src/secret_paths.rs`), not trait
+methods:
+
+- `mask_present_keys` replaces the value at each sensitive path already present in the object with the
+  sentinel `"***"` (`SECRET_SENTINEL`); absent paths are never injected (sparse-preserving).
+- `restore_masked_keys` copies the stored value back in for each path whose incoming value is the
+  sentinel. A sentinel with no stored counterpart is left in place, and the write is rejected: the
+  post-restore assertion fails validation for any sensitive path still holding `"***"`.
+
+`crates/plugins/infrastructure/registry/tests/secret_path_parity.rs` enforces catalog-wide coverage (parity, fixture
+density, sparse-layer behavior) -- it is the gate that stops a new secret-bearing plugin from shipping
+unmasked.
 
 ### Config form schema
 
@@ -1521,7 +1533,7 @@ All notification plugins share a `list_channels` helper from `uptrakit-notificat
 
 - Querying channels by type with tenant scoping
 - Decrypting and parsing channel config
-- Masking secrets via the plugin's `PluginConfig::with_secrets_masked()`
+- Masking secrets via a caller-supplied `mask_fn` callback (typically `PluginConfigOps::mask_config_secrets`)
 - Flattening top-level config keys into the row object for `DataTable` rendering
 - Pagination with `page`/`per_page` parameters
 

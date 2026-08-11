@@ -254,9 +254,11 @@ The macro generates:
 - **`impl PluginMeta`** -- returns `PluginTypeId::from_static(type_id)`.
 - **Compile-time trait assertions** -- verifies the plugin struct implements all declared role
   traits (e.g., `Discoverer`, `VersionDetector`). A missing impl is a compile error.
-- **Config delegation functions** -- `validate`, `mask_secrets`, `restore_secrets`, `sample`,
-  `form_schema`, `validate_identifier` -- all delegating to the `PluginConfig` trait on the
-  config type.
+- **Config delegation functions** -- `validate`, `normalize`, `sample`, `form_schema`,
+  `validate_identifier` -- all delegating to the `PluginConfig` trait on the config type. Secret
+  masking is not part of this delegation: it is a schema-driven, key-set operation
+  (`PluginConfigOps::mask_config_secrets` / `restore_config_secrets`) over the plugin's
+  `sensitive_paths` -- see [plugin-guidelines.md](plugin-guidelines.md#secret-masking).
 - **Per-role creation functions** -- `create_discoverer`, `create_version_detector`, etc. Each
   deserializes the config JSON and calls `Plugin::new(config, runtime)`.
 - **`pub static DESCRIPTOR: PluginDescriptor`** -- the assembled descriptor with all fields
