@@ -742,12 +742,6 @@ mod tests {
         Ok(())
     }
 
-    fn noop_mask(config: &serde_json::Value) -> serde_json::Value {
-        config.clone()
-    }
-
-    fn noop_restore(_: &mut serde_json::Value, _: &serde_json::Value) {}
-
     fn noop_normalize(
         config: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, crate::plugin_config::PluginConfigValidationError>
@@ -1294,8 +1288,6 @@ mod tests {
         sensitive_paths: &[],
         config: ConfigOps {
             validate: noop_validate,
-            mask_secrets: noop_mask,
-            restore_secrets: noop_restore,
             normalize: noop_normalize,
             sample: noop_sample,
             form_schema: noop_form_schema,
@@ -1339,8 +1331,6 @@ mod tests {
         sensitive_paths: &[],
         config: ConfigOps {
             validate: noop_validate,
-            mask_secrets: noop_mask,
-            restore_secrets: noop_restore,
             normalize: noop_normalize,
             sample: noop_sample,
             form_schema: noop_form_schema,
@@ -1385,8 +1375,6 @@ mod tests {
         sensitive_paths: &[],
         config: ConfigOps {
             validate: noop_validate,
-            mask_secrets: noop_mask,
-            restore_secrets: noop_restore,
             normalize: noop_normalize,
             sample: noop_sample,
             form_schema: noop_form_schema,
@@ -1431,8 +1419,6 @@ mod tests {
         sensitive_paths: &[],
         config: ConfigOps {
             validate: noop_validate,
-            mask_secrets: noop_mask,
-            restore_secrets: noop_restore,
             normalize: noop_normalize,
             sample: noop_sample,
             form_schema: noop_form_schema,
@@ -1477,8 +1463,6 @@ mod tests {
         sensitive_paths: &[],
         config: ConfigOps {
             validate: noop_validate,
-            mask_secrets: noop_mask,
-            restore_secrets: noop_restore,
             normalize: noop_normalize,
             sample: noop_sample,
             form_schema: noop_form_schema,
@@ -1717,8 +1701,6 @@ mod tests {
         sensitive_paths: &[],
         config: ConfigOps {
             validate: noop_validate,
-            mask_secrets: noop_mask,
-            restore_secrets: noop_restore,
             normalize: noop_normalize,
             sample: noop_sample,
             form_schema: noop_form_schema,
@@ -1784,8 +1766,6 @@ mod tests {
         sensitive_paths: &[],
         config: ConfigOps {
             validate: noop_validate,
-            mask_secrets: noop_mask,
-            restore_secrets: noop_restore,
             normalize: noop_normalize,
             sample: noop_sample,
             form_schema: noop_form_schema,

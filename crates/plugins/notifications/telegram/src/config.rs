@@ -28,25 +28,6 @@ impl PluginConfig for TelegramChannelConfig {
         }
         Ok(())
     }
-
-    fn with_secrets_masked(mut self) -> Self {
-        if self.bot_token.is_some() {
-            self.bot_token = Some("***".to_string());
-        }
-        if self.webhook_secret.is_some() {
-            self.webhook_secret = Some("***".to_string());
-        }
-        self
-    }
-
-    fn restore_secrets_from(&mut self, existing: &Self) {
-        if self.bot_token.as_deref() == Some("***") {
-            self.bot_token = existing.bot_token.clone();
-        }
-        if self.webhook_secret.as_deref() == Some("***") {
-            self.webhook_secret = existing.webhook_secret.clone();
-        }
-    }
 }
 
 #[cfg(test)]
@@ -97,74 +78,6 @@ mod tests {
             ..Default::default()
         };
         assert!(config.validate().is_ok());
-    }
-
-    #[test]
-    fn mask_secrets_replaces_bot_token() {
-        let config = TelegramChannelConfig {
-            bot_token: Some("123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11".to_string()),
-            chat_id: "-100123456".to_string(),
-            ..Default::default()
-        };
-        let masked = config.with_secrets_masked();
-        assert_eq!(masked.bot_token.as_deref(), Some("***"));
-        assert_eq!(masked.chat_id, "-100123456");
-    }
-
-    #[test]
-    fn mask_secrets_replaces_webhook_secret() {
-        let config = TelegramChannelConfig {
-            bot_token: Some("tok".to_string()),
-            chat_id: "id".to_string(),
-            webhook_secret: Some("s3cret".to_string()),
-        };
-        let masked = config.with_secrets_masked();
-        assert_eq!(masked.bot_token.as_deref(), Some("***"));
-        assert_eq!(masked.webhook_secret.as_deref(), Some("***"));
-    }
-
-    #[test]
-    fn mask_secrets_leaves_none_fields_as_none() {
-        let config = TelegramChannelConfig {
-            chat_id: "-100123".to_string(),
-            ..Default::default()
-        };
-        let masked = config.with_secrets_masked();
-        assert!(masked.bot_token.is_none());
-        assert!(masked.webhook_secret.is_none());
-    }
-
-    #[test]
-    fn restore_secrets_from_existing() {
-        let existing = TelegramChannelConfig {
-            bot_token: Some("real-token".to_string()),
-            chat_id: "-100123".to_string(),
-            webhook_secret: Some("real-secret".to_string()),
-        };
-        let mut incoming = TelegramChannelConfig {
-            bot_token: Some("***".to_string()),
-            chat_id: "-100123".to_string(),
-            webhook_secret: Some("***".to_string()),
-        };
-        incoming.restore_secrets_from(&existing);
-        assert_eq!(incoming.bot_token.as_deref(), Some("real-token"));
-        assert_eq!(incoming.webhook_secret.as_deref(), Some("real-secret"));
-    }
-
-    #[test]
-    fn restore_secrets_preserves_new_values() {
-        let existing = TelegramChannelConfig {
-            bot_token: Some("old-token".to_string()),
-            chat_id: "-100123".to_string(),
-            ..Default::default()
-        };
-        let mut incoming = TelegramChannelConfig {
-            bot_token: Some("new-token".to_string()),
-            chat_id: "-100123".to_string(),
-            ..Default::default()
-        };
-        incoming.restore_secrets_from(&existing);
-        assert_eq!(incoming.bot_token.as_deref(), Some("new-token"));
     }
 
     #[test]

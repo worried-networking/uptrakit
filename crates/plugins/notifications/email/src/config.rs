@@ -43,7 +43,6 @@ impl PluginConfig for EmailChannelConfig {
     }
 
     // No secrets in per-channel config -- SMTP credentials are in global settings.
-    // Default `with_secrets_masked()` and `restore_secrets_from()` are correct.
 }
 
 #[cfg(test)]
@@ -124,20 +123,6 @@ mod tests {
     #[test]
     fn is_valid_email_rejects_domain_without_dot() {
         assert!(!is_valid_email("user@nodomain"));
-    }
-
-    #[test]
-    fn mask_config_secrets_returns_config_unchanged() {
-        let cfg = EmailChannelConfig {
-            to_addresses: vec!["user@example.com".to_string()],
-        };
-        let masked = cfg.clone().with_secrets_masked();
-        let original_json = serde_json::to_value(&cfg).expect("serialize");
-        let masked_json = serde_json::to_value(masked).expect("serialize");
-        assert_eq!(
-            original_json, masked_json,
-            "per-channel config has no secrets to mask"
-        );
     }
 
     #[test]

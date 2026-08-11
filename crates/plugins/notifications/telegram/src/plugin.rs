@@ -627,7 +627,40 @@ mod tests {
         reason = "test assertions use assert!(result.is_ok()) pattern"
     )]
     use super::*;
-    use uptrakit_plugin_infrastructure_core::{PluginMeta, surfaces};
+    use uptrakit_plugin_infrastructure_core::{
+        PluginConfigOps, PluginMeta, PluginMetadataOps, surfaces,
+    };
+    use uptrakit_shared_types::PluginTypeId;
+
+    /// Minimal `PluginMetadataOps`/`PluginConfigOps` implementor wrapping this
+    /// crate's own `DESCRIPTOR`, so masking/restore tests can exercise the
+    /// schema-driven `PluginConfigOps` default methods without depending on
+    /// the full registry catalog (this crate has no dependency on the
+    /// registry crate, and adding one would create a cycle).
+    struct StubOps;
+
+    impl PluginMetadataOps for StubOps {
+        fn get(
+            &self,
+            id: &PluginTypeId,
+        ) -> Option<&uptrakit_plugin_infrastructure_core::PluginDescriptor> {
+            if id.as_str() == DESCRIPTOR.type_id {
+                Some(&DESCRIPTOR)
+            } else {
+                None
+            }
+        }
+
+        fn all(&self) -> Vec<&uptrakit_plugin_infrastructure_core::PluginDescriptor> {
+            vec![&DESCRIPTOR]
+        }
+
+        fn instance_enabled(&self, _id: &PluginTypeId) -> bool {
+            true
+        }
+    }
+
+    impl PluginConfigOps for StubOps {}
 
     #[test]
     fn plugin_type_id_is_telegram() {
@@ -942,35 +975,39 @@ mod tests {
         assert!((DESCRIPTOR.config.validate)(&config).is_ok());
     }
 
-    // ── Secret masking via descriptor ────────────────────────────────────
+    // ── Secret masking via PluginConfigOps (schema-driven, sparse) ───────
 
     #[test]
-    fn descriptor_mask_secrets_replaces_bot_token() {
+    fn config_ops_mask_secrets_replaces_present_bot_token_and_webhook_secret() {
+        let ops = StubOps;
+        let id = PluginTypeId::new(DESCRIPTOR.type_id.to_string());
         let config = serde_json::json!({
             "bot_token": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
-            "chat_id": "-100123456"
+            "chat_id": "-100123456",
+            "webhook_secret": "s3cret"
         });
-        let masked = (DESCRIPTOR.config.mask_secrets)(&config);
+        let masked = ops.mask_config_secrets(&id, &config);
         assert_eq!(masked["bot_token"], "***");
+        assert_eq!(masked["webhook_secret"], "***");
         assert_eq!(masked["chat_id"], "-100123456");
     }
 
     #[test]
-    fn descriptor_mask_secrets_replaces_webhook_secret() {
-        let config = serde_json::json!({
-            "bot_token": "tok",
-            "chat_id": "id",
-            "webhook_secret": "s3cret"
-        });
-        let masked = (DESCRIPTOR.config.mask_secrets)(&config);
-        assert_eq!(masked["bot_token"], "***");
-        assert_eq!(masked["webhook_secret"], "***");
+    fn config_ops_mask_secrets_leaves_absent_secrets_absent() {
+        let ops = StubOps;
+        let id = PluginTypeId::new(DESCRIPTOR.type_id.to_string());
+        let config = serde_json::json!({"chat_id": "-100123"});
+        let masked = ops.mask_config_secrets(&id, &config);
+        assert!(masked.get("bot_token").is_none());
+        assert!(masked.get("webhook_secret").is_none());
     }
 
-    // ── Secret restoration via descriptor ────────────────────────────────
+    // ── Secret restoration via PluginConfigOps ────────────────────────────
 
     #[test]
-    fn descriptor_restore_secrets_from_stored() {
+    fn config_ops_restore_config_secrets_recovers_stored_value() {
+        let ops = StubOps;
+        let id = PluginTypeId::new(DESCRIPTOR.type_id.to_string());
         let stored = serde_json::json!({
             "bot_token": "real-token",
             "chat_id": "-100123",
@@ -981,7 +1018,7 @@ mod tests {
             "chat_id": "-100123",
             "webhook_secret": "***"
         });
-        (DESCRIPTOR.config.restore_secrets)(&mut incoming, &stored);
+        ops.restore_config_secrets(&id, &mut incoming, &stored);
         assert_eq!(incoming["bot_token"], "real-token");
         assert_eq!(incoming["webhook_secret"], "real-secret");
     }

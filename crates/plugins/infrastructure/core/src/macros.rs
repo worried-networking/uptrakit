@@ -113,35 +113,6 @@ macro_rules! declare_plugin {
                 <$config as $crate::PluginConfig>::validate(&typed)
             }
 
-            pub(super) fn mask_secrets(
-                config: &serde_json::Value,
-            ) -> serde_json::Value {
-                let Ok(cfg) = serde_json::from_value::<$config>(config.clone()) else {
-                    return config.clone();
-                };
-                let masked = <$config as $crate::PluginConfig>::with_secrets_masked(cfg);
-                serde_json::to_value(masked).unwrap_or_else(|e| {
-                    tracing::error!(error = %e, "failed to serialize masked plugin config");
-                    config.clone()
-                })
-            }
-
-            pub(super) fn restore_secrets(
-                incoming: &mut serde_json::Value,
-                stored: &serde_json::Value,
-            ) {
-                let (Ok(mut inc), Ok(ex)) = (
-                    serde_json::from_value::<$config>(incoming.clone()),
-                    serde_json::from_value::<$config>(stored.clone()),
-                ) else {
-                    return;
-                };
-                <$config as $crate::PluginConfig>::restore_secrets_from(&mut inc, &ex);
-                if let Ok(v) = serde_json::to_value(&inc) {
-                    *incoming = v;
-                }
-            }
-
             pub(super) fn normalize(
                 config: &serde_json::Value,
             ) -> std::result::Result<serde_json::Value, $crate::PluginConfigValidationError> {
@@ -209,8 +180,6 @@ macro_rules! declare_plugin {
             sensitive_paths: $crate::__or_empty_slice!( $( &[ $( $sensitive_path ),+ ] )? ),
             config: $crate::ConfigOps {
                 validate: __descriptor_impl::validate,
-                mask_secrets: __descriptor_impl::mask_secrets,
-                restore_secrets: __descriptor_impl::restore_secrets,
                 normalize: __descriptor_impl::normalize,
                 sample: __descriptor_impl::sample,
                 form_schema: __descriptor_impl::form_schema,

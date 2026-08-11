@@ -174,18 +174,6 @@ fn leaf_paths(value: &Value, prefix: &str, out: &mut Vec<String>) {
     }
 }
 
-/// Dotted paths present in `before` whose value differs from the value at
-/// the same path in `after`. Because the walk starts from `before`'s own
-/// structure, every returned path is guaranteed to have existed in `before`.
-fn paths_where_values_differ(before: &Value, after: &Value) -> Vec<String> {
-    let mut paths = Vec::new();
-    leaf_paths(before, "", &mut paths);
-    paths
-        .into_iter()
-        .filter(|path| value_at(before, path) != value_at(after, path))
-        .collect()
-}
-
 /// Every string-valued leaf in `value`, as `(dotted path, string value)`.
 fn string_leaves(value: &Value) -> Vec<(String, String)> {
     let mut paths = Vec::new();
@@ -198,20 +186,6 @@ fn string_leaves(value: &Value) -> Vec<(String, String)> {
         })
         .collect()
 }
-
-/// The non-noop legacy masker set: plugins whose `with_secrets_masked` does
-/// something observable on a populated fixture. Hard-coded on purpose — a
-/// rename must make `legacy_maskers_actually_mask` red, not silently drop
-/// the id from coverage.
-const NON_VACUOUS_LEGACY_MASKER_IDS: [&str; 7] = [
-    "releases.docker",
-    "releases.github",
-    "releases.gitlab",
-    "releases.forgejo",
-    "infrastructure.proxmox",
-    "notifications.webhook",
-    "notifications.telegram",
-];
 
 /// Proves the new schema-derived `sensitive_paths` cover everything the
 /// legacy per-plugin maskers covered, and that mask/restore round-trip
@@ -248,18 +222,6 @@ fn parity_gate() {
                 panic!("{}: fixture failed validate_config: {e}", desc.type_id)
             });
 
-            // Legacy-masked set must be a subset of the derived sensitive paths.
-            let legacy_masked = (desc.config.mask_secrets)(fixture);
-            for path in paths_where_values_differ(fixture, &legacy_masked) {
-                assert!(
-                    paths.contains(&path),
-                    "{}: legacy mask_secrets changed '{path}' but it is not covered by the \
-                     schema-derived sensitive_paths ({paths:?}) — add a sensitive_paths \
-                     declaration to this plugin's declare_plugin! (immediately before `roles:`)",
-                    desc.type_id
-                );
-            }
-
             // Marker-leaf guard: every fixture-secret- leaf is covered and masks to the sentinel.
             let masked = mask_present_keys(fixture, &paths);
             for (leaf_path, leaf_value) in string_leaves(fixture) {
@@ -283,8 +245,6 @@ fn parity_gate() {
             // Restore parity (same-variant), per sensitive path, values not whole documents.
             let mut new_restored = masked.clone();
             restore_masked_keys(&mut new_restored, fixture, &paths);
-            let mut legacy_restored = legacy_masked.clone();
-            (desc.config.restore_secrets)(&mut legacy_restored, fixture);
 
             for path in &paths {
                 let original = value_at(fixture, path);
@@ -294,15 +254,6 @@ fn parity_gate() {
                     "{}: restore_masked_keys did not recover '{path}' to its fixture value",
                     desc.type_id
                 );
-                if original.is_some() {
-                    assert_eq!(
-                        value_at(&legacy_restored, path),
-                        original,
-                        "{}: legacy restore_secrets did not recover '{path}' to its fixture \
-                         value (same-variant)",
-                        desc.type_id
-                    );
-                }
             }
         }
 
@@ -314,31 +265,6 @@ fn parity_gate() {
                 "{}: sensitive_paths entry '{path}' does not resolve in any fixture — a path \
                  that matches nothing is a bug, not a no-op",
                 desc.type_id
-            );
-        }
-    }
-}
-
-/// Non-vacuity guard: `parity_gate`'s subset check only proves something if
-/// the legacy masker actually changes the fixture. A fixture that leaves a
-/// secret unset would let an `is_some()`-guarded legacy masker mask nothing
-/// and pass the subset check vacuously — this test proves that hole is
-/// closed for the plugins whose legacy masking has an `is_some()`/unconditional
-/// shape worth proving non-vacuous.
-#[test]
-fn legacy_maskers_actually_mask() {
-    let descriptors = all_descriptors();
-    for id in NON_VACUOUS_LEGACY_MASKER_IDS {
-        let desc = descriptors
-            .iter()
-            .find(|desc| desc.type_id == id)
-            .unwrap_or_else(|| panic!("'{id}' does not resolve to a compiled-in descriptor"));
-        for fixture in secret_fixtures(id) {
-            let masked = (desc.config.mask_secrets)(&fixture);
-            assert_ne!(
-                masked, fixture,
-                "{id}: legacy mask_secrets is a no-op on its own populated fixture — the \
-                 vacuity hole this test exists to catch is not actually closed"
             );
         }
     }

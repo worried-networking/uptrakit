@@ -94,12 +94,6 @@ fn validate(_cfg: &serde_json::Value) -> std::result::Result<(), PluginConfigVal
     Ok(())
 }
 
-fn mask_secrets(cfg: &serde_json::Value) -> serde_json::Value {
-    cfg.clone()
-}
-
-fn restore_secrets(_cfg: &mut serde_json::Value, _masked: &serde_json::Value) {}
-
 fn normalize(
     cfg: &serde_json::Value,
 ) -> std::result::Result<serde_json::Value, PluginConfigValidationError> {
@@ -129,8 +123,6 @@ pub static DESCRIPTOR: PluginDescriptor = PluginDescriptor {
     sensitive_paths: &[],
     config: ConfigOps {
         validate,
-        mask_secrets,
-        restore_secrets,
         normalize,
         sample,
         form_schema,
@@ -177,8 +169,6 @@ pub static PER_ITEM_FAIL_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
     sensitive_paths: &[],
     config: ConfigOps {
         validate,
-        mask_secrets,
-        restore_secrets,
         normalize,
         sample,
         form_schema,
@@ -296,8 +286,6 @@ pub static ENRICHER_ECHO_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
     sensitive_paths: &[],
     config: ConfigOps {
         validate,
-        mask_secrets,
-        restore_secrets,
         normalize,
         sample,
         form_schema,
@@ -380,8 +368,6 @@ pub static ENRICHER_MISS_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
     sensitive_paths: &[],
     config: ConfigOps {
         validate,
-        mask_secrets,
-        restore_secrets,
         normalize,
         sample,
         form_schema,
@@ -497,8 +483,6 @@ pub static TEST_LIFECYCLE_HOOK_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
     sensitive_paths: &[],
     config: ConfigOps {
         validate,
-        mask_secrets,
-        restore_secrets,
         normalize,
         sample,
         form_schema,
@@ -545,8 +529,6 @@ pub static CTX_CAPTURE_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
     sensitive_paths: &[],
     config: ConfigOps {
         validate,
-        mask_secrets,
-        restore_secrets,
         normalize,
         sample,
         form_schema,

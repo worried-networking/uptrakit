@@ -5,9 +5,6 @@ use uptrakit_plugin_infrastructure_core::{
 use uptrakit_shared_types::network::is_private_host;
 use url::Url;
 
-/// Sentinel value used to indicate a masked secret in API responses.
-const SECRET_MASK: &str = "***";
-
 /// Configuration for the GitLab Releases plugin.
 ///
 /// Holds only auth credentials and behaviour toggles — no project path.
@@ -137,25 +134,6 @@ impl PluginConfig for GitLabConfig {
                 .with_help_text("Regex patterns to filter release asset links (one per line)"),
         ]
     }
-
-    /// Return a copy with secret fields masked for API responses.
-    ///
-    /// Unset secrets become `Some("***")` so the field always appears in JSON.
-    fn with_secrets_masked(mut self) -> Self {
-        self.auth_token = Some(SecretString::new(SECRET_MASK));
-        self
-    }
-
-    /// Restore masked secrets from an existing config (for PUT updates).
-    ///
-    /// If `auth_token` is the mask sentinel, take the value from `existing`.
-    fn restore_secrets_from(&mut self, existing: &Self) {
-        if let Some(ref token) = self.auth_token
-            && token.expose_secret() == SECRET_MASK
-        {
-            self.auth_token = existing.auth_token.clone();
-        }
-    }
 }
 
 #[cfg(test)]
@@ -243,48 +221,6 @@ mod tests {
         assert_eq!(deserialized.include_prereleases, config.include_prereleases);
         assert_eq!(deserialized.tag_strip_prefix, config.tag_strip_prefix);
         assert_eq!(deserialized.asset_patterns, config.asset_patterns);
-    }
-
-    #[test]
-    fn with_secrets_masked_always_shows_auth_token() {
-        let config = GitLabConfig::default();
-        let masked = config.with_secrets_masked();
-        assert_eq!(masked.auth_token.unwrap().expose_secret(), SECRET_MASK);
-    }
-
-    #[test]
-    fn with_secrets_masked_replaces_real_token() {
-        let config = GitLabConfig {
-            auth_token: Some(SecretString::new("glpat-real")),
-            ..GitLabConfig::default()
-        };
-        let masked = config.with_secrets_masked();
-        assert_eq!(masked.auth_token.unwrap().expose_secret(), SECRET_MASK);
-    }
-
-    #[test]
-    fn restore_secrets_from_restores_masked_token() {
-        let existing = GitLabConfig {
-            auth_token: Some(SecretString::new("glpat-real")),
-            ..GitLabConfig::default()
-        };
-        let mut incoming = existing.clone().with_secrets_masked();
-        incoming.restore_secrets_from(&existing);
-        assert_eq!(incoming.auth_token.unwrap().expose_secret(), "glpat-real");
-    }
-
-    #[test]
-    fn restore_secrets_from_keeps_new_token() {
-        let existing = GitLabConfig {
-            auth_token: Some(SecretString::new("glpat-old")),
-            ..GitLabConfig::default()
-        };
-        let mut incoming = GitLabConfig {
-            auth_token: Some(SecretString::new("glpat-new")),
-            ..GitLabConfig::default()
-        };
-        incoming.restore_secrets_from(&existing);
-        assert_eq!(incoming.auth_token.unwrap().expose_secret(), "glpat-new");
     }
 
     #[test]

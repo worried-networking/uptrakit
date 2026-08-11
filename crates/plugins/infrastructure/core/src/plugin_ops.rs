@@ -570,12 +570,6 @@ mod sensitive_paths_tests {
         Ok(())
     }
 
-    fn noop_mask(config: &serde_json::Value) -> serde_json::Value {
-        config.clone()
-    }
-
-    fn noop_restore(_: &mut serde_json::Value, _: &serde_json::Value) {}
-
     fn noop_normalize(
         config: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, PluginConfigValidationError> {
@@ -609,8 +603,6 @@ mod sensitive_paths_tests {
         sensitive_paths: &["extra_declared"],
         config: ConfigOps {
             validate: noop_validate,
-            mask_secrets: noop_mask,
-            restore_secrets: noop_restore,
             normalize: noop_normalize,
             sample: noop_sample,
             form_schema: stub_form_schema,

@@ -5,9 +5,6 @@ use uptrakit_plugin_infrastructure_core::{
 use uptrakit_shared_types::network::is_private_host;
 use url::Url;
 
-/// Sentinel value used to indicate a masked secret in API responses.
-const SECRET_MASK: &str = "***";
-
 /// Configuration for the Forgejo Releases plugin.
 ///
 /// Holds only auth credentials and behaviour toggles — no `owner` or `repo`.
@@ -148,19 +145,6 @@ impl PluginConfig for ForgejoConfig {
                 .with_help_text("Regex patterns to filter release assets (one per line)"),
         ]
     }
-
-    fn with_secrets_masked(mut self) -> Self {
-        self.auth_token = Some(SecretString::new(SECRET_MASK));
-        self
-    }
-
-    fn restore_secrets_from(&mut self, existing: &Self) {
-        if let Some(ref token) = self.auth_token
-            && token.expose_secret() == SECRET_MASK
-        {
-            self.auth_token = existing.auth_token.clone();
-        }
-    }
 }
 
 #[cfg(test)]
@@ -260,48 +244,6 @@ mod tests {
         assert_eq!(deserialized.include_prereleases, config.include_prereleases);
         assert_eq!(deserialized.tag_strip_prefix, config.tag_strip_prefix);
         assert_eq!(deserialized.asset_patterns, config.asset_patterns);
-    }
-
-    #[test]
-    fn with_secrets_masked_always_shows_auth_token() {
-        let config = ForgejoConfig::default();
-        let masked = config.with_secrets_masked();
-        assert_eq!(masked.auth_token.unwrap().expose_secret(), SECRET_MASK);
-    }
-
-    #[test]
-    fn with_secrets_masked_replaces_real_token() {
-        let config = ForgejoConfig {
-            auth_token: Some(SecretString::new("real_token")),
-            ..ForgejoConfig::default()
-        };
-        let masked = config.with_secrets_masked();
-        assert_eq!(masked.auth_token.unwrap().expose_secret(), SECRET_MASK);
-    }
-
-    #[test]
-    fn restore_secrets_from_restores_masked_token() {
-        let existing = ForgejoConfig {
-            auth_token: Some(SecretString::new("real_token")),
-            ..ForgejoConfig::default()
-        };
-        let mut incoming = existing.clone().with_secrets_masked();
-        incoming.restore_secrets_from(&existing);
-        assert_eq!(incoming.auth_token.unwrap().expose_secret(), "real_token");
-    }
-
-    #[test]
-    fn restore_secrets_from_keeps_new_token() {
-        let existing = ForgejoConfig {
-            auth_token: Some(SecretString::new("old_token")),
-            ..ForgejoConfig::default()
-        };
-        let mut incoming = ForgejoConfig {
-            auth_token: Some(SecretString::new("new_token")),
-            ..ForgejoConfig::default()
-        };
-        incoming.restore_secrets_from(&existing);
-        assert_eq!(incoming.auth_token.unwrap().expose_secret(), "new_token");
     }
 
     #[test]

@@ -99,16 +99,4 @@ mod tests {
         use uptrakit_plugin_infrastructure_core::PluginConfig;
         assert!(NpmConfig::default().validate().is_ok());
     }
-
-    #[test]
-    fn secret_masking_is_noop() {
-        use uptrakit_plugin_infrastructure_core::PluginConfig;
-        let config = NpmConfig {
-            include_prereleases: true,
-            registry_url: None,
-        };
-        let expected = config.clone();
-        let masked = config.with_secrets_masked();
-        assert_eq!(masked, expected);
-    }
 }

@@ -80,8 +80,6 @@ pub enum ConfigModel {
 /// Config operations — every plugin has these. Grouped to keep the descriptor flat.
 pub struct ConfigOps {
     pub validate: fn(&serde_json::Value) -> Result<(), PluginConfigValidationError>,
-    pub mask_secrets: fn(&serde_json::Value) -> serde_json::Value,
-    pub restore_secrets: fn(&mut serde_json::Value, &serde_json::Value),
     /// Deserialize→reserialize through the typed config; used to prune stale
     /// variant keys after restore.
     pub normalize: fn(&serde_json::Value) -> Result<serde_json::Value, PluginConfigValidationError>,

@@ -7,9 +7,6 @@ use uptrakit_plugin_infrastructure_core::{
 use uptrakit_shared_types::network::is_private_host;
 use url::Url;
 
-/// Sentinel value used to indicate a masked secret in API responses.
-const SECRET_MASK: &str = "***";
-
 /// Maximum length for `install_path` to prevent abuse.
 const MAX_INSTALL_PATH_LENGTH: usize = 4096;
 
@@ -259,19 +256,6 @@ impl PluginConfig for GitHubConfig {
                 .with_help_text("Set executable permission (mode 0755) on the installed file"),
         ]
     }
-
-    fn with_secrets_masked(mut self) -> Self {
-        self.auth_token = Some(SecretString::new(SECRET_MASK));
-        self
-    }
-
-    fn restore_secrets_from(&mut self, existing: &Self) {
-        if let Some(ref token) = self.auth_token
-            && token.expose_secret() == SECRET_MASK
-        {
-            self.auth_token = existing.auth_token.clone();
-        }
-    }
 }
 
 #[cfg(test)]
@@ -380,51 +364,6 @@ mod tests {
         assert_eq!(deserialized.require_attestation, config.require_attestation);
         assert_eq!(deserialized.install_path, config.install_path);
         assert_eq!(deserialized.make_executable, config.make_executable);
-    }
-
-    #[test]
-    fn with_secrets_masked_always_shows_auth_token() {
-        let config = GitHubConfig::default();
-        let masked = config.with_secrets_masked();
-        assert_eq!(masked.auth_token.unwrap().expose_secret(), SECRET_MASK);
-    }
-
-    #[test]
-    fn with_secrets_masked_replaces_real_token() {
-        let config = GitHubConfig {
-            auth_token: Some(SecretString::new("ghp_real")),
-            ..GitHubConfig::default()
-        };
-        let masked = config.with_secrets_masked();
-        assert_eq!(masked.auth_token.unwrap().expose_secret(), SECRET_MASK);
-    }
-
-    #[test]
-    fn restore_secrets_from_restores_masked_token() {
-        let existing = GitHubConfig {
-            auth_token: Some(SecretString::new("ghp_real_token")),
-            ..GitHubConfig::default()
-        };
-        let mut incoming = existing.clone().with_secrets_masked();
-        incoming.restore_secrets_from(&existing);
-        assert_eq!(
-            incoming.auth_token.unwrap().expose_secret(),
-            "ghp_real_token"
-        );
-    }
-
-    #[test]
-    fn restore_secrets_from_keeps_new_token() {
-        let existing = GitHubConfig {
-            auth_token: Some(SecretString::new("ghp_old")),
-            ..GitHubConfig::default()
-        };
-        let mut incoming = GitHubConfig {
-            auth_token: Some(SecretString::new("ghp_new")),
-            ..GitHubConfig::default()
-        };
-        incoming.restore_secrets_from(&existing);
-        assert_eq!(incoming.auth_token.unwrap().expose_secret(), "ghp_new");
     }
 
     #[test]

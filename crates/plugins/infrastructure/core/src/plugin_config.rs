@@ -73,18 +73,6 @@ pub trait PluginConfig:
         Ok(())
     }
 
-    /// Return a copy with secret fields replaced by `"***"`.
-    ///
-    /// Plugins with no secrets use the default (returns self unchanged).
-    fn with_secrets_masked(self) -> Self {
-        self
-    }
-
-    /// Restore secret fields from an existing config where `self` contains `"***"` sentinels.
-    ///
-    /// Plugins with no secrets use the default (no-op).
-    fn restore_secrets_from(&mut self, _existing: &Self) {}
-
     /// Returns form field definitions for the plugin config form.
     ///
     /// Used by `GET /api/v1/plugin-types` to render typed input forms.
@@ -133,19 +121,6 @@ mod tests {
             }
             Ok(())
         }
-
-        fn with_secrets_masked(mut self) -> Self {
-            if !self.token.is_empty() {
-                self.token = "***".to_string();
-            }
-            self
-        }
-
-        fn restore_secrets_from(&mut self, existing: &Self) {
-            if self.token == "***" {
-                self.token = existing.token.clone();
-            }
-        }
     }
 
     #[test]
@@ -169,21 +144,6 @@ mod tests {
             token: "tok".into(),
         };
         assert!(cfg.validate().is_ok());
-    }
-
-    #[test]
-    fn mask_and_restore_secrets() {
-        let original = TestConfig {
-            url: "https://example.com".into(),
-            token: "secret123".into(),
-        };
-        let masked = original.clone().with_secrets_masked();
-        assert_eq!(masked.token, "***");
-        assert_eq!(masked.url, "https://example.com");
-
-        let mut restored = masked;
-        restored.restore_secrets_from(&original);
-        assert_eq!(restored.token, "secret123");
     }
 
     #[test]

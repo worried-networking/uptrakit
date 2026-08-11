@@ -9,9 +9,6 @@ use uptrakit_plugin_infrastructure_core::{
 };
 use url::Url;
 
-/// Sentinel value used to indicate a masked secret in API responses.
-const SECRET_MASK: &str = "***";
-
 fn default_true() -> bool {
     true
 }
@@ -86,17 +83,6 @@ impl PluginConfig for ProxmoxConfig {
         }
 
         Ok(())
-    }
-
-    fn with_secrets_masked(mut self) -> Self {
-        self.api_token = SecretString::new(SECRET_MASK);
-        self
-    }
-
-    fn restore_secrets_from(&mut self, existing: &Self) {
-        if self.api_token.expose_secret() == SECRET_MASK {
-            self.api_token = existing.api_token.clone();
-        }
     }
 
     fn form_schema() -> Vec<FormFieldDescriptor> {
@@ -261,52 +247,6 @@ mod tests {
         assert!(!is_valid_pve_token("@realm!token=secret"));
         assert!(!is_valid_pve_token("user@!token=secret"));
         assert!(!is_valid_pve_token("user@realm!=secret"));
-    }
-
-    #[test]
-    fn secret_masking() {
-        let config = ProxmoxConfig {
-            api_url: "https://pve.local:8006".to_string(),
-            api_token: SecretString::new("root@pam!tok=real-secret"),
-            ..ProxmoxConfig::default()
-        };
-        let masked = config.clone().with_secrets_masked();
-        assert_eq!(masked.api_token.expose_secret(), SECRET_MASK);
-        assert_eq!(masked.api_url, "https://pve.local:8006");
-    }
-
-    #[test]
-    fn restore_secrets() {
-        let existing = ProxmoxConfig {
-            api_url: "https://pve.local:8006".to_string(),
-            api_token: SecretString::new("root@pam!tok=real-secret"),
-            ..ProxmoxConfig::default()
-        };
-        let mut incoming = existing.clone().with_secrets_masked();
-        incoming.restore_secrets_from(&existing);
-        assert_eq!(
-            incoming.api_token.expose_secret(),
-            "root@pam!tok=real-secret"
-        );
-    }
-
-    #[test]
-    fn restore_secrets_keeps_new_token() {
-        let existing = ProxmoxConfig {
-            api_url: "https://pve.local:8006".to_string(),
-            api_token: SecretString::new("root@pam!tok=old-secret"),
-            ..ProxmoxConfig::default()
-        };
-        let mut incoming = ProxmoxConfig {
-            api_url: "https://pve.local:8006".to_string(),
-            api_token: SecretString::new("root@pam!tok=new-secret"),
-            ..ProxmoxConfig::default()
-        };
-        incoming.restore_secrets_from(&existing);
-        assert_eq!(
-            incoming.api_token.expose_secret(),
-            "root@pam!tok=new-secret"
-        );
     }
 
     #[test]

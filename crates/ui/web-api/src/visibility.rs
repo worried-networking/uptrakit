@@ -137,10 +137,6 @@ mod test_support {
     ) -> Result<(), uptrakit_plugin_infrastructure_registry::PluginConfigValidationError> {
         Ok(())
     }
-    fn noop_mask(v: &serde_json::Value) -> serde_json::Value {
-        v.clone()
-    }
-    fn noop_restore(_: &mut serde_json::Value, _: &serde_json::Value) {}
     fn noop_normalize(
         v: &serde_json::Value,
     ) -> Result<
@@ -176,8 +172,6 @@ mod test_support {
             sensitive_paths: &[],
             config: ConfigOps {
                 validate: noop_validate,
-                mask_secrets: noop_mask,
-                restore_secrets: noop_restore,
                 normalize: noop_normalize,
                 sample: noop_sample,
                 form_schema: noop_form_schema,
@@ -226,8 +220,6 @@ mod test_support {
             sensitive_paths: &[],
             config: ConfigOps {
                 validate: noop_validate,
-                mask_secrets: noop_mask,
-                restore_secrets: noop_restore,
                 normalize: noop_normalize,
                 sample: noop_sample,
                 form_schema: noop_form_schema,

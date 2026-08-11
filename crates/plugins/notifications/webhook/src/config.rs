@@ -70,19 +70,6 @@ impl PluginConfig for WebhookChannelConfig {
         }
         Ok(())
     }
-
-    fn with_secrets_masked(mut self) -> Self {
-        if self.secret.is_some() {
-            self.secret = Some("***".to_string());
-        }
-        self
-    }
-
-    fn restore_secrets_from(&mut self, existing: &Self) {
-        if self.secret.as_deref() == Some("***") {
-            self.secret = existing.secret.clone();
-        }
-    }
 }
 
 #[cfg(test)]
@@ -164,61 +151,6 @@ mod tests {
             ..Default::default()
         };
         assert!(cfg.validate().is_ok());
-    }
-
-    #[test]
-    fn mask_secrets_replaces_secret() {
-        let cfg = WebhookChannelConfig {
-            url: "https://example.com".to_string(),
-            secret: Some("super-secret".to_string()),
-            ..Default::default()
-        };
-        let masked = cfg.with_secrets_masked();
-        assert_eq!(masked.secret.as_deref(), Some("***"));
-        assert_eq!(masked.url, "https://example.com");
-    }
-
-    #[test]
-    fn mask_secrets_preserves_none_secret() {
-        let cfg = WebhookChannelConfig {
-            url: "https://example.com".to_string(),
-            secret: None,
-            ..Default::default()
-        };
-        let masked = cfg.with_secrets_masked();
-        assert!(masked.secret.is_none());
-    }
-
-    #[test]
-    fn restore_secrets_replaces_masked_value() {
-        let existing = WebhookChannelConfig {
-            url: "https://example.com".to_string(),
-            secret: Some("real-secret".to_string()),
-            ..Default::default()
-        };
-        let mut incoming = WebhookChannelConfig {
-            url: "https://example.com".to_string(),
-            secret: Some("***".to_string()),
-            ..Default::default()
-        };
-        incoming.restore_secrets_from(&existing);
-        assert_eq!(incoming.secret.as_deref(), Some("real-secret"));
-    }
-
-    #[test]
-    fn restore_secrets_keeps_new_value() {
-        let existing = WebhookChannelConfig {
-            url: "https://example.com".to_string(),
-            secret: Some("old-secret".to_string()),
-            ..Default::default()
-        };
-        let mut incoming = WebhookChannelConfig {
-            url: "https://example.com".to_string(),
-            secret: Some("new-secret".to_string()),
-            ..Default::default()
-        };
-        incoming.restore_secrets_from(&existing);
-        assert_eq!(incoming.secret.as_deref(), Some("new-secret"));
     }
 
     #[test]

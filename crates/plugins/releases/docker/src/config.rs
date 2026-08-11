@@ -8,9 +8,6 @@ use uptrakit_plugin_infrastructure_core::{
 
 use crate::error::{DockerError, Result};
 
-/// Sentinel value used to indicate a masked secret in API responses.
-const SECRET_MASK: &str = "***";
-
 /// Selects the container runtime used for `dial-stdio` tunnelling over SSH.
 ///
 /// Only relevant when the plugin is used via an SSH executor that supports
@@ -411,53 +408,6 @@ impl PluginConfig for DockerConfig {
                 .with_help_text("Mark the update as requiring a host restart to take effect. The item stays in AwaitingRestart until the new container is running after reboot."),
         ]
     }
-
-    fn with_secrets_masked(mut self) -> Self {
-        self.auth = self.auth.map(|a| match a {
-            DockerAuth::Basic { username, .. } => DockerAuth::Basic {
-                username,
-                password: SecretString::new(SECRET_MASK),
-            },
-            DockerAuth::Bearer { .. } => DockerAuth::Bearer {
-                token: SecretString::new(SECRET_MASK),
-            },
-        });
-        self
-    }
-
-    fn restore_secrets_from(&mut self, existing: &Self) {
-        let Some(existing_auth) = &existing.auth else {
-            return;
-        };
-        let Some(incoming_auth) = &mut self.auth else {
-            return;
-        };
-        match (incoming_auth, existing_auth) {
-            (
-                DockerAuth::Basic {
-                    password: incoming_pw,
-                    ..
-                },
-                DockerAuth::Basic {
-                    password: existing_pw,
-                    ..
-                },
-            ) if incoming_pw.expose_secret() == SECRET_MASK => {
-                *incoming_pw = existing_pw.clone();
-            }
-            (
-                DockerAuth::Bearer {
-                    token: incoming_token,
-                },
-                DockerAuth::Bearer {
-                    token: existing_token,
-                },
-            ) if incoming_token.expose_secret() == SECRET_MASK => {
-                *incoming_token = existing_token.clone();
-            }
-            _ => {}
-        }
-    }
 }
 
 #[cfg(test)]
@@ -589,113 +539,6 @@ mod tests {
         };
         assert_eq!(config.resolved_tracked_tag("latest"), "main");
         assert_eq!(config.resolved_tracked_tag("stable"), "main");
-    }
-
-    // ── secret masking ───────────────────────────────────────────────────────
-
-    #[test]
-    fn with_secrets_masked_basic_auth() {
-        let config = DockerConfig {
-            auth: Some(DockerAuth::Basic {
-                username: "user".to_string(),
-                password: SecretString::new("secret123"),
-            }),
-            ..Default::default()
-        };
-        let masked = config.with_secrets_masked();
-        match masked.auth.unwrap() {
-            DockerAuth::Basic { username, password } => {
-                assert_eq!(username, "user");
-                assert_eq!(password.expose_secret(), SECRET_MASK);
-            }
-            _ => panic!("expected Basic auth"),
-        }
-    }
-
-    #[test]
-    fn with_secrets_masked_bearer_auth() {
-        let config = DockerConfig {
-            auth: Some(DockerAuth::Bearer {
-                token: SecretString::new("ghcr_token"),
-            }),
-            ..Default::default()
-        };
-        let masked = config.with_secrets_masked();
-        match masked.auth.unwrap() {
-            DockerAuth::Bearer { token } => {
-                assert_eq!(token.expose_secret(), SECRET_MASK);
-            }
-            _ => panic!("expected Bearer auth"),
-        }
-    }
-
-    #[test]
-    fn with_secrets_masked_no_auth_stays_none() {
-        let config = DockerConfig::default();
-        let masked = config.with_secrets_masked();
-        assert!(masked.auth.is_none());
-    }
-
-    #[test]
-    fn restore_secrets_from_basic_password() {
-        let existing = DockerConfig {
-            auth: Some(DockerAuth::Basic {
-                username: "user".to_string(),
-                password: SecretString::new("real_password"),
-            }),
-            ..Default::default()
-        };
-        let mut incoming = existing.clone().with_secrets_masked();
-        incoming.restore_secrets_from(&existing);
-        match incoming.auth.unwrap() {
-            DockerAuth::Basic { password, .. } => {
-                assert_eq!(password.expose_secret(), "real_password");
-            }
-            _ => panic!("expected Basic auth"),
-        }
-    }
-
-    #[test]
-    fn restore_secrets_from_bearer_token() {
-        let existing = DockerConfig {
-            auth: Some(DockerAuth::Bearer {
-                token: SecretString::new("real_token"),
-            }),
-            ..Default::default()
-        };
-        let mut incoming = existing.clone().with_secrets_masked();
-        incoming.restore_secrets_from(&existing);
-        match incoming.auth.unwrap() {
-            DockerAuth::Bearer { token } => {
-                assert_eq!(token.expose_secret(), "real_token");
-            }
-            _ => panic!("expected Bearer auth"),
-        }
-    }
-
-    #[test]
-    fn restore_secrets_from_keeps_new_password() {
-        let existing = DockerConfig {
-            auth: Some(DockerAuth::Basic {
-                username: "user".to_string(),
-                password: SecretString::new("old_password"),
-            }),
-            ..Default::default()
-        };
-        let mut incoming = DockerConfig {
-            auth: Some(DockerAuth::Basic {
-                username: "user".to_string(),
-                password: SecretString::new("new_password"),
-            }),
-            ..Default::default()
-        };
-        incoming.restore_secrets_from(&existing);
-        match incoming.auth.unwrap() {
-            DockerAuth::Basic { password, .. } => {
-                assert_eq!(password.expose_secret(), "new_password");
-            }
-            _ => panic!("expected Basic auth"),
-        }
     }
 
     #[test]

@@ -254,21 +254,6 @@ mod tests {
     }
 
     #[test]
-    fn masking_is_noop() {
-        let config = ShellConfig {
-            version_command: Some("cmd".to_string()),
-            update_command: Some("update".to_string()),
-            prefer_interactive: false,
-            resumable: false,
-        };
-        let masked = config.clone().with_secrets_masked();
-        assert_eq!(masked.version_command, config.version_command);
-        assert_eq!(masked.update_command, config.update_command);
-        assert_eq!(masked.prefer_interactive, config.prefer_interactive);
-        assert_eq!(masked.resumable, config.resumable);
-    }
-
-    #[test]
     fn test_shell_plugin_resumable_config_defaults_false() {
         let config: ShellConfig = serde_json::from_str(r#"{"update_command":"echo hi"}"#).unwrap();
         assert!(!config.resumable);

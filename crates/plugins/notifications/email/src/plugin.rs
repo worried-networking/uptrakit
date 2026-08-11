@@ -1598,13 +1598,6 @@ mod tests {
     }
 
     #[test]
-    fn descriptor_mask_secrets_returns_config_unchanged() {
-        let config = serde_json::json!({"to_addresses": ["user@example.com"]});
-        let masked = (DESCRIPTOR.config.mask_secrets)(&config);
-        assert_eq!(masked, config, "per-channel config has no secrets to mask");
-    }
-
-    #[test]
     fn descriptor_sample_config() {
         let sample = (DESCRIPTOR.config.sample)();
         assert!(sample.is_object());

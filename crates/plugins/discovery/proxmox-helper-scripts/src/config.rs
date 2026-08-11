@@ -43,21 +43,4 @@ mod tests {
         let json = serde_json::to_string(&config).expect("serialize");
         assert_eq!(json, "{}");
     }
-
-    #[test]
-    fn secret_masking_is_noop() {
-        let config = ProxmoxHelperScriptsConfig::default();
-        let masked = config.with_secrets_masked();
-        let json = serde_json::to_string(&masked).expect("serialize masked");
-        assert_eq!(json, "{}");
-    }
-
-    #[test]
-    fn secret_restore_is_noop() {
-        let existing = ProxmoxHelperScriptsConfig::default();
-        let mut incoming = ProxmoxHelperScriptsConfig::default();
-        incoming.restore_secrets_from(&existing);
-        let json = serde_json::to_string(&incoming).expect("serialize restored");
-        assert_eq!(json, "{}");
-    }
 }
