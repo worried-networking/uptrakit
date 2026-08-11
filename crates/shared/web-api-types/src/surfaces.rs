@@ -127,6 +127,17 @@ impl Validate for InvokeSurfaceInteractionRequest {
     }
 }
 
+impl crate::validation::sealed::Sealed for InvokeSurfaceInteractionRequest {}
+
+impl crate::validation::RoutingEnvelope for InvokeSurfaceInteractionRequest {
+    fn routing_envelope(&self) -> crate::validation::InvokeRoutingEnvelope {
+        crate::validation::InvokeRoutingEnvelope {
+            target_provider_id: self.target_provider_id.clone(),
+            timeout_seconds: self.timeout_seconds,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -136,5 +147,41 @@ mod tests {
         InvokeSurfaceInteractionRequest::default()
             .validate()
             .expect("InvokeSurfaceInteractionRequest::default() should validate");
+    }
+
+    #[test]
+    fn invoke_request_validate_is_unconditionally_ok_canary() {
+        // Canary (spec 2026-08-06 item 5): validate() is unconditionally Ok
+        // today, so the 403-before-semantic-400 dispatch ordering has no
+        // discriminating test. The author of the FIRST real Validate rule
+        // breaks this test and must then add that discriminating test (a
+        // well-formed body violating the rule, sent by an unauthorized
+        // caller, must 403 — see the choke-point comment in
+        // web-api routes/surfaces.rs::dispatch_surface_interaction).
+        let populated = InvokeSurfaceInteractionRequest {
+            params: serde_json::Map::from_iter([(
+                "k".to_string(),
+                serde_json::Value::String("v".to_string()),
+            )]),
+            encrypted_sensitive_params: None,
+            target_provider_id: Some("provider".to_string()),
+            idempotency_key: Some("key".to_string()),
+            timeout_seconds: Some(1),
+        };
+        populated
+            .validate()
+            .expect("validate() must stay unconditionally Ok until the discriminating test exists");
+    }
+
+    #[test]
+    fn routing_envelope_projects_only_the_envelope_fields() {
+        let req = InvokeSurfaceInteractionRequest {
+            target_provider_id: Some("p1".to_string()),
+            timeout_seconds: Some(30),
+            ..Default::default()
+        };
+        let env = crate::validation::RoutingEnvelope::routing_envelope(&req);
+        assert_eq!(env.target_provider_id.as_deref(), Some("p1"));
+        assert_eq!(env.timeout_seconds, Some(30));
     }
 }

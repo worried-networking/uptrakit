@@ -15,7 +15,9 @@ use axum::response::Response;
 use serde::de::DeserializeOwned;
 use uptrakit_web_api_auth::auth::api_token::ApiTokenService;
 use uptrakit_web_api_auth::auth::session::SessionService;
-use uptrakit_web_api_types::validation::{Validate, ValidationError};
+use uptrakit_web_api_types::validation::{
+    InvokeRoutingEnvelope, RoutingEnvelope, Validate, ValidationError,
+};
 
 use crate::app_state::DbState;
 
@@ -320,13 +322,23 @@ where
 }
 
 /// A deserialized-but-not-yet-validated request body. The inner value is
-/// private; the only way to reach the fields is [`Unvalidated::require_valid`].
+/// private; the only way to reach the payload fields is
+/// [`Unvalidated::require_valid`]. Sole carve-out: for types implementing
+/// [`RoutingEnvelope`], [`Unvalidated::peek_envelope`] projects the declared
+/// routing metadata (target selection, timeout) without unlocking the payload.
 pub struct Unvalidated<T>(T);
 
 impl<T: Validate> Unvalidated<T> {
     pub fn require_valid(self) -> Result<T, ValidationError> {
         self.0.validate()?;
         Ok(self.0)
+    }
+}
+
+impl<T: RoutingEnvelope> Unvalidated<T> {
+    /// Project the routing envelope without unlocking the payload.
+    pub fn peek_envelope(&self) -> InvokeRoutingEnvelope {
+        self.0.routing_envelope()
     }
 }
 
