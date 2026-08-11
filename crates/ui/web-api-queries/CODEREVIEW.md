@@ -8,8 +8,8 @@
 The query crate is functionally strong with good transactional safety for batch dispatch, update
 completion, and tenant data reset. CAS-style dispatch patterns are well-implemented and
 multi-controller-safe. This review cycle validated all prior findings, confirmed one has been
-partially mitigated, added two new findings (Queued status mapping gap, interactive flag
-inconsistency in batch path), and retained all prior findings that remain valid.
+partially mitigated, added one new finding (interactive flag inconsistency in batch path), and
+retained all prior findings that remain valid.
 
 ## Strengths
 
@@ -62,22 +62,6 @@ inconsistency in batch path), and retained all prior findings that remain valid.
   GitHub and Docker both discovering a package named "nginx") race through Phase 3. The losing
   insert's fallback returns the winner's item, causing incorrect plugin config routing for
   all subsequent operations on that software item.
-
-### [MEDIUM] `db_status_to_api` maps `Queued` to `Pending` with a warning log
-
-- **Dimension**: correctness, consistency
-- **Scope**: `crates/ui/web-api-queries/src/queries/update_history.rs:db_status_to_api` (line 17-28)
-- **Description**: the API-level `UpdateStatus` enum in `web-api-types` has four variants
-  (`Pending`, `InProgress`, `Completed`, `Failed`) but no `Queued` variant. The `db_status_to_api`
-  mapping function sends `Queued` records through the wildcard `_ =>` branch, which logs a warning
-  and returns `Pending`. This means the update history list and detail endpoints misrepresent
-  `Queued` records as `Pending`.
-- **Why it matters**: users see `Pending` for updates that are actually `Queued` (waiting for the
-  host to become free). This is confusing because `Pending` implies the update is about to be
-  dispatched, while `Queued` means it is blocked behind another active update. The warning log
-  fires on every `Queued` record load, generating noise in production logs for a normal state.
-- **Failure scenario**: a host with 5 queued updates shows all 5 as "Pending" in the UI. The
-  user cannot distinguish which update is actively waiting for dispatch vs. which are blocked.
 
 ### [MEDIUM] N+1 sequential plugin role queries in `load_target_for_dispatch`
 
