@@ -611,6 +611,7 @@ declare_plugin!(TelegramPlugin, TelegramChannelConfig, "notifications.telegram",
     display_name: "Telegram",
     family: PluginFamily::Notification,
     config_model: ConfigModel::NotificationChannel,
+    sensitive_paths: ["bot_token", "webhook_secret"],
     roles: [NotificationTransport],
     notification_transport: create_telegram_transport,
     raw_settings_keys: &["global_telegram.bot_token"],
@@ -637,6 +638,11 @@ mod tests {
     #[test]
     fn descriptor_type_id() {
         assert_eq!(DESCRIPTOR.type_id, "notifications.telegram");
+    }
+
+    #[test]
+    fn descriptor_declares_sensitive_paths() {
+        assert_eq!(DESCRIPTOR.sensitive_paths, ["bot_token", "webhook_secret"]);
     }
 
     #[test]

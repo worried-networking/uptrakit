@@ -525,6 +525,7 @@ declare_plugin!(WebhookPlugin, WebhookChannelConfig, "notifications.webhook", {
     display_name: "Webhook",
     family: PluginFamily::Notification,
     config_model: ConfigModel::NotificationChannel,
+    sensitive_paths: ["secret"],
     roles: [NotificationTransport],
     notification_transport: create_webhook_transport,
     raw_settings_keys: &[],
@@ -574,6 +575,11 @@ mod tests {
     fn descriptor_type_id() {
         assert_eq!(DESCRIPTOR.type_id, "notifications.webhook");
         assert_eq!(DESCRIPTOR.display_name, "Webhook");
+    }
+
+    #[test]
+    fn descriptor_declares_sensitive_paths() {
+        assert_eq!(DESCRIPTOR.sensitive_paths, ["secret"]);
     }
 
     #[test]
