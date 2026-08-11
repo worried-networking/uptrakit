@@ -20,10 +20,14 @@ itself plus markdownlint are the quality gates for this branch.
 - Conventional Commits (per `docs/development/commit-messages.md`).
 - NEVER pass `--no-verify`, `--no-gpg-sign`, `SKIP=`, or `NO_HUSKY_HOOKS=1` to any git command. If a hook fails, report
   its output and STOP without committing.
-- All in-place file edits in shell steps use `perl -pi -e` (BSD `sed -i` is not portable on macOS); file appends use
-  single-quoted `printf '%s\n' '…' >> file` (no heredocs, no scalar-var argument lists — zsh does not word-split).
-- Every temporary probe edit to a `.rs` file is reverted with `git checkout -- <file>` in the same step; no probe
-  content is ever committed.
+- Every "change X to Y" / "replace … with …" / "insert …" step in this plan is an Edit-tool operation (exact string
+  replacement) unless the step shows an explicit shell command. When a step must be done from a shell instead, use
+  `perl -pi -e` (BSD `sed -i` is not portable on macOS); file appends use single-quoted `printf '%s\n' '…' >> file` (no
+  heredocs, no scalar-var argument lists — zsh does not word-split).
+- Negative-test probes write to the untracked scratch file `crates/shared/types/src/__probe_gate.rs` and end with
+  `rm -f` in the same step — never appended to a real source file. Sole exception: Task 2 Step 9 must touch the
+  allowlisted `bootstrap.rs`; it requires a clean-file precondition check before its whole-file `git checkout` revert.
+  No probe content is ever committed.
 - Snapshot rules in force: "Git hooks via husky-rs enforce a gate subset on commit/push"; "root AGENTS.md ≤500
   lines/≤60KB … no hardcoded counts"; markdownlint MD013 line_length=150 (code blocks exempt).
 - All snippets below were executed against the live tree on 2026-08-11 and produced exactly the Expected outputs shown
@@ -56,6 +60,10 @@ Expected (the bug): `verify_no_security_audit: OK` and `EXIT:0` — a broken pat
 ```bash
 git checkout -- ci/verify_no_security_audit.sh
 ```
+
+This whole-file `git checkout` is safe ONLY because no edit to this file has landed yet (first step of the task). If
+Task 1 is resumed or retried after Step 2, do NOT re-run this step's revert — after Step 2, corruption is reverted via
+perl only (see Step 3).
 
 - [ ] **Step 2: Replace the function body**
 
@@ -97,7 +105,10 @@ Changes vs the old body: `2>/dev/null || true` on the `rg` process substitution 
 0 and hid rg's diagnostics); rg output goes to a `mktemp` file with `rc` captured, checked BEFORE the loop; status 1
 (zero matches) stays legal, status ≥ 2 hard-fails. Do NOT use `wait $!` after a process substitution instead — that
 requires bash ≥ 5.1. The message prefix stays `verify_no_security_audit:` here; Task 3's rename sweep updates every
-prefix at once.
+prefix at once. Deliberate textual deviation from the spec's snippet: the spec writes the status check as a one-liner
+(`(( rc <= 1 )) || { …; exit 1; }`); this plan uses the equivalent `if (( rc > 1 )); then … fi` block because the
+script's house style is if-blocks throughout. Both are `set -e`-safe; the spec's prescription is the MECHANISM (temp
+file, rc capture, pre-loop check, no `|| true`, no `2>/dev/null`), which is preserved exactly.
 
 - [ ] **Step 3: Verify the fix (red, phase 2 — corrupt pattern now fails loudly)**
 
@@ -106,16 +117,16 @@ perl -pi -e 's/collect_findings "security_audit" \x27target:/collect_findings "s
 bash ci/verify_no_security_audit.sh; echo "EXIT:$?"
 ```
 
-Expected (named signature, verbatim):
+Expected — the ASSERTED signature is the script's own line plus the exit code:
 
 ```text
-rg: regex parse error:
-    (?:(target:\s*"security_audit")
-    ^
-error: unclosed group
 verify_no_security_audit: rg failed (rc=2) for rule 'security_audit'
 EXIT:1
 ```
+
+rg's own preceding stderr lines (`rg: regex parse error: … error: unclosed group` on rg 15.2.0) are informational —
+their exact wording is a ripgrep implementation detail that varies across rg versions; do not fail this step on their
+formatting, only on the two asserted lines above.
 
 Revert the corruption only (the function fix from Step 2 must survive — revert via perl, NOT `git checkout`):
 
@@ -151,7 +162,7 @@ status, and hard-fail on status >= 2 before the parse loop; status 1
 **Files:**
 
 - Modify: `ci/verify_no_security_audit.sh` (rule validation, collect_findings calls, COUNTS, violation print tail)
-- Modify: `ci/verify_no_security_audit_allowlist.txt` (append 2 rows)
+- Modify: `ci/verify_no_security_audit_allowlist.txt` (append 1 comment line + 2 rows)
 
 **Interfaces:**
 
@@ -236,12 +247,12 @@ raw_action does not (spec §Rule family).
 - [ ] **Step 5: Append the two allowlist rows**
 
 ```bash
-printf '%s\n' 'permission_model|crates/core/agent-ssh-runtime/src/operations/bootstrap.rs|Permission denied' 'permission_model|crates/core/integration-tests/tests/database/migrations.rs|TABLES.*role_permissions' >> ci/verify_no_security_audit_allowlist.txt
+printf '%s\n' '# permission_model: expected allowlist material is (1) OS-error prose in string literals ("Permission denied"-class, the live precedent below) and (2) trailing "// ..." comments — the comment filter only skips comment-ONLY lines.' 'permission_model|crates/core/agent-ssh-runtime/src/operations/bootstrap.rs|Permission denied' 'permission_model|crates/core/integration-tests/tests/database/migrations.rs|TABLES.*role_permissions' >> ci/verify_no_security_audit_allowlist.txt
 ```
 
 Row 1: the `output.contains("Permission denied")` match guard (OS error prose). Row 2: the M1.8 drop-regression test's
 `const TABLES` declaration — anchored on `TABLES` so the row does not blind the whole file to future `role_permissions`
-lines.
+lines. The leading comment line documents the trailing-comment false-positive class at its point of use.
 
 - [ ] **Step 6: Clean-tree run (zero fix cost)**
 
@@ -252,56 +263,79 @@ bash ci/verify_no_security_audit.sh; echo "EXIT:$?"
 Expected: `verify_no_security_audit: OK`, `EXIT:0`. (The 7 comment-only hits are skipped by `is_comment_only_line`; the
 2 code-line hits match the new allowlist rows.)
 
-- [ ] **Step 7: Negative self-test — all three registered families of token**
+- [ ] **Step 7: Negative self-test — every pattern component fires (7-line canary)**
+
+Probes go into a NEW untracked scratch file — never appended to a real source file, so no `git checkout` revert that
+could clobber concurrent uncommitted edits, no compile impact (the file is in no `mod` tree), and no way to leak into a
+`--only` commit. One canary line per pattern component (a canary narrower than its ban list proves only the sample):
 
 ```bash
-printf '%s\n' 'pub enum Permission { A }' 'pub fn permission_extractor_probe() {}' 'pub fn probe_alias() { let _ = r#"Alias::new("role_permissions")"#; }' >> crates/shared/types/src/lib.rs
-bash ci/verify_no_security_audit.sh; echo "EXIT:$?"
-git checkout -- crates/shared/types/src/lib.rs
+printf '%s\n' 'pub enum Permission { A }' 'pub fn permission_extractor_probe() {}' 'pub fn probe_alias() { let _ = r#"Alias::new("role_permissions")"#; }' 'pub struct RolePermission;' 'pub fn probe_entity() { let _ = crate::entity::role_permission::Entity; }' '#[sea_orm(table_name = "permissions")]' 'pub fn probe_parent() { let _ = r#"Alias::new("permissions")"#; }' > crates/shared/types/src/__probe_gate.rs; bash ci/verify_no_security_audit.sh; echo "EXIT:$?"; rm -f crates/shared/types/src/__probe_gate.rs
 ```
 
-Expected (line numbers will differ):
+(One line on purpose: the `rm -f` must run even though the gate exits 1 — a step runner that stops at the first non-zero
+exit would otherwise leave the probe file behind.)
+
+Expected (verbatim):
 
 ```text
 verify_no_security_audit: legacy permission-model identifiers remain outside allowlist:
-crates/shared/types/src/lib.rs:56:pub enum Permission { A }
-crates/shared/types/src/lib.rs:57:pub fn permission_extractor_probe() {}
-crates/shared/types/src/lib.rs:58:pub fn probe_alias() { let _ = r#"Alias::new("role_permissions")"#; }
+crates/shared/types/src/__probe_gate.rs:1:pub enum Permission { A }
+crates/shared/types/src/__probe_gate.rs:2:pub fn permission_extractor_probe() {}
+crates/shared/types/src/__probe_gate.rs:3:pub fn probe_alias() { let _ = r#"Alias::new("role_permissions")"#; }
+crates/shared/types/src/__probe_gate.rs:4:pub struct RolePermission;
+crates/shared/types/src/__probe_gate.rs:5:pub fn probe_entity() { let _ = crate::entity::role_permission::Entity; }
+crates/shared/types/src/__probe_gate.rs:6:#[sea_orm(table_name = "permissions")]
+crates/shared/types/src/__probe_gate.rs:7:pub fn probe_parent() { let _ = r#"Alias::new("permissions")"#; }
 EXIT:1
 ```
 
-All three lines MUST appear — a missing line means a pattern component regressed.
+ALL SEVEN lines MUST appear — a missing line means that specific pattern component regressed (lines 1–3: the
+`Permission` token, `permission_extractor`, `role_permissions`; 4: `RolePermission`; 5: entity-module path; 6:
+`table_name` literal; 7: `Alias::new("permissions")`).
 
 - [ ] **Step 8: Negative self-test — two-family separator leg**
 
 ```bash
-printf '%s\n' 'pub fn selftest_sep() { let _ = r#"target: "security_audit""#; }' 'pub enum Permission { A }' >> crates/shared/types/src/lib.rs
-bash ci/verify_no_security_audit.sh; echo "EXIT:$?"
-git checkout -- crates/shared/types/src/lib.rs
+printf '%s\n' 'pub fn selftest_sep() { let _ = r#"target: "security_audit""#; }' 'pub enum Permission { A }' > crates/shared/types/src/__probe_gate.rs; bash ci/verify_no_security_audit.sh; echo "EXIT:$?"; rm -f crates/shared/types/src/__probe_gate.rs
 ```
 
 Expected: the `security_audit` block, then EXACTLY ONE blank line, then the `permission_model` block, `EXIT:1`:
 
 ```text
 verify_no_security_audit: legacy security_audit callsites remain:
-crates/shared/types/src/lib.rs:56:pub fn selftest_sep() { let _ = r#"target: "security_audit""#; }
+crates/shared/types/src/__probe_gate.rs:1:pub fn selftest_sep() { let _ = r#"target: "security_audit""#; }
 
 verify_no_security_audit: legacy permission-model identifiers remain outside allowlist:
-crates/shared/types/src/lib.rs:57:pub enum Permission { A }
+crates/shared/types/src/__probe_gate.rs:2:pub enum Permission { A }
 EXIT:1
 ```
 
 - [ ] **Step 9: Negative self-test — allowlist rows do not blind their files**
 
+This is the one probe that MUST touch a real file (the allowlisted `bootstrap.rs`). Preconditions: run
+`git status --short crates/core/agent-ssh-runtime/src/operations/bootstrap.rs` first — it must be EMPTY (the revert
+below is a whole-file `git checkout`, which would destroy concurrent uncommitted edits). The probe line is valid,
+compiling, warning-clean Rust: `bootstrap` sits in a `pub` module chain (`lib.rs` has `pub mod operations`,
+`operations/mod.rs` has `pub mod bootstrap`), so the top-level `pub const` dodges both `dead_code` and `unreachable_pub`
+under the deny-warnings workspace — if this probe is ever retargeted to a different allowlisted file, re-derive that
+claim for the new module's visibility:
+
 ```bash
-printf '%s\n' 'use x::Permission;' >> crates/core/agent-ssh-runtime/src/operations/bootstrap.rs
+printf '%s\n' 'pub const PROBE_MSG: &str = "Permission granted";' >> crates/core/agent-ssh-runtime/src/operations/bootstrap.rs
 bash ci/verify_no_security_audit.sh; echo "EXIT:$?"
 git checkout -- crates/core/agent-ssh-runtime/src/operations/bootstrap.rs
 ```
 
-Expected: `permission_model` block naming
-`crates/core/agent-ssh-runtime/src/operations/bootstrap.rs:…:use x::Permission;`, `EXIT:1` — the row's
-`Permission denied` text pattern must not absorb a genuine type reference.
+Expected (line number may differ):
+
+```text
+verify_no_security_audit: legacy permission-model identifiers remain outside allowlist:
+crates/core/agent-ssh-runtime/src/operations/bootstrap.rs:2157:pub const PROBE_MSG: &str = "Permission granted";
+EXIT:1
+```
+
+The row's `Permission denied` text pattern must not absorb a genuine non-comment `Permission` line.
 
 - [ ] **Step 10: Confirm working tree is clean and gate is green**
 
@@ -353,6 +387,9 @@ perl -pi -e 's/verify_no_security_audit/verify_no_legacy_identifiers/g' ci/verif
 
 The perl sweep rewrites the `ALLOWLIST_FILE=` constant AND every message prefix in one pass. The allowlist txt contains
 no self-reference (its only comment is `# rule|path|text-regex`) — no edit needed there.
+
+**Edit mechanism for Steps 2–4:** use the Edit tool (exact string replacement). If a step must be done from a shell
+instead, use `perl -pi -e` per the Global Constraints — never `sed -i` (BSD/macOS incompatibility).
 
 - [ ] **Step 2: Update the two enforcement surfaces**
 
@@ -433,8 +470,7 @@ missed reference; fix it before committing. (`--no-ignore` because a machine-loc
 - [ ] **Step 7: Commit**
 
 ```bash
-git add ci/verify_no_legacy_identifiers.sh ci/verify_no_legacy_identifiers_allowlist.txt .husky/pre-push .github/workflows/ci.yml AGENTS.md docs/development/quality-gates.md ci/verify_no_new_cfg_not_feature.sh
-git commit -m "refactor(ci): rename verify_no_security_audit to verify_no_legacy_identifiers
+git commit --only ci/verify_no_security_audit.sh --only ci/verify_no_legacy_identifiers.sh --only ci/verify_no_security_audit_allowlist.txt --only ci/verify_no_legacy_identifiers_allowlist.txt --only .husky/pre-push --only .github/workflows/ci.yml --only AGENTS.md --only docs/development/quality-gates.md --only ci/verify_no_new_cfg_not_feature.sh -m "refactor(ci): rename verify_no_security_audit to verify_no_legacy_identifiers
 
 The script now bans three legacy identifier families (security_audit
 target literal, raw action literals, deleted permission model), so the
@@ -445,8 +481,11 @@ the precedent comment in verify_no_new_cfg_not_feature.sh. Historical
 mentions under docs/superpowers/ stay untouched by convention."
 ```
 
-Note: `git status --short` before committing must show ONLY the seven paths listed above (the two renames show as `R`).
-Anything else = investigate before committing.
+Note: `--only` names BOTH halves of each rename (old + new path) — naming only the new path would commit the added file
+while leaving the old path's deletion out (verified in a scratch repo: old+new named ⇒ clean `a.txt => b.txt` rename
+commit). `git status --short` before committing must show EXACTLY seven lines — one `R old -> new` line per rename (2)
+plus one `M` line per modified file (5) — covering only paths from this task's Files block. Anything else = investigate
+before committing.
 
 ---
 
@@ -470,3 +509,9 @@ Anything else = investigate before committing.
   (clean-tree OK, three-token leg, separator leg, non-blinding leg, exit-2 leg) and reverted; none is hand-derived.
 - Intermediate-commit sanity: after Task 1 and Task 2 commits the script keeps its old name and old wiring — every
   commit deploys a consistent, green state; Task 3 flips the name and all references atomically in one commit.
+- Known deferred residual (contrarian round, deliberately NOT in this plan's scope): a valid-but-semantically-dead
+  pattern (e.g. a botched future edit of `\bPermission\b`) stays green forever, because the family legitimately matches
+  zero non-allowlisted lines. The known fix is a permanent stale-gate canary asserting every allowlist row's
+  `(path, text-pattern)` still matches at least one line (precedent: the in-script canary in
+  `ci/verify_engine_owned_entities.sh`) — registered as a follow-up in the pending-specs tracker, not implemented here,
+  since the reviewed spec explicitly accepted allowlist-row staleness as a residual.
