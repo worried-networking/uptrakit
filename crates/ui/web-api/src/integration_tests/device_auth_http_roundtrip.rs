@@ -1,4 +1,12 @@
+#![expect(
+    clippy::expect_used,
+    reason = "test code: panics on failure are acceptable"
+)]
+#![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
+
 use http::StatusCode;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+use uptrakit_shared_db::entity::audit_log;
 use uptrakit_web_api_types::auth::UserResponse;
 use uptrakit_web_api_types::oauth::{
     DeviceAuthorizationResponse, OAuthErrorCode, OAuthErrorResponse, OAuthTokenResponse,
@@ -137,4 +145,71 @@ async fn device_flow_deny_via_http_returns_access_denied_on_poll() {
         .await;
     assert_eq!(token_status, StatusCode::BAD_REQUEST);
     assert_eq!(err.error, OAuthErrorCode::AccessDenied);
+}
+
+// ── Test 3: validation reject is audited ────────────────────────────────
+
+/// Polls the tenant-scoped `audit_logs` table up to 50 × 10 ms for a row
+/// matching both `action_type` and `outcome`, since `emit_event` is
+/// async/fire-and-forget. Copied from `tenant_audit_row_for_action_and_outcome`
+/// in `routes/software_items/tests.rs` (this module has no shared helper of
+/// its own to reach across into).
+async fn tenant_audit_row_for_action_and_outcome(
+    db: &sea_orm::DatabaseConnection,
+    action_type: uptrakit_audit_log::RegisteredAuditAction,
+    outcome: &'static str,
+) -> audit_log::Model {
+    for _ in 0..50 {
+        if let Some(row) = audit_log::Entity::find()
+            .filter(audit_log::Column::ActionType.eq(action_type))
+            .filter(audit_log::Column::Outcome.eq(outcome))
+            .order_by_desc(audit_log::Column::OccurredAt)
+            .one(db)
+            .await
+            .expect("query audit rows")
+        {
+            return row;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    panic!("expected tenant audit row with outcome");
+}
+
+#[tokio::test]
+async fn device_auth_approve_validation_reject_is_audited() {
+    let app = TestApp::new().await;
+    let client = app.client();
+
+    // Register user via HTTP; the first registration is bootstrapped as
+    // owner, so no separate role-staging is needed to call `approve`.
+    let (reg_status, auth) =
+        register_user(&client, "approve-invalid@example.com", "TestPassword1!").await;
+    assert_eq!(reg_status, StatusCode::CREATED);
+    let user_jwt = auth.access_token.expose_secret().to_string();
+
+    // Whitespace-only user_code fails DeviceAuthApproveRequest::validate()
+    // (trims to empty) before normalization/hashing ever runs.
+    let approve_status = client
+        .post_json(
+            "/api/v1/auth/device/approve",
+            &serde_json::json!({ "user_code": "   " }),
+        )
+        .bearer(&user_jwt)
+        .send_status()
+        .await;
+    assert_eq!(approve_status, StatusCode::BAD_REQUEST);
+
+    let row = tenant_audit_row_for_action_and_outcome(
+        &app.db,
+        uptrakit_audit_log::AuditActionType::AUTH_DEVICE_APPROVE,
+        uptrakit_audit_log::AuditOutcome::ValidationFailed.as_str(),
+    )
+    .await;
+    let details = row.details_json.expect("details");
+    assert_eq!(details["reason_code"], serde_json::json!("invalid_request"));
+    assert!(
+        details.get("device_flow_id").is_none(),
+        "rejected before normalization/hashing: no device_flow_id should be recorded"
+    );
 }

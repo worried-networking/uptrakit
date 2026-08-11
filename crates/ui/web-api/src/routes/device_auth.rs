@@ -71,9 +71,23 @@ pub async fn device_auth_approve(
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     body: Unvalidated<DeviceAuthApproveRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let api_token_id = api_token_id.map(|value| value.0);
     let req = match body.require_valid() {
         Ok(req) => req,
         Err(e) => {
+            let (actor_type, actor_id) = auth_user.audit_actor(api_token_id);
+            if let Ok(entry) =
+                uptrakit_audit_log::AuditEntry::<uptrakit_audit_log::Event>::builder_event(
+                    uptrakit_audit_log::AuditActionType::AUTH_DEVICE_APPROVE,
+                )
+                .tenant_scope(state.default_tenant_id)
+                .actor(actor_type, actor_id)
+                .outcome(uptrakit_audit_log::AuditOutcome::ValidationFailed)
+                .details(serde_json::json!({ "reason_code": "invalid_request" }))
+                .build()
+            {
+                state.audit_emitter.emit_event(entry);
+            }
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 e.to_string(),
@@ -82,7 +96,6 @@ pub async fn device_auth_approve(
             ));
         }
     };
-    let api_token_id = api_token_id.map(|value| value.0);
     let normalized = req.user_code.replace('-', "").to_uppercase();
     let device_flow_id = hash_token(&normalized);
 
