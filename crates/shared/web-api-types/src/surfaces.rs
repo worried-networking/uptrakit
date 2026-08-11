@@ -141,6 +141,7 @@ impl crate::validation::RoutingEnvelope for InvokeSurfaceInteractionRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uptrakit_wire::limits::MAX_SURFACE_PARAMS_LEN;
 
     #[test]
     fn invoke_surface_interaction_request_validate_is_ok() {
@@ -157,8 +158,12 @@ mod tests {
         // breaks this test and must then add that discriminating test (a
         // well-formed body violating the rule, sent by an unauthorized
         // caller, must 403 — see the choke-point comment in
-        // web-api routes/surfaces.rs::dispatch_surface_interaction).
-        let populated = InvokeSurfaceInteractionRequest {
+        // web-api routes/surfaces.rs::dispatch_surface_interaction). Each
+        // fixture below is deliberately validator-hostile (the kind of
+        // value a first real rule would plausibly reject), so this test
+        // goes red the instant such a rule lands rather than staying green
+        // by accident on uniformly well-formed input.
+        let base = InvokeSurfaceInteractionRequest {
             params: serde_json::Map::from_iter([(
                 "k".to_string(),
                 serde_json::Value::String("v".to_string()),
@@ -168,9 +173,46 @@ mod tests {
             idempotency_key: Some("key".to_string()),
             timeout_seconds: Some(1),
         };
-        populated
-            .validate()
-            .expect("validate() must stay unconditionally Ok until the discriminating test exists");
+
+        let hostile_fixtures = [
+            InvokeSurfaceInteractionRequest {
+                target_provider_id: Some(String::new()),
+                ..base.clone()
+            },
+            InvokeSurfaceInteractionRequest {
+                target_provider_id: Some("   ".to_string()),
+                ..base.clone()
+            },
+            InvokeSurfaceInteractionRequest {
+                idempotency_key: Some(String::new()),
+                ..base.clone()
+            },
+            InvokeSurfaceInteractionRequest {
+                idempotency_key: Some("   ".to_string()),
+                ..base.clone()
+            },
+            InvokeSurfaceInteractionRequest {
+                timeout_seconds: Some(0),
+                ..base.clone()
+            },
+            InvokeSurfaceInteractionRequest {
+                // Oversized value derived from `MAX_SURFACE_PARAMS_LEN`, the
+                // limit that already governs this field's wire twin
+                // (`surfaces::SurfaceActionRequest.params`, see
+                // `wire_validate_impls.rs`).
+                params: serde_json::Map::from_iter([(
+                    String::new(),
+                    serde_json::Value::String("x".repeat(MAX_SURFACE_PARAMS_LEN + 1)),
+                )]),
+                ..base.clone()
+            },
+        ];
+
+        for fixture in hostile_fixtures {
+            fixture.validate().expect(
+                "validate() must stay unconditionally Ok until the discriminating test exists",
+            );
+        }
     }
 
     #[test]
