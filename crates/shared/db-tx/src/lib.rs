@@ -18,6 +18,13 @@ use sea_orm::{
 /// applies instead of an immediate snapshot error). On other backends and on
 /// nested transactions (savepoints) the mode is silently ignored by SeaORM —
 /// correct in both contexts.
+///
+/// # Errors
+///
+/// Returns the [`DbErr`] raised by the backend when the transaction cannot be
+/// opened — a broken or exhausted connection pool, or, on SQLite, a write-lock
+/// wait that outlives `busy_timeout` (`SQLITE_BUSY`, since `BEGIN IMMEDIATE`
+/// acquires the write lock up front).
 #[expect(
     clippy::disallowed_methods,
     reason = "the workspace's sole sanctioned begin_with_options call site"
