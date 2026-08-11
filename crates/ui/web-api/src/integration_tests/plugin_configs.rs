@@ -781,6 +781,125 @@ async fn test_plugin_config_prefers_active_agent_when_stale_link_exists() {
     assert_eq!(body["success"], true);
 }
 
+/// Task 10: the config-test merge step must restore secrets masked by the UI
+/// echo before dispatching to the agent — a `"***"` sentinel in `body.config`
+/// must never overwrite the real stored credential. Non-vacuity: the raw
+/// `payload.config` the fake agent receives is asserted, not just the
+/// response status. `infrastructure.proxmox` is used because it takes the
+/// agent-side path (unlike controller-side release plugins, whose canned 200
+/// exposes nothing about the merged config).
+#[tokio::test]
+async fn config_test_merge_restores_stored_secret_before_dispatch() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let config_id = Uuid::now_v7();
+    let now = time::OffsetDateTime::now_utc();
+    plugin_config::ActiveModel {
+        id: Set(config_id),
+        tenant_id: Set(app.tenant_id),
+        name: Set("Proxmox Config".to_string()),
+        plugin_type: Set("infrastructure.proxmox".to_string()),
+        config: Set(serde_json::json!({
+            "api_url": "https://pve.example.com:8006",
+            "api_token": "svc@pve!apitoken=tok-1-secret"
+        })),
+        enabled: Set(true),
+        created_at: Set(now),
+        updated_at: Set(now),
+        deactivated_at: Set(None),
+    }
+    .insert(&app.db)
+    .await
+    .expect("insert plugin config");
+
+    let host = insert_host(&app.db, app.tenant_id).await;
+    let service =
+        insert_service_with_id(&app, Uuid::from_u128(3), service::ServiceStatus::Approved).await;
+    link_service_host(&app.db, service.id, host.id).await;
+
+    let (mut rx, _handle) = app
+        .state
+        .service_connections
+        .register(service.id, BTreeSet::new(), None, None, None)
+        .await;
+    let proxy = app.state.config_test_proxy.clone();
+    let (payload_tx, payload_rx) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        match rx.recv().await {
+            Some(ControllerMessage::TestPluginConfig(payload)) => {
+                let request_id = payload.request_id.clone();
+                if payload_tx.send(payload.config.clone()).is_err() {
+                    panic!("failed to hand off dispatched payload to test");
+                }
+                proxy.complete(
+                    &request_id,
+                    TestPluginConfigResultPayload::new(request_id.clone(), true, 1),
+                );
+            }
+            other => panic!("unexpected message: {other:?}"),
+        }
+    });
+
+    let (status, body): (_, serde_json::Value) = client
+        .post_json(
+            "/api/v1/plugin-configs/test",
+            &serde_json::json!({
+                "plugin_type": "infrastructure.proxmox",
+                "plugin_config_id": config_id,
+                "config": { "api_token": "***" },
+                "host_id": host.id,
+                "test_kind": "connectivity"
+            }),
+        )
+        .bearer(&token)
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::OK, "response body: {body:?}");
+
+    let dispatched_config = payload_rx.await.expect("fake agent received payload");
+    assert_eq!(
+        dispatched_config["api_token"],
+        serde_json::json!("svc@pve!apitoken=tok-1-secret"),
+        "the dispatched wire payload must carry the real stored secret, not the UI sentinel: {dispatched_config:?}"
+    );
+}
+
+/// Task 10: with no `plugin_config_id` there is nothing to restore from, so a
+/// sentinel at a sensitive path must be rejected outright.
+#[tokio::test]
+async fn config_test_sentinel_without_saved_config_is_400() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let (status, body): (_, serde_json::Value) = client
+        .post_json(
+            "/api/v1/plugin-configs/test",
+            &serde_json::json!({
+                "plugin_type": "infrastructure.proxmox",
+                "config": {
+                    "api_url": "https://pve.example.com:8006",
+                    "api_token": "***"
+                }
+            }),
+        )
+        .bearer(&token)
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::BAD_REQUEST);
+    assert!(
+        body["error"]
+            .as_str()
+            .expect("error message")
+            .contains("still contains the masked sentinel"),
+        "unexpected error body: {body:?}"
+    );
+}
+
 #[cfg(feature = "dashboard-icons")]
 #[tokio::test]
 async fn list_plugin_types_includes_dashboard_icons_type_settings() {

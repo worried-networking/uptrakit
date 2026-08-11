@@ -155,12 +155,31 @@ pub async fn test_plugin_config(
                 base.insert(k.clone(), v.clone());
             }
         }
+        // A UI-echoed masked sentinel at a sensitive path must not overwrite
+        // the real stored secret with "***" before dispatch.
+        state
+            .plugin
+            .plugin_ops
+            .restore_config_secrets(&plugin_type_id, &mut merged, &saved.config);
         merged
     } else {
         body.config.clone()
     };
 
-    // 3. Validate merged config.
+    // 3. Reject a config that still carries the mask sentinel at a sensitive
+    // path (no saved config to restore from, or restoration left it unresolved).
+    if let Err(e) = state
+        .plugin
+        .plugin_ops
+        .assert_no_sentinel(&plugin_type_id, &config)
+    {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            format!("Invalid plugin config: {e}"),
+        );
+    }
+
+    // 4. Validate merged config.
     if let Err(e) = state
         .plugin
         .plugin_ops
@@ -172,7 +191,7 @@ pub async fn test_plugin_config(
         );
     }
 
-    // 4. Reject dangerous commands if enabled.
+    // 5. Reject dangerous commands if enabled.
     if state.reject_dangerous_commands {
         let matches = collect_dangerous_patterns(&config);
         if !matches.is_empty() {
@@ -183,7 +202,7 @@ pub async fn test_plugin_config(
         }
     }
 
-    // 5. Determine test kind from capabilities.
+    // 6. Determine test kind from capabilities.
     let is_controller_side = caps.contains(&PluginCapability::ControllerSideFetchReleases);
 
     if is_controller_side {
@@ -206,7 +225,7 @@ pub async fn test_plugin_config(
         }
     };
 
-    // 6. Resolve host → service.
+    // 7. Resolve host → service.
     let host_record = match Host::find_by_id(host_id)
         .filter(host::Column::TenantId.eq(tenant_db.tenant_id()))
         .filter(host::Column::DeactivatedAt.is_null())
@@ -226,7 +245,7 @@ pub async fn test_plugin_config(
         Err(resp) => return resp,
     };
 
-    // 7. Determine test kind.
+    // 8. Determine test kind.
     let test_kind_str = body.test_kind.as_deref().unwrap_or("version_detection");
     let test_kind = match test_kind_str {
         "version_detection" => uptrakit_wire::ConfigTestKind::VersionDetection,
@@ -242,7 +261,7 @@ pub async fn test_plugin_config(
         }
     };
 
-    // 8. Build payload and invoke via proxy.
+    // 9. Build payload and invoke via proxy.
     let request_id = Uuid::now_v7().to_string();
     let mut payload = uptrakit_wire::TestPluginConfigPayload::new(
         request_id,
