@@ -14,10 +14,25 @@
 //! `validate_identifier` SSRF guard) lives here and does not leak to callers.
 //!
 //! No query in this module may be built from the raw connection: these tables
-//! carry no `tenant_id` column, so every query goes through `ctx.tenant_db()`
-//! join helpers, scoped through both `TenantScoped` parents (`software_item`
-//! and `host`). The raw handle remains only as the executor and for
-//! `begin_immediate`.
+//! carry no `tenant_id` column, so every query must be anchored to both
+//! `TenantScoped` parents. That takes two parts per site, and only the first is
+//! a framework helper:
+//!
+//! 1. `ctx.tenant_db().find_via_tenant_join::<Target, software_item::Entity>(…)`
+//!    — anchors the `software_item` parent.
+//! 2. A hand-written `.join(JoinType::InnerJoin, …Relation::Host.def())` plus
+//!    `.filter(host::Column::TenantId.eq(tenant_db.tenant_id()))` — anchors the
+//!    `host` parent. `find_via_tenant_join` anchors one parent only, so dropping
+//!    this second part still compiles and still passes same-tenant tests while
+//!    reopening the cross-tenant path that `host_id`/`software_item_id` pointing
+//!    at different tenants exploits.
+//!
+//! Both parts are required at every site; the mismatched-parent tests in this
+//! file (`…_host_a_item_b_…` / `…_host_b_item_a_…`) are what catch a site that
+//! keeps one anchor and loses the other. Promoting the pair to a shared
+//! `TenantDb` helper is the committed response to the next occurrence of this
+//! pattern outside this crate. The raw handle remains only as the executor and
+//! for `begin_immediate`.
 
 use std::future::Future;
 use std::pin::Pin;
