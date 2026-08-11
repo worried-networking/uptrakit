@@ -129,7 +129,9 @@ async fn snapshot_protection_and_scaling_before_dispatch() {
     let snapshot_mock = server
         .mock_async(|when, then| {
             when.method(POST)
-                .path("/api2/json/nodes/pve1/qemu/100/snapshot");
+                .path("/api2/json/nodes/pve1/qemu/100/snapshot")
+                .body_includes("snapname=upk-test-software-")
+                .body_includes("description=Uptrakit");
             then.status(200)
                 .json_body(serde_json::json!({"data": "UPID:pve1:001:snapshot"}));
         })
@@ -226,7 +228,8 @@ async fn backup_protection_before_dispatch() {
             when.method(POST)
                 .path("/api2/json/nodes/pve1/vzdump")
                 .body_includes("vmid=100")
-                .body_includes("storage=storage1");
+                .body_includes("storage=storage1")
+                .body_includes("notes-template=Uptrakit");
             then.status(200)
                 .json_body(serde_json::json!({"data": "UPID:pve1:002:backup"}));
         })

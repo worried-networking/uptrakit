@@ -444,12 +444,16 @@ impl ProxmoxClient {
         node: &str,
         vmid: u32,
         snapshot_name: &str,
+        description: &str,
     ) -> Result<String> {
         tracing::debug!(node, vmid, snapshot_name, "creating QEMU snapshot");
         let data: serde_json::Value = self
             .post_form(
                 &format!("/nodes/{node}/qemu/{vmid}/snapshot"),
-                &[("snapname".to_string(), snapshot_name.to_string())],
+                &[
+                    ("snapname".to_string(), snapshot_name.to_string()),
+                    ("description".to_string(), description.to_string()),
+                ],
             )
             .await?;
         Self::task_upid_from_data(data, "QEMU snapshot create")
@@ -461,12 +465,16 @@ impl ProxmoxClient {
         node: &str,
         vmid: u32,
         snapshot_name: &str,
+        description: &str,
     ) -> Result<String> {
         tracing::debug!(node, vmid, snapshot_name, "creating LXC snapshot");
         let data: serde_json::Value = self
             .post_form(
                 &format!("/nodes/{node}/lxc/{vmid}/snapshot"),
-                &[("snapname".to_string(), snapshot_name.to_string())],
+                &[
+                    ("snapname".to_string(), snapshot_name.to_string()),
+                    ("description".to_string(), description.to_string()),
+                ],
             )
             .await?;
         Self::task_upid_from_data(data, "LXC snapshot create")
@@ -479,6 +487,7 @@ impl ProxmoxClient {
         vmid: u32,
         _guest_type: &str,
         storage_id: &str,
+        notes_template: &str,
     ) -> Result<String> {
         tracing::debug!(node, vmid, storage_id, "starting Proxmox backup task");
         let data: serde_json::Value = self
@@ -489,6 +498,7 @@ impl ProxmoxClient {
                     ("storage".to_string(), storage_id.to_string()),
                     ("mode".to_string(), "snapshot".to_string()),
                     ("quiet".to_string(), "1".to_string()),
+                    ("notes-template".to_string(), notes_template.to_string()),
                 ],
             )
             .await?;

@@ -19,8 +19,13 @@ QEMU VMs and LXC containers. Once discovered, you can manually link them to
 existing Uptrakit-managed hosts to see Proxmox metadata alongside update
 information.
 
-This is Phase 1 — discovery and manual matching. Future phases will add
-pre-update snapshot creation and rollback capabilities.
+Beyond discovery and manual matching, Uptrakit can automatically create a PVE
+snapshot or vzdump backup for a matched guest before applying an update
+(configurable per software item/host). These protection artifacts are
+labeled in the PVE UI with the software name, the version transition (e.g.
+`1.0.0 -> 2.0.0`), and the triggering update's ID, so you can identify and
+manage them at a glance. Automated rollback from these artifacts is not yet
+implemented — a future capability.
 
 ## Setup
 

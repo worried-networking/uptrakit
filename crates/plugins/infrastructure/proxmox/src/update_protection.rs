@@ -25,6 +25,7 @@ use uuid::Uuid;
 use crate::client::ProxmoxClient;
 use crate::config::ProxmoxConfig;
 use crate::policy_store::{ProtectionAudit, ProtectionMode, ProtectionPolicy};
+use uptrakit_shared_db::entity::prelude::{SoftwareItem, UpdateHistory};
 
 pub(crate) const DEFAULT_SNAPSHOT_TIMEOUT_SECONDS: i64 = 120;
 pub(crate) const DEFAULT_BACKUP_TIMEOUT_SECONDS: i64 = 900;
@@ -145,10 +146,38 @@ impl ControllerUpdateProtection for ControllerUpdateProtectionPlugin {
                 )))
             }
             ProtectionMode::Snapshot => {
-                prepare_snapshot_protection(&store, ctx, &mapping, &proxmox_cfg, &policy).await
+                let artifact_meta = load_update_artifact_context(
+                    ctx.controller.tenant_db(),
+                    ctx.software_item_id,
+                    ctx.update_history_id,
+                )
+                .await;
+                prepare_snapshot_protection(
+                    &store,
+                    ctx,
+                    &mapping,
+                    &proxmox_cfg,
+                    &policy,
+                    &artifact_meta,
+                )
+                .await
             }
             ProtectionMode::Backup => {
-                prepare_backup_protection(&store, ctx, &mapping, &proxmox_cfg, &policy).await
+                let artifact_meta = load_update_artifact_context(
+                    ctx.controller.tenant_db(),
+                    ctx.software_item_id,
+                    ctx.update_history_id,
+                )
+                .await;
+                prepare_backup_protection(
+                    &store,
+                    ctx,
+                    &mapping,
+                    &proxmox_cfg,
+                    &policy,
+                    &artifact_meta,
+                )
+                .await
             }
         }
     }
@@ -337,9 +366,14 @@ async fn prepare_snapshot_protection(
     mapping: &ProxmoxHostMappingRecord,
     proxmox_cfg: &ProxmoxConfig,
     policy: &ProtectionPolicy,
+    artifact_meta: &ProxmoxUpdateArtifactContext,
 ) -> Result<ControllerProtectionDecision> {
     let client = ProxmoxClient::new(proxmox_cfg).map_err(plugin_internal)?;
-    let snapshot_name = snapshot_name_for_update_history(ctx.update_history_id);
+    let snapshot_name = snapshot_name_for_update_history(
+        ctx.update_history_id,
+        artifact_meta.software_name.as_deref(),
+    );
+    let description = snapshot_description(ctx.update_history_id, artifact_meta);
 
     tracing::info!(
         node = %mapping.proxmox_node,
@@ -364,6 +398,7 @@ async fn prepare_snapshot_protection(
                 &mapping.proxmox_node,
                 mapping.proxmox_vmid as u32,
                 &snapshot_name,
+                &description,
             )
             .await
     } else {
@@ -372,6 +407,7 @@ async fn prepare_snapshot_protection(
                 &mapping.proxmox_node,
                 mapping.proxmox_vmid as u32,
                 &snapshot_name,
+                &description,
             )
             .await
     };
@@ -511,6 +547,7 @@ async fn prepare_backup_protection(
     mapping: &ProxmoxHostMappingRecord,
     proxmox_cfg: &ProxmoxConfig,
     policy: &ProtectionPolicy,
+    artifact_meta: &ProxmoxUpdateArtifactContext,
 ) -> Result<ControllerProtectionDecision> {
     let Some(target_key) = policy.backup_target_key.as_deref() else {
         tracing::warn!(
@@ -589,6 +626,7 @@ async fn prepare_backup_protection(
     }
 
     let client = ProxmoxClient::new(proxmox_cfg).map_err(plugin_internal)?;
+    let notes = backup_notes_template(ctx.update_history_id, artifact_meta);
 
     let task = match client
         .start_backup(
@@ -596,6 +634,7 @@ async fn prepare_backup_protection(
             mapping.proxmox_vmid as u32,
             &mapping.proxmox_type,
             &target_storage_id,
+            &notes,
         )
         .await
     {
@@ -728,11 +767,194 @@ fn plugin_internal<E: std::fmt::Display>(error: E) -> Report<PluginError> {
     report!(PluginError::PluginInternal(error.to_string()))
 }
 
-/// Derive a deterministic Proxmox-safe snapshot name for an update-history row.
+/// Decorative metadata used to build human-readable protection artifact names,
+/// descriptions, and notes. Never affects the protection workflow's success/
+/// failure outcome — loading it is best-effort and infallible.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct ProxmoxUpdateArtifactContext {
+    software_name: Option<String>,
+    from_version: Option<String>,
+    to_version: Option<String>,
+}
+
+/// Load software name and version-transition metadata for a pre-update
+/// protection artifact's name/description/notes. Infallible by design: a DB
+/// error or missing row degrades the affected field(s) to `None` rather than
+/// blocking the protection workflow, since this metadata is purely
+/// decorative display text.
+async fn load_update_artifact_context(
+    tenant_db: &uptrakit_tenant_db::TenantDb,
+    software_item_id: Uuid,
+    update_history_id: Uuid,
+) -> ProxmoxUpdateArtifactContext {
+    let software_name = match tenant_db
+        .find_by_id::<SoftwareItem, _>(software_item_id)
+        .one(tenant_db.db())
+        .await
+    {
+        Ok(Some(item)) => Some(item.name),
+        Ok(None) => None,
+        Err(error) => {
+            tracing::warn!(
+                software_item_id = %software_item_id,
+                error = %error,
+                "failed to load software item for protection artifact metadata"
+            );
+            None
+        }
+    };
+
+    let (from_version, to_version) = match tenant_db
+        .find_by_id::<UpdateHistory, _>(update_history_id)
+        .one(tenant_db.db())
+        .await
+    {
+        Ok(Some(history)) => (history.from_version, history.to_version),
+        Ok(None) => (None, None),
+        Err(error) => {
+            tracing::warn!(
+                update_history_id = %update_history_id,
+                error = %error,
+                "failed to load update history for protection artifact metadata"
+            );
+            (None, None)
+        }
+    };
+
+    ProxmoxUpdateArtifactContext {
+        software_name,
+        from_version,
+        to_version,
+    }
+}
+
+/// Derive a Proxmox-safe snapshot name for an update-history row.
 ///
-/// The output is ASCII-safe and at most 40 chars.
-pub fn snapshot_name_for_update_history(update_history_id: Uuid) -> String {
-    format!("upk-{}", update_history_id.simple())
+/// Format: `upk-<sanitized-software-name>-<hex8>`, where `hex8` is the first
+/// 8 hex characters of `update_history_id`'s simple (no-dashes) form, and the
+/// sanitized software name is lowercased ASCII alphanumerics with runs of
+/// other characters collapsed to a single `-` (leading/trailing separators
+/// stripped), capped at 27 chars. Total budget: `upk-` (4) + name (<=27) +
+/// `-` (1) + hex8 (8) = <=40 chars, satisfying Proxmox's snapname length
+/// limit.
+///
+/// When `software_name` is `None`, or it sanitizes to an empty string (e.g. a
+/// fully non-ASCII name), the name degrades to `upk-<hex8>` — no name
+/// segment, no double dash.
+///
+/// The first character is always `u`, satisfying PVE's snapname regex
+/// `[A-Za-z][A-Za-z0-9_\-]*`.
+///
+/// The name is deterministic for a given `(update_history_id, software_name)`
+/// pair, but retry-reuse logic does not depend on this determinism — the
+/// persisted `artifact_ref` in the protection audit row is what's reused on
+/// retry, never recomputed (see `is_reusable_success`).
+pub fn snapshot_name_for_update_history(
+    update_history_id: Uuid,
+    software_name: Option<&str>,
+) -> String {
+    let mut hex8 = update_history_id.simple().to_string();
+    hex8.truncate(8);
+
+    let sanitized = software_name
+        .map(sanitize_snapshot_segment)
+        .unwrap_or_default();
+
+    if sanitized.is_empty() {
+        format!("upk-{hex8}")
+    } else {
+        format!("upk-{sanitized}-{hex8}")
+    }
+}
+
+/// Sanitize a software name into a Proxmox-safe filename segment (lowercase
+/// ASCII alphanumerics, `-` separators, capped at 27 chars). Distinct from
+/// [`sanitize_label`], which sanitizes text for human-readable descriptions.
+fn sanitize_snapshot_segment(name: &str) -> String {
+    let mut out = String::new();
+    for ch in name.chars() {
+        if out.len() >= 27 {
+            break;
+        }
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+        } else if !out.is_empty() && !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    out
+}
+
+/// Sanitize untrusted display text (software name, version strings) for
+/// embedding in a PVE snapshot description or vzdump notes-template: control
+/// characters (including `\n`, `\r`, `\t`) are replaced with a single space
+/// so untrusted metadata can never forge an extra line in operator-facing
+/// text, then the result is truncated to at most `max_chars` characters.
+fn sanitize_label(text: &str, max_chars: usize) -> String {
+    text.chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .take(max_chars)
+        .collect()
+}
+
+/// Sanitized `(name, version_clause)` pieces shared by [`snapshot_description`]
+/// and [`backup_notes_template`].
+struct ArtifactLabelParts {
+    name: String,
+    version_clause: String,
+}
+
+fn artifact_label_parts(meta: &ProxmoxUpdateArtifactContext) -> ArtifactLabelParts {
+    let name = meta
+        .software_name
+        .as_deref()
+        .map(|n| sanitize_label(n, 64))
+        .unwrap_or_else(|| "unknown software".to_string());
+
+    let version_clause = match (meta.from_version.as_deref(), meta.to_version.as_deref()) {
+        (Some(from), Some(to)) => format!(
+            " ({} -> {})",
+            sanitize_label(from, 32),
+            sanitize_label(to, 32)
+        ),
+        (None, Some(to)) => format!(" (-> {})", sanitize_label(to, 32)),
+        _ => String::new(),
+    };
+
+    ArtifactLabelParts {
+        name,
+        version_clause,
+    }
+}
+
+/// Build the multi-line PVE snapshot `description` for a pre-update
+/// protection snapshot.
+fn snapshot_description(update_history_id: Uuid, meta: &ProxmoxUpdateArtifactContext) -> String {
+    let parts = artifact_label_parts(meta);
+    format!(
+        "Uptrakit pre-update protection snapshot.\nSoftware: {}{}\nUpdate ID: {update_history_id}\nCreated automatically by Uptrakit before applying this update. Safe to remove once the update is verified.",
+        parts.name, parts.version_clause
+    )
+}
+
+/// Build the single-line vzdump `notes-template` for a pre-update protection
+/// backup. vzdump's own `notes-template` mechanism treats a literal `{{` in
+/// the value as the start of its variable-substitution syntax, so the
+/// interpolated (untrusted) pieces are escaped (`\` -> `/`, `{` -> `(`,
+/// `}` -> `)`) after [`sanitize_label`] neutralizes control characters.
+fn backup_notes_template(update_history_id: Uuid, meta: &ProxmoxUpdateArtifactContext) -> String {
+    let parts = artifact_label_parts(meta);
+    let interpolated = escape_notes_template(&format!("{}{}", parts.name, parts.version_clause));
+    format!(
+        "Uptrakit pre-update protection backup - Software: {interpolated} - Update ID: {update_history_id} - Created automatically by Uptrakit"
+    )
+}
+
+fn escape_notes_template(text: &str) -> String {
+    text.replace('\\', "/").replace('{', "(").replace('}', ")")
 }
 
 #[cfg(test)]
@@ -851,8 +1073,8 @@ mod tests {
     fn snapshot_name_is_deterministic_and_safe() {
         let update_history_id =
             Uuid::parse_str("5bfb4e73-a0b4-4c81-b43d-b986589f6205").expect("valid uuid");
-        let a = snapshot_name_for_update_history(update_history_id);
-        let b = snapshot_name_for_update_history(update_history_id);
+        let a = snapshot_name_for_update_history(update_history_id, Some("Test Software 2!"));
+        let b = snapshot_name_for_update_history(update_history_id, Some("Test Software 2!"));
 
         assert_eq!(a, b);
         assert!(a.len() <= 40, "snapshot name must be <= 40 chars");
@@ -861,6 +1083,257 @@ mod tests {
                 .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
             "snapshot name must be Proxmox-safe"
         );
+        assert!(
+            a.starts_with("upk-test-software-2-"),
+            "expected sanitized name prefix, got {a}"
+        );
+    }
+
+    #[test]
+    fn snapshot_name_truncates_long_software_name_without_trailing_dash() {
+        let update_history_id = Uuid::now_v7();
+        let long_name = "a".repeat(60);
+        let name = snapshot_name_for_update_history(update_history_id, Some(&long_name));
+
+        assert!(name.len() <= 40, "snapshot name must be <= 40 chars");
+        assert!(
+            name.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+            "snapshot name must be Proxmox-safe"
+        );
+        let segment = name
+            .strip_prefix("upk-")
+            .and_then(|rest| rest.rsplit_once('-'))
+            .map(|(segment, _hex8)| segment)
+            .expect("name must have a name segment and hex8 suffix");
+        assert!(
+            !segment.ends_with('-'),
+            "truncated name segment must not leak a trailing separator: {segment:?}"
+        );
+    }
+
+    #[test]
+    fn snapshot_name_falls_back_to_hex8_only_for_non_ascii_or_missing_name() {
+        let update_history_id = Uuid::now_v7();
+
+        let non_ascii = snapshot_name_for_update_history(update_history_id, Some("производство"));
+        let missing = snapshot_name_for_update_history(update_history_id, None);
+
+        let mut hex8 = update_history_id.simple().to_string();
+        hex8.truncate(8);
+        let expected = format!("upk-{hex8}");
+
+        assert_eq!(non_ascii, expected);
+        assert_eq!(missing, expected);
+        assert_eq!(
+            snapshot_name_for_update_history(update_history_id, Some("производство")),
+            non_ascii,
+            "must be deterministic"
+        );
+        assert_eq!(
+            snapshot_name_for_update_history(update_history_id, None),
+            missing,
+            "must be deterministic"
+        );
+    }
+
+    #[test]
+    fn snapshot_description_includes_metadata_and_neutralizes_injected_newline() {
+        let update_history_id = Uuid::now_v7();
+        let meta = ProxmoxUpdateArtifactContext {
+            software_name: Some("Home Assistant".to_string()),
+            from_version: Some("1.0.0".to_string()),
+            to_version: Some("2.0.0".to_string()),
+        };
+        let description = snapshot_description(update_history_id, &meta);
+
+        assert!(description.contains("Home Assistant"));
+        assert!(description.contains("1.0.0 -> 2.0.0"));
+        assert!(description.contains(&update_history_id.to_string()));
+        assert!(description.contains("Uptrakit"));
+
+        let malicious_meta = ProxmoxUpdateArtifactContext {
+            software_name: Some("Evil\nSoftware".to_string()),
+            from_version: None,
+            to_version: None,
+        };
+        let malicious_description = snapshot_description(update_history_id, &malicious_meta);
+        assert_eq!(
+            malicious_description.lines().count(),
+            4,
+            "embedded newline in software name must not add an extra line: {malicious_description:?}"
+        );
+    }
+
+    #[test]
+    fn backup_notes_template_is_single_line_and_strips_vzdump_special_chars() {
+        let update_history_id = Uuid::now_v7();
+        let meta = ProxmoxUpdateArtifactContext {
+            software_name: Some("bad{{name}}\nx\\".to_string()),
+            from_version: Some("1{{\n0".to_string()),
+            to_version: Some("2}}\n0".to_string()),
+        };
+        let notes = backup_notes_template(update_history_id, &meta);
+
+        assert!(
+            !notes.contains('\n'),
+            "notes must be single line: {notes:?}"
+        );
+        assert!(
+            !notes.contains('{'),
+            "notes must not contain '{{': {notes:?}"
+        );
+        assert!(
+            !notes.contains('}'),
+            "notes must not contain '}}': {notes:?}"
+        );
+        assert!(
+            !notes.contains('\\'),
+            "notes must not contain '\\\\': {notes:?}"
+        );
+    }
+
+    #[test]
+    fn sanitize_label_truncates_by_char_and_strips_control_chars() {
+        let multi_byte = "😀".repeat(10) + &"я".repeat(10);
+        let truncated = sanitize_label(&multi_byte, 5);
+        assert_eq!(
+            truncated.chars().count(),
+            5,
+            "must truncate by chars, not bytes"
+        );
+
+        let with_control = "a\tb\nc\rd";
+        let cleaned = sanitize_label(with_control, 64);
+        assert!(
+            !cleaned.chars().any(|c| c.is_control()),
+            "control chars must be replaced: {cleaned:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn load_update_artifact_context_returns_both_rows_when_present() {
+        let software_item_id = Uuid::now_v7();
+        let update_history_id = Uuid::now_v7();
+        let tenant_id = Uuid::now_v7();
+
+        let db = MockDatabase::new(DbBackend::MySql)
+            .append_query_results([vec![mock_software_item_model(
+                software_item_id,
+                tenant_id,
+                "Test App",
+            )]])
+            .append_query_results([vec![mock_update_history_model(
+                update_history_id,
+                tenant_id,
+                software_item_id,
+                Some("9.9.9".to_string()),
+                Some("10.0.0".to_string()),
+            )]])
+            .into_connection();
+        let tenant_db = uptrakit_tenant_db::TenantDb::new(db, tenant_id);
+
+        let meta =
+            load_update_artifact_context(&tenant_db, software_item_id, update_history_id).await;
+
+        assert_eq!(meta.software_name, Some("Test App".to_string()));
+        assert_eq!(meta.from_version, Some("9.9.9".to_string()));
+        assert_eq!(meta.to_version, Some("10.0.0".to_string()));
+    }
+
+    #[tokio::test]
+    async fn load_update_artifact_context_defaults_when_rows_missing() {
+        use uptrakit_shared_db::entity::prelude::{SoftwareItemModel, UpdateHistoryModel};
+
+        let software_item_id = Uuid::now_v7();
+        let update_history_id = Uuid::now_v7();
+        let tenant_id = Uuid::now_v7();
+
+        let db = MockDatabase::new(DbBackend::MySql)
+            .append_query_results([Vec::<SoftwareItemModel>::new()])
+            .append_query_results([Vec::<UpdateHistoryModel>::new()])
+            .into_connection();
+        let tenant_db = uptrakit_tenant_db::TenantDb::new(db, tenant_id);
+
+        let meta =
+            load_update_artifact_context(&tenant_db, software_item_id, update_history_id).await;
+
+        assert_eq!(meta.software_name, None);
+        assert_eq!(meta.from_version, None);
+        assert_eq!(meta.to_version, None);
+    }
+
+    #[tokio::test]
+    async fn load_update_artifact_context_defaults_on_db_error_without_panicking() {
+        let software_item_id = Uuid::now_v7();
+        let update_history_id = Uuid::now_v7();
+        let tenant_id = Uuid::now_v7();
+
+        let db = MockDatabase::new(DbBackend::MySql)
+            .append_query_errors([sea_orm::DbErr::Custom("boom".to_string())])
+            .append_query_errors([sea_orm::DbErr::Custom("boom".to_string())])
+            .into_connection();
+        let tenant_db = uptrakit_tenant_db::TenantDb::new(db, tenant_id);
+
+        let meta =
+            load_update_artifact_context(&tenant_db, software_item_id, update_history_id).await;
+
+        assert_eq!(meta, ProxmoxUpdateArtifactContext::default());
+    }
+
+    fn mock_software_item_model(
+        id: Uuid,
+        tenant_id: Uuid,
+        name: &str,
+    ) -> uptrakit_shared_db::entity::prelude::SoftwareItemModel {
+        uptrakit_shared_db::entity::prelude::SoftwareItemModel {
+            id,
+            tenant_id,
+            name: name.to_string(),
+            featured: false,
+            icon_url: None,
+            last_checked_at: None,
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+            deactivated_at: None,
+            awaiting_restart_timeout: None,
+        }
+    }
+
+    fn mock_update_history_model(
+        id: Uuid,
+        tenant_id: Uuid,
+        software_item_id: Uuid,
+        from_version: Option<String>,
+        to_version: Option<String>,
+    ) -> uptrakit_shared_db::entity::prelude::UpdateHistoryModel {
+        uptrakit_shared_db::entity::prelude::UpdateHistoryModel {
+            id,
+            tenant_id,
+            host_id: Uuid::now_v7(),
+            software_item_id,
+            host_software_item_id: None,
+            from_version,
+            to_version,
+            status: uptrakit_shared_db::entity::update_history::UpdateStatus::Pending,
+            output: String::new(),
+            output_bytes: 0,
+            actor_type: "user".to_string(),
+            actor_id: "test".to_string(),
+            execution_owner_service_id: None,
+            execution_owner_instance_id: None,
+            started_at: None,
+            completed_at: None,
+            awaiting_restart_since: None,
+            created_at: OffsetDateTime::now_utc(),
+            update_category: "unknown".to_string(),
+            batch_id: None,
+            interactive: false,
+            output_truncated: false,
+            pre_update_protection_status: None,
+            pre_update_protection_summary: None,
+            recovery_hint: None,
+        }
     }
 
     #[test]
@@ -956,9 +1429,16 @@ mod tests {
             update_history_id,
         );
 
-        let decision = prepare_backup_protection(&store, &ctx, &mapping, &proxmox_cfg, &policy)
-            .await
-            .expect("prepare returns decision");
+        let decision = prepare_backup_protection(
+            &store,
+            &ctx,
+            &mapping,
+            &proxmox_cfg,
+            &policy,
+            &ProxmoxUpdateArtifactContext::default(),
+        )
+        .await
+        .expect("prepare returns decision");
         assert!(decision.attempted);
         assert!(!decision.succeeded);
 
@@ -1014,9 +1494,16 @@ mod tests {
             update_history_id,
         );
 
-        let decision = prepare_backup_protection(&store, &ctx, &mapping, &proxmox_cfg, &policy)
-            .await
-            .expect("prepare returns decision");
+        let decision = prepare_backup_protection(
+            &store,
+            &ctx,
+            &mapping,
+            &proxmox_cfg,
+            &policy,
+            &ProxmoxUpdateArtifactContext::default(),
+        )
+        .await
+        .expect("prepare returns decision");
         assert!(decision.attempted);
         assert!(!decision.succeeded);
 
