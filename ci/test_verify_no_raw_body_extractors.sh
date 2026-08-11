@@ -281,6 +281,51 @@ assert_contains "case11: adding a row against a zero-row baseline is a violation
 assert_not_contains "case11: a zero-row baseline is not treated as an absent-file warn-skip" "$GATE_OUT" "allowlist absent"
 assert_exit_code "case11: exit code is 1" "$GATE_RC" 1
 
+# --- Case 12: no-arg mode resolves baseline via merge-base with origin/main ---
+case12_dir="$(new_sandbox case12)"
+write_routes_file "$case12_dir/$ROUTES_REL/probe.rs" "rowm:bytes"
+write_allowlist "$case12_dir/$ALLOWLIST_REL" \
+  "raw_body|$ROUTES_REL/probe.rs|fn rowm\b"
+commit_all "$case12_dir" "baseline"
+# No real remote exists in these throwaway repos; a remote-tracking ref is
+# faked directly so the no-arg fallback (origin/main) resolves, exercising
+# the merge-base baseline mode rather than the explicit-BASE_REF mode every
+# other case above pins via the `HEAD` argument.
+(cd "$case12_dir" && git update-ref refs/remotes/origin/main "$(git rev-parse HEAD)")
+
+# Leg 1: clean tree — the no-arg invocation must resolve
+# merge-base(HEAD, origin/main) and complete normally.
+run_gate "$case12_dir"
+assert_contains "case12 leg1: no-arg merge-base mode completes on a clean tree" "$GATE_OUT" "verify_no_raw_body_extractors: OK"
+assert_exit_code "case12 leg1: exit code is 0" "$GATE_RC" 0
+
+# Leg 2: append a row absent from the origin/main-derived baseline — still caught.
+append_allowlist_row "$case12_dir/$ALLOWLIST_REL" \
+  "raw_body|$ROUTES_REL/probe_new.rs|fn probe_new\b"
+run_gate "$case12_dir"
+assert_contains "case12 leg2: no-arg merge-base mode still catches an unbaselined addition" "$GATE_OUT" "not in baseline"
+assert_exit_code "case12 leg2: exit code is 1" "$GATE_RC" 1
+
+# --- Case 13: explicit non-hex BASE_REF that doesn't resolve -> hard FATAL ---
+case13_dir="$(new_sandbox case13)"
+write_routes_file "$case13_dir/$ROUTES_REL/probe.rs" "harmless:plain"
+write_allowlist "$case13_dir/$ALLOWLIST_REL"
+commit_all "$case13_dir" "baseline"
+run_gate "$case13_dir" "not-a-real-ref-zzz"
+assert_contains "case13: non-hex unresolvable BASE_REF is a hard FATAL, not a skip" "$GATE_OUT" "FATAL: explicit BASE_REF"
+assert_not_contains "case13: FATAL path does not also print the WARNING skip message" "$GATE_OUT" "WARNING: allowlist history sub-check SKIPPED"
+assert_exit_code "case13: exit code is 1" "$GATE_RC" 1
+
+# --- Case 14: bare-SHA unresolvable BASE_REF -> WARNING skip, other checks run
+case14_dir="$(new_sandbox case14)"
+write_routes_file "$case14_dir/$ROUTES_REL/probe.rs" "harmless:plain"
+write_allowlist "$case14_dir/$ALLOWLIST_REL"
+commit_all "$case14_dir" "baseline"
+run_gate "$case14_dir" "0000000000000000000000000000000000000000"
+assert_contains "case14: unresolvable bare-SHA BASE_REF warns instead of failing" "$GATE_OUT" "WARNING: allowlist history sub-check SKIPPED"
+assert_contains "case14: unresolvable bare-SHA BASE_REF still completes the other checks" "$GATE_OUT" "verify_no_raw_body_extractors: OK"
+assert_exit_code "case14: exit code is 0" "$GATE_RC" 0
+
 echo
 echo "verify_no_raw_body_extractors sandbox probe matrix: $pass_count/$total_count passed"
 if [ "$fail" -ne 0 ]; then

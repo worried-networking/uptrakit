@@ -701,7 +701,7 @@ async fn update_host_assignment_rejects_two_config_sources() {
     .await;
 
     // Ambiguous request: both `plugin_config_id` and `plugin_type` are set.
-    // `UpdateHostAssignmentRequest::validate()` requires exactly one config
+    // `UpdateHostAssignmentRequest::validate()` requires at most one config
     // source; previously this reached the query layer, which resolved the
     // two sources by precedence (TOCTOU) instead of rejecting the request.
     let status = client

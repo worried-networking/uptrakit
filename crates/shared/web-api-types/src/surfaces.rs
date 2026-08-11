@@ -163,6 +163,14 @@ mod tests {
         // value a first real rule would plausibly reject), so this test
         // goes red the instant such a rule lands rather than staying green
         // by accident on uniformly well-formed input.
+        //
+        // WARNING: the first two fixtures below target `target_provider_id`,
+        // but that field (with `timeout_seconds`) is read via
+        // `Unvalidated::peek_envelope()` before this `validate()` ever runs
+        // (see ADR-0038's deferred-obligation paragraph) — a rule added here
+        // would NOT gate the pre-validation registry-lookup/audit uses in
+        // `dispatch_surface_interaction` step 1. Enforce such a rule at the
+        // peek site instead, not (only) here.
         let base = InvokeSurfaceInteractionRequest {
             params: serde_json::Map::from_iter([(
                 "k".to_string(),

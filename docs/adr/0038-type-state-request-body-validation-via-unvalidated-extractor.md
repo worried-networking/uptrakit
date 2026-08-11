@@ -30,12 +30,20 @@ in `crates/ui/web-api/src/extract.rs`:
   `T` field is private. The struct implements `FromRequest` (deserializing to the unvalidated
   state) and, for `Unvalidated<T>`, `OptionalFromRequest` as well, so a handler taking
   `Option<Unvalidated<T>>` still accepts a missing body as `None` without weakening the
-  guarantee once a body _is_ present. The only way out of the wrapper is the consuming method
+  guarantee once a body _is_ present. The primary way out of the wrapper is the consuming method
   `require_valid(self) -> Result<T, ValidationError>`, bounded on `T: Validate`, which runs
   validation and hands back the plain value only on success. There is no field accessor, no
-  `Deref`, and no other exit — a handler that holds an `Unvalidated<T>` cannot reach the body
-  without going through `require_valid()`, so a missed validation call is a compile error, not a
-  reviewer's oversight.
+  `Deref`, and no other exit for the payload — a handler that holds an `Unvalidated<T>` cannot
+  reach the body without going through `require_valid()`, so a missed validation call is a
+  compile error, not a reviewer's oversight. The sole carve-out is
+  `Unvalidated<T>::peek_envelope(&self) -> InvokeRoutingEnvelope`
+  (`crates/ui/web-api/src/extract.rs`), available only for `T: RoutingEnvelope`
+  (`crates/shared/web-api-types/src/validation.rs`) — a sealed trait implementable only inside
+  `uptrakit-web-api-types`, so a type can expose pre-validation routing metadata only via a
+  reviewed change in the crate that owns the request types. `peek_envelope` returns a fixed,
+  named struct of routing-only fields (`target_provider_id`, `timeout_seconds`) by value, never
+  the payload or a reference into it, so it narrows the escape to exactly those fields rather
+  than reopening general pre-validation access.
 - The pre-existing `Validated<T>`, for handlers that want deserialize-and-validate as a single
   extraction step with a fixed `400 Bad Request` rejection, remains available where a
   per-handler failure mapping isn't needed.
@@ -72,8 +80,9 @@ be worth preserving.
 
 For every handler taking `Unvalidated<T>`/`UnvalidatedForm<T>`, unvalidated use of the request
 body is now compile-blocked, not just discouraged: the type has no accessor other than
-`require_valid()`, so the class of bug that motivated this ADR cannot recur at those call sites
-short of deleting the `Validate` bound itself. `ci/verify_no_raw_body_extractors.sh` extends that
+`require_valid()` and, for `T: RoutingEnvelope`, the narrowly-scoped `peek_envelope()`, so the
+class of bug that motivated this ADR cannot recur at those call sites short of deleting the
+`Validate` bound itself or widening `InvokeRoutingEnvelope`. `ci/verify_no_raw_body_extractors.sh` extends that
 guarantee forward — a new mutating handler cannot introduce a fresh raw `Json<T>`/`Form<T>`
 parameter without converting it; the gate-script amendment is the only review-gated exception.
 
@@ -106,4 +115,11 @@ handler remains a review-time concern, not a gate-enforced one.
 precedence between an action-gate `403` and a semantic `400` on the same request. The first real
 `Validate` rule added to `InvokeSurfaceInteractionRequest` must add the discriminating test proving
 the `403` still wins over a `400` when both conditions hold (see the dispatch choke-point comment
-in `surfaces.rs`); that obligation is deferred, not forgotten.
+in `surfaces.rs`); that obligation is deferred, not forgotten. `target_provider_id` and
+`timeout_seconds` are structurally outside that choke point: `dispatch_surface_interaction` peeks
+both via `peek_envelope()` at step 1, ahead of the step-3 permission checks and the step-5
+`require_valid()` call, and uses them for the registry lookup and the `SURFACE_ACTION_INVOKE`
+audit details before validation ever runs. A future `Validate` rule on either field would not gate
+those pre-validation uses; any such rule must instead be enforced at the peek site
+(`dispatch_surface_interaction`, step 1) or in `split_get_envelope`/`peek_envelope` itself, not by
+adding it to `InvokeSurfaceInteractionRequest::validate()`.

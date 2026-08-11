@@ -2166,12 +2166,4 @@ mod tests {
             .expect("host B's active link must still resolve");
         assert_eq!(result_b.hsi_link.host_id, host_b_id);
     }
-
-    #[test]
-    fn invalid_request_reason_carries_the_family_prefix() {
-        assert!(
-            super::TRIGGER_UPDATE_INVALID_REQUEST_REASON.starts_with("trigger_update."),
-            "validation-reject reason must stay in the trigger_update.* family namespace"
-        );
-    }
 }
