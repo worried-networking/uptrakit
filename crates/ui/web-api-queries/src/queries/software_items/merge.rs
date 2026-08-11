@@ -3,10 +3,11 @@
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, FromQueryResult, JoinType,
-    QueryFilter, QueryOrder, QuerySelect, RelationTrait, Set, TransactionTrait,
+    QueryFilter, QueryOrder, QuerySelect, RelationTrait, Set,
 };
 use std::collections::{HashMap, HashSet};
 use time::OffsetDateTime;
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, prelude::*, software_item,
 };
@@ -755,7 +756,8 @@ pub async fn execute_merge_software_items(
     let candidate_ids = validate_candidate_ids(&req.candidate_ids, req.survivor_id)?;
     let deleted_ids = deleted_candidate_ids(&candidate_ids, req.survivor_id);
 
-    let txn = tenant_db.db().begin().await.context_to()?;
+    // BEGIN IMMEDIATE prevents SQLITE_BUSY_SNAPSHOT: this transaction reads before writing.
+    let txn = begin_immediate(tenant_db.db()).await.context_to()?;
     let plan =
         build_merge_plan(&txn, tenant_db.tenant_id(), &candidate_ids, req.survivor_id).await?;
 

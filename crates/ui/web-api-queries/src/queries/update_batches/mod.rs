@@ -27,12 +27,10 @@ pub use dispatch::{
 pub use queries::{get_batch_with_items, list_batches};
 
 use rootcause::prelude::*;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
-    TransactionTrait,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use std::collections::{HashMap, HashSet};
 use time::OffsetDateTime;
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_db::entity::{update_batch, update_history};
 use uptrakit_shared_types::BatchStatus;
 use uptrakit_web_api_types::software_items::TriggerUpdateStatus;
@@ -149,7 +147,7 @@ pub async fn create_batch(
 
     // Determine initial status per host before opening the transaction.
     // Doing this outside the transaction avoids a pool-exhaustion deadlock on
-    // single-connection pools (e.g. SQLite in-memory): db.begin() takes the
+    // single-connection pools (e.g. SQLite in-memory): begin_immediate() takes the
     // sole connection, and a subsequent query on `db` would block forever
     // waiting for a connection that is never released.
     //
@@ -173,7 +171,7 @@ pub async fn create_batch(
     // mid-flight failure cannot leave a batch record with an incorrect total_count.
     // Dispatch (WebSocket sends) happens outside the transaction because it cannot
     // be rolled back.
-    let txn = db.begin().await.context_to()?;
+    let txn = begin_immediate(db).await.context_to()?;
 
     let batch_record = update_batch::ActiveModel {
         id: Set(batch_id),

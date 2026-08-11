@@ -8,8 +8,9 @@
 //! name recorded in `seaql_migrations` matches the original name from when
 //! these migrations lived in `crates/shared/db`.
 
-use sea_orm::{ConnectionTrait as _, TransactionTrait as _, TryGetable as _};
+use sea_orm::{ConnectionTrait as _, TryGetable as _};
 use sea_orm_migration::prelude::*;
+use uptrakit_shared_db::begin_immediate;
 use uuid::Uuid;
 
 // ── Migration: create proxmox_host_mappings ─────────────────────────────────
@@ -1624,8 +1625,8 @@ impl MigrationTrait for CreateProxmoxScalingItemOverrides {
 /// by name only, so applied SQLite databases skip it (their text rows are
 /// healed by `RepairProxmoxScalingUuidStorage`), and no Postgres instance
 /// ever recorded it — the batch runner wraps all migrations in ONE
-/// transaction, and the inner `begin()` here nests as a SAVEPOINT on the same
-/// connection, so the old parse failure rolled the whole batch back.
+/// transaction, and the inner `begin_immediate()` here nests as a SAVEPOINT
+/// on the same connection, so the old parse failure rolled the whole batch back.
 ///
 /// The remaining raw statements in this migration (the C.3/C.4
 /// `UPDATE … SET … = NULL` cleanups) are standard SQL, portable as written.
@@ -1644,7 +1645,7 @@ impl MigrationTrait for MigrateProxmoxScalingFromProtectionTables {
         // Without this, if C.2 fails after C.1 succeeds, the migration is permanently
         // broken: on retry, C.1 hits the UNIQUE constraint and fails again with no recovery path.
         // Under the batch runner this nests as a SAVEPOINT on the same connection.
-        let txn = manager.get_connection().begin().await?;
+        let txn = begin_immediate(manager.get_connection()).await?;
 
         // C.1 — copy proxmox_protection_defaults → proxmox_scaling_defaults.
         // Ids are generated in Rust (Uuid::now_v7()) and bound as Value::Uuid:
@@ -2112,8 +2113,9 @@ impl MigrationTrait for CreateProxmoxResourceScalingRecord {
 /// every value the old migration could produce parses (valid 8-4-4-4-12 hex
 /// layout), so anything else is corruption from no known code path.
 ///
-/// Runs at startup on one dedicated connection — plain `begin()` (a SAVEPOINT
-/// under the batch transaction); no `BEGIN IMMEDIATE` needed.
+/// Runs at startup on one dedicated connection — `begin_immediate()` (a
+/// SAVEPOINT under the batch transaction; Immediate mode is a no-op here,
+/// but callers use `begin_immediate()` uniformly per the codebase-wide rule).
 pub struct RepairProxmoxScalingUuidStorage;
 
 impl MigrationName for RepairProxmoxScalingUuidStorage {
@@ -2129,7 +2131,7 @@ impl MigrationTrait for RepairProxmoxScalingUuidStorage {
         if db.get_database_backend() != sea_orm::DatabaseBackend::Sqlite {
             return Ok(());
         }
-        let txn = db.begin().await?;
+        let txn = begin_immediate(db).await?;
         repair_scaling_table(
             &txn,
             "proxmox_scaling_defaults",

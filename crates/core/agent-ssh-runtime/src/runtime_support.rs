@@ -66,8 +66,9 @@ impl AgentSshRuntimeSupport {
     async fn reset_data_impl(&self) -> bool {
         if cfg!(feature = "reset-data") {
             tracing::info!("received ResetData: truncating local data stores");
-            use sea_orm::{ConnectionTrait, EntityTrait, TransactionTrait};
-            match self.db.begin().await {
+            use sea_orm::{ConnectionTrait, EntityTrait};
+            use uptrakit_db_tx::begin_immediate;
+            match begin_immediate(&self.db).await {
                 Ok(txn) => {
                     if let Err(error) = db::entity::pending_proxmox_match::Entity::delete_many()
                         .exec(&txn)

@@ -42,6 +42,7 @@ use crate::middleware::require_auth::{
 };
 use uptrakit_audit_log::{AuditEntry, AuditOutcome, Event, Stateful};
 use uptrakit_shared_db::access_grants::{GuardedMutation, LockoutVerdict, check_lockout};
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{role, user, user_role};
 use uptrakit_shared_types::access::{Decision, actions};
@@ -984,7 +985,7 @@ pub async fn initiate_email_change(
     }
 
     // Save pending request (delete-then-insert in a transaction)
-    let txn = match state.db().begin().await {
+    let txn = match begin_immediate(state.db()).await {
         Ok(t) => t,
         Err(e) => {
             tracing::error!(error = %e, "failed to begin transaction");

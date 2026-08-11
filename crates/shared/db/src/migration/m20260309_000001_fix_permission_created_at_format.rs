@@ -1,5 +1,6 @@
-use sea_orm::{ConnectionTrait as _, DatabaseBackend, Statement, TransactionTrait as _};
+use sea_orm::{ConnectionTrait as _, DatabaseBackend, Statement};
 use sea_orm_migration::prelude::*;
+use uptrakit_db_tx::begin_immediate;
 
 /// Fix `created_at` values in the `permissions` table that were stored in
 /// `time::OffsetDateTime::Display` format instead of RFC 3339.
@@ -87,7 +88,7 @@ impl MigrationTrait for Migration {
             to_fix.push((id_bytes, fixed));
         }
 
-        let txn = db.begin().await?;
+        let txn = begin_immediate(db).await?;
 
         for (id_bytes, fixed_created_at) in to_fix {
             txn.execute(

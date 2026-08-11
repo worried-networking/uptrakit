@@ -337,7 +337,6 @@ mod db_tests {
 
     use sea_orm::{
         ConnectOptions, ConnectionTrait as _, Database, DatabaseConnection, EntityTrait as _,
-        TransactionTrait as _,
     };
 
     use super::AuditEmitter;
@@ -345,6 +344,7 @@ mod db_tests {
     use crate::backend::{AuditLogBackend, DatabaseBackend, NoopBackend};
     use crate::dispatcher::AuditLogDispatcher;
     use crate::entry::{AuditEntry, AuditView, Stateful};
+    use uptrakit_shared_db::begin_immediate;
 
     struct Demo {
         id: uuid::Uuid,
@@ -445,7 +445,7 @@ mod db_tests {
         let emitter = make_emitter(&db);
         let entry = make_stateful_entry(uuid::Uuid::now_v7());
         let hook = emitter.commit_hook();
-        let tx = db.begin().await.expect("txn should start");
+        let tx = begin_immediate(&db).await.expect("txn should start");
         emitter
             .emit_stateful(&tx, &hook, entry)
             .await
@@ -469,7 +469,7 @@ mod db_tests {
         let emitter = make_emitter(&db);
         let entry = make_stateful_entry(uuid::Uuid::now_v7());
         let hook = emitter.commit_hook();
-        let tx = db.begin().await.expect("txn should start");
+        let tx = begin_immediate(&db).await.expect("txn should start");
         emitter
             .emit_stateful(&tx, &hook, entry)
             .await

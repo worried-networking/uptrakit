@@ -3,13 +3,11 @@
 //! Per spec §12.3 (skip-prompt logic) and §10.5 (revoke + cascade).
 
 use rootcause::prelude::*;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
-    TransactionTrait,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use std::sync::Arc;
 use thiserror::Error;
 use time::OffsetDateTime;
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_db::entity::{oauth_client, oauth_consent, oauth_refresh_token};
 use uptrakit_shared_macros::impl_report_conversion;
 use uuid::Uuid;
@@ -153,7 +151,7 @@ impl OAuthConsentService {
 
     /// Revoke a consent and cascade to all active refresh tokens.
     ///
-    /// Multi-statement atomic via `db.begin()/txn.commit()` (write-only;
+    /// Multi-statement atomic via `begin_immediate()/txn.commit()` (write-only;
     /// no read-then-write TOCTOU risk so `BEGIN DEFERRED` suffices).
     ///
     /// Steps:
@@ -166,7 +164,7 @@ impl OAuthConsentService {
     pub async fn revoke(&self, consent_id: Uuid, user_id: Uuid) -> Result<()> {
         let now = (self.clock)();
 
-        let txn = self.db.begin().await.context_to()?;
+        let txn = begin_immediate(&self.db).await.context_to()?;
 
         let result = oauth_consent::Entity::update_many()
             .col_expr(

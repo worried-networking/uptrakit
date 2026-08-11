@@ -7229,6 +7229,7 @@ dependencies = [
  "uptrakit-audit-log",
  "uptrakit-command",
  "uptrakit-crypto",
+ "uptrakit-db-tx",
  "uptrakit-directories",
  "uptrakit-plugin-infrastructure-registry",
  "uptrakit-service-sdk",

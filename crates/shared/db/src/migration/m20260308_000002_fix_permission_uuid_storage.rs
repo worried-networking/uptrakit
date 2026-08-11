@@ -1,5 +1,6 @@
-use sea_orm::{ConnectionTrait as _, DatabaseBackend, Statement, TransactionTrait as _};
+use sea_orm::{ConnectionTrait as _, DatabaseBackend, Statement};
 use sea_orm_migration::prelude::*;
+use uptrakit_db_tx::begin_immediate;
 use uuid::Uuid;
 
 /// Repair SQLite databases where migrations m20260307_000002 and
@@ -87,7 +88,7 @@ impl MigrationTrait for Migration {
             to_fix.push((id_str, name));
         }
 
-        let txn = db.begin().await?;
+        let txn = begin_immediate(db).await?;
 
         for (id_str, name) in to_fix {
             let uuid = Uuid::parse_str(&id_str).map_err(|e| {

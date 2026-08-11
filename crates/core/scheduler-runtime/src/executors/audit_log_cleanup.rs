@@ -1,7 +1,8 @@
 use rootcause::prelude::*;
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, TransactionTrait};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use time::OffsetDateTime;
 use uptrakit_audit_log::RuntimeAuditEmitter;
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{audit_log, scheduled_task, system_audit_log};
 
@@ -37,7 +38,7 @@ impl TaskExecutor for AuditLogCleanupExecutor {
 
         let cutoff = OffsetDateTime::now_utc() - time::Duration::days(DEFAULT_RETENTION_DAYS);
 
-        let txn = self.db.begin().await.context_to()?;
+        let txn = begin_immediate(&self.db).await.context_to()?;
 
         let tenant_result = AuditLog::delete_many()
             .filter(audit_log::Column::OccurredAt.lt(cutoff))

@@ -6,6 +6,7 @@ use sea_orm::{
 };
 use thiserror::Error;
 use time::OffsetDateTime;
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_db::entity::prelude::{RevocationReason, ServiceCertificate, ServiceHost};
 use uptrakit_shared_db::entity::{
     host, service, service_certificate, service_host, service_merge_redirect,
@@ -1352,7 +1353,7 @@ pub async fn batch_deactivate_services(
             continue;
         }
 
-        let txn = tenant_db.db().begin().await.context_to()?;
+        let txn = begin_immediate(tenant_db.db()).await.context_to()?;
 
         let mut active: service::ActiveModel = svc.into();
         active.deactivated_at = Set(Some(now));

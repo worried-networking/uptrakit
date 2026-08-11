@@ -1,10 +1,11 @@
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect, Set, TransactionTrait, sea_query::Expr,
+    QueryOrder, QuerySelect, Set, sea_query::Expr,
 };
 use thiserror::Error;
 use time::OffsetDateTime;
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_db::entity::system_service::{self, SystemServiceStatus};
 use uptrakit_shared_db::entity::system_service_certificate::{self, SystemRevocationReason};
 use uptrakit_shared_macros::impl_report_conversion;
@@ -317,7 +318,8 @@ pub async fn reject_system_service(
 /// and requesting a CRL renewal.
 #[tracing::instrument(skip_all, fields(%id))]
 pub async fn deactivate_system_service(db: &DatabaseConnection, id: Uuid) -> Result<bool> {
-    let txn = db.begin().await.context_to()?;
+    // BEGIN IMMEDIATE prevents SQLITE_BUSY_SNAPSHOT: this transaction reads before writing.
+    let txn = begin_immediate(db).await.context_to()?;
 
     let Some(svc) = system_service::Entity::find_by_id(id)
         .filter(system_service::Column::DeactivatedAt.is_null())
@@ -480,7 +482,7 @@ pub async fn batch_deactivate_system_services(
             continue;
         }
 
-        let txn = db.begin().await.context_to()?;
+        let txn = begin_immediate(db).await.context_to()?;
 
         let mut active: system_service::ActiveModel = svc.into();
         active.deactivated_at = Set(Some(now));

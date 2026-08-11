@@ -8,6 +8,7 @@ use sea_orm::{
 };
 use std::sync::Arc;
 use time::OffsetDateTime;
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_db::entity::{prelude::*, update_batch, update_history, update_output_line};
 use uptrakit_shared_types::BatchStatus;
 use uptrakit_wire::{OutputStreamType, UpdateFinalStatus};
@@ -467,7 +468,7 @@ pub async fn mark_owned_in_progress_as_interrupted_on_reconnect(
         return Ok(vec![]);
     }
 
-    let txn = db.begin().await.context_to()?;
+    let txn = begin_immediate(db).await.context_to()?;
     let now = OffsetDateTime::now_utc();
     let reason = "Update interrupted: agent restarted (outcome unknown)";
     let mut interrupted = Vec::new();
@@ -549,7 +550,7 @@ pub async fn mark_all_in_progress_as_interrupted_for_rollout(
         return Ok(vec![]);
     }
 
-    let txn = db.begin().await.context_to()?;
+    let txn = begin_immediate(db).await.context_to()?;
     let now = OffsetDateTime::now_utc();
     let reason = "Update interrupted: owner-aware rollout (outcome unknown)";
     let mut interrupted = Vec::new();
@@ -670,7 +671,7 @@ pub async fn claim_or_replay_update_start_db(
         && record.execution_owner_instance_id.is_none()
     {
         let started_at = OffsetDateTime::now_utc();
-        let txn = db.begin().await.context_to()?;
+        let txn = begin_immediate(db).await.context_to()?;
         let claimed = UpdateHistory::update_many()
             .filter(update_history::Column::Id.eq(record.id))
             .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Pending))
@@ -725,7 +726,7 @@ pub async fn claim_or_replay_update_start_db(
     if record.status == update_history::UpdateStatus::InProgress
         && record.execution_owner_service_id.is_none()
     {
-        let txn = db.begin().await.context_to()?;
+        let txn = begin_immediate(db).await.context_to()?;
         let claimed = UpdateHistory::update_many()
             .filter(update_history::Column::Id.eq(record.id))
             .filter(update_history::Column::Status.eq(update_history::UpdateStatus::InProgress))
@@ -778,7 +779,8 @@ pub async fn append_update_output_if_owned(
     stream: OutputStreamType,
     output: &str,
 ) -> std::result::Result<AppendUpdateOutputOutcome, rootcause::Report<TriggerUpdateError>> {
-    let txn = db.begin().await.context_to()?;
+    // BEGIN IMMEDIATE prevents SQLITE_BUSY_SNAPSHOT: this transaction reads before writing.
+    let txn = begin_immediate(db).await.context_to()?;
     let line_len = output.len() as i64;
     let Some(record) = UpdateHistory::find()
         .filter(update_history::Column::Id.eq(update_history_id))

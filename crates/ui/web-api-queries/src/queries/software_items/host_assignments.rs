@@ -1,11 +1,10 @@
 //! Host assignment management for software items.
 
 use rootcause::prelude::*;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, Set, TransactionTrait,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, Set};
 use time::OffsetDateTime;
 use uptrakit_plugin_infrastructure_registry::{PluginConfigOps, RoleKey};
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, plugin_config, prelude::*,
 };
@@ -684,7 +683,7 @@ pub async fn assign_hosts(
         .await
         .ok_or_else(|| report!(SoftwareItemQueryError::NotFound))?;
 
-    let txn = tenant_db.db().begin().await.context_to()?;
+    let txn = begin_immediate(tenant_db.db()).await.context_to()?;
     let now = OffsetDateTime::now_utc();
 
     for assignment in &req.host_assignments {
@@ -785,8 +784,9 @@ pub async fn load_host_assignment(
 #[cfg(test)]
 mod tests {
     use super::resolve_type_only_inline_override;
-    use sea_orm::{ActiveModelTrait, Database, DatabaseConnection, Set, TransactionTrait};
+    use sea_orm::{ActiveModelTrait, Database, DatabaseConnection, Set};
     use time::OffsetDateTime;
+    use uptrakit_shared_db::begin_immediate;
     use uptrakit_shared_db::entity::{host, software_item, tenant};
     use uptrakit_web_api_types::software_items::{
         HostSoftwareAssignment, JsonObjectMap, JsonObjectMapPatch,
@@ -899,7 +899,7 @@ mod tests {
             }],
         };
 
-        let txn = db.begin().await.expect("begin");
+        let txn = begin_immediate(&db).await.expect("begin");
         let result = super::assign_hosts_in_tx(&StubOps, &txn, tenant_a, item_a, &req).await;
 
         assert!(
@@ -923,7 +923,7 @@ mod tests {
             }],
         };
 
-        let txn = db.begin().await.expect("begin");
+        let txn = begin_immediate(&db).await.expect("begin");
         let result = super::assign_hosts_in_tx(&StubOps, &txn, tenant_a, item_a, &req).await;
 
         assert!(
@@ -1023,7 +1023,7 @@ mod tests {
         // Rogue link so the host-tenant filter (not the missing link) is what rejects host_b.
         seed_link(&db, host_b, item_a).await;
 
-        let txn = db.begin().await.expect("begin");
+        let txn = begin_immediate(&db).await.expect("begin");
         let result = super::update_host_assignment_in_tx(
             &StubOps,
             &txn,

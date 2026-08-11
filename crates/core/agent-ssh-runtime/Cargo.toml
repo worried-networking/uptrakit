@@ -43,6 +43,7 @@ uptrakit-agent-core = { workspace = true }
 uptrakit-audit-log = { workspace = true }
 uptrakit-command = { workspace = true }
 uptrakit-crypto = { workspace = true, features = ["sea-orm"] }
+uptrakit-db-tx = { workspace = true }
 uptrakit-directories = { workspace = true }
 uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["daemon", "agent-infra"] }
 uptrakit-service-sdk = { workspace = true, features = ["sensitive-params"] }

@@ -7,11 +7,11 @@ use crate::settings_store::{RawSettings, RawSettingsExt, upsert_setting};
 use rootcause::prelude::*;
 use sea_orm::ConnectionTrait;
 #[cfg(feature = "oidc")]
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set, TransactionTrait,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 #[cfg(feature = "oidc")]
 use time::OffsetDateTime;
+#[cfg(feature = "oidc")]
+use uptrakit_shared_db::begin_immediate;
 #[cfg(feature = "oidc")]
 use uptrakit_shared_db::entity::{
     oidc_provider, prelude::*, role, user, user_oidc_link, user_role,
@@ -413,7 +413,7 @@ pub async fn sync_oidc_roles(
     // only QUEUES the rollback (flushed on some later async op, an sqlx
     // internal, not a contract) and its lock-contention branch panics,
     // which under panic = "abort" kills the process.
-    let sp = txn.begin().await.context_to()?; // SAVEPOINT on the outer txn
+    let sp = begin_immediate(txn).await.context_to()?; // SAVEPOINT on the outer txn (Immediate mode is a no-op here)
     let write_result = async {
         // Delete existing user_role rows for this user within this tenant
         UserRole::delete_many()

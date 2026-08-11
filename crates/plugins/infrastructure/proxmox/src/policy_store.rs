@@ -14,6 +14,7 @@ use sea_orm::{
     SqliteTransactionMode, TransactionOptions, TransactionTrait,
 };
 use time::OffsetDateTime;
+use uptrakit_shared_db::begin_immediate;
 use uuid::Uuid;
 
 use crate::error::{ProxmoxError, Result};
@@ -361,7 +362,7 @@ pub async fn upsert_cached_backup_targets(
     plugin_config_id: Uuid,
     targets: &[CachedBackupTarget],
 ) -> Result<usize> {
-    let tx = db.begin().await.map_err(|e| {
+    let tx = begin_immediate(db).await.map_err(|e| {
         rootcause::report!(ProxmoxError::Database(format!(
             "failed to begin backup target cache transaction: {e}"
         )))

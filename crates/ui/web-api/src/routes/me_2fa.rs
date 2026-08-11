@@ -33,6 +33,7 @@ use crate::error_response::error_response;
 use crate::extract::Validated;
 use crate::middleware::require_auth::{AuthenticatedUser, FullSessionUser, SetupRequired};
 use uptrakit_crypto::EncryptedString;
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{user_recovery_code, user_totp};
 use uptrakit_web_api_types::SecretString;
@@ -587,7 +588,7 @@ pub async fn totp_disable(
     }
 
     // DELETE all user_totp rows and recovery codes atomically.
-    let txn = match state.db().begin().await {
+    let txn = match begin_immediate(state.db()).await {
         Ok(t) => t,
         Err(e) => {
             tracing::error!("totp_disable: failed to begin transaction: {e}");

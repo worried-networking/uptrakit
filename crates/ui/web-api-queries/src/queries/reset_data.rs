@@ -1,8 +1,9 @@
 //! Bulk deletion of all tenant-scoped data for the reset-data endpoint.
 
 use rootcause::prelude::*;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, TransactionTrait};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use thiserror::Error;
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_db::entity::{
     host, host_discovery_allowlist, host_software_item, host_software_item_plugin, host_tag,
     host_tag_assignment, notification_channel, notification_log, notification_rule, plugin_config,
@@ -39,7 +40,7 @@ impl_report_conversion!(sea_orm::DbErr => ResetDataQueryError::Database);
 #[tracing::instrument(skip_all, fields(tenant_id = %tenant_db.tenant_id()))]
 pub async fn reset_tenant_data(tenant_db: &TenantDb) -> Result<ResetDeletedCounts> {
     let tenant_id = tenant_db.tenant_id();
-    let txn = tenant_db.db().begin().await.context_to()?;
+    let txn = begin_immediate(tenant_db.db()).await.context_to()?;
 
     // -- 1. update_output_lines: FK to update_history (no tenant_id) --
     let uh_sub = sea_orm::sea_query::Query::select()
@@ -202,8 +203,9 @@ pub async fn reset_tenant_data(tenant_db: &TenantDb) -> Result<ResetDeletedCount
 
 #[cfg(test)]
 mod tests {
-    use sea_orm::{Database, TransactionTrait};
+    use sea_orm::Database;
     use uptrakit_plugin_infrastructure_registry::reset_plugin_tenant_data;
+    use uptrakit_shared_db::begin_immediate;
     use uuid::Uuid;
 
     async fn make_db() -> sea_orm::DatabaseConnection {
@@ -222,7 +224,7 @@ mod tests {
     async fn reset_plugin_tenant_data_runs_without_fk_error() {
         let db = make_db().await;
         let tenant_id = Uuid::new_v4();
-        let txn = db.begin().await.unwrap();
+        let txn = begin_immediate(&db).await.unwrap();
         reset_plugin_tenant_data(tenant_id, &txn)
             .await
             .expect("reset_plugin_tenant_data must not fail on empty DB");

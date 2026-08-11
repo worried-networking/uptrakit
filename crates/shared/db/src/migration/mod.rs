@@ -1,5 +1,6 @@
 use sea_orm::DatabaseConnection;
 use sea_orm_migration::prelude::*;
+use uptrakit_db_tx::begin_immediate;
 
 pub mod helpers;
 
@@ -279,7 +280,6 @@ pub async fn run_migrations_with_plugins(
     db: &DatabaseConnection,
     plugin_provider: impl Fn() -> Vec<Box<dyn MigrationTrait>> + Send + Sync + 'static,
 ) -> Result<(), sea_orm::DbErr> {
-    use sea_orm::TransactionTrait;
     let migrator = CombinedMigrator {
         plugin_provider: Box::new(plugin_provider),
     };
@@ -298,7 +298,7 @@ pub async fn run_migrations_with_plugins(
         // cascade-child rows populated by earlier migrations; the
         // file-backed production path is immune by construction.)
         use sea_orm_migration::MigratorTraitSelf as _;
-        let txn = db.begin().await?;
+        let txn = begin_immediate(db).await?;
         migrator.up(&txn, None).await?;
         txn.commit().await?;
         return sqlite_foreign_key_check(db).await;
@@ -306,7 +306,7 @@ pub async fn run_migrations_with_plugins(
 
     // PostgreSQL (and any non-SQLite backend): unchanged.
     use sea_orm_migration::MigratorTraitSelf as _;
-    let txn = db.begin().await?;
+    let txn = begin_immediate(db).await?;
     migrator.up(&txn, None).await?;
     txn.commit().await
 }
@@ -415,7 +415,7 @@ async fn run_on_dedicated_sqlite_pool(
     db: &DatabaseConnection,
     migrator: &CombinedMigrator,
 ) -> Result<(), sea_orm::DbErr> {
-    use sea_orm::{SqlxSqliteConnector, TransactionTrait};
+    use sea_orm::SqlxSqliteConnector;
     use sea_orm_migration::MigratorTraitSelf as _;
     use sqlx::sqlite::SqlitePoolOptions;
 
@@ -436,7 +436,7 @@ async fn run_on_dedicated_sqlite_pool(
     // Run migration + post-commit gate, then ALWAYS close the dedicated pool
     // — even on a begin/up/commit error — so cleanup never depends on `Drop`.
     let result = async {
-        let txn = migration_db.begin().await?;
+        let txn = begin_immediate(&migration_db).await?;
         migrator.up(&txn, None).await?;
         txn.commit().await?;
         sqlite_foreign_key_check(&migration_db).await

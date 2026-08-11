@@ -1207,7 +1207,8 @@ pub async fn rotate_ssh_master_key(
     db: &sea_orm::DatabaseConnection,
     new_key_path: &std::path::Path,
 ) {
-    use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel, TransactionTrait};
+    use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel};
+    use uptrakit_db_tx::begin_immediate;
 
     let new_key_hex = match std::fs::read_to_string(new_key_path) {
         Ok(contents) => contents,
@@ -1259,7 +1260,7 @@ pub async fn rotate_ssh_master_key(
         return;
     }
 
-    let txn = match db.begin().await {
+    let txn = match begin_immediate(db).await {
         Ok(txn) => txn,
         Err(error) => {
             tracing::error!(error = %error, "failed to begin transaction for key rotation");

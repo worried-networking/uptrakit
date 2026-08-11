@@ -1,5 +1,6 @@
-use sea_orm::{ConnectionTrait as _, DatabaseBackend, Statement, TransactionTrait as _};
+use sea_orm::{ConnectionTrait as _, DatabaseBackend, Statement};
 use sea_orm_migration::prelude::*;
+use uptrakit_db_tx::begin_immediate;
 use uuid::Uuid;
 
 /// Convert `ssh_hosts.id` from TEXT to UUID and `ssh_hosts.pve_plugin_config_id`
@@ -121,7 +122,7 @@ impl MigrationTrait for Migration {
             .await?;
 
         if !rows.is_empty() {
-            let txn = db.begin().await?;
+            let txn = begin_immediate(db).await?;
 
             for row in &rows {
                 use sea_orm::TryGetable as _;

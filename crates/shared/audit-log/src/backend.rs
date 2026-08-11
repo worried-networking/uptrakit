@@ -259,6 +259,7 @@ mod db_tests {
 
     use crate::AuditActionType;
     use crate::entry::{AuditActorType, AuditEntry, Event};
+    use uptrakit_shared_db::begin_immediate;
 
     async fn setup_db() -> DatabaseConnection {
         let db = Database::connect(ConnectOptions::new("sqlite::memory:"))
@@ -388,8 +389,6 @@ mod db_tests {
 
     #[tokio::test]
     async fn database_backend_write_in_tx_persists_entry() {
-        use sea_orm::TransactionTrait as _;
-
         let db = setup_db().await;
         let backend = DatabaseBackend::new(db.clone());
         let entry: AuditEntryErased =
@@ -399,7 +398,7 @@ mod db_tests {
                 .expect("stub entry should validate")
                 .into();
 
-        let tx = db.begin().await.expect("txn should start");
+        let tx = begin_immediate(&db).await.expect("txn should start");
         backend
             .write_in_tx(&entry, &tx)
             .await
@@ -418,8 +417,6 @@ mod db_tests {
     #[tokio::test]
     #[cfg(feature = "db-sqlite")]
     async fn write_in_tx_rollback_leaves_no_row() {
-        use sea_orm::TransactionTrait as _;
-
         let db = setup_db().await;
         let entry: AuditEntryErased =
             AuditEntry::<Event>::builder_event(AuditActionType::AUTH_LOGOUT)
@@ -428,7 +425,7 @@ mod db_tests {
                 .expect("stub entry should validate")
                 .into();
 
-        let tx = db.begin().await.expect("txn should start");
+        let tx = begin_immediate(&db).await.expect("txn should start");
         DatabaseBackend::new(db.clone())
             .write_in_tx(&entry, &tx)
             .await

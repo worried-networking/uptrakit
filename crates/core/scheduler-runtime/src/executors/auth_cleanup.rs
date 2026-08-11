@@ -1,6 +1,7 @@
 use rootcause::prelude::*;
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, TransactionTrait};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use time::OffsetDateTime;
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{
     api_rate_limit, email_change_request, mfa_challenge, pending_device_flow, scheduled_task,
@@ -37,7 +38,7 @@ impl TaskExecutor for AuthCleanupExecutor {
     async fn execute(&self, _task: &scheduled_task::Model) -> crate::error::Result<()> {
         let now = OffsetDateTime::now_utc();
 
-        let txn = self.db.begin().await.context_to()?;
+        let txn = begin_immediate(&self.db).await.context_to()?;
 
         #[cfg(feature = "oidc")]
         {

@@ -12,12 +12,13 @@ use rand::RngExt;
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
-    Set, TransactionTrait,
+    Set,
 };
 use std::sync::Arc;
 use thiserror::Error;
 use time::OffsetDateTime;
 use uptrakit_audit_log::{AuditActionType, AuditEmitter, AuditEntry, AuditOutcome, Event};
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_db::entity::{oauth_client, oauth_consent, oauth_refresh_token};
 use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_web_api_auth::auth::token::hash_token;
@@ -138,7 +139,7 @@ impl OAuthClientService {
     pub async fn revoke(&self, client_id: &str) -> Result<()> {
         let now = (self.clock)();
 
-        let txn = self.db.begin().await.context_to()?;
+        let txn = begin_immediate(&self.db).await.context_to()?;
 
         let result = oauth_client::Entity::update_many()
             .col_expr(

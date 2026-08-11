@@ -898,6 +898,7 @@ mod tests {
         ColumnTrait, ConnectOptions, ConnectionTrait, Database, DatabaseConnection, EntityTrait,
         QueryFilter, QueryOrder,
     };
+    use uptrakit_shared_db::begin_immediate;
     use uptrakit_shared_db::entity::{audit_log, tenant};
 
     async fn setup_test_db() -> DatabaseConnection {
@@ -1890,7 +1891,7 @@ mod tests {
         };
         let inserted = user.insert(&db).await.expect("insert user");
 
-        let txn = db.begin().await.expect("begin");
+        let txn = begin_immediate(&db).await.expect("begin");
         let reg = handle_first_user_setup(
             &txn,
             &state.settings,
@@ -1936,7 +1937,7 @@ mod tests {
         };
         let inserted = second.insert(&db).await.expect("insert user");
 
-        let txn = db.begin().await.expect("begin");
+        let txn = begin_immediate(&db).await.expect("begin");
         let reg = handle_first_user_setup(
             &txn,
             &state.settings,
@@ -1973,7 +1974,7 @@ mod tests {
         };
         let inserted = user.insert(&db).await.expect("insert user");
 
-        let txn = db.begin().await.expect("begin");
+        let txn = begin_immediate(&db).await.expect("begin");
         // Stand-in for resolve_oidc_user's best-effort default role (the legacy
         // "user" role no longer exists post-m20260310; viewer overlaps the owner
         // set, so Keep would PK-conflict — Clear must make this succeed).
@@ -2464,7 +2465,7 @@ mod tests {
         .expect("insert user");
 
         // Phase 1: only the shadow matches the name "system_administrator".
-        let txn1 = db.begin().await.expect("begin phase-1 txn");
+        let txn1 = begin_immediate(&db).await.expect("begin phase-1 txn");
         match assign_owner_roles(&txn1, state.default_tenant_id, user_id).await {
             Ok(()) => {
                 // Pre-fix: the unscoped lookup found and assigned the
@@ -2517,7 +2518,7 @@ mod tests {
             .map(|r| r.id)
             .collect();
 
-        let txn2 = db.begin().await.expect("begin phase-2 txn");
+        let txn2 = begin_immediate(&db).await.expect("begin phase-2 txn");
         assign_owner_roles(&txn2, state.default_tenant_id, user_id)
             .await
             .expect("assign_owner_roles must succeed once the global row is restored");

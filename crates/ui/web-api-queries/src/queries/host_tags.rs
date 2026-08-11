@@ -1,9 +1,10 @@
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
-    QuerySelect, Set, TransactionTrait,
+    QuerySelect, Set,
 };
 use std::collections::HashMap;
 use time::OffsetDateTime;
+use uptrakit_shared_db::begin_immediate;
 use uptrakit_shared_db::entity::{host, host_tag, host_tag_assignment};
 use uptrakit_web_api_types::host_tags::{
     CreateHostTagRequest, HostTagResponse, HostTagSummary, ListHostTagsQuery, UpdateHostTagRequest,
@@ -274,7 +275,7 @@ pub async fn delete_host_tag(tenant_db: &TenantDb, id: Uuid) -> Result<bool, sea
         return Ok(false);
     };
 
-    let txn = tenant_db.db().begin().await?;
+    let txn = begin_immediate(tenant_db.db()).await?;
 
     // Hard-delete assignments first.
     host_tag_assignment::Entity::delete_many()
@@ -300,7 +301,7 @@ pub async fn set_host_tags(
     host_id: Uuid,
     tag_ids: &[Uuid],
 ) -> Result<Vec<HostTagSummary>, sea_orm::DbErr> {
-    let txn = tenant_db.db().begin().await?;
+    let txn = begin_immediate(tenant_db.db()).await?;
 
     // Remove all existing assignments for this host.
     host_tag_assignment::Entity::delete_many()
@@ -454,7 +455,7 @@ pub async fn batch_delete_host_tags(
     }
 
     let now = OffsetDateTime::now_utc();
-    let txn = tenant_db.db().begin().await?;
+    let txn = begin_immediate(tenant_db.db()).await?;
 
     for (id, tag) in found {
         // Hard-delete assignments.
