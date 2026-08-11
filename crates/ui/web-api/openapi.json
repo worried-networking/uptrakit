@@ -18730,6 +18730,7 @@
       },
       "UpdateStatus": {
         "type": "string",
+        "description": "Status of an individual update record.",
         "enum": [
           "queued",
           "pending",

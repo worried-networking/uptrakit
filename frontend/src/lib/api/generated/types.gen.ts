@@ -3555,6 +3555,9 @@ export type UpdateSoftwareItemRequest = {
     name?: string | null;
 };
 
+/**
+ * Status of an individual update record.
+ */
 export const UpdateStatus = {
     QUEUED: 'queued',
     PENDING: 'pending',
@@ -3565,6 +3568,9 @@ export const UpdateStatus = {
     INTERRUPTED: 'interrupted'
 } as const;
 
+/**
+ * Status of an individual update record.
+ */
 export type UpdateStatus = typeof UpdateStatus[keyof typeof UpdateStatus];
 
 /**

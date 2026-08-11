@@ -1,63 +1,8 @@
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-#[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[cfg_attr(test, derive(strum::EnumIter))]
-#[serde(rename_all = "snake_case")]
-pub enum UpdateStatus {
-    Queued,
-    Pending,
-    InProgress,
-    AwaitingRestart,
-    Completed,
-    Failed,
-    Interrupted,
-}
-
-impl UpdateStatus {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Queued => "queued",
-            Self::Pending => "pending",
-            Self::InProgress => "in_progress",
-            Self::AwaitingRestart => "awaiting_restart",
-            Self::Completed => "completed",
-            Self::Failed => "failed",
-            Self::Interrupted => "interrupted",
-        }
-    }
-}
-
-impl std::fmt::Display for UpdateStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-#[derive(Debug, Error)]
-#[error("invalid update status value")]
-pub struct ParseUpdateStatusError;
-
-impl std::str::FromStr for UpdateStatus {
-    type Err = ParseUpdateStatusError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "queued" => Ok(Self::Queued),
-            "pending" => Ok(Self::Pending),
-            "in_progress" => Ok(Self::InProgress),
-            "awaiting_restart" => Ok(Self::AwaitingRestart),
-            "completed" => Ok(Self::Completed),
-            "failed" => Ok(Self::Failed),
-            "interrupted" => Ok(Self::Interrupted),
-            _ => Err(ParseUpdateStatusError),
-        }
-    }
-}
+pub use uptrakit_shared_types::{ParseUpdateStatusError, UpdateStatus};
 
 #[non_exhaustive]
 #[derive(Default, Serialize, Deserialize)]
@@ -244,28 +189,4 @@ pub struct UpdateCompletedSSE {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StdinAttentionSSE {
     pub hint: Option<String>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_awaiting_restart_serde() {
-        let s = UpdateStatus::AwaitingRestart;
-        let json = serde_json::to_string(&s).unwrap();
-        assert_eq!(json, r#""awaiting_restart""#);
-        let back: UpdateStatus = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, UpdateStatus::AwaitingRestart);
-    }
-
-    #[test]
-    fn interrupted_roundtrips() {
-        use std::str::FromStr;
-        assert_eq!(UpdateStatus::Interrupted.as_str(), "interrupted");
-        assert_eq!(
-            UpdateStatus::from_str("interrupted").unwrap(),
-            UpdateStatus::Interrupted
-        );
-    }
 }

@@ -42,6 +42,7 @@ uptrakit-config-merge = { workspace = true }
 uptrakit-web-api-types = { workspace = true }
 
 [dev-dependencies]
+strum = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
 uptrakit-crypto = { workspace = true, features = ["testing"] }
 uptrakit-shared-db = { workspace = true, features = ["migration", "db-sqlite"] }

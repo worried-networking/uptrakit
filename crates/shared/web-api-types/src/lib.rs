@@ -91,7 +91,6 @@ mod tests {
     use crate::plugin_configs::CreatePluginConfigRequest;
     use crate::registration::RegistrationMode;
     use crate::software_items::CreateSoftwareItemRequest;
-    use crate::update_history::UpdateStatus;
     use strum::IntoEnumIterator;
     use uptrakit_shared_types::SecretString;
     use uuid::Uuid;
@@ -352,76 +351,6 @@ mod tests {
         assert_eq!(deserialized.user.actions.len(), 2);
         assert_eq!(deserialized.user.actions[0], "settings:read");
         assert_eq!(deserialized.user.actions[1], "services:update");
-    }
-
-    // ── 6. UpdateStatus enum round-trip ─────────────────────────────────
-
-    #[test]
-    fn update_status_serde_round_trip() {
-        for status in UpdateStatus::iter() {
-            let json = serde_json::to_string(&status).unwrap();
-            let deserialized: UpdateStatus = serde_json::from_str(&json).unwrap();
-            assert_eq!(deserialized, status);
-        }
-    }
-
-    #[test]
-    fn update_status_as_str_values() {
-        assert_eq!(UpdateStatus::Queued.as_str(), "queued");
-        assert_eq!(UpdateStatus::Pending.as_str(), "pending");
-        assert_eq!(UpdateStatus::InProgress.as_str(), "in_progress");
-        assert_eq!(UpdateStatus::AwaitingRestart.as_str(), "awaiting_restart");
-        assert_eq!(UpdateStatus::Completed.as_str(), "completed");
-        assert_eq!(UpdateStatus::Failed.as_str(), "failed");
-    }
-
-    #[test]
-    fn update_status_from_str_valid() {
-        assert_eq!(
-            "queued".parse::<UpdateStatus>().ok(),
-            Some(UpdateStatus::Queued)
-        );
-        assert_eq!(
-            "pending".parse::<UpdateStatus>().ok(),
-            Some(UpdateStatus::Pending)
-        );
-        assert_eq!(
-            "in_progress".parse::<UpdateStatus>().ok(),
-            Some(UpdateStatus::InProgress)
-        );
-        assert_eq!(
-            "completed".parse::<UpdateStatus>().ok(),
-            Some(UpdateStatus::Completed)
-        );
-        assert_eq!(
-            "failed".parse::<UpdateStatus>().ok(),
-            Some(UpdateStatus::Failed)
-        );
-    }
-
-    #[test]
-    fn update_status_from_str_invalid_returns_none() {
-        assert!("unknown".parse::<UpdateStatus>().is_err());
-        assert!("".parse::<UpdateStatus>().is_err());
-        assert!("PENDING".parse::<UpdateStatus>().is_err());
-    }
-
-    #[test]
-    fn update_status_as_str_round_trips_through_from_str() {
-        for status in UpdateStatus::iter() {
-            let s = status.as_str();
-            let parsed: UpdateStatus = s
-                .parse()
-                .expect("from_str should succeed for as_str output");
-            assert_eq!(parsed, status);
-        }
-    }
-
-    #[test]
-    fn update_status_display_matches_as_str() {
-        for status in UpdateStatus::iter() {
-            assert_eq!(format!("{status}"), status.as_str());
-        }
     }
 
     // ── 8. ErrorResponse round-trip ─────────────────────────────────────

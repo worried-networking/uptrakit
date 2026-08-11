@@ -6,29 +6,12 @@ use uptrakit_shared_db::entity::{
     user,
 };
 use uptrakit_web_api_types::pagination::PaginatedResponse;
-use uptrakit_web_api_types::update_history::{
-    UpdateHistoryQuery, UpdateHistoryResponse, UpdateStatus,
-};
+use uptrakit_web_api_types::update_history::{UpdateHistoryQuery, UpdateHistoryResponse};
 use uuid::Uuid;
 
 use crate::tenant_db::TenantDb;
 
 // --- Private helpers ---
-
-fn db_status_to_api(status: &update_history::UpdateStatus) -> UpdateStatus {
-    match status {
-        update_history::UpdateStatus::Queued => UpdateStatus::Queued,
-        update_history::UpdateStatus::Pending => UpdateStatus::Pending,
-        update_history::UpdateStatus::InProgress => UpdateStatus::InProgress,
-        update_history::UpdateStatus::Completed => UpdateStatus::Completed,
-        update_history::UpdateStatus::Failed => UpdateStatus::Failed,
-        update_history::UpdateStatus::Interrupted => UpdateStatus::Interrupted,
-        _ => {
-            tracing::warn!("Unknown update status encountered, defaulting to Pending");
-            UpdateStatus::Pending
-        }
-    }
-}
 
 /// Maximum bytes of output to load and return via the API (50 MB).
 ///
@@ -79,7 +62,7 @@ fn build_response(
         software_item_name,
         record.from_version.clone(),
         record.to_version.clone().unwrap_or_default(),
-        db_status_to_api(&record.status),
+        record.status,
         output,
         record.actor_type.clone(),
         record.actor_id.clone(),
@@ -372,9 +355,11 @@ pub async fn get_update_history(
 mod tests {
     use super::*;
     use sea_orm::{ActiveModelTrait, ConnectOptions, Database, DatabaseConnection, Set};
+    use strum::IntoEnumIterator;
     use time::OffsetDateTime;
     use uptrakit_shared_db::entity::{host, software_item, tenant};
     use uptrakit_shared_types::OutputStreamType;
+    use uptrakit_web_api_types::update_history::UpdateStatus;
 
     async fn setup_test_db() -> DatabaseConnection {
         let opt = ConnectOptions::new("sqlite::memory:");
@@ -701,36 +686,56 @@ mod tests {
         assert!(resp.completed_at.is_none());
     }
 
+    /// Drift-class tripwire: every variant must survive the real build_response
+    /// path. If a future refactor re-inserts a lossy converter/DTO/wildcard
+    /// match, this fails for the dropped variant. AwaitingRestart is the
+    /// documented-bug anchor — before this fix it came back as `pending`.
     #[test]
-    fn db_status_to_api_maps_all_variants() {
-        assert_eq!(
-            db_status_to_api(&update_history::UpdateStatus::Queued),
-            UpdateStatus::Queued
-        );
-        assert_eq!(
-            db_status_to_api(&update_history::UpdateStatus::Pending),
-            UpdateStatus::Pending
-        );
-        assert_eq!(
-            db_status_to_api(&update_history::UpdateStatus::InProgress),
-            UpdateStatus::InProgress
-        );
-        assert_eq!(
-            db_status_to_api(&update_history::UpdateStatus::Completed),
-            UpdateStatus::Completed
-        );
-        assert_eq!(
-            db_status_to_api(&update_history::UpdateStatus::Failed),
-            UpdateStatus::Failed
-        );
-    }
+    fn build_response_preserves_every_status() {
+        let now = OffsetDateTime::now_utc();
+        for status in update_history::UpdateStatus::iter() {
+            let record = update_history::Model {
+                id: uuid::Uuid::now_v7(),
+                tenant_id: uuid::Uuid::now_v7(),
+                host_id: uuid::Uuid::now_v7(),
+                software_item_id: uuid::Uuid::now_v7(),
+                host_software_item_id: None,
+                from_version: Some("1.0.0".to_string()),
+                to_version: Some("2.0.0".to_string()),
+                status,
+                output: String::new(),
+                output_bytes: 0,
+                actor_type: "user".to_string(),
+                actor_id: "user-123".to_string(),
+                execution_owner_service_id: None,
+                execution_owner_instance_id: None,
+                started_at: Some(now),
+                completed_at: None,
+                awaiting_restart_since: None,
+                created_at: now,
+                update_category: "unknown".to_string(),
+                batch_id: None,
+                interactive: false,
+                output_truncated: false,
+                pre_update_protection_status: None,
+                pre_update_protection_summary: None,
+                recovery_hint: None,
+            };
 
-    #[test]
-    fn db_interrupted_maps_to_api_interrupted() {
-        assert_eq!(
-            db_status_to_api(&update_history::UpdateStatus::Interrupted),
-            UpdateStatus::Interrupted
-        );
+            let resp = build_response(
+                &record,
+                "Web Server".to_string(),
+                "Node.js".to_string(),
+                String::new(),
+                None,
+            );
+            assert_eq!(
+                resp.status.as_str(),
+                status.as_str(),
+                "status {status:?} must survive build_response unchanged \
+                 (AwaitingRestart previously came back as pending)"
+            );
+        }
     }
 
     #[tokio::test]
