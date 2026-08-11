@@ -38,6 +38,7 @@ macro_rules! declare_plugin {
             $( type_settings: $ts_marker:tt, )?
             $( scope: $scope:expr, )?
             $( instance_config: $instance_cfg:expr, )?
+            $( sensitive_paths: [ $( $sensitive_path:literal ),+ $(,)? ], )?
             roles: [ $( $role:ident $( { host_requirements: $role_hr:expr } )? ),* $(,)? ]
             $(, extra_capabilities: [ $( $extra_cap:expr ),+ $(,)? ] )?
             $(, notification_transport: $transport_fn:expr )?
@@ -141,6 +142,19 @@ macro_rules! declare_plugin {
                 }
             }
 
+            pub(super) fn normalize(
+                config: &serde_json::Value,
+            ) -> std::result::Result<serde_json::Value, $crate::PluginConfigValidationError> {
+                let typed: $config = serde_json::from_value(config.clone())
+                    .map_err(|e| $crate::PluginConfigValidationError::Contract(format!(
+                        "failed to parse config: {e}"
+                    )))?;
+                serde_json::to_value(&typed)
+                    .map_err(|e| $crate::PluginConfigValidationError::Contract(format!(
+                        "failed to serialize config: {e}"
+                    )))
+            }
+
             pub(super) fn sample() -> serde_json::Value {
                 serde_json::to_value(<$config as Default>::default())
                     .unwrap_or_else(|_| serde_json::json!({}))
@@ -192,10 +206,12 @@ macro_rules! declare_plugin {
             ),
             scope: $crate::__scope_value!( $( $scope )? ),
             instance_config: $crate::__instance_config_value!( $( $instance_cfg )? ),
+            sensitive_paths: $crate::__or_empty_slice!( $( &[ $( $sensitive_path ),+ ] )? ),
             config: $crate::ConfigOps {
                 validate: __descriptor_impl::validate,
                 mask_secrets: __descriptor_impl::mask_secrets,
                 restore_secrets: __descriptor_impl::restore_secrets,
+                normalize: __descriptor_impl::normalize,
                 sample: __descriptor_impl::sample,
                 form_schema: __descriptor_impl::form_schema,
                 validate_identifier: __descriptor_impl::validate_identifier,

@@ -748,6 +748,13 @@ mod tests {
 
     fn noop_restore(_: &mut serde_json::Value, _: &serde_json::Value) {}
 
+    fn noop_normalize(
+        config: &serde_json::Value,
+    ) -> std::result::Result<serde_json::Value, crate::plugin_config::PluginConfigValidationError>
+    {
+        Ok(config.clone())
+    }
+
     fn noop_sample() -> serde_json::Value {
         serde_json::json!({})
     }
@@ -1284,10 +1291,12 @@ mod tests {
         capabilities: &[],
         scope: crate::descriptor::PluginScope::Tenant,
         instance_config: None,
+        sensitive_paths: &[],
         config: ConfigOps {
             validate: noop_validate,
             mask_secrets: noop_mask,
             restore_secrets: noop_restore,
+            normalize: noop_normalize,
             sample: noop_sample,
             form_schema: noop_form_schema,
             validate_identifier: noop_validate_identifier,
@@ -1327,10 +1336,12 @@ mod tests {
         capabilities: &[PluginCapability::SoftwareItemLifecycle],
         scope: crate::descriptor::PluginScope::Tenant,
         instance_config: None,
+        sensitive_paths: &[],
         config: ConfigOps {
             validate: noop_validate,
             mask_secrets: noop_mask,
             restore_secrets: noop_restore,
+            normalize: noop_normalize,
             sample: noop_sample,
             form_schema: noop_form_schema,
             validate_identifier: noop_validate_identifier,
@@ -1371,10 +1382,12 @@ mod tests {
         capabilities: &[],
         scope: crate::descriptor::PluginScope::Tenant,
         instance_config: None,
+        sensitive_paths: &[],
         config: ConfigOps {
             validate: noop_validate,
             mask_secrets: noop_mask,
             restore_secrets: noop_restore,
+            normalize: noop_normalize,
             sample: noop_sample,
             form_schema: noop_form_schema,
             validate_identifier: noop_validate_identifier,
@@ -1415,10 +1428,12 @@ mod tests {
         capabilities: &[],
         scope: crate::descriptor::PluginScope::Tenant,
         instance_config: None,
+        sensitive_paths: &[],
         config: ConfigOps {
             validate: noop_validate,
             mask_secrets: noop_mask,
             restore_secrets: noop_restore,
+            normalize: noop_normalize,
             sample: noop_sample,
             form_schema: noop_form_schema,
             validate_identifier: noop_validate_identifier,
@@ -1459,10 +1474,12 @@ mod tests {
         capabilities: &[],
         scope: crate::descriptor::PluginScope::Tenant,
         instance_config: None,
+        sensitive_paths: &[],
         config: ConfigOps {
             validate: noop_validate,
             mask_secrets: noop_mask,
             restore_secrets: noop_restore,
+            normalize: noop_normalize,
             sample: noop_sample,
             form_schema: noop_form_schema,
             validate_identifier: noop_validate_identifier,
@@ -1697,10 +1714,12 @@ mod tests {
         capabilities: &[],
         scope: crate::descriptor::PluginScope::Tenant,
         instance_config: Some(&INSTANCE_CONFIG_OPS_FOR_BAD),
+        sensitive_paths: &[],
         config: ConfigOps {
             validate: noop_validate,
             mask_secrets: noop_mask,
             restore_secrets: noop_restore,
+            normalize: noop_normalize,
             sample: noop_sample,
             form_schema: noop_form_schema,
             validate_identifier: noop_validate_identifier,
@@ -1762,10 +1781,12 @@ mod tests {
         capabilities: &[PluginCapability::SoftwareItemLifecycle],
         scope: crate::descriptor::PluginScope::Instance,
         instance_config: None,
+        sensitive_paths: &[],
         config: ConfigOps {
             validate: noop_validate,
             mask_secrets: noop_mask,
             restore_secrets: noop_restore,
+            normalize: noop_normalize,
             sample: noop_sample,
             form_schema: noop_form_schema,
             validate_identifier: noop_validate_identifier,

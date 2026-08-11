@@ -82,6 +82,9 @@ pub struct ConfigOps {
     pub validate: fn(&serde_json::Value) -> Result<(), PluginConfigValidationError>,
     pub mask_secrets: fn(&serde_json::Value) -> serde_json::Value,
     pub restore_secrets: fn(&mut serde_json::Value, &serde_json::Value),
+    /// Deserialize→reserialize through the typed config; used to prune stale
+    /// variant keys after restore.
+    pub normalize: fn(&serde_json::Value) -> Result<serde_json::Value, PluginConfigValidationError>,
     pub sample: fn() -> serde_json::Value,
     pub form_schema: fn() -> Vec<FormFieldDescriptor>,
     pub validate_identifier: fn(&str) -> Result<(), PluginConfigValidationError>,
@@ -553,6 +556,9 @@ pub struct PluginDescriptor {
     /// Instance-wide config operations for [`PluginScope::Instance`] plugins.
     /// `None` for tenant-scoped plugins and instance plugins with no config knobs.
     pub instance_config: Option<&'static InstanceConfigOps>,
+    /// Explicitly declared sensitive dotted JSON paths. UNION semantics: these
+    /// ADD to the schema-derived set, never replace it (spec §5).
+    pub sensitive_paths: &'static [&'static str],
 
     // ── Config operations (every plugin) ──
     pub config: ConfigOps,

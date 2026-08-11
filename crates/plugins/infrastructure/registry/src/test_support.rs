@@ -100,6 +100,12 @@ fn mask_secrets(cfg: &serde_json::Value) -> serde_json::Value {
 
 fn restore_secrets(_cfg: &mut serde_json::Value, _masked: &serde_json::Value) {}
 
+fn normalize(
+    cfg: &serde_json::Value,
+) -> std::result::Result<serde_json::Value, PluginConfigValidationError> {
+    Ok(cfg.clone())
+}
+
 fn sample() -> serde_json::Value {
     serde_json::json!({})
 }
@@ -120,10 +126,12 @@ pub static DESCRIPTOR: PluginDescriptor = PluginDescriptor {
     capabilities: TEST_RELEASE_FETCH_CAPABILITIES,
     scope: PluginScope::Tenant,
     instance_config: None,
+    sensitive_paths: &[],
     config: ConfigOps {
         validate,
         mask_secrets,
         restore_secrets,
+        normalize,
         sample,
         form_schema,
         validate_identifier,
@@ -166,10 +174,12 @@ pub static PER_ITEM_FAIL_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
     capabilities: TEST_RELEASE_FETCH_CAPABILITIES,
     scope: PluginScope::Tenant,
     instance_config: None,
+    sensitive_paths: &[],
     config: ConfigOps {
         validate,
         mask_secrets,
         restore_secrets,
+        normalize,
         sample,
         form_schema,
         validate_identifier,
@@ -283,10 +293,12 @@ pub static ENRICHER_ECHO_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
     capabilities: TEST_ENRICHER_CAPABILITIES,
     scope: PluginScope::Tenant,
     instance_config: None,
+    sensitive_paths: &[],
     config: ConfigOps {
         validate,
         mask_secrets,
         restore_secrets,
+        normalize,
         sample,
         form_schema,
         validate_identifier,
@@ -365,10 +377,12 @@ pub static ENRICHER_MISS_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
     capabilities: TEST_ENRICHER_CAPABILITIES,
     scope: PluginScope::Tenant,
     instance_config: None,
+    sensitive_paths: &[],
     config: ConfigOps {
         validate,
         mask_secrets,
         restore_secrets,
+        normalize,
         sample,
         form_schema,
         validate_identifier,
@@ -480,10 +494,12 @@ pub static TEST_LIFECYCLE_HOOK_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
     capabilities: TEST_LIFECYCLE_HOOK_CAPABILITIES,
     scope: PluginScope::Tenant,
     instance_config: None,
+    sensitive_paths: &[],
     config: ConfigOps {
         validate,
         mask_secrets,
         restore_secrets,
+        normalize,
         sample,
         form_schema,
         validate_identifier,
@@ -526,10 +542,12 @@ pub static CTX_CAPTURE_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
     capabilities: TEST_RELEASE_FETCH_CAPABILITIES,
     scope: PluginScope::Tenant,
     instance_config: None,
+    sensitive_paths: &[],
     config: ConfigOps {
         validate,
         mask_secrets,
         restore_secrets,
+        normalize,
         sample,
         form_schema,
         validate_identifier,
