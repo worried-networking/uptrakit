@@ -150,9 +150,13 @@ pub async fn find_raw_active_config_txn(
 #[tracing::instrument(skip_all)]
 pub async fn create_plugin_config_in_tx(
     tx: &DatabaseTransaction,
+    ops: &dyn PluginConfigOps,
     tenant_id: Uuid,
     req: CreatePluginConfigRequest,
 ) -> Result<plugin_config::Model> {
+    ops.assert_no_sentinel(&req.plugin_type, &req.config)
+        .map_err(|e| report!(PluginConfigError::ConfigValidation(e.to_string())))?;
+
     let now = OffsetDateTime::now_utc();
     let model = plugin_config::ActiveModel {
         id: Set(generate_uuid()),
@@ -217,6 +221,8 @@ pub async fn update_plugin_config_in_tx(
     if let Some(mut config) = req.config {
         ops.restore_config_secrets(&type_id, &mut config, model.config.as_ref());
         let _pruned = ops.prune_stale_sensitive_keys(&type_id, &mut config);
+        ops.assert_no_sentinel(&type_id, &config)
+            .map_err(|e| report!(PluginConfigError::ConfigValidation(e.to_string())))?;
         model.config = Set(config);
     }
     if let Some(enabled) = req.enabled {
@@ -265,6 +271,8 @@ pub async fn create_plugin_config(
     let now = OffsetDateTime::now_utc();
     let type_id = req.plugin_type.clone();
     let _pruned = ops.prune_stale_sensitive_keys(&type_id, &mut req.config);
+    ops.assert_no_sentinel(&type_id, &req.config)
+        .map_err(|e| report!(PluginConfigError::ConfigValidation(e.to_string())))?;
     let model = plugin_config::ActiveModel {
         id: Set(generate_uuid()),
         tenant_id: Set(tenant_db.tenant_id()),
@@ -386,6 +394,8 @@ pub async fn update_plugin_config(
         // Re-apply secret restoration on the actual value being persisted.
         ops.restore_config_secrets(&type_id, &mut config, model.config.as_ref());
         let _pruned = ops.prune_stale_sensitive_keys(&type_id, &mut config);
+        ops.assert_no_sentinel(&type_id, &config)
+            .map_err(|e| report!(PluginConfigError::ConfigValidation(e.to_string())))?;
         model.config = Set(config);
     }
     if let Some(enabled) = req.enabled {

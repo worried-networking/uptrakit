@@ -174,6 +174,11 @@ async fn resolve_plugin_config_txn(
                     e.to_string()
                 ));
             }
+            if let Err(e) = ops.assert_no_sentinel(&id, &inline.config) {
+                bail!(SoftwareItemQueryError::InvalidInlinePluginConfig(
+                    e.to_string()
+                ));
+            }
             let now = OffsetDateTime::now_utc();
             let pcid = generate_uuid();
             let model = plugin_config::ActiveModel {

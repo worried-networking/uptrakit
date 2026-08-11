@@ -279,18 +279,35 @@ pub async fn create_plugin_config(
         }
     };
 
-    let model = match pc_queries::create_plugin_config_in_tx(&tx, tenant_id, req).await {
+    let model = match pc_queries::create_plugin_config_in_tx(
+        &tx,
+        state.plugin.plugin_ops.as_ref(),
+        tenant_id,
+        req,
+    )
+    .await
+    {
         Ok(m) => m,
         Err(err) => {
             drop(tx);
-            let (outcome, reason_code) = if matches!(
-                err.current_context(),
-                pc_queries::PluginConfigError::DuplicateName
-            ) {
-                (AuditOutcome::Denied, "duplicate_name")
-            } else {
-                tracing::error!("DB error creating plugin config: {err}");
-                (AuditOutcome::Failed, "plugin_config_create_failed")
+            let ctx = err.current_context();
+            let (status, outcome, reason_code) = match ctx {
+                pc_queries::PluginConfigError::DuplicateName => {
+                    (StatusCode::CONFLICT, AuditOutcome::Denied, "duplicate_name")
+                }
+                pc_queries::PluginConfigError::ConfigValidation(_) => (
+                    StatusCode::BAD_REQUEST,
+                    AuditOutcome::ValidationFailed,
+                    "config_validation_failed",
+                ),
+                _ => {
+                    tracing::error!("DB error creating plugin config: {err}");
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        AuditOutcome::Failed,
+                        "plugin_config_create_failed",
+                    )
+                }
             };
             if let Ok(entry) = AuditEntry::<Event>::builder_event(
                 uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
@@ -307,16 +324,13 @@ pub async fn create_plugin_config(
             {
                 state.audit_emitter.emit_event(entry);
             }
-            return if matches!(
-                err.current_context(),
-                pc_queries::PluginConfigError::DuplicateName
-            ) {
-                error_response(
+            return match status {
+                StatusCode::CONFLICT => error_response(
                     StatusCode::CONFLICT,
                     "A plugin config with this name already exists",
-                )
-            } else {
-                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+                ),
+                StatusCode::BAD_REQUEST => error_response(StatusCode::BAD_REQUEST, ctx.to_string()),
+                _ => error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
             };
         }
     };

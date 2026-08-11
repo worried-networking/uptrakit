@@ -452,6 +452,144 @@ async fn github_update_stays_sparse_no_materialized_defaults() {
     );
 }
 
+/// Task 7: creating a config with the mask sentinel at a sensitive path must
+/// be rejected — there is no stored row to restore from, so persisting it
+/// would silently store `"***"` as the live secret.
+#[tokio::test]
+async fn create_with_sentinel_at_sensitive_path_is_400() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let (status, body): (_, serde_json::Value) = client
+        .post_json(
+            "/api/v1/plugin-configs",
+            &serde_json::json!({
+                "name": "Sentinel GitHub Config",
+                "plugin_type": "releases.github",
+                "config": {"auth_token": "***"}
+            }),
+        )
+        .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::BAD_REQUEST);
+    assert!(
+        body["error"]
+            .as_str()
+            .expect("error message")
+            .contains("still contains the masked sentinel"),
+        "unexpected error body: {body:?}"
+    );
+}
+
+/// Task 7: a GET-masked config echoed back verbatim on PUT must restore the
+/// stored secret rather than persist the sentinel literal. Non-vacuity: the
+/// raw stored value is asserted, not just the response status.
+#[tokio::test]
+async fn update_echoing_sentinel_preserves_stored_secret() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let (create_status, created): (_, serde_json::Value) = client
+        .post_json(
+            "/api/v1/plugin-configs",
+            &serde_json::json!({
+                "name": "Echo GitHub Config",
+                "plugin_type": "releases.github",
+                "config": {"auth_token": "original-secret-token"}
+            }),
+        )
+        .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
+        .send_json()
+        .await;
+    assert_eq!(create_status, http::StatusCode::CREATED);
+    let id = created["id"].as_str().expect("id");
+
+    let (get_status, masked): (_, serde_json::Value) = client
+        .get(&format!("/api/v1/plugin-configs/{id}"))
+        .bearer(&token)
+        .send_json()
+        .await;
+    assert_eq!(get_status, http::StatusCode::OK);
+    assert_eq!(masked["config"]["auth_token"], serde_json::json!("***"));
+
+    let (update_status, _body): (_, serde_json::Value) = client
+        .put_json(
+            &format!("/api/v1/plugin-configs/{id}"),
+            &serde_json::json!({
+                "config": {"auth_token": "***"}
+            }),
+        )
+        .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
+        .send_json()
+        .await;
+    assert_eq!(update_status, http::StatusCode::OK);
+
+    let stored = plugin_config::Entity::find_by_id(Uuid::parse_str(id).expect("uuid"))
+        .one(&app.db)
+        .await
+        .expect("query plugin_config")
+        .expect("plugin_config row exists");
+
+    assert_eq!(
+        stored.config["auth_token"],
+        serde_json::json!("original-secret-token"),
+        "the echoed sentinel must restore the previously stored secret, not overwrite it"
+    );
+}
+
+/// Task 7: echoing the sentinel on a config that never had a stored value
+/// for that sensitive path must be rejected — there is nothing to restore.
+#[tokio::test]
+async fn update_sentinel_without_stored_value_is_400() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let (create_status, created): (_, serde_json::Value) = client
+        .post_json(
+            "/api/v1/plugin-configs",
+            &serde_json::json!({
+                "name": "No-Token GitHub Config",
+                "plugin_type": "releases.github",
+                "config": {}
+            }),
+        )
+        .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
+        .send_json()
+        .await;
+    assert_eq!(create_status, http::StatusCode::CREATED);
+    let id = created["id"].as_str().expect("id");
+
+    let (update_status, body): (_, serde_json::Value) = client
+        .put_json(
+            &format!("/api/v1/plugin-configs/{id}"),
+            &serde_json::json!({
+                "config": {"auth_token": "***"}
+            }),
+        )
+        .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
+        .send_json()
+        .await;
+
+    assert_eq!(update_status, http::StatusCode::BAD_REQUEST);
+    assert!(
+        body["error"]
+            .as_str()
+            .expect("error message")
+            .contains("still contains the masked sentinel"),
+        "unexpected error body: {body:?}"
+    );
+}
+
 /// Intent pin (task 6a spec §5.2): `resolve_effective_config` merge
 /// semantics don't change across the flip, but WHICH stored shape a profile
 /// takes does — this pins the later-wins result for both. An
