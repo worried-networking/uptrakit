@@ -1754,13 +1754,29 @@ snapshot can never become current without restarting the transaction.
 The symptom is a `database is locked` error with a 2–5 ms latency on an operation that is supposed to wait up to 5 seconds. It is easy to miss in
 testing because it only triggers under concurrent load.
 
-**Rule:** Any transaction that **reads rows first and then writes** must be started with `BEGIN IMMEDIATE`. This acquires the write lock at `BEGIN`
-time, before any reads establish a snapshot, so the snapshot-staleness race cannot occur.
+**Rule:** Every transaction in the workspace opens via `begin_immediate()` (the `uptrakit-db-tx` leaf crate,
+re-exported as `uptrakit_shared_db::begin_immediate`) — not only transactions that read before writing. This
+acquires the write lock at `BEGIN` time, before any reads establish a snapshot, so the snapshot-staleness race
+cannot occur, and it is a mode no-op on other backends and on nested (savepoint) transactions, so it is safe to
+call unconditionally regardless of backend or nesting. All eleven `sea_orm` transaction-opening method paths are
+banned via `clippy.toml`'s `disallowed-methods`: `TransactionTrait::{begin, begin_with_config,
+begin_with_options, transaction, transaction_with_config}`, plus the inherent `transaction_async` /
+`transaction_with_config_async` pair on each of `DatabaseTransaction`, `DatabaseConnection`, and
+`DatabaseExecutor`.
 
 ```rust
-use sea_orm::{SqliteTransactionMode, TransactionOptions, TransactionTrait};
+use uptrakit_shared_db::begin_immediate;
 
-// ✓ Correct — write lock acquired before snapshot is established
+// ✓ Correct — the sole sanctioned transaction opener
+let txn = begin_immediate(db).await.context_to()?;
+
+let row = Entity::find().one(&txn).await?;   // read
+// … some logic …
+active_model.update(&txn).await?;            // write — safe, no BUSY_SNAPSHOT
+
+// ✗ Wrong — banned via clippy.toml disallowed-methods; BEGIN DEFERRED opens a
+//   snapshot on first read that a concurrent commit can invalidate before the
+//   write → SQLITE_BUSY_SNAPSHOT (code 517) instead of an ordinary busy_timeout wait
 let txn = db
     .begin_with_options(TransactionOptions {
         sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
@@ -1768,23 +1784,20 @@ let txn = db
     })
     .await
     .context_to()?;
-
-let row = Entity::find().one(&txn).await?;   // read
-// … some logic …
-active_model.update(&txn).await?;            // write — safe, no BUSY_SNAPSHOT
-
-// ✗ Wrong — BEGIN DEFERRED; snapshot established on first read;
-//   concurrent commit between read and write → SQLITE_BUSY (code 5, 2 ms)
-let txn = db.begin().await.context_to()?;
-let row = Entity::find().one(&txn).await?;
-active_model.update(&txn).await?;  // may fail instantly
 ```
 
-`SqliteTransactionMode::Immediate` is **ignored on Postgres** connections — it is a SQLite-only hint, so it is safe to pass unconditionally regardless
-of which backend is active.
+**Escape hatch:** a call site that genuinely needs a non-default `TransactionOptions` field, or that can justify
+staying on a plain writer-writer lock, may bypass the ban with `#[expect(clippy::disallowed_methods, reason =
+"...")]`, where the reason names either the write-only rationale or the specific `TransactionOptions` field
+needed. The only current users of this escape hatch are `begin_immediate()`'s own internal
+`begin_with_options()` call and the `uptrakit-db-tx` test module's canary/negative-control call sites (see
+below) — no production call site outside `uptrakit-db-tx` opts out of `begin_immediate()`.
 
-**Write-only transactions** (DELETE/UPDATE with no prior SELECT inside the same transaction) do not need `BEGIN IMMEDIATE`; `busy_timeout` handles the
-ordinary writer-writer lock contention for those.
+**Canary:** `crates/shared/db-tx/src/lib.rs`'s `mod tests` exercises all eleven banned paths, each under its own
+`#[expect(clippy::disallowed_methods, ...)]`. If a future `sea_orm` upgrade renames or relocates a banned
+method, the unresolvable `clippy.toml` path degrades to a config warning that `-D warnings` does not catch — but
+the corresponding `#[expect]` then goes unfulfilled, and the workspace's `unfulfilled_lint_expectations = "deny"`
+lint turns that into a hard build failure instead of a silent gap.
 
 ### Active partial-index predicates must track the active status set
 

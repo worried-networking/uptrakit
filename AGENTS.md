@@ -42,6 +42,7 @@ cargo test --all-features                                            # Tests
 cargo deny check                                                     # Validate new dependencies
 bash ci/verify_no_security_audit.sh                                  # No legacy security_audit / raw action literals
 bash ci/verify_typed_audit_actions.sh                                # Audit action parsing/building at explicit boundaries
+bash ci/verify_no_inline_query_params.sh                             # OpenAPI params authored via IntoParams structs, no inline lists
 bash ci/verify_handler_state_contract.sh                             # No handler mixes State<Arc<AppState>> with sub-state
 python3 ci/verify_db_access_policy.py                                # db_access_policy.toml consistent with routes/
 bash ci/verify_agents_md_budget.sh                                   # AGENTS.md size budget gate

@@ -55,10 +55,12 @@ Writes the audit row directly on the supplied transaction. If the INSERT fails, 
 rolls back along with the mutation it describes. Use for all Stateful-class actions.
 
 **Transaction requirement:** the caller must open the transaction with `BEGIN IMMEDIATE`
-whenever the handler reads any row before writing (the snapshot SELECT qualifies). Without
-`BEGIN IMMEDIATE`, SQLite raises `SQLITE_BUSY_SNAPSHOT` (error code 5, bypasses
-`busy_timeout`) when another writer commits between the snapshot read and the audit INSERT.
-See the coding-standards database section for the full `begin_with_options` boilerplate.
+whenever the handler reads any row before writing (the snapshot SELECT qualifies) — in practice
+this means every Stateful transaction, since `begin_immediate()` is the workspace's sole
+sanctioned transaction opener. Without `BEGIN IMMEDIATE`, SQLite raises `SQLITE_BUSY_SNAPSHOT`
+(error code 5, bypasses `busy_timeout`) when another writer commits between the snapshot read
+and the audit INSERT. See the coding-standards database section for the full `begin_immediate()`
+rule.
 
 **Journald post-commit flush:** the journald backend cannot write inside a
 `DatabaseTransaction`. Obtain a `AuditCommitHook` before opening the transaction and call
@@ -67,12 +69,11 @@ back or the caller returns an error, the hook is dropped without flushing — no
 is emitted for a failed mutation.
 
 ```rust
+use uptrakit_shared_db::begin_immediate;
+
 // Obtain the hook before opening the transaction.
 let hook = audit.commit_hook();
-let tx = db.begin_with_options(TransactionOptions {
-    sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-    ..Default::default()
-}).await?;
+let tx = begin_immediate(&db).await?;
 let before = PluginConfig::find_by_id(id).one(&tx).await?...;
 // ... perform mutation ...
 let after = PluginConfig::find_by_id(id).one(&tx).await?...;
