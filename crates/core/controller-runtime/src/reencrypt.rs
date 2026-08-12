@@ -426,6 +426,32 @@ async fn upgrade_plugin_configs(db: &DatabaseConnection) -> u64 {
     use uptrakit_shared_db::encrypted_columns::EncryptedPluginConfig;
     use uptrakit_shared_db::entity::{plugin_config, prelude::PluginConfig};
 
+    /// Upgrade a single already-loaded row; shared by the happy path and the
+    /// per-row recovery path below so both apply identical logic.
+    async fn upgrade_row(db: &DatabaseConnection, row: plugin_config::Model) -> bool {
+        if !row.config.needs_v3_upgrade() {
+            return false;
+        }
+        let plaintext = row.config.expose_secret().to_string();
+        let id = row.id;
+        match EncryptedPluginConfig::new(plaintext) {
+            Ok(encrypted) => {
+                let mut am = row.into_active_model();
+                am.config = sea_orm::Set(encrypted);
+                if let Err(e) = am.update(db).await {
+                    tracing::warn!(id = %id, error = %e, "v3 upgrade failed: plugin_configs.config");
+                    false
+                } else {
+                    true
+                }
+            }
+            Err(e) => {
+                tracing::warn!(id = %id, error = %e, "v3 encrypt failed: plugin_configs.config");
+                false
+            }
+        }
+    }
+
     let mut count = 0u64;
     let mut last_id: Option<uuid::Uuid> = None;
 
@@ -442,14 +468,14 @@ async fn upgrade_plugin_configs(db: &DatabaseConnection) -> u64 {
                 tracing::warn!(
                     cursor = ?last_id,
                     error = %e,
-                    "failed to query plugin_configs page for v3 upgrade; attempting to skip poisoned page"
+                    "failed to query plugin_configs page for v3 upgrade; recovering row by row"
                 );
 
                 // The page load failed to decode (likely one undecryptable or
                 // unparseable `config` value). Pks are unencrypted, so a
-                // pk-only select of the same page can still succeed and let
-                // us advance the cursor past the poisoned page instead of
-                // stalling this table's pass forever.
+                // pk-only select of the same page can still succeed. Load
+                // each id individually so the one poisoned row is excluded
+                // without stranding the rest of the page.
                 let mut pk_query = PluginConfig::find()
                     .select_only()
                     .column(plugin_config::Column::Id)
@@ -462,6 +488,27 @@ async fn upgrade_plugin_configs(db: &DatabaseConnection) -> u64 {
                     Ok(ids) => {
                         let Some(&max_id) = ids.last() else { break };
                         let recovered_page_len = ids.len() as u64;
+                        for id in &ids {
+                            match PluginConfig::find_by_id(*id).one(db).await {
+                                Ok(Some(row)) => {
+                                    if upgrade_row(db, row).await {
+                                        count += 1;
+                                    }
+                                }
+                                Ok(None) => {
+                                    // Deleted concurrently between the pk-only
+                                    // select and this per-row load; nothing to
+                                    // upgrade.
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        id = %id,
+                                        error = %e,
+                                        "plugin config row is undecodable; excluded from v3 upgrade"
+                                    );
+                                }
+                            }
+                        }
                         last_id = Some(max_id);
                         if recovered_page_len < UPGRADE_CHUNK_SIZE {
                             break;
@@ -485,24 +532,8 @@ async fn upgrade_plugin_configs(db: &DatabaseConnection) -> u64 {
         let page_len = rows.len() as u64;
 
         for row in rows {
-            if !row.config.needs_v3_upgrade() {
-                continue;
-            }
-            let plaintext = row.config.expose_secret().to_string();
-            let id = row.id;
-            match EncryptedPluginConfig::new(plaintext) {
-                Ok(encrypted) => {
-                    let mut am = row.into_active_model();
-                    am.config = sea_orm::Set(encrypted);
-                    if let Err(e) = am.update(db).await {
-                        tracing::warn!(id = %id, error = %e, "v3 upgrade failed: plugin_configs.config");
-                    } else {
-                        count += 1;
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(id = %id, error = %e, "v3 encrypt failed: plugin_configs.config");
-                }
+            if upgrade_row(db, row).await {
+                count += 1;
             }
         }
 
@@ -527,6 +558,32 @@ async fn upgrade_plugin_type_settings(db: &DatabaseConnection) -> u64 {
     use uptrakit_shared_db::encrypted_columns::EncryptedPluginTypeConfig;
     use uptrakit_shared_db::entity::{plugin_type_setting, prelude::PluginTypeSetting};
 
+    /// Upgrade a single already-loaded row; shared by the happy path and the
+    /// per-row recovery path below so both apply identical logic.
+    async fn upgrade_row(db: &DatabaseConnection, row: plugin_type_setting::Model) -> bool {
+        if !row.config.needs_v3_upgrade() {
+            return false;
+        }
+        let plaintext = row.config.expose_secret().to_string();
+        let id = row.id;
+        match EncryptedPluginTypeConfig::new(plaintext) {
+            Ok(encrypted) => {
+                let mut am = row.into_active_model();
+                am.config = sea_orm::Set(encrypted);
+                if let Err(e) = am.update(db).await {
+                    tracing::warn!(id = %id, error = %e, "v3 upgrade failed: plugin_type_settings.config");
+                    false
+                } else {
+                    true
+                }
+            }
+            Err(e) => {
+                tracing::warn!(id = %id, error = %e, "v3 encrypt failed: plugin_type_settings.config");
+                false
+            }
+        }
+    }
+
     let mut count = 0u64;
     let mut last_id: Option<uuid::Uuid> = None;
 
@@ -543,14 +600,14 @@ async fn upgrade_plugin_type_settings(db: &DatabaseConnection) -> u64 {
                 tracing::warn!(
                     cursor = ?last_id,
                     error = %e,
-                    "failed to query plugin_type_settings page for v3 upgrade; attempting to skip poisoned page"
+                    "failed to query plugin_type_settings page for v3 upgrade; recovering row by row"
                 );
 
                 // The page load failed to decode (likely one undecryptable or
                 // unparseable `config` value). Pks are unencrypted, so a
-                // pk-only select of the same page can still succeed and let
-                // us advance the cursor past the poisoned page instead of
-                // stalling this table's pass forever.
+                // pk-only select of the same page can still succeed. Load
+                // each id individually so the one poisoned row is excluded
+                // without stranding the rest of the page.
                 let mut pk_query = PluginTypeSetting::find()
                     .select_only()
                     .column(plugin_type_setting::Column::Id)
@@ -563,6 +620,27 @@ async fn upgrade_plugin_type_settings(db: &DatabaseConnection) -> u64 {
                     Ok(ids) => {
                         let Some(&max_id) = ids.last() else { break };
                         let recovered_page_len = ids.len() as u64;
+                        for id in &ids {
+                            match PluginTypeSetting::find_by_id(*id).one(db).await {
+                                Ok(Some(row)) => {
+                                    if upgrade_row(db, row).await {
+                                        count += 1;
+                                    }
+                                }
+                                Ok(None) => {
+                                    // Deleted concurrently between the pk-only
+                                    // select and this per-row load; nothing to
+                                    // upgrade.
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        id = %id,
+                                        error = %e,
+                                        "plugin config row is undecodable; excluded from v3 upgrade"
+                                    );
+                                }
+                            }
+                        }
                         last_id = Some(max_id);
                         if recovered_page_len < UPGRADE_CHUNK_SIZE {
                             break;
@@ -586,24 +664,8 @@ async fn upgrade_plugin_type_settings(db: &DatabaseConnection) -> u64 {
         let page_len = rows.len() as u64;
 
         for row in rows {
-            if !row.config.needs_v3_upgrade() {
-                continue;
-            }
-            let plaintext = row.config.expose_secret().to_string();
-            let id = row.id;
-            match EncryptedPluginTypeConfig::new(plaintext) {
-                Ok(encrypted) => {
-                    let mut am = row.into_active_model();
-                    am.config = sea_orm::Set(encrypted);
-                    if let Err(e) = am.update(db).await {
-                        tracing::warn!(id = %id, error = %e, "v3 upgrade failed: plugin_type_settings.config");
-                    } else {
-                        count += 1;
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(id = %id, error = %e, "v3 encrypt failed: plugin_type_settings.config");
-                }
+            if upgrade_row(db, row).await {
+                count += 1;
             }
         }
 
@@ -628,6 +690,32 @@ async fn upgrade_instance_plugin_settings(db: &DatabaseConnection) -> u64 {
     use uptrakit_shared_db::encrypted_columns::EncryptedInstancePluginConfig;
     use uptrakit_shared_db::entity::{instance_plugin_setting, prelude::InstancePluginSetting};
 
+    /// Upgrade a single already-loaded row; shared by the happy path and the
+    /// per-row recovery path below so both apply identical logic.
+    async fn upgrade_row(db: &DatabaseConnection, row: instance_plugin_setting::Model) -> bool {
+        if !row.config.needs_v3_upgrade() {
+            return false;
+        }
+        let plaintext = row.config.expose_secret().to_string();
+        let plugin_type_id = row.plugin_type_id.clone();
+        match EncryptedInstancePluginConfig::new(plaintext) {
+            Ok(encrypted) => {
+                let mut am = row.into_active_model();
+                am.config = sea_orm::Set(encrypted);
+                if let Err(e) = am.update(db).await {
+                    tracing::warn!(plugin_type_id = %plugin_type_id, error = %e, "v3 upgrade failed: instance_plugin_setting.config");
+                    false
+                } else {
+                    true
+                }
+            }
+            Err(e) => {
+                tracing::warn!(plugin_type_id = %plugin_type_id, error = %e, "v3 encrypt failed: instance_plugin_setting.config");
+                false
+            }
+        }
+    }
+
     let mut count = 0u64;
     let mut last_plugin_type_id: Option<String> = None;
 
@@ -645,14 +733,14 @@ async fn upgrade_instance_plugin_settings(db: &DatabaseConnection) -> u64 {
                 tracing::warn!(
                     cursor = ?last_plugin_type_id,
                     error = %e,
-                    "failed to query instance_plugin_setting page for v3 upgrade; attempting to skip poisoned page"
+                    "failed to query instance_plugin_setting page for v3 upgrade; recovering row by row"
                 );
 
                 // The page load failed to decode (likely one undecryptable or
                 // unparseable `config` value). Pks are unencrypted, so a
-                // pk-only select of the same page can still succeed and let
-                // us advance the cursor past the poisoned page instead of
-                // stalling this table's pass forever.
+                // pk-only select of the same page can still succeed. Load
+                // each id individually so the one poisoned row is excluded
+                // without stranding the rest of the page.
                 let mut pk_query = InstancePluginSetting::find()
                     .select_only()
                     .column(instance_plugin_setting::Column::PluginTypeId)
@@ -669,6 +757,30 @@ async fn upgrade_instance_plugin_settings(db: &DatabaseConnection) -> u64 {
                             break;
                         };
                         let recovered_page_len = ids.len() as u64;
+                        for plugin_type_id in &ids {
+                            match InstancePluginSetting::find_by_id(plugin_type_id.clone())
+                                .one(db)
+                                .await
+                            {
+                                Ok(Some(row)) => {
+                                    if upgrade_row(db, row).await {
+                                        count += 1;
+                                    }
+                                }
+                                Ok(None) => {
+                                    // Deleted concurrently between the pk-only
+                                    // select and this per-row load; nothing to
+                                    // upgrade.
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        plugin_type_id = %plugin_type_id,
+                                        error = %e,
+                                        "plugin config row is undecodable; excluded from v3 upgrade"
+                                    );
+                                }
+                            }
+                        }
                         last_plugin_type_id = Some(max_id);
                         if recovered_page_len < UPGRADE_CHUNK_SIZE {
                             break;
@@ -692,24 +804,8 @@ async fn upgrade_instance_plugin_settings(db: &DatabaseConnection) -> u64 {
         let page_len = rows.len() as u64;
 
         for row in rows {
-            if !row.config.needs_v3_upgrade() {
-                continue;
-            }
-            let plaintext = row.config.expose_secret().to_string();
-            let plugin_type_id = row.plugin_type_id.clone();
-            match EncryptedInstancePluginConfig::new(plaintext) {
-                Ok(encrypted) => {
-                    let mut am = row.into_active_model();
-                    am.config = sea_orm::Set(encrypted);
-                    if let Err(e) = am.update(db).await {
-                        tracing::warn!(plugin_type_id = %plugin_type_id, error = %e, "v3 upgrade failed: instance_plugin_setting.config");
-                    } else {
-                        count += 1;
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(plugin_type_id = %plugin_type_id, error = %e, "v3 encrypt failed: instance_plugin_setting.config");
-                }
+            if upgrade_row(db, row).await {
+                count += 1;
             }
         }
 
@@ -1411,6 +1507,75 @@ mod tests {
             row.config.expose_secret(),
             r#"{"token":"idem-secret"}"#,
             "data preserved"
+        );
+    }
+
+    /// FIX 1 (per-row recovery): a single undecodable row on a page must not
+    /// strand its healthy siblings. Seeds one row whose `config` is a
+    /// ciphertext encrypted under the wrong AAD (so it can never decode
+    /// through the `plugin_configs.config` compile-time AAD, forcing the
+    /// page load to fail) plus several healthy plaintext rows on the same
+    /// page, then asserts the healthy rows converted and the poisoned row
+    /// was left untouched.
+    #[tokio::test]
+    async fn plugin_config_poisoned_row_does_not_strand_healthy_page_siblings() {
+        use uptrakit_shared_db::entity::plugin_config;
+
+        let db = test_db().await;
+        let now = OffsetDateTime::now_utc();
+
+        let poisoned_id = Uuid::now_v7();
+        let wrong_aad_ciphertext: String = {
+            let encrypted = EncryptedString::new(
+                r#"{"token":"should-never-convert"}"#.to_string(),
+                "some:other:aad",
+            )
+            .expect("encrypt under wrong aad");
+            let value: sea_orm::Value = encrypted.into();
+            let sea_orm::Value::String(Some(s)) = value else {
+                panic!("EncryptedString always converts to Value::String(Some(_))");
+            };
+            s
+        };
+        insert_plaintext_plugin_config(&db, poisoned_id, &wrong_aad_ciphertext, now).await;
+
+        let mut healthy_ids = Vec::new();
+        for _ in 0..5 {
+            let id = Uuid::now_v7();
+            insert_plaintext_plugin_config(&db, id, r#"{"token":"healthy-secret"}"#, now).await;
+            healthy_ids.push(id);
+        }
+
+        reencrypt_to_v3(&db).await;
+
+        for id in healthy_ids {
+            let raw: String = uptrakit_shared_db::entity::prelude::PluginConfig::find_by_id(id)
+                .select_only()
+                .column(plugin_config::Column::Config)
+                .into_tuple::<String>()
+                .one(&db)
+                .await
+                .expect("query raw config")
+                .expect("row exists");
+            assert!(
+                raw.starts_with("ENC:"),
+                "healthy sibling row must be converted even though its page also contained a \
+                 poisoned row, got {raw:?}"
+            );
+        }
+
+        let raw_poisoned: String =
+            uptrakit_shared_db::entity::prelude::PluginConfig::find_by_id(poisoned_id)
+                .select_only()
+                .column(plugin_config::Column::Config)
+                .into_tuple::<String>()
+                .one(&db)
+                .await
+                .expect("query raw poisoned config")
+                .expect("row exists");
+        assert_eq!(
+            raw_poisoned, wrong_aad_ciphertext,
+            "poisoned row must be left untouched by the per-row recovery path"
         );
     }
 
