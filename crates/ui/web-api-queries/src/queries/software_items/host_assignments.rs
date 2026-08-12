@@ -122,6 +122,10 @@ fn validate_assignment(
     config_override: Option<&JsonObjectMap>,
 ) -> super::Result<()> {
     let id = uptrakit_shared_types::PluginTypeId::new(plugin_type);
+    // Must run before the sensitive-path check below: `sensitive_paths` (and thus
+    // `first_sensitive_path_in`) returns empty for an uncataloged plugin type, so
+    // that check alone is fail-OPEN for unknown plugins. Rejecting unknown plugin
+    // types here first is what keeps the override path safe in that case.
     if let Err(e) = ops.validate_package_identifier(&id, package_identifier) {
         bail!(SoftwareItemQueryError::InvalidPackageIdentifier(
             e.to_string()
@@ -130,6 +134,12 @@ fn validate_assignment(
 
     if let Some(override_val) = config_override {
         let override_value = config_override_to_value(override_val);
+        if let Some(path) = ops.first_sensitive_path_in(&id, &override_value) {
+            bail!(SoftwareItemQueryError::InvalidConfigOverride(format!(
+                "per-host overrides must not contain sensitive fields (found '{path}'); \
+                 use a per-host plugin config profile instead"
+            )));
+        }
         if let Some(base) = base_config {
             if let Err(e) = validate_config_override(ops, plugin_type, base, &override_value) {
                 bail!(SoftwareItemQueryError::InvalidConfigOverride(e.to_string()));

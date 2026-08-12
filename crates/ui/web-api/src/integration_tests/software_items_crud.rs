@@ -722,6 +722,236 @@ async fn update_host_assignment_rejects_two_config_sources() {
     assert_eq!(status, http::StatusCode::BAD_REQUEST);
 }
 
+/// Layer-3 guard: a per-host `config_override` on the assign-hosts endpoint
+/// must not be able to smuggle a schema-derived sensitive field (github's
+/// `auth_token`) past validation. `host_assignment_error_response` returns
+/// `msg.as_str()` verbatim for `InvalidConfigOverride` (no `#[error]` prefix),
+/// so the body's `error` field is exactly the formatted rejection message.
+#[tokio::test]
+async fn assignment_override_with_sensitive_path_is_400() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let (_, created): (_, serde_json::Value) = client
+        .post_json(
+            "/api/v1/software-items",
+            &serde_json::json!({ "name": "GitHub Tracked App" }),
+        )
+        .bearer(&token)
+        .send_json()
+        .await;
+    let item_id = created["id"].as_str().expect("id");
+
+    let host = insert_host(&app.db, app.tenant_id).await;
+
+    let (status, body): (_, serde_json::Value) = client
+        .post_json(
+            &format!("/api/v1/software-items/{item_id}/hosts"),
+            &serde_json::json!({
+                "host_assignments": [{
+                    "host_id": host.id,
+                    "plugins": [{
+                        "role": "fetch_releases",
+                        "ordinal": 0,
+                        "plugin_config": {
+                            "name": "GitHub Config",
+                            "plugin_type": "releases.github",
+                            "config": {},
+                        },
+                        "package_identifier": "octocat/hello-world",
+                        "config_override": { "auth_token": "leak" },
+                        "execution_site": "controller",
+                    }],
+                }],
+            }),
+        )
+        .bearer(&token)
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::BAD_REQUEST, "body: {body:?}");
+    let error = body["error"].as_str().expect("error message");
+    assert!(
+        error.contains("must not contain sensitive fields"),
+        "error should name the rule: {error}"
+    );
+    assert!(
+        error.contains("auth_token"),
+        "error should name the offending path: {error}"
+    );
+}
+
+/// Regression guard: a non-sensitive per-host override must still be accepted
+/// through the same assign-hosts path exercised above.
+#[tokio::test]
+async fn assignment_override_without_secrets_is_accepted() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let (_, created): (_, serde_json::Value) = client
+        .post_json(
+            "/api/v1/software-items",
+            &serde_json::json!({ "name": "GitHub Tracked App 2" }),
+        )
+        .bearer(&token)
+        .send_json()
+        .await;
+    let item_id = created["id"].as_str().expect("id");
+
+    let host = insert_host(&app.db, app.tenant_id).await;
+
+    let (status, body): (_, serde_json::Value) = client
+        .post_json(
+            &format!("/api/v1/software-items/{item_id}/hosts"),
+            &serde_json::json!({
+                "host_assignments": [{
+                    "host_id": host.id,
+                    "plugins": [{
+                        "role": "fetch_releases",
+                        "ordinal": 0,
+                        "plugin_config": {
+                            "name": "GitHub Config 2",
+                            "plugin_type": "releases.github",
+                            "config": {},
+                        },
+                        "package_identifier": "octocat/hello-world",
+                        "config_override": { "tag_strip_prefix": "release-" },
+                        "execution_site": "controller",
+                    }],
+                }],
+            }),
+        )
+        .bearer(&token)
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::OK, "body: {body:?}");
+}
+
+/// Layer-3 guard on the update-assignment path: the type-only inline branch
+/// (`plugin_type` set directly, no shared `plugin_configs` row) reaches
+/// `validate_assignment` at a different call site than the assign-hosts
+/// endpoint; both must reject sensitive overrides identically.
+#[tokio::test]
+async fn update_assignment_override_with_sensitive_path_is_400() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let item_id = Uuid::now_v7();
+    let host_id = Uuid::now_v7();
+    let link_id = Uuid::now_v7();
+    let plugin_row_id = Uuid::now_v7();
+
+    insert_software_item(&app, item_id, "Update Sensitive Override App").await;
+    insert_host_for_merge_test(&app, host_id, "update-sensitive-override-host").await;
+    insert_host_link(&app, link_id, host_id, item_id, None).await;
+    // execution_site "controller" is required so `validate_execution_site` accepts
+    // role "fetch_releases", and so `validate_host_compatibility` (which would
+    // otherwise reject github for a role it doesn't support) is skipped, keeping
+    // this test isolated to the `validate_assignment` sensitive-path check.
+    insert_plugin_row_with_details(
+        &app,
+        plugin_row_id,
+        host_id,
+        item_id,
+        link_id,
+        "package-manager.apt",
+        "fetch_releases",
+        0,
+        None,
+        "pkg",
+        None,
+        "controller",
+    )
+    .await;
+
+    let (status, body): (_, serde_json::Value) = client
+        .put_json(
+            &format!("/api/v1/software-items/{item_id}/hosts/{host_id}"),
+            &serde_json::json!({
+                "role": "fetch_releases",
+                "ordinal": 0,
+                "plugin_type": "releases.github",
+                "package_identifier": "octocat/hello-world",
+                "config_override": { "auth_token": "leak" },
+                "execution_site": "controller",
+            }),
+        )
+        .bearer(&token)
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::BAD_REQUEST, "body: {body:?}");
+    let error = body["error"].as_str().expect("error message");
+    assert!(
+        error.contains("must not contain sensitive fields"),
+        "error should name the rule: {error}"
+    );
+    assert!(
+        error.contains("auth_token"),
+        "error should name the offending path: {error}"
+    );
+}
+
+/// Pins the ordering `validate_assignment` relies on for safety: for an
+/// uncataloged plugin type, `sensitive_paths` returns empty, so
+/// `first_sensitive_path_in` alone is fail-OPEN. The type-only update branch
+/// never calls `ops.validate_config` (unlike the plugin_config-creation
+/// path), so the *only* thing rejecting this request is the upstream
+/// `validate_package_identifier` call — this test breaks if that ordering
+/// is ever reversed.
+#[tokio::test]
+async fn update_assignment_override_unknown_plugin_type_is_rejected() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let item_id = Uuid::now_v7();
+    let host_id = Uuid::now_v7();
+    let link_id = Uuid::now_v7();
+    let plugin_row_id = Uuid::now_v7();
+
+    insert_software_item(&app, item_id, "Unknown Plugin Type App").await;
+    insert_host_for_merge_test(&app, host_id, "unknown-plugin-type-host").await;
+    insert_host_link(&app, link_id, host_id, item_id, None).await;
+    insert_plugin_row(
+        &app,
+        plugin_row_id,
+        host_id,
+        item_id,
+        link_id,
+        "detect_version",
+        0,
+    )
+    .await;
+
+    let (status, body): (_, serde_json::Value) = client
+        .put_json(
+            &format!("/api/v1/software-items/{item_id}/hosts/{host_id}"),
+            &serde_json::json!({
+                "role": "detect_version",
+                "ordinal": 0,
+                "plugin_type": "no.such.plugin",
+                "package_identifier": "x",
+                "config_override": { "auth_token": "leak" },
+            }),
+        )
+        .bearer(&token)
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::BAD_REQUEST, "body: {body:?}");
+    let error = body["error"].as_str().expect("error message");
+    assert!(
+        error.contains("unknown plugin"),
+        "rejection must come from validate_package_identifier, not the \
+         sensitive-path check: {error}"
+    );
+}
+
 #[tokio::test]
 async fn merge_execute_missing_survivor_candidate_returns_400() {
     let app = TestApp::new().await;
