@@ -10,6 +10,7 @@ use rootcause::prelude::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Set};
 use time::OffsetDateTime;
 use uptrakit_plugin_infrastructure_registry::{PluginOps, SoftwareItemLifecycleContext};
+use uptrakit_shared_db::encrypted_columns::EncryptedPluginTypeConfig;
 use uptrakit_shared_db::entity::plugin_type_setting;
 use uptrakit_shared_db::is_unique_constraint_violation;
 use uptrakit_shared_macros::impl_report_conversion;
@@ -27,6 +28,9 @@ pub enum PluginTypeSettingsError {
     /// The requested plugin type setting was not found.
     #[error("not found")]
     NotFound,
+    /// Encrypting the `config` column failed.
+    #[error("config encryption failed: {0}")]
+    Encryption(String),
 }
 
 pub type Result<T> = std::result::Result<T, rootcause::Report<PluginTypeSettingsError>>;
@@ -88,7 +92,7 @@ pub async fn preload_lifecycle_type_settings(
     for setting in settings {
         let plugin_type = PluginTypeId::new(setting.plugin_type);
         if lifecycle_plugin_types.contains(&plugin_type) {
-            ctx.insert_type_setting(plugin_type, setting.config);
+            ctx.insert_type_setting(plugin_type, setting.config.as_json().clone());
         }
     }
 
@@ -115,7 +119,8 @@ pub async fn upsert_type_settings(
 
     if let Some(existing) = existing {
         let mut model: plugin_type_setting::ActiveModel = existing.into();
-        model.config = Set(config);
+        model.config = Set(EncryptedPluginTypeConfig::from_json(&config)
+            .map_err(|e| report!(PluginTypeSettingsError::Encryption(e.to_string())))?);
         model.updated_at = Set(now);
         let updated = model.update(db).await.context_to()?;
         return Ok(updated);
@@ -126,7 +131,8 @@ pub async fn upsert_type_settings(
         id: Set(generate_uuid()),
         tenant_id: Set(tenant_id),
         plugin_type: Set(plugin_type.to_string()),
-        config: Set(config.clone()),
+        config: Set(EncryptedPluginTypeConfig::from_json(&config)
+            .map_err(|e| report!(PluginTypeSettingsError::Encryption(e.to_string())))?),
         created_at: Set(now),
         updated_at: Set(now),
     };
@@ -139,7 +145,8 @@ pub async fn upsert_type_settings(
                 .await?
                 .ok_or_else(|| report!(PluginTypeSettingsError::NotFound))?;
             let mut active: plugin_type_setting::ActiveModel = existing.into();
-            active.config = Set(config);
+            active.config = Set(EncryptedPluginTypeConfig::from_json(&config)
+                .map_err(|e| report!(PluginTypeSettingsError::Encryption(e.to_string())))?);
             active.updated_at = Set(now);
             let updated = active.update(db).await.context_to()?;
             Ok(updated)
@@ -239,7 +246,8 @@ pub async fn upsert_type_settings_in_tx(
 
     if let Some(before) = existing {
         let mut active: plugin_type_setting::ActiveModel = before.clone().into();
-        active.config = Set(config);
+        active.config = Set(EncryptedPluginTypeConfig::from_json(&config)
+            .map_err(|e| report!(PluginTypeSettingsError::Encryption(e.to_string())))?);
         active.updated_at = Set(now);
         let after = active.update(tx).await.context_to()?;
         return Ok((Some(before), after));
@@ -249,7 +257,8 @@ pub async fn upsert_type_settings_in_tx(
         id: Set(generate_uuid()),
         tenant_id: Set(tenant_id),
         plugin_type: Set(plugin_type.to_string()),
-        config: Set(config.clone()),
+        config: Set(EncryptedPluginTypeConfig::from_json(&config)
+            .map_err(|e| report!(PluginTypeSettingsError::Encryption(e.to_string())))?),
         created_at: Set(now),
         updated_at: Set(now),
     };
@@ -262,7 +271,8 @@ pub async fn upsert_type_settings_in_tx(
                 .await?
                 .ok_or_else(|| report!(PluginTypeSettingsError::NotFound))?;
             let mut active: plugin_type_setting::ActiveModel = before.clone().into();
-            active.config = Set(config);
+            active.config = Set(EncryptedPluginTypeConfig::from_json(&config)
+                .map_err(|e| report!(PluginTypeSettingsError::Encryption(e.to_string())))?);
             active.updated_at = Set(now);
             let after = active.update(tx).await.context_to()?;
             Ok((Some(before), after))

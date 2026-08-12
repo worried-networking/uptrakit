@@ -38,6 +38,7 @@ auth.refresh_token_revoked
 auth.session_expired
 auth.user_deactivated
 autodiscovery.database_error
+autodiscovery.encryption_error
 device_flow.already_authorized
 device_flow.database_error
 device_flow.not_found
@@ -59,6 +60,7 @@ plugin_config.empty_name
 plugin_config.internal_error
 plugin_config.not_found
 plugin_type_settings.database_error
+plugin_type_settings.encryption_error
 plugin_type_settings.not_found
 registration.closed
 registration.invalid_token

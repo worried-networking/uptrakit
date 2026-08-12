@@ -864,6 +864,13 @@ async fn plugin_type_settings_error_all_variants() {
     .await;
     assert_eq!(status.as_u16(), 500);
     assert_eq!(code_of(&json), "plugin_type_settings.database_error");
+
+    let (status, json) = read_response(
+        ApiError::from(report!(PluginTypeSettingsError::Encryption("test".into()))).into_response(),
+    )
+    .await;
+    assert_eq!(status.as_u16(), 500);
+    assert_eq!(code_of(&json), "plugin_type_settings.encryption_error");
 }
 
 #[tokio::test]
@@ -1348,6 +1355,7 @@ const ALL_IMPL_CODES: &[&str] = &[
     "auth.session_expired",
     "auth.user_deactivated",
     "autodiscovery.database_error",
+    "autodiscovery.encryption_error",
     "device_flow.already_authorized",
     "device_flow.database_error",
     "device_flow.not_found",
@@ -1369,6 +1377,7 @@ const ALL_IMPL_CODES: &[&str] = &[
     "plugin_config.internal_error",
     "plugin_config.not_found",
     "plugin_type_settings.database_error",
+    "plugin_type_settings.encryption_error",
     "plugin_type_settings.not_found",
     "registration.closed",
     "registration.invalid_token",

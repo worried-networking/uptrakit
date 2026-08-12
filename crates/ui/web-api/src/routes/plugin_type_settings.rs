@@ -31,7 +31,7 @@ fn model_to_response(
     model: uptrakit_shared_db::entity::plugin_type_setting::Model,
 ) -> PluginTypeSettingsResponse {
     let plugin_type = PluginTypeId::new(model.plugin_type);
-    let config = ops.mask_config_secrets(&plugin_type, &model.config);
+    let config = ops.mask_config_secrets(&plugin_type, model.config.as_json());
     PluginTypeSettingsResponse {
         plugin_type,
         config,
@@ -357,7 +357,7 @@ pub async fn upsert_plugin_type_settings(
         plugin_ops.0.as_ref(),
         &plugin_type_id,
         &mut req.config,
-        existing.as_ref().map(|m| &m.config),
+        existing.as_ref().map(|m| m.config.as_json()),
     ) {
         if let Ok(entry) = AuditEntry::<Event>::builder_event(
             uptrakit_audit_log::AuditActionType::PLUGIN_TYPE_SETTINGS_UPSERT,

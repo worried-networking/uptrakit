@@ -508,18 +508,19 @@ async fn type_settings_put_sentinel_preserves_secret_and_stays_sparse() {
     .expect("row must exist after PUT");
 
     assert_eq!(
-        stored.config["auth_token"],
+        stored.config.as_json()["auth_token"],
         serde_json::json!("t1"),
         "sentinel must be restored to the real stored secret"
     );
     assert_eq!(
-        stored.config["filter"],
+        stored.config.as_json()["filter"],
         serde_json::json!("y"),
         "non-sensitive field must be updated"
     );
 
     let stored_keys: std::collections::BTreeSet<&str> = stored
         .config
+        .as_json()
         .as_object()
         .expect("stored config must be an object")
         .keys()

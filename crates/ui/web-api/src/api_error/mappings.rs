@@ -695,6 +695,12 @@ impl From<Report<PluginTypeSettingsError>> for ApiError {
                 "plugin_type_settings.database_error",
                 Some(format_report_summary(&report)),
             ),
+            Encryption(_) => ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "An internal error occurred.",
+                "plugin_type_settings.encryption_error",
+                Some(format_report_summary(&report)),
+            ),
         }
     }
 }

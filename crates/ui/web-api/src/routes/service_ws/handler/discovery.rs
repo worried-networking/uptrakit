@@ -76,7 +76,7 @@ pub(crate) async fn trigger_discovery_for_agent_host(
                 .one(state.db())
                 .await
             {
-                Ok(Some(setting)) => setting.config,
+                Ok(Some(setting)) => setting.config.as_json().clone(),
                 Ok(None) => serde_json::Value::Object(Default::default()),
                 Err(e) => {
                     tracing::warn!(

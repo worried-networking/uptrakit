@@ -183,6 +183,7 @@ needed — they are available for future use.
 | --- | --- | --- | --- |
 | `PluginTypeSettingsError::NotFound` | 404 | static | `plugin_type_settings.not_found` |
 | `PluginTypeSettingsError::Db` | 500 | static | `plugin_type_settings.database_error` |
+| `PluginTypeSettingsError::Encryption` | 500 | static | `plugin_type_settings.encryption_error` |
 
 ### AutodiscoveryError
 

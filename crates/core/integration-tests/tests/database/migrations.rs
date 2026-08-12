@@ -60,6 +60,7 @@ async fn test_all_core_entities_queryable(harness: &TestHarness) {
     assert_queryable!(notification_channel::Entity);
     assert_queryable!(notification_rule::Entity);
     assert_queryable!(plugin_config::Entity);
+    assert_queryable!(plugin_type_setting::Entity);
     assert_queryable!(setting::Entity);
     assert_queryable!(global_setting::Entity);
     assert_queryable!(update_history::Entity);
