@@ -105,6 +105,10 @@ pub async fn run_embedded_message_handler(params: EmbeddedHandlerParams, tenant_
         service_rx,
         cancel,
     } = params;
+    // `Box::pin` here is load-bearing, not decorative: without it,
+    // `clippy::large_futures` (workspace `-D warnings`) rejects this call —
+    // the callee's future is 16744 bytes, verified by temporarily removing
+    // this `Box::pin` and observing the lint trip.
     Box::pin(
         crate::routes::service_ws::handler::run_embedded_message_handler(
             crate::routes::service_ws::handler::EmbeddedHandlerCallParams {
@@ -136,6 +140,10 @@ pub async fn run_embedded_system_message_handler(
         service_rx,
         cancel,
     } = params;
+    // `Box::pin` here is load-bearing, not decorative: without it,
+    // `clippy::large_futures` (workspace `-D warnings`) rejects this call —
+    // the callee's future is 16744 bytes, verified by temporarily removing
+    // this `Box::pin` and observing the lint trip.
     Box::pin(
         crate::routes::service_ws::handler::run_embedded_system_message_handler(
             crate::routes::service_ws::handler::EmbeddedHandlerCallParams {

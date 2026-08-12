@@ -175,9 +175,10 @@ distinct mechanisms — this ADR's compile-time newtype is a third:
   `oidc_providers.client_secret`, `pending_oidc_flows.pkce_verifier`, and `user_totp.secret` are
   `EncryptedString` columns whose AAD is resolved at decode time through the bare-column-name registry
   described above (`register_column_aad_mappings()` in `crates/core/controller-runtime/src/reencrypt.rs`
-  registers exactly these five entries — no others). These are the columns subject to the two failure
-  modes (global name collision, alias blindness) and the three-binary drift risk this ADR's mechanism
-  avoids.
+  registers exactly these five entries unconditionally, plus a sixth, `ssh_hosts.private_key`
+  (`crates/core/agent-ssh-runtime/src/handler.rs:57-63`), appended only when the `embedded-ssh-agent`
+  feature is enabled — no others). These are the columns subject to the two failure modes (global name
+  collision, alias blindness) and the three-binary drift risk this ADR's mechanism avoids.
 - **Direct `encrypt_str`/`decrypt_str` with a call-site AAD constant.** Settings values
   (`auth.jwt_signing_key`, `nats.url`, `smtp.password`, the GitHub provider auth token, the system-services
   enrollment token, …) live in `settings.value` / `global_settings.value`, both typed plain

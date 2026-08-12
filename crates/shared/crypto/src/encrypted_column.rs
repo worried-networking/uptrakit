@@ -109,6 +109,16 @@ macro_rules! encrypted_column {
         }
 
         impl sea_orm::sea_query::ValueType for $name {
+            // `ValueType::try_from`'s error type is fixed by the sea-orm trait
+            // signature (`ValueTypeErr`, a unit struct) and cannot carry any
+            // context, unlike the `TryGetable` path above which reports the
+            // AAD and a row handle on decode failure. This path is
+            // unreachable today: all three encrypted-column consumers read
+            // exclusively via `Model`/`FromQueryResult`, which goes through
+            // `TryGetable`, never `ValueType`. If a future `into_tuple` or
+            // other custom `select_only()` projection ever reads one of
+            // these columns directly, it would hit this arm and get an
+            // undiagnosable error with no AAD or row context at all.
             #[expect(
                 clippy::map_err_ignore,
                 reason = "ValueTypeErr is a unit struct that carries no additional context; the original error is discarded intentionally"

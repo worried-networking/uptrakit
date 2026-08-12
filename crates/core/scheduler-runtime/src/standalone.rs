@@ -287,10 +287,19 @@ async fn build_standalone_runtime_config(
     // deploy-decoupled, delayed failure. Surface the precondition now so
     // operators see it at the moment the ring actually failed to come up.
     if !uptrakit_crypto::master_key_available() || !uptrakit_crypto::data_key_ring_available() {
+        // Distinguish the two preconditions: no master key at all means
+        // nothing on these tables is readable (neither `ENC:v2:` nor
+        // `ENC:v3:`); a master key with no live ring only blocks the
+        // `ENC:v3:` envelope-encrypted rows — `ENC:v2:` (KEK-direct) rows
+        // still decrypt fine.
+        let unreadable = if uptrakit_crypto::master_key_available() {
+            "ENC:v3: (envelope-encrypted) rows are unreadable; ENC:v2: rows remain readable"
+        } else {
+            "no rows are readable (neither ENC:v2: nor ENC:v3:)"
+        };
         tracing::error!(
             tables = "plugin_configs, plugin_type_settings, instance_plugin_setting",
-            "no live master key / data key ring: encrypted plugin-config columns on these \
-             tables will be unreadable until valid credentials arrive"
+            "no live master key / data key ring: {unreadable} until valid credentials arrive"
         );
     }
 
