@@ -259,6 +259,11 @@
 	function unflattenConfig(formValues: Record<string, string>, fields: FormField[]): Record<string, unknown> {
 		const result: Record<string, unknown> = {};
 		for (const field of fields) {
+			// A sensitive field currently hidden by visible_when (e.g. the Basic-auth
+			// password after switching to Bearer) must not be resubmitted — its stale
+			// value sits inert in the form store. Visible sensitive fields ARE kept:
+			// the "***" sentinel echo is the designed unchanged-secret mechanism.
+			if (field.sensitive && !isFieldVisible(field, formValues)) continue;
 			const raw = formValues[field.key] ?? '';
 			if (raw === '' && !field.required && field.field_type !== 'toggle') continue;
 			let value: unknown;

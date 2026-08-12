@@ -212,7 +212,7 @@
 				} else if (existing?.plugin_type) {
 					const pt = pluginTypes.find((t) => t.plugin_type === existing.plugin_type);
 					if (pt) {
-						const fields = (pt.config_form_fields ?? []) as FormField[];
+						const fields = getFormFields(pt.plugin_type);
 						standardStates[role].overrideFormValues = flattenConfig(
 							(existing.config_override as Record<string, unknown>) ?? (pt.sample_config as Record<string, unknown>),
 							fields
@@ -240,7 +240,7 @@
 					} else if (existing?.plugin_type) {
 						const pt = pluginTypes.find((t) => t.plugin_type === existing.plugin_type);
 						if (pt) {
-							const fields = (pt.config_form_fields ?? []) as FormField[];
+							const fields = getFormFields(pt.plugin_type);
 							hookLists[role][i].overrideFormValues = flattenConfig(
 								(existing.config_override as Record<string, unknown>) ?? (pt.sample_config as Record<string, unknown>),
 								fields
@@ -337,7 +337,7 @@
 			target.plugin_type = ptStr;
 			target.plugin_config_id = '';
 			const pt = pluginTypes.find((t) => t.plugin_type === ptStr);
-			const fields = (pt?.config_form_fields ?? []) as FormField[];
+			const fields = getFormFields(ptStr);
 			target.overrideFormValues = flattenConfig((pt?.sample_config ?? {}) as Record<string, unknown>, fields);
 		} else {
 			target.plugin_type = '';
@@ -349,9 +349,19 @@
 		target.config_override_error = null;
 	}
 
+	/**
+	 * Layer-3 overrides never carry secrets (server rejects them). Filter out any
+	 * field the server would treat as sensitive so it never renders or gets
+	 * resubmitted from this modal.
+	 */
+	function isSensitiveField(field: FormField): boolean {
+		return !!field.sensitive || field.field_type === 'password' || field.field_type === 'ssh_private_key';
+	}
+
 	function getFormFields(pluginType: string): FormField[] {
 		const t = pluginTypes.find((pt) => pt.plugin_type === pluginType);
-		return (t?.config_form_fields ?? []) as FormField[];
+		const fields = (t?.config_form_fields ?? []) as FormField[];
+		return fields.filter((field) => !isSensitiveField(field));
 	}
 
 	function resolvedOptions(field: FormField): SelectOption[] {
