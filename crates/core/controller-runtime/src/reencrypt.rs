@@ -22,7 +22,10 @@
 //! - **Fault-tolerant**: errors on individual rows are logged and skipped —
 //!   the controller still starts successfully.
 
-use sea_orm::{DatabaseConnection, EntityTrait, IntoActiveModel, QuerySelect};
+use sea_orm::{
+    ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder,
+    QuerySelect,
+};
 use uptrakit_crypto::{ColumnAadEntry, EncryptedString};
 use uptrakit_shared_db::provider_settings::AAD_SETTINGS_GITHUB_PROVIDER_AUTH_TOKEN;
 
@@ -148,18 +151,19 @@ pub(crate) async fn reencrypt_to_v3(db: &DatabaseConnection) {
 
 async fn upgrade_ca_certificate_keys(db: &DatabaseConnection) -> u64 {
     use sea_orm::ActiveModelTrait;
-    use uptrakit_shared_db::entity::prelude::CaCertificate;
+    use uptrakit_shared_db::entity::{ca_certificate, prelude::CaCertificate};
 
     let mut count = 0u64;
-    let mut offset = 0u64;
+    let mut last_fingerprint: Option<String> = None;
 
     loop {
-        let rows = match CaCertificate::find()
-            .offset(offset)
-            .limit(UPGRADE_CHUNK_SIZE)
-            .all(db)
-            .await
-        {
+        let mut query = CaCertificate::find()
+            .order_by_asc(ca_certificate::Column::Fingerprint)
+            .limit(UPGRADE_CHUNK_SIZE);
+        if let Some(fingerprint) = &last_fingerprint {
+            query = query.filter(ca_certificate::Column::Fingerprint.gt(fingerprint.clone()));
+        }
+        let rows = match query.all(db).await {
             Ok(r) => r,
             Err(e) => {
                 tracing::warn!(error = %e, "failed to query ca_certificates for v3 upgrade");
@@ -167,9 +171,8 @@ async fn upgrade_ca_certificate_keys(db: &DatabaseConnection) -> u64 {
             }
         };
 
-        if rows.is_empty() {
-            break;
-        }
+        let Some(last) = rows.last() else { break };
+        last_fingerprint = Some(last.fingerprint.clone());
         let page_len = rows.len() as u64;
 
         for row in rows {
@@ -197,7 +200,6 @@ async fn upgrade_ca_certificate_keys(db: &DatabaseConnection) -> u64 {
         if page_len < UPGRADE_CHUNK_SIZE {
             break;
         }
-        offset += UPGRADE_CHUNK_SIZE;
     }
 
     if count > 0 {
@@ -213,18 +215,19 @@ async fn upgrade_ca_certificate_keys(db: &DatabaseConnection) -> u64 {
 
 async fn upgrade_oidc_client_secrets(db: &DatabaseConnection) -> u64 {
     use sea_orm::ActiveModelTrait;
-    use uptrakit_shared_db::entity::prelude::OidcProvider;
+    use uptrakit_shared_db::entity::{oidc_provider, prelude::OidcProvider};
 
     let mut count = 0u64;
-    let mut offset = 0u64;
+    let mut last_id: Option<uuid::Uuid> = None;
 
     loop {
-        let rows = match OidcProvider::find()
-            .offset(offset)
-            .limit(UPGRADE_CHUNK_SIZE)
-            .all(db)
-            .await
-        {
+        let mut query = OidcProvider::find()
+            .order_by_asc(oidc_provider::Column::Id)
+            .limit(UPGRADE_CHUNK_SIZE);
+        if let Some(id) = last_id {
+            query = query.filter(oidc_provider::Column::Id.gt(id));
+        }
+        let rows = match query.all(db).await {
             Ok(r) => r,
             Err(e) => {
                 tracing::warn!(error = %e, "failed to query oidc_providers for v3 upgrade");
@@ -232,9 +235,8 @@ async fn upgrade_oidc_client_secrets(db: &DatabaseConnection) -> u64 {
             }
         };
 
-        if rows.is_empty() {
-            break;
-        }
+        let Some(last) = rows.last() else { break };
+        last_id = Some(last.id);
         let page_len = rows.len() as u64;
 
         for row in rows {
@@ -262,7 +264,6 @@ async fn upgrade_oidc_client_secrets(db: &DatabaseConnection) -> u64 {
         if page_len < UPGRADE_CHUNK_SIZE {
             break;
         }
-        offset += UPGRADE_CHUNK_SIZE;
     }
 
     if count > 0 {
@@ -278,18 +279,19 @@ async fn upgrade_oidc_client_secrets(db: &DatabaseConnection) -> u64 {
 
 async fn upgrade_oidc_flow_pkce_verifiers(db: &DatabaseConnection) -> u64 {
     use sea_orm::ActiveModelTrait;
-    use uptrakit_shared_db::entity::prelude::PendingOidcFlow;
+    use uptrakit_shared_db::entity::{pending_oidc_flow, prelude::PendingOidcFlow};
 
     let mut count = 0u64;
-    let mut offset = 0u64;
+    let mut last_csrf_state: Option<String> = None;
 
     loop {
-        let rows = match PendingOidcFlow::find()
-            .offset(offset)
-            .limit(UPGRADE_CHUNK_SIZE)
-            .all(db)
-            .await
-        {
+        let mut query = PendingOidcFlow::find()
+            .order_by_asc(pending_oidc_flow::Column::CsrfState)
+            .limit(UPGRADE_CHUNK_SIZE);
+        if let Some(csrf_state) = &last_csrf_state {
+            query = query.filter(pending_oidc_flow::Column::CsrfState.gt(csrf_state.clone()));
+        }
+        let rows = match query.all(db).await {
             Ok(r) => r,
             Err(e) => {
                 tracing::warn!(error = %e, "failed to query pending_oidc_flows for v3 upgrade");
@@ -297,9 +299,8 @@ async fn upgrade_oidc_flow_pkce_verifiers(db: &DatabaseConnection) -> u64 {
             }
         };
 
-        if rows.is_empty() {
-            break;
-        }
+        let Some(last) = rows.last() else { break };
+        last_csrf_state = Some(last.csrf_state.clone());
         let page_len = rows.len() as u64;
 
         for row in rows {
@@ -327,7 +328,6 @@ async fn upgrade_oidc_flow_pkce_verifiers(db: &DatabaseConnection) -> u64 {
         if page_len < UPGRADE_CHUNK_SIZE {
             break;
         }
-        offset += UPGRADE_CHUNK_SIZE;
     }
 
     if count > 0 {
@@ -343,18 +343,19 @@ async fn upgrade_oidc_flow_pkce_verifiers(db: &DatabaseConnection) -> u64 {
 
 async fn upgrade_notification_channel_configs(db: &DatabaseConnection) -> u64 {
     use sea_orm::ActiveModelTrait;
-    use uptrakit_shared_db::entity::prelude::NotificationChannel;
+    use uptrakit_shared_db::entity::{notification_channel, prelude::NotificationChannel};
 
     let mut count = 0u64;
-    let mut offset = 0u64;
+    let mut last_id: Option<uuid::Uuid> = None;
 
     loop {
-        let rows = match NotificationChannel::find()
-            .offset(offset)
-            .limit(UPGRADE_CHUNK_SIZE)
-            .all(db)
-            .await
-        {
+        let mut query = NotificationChannel::find()
+            .order_by_asc(notification_channel::Column::Id)
+            .limit(UPGRADE_CHUNK_SIZE);
+        if let Some(id) = last_id {
+            query = query.filter(notification_channel::Column::Id.gt(id));
+        }
+        let rows = match query.all(db).await {
             Ok(r) => r,
             Err(e) => {
                 tracing::warn!(error = %e, "failed to query notification_channels for v3 upgrade");
@@ -362,9 +363,8 @@ async fn upgrade_notification_channel_configs(db: &DatabaseConnection) -> u64 {
             }
         };
 
-        if rows.is_empty() {
-            break;
-        }
+        let Some(last) = rows.last() else { break };
+        last_id = Some(last.id);
         let page_len = rows.len() as u64;
 
         for row in rows {
@@ -392,7 +392,6 @@ async fn upgrade_notification_channel_configs(db: &DatabaseConnection) -> u64 {
         if page_len < UPGRADE_CHUNK_SIZE {
             break;
         }
-        offset += UPGRADE_CHUNK_SIZE;
     }
 
     if count > 0 {
@@ -729,6 +728,48 @@ mod tests {
             row.config.expose_secret(),
             r#"{"url":"https://example.com"}"#
         );
+    }
+
+    #[tokio::test]
+    async fn notification_channel_config_pagination_upgrades_all_rows() {
+        use uptrakit_shared_db::entity::notification_channel;
+
+        let db = test_db().await;
+        let now = OffsetDateTime::now_utc();
+
+        for _ in 0..150 {
+            let id = Uuid::now_v7();
+            notification_channel::ActiveModel {
+                id: Set(id),
+                tenant_id: Set(Uuid::nil()),
+                name: Set(format!("test-channel-{id}")),
+                channel_type: Set("webhook".to_string()),
+                config: Set(EncryptedString::plaintext_for_test(
+                    r#"{"url":"https://example.com"}"#.to_string(),
+                )),
+                enabled: Set(true),
+                created_at: Set(now),
+                updated_at: Set(now),
+            }
+            .insert(&db)
+            .await
+            .expect("insert");
+        }
+
+        let count = upgrade_notification_channel_configs(&db).await;
+        assert_eq!(count, 150, "all 150 rows should be upgraded");
+
+        let rows = uptrakit_shared_db::entity::prelude::NotificationChannel::find()
+            .all(&db)
+            .await
+            .expect("query all");
+        assert_eq!(rows.len(), 150);
+        for row in rows {
+            assert!(
+                row.config.is_db_value_encrypted(),
+                "every row's config must be encrypted after upgrade"
+            );
+        }
     }
 
     // ── Settings value upgrade ─────────────────────────────────────────────────
