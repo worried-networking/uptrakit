@@ -275,7 +275,15 @@ async fn process_targets_discovery(
                 }
                 None
             }
-            Some(_) => target.config_override.clone().map(|mut value| {
+            Some(_) => target.config_override.clone().and_then(|mut value| {
+                if !value.is_object() {
+                    tracing::warn!(
+                        plugin_type = %target.plugin_type,
+                        "dropping non-object discovery config_override wholesale (fail-closed): \
+                         the sensitive-path walker cannot strip a non-object root"
+                    );
+                    return None;
+                }
                 let removed = ctx
                     .ops
                     .strip_sensitive_paths_from(&target.plugin_type, &mut value);
@@ -287,7 +295,7 @@ async fn process_targets_discovery(
                          never report credentials"
                     );
                 }
-                value
+                Some(value)
             }),
         };
 
@@ -1878,6 +1886,85 @@ mod tests {
             assert!(
                 link.config.is_none(),
                 "config_override for an uncataloged plugin type must be dropped wholesale, got: {:?}",
+                link.config
+            );
+        }
+    }
+
+    /// A discovery target for a cataloged plugin type (github) whose
+    /// `config_override` JSON root is not an object must have the override
+    /// dropped wholesale (fail-closed) -- the sensitive-path walker only
+    /// operates on object roots, so a non-object value would otherwise be
+    /// stored verbatim, unstripped and forever un-swept.
+    #[tokio::test]
+    async fn discovery_override_non_object_dropped_wholesale() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+
+        insert_tenant(&db, tenant_id).await;
+        insert_host(&db, host_id, tenant_id).await;
+
+        let result = DiscoveryPluginResult {
+            plugin_type: plugin_ids::DISCOVERY_PROXMOX_HELPER_SCRIPTS.clone(),
+            plugin_config_id: None,
+            error: None,
+            discoveries: vec![WireDiscoveredSoftware {
+                package_identifier: "booklore".to_string(),
+                name: "BookLore".to_string(),
+                installed_version: "1.18.5".to_string(),
+                targets: vec![DiscoveryTarget {
+                    plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
+                    plugin_config: serde_json::json!({
+                        "owner": "BookLore",
+                        "repo": "BookLore",
+                        "tag_strip_prefix": "v",
+                        "include_prereleases": false,
+                        "asset_patterns": [],
+                    }),
+                    plugin_config_name: "BookLore/BookLore".to_string(),
+                    roles: all_roles(),
+                    package_identifier: None,
+                    config_override: Some(serde_json::json!("not-an-object")),
+                    execution_site: None,
+                }],
+                extra: None,
+                featured: false,
+                qualifier: None,
+                plugin_package_identifier: None,
+                installed_display_version: None,
+            }],
+        };
+
+        let ops = real_plugin_ops();
+        process_plugin_result(
+            &db,
+            &DiscoveryDeps::new(&test_emitter(), &ops),
+            tenant_id,
+            host_id,
+            now,
+            &result,
+            &HashSet::new(),
+        )
+        .await
+        .expect("process_plugin_result");
+
+        let plugin_links = HostSoftwareItemPlugin::find()
+            .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+            .filter(host_software_item_plugin::Column::PackageIdentifier.eq("booklore"))
+            .all(&db)
+            .await
+            .expect("query plugin links");
+        assert_eq!(
+            plugin_links.len(),
+            3,
+            "expected three role-based plugin links"
+        );
+        for link in &plugin_links {
+            assert!(
+                link.config.is_none(),
+                "config_override with a non-object JSON root must be dropped wholesale, got: {:?}",
                 link.config
             );
         }
