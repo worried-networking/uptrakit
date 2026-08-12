@@ -1,5 +1,6 @@
 pub mod access_grants;
 pub mod db_error;
+pub mod encrypted_columns;
 pub mod entity;
 #[cfg(feature = "db-migrate")]
 pub mod migrate_core_tables;

@@ -20,6 +20,7 @@ base64 = { workspace = true }
 rand = { workspace = true }
 rootcause = { workspace = true }
 sea-orm = { workspace = true, optional = true }
+serde_json = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
@@ -29,6 +30,10 @@ zeroize = { workspace = true }
 
 [dev-dependencies]
 rcgen = { workspace = true }
+
+[[test]]
+name = "encrypted_column"
+required-features = ["sea-orm"]
 
 [lints]
 workspace = true

@@ -27,6 +27,8 @@
 
 pub mod data_key_ring;
 pub mod ecies;
+#[cfg(feature = "sea-orm")]
+mod encrypted_column;
 pub mod encrypted_string;
 mod v1;
 mod v2;
@@ -50,6 +52,19 @@ pub use data_key_ring::{
     wrap_data_key_with,
 };
 pub use encrypted_string::EncryptedString;
+
+// Re-exports consumed by the `encrypted_column!` macro expansion.
+//
+// `macro_rules!` macros expand in the *invoking* crate's scope, so a bare
+// `rootcause::report!` or `serde_json::Value` inside the macro body would
+// resolve against the consuming crate's own dependency graph, not this
+// crate's. Routing through `$crate::rootcause`/`$crate::serde_json` instead
+// guarantees the macro always finds these crates, regardless of whether the
+// consumer happens to depend on them directly.
+#[doc(hidden)]
+pub use rootcause;
+#[doc(hidden)]
+pub use serde_json;
 
 /// Errors originating from encryption/decryption operations.
 #[derive(Debug, Error)]
