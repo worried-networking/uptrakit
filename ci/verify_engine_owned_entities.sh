@@ -36,6 +36,22 @@ if ! rg -q "$PATTERN" crates/shared/db/src/access_grants.rs; then
 fi
 
 violations=0
+
+# rg exits 0 on matches, 1 on no matches (legal here), >=2 on error. Capture the
+# status via a temp file: a `done < <(rg ...)` process substitution hides it, so
+# a broken pattern or unreadable path would report an empty, green run.
+RG_TMP="$(mktemp)"
+RG_RC=0
+rg -n --no-heading "$PATTERN" crates \
+  --glob '**/*.rs' \
+  --glob '!crates/shared/db/src/access_grants.rs' \
+  --glob '!crates/shared/db/src/migration/**' >"$RG_TMP" || RG_RC=$?
+if (( RG_RC > 1 )); then
+  echo "verify_engine_owned_entities: rg failed (rc=${RG_RC})" >&2
+  rm -f "$RG_TMP"
+  exit 1
+fi
+
 while IFS= read -r line; do
   path="${line%%:*}"
   rest="${line#*:}"
@@ -49,10 +65,8 @@ while IFS= read -r line; do
   fi
   echo "${path}:${line_no}:${text}"
   violations=$((violations + 1))
-done < <(rg -n --no-heading "$PATTERN" crates \
-  --glob '**/*.rs' \
-  --glob '!crates/shared/db/src/access_grants.rs' \
-  --glob '!crates/shared/db/src/migration/**' 2>/dev/null || true)
+done <"$RG_TMP"
+rm -f "$RG_TMP"
 
 if (( violations > 0 )); then
   exit 1

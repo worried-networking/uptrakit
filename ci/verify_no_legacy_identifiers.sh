@@ -169,7 +169,7 @@ collect_findings "raw_action" 'AuditActionType::(new|from_static)\("|AuditEntry:
   --glob '!**/fixtures/**' \
   --glob '!**/docs/**'
 
-collect_findings "permission_model" '\bPermission\b|permission_extractor|\brole_permissions\b|\bRolePermission\b|entity::(permission|role_permission)\b|table_name\s*=\s*"(permissions|role_permissions)"|Alias::new\("permissions"\)' \
+collect_findings "permission_model" '\bPermission\b|permission_extractor|\brole_permissions?\b|\bRolePermission|entity::(permission|role_permission)\b|table_name\s*=\s*"(permissions|role_permissions)"|Alias::new\("permissions"\)' \
   crates \
   --glob '**/*.rs' \
   --glob '!**/migration/**'

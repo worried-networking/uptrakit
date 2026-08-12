@@ -112,17 +112,31 @@ load_allowlist
 # embedded field separators to split on — unlike a `path:line:text` producer,
 # a single `while IFS= read` consumer here cannot mis-split a record.
 declare -a FINDINGS=()
-while IFS= read -r line; do
-  [[ -n "$line" ]] || continue
-  FINDINGS+=("$line")
-done < <(rg -l "$DATALOAD_PATTERN" crates \
+
+# rg exits 0 on matches, 1 on no matches (legal here), >=2 on error. Capture the
+# status via a temp file: both a `done < <(rg ...)` process substitution and a
+# pipe into `sort` hide it, so a broken pattern or unreadable path would report
+# an empty, green run.
+RG_TMP="$(mktemp)"
+RG_RC=0
+rg -l "$DATALOAD_PATTERN" crates \
   --glob '**/*.rs' \
   --glob '!crates/shared/surfaces/**' \
   --glob '!crates/ui/surface-proxy/**' \
   --glob '!**/tests/**' \
   --glob '!**/tests.rs' \
-  --glob '!**/integration_tests/**' \
-  2>/dev/null | sort || true)
+  --glob '!**/integration_tests/**' >"$RG_TMP" || RG_RC=$?
+if (( RG_RC > 1 )); then
+  echo "verify_dataload_declares_params: rg failed (rc=${RG_RC})" >&2
+  rm -f "$RG_TMP"
+  exit 1
+fi
+
+while IFS= read -r line; do
+  [[ -n "$line" ]] || continue
+  FINDINGS+=("$line")
+done < <(sort "$RG_TMP")
+rm -f "$RG_TMP"
 
 declare -a VIOLATIONS=()
 declare path

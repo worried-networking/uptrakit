@@ -134,6 +134,18 @@ collect_findings() {
   local pattern="$2"
   shift 2
   local line path rest line_no text
+  local tmp rc=0
+
+  # rg exits 0 on matches, 1 on no matches (legal here), >=2 on error. Capture
+  # the status via a temp file: a `done < <(rg ...)` process substitution hides
+  # it, so a broken pattern or unreadable path would report an empty, green run.
+  tmp="$(mktemp)"
+  rg -n --no-heading "$pattern" "$@" >"$tmp" || rc=$?
+  if (( rc > 1 )); then
+    echo "verify_typed_audit_actions: rg failed (rc=${rc}) for rule '${rule}'" >&2
+    rm -f "$tmp"
+    exit 1
+  fi
 
   while IFS= read -r line; do
     path="${line%%:*}"
@@ -146,7 +158,8 @@ collect_findings() {
     fi
 
     FINDINGS+=("${rule}${SEP}${path}${SEP}${line_no}${SEP}${text}")
-  done < <(rg -n --no-heading "$pattern" "$@" 2>/dev/null || true)
+  done <"$tmp"
+  rm -f "$tmp"
 }
 
 load_allowlist
