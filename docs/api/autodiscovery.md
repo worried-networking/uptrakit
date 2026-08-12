@@ -266,6 +266,22 @@ The controller routes each discovered item through one of two paths:
 | `targets` is non-empty                        | For each target: find-or-create the plugin config matching `(plugin_type, plugin_config)`, then create role assignments per `target.roles`. |
 | `targets` is empty, `plugin_config_id` is set | Use the discovering plugin's own config for all three roles (`detect_version`, `fetch_releases`, `execute_update`).                         |
 
+### `config_override` sensitive-field handling
+
+A `DiscoveryTarget.config_override` is agent-reported, untrusted input, so the controller never trusts it to be
+free of secrets the way a REST-submitted layer-3 override is (that path is rejected outright — see
+[plugin-system.md](../development/plugin-system.md#layer-3-overrides-carry-no-secrets)). Instead it is sanitized
+per target, and a discovery report is never rejected wholesale for carrying one:
+
+| Condition                                                                        | Handling                                                                                                                                                           |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Target's plugin type is cataloged and `config_override`'s JSON root is an object | Sensitive keys (per the plugin's form schema) are stripped in place, with a warning logging the dropped key names; non-sensitive keys are persisted.               |
+| Target's plugin type has no live descriptor (uncataloged)                        | The whole `config_override` is dropped wholesale (fail-closed) — an unknown plugin type has no `sensitive_paths` to strip against, so nothing can be assumed safe. |
+| `config_override`'s JSON root is not an object                                   | The whole `config_override` is dropped wholesale (fail-closed) — the sensitive-path walker can only strip keys from an object root.                                |
+
+The rest of the discovery target (role assignments, package identifier, etc.) is still created normally in every
+case above; only the override value is affected.
+
 ### PHS discovery targets
 
 The PHS plugin (`discovery.proxmox-helper-scripts`) always emits `DiscoveryTarget` values. It analyzes

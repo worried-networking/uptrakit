@@ -30,6 +30,8 @@ const MAX_INSTALL_PATH_LENGTH: usize = 4096;
 ///
 /// Per-host overrides via `config_override` on the `execute_update` role
 /// assignment allow different `asset_patterns` and `install_path` per host.
+/// Sensitive fields (e.g. `auth_token`) cannot be set via per-host overrides --
+/// use a per-host plugin config profile instead.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GitHubConfig {
     /// Optional personal access token for authentication (increases rate limits).

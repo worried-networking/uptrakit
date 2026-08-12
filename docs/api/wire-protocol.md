@@ -396,15 +396,15 @@ Known `plugin_type` values for discovery: `package-manager.homebrew`, `discovery
 
 #### `DiscoveryTarget` fields
 
-| Field                | Type       | Required | Description                                                                                    |
-| -------------------- | ---------- | -------- | ---------------------------------------------------------------------------------------------- |
-| `plugin_type`        | string     | Yes      | Target plugin type (may differ from discovering plugin)                                        |
-| `plugin_config`      | object     | Yes      | Config JSON for find-or-create of the target plugin config                                     |
-| `plugin_config_name` | string     | Yes      | Display name for auto-created plugin config                                                    |
-| `roles`              | `string[]` | Yes      | Which roles this target covers (e.g. `["detect_version", "fetch_releases", "execute_update"]`) |
-| `package_identifier` | string     | No       | Package identifier override (default: same as parent item)                                     |
-| `config_override`    | object     | No       | Per-assignment config override                                                                 |
-| `execution_site`     | string     | No       | Execution site hint (`"auto"`, `"agent"`, `"controller"`; default: `"auto"`)                   |
+| Field                | Type       | Required | Description                                                                                                                                                                                                   |
+| -------------------- | ---------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `plugin_type`        | string     | Yes      | Target plugin type (may differ from discovering plugin)                                                                                                                                                       |
+| `plugin_config`      | object     | Yes      | Config JSON for find-or-create of the target plugin config                                                                                                                                                    |
+| `plugin_config_name` | string     | Yes      | Display name for auto-created plugin config                                                                                                                                                                   |
+| `roles`              | `string[]` | Yes      | Which roles this target covers (e.g. `["detect_version", "fetch_releases", "execute_update"]`)                                                                                                                |
+| `package_identifier` | string     | No       | Package identifier override (default: same as parent item)                                                                                                                                                    |
+| `config_override`    | object     | No       | Per-assignment config override — sensitive fields are stripped or the whole value dropped server-side, never trusted as-is; see [autodiscovery.md](autodiscovery.md#config_override-sensitive-field-handling) |
+| `execution_site`     | string     | No       | Execution site hint (`"auto"`, `"agent"`, `"controller"`; default: `"auto"`)                                                                                                                                  |
 
 See [docs/api/autodiscovery.md](autodiscovery.md#plugin-driven-discovery-targets) for the full
 processing rules and plugin-specific target patterns.

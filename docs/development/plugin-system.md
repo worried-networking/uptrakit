@@ -73,7 +73,8 @@ Each plugin assignment row carries:
 - `plugin_config_id` -- optional; which plugin config to use for this role (nullable since type
   settings may suffice).
 - `package_identifier` -- the package name or image reference within that plugin.
-- `config` -- optional per-host JSON override merged on top of the profile config and type settings.
+- `config` -- optional per-host JSON override merged on top of the profile config and type settings. Must not carry
+  sensitive fields (see below).
 - `execution_site` -- where the operation runs: `auto` (default), `agent`, or `controller`.
 - `role` -- one of the role strings above.
 - `ordinal` -- ordering within the same role. Used by hook roles (`pre_update_hook`,
@@ -89,6 +90,24 @@ config with `package_type`). Multiple plugin assignments can share the same plug
 The `owner/repo` identifying a GitHub repository is **not** part of the plugin config -- it is the
 `package_identifier` on the software item host assignment, allowing one GitHub config to serve
 all tracked repositories.
+
+### Layer-3 overrides carry no secrets
+
+A layer-3 (per-host) override cannot carry sensitive fields: the server rejects any
+`host_software_item_plugins.config` write whose value at a sensitive path (per the plugin's form
+schema or `sensitive_paths`) is non-empty, with an HTTP 400 pointing the caller at a per-host
+plugin config profile instead. Per-host credentials therefore go through a per-host **plugin
+config profile** (a dedicated `plugin_configs` row assigned only to that host), never through
+`config_override`. See [secrets-and-encryption.md](../security/secrets-and-encryption.md) for the
+storage-layer rationale.
+
+This also constrains **type-only ("Inline") assignments** -- a role assignment with no
+`plugin_config_id` and no `plugin_config`, where `host_software_item_plugins.config` merges onto
+the plugin type's built-in defaults instead of a profile row. With no profile, the override _is_
+the whole effective config, so after the sensitive-field reject a type-only assignment can carry no
+credential at all. A future plugin whose config has a **required** sensitive field could not be
+assigned inline and would need a profile; no such plugin exists today (verified against the current
+catalog).
 
 ### Plugin Role Enum
 

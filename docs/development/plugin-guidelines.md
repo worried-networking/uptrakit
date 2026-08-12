@@ -456,6 +456,10 @@ When the system needs the effective configuration for a plugin operation, `resol
 Each layer's JSON is shallow-merged on top of the previous one. Fields present in a narrower layer override the same field from a broader layer. This
 replaces the previous two-layer model (plugin config + `config_override`).
 
+The narrowest layer (assignment config) is validated to reject sensitive fields at write time -- design credentials as part of the plugin config
+(profile) layer, never as something a per-host override can supply. See
+[plugin-system.md](plugin-system.md#layer-3-overrides-carry-no-secrets).
+
 ## Plugin Construction
 
 Plugin construction is **synchronous**. Each plugin's `new()` takes its typed config and an `Arc<dyn HostRuntime>`:

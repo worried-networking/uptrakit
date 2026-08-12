@@ -164,10 +164,16 @@ store it through the API.
 ### `credential_updated_at`
 
 `plugin_configs` carries a nullable `credential_updated_at` (`OffsetDateTime`) column, added by the same migration
-that encrypted `plugin_configs.config`. It records when a credential value inside the config JSON last changed —
-distinct from the row's `updated_at`, which moves for any edit (renaming a profile, changing an endpoint). It exists
-so that credential age is auditable without decrypting the config. No write path stamps it yet; every current
-`ActiveModel` sets it to `None`.
+that encrypted `plugin_configs.config`. Every writer of `plugin_configs` stamps it to `Some(now)` whenever a
+sensitive path's value actually changes relative to what was stored — distinct from the row's `updated_at`, which
+moves on any edit (renaming a profile, changing an endpoint). It means **"when a credential-related change last
+happened"**, not "age of the current credential": a create with no secret in the config leaves it `None`, and
+removing a previously-stored credential stamps it `Some(now)` even though the row holds no live secret afterward.
+It is not exposed over REST — no `web-api-types` response DTO carries the field.
+
+Layer-3 (per-host) overrides never contribute to this column: they are rejected outright when they carry a
+sensitive field, so there is no credential-bearing layer-3 write to stamp. See
+[plugin-system.md](../development/plugin-system.md#layer-3-overrides-carry-no-secrets) for that rule.
 
 ### Envelope encryption
 
