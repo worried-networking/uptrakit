@@ -90,7 +90,7 @@ jobs:
       - run: python3 -m unittest ci/test_check_plugin_semantic_boundary.py
       - run: python3 -m unittest ci/test_verify_action_security_declarations.py
       - run: python3 ci/check_plugin_semantic_boundary.py
-      - run: bash ci/verify_no_security_audit.sh
+      - run: bash ci/verify_no_legacy_identifiers.sh
       - run: bash ci/verify_typed_audit_actions.sh
       - run: bash ci/verify_no_inline_query_params.sh
       - run: bash ci/verify_dataload_declares_params.sh

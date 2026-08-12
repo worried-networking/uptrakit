@@ -4,16 +4,16 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-ALLOWLIST_FILE="ci/verify_no_security_audit_allowlist.txt"
+ALLOWLIST_FILE="ci/verify_no_legacy_identifiers_allowlist.txt"
 SEP=$'\x1f'
 
 if ! command -v rg >/dev/null 2>&1; then
-  echo "verify_no_security_audit: required tool 'rg' was not found"
+  echo "verify_no_legacy_identifiers: required tool 'rg' was not found"
   exit 1
 fi
 
 if [[ ! -f "$ALLOWLIST_FILE" ]]; then
-  echo "verify_no_security_audit: allowlist file is missing: $ALLOWLIST_FILE"
+  echo "verify_no_legacy_identifiers: allowlist file is missing: $ALLOWLIST_FILE"
   exit 1
 fi
 
@@ -61,14 +61,14 @@ load_allowlist() {
     fi
 
     if [[ "$raw" != *"|"* ]]; then
-      echo "verify_no_security_audit: invalid allowlist row ${line_no}: expected 'rule|path|text-regex'"
+      echo "verify_no_legacy_identifiers: invalid allowlist row ${line_no}: expected 'rule|path|text-regex'"
       exit 1
     fi
     rule="${raw%%|*}"
     rest="${raw#*|}"
 
     if [[ "$rest" != *"|"* ]]; then
-      echo "verify_no_security_audit: invalid allowlist row ${line_no}: expected 'rule|path|text-regex'"
+      echo "verify_no_legacy_identifiers: invalid allowlist row ${line_no}: expected 'rule|path|text-regex'"
       exit 1
     fi
     path="${rest%%|*}"
@@ -79,22 +79,22 @@ load_allowlist() {
     text_pattern="$(trim "$text_pattern")"
 
     if [[ -z "$rule" || -z "$path" || -z "$text_pattern" ]]; then
-      echo "verify_no_security_audit: invalid allowlist row ${line_no}: expected 'rule|path|text-regex'"
+      echo "verify_no_legacy_identifiers: invalid allowlist row ${line_no}: expected 'rule|path|text-regex'"
       exit 1
     fi
 
     if [[ "$rule" != "security_audit" && "$rule" != "raw_action" && "$rule" != "permission_model" ]]; then
-      echo "verify_no_security_audit: invalid allowlist rule '${rule}' at row ${line_no}"
+      echo "verify_no_legacy_identifiers: invalid allowlist rule '${rule}' at row ${line_no}"
       exit 1
     fi
 
     if [[ "$path" != crates/* ]]; then
-      echo "verify_no_security_audit: allowlist path must start with 'crates/' at row ${line_no}"
+      echo "verify_no_legacy_identifiers: allowlist path must start with 'crates/' at row ${line_no}"
       exit 1
     fi
 
     if ! is_valid_ere "$text_pattern"; then
-      echo "verify_no_security_audit: invalid regex in allowlist row ${line_no}: ${text_pattern}"
+      echo "verify_no_legacy_identifiers: invalid regex in allowlist row ${line_no}: ${text_pattern}"
       exit 1
     fi
 
@@ -135,7 +135,7 @@ collect_findings() {
   tmp="$(mktemp)"
   rg -n --no-heading "$pattern" "$@" >"$tmp" || rc=$?
   if (( rc > 1 )); then
-    echo "verify_no_security_audit: rg failed (rc=${rc}) for rule '${rule}'" >&2
+    echo "verify_no_legacy_identifiers: rg failed (rc=${rc}) for rule '${rule}'" >&2
     rm -f "$tmp"
     exit 1
   fi
@@ -195,7 +195,7 @@ done
 
 if (( ${#VIOLATIONS[@]} > 0 )); then
   if (( COUNTS["security_audit"] > 0 )); then
-    echo "verify_no_security_audit: legacy security_audit callsites remain:"
+    echo "verify_no_legacy_identifiers: legacy security_audit callsites remain:"
     for entry in "${VIOLATIONS[@]}"; do
       IFS="$SEP" read -r rule path line_no text <<<"$entry"
       [[ "$rule" == "security_audit" ]] || continue
@@ -207,7 +207,7 @@ if (( ${#VIOLATIONS[@]} > 0 )); then
     if (( COUNTS["security_audit"] > 0 )); then
       echo
     fi
-    echo "verify_no_security_audit: raw semantic action strings remain outside allowlist:"
+    echo "verify_no_legacy_identifiers: raw semantic action strings remain outside allowlist:"
     for entry in "${VIOLATIONS[@]}"; do
       IFS="$SEP" read -r rule path line_no text <<<"$entry"
       [[ "$rule" == "raw_action" ]] || continue
@@ -219,7 +219,7 @@ if (( ${#VIOLATIONS[@]} > 0 )); then
     if (( COUNTS["security_audit"] > 0 || COUNTS["raw_action"] > 0 )); then
       echo
     fi
-    echo "verify_no_security_audit: legacy permission-model identifiers remain outside allowlist:"
+    echo "verify_no_legacy_identifiers: legacy permission-model identifiers remain outside allowlist:"
     for entry in "${VIOLATIONS[@]}"; do
       IFS="$SEP" read -r rule path line_no text <<<"$entry"
       [[ "$rule" == "permission_model" ]] || continue
@@ -230,4 +230,4 @@ if (( ${#VIOLATIONS[@]} > 0 )); then
   exit 1
 fi
 
-echo "verify_no_security_audit: OK"
+echo "verify_no_legacy_identifiers: OK"

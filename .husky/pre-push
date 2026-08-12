@@ -75,7 +75,7 @@ echo "[pre-push] Running no-orphan-modules check..."
 python3 ci/verify_no_orphan_modules.py
 
 echo "[pre-push] Running no-security-audit check..."
-bash ci/verify_no_security_audit.sh
+bash ci/verify_no_legacy_identifiers.sh
 
 echo "[pre-push] Running typed-audit-actions check..."
 bash ci/verify_typed_audit_actions.sh

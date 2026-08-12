@@ -36,7 +36,7 @@ is_valid_ere() {
 declare -a ALLOW_PATHS=()
 declare -a ALLOW_TEXT_PATTERNS=()
 
-# Validate + load every allowlist row up front (mirror verify_no_security_audit.sh:
+# Validate + load every allowlist row up front (mirror verify_no_legacy_identifiers.sh:
 # blank and comment lines are skipped for editability; a malformed, unknown-rule,
 # bad-path, or invalid-regex row is a fatal error reported with its line number,
 # never silently skipped).
