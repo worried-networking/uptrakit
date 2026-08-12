@@ -130,6 +130,15 @@ collect_findings() {
   local pattern="$2"
   shift 2
   local line path rest line_no text
+  local tmp rc=0
+
+  tmp="$(mktemp)"
+  rg -n --no-heading "$pattern" "$@" >"$tmp" || rc=$?
+  if (( rc > 1 )); then
+    echo "verify_no_security_audit: rg failed (rc=${rc}) for rule '${rule}'" >&2
+    rm -f "$tmp"
+    exit 1
+  fi
 
   while IFS= read -r line; do
     path="${line%%:*}"
@@ -142,7 +151,8 @@ collect_findings() {
     fi
 
     FINDINGS+=("${rule}${SEP}${path}${SEP}${line_no}${SEP}${text}")
-  done < <(rg -n --no-heading "$pattern" "$@" 2>/dev/null || true)
+  done <"$tmp"
+  rm -f "$tmp"
 }
 
 load_allowlist
