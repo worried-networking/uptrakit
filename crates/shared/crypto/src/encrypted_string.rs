@@ -7,9 +7,7 @@ use std::fmt;
 
 use uptrakit_shared_types::SecretString;
 
-#[cfg(feature = "sea-orm")]
-use crate::{ENC_V1_PREFIX, ENC_V2_PREFIX, is_plaintext_mode};
-use crate::{ENC_V3_PREFIX, encrypt_str, is_encrypted};
+use crate::{ENC_V1_PREFIX, ENC_V2_PREFIX, ENC_V3_PREFIX, encrypt_str, is_encrypted};
 
 /// A string that is transparently encrypted when written to the database
 /// and decrypted when read back.
@@ -78,15 +76,35 @@ impl EncryptedString {
         })
     }
 
-    /// Construct from a decrypted DB value on the read path.
+    /// Decode a raw database representation into an `EncryptedString`.
     ///
-    /// Used by `ValueType` / `TryGetable` impls to construct from a decrypted
-    /// value while preserving the original DB representation.
-    #[cfg(feature = "sea-orm")]
-    pub(crate) fn from_db(plaintext: String, db_repr: String) -> Self {
-        Self {
-            plaintext: SecretString::new(plaintext),
-            db_value: db_repr,
+    /// Prefix dispatch: `ENC:v3:`/`ENC:v2:` decrypt with the supplied `aad`;
+    /// `ENC:v1:` always decrypts with the EMPTY AAD regardless of `aad`
+    /// (legacy format predates AAD binding); anything else is legacy
+    /// plaintext (or plaintext mode) and is accepted as-is.
+    ///
+    /// # Errors
+    ///
+    /// Returns the underlying decryption error for any `ENC:`-prefixed
+    /// value that fails to decrypt.
+    pub fn decode_db_value(raw: String, aad: &str) -> crate::Result<Self> {
+        if raw.starts_with(ENC_V3_PREFIX) || raw.starts_with(ENC_V2_PREFIX) {
+            let plaintext = crate::decrypt_str(&raw, aad)?;
+            Ok(Self {
+                plaintext: SecretString::new(plaintext),
+                db_value: raw,
+            })
+        } else if raw.starts_with(ENC_V1_PREFIX) {
+            let plaintext = crate::decrypt_str(&raw, "")?;
+            Ok(Self {
+                plaintext: SecretString::new(plaintext),
+                db_value: raw,
+            })
+        } else {
+            Ok(Self {
+                plaintext: SecretString::new(raw.clone()),
+                db_value: raw,
+            })
         }
     }
 
@@ -150,30 +168,11 @@ impl sea_orm::sea_query::ValueType for EncryptedString {
     )]
     fn try_from(v: sea_orm::Value) -> std::result::Result<Self, sea_orm::sea_query::ValueTypeErr> {
         match v {
+            // ValueType has no column name -- best-effort with empty AAD.
+            // Normal SeaORM entity queries go through TryGetable which has
+            // the column name and can look up the correct AAD.
             sea_orm::Value::String(Some(s)) => {
-                if s.starts_with(ENC_V3_PREFIX) {
-                    // ValueType has no column name -- best-effort with empty AAD.
-                    // Normal SeaORM entity queries go through TryGetable which has
-                    // the column name and can look up the correct AAD.
-                    let plaintext =
-                        crate::decrypt_str(&s, "").map_err(|_| sea_orm::sea_query::ValueTypeErr)?;
-                    Ok(Self::from_db(plaintext, s))
-                } else if s.starts_with(ENC_V1_PREFIX) {
-                    let plaintext =
-                        crate::decrypt_str(&s, "").map_err(|_| sea_orm::sea_query::ValueTypeErr)?;
-                    Ok(Self::from_db(plaintext, s))
-                } else if s.starts_with(ENC_V2_PREFIX) {
-                    // ValueType has no column name -- use empty AAD as fallback.
-                    let plaintext =
-                        crate::decrypt_str(&s, "").map_err(|_| sea_orm::sea_query::ValueTypeErr)?;
-                    Ok(Self::from_db(plaintext, s))
-                } else if is_plaintext_mode() {
-                    // Plaintext mode -- accept as-is
-                    Ok(Self::from_db(s.clone(), s))
-                } else {
-                    // Legacy plaintext -- accept as-is
-                    Ok(Self::from_db(s.clone(), s))
-                }
+                Self::decode_db_value(s, "").map_err(|_| sea_orm::sea_query::ValueTypeErr)
             }
             _ => Err(sea_orm::sea_query::ValueTypeErr),
         }
@@ -224,34 +223,12 @@ impl sea_orm::TryGetable for EncryptedString {
             }
         };
 
-        if s.starts_with(ENC_V3_PREFIX) {
-            let col_name = index.as_str().unwrap_or("unknown");
-            let aad = crate::column_aad(col_name).unwrap_or("");
-            let plaintext = crate::decrypt_str(&s, aad).map_err(|e| {
-                sea_orm::TryGetError::DbErr(sea_orm::DbErr::Type(format!(
-                    "ENC:v3 decryption failed for column '{col_name}': {e}"
-                )))
-            })?;
-            Ok(Self::from_db(plaintext, s))
-        } else if s.starts_with(ENC_V2_PREFIX) {
-            let col_name = index.as_str().unwrap_or("unknown");
-            let aad = crate::column_aad(col_name).unwrap_or("");
-            let plaintext = crate::decrypt_str(&s, aad).map_err(|e| {
-                sea_orm::TryGetError::DbErr(sea_orm::DbErr::Type(format!(
-                    "ENC:v2 decryption failed for column '{col_name}': {e}"
-                )))
-            })?;
-            Ok(Self::from_db(plaintext, s))
-        } else if s.starts_with(ENC_V1_PREFIX) {
-            let plaintext = crate::decrypt_str(&s, "").map_err(|e| {
-                sea_orm::TryGetError::DbErr(sea_orm::DbErr::Type(format!(
-                    "EncryptedString decryption failed: {e}"
-                )))
-            })?;
-            Ok(Self::from_db(plaintext, s))
-        } else {
-            // Legacy plaintext -- accept as-is
-            Ok(Self::from_db(s.clone(), s))
-        }
+        let col_name = index.as_str().unwrap_or("unknown");
+        let aad = crate::column_aad(col_name).unwrap_or("");
+        Self::decode_db_value(s, aad).map_err(|e| {
+            sea_orm::TryGetError::DbErr(sea_orm::DbErr::Type(format!(
+                "EncryptedString decryption failed for column '{col_name}': {e}"
+            )))
+        })
     }
 }

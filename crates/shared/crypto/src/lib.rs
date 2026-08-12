@@ -81,6 +81,9 @@ pub enum CryptoError {
     #[error("decrypted value is not valid UTF-8: {0}")]
     InvalidUtf8(std::string::FromUtf8Error),
 
+    #[error("stored value is not valid JSON: {0}")]
+    InvalidJson(String),
+
     #[error("master key does not match existing encrypted data")]
     MasterKeyMismatch,
 

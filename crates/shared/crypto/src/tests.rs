@@ -843,6 +843,44 @@ fn test_new_produces_v3_when_ring_available() {
     assert_eq!(es.expose_secret(), "v3 secret");
 }
 
+// ── decode_db_value tests ──────────────────────────────────────
+
+#[test]
+fn test_decode_db_value_v2_round_trip() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    ensure_test_key();
+    let key = test_master_key();
+
+    let aad = "uptrakit:test:decode_db_value";
+    let encrypted =
+        v2::encrypt_value_v2(key, "decode me", aad).expect("v2 encryption should succeed");
+    let decoded = EncryptedString::decode_db_value(encrypted, aad).expect("decode should succeed");
+    assert_eq!(decoded.expose_secret(), "decode me");
+}
+
+#[test]
+fn test_decode_db_value_v2_wrong_aad_fails() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    ensure_test_key();
+    let key = test_master_key();
+
+    let encrypted = v2::encrypt_value_v2(key, "decode me", "correct-aad")
+        .expect("v2 encryption should succeed");
+    let result = EncryptedString::decode_db_value(encrypted, "wrong-aad");
+    assert!(result.is_err(), "decoding with wrong AAD must fail");
+}
+
+#[test]
+fn test_decode_db_value_legacy_plaintext_passthrough() {
+    let decoded = EncryptedString::decode_db_value("legacy plaintext".to_string(), "any-aad")
+        .expect("plaintext passthrough should succeed");
+    assert_eq!(decoded.expose_secret(), "legacy plaintext");
+    assert!(
+        !decoded.is_db_value_encrypted(),
+        "legacy plaintext value must not be reported as encrypted"
+    );
+}
+
 #[test]
 fn test_create_verification_token_with_explicit_key() {
     let _lock = TEST_LOCK.lock().unwrap();
