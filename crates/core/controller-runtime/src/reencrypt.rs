@@ -502,9 +502,10 @@ async fn upgrade_plugin_configs(db: &DatabaseConnection) -> u64 {
                                 }
                                 Err(e) => {
                                     tracing::error!(
+                                        table = "plugin_configs",
                                         id = %id,
                                         error = %e,
-                                        "plugin config row is undecodable; excluded from v3 upgrade"
+                                        "row is undecodable; excluded from v3 upgrade"
                                     );
                                 }
                             }
@@ -634,9 +635,10 @@ async fn upgrade_plugin_type_settings(db: &DatabaseConnection) -> u64 {
                                 }
                                 Err(e) => {
                                     tracing::error!(
+                                        table = "plugin_type_settings",
                                         id = %id,
                                         error = %e,
-                                        "plugin config row is undecodable; excluded from v3 upgrade"
+                                        "row is undecodable; excluded from v3 upgrade"
                                     );
                                 }
                             }
@@ -774,9 +776,10 @@ async fn upgrade_instance_plugin_settings(db: &DatabaseConnection) -> u64 {
                                 }
                                 Err(e) => {
                                     tracing::error!(
+                                        table = "instance_plugin_setting",
                                         plugin_type_id = %plugin_type_id,
                                         error = %e,
-                                        "plugin config row is undecodable; excluded from v3 upgrade"
+                                        "row is undecodable; excluded from v3 upgrade"
                                     );
                                 }
                             }
