@@ -356,9 +356,10 @@ mod tests {
             .await
             .expect("query")
             .expect("row exists");
-        assert!(
-            stored.credential_updated_at.is_some(),
-            "changed secret must stamp"
+        assert_ne!(
+            stored.credential_updated_at,
+            Some(first_stamp),
+            "changed secret must produce a new credential_updated_at stamp, not reuse the prior one"
         );
         assert_ne!(
             stored.config.as_json(),

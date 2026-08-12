@@ -93,11 +93,21 @@ pub fn first_sensitive_path_present(value: &Value, paths: &[String]) -> Option<S
 ///
 /// `navigate()` returns `None` for a non-object root (e.g. `value` is a
 /// JSON array or scalar), which this function treats the same as "path
-/// absent" -- deliberate, not a silent gap: `PluginConfig` bodies are
-/// always JSON objects by construction (`validate_config` rejects
-/// non-object configs before this is ever reached), so a non-object root
-/// here would already be a validation-layer bug, not a real input this
-/// function needs to special-case.
+/// absent" -- deliberate, not a silent gap, but the guarantee behind it is
+/// narrower than it looks: for the REST `plugin_configs` writers,
+/// `validate_config` rejects a non-object config before this is ever
+/// reached, so a non-object root there would be a validation-layer bug.
+/// That guarantee does NOT hold for
+/// `autodiscovery::find_or_create_default_plugin_config`'s caller in
+/// `discovery_items.rs` -- `DiscoveryTarget.plugin_config` is untyped
+/// `serde_json::Value` from an untrusted agent report, and only
+/// `assert_no_sentinel` runs on it (which itself no-ops on a non-object
+/// root via this same `navigate` fallback), never `validate_config`. On
+/// that path a non-object root is a real, reachable input: this function
+/// under-counts (reports "no live secret") rather than lying the other
+/// way, consistent with the sibling traversal helpers in this module and
+/// with the "unknowable" bucket the startup residue sweep already carves
+/// out for the identical blind spot (`reencrypt.rs`).
 pub fn has_live_secret_value(value: &Value, paths: &[String]) -> bool {
     paths.iter().any(|p| {
         navigate(value, p)
