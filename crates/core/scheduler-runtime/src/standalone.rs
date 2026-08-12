@@ -277,6 +277,23 @@ async fn build_standalone_runtime_config(
 
     init_data_key_ring(&db).await;
 
+    // Ring-precondition visibility: `plugin_configs`, `plugin_type_settings`,
+    // and `instance_plugin_setting` carry `EncryptedPlugin*` columns that
+    // require a live data key ring to decode ENC:v3: rows. The ring init
+    // above is best-effort (logs and continues on failure), so a scheduler
+    // that starts right after deploy with a missing/failed ring will run
+    // fine while those tables are still plaintext, then break at the first
+    // controller restart once the reencrypt pass converts them — a
+    // deploy-decoupled, delayed failure. Surface the precondition now so
+    // operators see it at the moment the ring actually failed to come up.
+    if !uptrakit_crypto::master_key_available() || !uptrakit_crypto::data_key_ring_available() {
+        tracing::error!(
+            tables = "plugin_configs, plugin_type_settings, instance_plugin_setting",
+            "no live master key / data key ring: encrypted plugin-config columns on these \
+             tables will be unreadable until valid credentials arrive"
+        );
+    }
+
     let nats_url = creds.nats_url.as_ref().ok_or_else(|| {
         report!(LoopError::Other(
             "ServiceCredentials missing nats_url (nats_access capability required)".to_string()

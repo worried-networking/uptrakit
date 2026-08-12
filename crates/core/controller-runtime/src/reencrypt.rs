@@ -108,43 +108,59 @@ pub(crate) fn register_column_aad_mappings() {
 /// columns and settings. Runs automatically at startup after the data key
 /// ring has been initialized.
 pub(crate) async fn reencrypt_to_v3(db: &DatabaseConnection) {
-    if !uptrakit_crypto::master_key_available() {
-        return;
-    }
+    if uptrakit_crypto::master_key_available() {
+        let mut total = 0u64;
 
-    let mut total = 0u64;
+        // Database columns
+        total += upgrade_ca_certificate_keys(db).await;
+        total += upgrade_oidc_client_secrets(db).await;
+        total += upgrade_oidc_flow_pkce_verifiers(db).await;
+        total += upgrade_notification_channel_configs(db).await;
+        total += upgrade_plugin_configs(db).await;
+        total += upgrade_plugin_type_settings(db).await;
+        total += upgrade_instance_plugin_settings(db).await;
 
-    // Database columns
-    total += upgrade_ca_certificate_keys(db).await;
-    total += upgrade_oidc_client_secrets(db).await;
-    total += upgrade_oidc_flow_pkce_verifiers(db).await;
-    total += upgrade_notification_channel_configs(db).await;
+        // Settings values
+        total += upgrade_setting(db, "auth.jwt_signing_key", AAD_SETTINGS_JWT_KEY).await;
+        total += upgrade_setting(db, "nats.url", AAD_SETTINGS_NATS_URL).await;
+        total += upgrade_setting(db, "smtp.password", AAD_SETTINGS_SMTP_PASSWORD).await;
+        total += upgrade_setting(
+            db,
+            "global_provider_github.auth_token",
+            AAD_SETTINGS_GITHUB_PROVIDER_AUTH_TOKEN,
+        )
+        .await;
+        total += upgrade_setting(
+            db,
+            "system_services.enrollment_token",
+            AAD_SETTINGS_ENROLLMENT_TOKEN,
+        )
+        .await;
 
-    // Settings values
-    total += upgrade_setting(db, "auth.jwt_signing_key", AAD_SETTINGS_JWT_KEY).await;
-    total += upgrade_setting(db, "nats.url", AAD_SETTINGS_NATS_URL).await;
-    total += upgrade_setting(db, "smtp.password", AAD_SETTINGS_SMTP_PASSWORD).await;
-    total += upgrade_setting(
-        db,
-        "global_provider_github.auth_token",
-        AAD_SETTINGS_GITHUB_PROVIDER_AUTH_TOKEN,
-    )
-    .await;
-    total += upgrade_setting(
-        db,
-        "system_services.enrollment_token",
-        AAD_SETTINGS_ENROLLMENT_TOKEN,
-    )
-    .await;
-
-    if total > 0 {
-        tracing::info!(
-            count = total,
-            "migrated values to ENC:v3 envelope encryption"
-        );
+        if total > 0 {
+            tracing::info!(
+                count = total,
+                "migrated values to ENC:v3 envelope encryption"
+            );
+        } else {
+            tracing::debug!("all encrypted values already at ENC:v3");
+        }
     } else {
-        tracing::debug!("all encrypted values already at ENC:v3");
+        tracing::debug!(
+            "no master key available: skipping ENC:v3 upgrade passes (plaintext-residue counters still run)"
+        );
     }
+
+    // Plaintext-residue observability: unconditional, independent of master
+    // key availability. This is deliberately NOT gated behind the branch
+    // above — an external-scheduler-only deployment (no controller, so this
+    // fn never even runs there) or a db-migrate skip is exactly the
+    // situation where rows are guaranteed to still be plaintext and this
+    // warning is most needed, and it needs no key material to run (a raw
+    // `NOT LIKE 'ENC:%'` count).
+    warn_on_plugin_config_plaintext_residue(db).await;
+    warn_on_plugin_type_setting_plaintext_residue(db).await;
+    warn_on_instance_plugin_setting_plaintext_residue(db).await;
 }
 
 // ── Per-table upgrade helpers ──────────────────────────────────────────
@@ -405,6 +421,416 @@ async fn upgrade_notification_channel_configs(db: &DatabaseConnection) -> u64 {
     count
 }
 
+async fn upgrade_plugin_configs(db: &DatabaseConnection) -> u64 {
+    use sea_orm::ActiveModelTrait;
+    use uptrakit_shared_db::encrypted_columns::EncryptedPluginConfig;
+    use uptrakit_shared_db::entity::{plugin_config, prelude::PluginConfig};
+
+    let mut count = 0u64;
+    let mut last_id: Option<uuid::Uuid> = None;
+
+    loop {
+        let mut query = PluginConfig::find()
+            .order_by_asc(plugin_config::Column::Id)
+            .limit(UPGRADE_CHUNK_SIZE);
+        if let Some(id) = last_id {
+            query = query.filter(plugin_config::Column::Id.gt(id));
+        }
+        let rows = match query.all(db).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(
+                    cursor = ?last_id,
+                    error = %e,
+                    "failed to query plugin_configs page for v3 upgrade; attempting to skip poisoned page"
+                );
+
+                // The page load failed to decode (likely one undecryptable or
+                // unparseable `config` value). Pks are unencrypted, so a
+                // pk-only select of the same page can still succeed and let
+                // us advance the cursor past the poisoned page instead of
+                // stalling this table's pass forever.
+                let mut pk_query = PluginConfig::find()
+                    .select_only()
+                    .column(plugin_config::Column::Id)
+                    .order_by_asc(plugin_config::Column::Id)
+                    .limit(UPGRADE_CHUNK_SIZE);
+                if let Some(id) = last_id {
+                    pk_query = pk_query.filter(plugin_config::Column::Id.gt(id));
+                }
+                match pk_query.into_tuple::<uuid::Uuid>().all(db).await {
+                    Ok(ids) => {
+                        let Some(&max_id) = ids.last() else { break };
+                        let recovered_page_len = ids.len() as u64;
+                        last_id = Some(max_id);
+                        if recovered_page_len < UPGRADE_CHUNK_SIZE {
+                            break;
+                        }
+                        continue;
+                    }
+                    Err(e2) => {
+                        tracing::error!(
+                            cursor = ?last_id,
+                            error = %e2,
+                            "pk-only recovery for plugin_configs also failed; aborting v3 upgrade pass for this table"
+                        );
+                        break;
+                    }
+                }
+            }
+        };
+
+        let Some(last) = rows.last() else { break };
+        last_id = Some(last.id);
+        let page_len = rows.len() as u64;
+
+        for row in rows {
+            if !row.config.needs_v3_upgrade() {
+                continue;
+            }
+            let plaintext = row.config.expose_secret().to_string();
+            let id = row.id;
+            match EncryptedPluginConfig::new(plaintext) {
+                Ok(encrypted) => {
+                    let mut am = row.into_active_model();
+                    am.config = sea_orm::Set(encrypted);
+                    if let Err(e) = am.update(db).await {
+                        tracing::warn!(id = %id, error = %e, "v3 upgrade failed: plugin_configs.config");
+                    } else {
+                        count += 1;
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(id = %id, error = %e, "v3 encrypt failed: plugin_configs.config");
+                }
+            }
+        }
+
+        if page_len < UPGRADE_CHUNK_SIZE {
+            break;
+        }
+    }
+
+    if count > 0 {
+        tracing::info!(
+            table = "plugin_configs",
+            column = "config",
+            count,
+            "upgraded to ENC:v3"
+        );
+    }
+    count
+}
+
+async fn upgrade_plugin_type_settings(db: &DatabaseConnection) -> u64 {
+    use sea_orm::ActiveModelTrait;
+    use uptrakit_shared_db::encrypted_columns::EncryptedPluginTypeConfig;
+    use uptrakit_shared_db::entity::{plugin_type_setting, prelude::PluginTypeSetting};
+
+    let mut count = 0u64;
+    let mut last_id: Option<uuid::Uuid> = None;
+
+    loop {
+        let mut query = PluginTypeSetting::find()
+            .order_by_asc(plugin_type_setting::Column::Id)
+            .limit(UPGRADE_CHUNK_SIZE);
+        if let Some(id) = last_id {
+            query = query.filter(plugin_type_setting::Column::Id.gt(id));
+        }
+        let rows = match query.all(db).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(
+                    cursor = ?last_id,
+                    error = %e,
+                    "failed to query plugin_type_settings page for v3 upgrade; attempting to skip poisoned page"
+                );
+
+                // The page load failed to decode (likely one undecryptable or
+                // unparseable `config` value). Pks are unencrypted, so a
+                // pk-only select of the same page can still succeed and let
+                // us advance the cursor past the poisoned page instead of
+                // stalling this table's pass forever.
+                let mut pk_query = PluginTypeSetting::find()
+                    .select_only()
+                    .column(plugin_type_setting::Column::Id)
+                    .order_by_asc(plugin_type_setting::Column::Id)
+                    .limit(UPGRADE_CHUNK_SIZE);
+                if let Some(id) = last_id {
+                    pk_query = pk_query.filter(plugin_type_setting::Column::Id.gt(id));
+                }
+                match pk_query.into_tuple::<uuid::Uuid>().all(db).await {
+                    Ok(ids) => {
+                        let Some(&max_id) = ids.last() else { break };
+                        let recovered_page_len = ids.len() as u64;
+                        last_id = Some(max_id);
+                        if recovered_page_len < UPGRADE_CHUNK_SIZE {
+                            break;
+                        }
+                        continue;
+                    }
+                    Err(e2) => {
+                        tracing::error!(
+                            cursor = ?last_id,
+                            error = %e2,
+                            "pk-only recovery for plugin_type_settings also failed; aborting v3 upgrade pass for this table"
+                        );
+                        break;
+                    }
+                }
+            }
+        };
+
+        let Some(last) = rows.last() else { break };
+        last_id = Some(last.id);
+        let page_len = rows.len() as u64;
+
+        for row in rows {
+            if !row.config.needs_v3_upgrade() {
+                continue;
+            }
+            let plaintext = row.config.expose_secret().to_string();
+            let id = row.id;
+            match EncryptedPluginTypeConfig::new(plaintext) {
+                Ok(encrypted) => {
+                    let mut am = row.into_active_model();
+                    am.config = sea_orm::Set(encrypted);
+                    if let Err(e) = am.update(db).await {
+                        tracing::warn!(id = %id, error = %e, "v3 upgrade failed: plugin_type_settings.config");
+                    } else {
+                        count += 1;
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(id = %id, error = %e, "v3 encrypt failed: plugin_type_settings.config");
+                }
+            }
+        }
+
+        if page_len < UPGRADE_CHUNK_SIZE {
+            break;
+        }
+    }
+
+    if count > 0 {
+        tracing::info!(
+            table = "plugin_type_settings",
+            column = "config",
+            count,
+            "upgraded to ENC:v3"
+        );
+    }
+    count
+}
+
+async fn upgrade_instance_plugin_settings(db: &DatabaseConnection) -> u64 {
+    use sea_orm::ActiveModelTrait;
+    use uptrakit_shared_db::encrypted_columns::EncryptedInstancePluginConfig;
+    use uptrakit_shared_db::entity::{instance_plugin_setting, prelude::InstancePluginSetting};
+
+    let mut count = 0u64;
+    let mut last_plugin_type_id: Option<String> = None;
+
+    loop {
+        let mut query = InstancePluginSetting::find()
+            .order_by_asc(instance_plugin_setting::Column::PluginTypeId)
+            .limit(UPGRADE_CHUNK_SIZE);
+        if let Some(plugin_type_id) = &last_plugin_type_id {
+            query = query
+                .filter(instance_plugin_setting::Column::PluginTypeId.gt(plugin_type_id.clone()));
+        }
+        let rows = match query.all(db).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(
+                    cursor = ?last_plugin_type_id,
+                    error = %e,
+                    "failed to query instance_plugin_setting page for v3 upgrade; attempting to skip poisoned page"
+                );
+
+                // The page load failed to decode (likely one undecryptable or
+                // unparseable `config` value). Pks are unencrypted, so a
+                // pk-only select of the same page can still succeed and let
+                // us advance the cursor past the poisoned page instead of
+                // stalling this table's pass forever.
+                let mut pk_query = InstancePluginSetting::find()
+                    .select_only()
+                    .column(instance_plugin_setting::Column::PluginTypeId)
+                    .order_by_asc(instance_plugin_setting::Column::PluginTypeId)
+                    .limit(UPGRADE_CHUNK_SIZE);
+                if let Some(plugin_type_id) = &last_plugin_type_id {
+                    pk_query = pk_query.filter(
+                        instance_plugin_setting::Column::PluginTypeId.gt(plugin_type_id.clone()),
+                    );
+                }
+                match pk_query.into_tuple::<String>().all(db).await {
+                    Ok(ids) => {
+                        let Some(max_id) = ids.last().cloned() else {
+                            break;
+                        };
+                        let recovered_page_len = ids.len() as u64;
+                        last_plugin_type_id = Some(max_id);
+                        if recovered_page_len < UPGRADE_CHUNK_SIZE {
+                            break;
+                        }
+                        continue;
+                    }
+                    Err(e2) => {
+                        tracing::error!(
+                            cursor = ?last_plugin_type_id,
+                            error = %e2,
+                            "pk-only recovery for instance_plugin_setting also failed; aborting v3 upgrade pass for this table"
+                        );
+                        break;
+                    }
+                }
+            }
+        };
+
+        let Some(last) = rows.last() else { break };
+        last_plugin_type_id = Some(last.plugin_type_id.clone());
+        let page_len = rows.len() as u64;
+
+        for row in rows {
+            if !row.config.needs_v3_upgrade() {
+                continue;
+            }
+            let plaintext = row.config.expose_secret().to_string();
+            let plugin_type_id = row.plugin_type_id.clone();
+            match EncryptedInstancePluginConfig::new(plaintext) {
+                Ok(encrypted) => {
+                    let mut am = row.into_active_model();
+                    am.config = sea_orm::Set(encrypted);
+                    if let Err(e) = am.update(db).await {
+                        tracing::warn!(plugin_type_id = %plugin_type_id, error = %e, "v3 upgrade failed: instance_plugin_setting.config");
+                    } else {
+                        count += 1;
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(plugin_type_id = %plugin_type_id, error = %e, "v3 encrypt failed: instance_plugin_setting.config");
+                }
+            }
+        }
+
+        if page_len < UPGRADE_CHUNK_SIZE {
+            break;
+        }
+    }
+
+    if count > 0 {
+        tracing::info!(
+            table = "instance_plugin_setting",
+            column = "config",
+            count,
+            "upgraded to ENC:v3"
+        );
+    }
+    count
+}
+
+// ── Plaintext-residue observability ─────────────────────────────────────
+
+/// Count rows whose `config` column is not stored as `ENC:*` ciphertext.
+///
+/// Deliberately a typed `sea_query` `COUNT(*)` scalar select rather than an
+/// entity load: with the eager-parse encrypted-column newtypes, a single
+/// undecryptable row fails an entire `Vec<Model>` load — exactly when this
+/// diagnostic is needed most (a stuck upgrade pass, or a deployment that
+/// never ran it at all).
+///
+/// Split out from the warn-emitting wrapper below so the count itself is
+/// directly unit-testable: the `remaining > 0` branch of the wrapper is only
+/// reachable via a log assertion otherwise, and every failure path degrades
+/// to `0`, which would make a malformed or backend-specific query silently
+/// inert with no test ever catching it.
+async fn count_plaintext_residue(
+    db: &DatabaseConnection,
+    stmt: &sea_orm::sea_query::SelectStatement,
+    table: &'static str,
+) -> i64 {
+    use sea_orm::ConnectionTrait;
+
+    match db.query_one(stmt).await {
+        Ok(Some(row)) => match row.try_get::<i64>("", "cnt") {
+            Ok(n) => n,
+            Err(e) => {
+                tracing::warn!(table, error = %e, "failed to parse plaintext-residue count");
+                0
+            }
+        },
+        Ok(None) => 0,
+        Err(e) => {
+            tracing::warn!(table, error = %e, "failed to count plaintext-residue rows");
+            0
+        }
+    }
+}
+
+/// Count rows whose `config` column is not stored as `ENC:*` ciphertext and,
+/// when any remain, warn with the table name and count.
+async fn warn_on_plaintext_residue(
+    db: &DatabaseConnection,
+    stmt: &sea_orm::sea_query::SelectStatement,
+    table: &'static str,
+) {
+    let remaining = count_plaintext_residue(db, stmt, table).await;
+
+    if remaining > 0 {
+        tracing::warn!(
+            table,
+            remaining,
+            "plugin config rows still stored in plaintext — reencrypt pass has not converted \
+             them (external-scheduler-only deployment or db-migrate skip?)"
+        );
+    }
+}
+
+async fn warn_on_plugin_config_plaintext_residue(db: &DatabaseConnection) {
+    use sea_orm::sea_query::{Alias, Expr, ExprTrait, Query};
+    use uptrakit_shared_db::entity::plugin_config;
+
+    let stmt = Query::select()
+        .expr_as(
+            Expr::col(plugin_config::Column::Config).count(),
+            Alias::new("cnt"),
+        )
+        .from(plugin_config::Entity)
+        .and_where(Expr::col(plugin_config::Column::Config).not_like("ENC:%"))
+        .to_owned();
+    warn_on_plaintext_residue(db, &stmt, "plugin_configs").await;
+}
+
+async fn warn_on_plugin_type_setting_plaintext_residue(db: &DatabaseConnection) {
+    use sea_orm::sea_query::{Alias, Expr, ExprTrait, Query};
+    use uptrakit_shared_db::entity::plugin_type_setting;
+
+    let stmt = Query::select()
+        .expr_as(
+            Expr::col(plugin_type_setting::Column::Config).count(),
+            Alias::new("cnt"),
+        )
+        .from(plugin_type_setting::Entity)
+        .and_where(Expr::col(plugin_type_setting::Column::Config).not_like("ENC:%"))
+        .to_owned();
+    warn_on_plaintext_residue(db, &stmt, "plugin_type_settings").await;
+}
+
+async fn warn_on_instance_plugin_setting_plaintext_residue(db: &DatabaseConnection) {
+    use sea_orm::sea_query::{Alias, Expr, ExprTrait, Query};
+    use uptrakit_shared_db::entity::instance_plugin_setting;
+
+    let stmt = Query::select()
+        .expr_as(
+            Expr::col(instance_plugin_setting::Column::Config).count(),
+            Alias::new("cnt"),
+        )
+        .from(instance_plugin_setting::Entity)
+        .and_where(Expr::col(instance_plugin_setting::Column::Config).not_like("ENC:%"))
+        .to_owned();
+    warn_on_plaintext_residue(db, &stmt, "instance_plugin_setting").await;
+}
+
 // ── Settings value upgrade ─────────────────────────────────────────────
 
 /// Upgrade a single global setting value from v1/v2/plaintext to v3.
@@ -544,6 +970,123 @@ mod tests {
             updated_at: Set(now),
             deactivated_at: Set(None),
         }
+    }
+
+    /// Insert a legacy plaintext `plugin_configs` row via a raw `sea_query`
+    /// insert, bypassing the `EncryptedPluginConfig` newtype (which always
+    /// encrypts on construction — there is no `plaintext_for_test` escape
+    /// hatch for it, unlike `EncryptedString`).
+    async fn insert_plaintext_plugin_config(
+        db: &DatabaseConnection,
+        id: Uuid,
+        plaintext_json: &str,
+        now: OffsetDateTime,
+    ) {
+        use sea_orm::ConnectionTrait as _;
+        use sea_orm::sea_query::{Expr as SqExpr, Query};
+        use uptrakit_shared_db::entity::plugin_config;
+
+        let insert = Query::insert()
+            .into_table(plugin_config::Entity)
+            .columns([
+                plugin_config::Column::Id,
+                plugin_config::Column::TenantId,
+                plugin_config::Column::Name,
+                plugin_config::Column::PluginType,
+                plugin_config::Column::Config,
+                plugin_config::Column::Enabled,
+                plugin_config::Column::CreatedAt,
+                plugin_config::Column::UpdatedAt,
+                plugin_config::Column::DeactivatedAt,
+                plugin_config::Column::CredentialUpdatedAt,
+            ])
+            .values_panic([
+                SqExpr::value(id),
+                SqExpr::value(Uuid::nil()),
+                SqExpr::value(format!("legacy-plugin-config-{id}")),
+                SqExpr::value("legacy-plugin-type"),
+                SqExpr::value(plaintext_json),
+                SqExpr::value(true),
+                SqExpr::value(now),
+                SqExpr::value(now),
+                SqExpr::value(sea_orm::Value::TimeDateTimeWithTimeZone(None)),
+                SqExpr::value(sea_orm::Value::TimeDateTimeWithTimeZone(None)),
+            ])
+            .to_owned();
+
+        db.execute(&insert)
+            .await
+            .expect("insert legacy plaintext plugin_config row");
+    }
+
+    /// Insert a legacy plaintext `plugin_type_settings` row via a raw
+    /// `sea_query` insert (see `insert_plaintext_plugin_config` doc comment).
+    async fn insert_plaintext_plugin_type_setting(
+        db: &DatabaseConnection,
+        id: Uuid,
+        plaintext_json: &str,
+        now: OffsetDateTime,
+    ) {
+        use sea_orm::ConnectionTrait as _;
+        use sea_orm::sea_query::{Expr as SqExpr, Query};
+        use uptrakit_shared_db::entity::plugin_type_setting;
+
+        let insert = Query::insert()
+            .into_table(plugin_type_setting::Entity)
+            .columns([
+                plugin_type_setting::Column::Id,
+                plugin_type_setting::Column::TenantId,
+                plugin_type_setting::Column::PluginType,
+                plugin_type_setting::Column::Config,
+                plugin_type_setting::Column::CreatedAt,
+                plugin_type_setting::Column::UpdatedAt,
+            ])
+            .values_panic([
+                SqExpr::value(id),
+                SqExpr::value(Uuid::nil()),
+                SqExpr::value("legacy-plugin-type"),
+                SqExpr::value(plaintext_json),
+                SqExpr::value(now),
+                SqExpr::value(now),
+            ])
+            .to_owned();
+
+        db.execute(&insert)
+            .await
+            .expect("insert legacy plaintext plugin_type_setting row");
+    }
+
+    /// Insert a legacy plaintext `instance_plugin_setting` row via a raw
+    /// `sea_query` insert (see `insert_plaintext_plugin_config` doc comment).
+    async fn insert_plaintext_instance_plugin_setting(
+        db: &DatabaseConnection,
+        plugin_type_id: &str,
+        plaintext_json: &str,
+        now: OffsetDateTime,
+    ) {
+        use sea_orm::ConnectionTrait as _;
+        use sea_orm::sea_query::{Expr as SqExpr, Query};
+        use uptrakit_shared_db::entity::instance_plugin_setting;
+
+        let insert = Query::insert()
+            .into_table(instance_plugin_setting::Entity)
+            .columns([
+                instance_plugin_setting::Column::PluginTypeId,
+                instance_plugin_setting::Column::Enabled,
+                instance_plugin_setting::Column::Config,
+                instance_plugin_setting::Column::UpdatedAt,
+            ])
+            .values_panic([
+                SqExpr::value(plugin_type_id),
+                SqExpr::value(true),
+                SqExpr::value(plaintext_json),
+                SqExpr::value(now),
+            ])
+            .to_owned();
+
+        db.execute(&insert)
+            .await
+            .expect("insert legacy plaintext instance_plugin_setting row");
     }
 
     // ── ca_certificates.key_pem ───────────────────────────────────────────────
@@ -772,6 +1315,203 @@ mod tests {
         }
     }
 
+    // ── plugin_configs.config ───────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn plugin_config_plaintext_gets_upgraded() {
+        let db = test_db().await;
+        let now = OffsetDateTime::now_utc();
+        let id = Uuid::now_v7();
+
+        insert_plaintext_plugin_config(&db, id, r#"{"token":"secret-token"}"#, now).await;
+
+        let count = upgrade_plugin_configs(&db).await;
+        assert_eq!(count, 1, "exactly one row should be upgraded");
+
+        let row = uptrakit_shared_db::entity::prelude::PluginConfig::find_by_id(id)
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row exists");
+        assert!(
+            row.config.is_db_value_encrypted(),
+            "config must be encrypted after upgrade"
+        );
+        assert_eq!(row.config.expose_secret(), r#"{"token":"secret-token"}"#);
+    }
+
+    #[tokio::test]
+    async fn plugin_config_pagination_upgrades_all_rows() {
+        let db = test_db().await;
+        let now = OffsetDateTime::now_utc();
+
+        for _ in 0..150 {
+            let id = Uuid::now_v7();
+            insert_plaintext_plugin_config(&db, id, r#"{"token":"secret-token"}"#, now).await;
+        }
+
+        let count = upgrade_plugin_configs(&db).await;
+        assert_eq!(count, 150, "all 150 rows should be upgraded");
+
+        let rows = uptrakit_shared_db::entity::prelude::PluginConfig::find()
+            .all(&db)
+            .await
+            .expect("query all");
+        assert_eq!(rows.len(), 150);
+        for row in rows {
+            assert!(
+                row.config.is_db_value_encrypted(),
+                "every row's config must be encrypted after upgrade"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn plugin_config_upgrade_is_idempotent_for_data_integrity() {
+        use uptrakit_shared_db::encrypted_columns::EncryptedPluginConfig;
+        use uptrakit_shared_db::entity::plugin_config;
+
+        let db = test_db().await;
+        let now = OffsetDateTime::now_utc();
+        let id = Uuid::now_v7();
+
+        plugin_config::ActiveModel {
+            id: Set(id),
+            tenant_id: Set(Uuid::nil()),
+            name: Set("idem-plugin-config".to_string()),
+            plugin_type: Set("idem-plugin-type".to_string()),
+            config: Set(
+                EncryptedPluginConfig::new(r#"{"token":"idem-secret"}"#.to_string()).unwrap(),
+            ),
+            enabled: Set(true),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+            credential_updated_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert");
+
+        // First run upgrades v2→v2 (no DEK ring in tests).
+        let count1 = upgrade_plugin_configs(&db).await;
+        assert_eq!(count1, 1);
+
+        // Second run: still v2 (not v3), so re-processed. Data integrity is key.
+        let count2 = upgrade_plugin_configs(&db).await;
+        assert_eq!(count2, 1, "v2 re-processed (harmless without DEK ring)");
+
+        let row = uptrakit_shared_db::entity::prelude::PluginConfig::find_by_id(id)
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row");
+        assert!(row.config.is_db_value_encrypted(), "still encrypted");
+        assert_eq!(
+            row.config.expose_secret(),
+            r#"{"token":"idem-secret"}"#,
+            "data preserved"
+        );
+    }
+
+    // ── plugin_type_settings.config ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn plugin_type_setting_plaintext_gets_upgraded() {
+        let db = test_db().await;
+        let now = OffsetDateTime::now_utc();
+        let id = Uuid::now_v7();
+
+        insert_plaintext_plugin_type_setting(&db, id, r#"{"default_timeout":30}"#, now).await;
+
+        let count = upgrade_plugin_type_settings(&db).await;
+        assert_eq!(count, 1, "exactly one row should be upgraded");
+
+        let row = uptrakit_shared_db::entity::prelude::PluginTypeSetting::find_by_id(id)
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row exists");
+        assert!(
+            row.config.is_db_value_encrypted(),
+            "config must be encrypted after upgrade"
+        );
+        assert_eq!(row.config.expose_secret(), r#"{"default_timeout":30}"#);
+    }
+
+    // ── instance_plugin_setting.config ──────────────────────────────────────────
+
+    #[tokio::test]
+    async fn instance_plugin_setting_plaintext_gets_upgraded() {
+        let db = test_db().await;
+        let now = OffsetDateTime::now_utc();
+
+        insert_plaintext_instance_plugin_setting(
+            &db,
+            "test-instance-plugin",
+            r#"{"api_key":"secret"}"#,
+            now,
+        )
+        .await;
+
+        let count = upgrade_instance_plugin_settings(&db).await;
+        assert_eq!(count, 1, "exactly one row should be upgraded");
+
+        let row = uptrakit_shared_db::entity::prelude::InstancePluginSetting::find_by_id(
+            "test-instance-plugin".to_string(),
+        )
+        .one(&db)
+        .await
+        .expect("query")
+        .expect("row exists");
+        assert!(
+            row.config.is_db_value_encrypted(),
+            "config must be encrypted after upgrade"
+        );
+        assert_eq!(row.config.expose_secret(), r#"{"api_key":"secret"}"#);
+    }
+
+    // ── Plaintext-residue observability ─────────────────────────────────────────
+
+    #[tokio::test]
+    async fn count_plaintext_residue_reports_remaining_rows() {
+        use sea_orm::sea_query::{Alias, Expr, ExprTrait, Query};
+        use uptrakit_shared_db::entity::plugin_config;
+
+        let db = test_db().await;
+        let now = OffsetDateTime::now_utc();
+
+        // Three plaintext rows left unconverted (no upgrade pass run) plus
+        // one already-encrypted row that must NOT be counted.
+        for _ in 0..3 {
+            insert_plaintext_plugin_config(&db, Uuid::now_v7(), r#"{"token":"t"}"#, now).await;
+        }
+        insert_plaintext_plugin_config(&db, Uuid::now_v7(), r#"{"token":"t"}"#, now).await;
+        let converted = upgrade_plugin_configs(&db).await;
+        assert_eq!(converted, 4, "seed data sanity: all four start plaintext");
+
+        // Re-seed three more plaintext rows that stay unconverted, mirroring
+        // a stuck/skipped upgrade pass.
+        for _ in 0..3 {
+            insert_plaintext_plugin_config(&db, Uuid::now_v7(), r#"{"token":"t"}"#, now).await;
+        }
+
+        let stmt = Query::select()
+            .expr_as(
+                Expr::col(plugin_config::Column::Config).count(),
+                Alias::new("cnt"),
+            )
+            .from(plugin_config::Entity)
+            .and_where(Expr::col(plugin_config::Column::Config).not_like("ENC:%"))
+            .to_owned();
+
+        let remaining = count_plaintext_residue(&db, &stmt, "plugin_configs").await;
+        assert_eq!(
+            remaining, 3,
+            "only the still-plaintext rows should be counted, not the four already upgraded"
+        );
+    }
+
     // ── Settings value upgrade ─────────────────────────────────────────────────
 
     #[tokio::test]
@@ -949,6 +1689,32 @@ mod tests {
         .await
         .expect("insert");
 
+        let plugin_config_id = Uuid::now_v7();
+        insert_plaintext_plugin_config(
+            &db,
+            plugin_config_id,
+            r#"{"token":"all_plugin_config"}"#,
+            now,
+        )
+        .await;
+
+        let plugin_type_setting_id = Uuid::now_v7();
+        insert_plaintext_plugin_type_setting(
+            &db,
+            plugin_type_setting_id,
+            r#"{"default_timeout":5}"#,
+            now,
+        )
+        .await;
+
+        insert_plaintext_instance_plugin_setting(
+            &db,
+            "v3_all_instance_plugin",
+            r#"{"api_key":"all_instance"}"#,
+            now,
+        )
+        .await;
+
         // Run top-level migration.
         reencrypt_to_v3(&db).await;
 
@@ -984,6 +1750,43 @@ mod tests {
         assert!(
             flow.pkce_verifier.is_db_value_encrypted(),
             "pkce_verifier must be encrypted"
+        );
+
+        let plugin_config =
+            uptrakit_shared_db::entity::prelude::PluginConfig::find_by_id(plugin_config_id)
+                .one(&db)
+                .await
+                .expect("query")
+                .expect("row");
+        assert!(
+            plugin_config.config.is_db_value_encrypted(),
+            "plugin_configs.config must be encrypted"
+        );
+
+        let plugin_type_setting =
+            uptrakit_shared_db::entity::prelude::PluginTypeSetting::find_by_id(
+                plugin_type_setting_id,
+            )
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row");
+        assert!(
+            plugin_type_setting.config.is_db_value_encrypted(),
+            "plugin_type_settings.config must be encrypted"
+        );
+
+        let instance_plugin_setting =
+            uptrakit_shared_db::entity::prelude::InstancePluginSetting::find_by_id(
+                "v3_all_instance_plugin".to_string(),
+            )
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row");
+        assert!(
+            instance_plugin_setting.config.is_db_value_encrypted(),
+            "instance_plugin_setting.config must be encrypted"
         );
     }
 
