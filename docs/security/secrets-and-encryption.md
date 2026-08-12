@@ -127,15 +127,26 @@ fallback or development mode: a missing master key is a hard failure that must b
 
 Database columns using encryption:
 
-| Table                   | Column          | AAD string                                  | Description                                                  |
-| ----------------------- | --------------- | ------------------------------------------- | ------------------------------------------------------------ |
-| `mqtt_clients`          | `password`      | `uptrakit:mqtt_clients:password`            | MQTT broker password                                         |
-| `mqtt_clients`          | `ca_cert_pem`   | `uptrakit:mqtt_clients:ca_cert_pem`         | Custom MQTT CA certificate                                   |
-| `oidc_providers`        | `client_secret` | `uptrakit:oidc_providers:client_secret`     | OIDC client secret                                           |
-| `ca_certificates`       | `key_pem`       | `uptrakit:ca_certificates:key_pem`          | CA private key                                               |
-| `pending_oidc_flows`    | `pkce_verifier` | `uptrakit:pending_oidc_flows:pkce_verifier` | PKCE code verifier for in-flight OIDC authorization          |
-| `ssh_hosts`             | `private_key`   | `uptrakit:ssh_hosts:private_key`            | SSH private key (agent-ssh local DB)                         |
-| `notification_channels` | `config`        | `uptrakit:notification_channels:config`     | Channel config JSON (bot tokens, webhook secrets, HMAC keys) |
+| Table                     | Column          | AAD string                                  | Description                                                  |
+| ------------------------- | --------------- | ------------------------------------------- | ------------------------------------------------------------ |
+| `mqtt_clients`            | `password`      | `uptrakit:mqtt_clients:password`            | MQTT broker password                                         |
+| `mqtt_clients`            | `ca_cert_pem`   | `uptrakit:mqtt_clients:ca_cert_pem`         | Custom MQTT CA certificate                                   |
+| `oidc_providers`          | `client_secret` | `uptrakit:oidc_providers:client_secret`     | OIDC client secret                                           |
+| `ca_certificates`         | `key_pem`       | `uptrakit:ca_certificates:key_pem`          | CA private key                                               |
+| `pending_oidc_flows`      | `pkce_verifier` | `uptrakit:pending_oidc_flows:pkce_verifier` | PKCE code verifier for in-flight OIDC authorization          |
+| `ssh_hosts`               | `private_key`   | `uptrakit:ssh_hosts:private_key`            | SSH private key (agent-ssh local DB)                         |
+| `notification_channels`   | `config`        | `uptrakit:notification_channels:config`     | Channel config JSON (bot tokens, webhook secrets, HMAC keys) |
+| `plugin_configs`          | `config`        | `uptrakit:plugin_configs:config`            | Named plugin profile config JSON (credentials, endpoints)    |
+| `plugin_type_settings`    | `config`        | `uptrakit:plugin_type_settings:config`      | Tenant-level plugin type default config JSON                 |
+| `instance_plugin_setting` | `config`        | `uptrakit:instance_plugin_setting:config`   | Instance-scoped plugin config JSON                           |
+
+The last three columns use a **compile-time AAD newtype** (`encrypted_column!`, see
+[ADR-0041](../adr/0041-compile-time-aad-encrypted-column-newtypes.md)) rather than the runtime bare-column-name
+registry the rest of this table's columns rely on — the AAD is a `pub const` baked into the generated
+`EncryptedPluginConfig` / `EncryptedPluginTypeConfig` / `EncryptedInstancePluginConfig` types
+(`crates/shared/db/src/encrypted_columns.rs`), not resolved by column name at decode time. The REST contract for
+plugin configs is unchanged by this — masking of sensitive fields in API responses remains schema-driven per
+[plugin-guidelines.md](../development/plugin-guidelines.md), independent of storage-at-rest encryption.
 
 ### Envelope encryption
 
