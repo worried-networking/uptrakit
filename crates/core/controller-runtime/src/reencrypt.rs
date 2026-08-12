@@ -1836,4 +1836,211 @@ mod tests {
         );
         assert_eq!(row.key_pem.expose_secret(), "ca_key");
     }
+
+    // ── Real-key acceptance (task-7-brief) ────────────────────────────────────
+
+    /// Step 1: raw-column acceptance. Inserts one row per plugin-config table
+    /// via the entity `ActiveModel` (going through `Encrypted*::new`, exactly
+    /// as production write paths do), then reads the RAW column back with a
+    /// typed `sea_query` select as `String` -- bypassing the `EncryptedPluginConfig`
+    /// newtype's `TryGetable` decode entirely, to see exactly what is
+    /// physically stored on disk.
+    ///
+    /// This module's `test_db()` only initializes the master key, never the
+    /// DEK ring (see the module doc comment on `test_db` and the "v2→v2" test
+    /// comments throughout this file) -- so `encrypt_str` falls back to the
+    /// `ENC:v2:` (KEK-direct) format here. The `ENC:v3:` envelope-encryption
+    /// path IS exercised with a real key and a real ring, but in a separate,
+    /// fully isolated process: `tests/rotation_claim.rs` in this crate, and
+    /// `crates/core/scheduler-runtime/tests/aliased_decrypt.rs`. Isolation is
+    /// required because activating the DEK ring inside this shared `--lib`
+    /// test binary would break several pre-existing tests in this module
+    /// whose assertions hard-depend on `encrypt_str` producing `ENC:v2:`
+    /// (e.g. `plugin_config_upgrade_is_idempotent_for_data_integrity`).
+    #[tokio::test]
+    async fn raw_column_acceptance_never_leaks_plaintext() {
+        use uptrakit_shared_db::encrypted_columns::{
+            EncryptedInstancePluginConfig, EncryptedPluginConfig, EncryptedPluginTypeConfig,
+        };
+        use uptrakit_shared_db::entity::{
+            instance_plugin_setting, plugin_config, plugin_type_setting,
+        };
+
+        let db = test_db().await;
+        let now = OffsetDateTime::now_utc();
+        let secret_json = r#"{"auth_token":"tok-acceptance"}"#;
+
+        let plugin_config_id = Uuid::now_v7();
+        plugin_config::ActiveModel {
+            id: Set(plugin_config_id),
+            tenant_id: Set(Uuid::nil()),
+            name: Set("acceptance-plugin-config".to_string()),
+            plugin_type: Set("acceptance-plugin-type".to_string()),
+            config: Set(EncryptedPluginConfig::new(secret_json.to_string()).unwrap()),
+            enabled: Set(true),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+            credential_updated_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert plugin_config");
+
+        let plugin_type_setting_id = Uuid::now_v7();
+        plugin_type_setting::ActiveModel {
+            id: Set(plugin_type_setting_id),
+            tenant_id: Set(Uuid::nil()),
+            plugin_type: Set("acceptance-plugin-type".to_string()),
+            config: Set(EncryptedPluginTypeConfig::new(secret_json.to_string()).unwrap()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(&db)
+        .await
+        .expect("insert plugin_type_setting");
+
+        instance_plugin_setting::ActiveModel {
+            plugin_type_id: Set("acceptance-instance-plugin".to_string()),
+            enabled: Set(true),
+            config: Set(EncryptedInstancePluginConfig::new(secret_json.to_string()).unwrap()),
+            updated_at: Set(now),
+        }
+        .insert(&db)
+        .await
+        .expect("insert instance_plugin_setting");
+
+        let raw_plugin_config: String =
+            uptrakit_shared_db::entity::prelude::PluginConfig::find_by_id(plugin_config_id)
+                .select_only()
+                .column(plugin_config::Column::Config)
+                .into_tuple::<String>()
+                .one(&db)
+                .await
+                .expect("query raw plugin_configs.config")
+                .expect("row exists");
+        let raw_plugin_type_setting: String =
+            uptrakit_shared_db::entity::prelude::PluginTypeSetting::find_by_id(
+                plugin_type_setting_id,
+            )
+            .select_only()
+            .column(plugin_type_setting::Column::Config)
+            .into_tuple::<String>()
+            .one(&db)
+            .await
+            .expect("query raw plugin_type_settings.config")
+            .expect("row exists");
+        let raw_instance_plugin_setting: String =
+            uptrakit_shared_db::entity::prelude::InstancePluginSetting::find_by_id(
+                "acceptance-instance-plugin".to_string(),
+            )
+            .select_only()
+            .column(instance_plugin_setting::Column::Config)
+            .into_tuple::<String>()
+            .one(&db)
+            .await
+            .expect("query raw instance_plugin_setting.config")
+            .expect("row exists");
+
+        for (label, raw) in [
+            ("plugin_configs.config", &raw_plugin_config),
+            ("plugin_type_settings.config", &raw_plugin_type_setting),
+            (
+                "instance_plugin_setting.config",
+                &raw_instance_plugin_setting,
+            ),
+        ] {
+            assert!(
+                raw.starts_with("ENC:"),
+                "{label}: raw column value must be ciphertext, got {raw:?}"
+            );
+            assert!(
+                !raw.contains("tok-acceptance"),
+                "{label}: raw column value must not contain the plaintext secret"
+            );
+        }
+
+        // No DEK ring in this shared test binary -- encrypt_str falls back to
+        // ENC:v2: (KEK-direct). See the doc comment above this test for why
+        // the ring is never initialized here, and where the ENC:v3: path
+        // (with a real ring) is exercised instead.
+        assert!(!uptrakit_crypto::data_key_ring_available());
+        assert!(raw_plugin_config.starts_with("ENC:v2:"));
+        assert!(raw_plugin_type_setting.starts_with("ENC:v2:"));
+        assert!(raw_instance_plugin_setting.starts_with("ENC:v2:"));
+    }
+
+    /// Step 1a: decode-diagnostic error strings must never leak the fixture
+    /// content. A ciphertext encrypted under a DIFFERENT AAD than the column
+    /// expects must fail to decrypt (AES-GCM auth-tag mismatch); the error
+    /// must correlate to the offending row via the `ENC:` prefix handle
+    /// (`s.chars().take(40)`, i.e. version + key-id + nonce) but must not
+    /// echo the plaintext that was encrypted.
+    #[tokio::test]
+    async fn plugin_config_decode_error_on_wrong_aad_leaks_only_the_ciphertext_handle() {
+        let db = test_db().await;
+        let now = OffsetDateTime::now_utc();
+        let id = Uuid::now_v7();
+
+        let wrong_aad_ciphertext: String = {
+            let encrypted = EncryptedString::new(
+                r#"{"token":"should-never-appear"}"#.to_string(),
+                "some:other:aad",
+            )
+            .expect("encrypt under wrong aad");
+            let value: sea_orm::Value = encrypted.into();
+            let sea_orm::Value::String(Some(s)) = value else {
+                panic!("EncryptedString always converts to Value::String(Some(_))");
+            };
+            s
+        };
+        assert!(wrong_aad_ciphertext.starts_with("ENC:"));
+        let expected_handle: String = wrong_aad_ciphertext.chars().take(40).collect();
+
+        insert_plaintext_plugin_config(&db, id, &wrong_aad_ciphertext, now).await;
+
+        let err = uptrakit_shared_db::entity::prelude::PluginConfig::find()
+            .all(&db)
+            .await
+            .expect_err("wrong-AAD ciphertext must fail to decode");
+        let message = err.to_string();
+
+        assert!(
+            message.contains(&expected_handle),
+            "error must contain the ciphertext handle for row correlation: {message}"
+        );
+        assert!(
+            !message.contains("should-never-appear"),
+            "error must never leak the plaintext secret: {message}"
+        );
+    }
+
+    /// Step 1a (continued): a non-JSON plaintext `config` value fails at the
+    /// `serde_json::from_str` step of `decode()` (legacy plaintext is always
+    /// accepted by `EncryptedString::decode_db_value`, but the plugin-config
+    /// newtype additionally requires valid JSON). The error must contain only
+    /// the `<plaintext, N bytes>` length marker, never the fixture content.
+    #[tokio::test]
+    async fn plugin_config_decode_error_on_plaintext_leaks_only_a_length_marker() {
+        let db = test_db().await;
+        let now = OffsetDateTime::now_utc();
+        let id = Uuid::now_v7();
+
+        insert_plaintext_plugin_config(&db, id, "not json", now).await;
+
+        let err = uptrakit_shared_db::entity::prelude::PluginConfig::find()
+            .all(&db)
+            .await
+            .expect_err("non-JSON plaintext config must fail to decode");
+        let message = err.to_string();
+
+        assert!(
+            message.contains("<plaintext, 8 bytes>"),
+            "error must contain only the length marker for plaintext rows: {message}"
+        );
+        assert!(
+            !message.contains("not json"),
+            "error must never echo the fixture content: {message}"
+        );
+    }
 }

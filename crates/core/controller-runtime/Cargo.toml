@@ -21,6 +21,11 @@ db-sqlite = ["sea-orm/sqlx-sqlite", "uptrakit-shared-db/db-sqlite", "uptrakit-we
 db-postgres = ["sea-orm/sqlx-postgres", "uptrakit-shared-db/db-postgres", "uptrakit-web-api/db-postgres", "uptrakit-scheduler-runtime?/db-postgres"]
 interactive = ["uptrakit-web-api/interactive", "uptrakit-agent-runtime?/interactive", "uptrakit-agent-ssh-runtime?/interactive"]
 test-utils = ["uptrakit-web-api/test-utils"]
+# Exposes `test_support` (crate-internal startup helpers reshaped for a
+# `pub` surface) so the `tests/` integration harness can reach otherwise
+# `pub(crate)`/private startup internals. Additive-only: existing items
+# keep their visibility untouched.
+test-support = []
 nats = ["uptrakit-web-api/nats", "dep:async-nats"]
 notifications-telegram = ["uptrakit-web-api/notifications-telegram", "uptrakit-plugin-infrastructure-registry/notifications-telegram"]
 notifications-email = ["uptrakit-web-api/notifications-email", "uptrakit-plugin-infrastructure-registry/notifications-email"]
@@ -105,6 +110,10 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"
 tempfile = { workspace = true }
 sea-orm = { workspace = true, features = ["mock"] }
 toml = { workspace = true }
+
+[[test]]
+name = "rotation_claim"
+required-features = ["test-support"]
 
 [build-dependencies]
 uptrakit-build-info = { workspace = true }

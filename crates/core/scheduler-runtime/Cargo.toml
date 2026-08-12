@@ -19,6 +19,11 @@ db-all = ["db-sqlite", "db-postgres"]
 db-sqlite = ["sea-orm/sqlx-sqlite", "uptrakit-shared-db/db-sqlite"]
 db-postgres = ["sea-orm/sqlx-postgres", "uptrakit-shared-db/db-postgres"]
 oidc = []
+# Exposes `test_support` (crate-internal query helpers reshaped for a
+# `pub` surface) so the `tests/` integration harness can reach otherwise
+# `pub(crate)` scheduler-query internals. Additive-only: existing items
+# keep their `pub(crate)` visibility untouched.
+test-support = []
 
 [dependencies]
 async-trait = { workspace = true }
@@ -55,6 +60,11 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"
 uptrakit-crypto = { workspace = true, features = ["testing"] }
 uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["test-support"] }
 uptrakit-shared-db = { workspace = true, features = ["db-sqlite", "migration"] }
+zeroize = { workspace = true }
+
+[[test]]
+name = "aliased_decrypt"
+required-features = ["test-support"]
 
 [lints]
 workspace = true

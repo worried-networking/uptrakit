@@ -6,6 +6,8 @@ pub mod executors;
 pub mod interval;
 pub mod notifier;
 pub mod scheduler;
+#[cfg(feature = "test-support")]
+pub mod test_support;
 pub mod tick_executor;
 
 mod runtime;

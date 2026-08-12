@@ -41,6 +41,8 @@ pub(crate) mod service_host;
 #[cfg(feature = "embedded-ssh-agent")]
 mod ssh_agent;
 pub(crate) mod tasks;
+#[cfg(feature = "test-support")]
+pub mod test_support;
 #[cfg(feature = "zeroconf")]
 mod zeroconf;
 
