@@ -87,6 +87,12 @@ pub(crate) async fn run_server(args: crate::cli::Args, info: BuildInfo) -> crate
     // need to be destructured yet.
     let components = components::build(&cfg, &db, &settings_bundle, &crypto).await?;
 
+    // Read-only diagnostic: count layer-3 (per-host plugin config override) rows
+    // that already hold a sensitive value, or whose sensitive-path set cannot be
+    // determined. Advisory only -- logs and returns, never aborts boot.
+    crate::reencrypt::sweep_layer3_secret_residue(&db.db, components.plugins.plugin_ops.as_ref())
+        .await;
+
     // Destructure cfg and db now that components::build has finished borrowing them.
     let booted = cfg.booted;
     let args = cfg.args;

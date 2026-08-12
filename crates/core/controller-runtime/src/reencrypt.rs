@@ -930,6 +930,177 @@ async fn warn_on_instance_plugin_setting_plaintext_residue(db: &DatabaseConnecti
     warn_on_plaintext_residue(db, &stmt, "instance_plugin_setting").await;
 }
 
+// ── Layer-3 secret-residue sweep (Plan 3) ───────────────────────────────
+
+/// Count `host_software_item_plugins` rows whose per-host `config` override
+/// (layer 3, unencrypted) already holds a sensitive value, or whose
+/// sensitive-path set cannot be determined at all.
+///
+/// This is a read-only diagnostic pass, not a migration: layer 3 is
+/// unencrypted by design (a per-host override, not a credential store) and
+/// Tasks 1-2 already stop *new* sensitive writes from reaching it at the
+/// HTTP and agent-discovery boundaries. This sweep only counts what is
+/// already stored from before that hardening landed.
+///
+/// Two independent counters:
+/// - **sensitive**: the plugin type has a live descriptor and its config
+///   holds a value at one of `ops.sensitive_paths()`.
+/// - **unknowable**: either the plugin type has no live descriptor (a
+///   feature-reduced controller build legitimately lacks descriptors for
+///   types agents wrote — `sensitive_paths()` degrades to empty, which is
+///   fail-*open* on its own) or the config's JSON root is not an object (the
+///   shared path walker in `first_sensitive_path_in` silently no-ops on a
+///   non-object root, per the same blind spot Task 2 fixed at the discovery
+///   write path). Both cases mean "we cannot rule out a stored secret", so
+///   they are counted together rather than assumed clean.
+///
+/// Every failure path (query error, row-decode error) logs and stops the
+/// current page rather than propagating — there is no `Result` alias in
+/// this file, and every sibling advisory fn in this section follows the
+/// same swallow-and-log shape. Counts gathered before a failure are still
+/// returned.
+pub(crate) async fn sweep_layer3_secret_residue(
+    db: &DatabaseConnection,
+    ops: &dyn uptrakit_plugin_infrastructure_core::PluginConfigOps,
+) -> (u64, u64) {
+    use sea_orm::ConnectionTrait;
+    use sea_orm::sea_query::{Expr, ExprTrait, Order, Query};
+    use std::collections::BTreeSet;
+    use uptrakit_shared_db::entity::host_software_item_plugin;
+    use uptrakit_shared_types::PluginTypeId;
+
+    let mut sensitive_count = 0u64;
+    let mut unknowable_count = 0u64;
+    let mut sensitive_types: BTreeSet<String> = BTreeSet::new();
+    let mut unknowable_types: BTreeSet<String> = BTreeSet::new();
+    let mut last_id: Option<uuid::Uuid> = None;
+
+    loop {
+        let mut stmt = Query::select()
+            .column(host_software_item_plugin::Column::Id)
+            .column(host_software_item_plugin::Column::PluginType)
+            .column(host_software_item_plugin::Column::Config)
+            .from(host_software_item_plugin::Entity)
+            .order_by(host_software_item_plugin::Column::Id, Order::Asc)
+            .limit(UPGRADE_CHUNK_SIZE)
+            .to_owned();
+        if let Some(id) = last_id {
+            stmt.and_where(Expr::col(host_software_item_plugin::Column::Id).gt(id));
+        }
+
+        let rows = match db.query_all(&stmt).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!(
+                    error = %e,
+                    "layer-3 secret-residue sweep: failed to query host_software_item_plugins"
+                );
+                break;
+            }
+        };
+
+        let Some(last_row) = rows.last() else {
+            break;
+        };
+        let last_row_id: uuid::Uuid = match last_row.try_get("", "id") {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::error!(
+                    error = %e,
+                    "layer-3 secret-residue sweep: failed to read row id, stopping pagination"
+                );
+                break;
+            }
+        };
+        let page_len = rows.len() as u64;
+
+        for row in rows {
+            let plugin_type_str: String = match row.try_get("", "plugin_type") {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::error!(
+                        error = %e,
+                        "layer-3 secret-residue sweep: failed to read plugin_type, skipping row"
+                    );
+                    continue;
+                }
+            };
+            let config: Option<serde_json::Value> = match row.try_get("", "config") {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::error!(
+                        error = %e,
+                        plugin_type = %plugin_type_str,
+                        "layer-3 secret-residue sweep: failed to read config, skipping row"
+                    );
+                    continue;
+                }
+            };
+
+            let Some(config) = config else {
+                continue;
+            };
+
+            let plugin_type = PluginTypeId::new(plugin_type_str.clone());
+            match ops.get(&plugin_type) {
+                None => {
+                    unknowable_count += 1;
+                    unknowable_types.insert(plugin_type_str);
+                }
+                Some(_) if !config.is_object() => {
+                    // Same blind spot as the discovery config_override write
+                    // path (Task 2): the sensitive-path walker only descends
+                    // into object roots, so a non-object config is invisible
+                    // to `first_sensitive_path_in` -- unknowable, not clean.
+                    unknowable_count += 1;
+                    unknowable_types.insert(plugin_type_str);
+                }
+                Some(_) => {
+                    if ops.first_sensitive_path_in(&plugin_type, &config).is_some() {
+                        sensitive_count += 1;
+                        sensitive_types.insert(plugin_type_str);
+                    }
+                }
+            }
+        }
+
+        last_id = Some(last_row_id);
+        if page_len < UPGRADE_CHUNK_SIZE {
+            break;
+        }
+    }
+
+    if sensitive_count > 0 {
+        tracing::warn!(
+            count = sensitive_count,
+            plugin_types = ?sensitive_types,
+            "host_software_item_plugins rows hold a sensitive value in an unencrypted \
+             per-host config override -- clear the flagged rows via the UI override form \
+             before other edits: keep-mode API updates resolve the stored override before \
+             validate_assignment, so an unrelated PATCH (e.g. execution_site) on a flagged \
+             row 400s until it is cleaned"
+        );
+    } else {
+        tracing::debug!("layer-3 secret-residue sweep: no sensitive-path residue found");
+    }
+
+    if unknowable_count > 0 {
+        tracing::warn!(
+            count = unknowable_count,
+            plugin_types = ?unknowable_types,
+            "host_software_item_plugins rows have a non-NULL per-host config override whose \
+             sensitive-path set is unknowable (uncataloged plugin type, or a config JSON root \
+             that is not an object) -- a feature-reduced controller build legitimately lacks \
+             descriptors for types agents wrote; clear the flagged rows via the UI override \
+             form before other edits"
+        );
+    } else {
+        tracing::debug!("layer-3 secret-residue sweep: no unknowable-config rows found");
+    }
+
+    (sensitive_count, unknowable_count)
+}
+
 // ── Settings value upgrade ─────────────────────────────────────────────
 
 /// Upgrade a single global setting value from v1/v2/plaintext to v3.
@@ -2209,6 +2380,193 @@ mod tests {
         assert!(
             !message.contains("not json"),
             "error must never echo the fixture content: {message}"
+        );
+    }
+
+    // ── Layer-3 secret-residue sweep (Plan 3) ───────────────────────────────
+
+    /// Build a nested JSON object holding `value` at a dotted `path`, e.g.
+    /// `json_at_path("auth.token", "x")` -> `{"auth": {"token": "x"}}`.
+    fn json_at_path(path: &str, value: &str) -> serde_json::Value {
+        let mut segments: Vec<&str> = path.split('.').collect();
+        let leaf = segments.pop().expect("path has at least one segment");
+        let mut obj = serde_json::json!({ leaf: value });
+        for seg in segments.into_iter().rev() {
+            obj = serde_json::json!({ seg: obj });
+        }
+        obj
+    }
+
+    /// Insert a `host` + `software_item` + `host_software_item` +
+    /// `host_software_item_plugin` chain, with `config` set on the layer-3
+    /// (per-host override) row -- exactly the row shape
+    /// `sweep_layer3_secret_residue` scans.
+    async fn insert_hsip_row(
+        db: &DatabaseConnection,
+        plugin_type: &str,
+        config: Option<serde_json::Value>,
+    ) {
+        use uptrakit_shared_db::entity::{host, host_software_item, software_item};
+
+        let now = OffsetDateTime::now_utc();
+        let host_id = Uuid::now_v7();
+        let software_item_id = Uuid::now_v7();
+
+        host::ActiveModel {
+            id: Set(host_id),
+            tenant_id: Set(Uuid::nil()),
+            machine_id: Set(format!("machine-{host_id}")),
+            hostname: Set(format!("host-{host_id}")),
+            friendly_name: Set(format!("Host {host_id}")),
+            os_type: Set(None),
+            os_version: Set(None),
+            architecture: Set(None),
+            ip_address: Set(None),
+            host_features: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert host");
+
+        software_item::ActiveModel {
+            id: Set(software_item_id),
+            tenant_id: Set(Uuid::nil()),
+            name: Set(format!("Sweep Test Software {software_item_id}")),
+            featured: Set(false),
+            icon_url: Set(None),
+            last_checked_at: Set(None),
+            awaiting_restart_timeout: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert software_item");
+
+        let host_software_item_id = host_software_item::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_id),
+            qualifier: Set(None),
+            plugin_config_id: Set(None),
+            package_identifier: Set(None),
+            installed_version: Set(None),
+            installed_version_detected_at: Set(None),
+            installed_display_version: Set(None),
+            latest_version: Set(None),
+            latest_version_fetched_at: Set(None),
+            latest_release_metadata: Set(None),
+            last_updated_at: Set(None),
+            linked_at: Set(now),
+            update_category: Set("unknown".to_string()),
+            deactivated_at: Set(None),
+            last_discovered_at: Set(None),
+            discovery_source: Set(None),
+            missing_since: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert host_software_item")
+        .id;
+
+        uptrakit_shared_db::entity::host_software_item_plugin::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_id),
+            host_software_item_id: Set(host_software_item_id),
+            plugin_config_id: Set(None),
+            plugin_type: Set(plugin_type.to_string()),
+            role: Set("detect_version".to_string()),
+            ordinal: Set(0),
+            package_identifier: Set("sweep-test-package".to_string()),
+            config: Set(config),
+            execution_site: Set("agent".to_string()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(db)
+        .await
+        .expect("insert host_software_item_plugin");
+    }
+
+    /// Step 2 (task-3-brief): seed one row whose layer-3 config holds a real
+    /// sensitive path for a live-cataloged plugin type (sensitive), one row
+    /// for an uncataloged plugin type with a non-NULL config (unknowable),
+    /// and one clean row -- assert the returned counts are `(1, 1)`.
+    ///
+    /// The sensitive-path-bearing plugin type is discovered dynamically from
+    /// the real production catalog rather than hardcoded, so this test does
+    /// not need to name a specific plugin type ID (plugin type identity is
+    /// semantic-boundary controlled outside `crates/plugins/`, see
+    /// `ci/check_plugin_semantic_boundary.py`).
+    #[tokio::test]
+    async fn sweep_counts_sensitive_and_unknowable_layer3_rows() {
+        use uptrakit_plugin_infrastructure_core::{PluginConfigOps, PluginMetadataOps};
+        use uptrakit_plugin_infrastructure_registry::{
+            CatalogConfig, InstancePluginStates, build_catalog,
+        };
+        use uptrakit_shared_types::PluginTypeId;
+
+        let db = test_db().await;
+
+        let catalog = build_catalog(
+            &CatalogConfig::default(),
+            InstancePluginStates::all_disabled(),
+        )
+        .expect("build real plugin catalog from all compiled-in descriptors");
+
+        let sensitive_type_id = catalog
+            .all()
+            .iter()
+            .map(|d| PluginTypeId::from_static(d.type_id))
+            .find(|id| !catalog.sensitive_paths(id).is_empty())
+            .expect(
+                "the production catalog must contain at least one plugin type with a \
+                 non-empty sensitive-path set for this test to exercise real detection",
+            );
+        let sensitive_path = catalog
+            .sensitive_paths(&sensitive_type_id)
+            .into_iter()
+            .next()
+            .expect("checked non-empty above");
+
+        // Sensitive: live descriptor, config holds a value at a real sensitive path.
+        insert_hsip_row(
+            &db,
+            sensitive_type_id.as_str(),
+            Some(json_at_path(&sensitive_path, "super-secret-value")),
+        )
+        .await;
+
+        // Unknowable: no live descriptor for this plugin type at all, so its
+        // sensitive-path set cannot be determined.
+        insert_hsip_row(
+            &db,
+            "sweep-test-uncataloged-plugin-type",
+            Some(serde_json::json!({"some_field": "some_value"})),
+        )
+        .await;
+
+        // Clean: live descriptor, config present but holds none of its
+        // sensitive paths.
+        insert_hsip_row(
+            &db,
+            sensitive_type_id.as_str(),
+            Some(serde_json::json!({"unrelated_field": "unrelated_value"})),
+        )
+        .await;
+
+        let (sensitive, unknowable) = sweep_layer3_secret_residue(&db, &catalog).await;
+
+        assert_eq!(
+            (sensitive, unknowable),
+            (1, 1),
+            "expected exactly one sensitive-path row and one unknowable-type row"
         );
     }
 }
