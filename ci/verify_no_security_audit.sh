@@ -83,7 +83,7 @@ load_allowlist() {
       exit 1
     fi
 
-    if [[ "$rule" != "security_audit" && "$rule" != "raw_action" ]]; then
+    if [[ "$rule" != "security_audit" && "$rule" != "raw_action" && "$rule" != "permission_model" ]]; then
       echo "verify_no_security_audit: invalid allowlist rule '${rule}' at row ${line_no}"
       exit 1
     fi
@@ -169,10 +169,16 @@ collect_findings "raw_action" 'AuditActionType::(new|from_static)\("|AuditEntry:
   --glob '!**/fixtures/**' \
   --glob '!**/docs/**'
 
+collect_findings "permission_model" '\bPermission\b|permission_extractor|\brole_permissions\b|\bRolePermission\b|entity::(permission|role_permission)\b|table_name\s*=\s*"(permissions|role_permissions)"|Alias::new\("permissions"\)' \
+  crates \
+  --glob '**/*.rs' \
+  --glob '!**/migration/**'
+
 declare -a VIOLATIONS=()
 declare -A COUNTS=(
   ["security_audit"]=0
   ["raw_action"]=0
+  ["permission_model"]=0
 )
 declare entry rule path line_no text
 
@@ -205,6 +211,18 @@ if (( ${#VIOLATIONS[@]} > 0 )); then
     for entry in "${VIOLATIONS[@]}"; do
       IFS="$SEP" read -r rule path line_no text <<<"$entry"
       [[ "$rule" == "raw_action" ]] || continue
+      echo "${path}:${line_no}:${text}"
+    done
+  fi
+
+  if (( COUNTS["permission_model"] > 0 )); then
+    if (( COUNTS["security_audit"] > 0 || COUNTS["raw_action"] > 0 )); then
+      echo
+    fi
+    echo "verify_no_security_audit: legacy permission-model identifiers remain outside allowlist:"
+    for entry in "${VIOLATIONS[@]}"; do
+      IFS="$SEP" read -r rule path line_no text <<<"$entry"
+      [[ "$rule" == "permission_model" ]] || continue
       echo "${path}:${line_no}:${text}"
     done
   fi

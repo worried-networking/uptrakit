@@ -4,3 +4,6 @@ raw_action|crates/shared/audit-log/src/action_type.rs|AuditActionType::new\("
 raw_action|crates/ui/web-api-queries/src/queries/audit_logs.rs|action_type:\s*"system\.scheduler\.audit_log_cleanup"
 raw_action|crates/ui/web-api/src/routes/service_ws/handler/audit_service.rs|action_type:\s*"auth\.login\.failed"
 raw_action|crates/ui/cli/src/commands/audit_logs.rs|action_type:\s*"(plugin_config\.create|system\.setting\.update)"
+# permission_model: expected allowlist material is (1) OS-error prose in string literals ("Permission denied"-class, the live precedent below) and (2) trailing "// ..." comments — the comment filter only skips comment-ONLY lines.
+permission_model|crates/core/agent-ssh-runtime/src/operations/bootstrap.rs|Permission denied
+permission_model|crates/core/integration-tests/tests/database/migrations.rs|TABLES.*role_permissions
