@@ -541,6 +541,10 @@ Fields in a narrower layer override the same field from a broader layer. This me
 set a tenant-wide `discovery_filter` in type settings and override it for a specific plugin
 config or host assignment if needed.
 
+Per-assignment (per-host) overrides cannot carry sensitive fields such as API tokens or
+passwords -- the server rejects any such override. If a host needs its own credential, create a
+separate plugin config profile for that host instead.
+
 ### Managing Type Defaults in the Web UI
 
 Navigate to **Settings → Plugin Configs**. The **Type Defaults** section appears below the

@@ -116,7 +116,8 @@ restart the systemd service around the binary replacement. See
 
 Per-host config overrides let you reuse the same `releases.github` plugin config across multiple
 hosts or items while supplying host-specific asset patterns (e.g. `amd64` on one host, `arm64`
-on another).
+on another). Per-host overrides cannot carry sensitive fields such as `auth_token` -- if a host
+needs its own credential, create a separate plugin config profile for that host instead.
 
 > [!NOTE]
 > Sudoers note: The `systemctl stop` and `systemctl start` commands used by the systemd
