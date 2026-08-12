@@ -178,7 +178,7 @@ pub async fn create_plugin_config_in_tx(
         deactivated_at: Set(None),
         credential_updated_at: Set(ops
             .has_live_secret_in(&req.plugin_type, &req.config)
-            .then(OffsetDateTime::now_utc)),
+            .then_some(now)),
     };
 
     model.insert(tx).await.map_err(|e| {
@@ -299,9 +299,7 @@ pub async fn create_plugin_config(
         created_at: Set(now),
         updated_at: Set(now),
         deactivated_at: Set(None),
-        credential_updated_at: Set(ops
-            .has_live_secret_in(&type_id, &req.config)
-            .then(OffsetDateTime::now_utc)),
+        credential_updated_at: Set(ops.has_live_secret_in(&type_id, &req.config).then_some(now)),
     };
 
     let inserted = model.insert(tenant_db.db()).await.map_err(|e| {

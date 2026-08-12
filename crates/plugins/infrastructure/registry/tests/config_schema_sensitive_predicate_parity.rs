@@ -25,6 +25,18 @@
 //! Canonical run: `cargo test -p uptrakit-plugin-infrastructure-registry --all-features --test config_schema_sensitive_predicate_parity`
 //! (notification plugins are optional deps behind `notifications-webhook` /
 //! `notifications-telegram`, so a default-feature run under-covers the catalog).
+//!
+//! KNOWN GAP: the parity check below matches only *exact* normalized keys
+//! between `sensitive_paths` and the CONFIG form schema. A `sensitive_paths`
+//! entry that is nested *under* a schema key rather than equal to one (e.g.
+//! sensitive path `auth.password` against a CONFIG schema key `auth`, with
+//! no separate `auth.password` field descriptor) has no exact match, so it
+//! silently falls into the "no matching CONFIG-schema key" branch and is
+//! skipped — even though the frontend predicate can never have flagged it
+//! either, and the test's own anti-vacuity guard (`checked_any_sensitive_path`)
+//! still passes as long as some *other* sensitive path matches exactly. A
+//! future reader should not treat a green run of this test as proof that
+//! every nested sensitive path has frontend/server parity.
 
 use std::collections::HashMap;
 

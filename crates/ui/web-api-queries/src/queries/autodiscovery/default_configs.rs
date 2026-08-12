@@ -104,9 +104,7 @@ pub async fn find_or_create_default_plugin_config(
         created_at: Set(now),
         updated_at: Set(now),
         deactivated_at: Set(None),
-        credential_updated_at: Set(ops
-            .has_live_secret_in(&type_id, config_json)
-            .then(OffsetDateTime::now_utc)),
+        credential_updated_at: Set(ops.has_live_secret_in(&type_id, config_json).then_some(now)),
     };
 
     match PluginConfig::insert(record).exec(db).await {

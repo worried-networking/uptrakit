@@ -105,9 +105,13 @@ This also constrains **type-only ("Inline") assignments** -- a role assignment w
 `plugin_config_id` and no `plugin_config`, where `host_software_item_plugins.config` merges onto
 the plugin type's built-in defaults instead of a profile row. With no profile, the override _is_
 the whole effective config, so after the sensitive-field reject a type-only assignment can carry no
-credential at all. A future plugin whose config has a **required** sensitive field could not be
-assigned inline and would need a profile; no such plugin exists today (verified against the current
-catalog).
+credential at all. A plugin whose config has a **required** sensitive field cannot be assigned
+inline and must use a profile -- `infrastructure.proxmox` is one such plugin today
+(`api_token` is `.required().sensitive()`), but its `ReleaseFetcher`/`UpdateExecutor` role impls are
+deliberate non-functional stubs (it drives everything through surfaces instead), so an inline
+assignment of it carries no working workload. A future plugin with a required sensitive field _and_
+functional role impls would be genuinely unassignable inline and would need a per-host plugin
+config profile.
 
 ### Plugin Role Enum
 

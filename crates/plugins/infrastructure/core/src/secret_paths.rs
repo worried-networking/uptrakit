@@ -85,11 +85,16 @@ pub fn first_sensitive_path_present(value: &Value, paths: &[String]) -> Option<S
     paths.iter().find(|p| navigate(value, p).is_some()).cloned()
 }
 
-/// True when any sensitive path holds a non-empty, non-sentinel string —
-/// i.e. a live credential value. Used for `credential_updated_at` stamping
-/// on create (spec §8): the `"***"`-on-create case is already a 400 via
-/// `assert_no_sentinel`; the sentinel check here is belt-and-braces so the
-/// stamp can never read "credential freshly set" for a sentinel.
+/// True when any sensitive path holds a present, non-null value that is not
+/// the mask sentinel string -- i.e. a live credential value. Any JSON type
+/// (string, number, bool, array, object) counts as live; only an explicit
+/// JSON `null`, an absent path, or a string exactly equal to
+/// `SECRET_SENTINEL` count as "no live secret" -- the sentinel comparison is
+/// string-specific by construction (a non-string value can never equal the
+/// sentinel). Used for `credential_updated_at` stamping on create (spec
+/// §8): the `"***"`-on-create case is already a 400 via `assert_no_sentinel`;
+/// the sentinel check here is belt-and-braces so the stamp can never read
+/// "credential freshly set" for a sentinel.
 ///
 /// `navigate()` returns `None` for a non-object root (e.g. `value` is a
 /// JSON array or scalar), which this function treats the same as "path
@@ -109,10 +114,10 @@ pub fn first_sensitive_path_present(value: &Value, paths: &[String]) -> Option<S
 /// with the "unknowable" bucket the startup residue sweep already carves
 /// out for the identical blind spot (`reencrypt.rs`).
 pub fn has_live_secret_value(value: &Value, paths: &[String]) -> bool {
-    paths.iter().any(|p| {
-        navigate(value, p)
-            .and_then(Value::as_str)
-            .is_some_and(|s| !s.is_empty() && s != SECRET_SENTINEL)
+    paths.iter().any(|p| match navigate(value, p) {
+        None | Some(Value::Null) => false,
+        Some(Value::String(s)) => s != SECRET_SENTINEL,
+        Some(_) => true,
     })
 }
 
@@ -245,14 +250,23 @@ mod tests {
     }
 
     #[test]
-    fn has_live_secret_value_rejects_empty_sentinel_and_absent() {
+    fn has_live_secret_value_rejects_sentinel_null_and_absent() {
         let paths = vec!["auth_token".to_string()];
-        assert!(!has_live_secret_value(&json!({"auth_token": ""}), &paths));
+        // An empty string is present, non-null, and not the sentinel -- it
+        // counts as live under the "present and not null" rule.
+        assert!(has_live_secret_value(&json!({"auth_token": ""}), &paths));
         assert!(!has_live_secret_value(
             &json!({"auth_token": "***"}),
             &paths
         ));
+        assert!(!has_live_secret_value(&json!({"auth_token": null}), &paths));
         assert!(!has_live_secret_value(&json!({}), &paths));
+    }
+
+    #[test]
+    fn has_live_secret_value_detects_non_string_live_value() {
+        let paths = vec!["auth_token".to_string()];
+        assert!(has_live_secret_value(&json!({"auth_token": 12345}), &paths));
     }
 
     #[test]

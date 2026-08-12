@@ -1090,9 +1090,12 @@ pub(crate) async fn sweep_layer3_secret_residue(
             plugin_types = ?unknowable_types,
             "host_software_item_plugins rows have a non-NULL per-host config override whose \
              sensitive-path set is unknowable (uncataloged plugin type, or a config JSON root \
-             that is not an object) -- a feature-reduced controller build legitimately lacks \
-             descriptors for types agents wrote; clear the flagged rows via the UI override \
-             form before other edits"
+             that is not an object) -- these rows cannot be cleaned through the UI override \
+             form at all while the type has no descriptor (validate_package_identifier rejects \
+             an unknown plugin type before any form could render); either enable the \
+             feature/build that provides that plugin type's descriptor (a feature-reduced \
+             controller build legitimately lacks descriptors an agent wrote) or delete the \
+             assignment row outright"
         );
     } else {
         tracing::debug!("layer-3 secret-residue sweep: no unknowable-config rows found");

@@ -210,9 +210,7 @@ async fn resolve_plugin_config_txn(
                 created_at: Set(now),
                 updated_at: Set(now),
                 deactivated_at: Set(None),
-                credential_updated_at: Set(ops
-                    .has_live_secret_in(&id, &config)
-                    .then(OffsetDateTime::now_utc)),
+                credential_updated_at: Set(ops.has_live_secret_in(&id, &config).then_some(now)),
             };
             let inserted = model.insert(txn).await.context_to()?;
             Ok((pcid, inserted))
@@ -1036,11 +1034,14 @@ mod tests {
     /// Insert a `host_software_item` link with no tenant check, so that
     /// `update_host_assignment*`'s first lookup (host_id + item_id) succeeds and
     /// the host-tenant filter becomes the load-bearing gate under test.
-    async fn seed_link(db: &DatabaseConnection, host_id: Uuid, item_id: Uuid) {
+    /// Returns the link's own id (needed by callers that also seed a
+    /// `host_software_item_plugin` row, which FKs to it).
+    async fn seed_link(db: &DatabaseConnection, host_id: Uuid, item_id: Uuid) -> Uuid {
         use uptrakit_shared_db::entity::host_software_item;
         let now = OffsetDateTime::now_utc();
+        let link_id = Uuid::now_v7();
         host_software_item::ActiveModel {
-            id: Set(Uuid::now_v7()),
+            id: Set(link_id),
             host_id: Set(host_id),
             software_item_id: Set(item_id),
             qualifier: Set(None),
@@ -1063,6 +1064,7 @@ mod tests {
         .insert(db)
         .await
         .expect("insert rogue host_software_item link");
+        link_id
     }
 
     /// Minimal `UpdateHostAssignmentRequest` that reaches the host lookup:
@@ -1138,6 +1140,116 @@ mod tests {
                 Err(super::SoftwareItemQueryError::HostNotFound(id)) if *id == host_b
             ),
             "cross-tenant host must be rejected as HostNotFound, got {result:?}"
+        );
+    }
+
+    /// A keep-mode PATCH that touches only an unrelated field (`package_identifier`,
+    /// not `config_override`) must still be rejected when the row's *stored*
+    /// `config_override` residue holds a sensitive value: `update_host_assignment_in_tx`
+    /// resolves the stored override via `JsonObjectMapPatch::Keep` and re-runs it
+    /// through `validate_assignment` on every update, regardless of which field
+    /// changed. Both the startup residue sweep (`reencrypt.rs`) and
+    /// `docs/development/plugin-system.md` promise operators this behaviour; this
+    /// pins it.
+    #[tokio::test]
+    async fn update_host_assignment_in_tx_rejects_keep_mode_update_over_stored_sensitive_override()
+    {
+        use uptrakit_shared_db::encrypted_columns::EncryptedPluginConfig;
+        use uptrakit_shared_db::entity::{host_software_item_plugin, plugin_config};
+
+        // Inline plugin config creation encrypts `config` via the real crypto
+        // path; tests never initialize a master key, so plaintext mode lets
+        // the encrypted column round-trip without one (see the
+        // `credential_updated_at`-stamping test above for the same pattern).
+        uptrakit_crypto::enable_plaintext_mode();
+        let db = idor_db().await;
+        let (tenant_a, item_a) = seed_tenant_with_item(&db, "a").await;
+        let host_a = seed_host(&db, tenant_a).await;
+        let hsi_id = seed_link(&db, host_a, item_a).await;
+        let ops = real_plugin_ops();
+
+        // A cataloged plugin type ("releases.github") with a real sensitive path
+        // ("auth_token"), matching the fixture used elsewhere in this module.
+        let now = OffsetDateTime::now_utc();
+        let plugin_config_id = Uuid::now_v7();
+        plugin_config::ActiveModel {
+            id: Set(plugin_config_id),
+            tenant_id: Set(tenant_a),
+            name: Set("gh-token".to_string()),
+            plugin_type: Set("releases.github".to_string()),
+            config: Set(EncryptedPluginConfig::from_json(&serde_json::json!({
+                "auth_token": "ghp_live_token"
+            }))
+            .expect("encrypt plugin config")),
+            enabled: Set(true),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+            credential_updated_at: Set(Some(now)),
+        }
+        .insert(&db)
+        .await
+        .expect("insert plugin_config");
+
+        // Seed the assignment row's `config` (layer-3 override) directly with a
+        // sensitive field, bypassing `validate_assignment` -- simulating residue
+        // written before the write-time reject existed (the exact scenario the
+        // startup sweep and the docs describe).
+        host_software_item_plugin::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            host_id: Set(host_a),
+            software_item_id: Set(item_a),
+            host_software_item_id: Set(hsi_id),
+            plugin_config_id: Set(Some(plugin_config_id)),
+            plugin_type: Set("releases.github".to_string()),
+            role: Set(uptrakit_web_api_types::PluginRole::FetchReleases
+                .as_str()
+                .to_string()),
+            ordinal: Set(0),
+            package_identifier: Set("octocat/Hello-World".to_string()),
+            config: Set(Some(
+                serde_json::json!({"auth_token": "leaked-per-host-secret"}),
+            )),
+            execution_site: Set("controller".to_string()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(&db)
+        .await
+        .expect("insert host_software_item_plugin with sensitive residue");
+
+        // Keep-mode update that only changes `package_identifier`; `config_override`
+        // stays `Keep` and `execution_site` stays `None` (preserving the existing
+        // "controller" value untouched).
+        let req = super::UpdateHostAssignmentRequest {
+            role: uptrakit_web_api_types::PluginRole::FetchReleases,
+            ordinal: 0,
+            plugin_config_id: None,
+            plugin_config: None,
+            plugin_type: None,
+            package_identifier: Some("octocat/Hello-World2".to_string()),
+            config_override: JsonObjectMapPatch::Keep,
+            execution_site: None,
+        };
+
+        let txn = begin_immediate(&db).await.expect("begin");
+        let result =
+            super::update_host_assignment_in_tx(&ops, &txn, tenant_a, item_a, host_a, req).await;
+
+        let err = result.expect_err(
+            "unrelated PATCH over a row with a stored sensitive config_override must be rejected",
+        );
+        let message = err.current_context().to_string();
+        assert!(
+            matches!(
+                err.current_context(),
+                super::SoftwareItemQueryError::InvalidConfigOverride(_)
+            ),
+            "expected InvalidConfigOverride, got {message}"
+        );
+        assert!(
+            message.contains("sensitive"),
+            "error message should name the sensitive-field reject, got: {message}"
         );
     }
 
