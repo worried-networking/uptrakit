@@ -237,6 +237,54 @@ The `docker.yml` workflow is **not** retriggered by backfill — `gh release upl
 only touches release-asset rows, not git tags. Docker images that were already built for the
 tag remain unchanged.
 
+## AI-polished release notes
+
+The `polish-notes` job in `release-plz.yml` rewrites each new release's raw git-cliff commit
+list into an operator-facing summary. Pipeline shape:
+
+1. **Filter** the releases from this cycle down to packages with a GitHub release page
+   (`git_release_enable = true` in `release-plz.toml`) — `git_only` crates that only get a tag
+   are skipped.
+2. **Generate**, per release, via a credential-less, read-only opencode agent: it reads the
+   package's `CHANGELOG.md` plus a `git diff` scoped to the package's directories, and prints a
+   notes document between sentinel markers.
+3. **Extract** the document from between the sentinels.
+4. **Validate** it deterministically (starts with `## Summary`, contains `## Highlights`, links
+   the changelog, length and fence-balance checks).
+5. **Publish** via `gh release edit`.
+
+The opencode CLI is installed via `npm install -g` and pinned to an exact version in the
+workflow step. The model is `google/gemini-3.6-flash`, overridable without a workflow edit
+via the repo variable `POLISH_NOTES_MODEL` — swap the variable to move to a replacement
+model (retirement, price change) without touching the workflow.
+
+The `GEMINI_API_KEY` secret should be a dedicated CI-only key with a quota/budget cap, not a
+personal key. Rotate it if you suspect it's been exposed: the agent's bash tool inherits the
+key (it needs it to call the model), so a prompt-injected commit message could in principle try
+to exfiltrate it. Repo integrity is unaffected either way — the agent holds no GitHub
+credential (`GH_TOKEN` is stripped from its environment, `persist-credentials: false` on
+checkout, and it runs as opencode's read-only `plan` agent), so the residual risk is limited to
+the billable key, not the repository.
+
+A red `polish-notes` job means partial or zero edits were applied, or the key/model is broken —
+it never means releases or their assets are affected, since the job runs after those already
+exist. Re-run it from the Actions UI; it resumes idempotently, because release bodies that
+already start with `## Summary` are skipped.
+
+`uptrakit-controller` and `uptrakit-controller-standalone` share most of their changes but are
+polished as independent releases, so their notes can end up worded differently even when
+describing the same underlying change — this divergence is accepted, not a bug.
+
+To dry-run the script locally without publishing:
+
+```sh
+RELEASES='[{"package_name":"uptrakit-controller","tag":"uptrakit-controller-v0.0.6","version":"0.0.6"}]' \
+  POLISH_NOTES_SKIP_PUBLISH=1 ci/release-plz/polish-notes.sh
+```
+
+Per [AI Guidelines](ai-guidelines.md), only public repository content (commits, diffs, and
+changelogs of this public repo) is sent to the Gemini API — no sensitive data.
+
 ## Related documentation
 
 - [Commit Messages](commit-messages.md) — Conventional Commits format required by release-plz

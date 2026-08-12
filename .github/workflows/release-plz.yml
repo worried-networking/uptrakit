@@ -552,6 +552,66 @@ jobs:
         with:
           subject-path: "uptrakit-*-${{ matrix.target }}.tar.gz"
 
+  polish-notes:
+    name: Polish release notes
+    needs: release-plz
+    # Skipped release-plz (backfill dispatch) yields empty outputs, so the
+    # gate is false. any_released may be true for cycles that only tagged
+    # git_only crates; polish-notes.sh filters to packages with actual
+    # release pages and exits 0 doing nothing in that case.
+    # Failure here is non-fatal by graph position — nothing depends on
+    # this job; releases and assets already exist. No continue-on-error:
+    # a red job is the desired signal (broken key/model/partial edits).
+    if: ${{ needs.release-plz.outputs.any_released == 'true' }}
+    runs-on: ubuntu-latest
+    # Sized from the loop bound, not by feel: worst case is a full cycle
+    # of 9 released packages × `timeout 300` per opencode invocation
+    # (45 min) + checkout/npm overhead. Serial-loop tradeoff (accepted):
+    # this run holds the workflow-level `release-plz` concurrency group
+    # until done, delaying a next push's release jobs by up to ~1 h in
+    # the worst case — acceptable at this repo's release cadence.
+    timeout-minutes: 60
+    # Narrower than the workflow-level grant (first job-level permissions
+    # block in this file — intentional least-privilege precedent):
+    # contents:write for `gh release edit`, used only by polish-notes.sh —
+    # the opencode agent itself runs with GH_TOKEN stripped.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # full history: prev-tag lookup + inter-tag diffs
+          # No token in .git/config: the agent's bash tool must have no
+          # credential to push with — env -u GH_TOKEN alone is not enough.
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      # cargo metadata (scope resolution in polish-notes.sh) otherwise
+      # triggers rustup auto-install of the rust-toolchain.toml pin;
+      # --no-deps metadata is toolchain-version-insensitive, stable is fine.
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Pinned exact version, matching this file's pinning discipline.
+      # (Trial ran 1.18.15 locally; 1.18.16 is the same minor — pin the
+      # current release and bump deliberately.)
+      - name: Install opencode
+        run: npm install -g opencode-ai@1.18.16
+
+      - name: Polish release notes
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # github.token, not RELEASE_PLZ_TOKEN: body edits must not
+          # trigger downstream workflows.
+          GH_TOKEN: ${{ github.token }}
+          RELEASES: ${{ needs.release-plz.outputs.releases }}
+          # Override with repo variable POLISH_NOTES_MODEL to swap models
+          # without a workflow edit (e.g. on retirement or price change).
+          MODEL: ${{ vars.POLISH_NOTES_MODEL || 'google/gemini-3.6-flash' }}
+        run: ci/release-plz/polish-notes.sh
+
   # ---------------------------------------------------------------------------
   # Manual backfill path. Triggered only by `workflow_dispatch` with a
   # non-empty `backfill_tags` input. Builds, attests, and uploads release

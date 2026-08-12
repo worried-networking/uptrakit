@@ -30,10 +30,12 @@ changelog_update = false
 # to hit HTTP 422 mid-loop and leave the surrounding binaries assetless.
 # Truncating at the body-template level keeps the initial release page
 # creation under the limit. For larger changelogs the release body is
-# the first 100 KB plus a pointer to the in-repo `CHANGELOG.md` — the
-# repo no longer post-processes release notes through an external
-# summariser, so operators are expected to edit the body manually
-# after the release if a fuller narrative is wanted.
+# the first 100 KB plus a pointer to the in-repo `CHANGELOG.md`. Post-
+# release, the `polish-notes` job in `.github/workflows/release-plz.yml`
+# best-effort replaces this body with an LLM-generated summary plus a
+# link to the package's CHANGELOG.md (see docs/development/releases.md).
+# This truncation template remains the safety net for when polishing
+# fails or is skipped.
 git_release_body = """{% if changelog | length > 100000 -%}
 {{ changelog | truncate(length=100000, end="") }}
 
