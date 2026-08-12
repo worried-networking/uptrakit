@@ -264,6 +264,11 @@ async fn aliased_select_decrypts_plugin_config_with_correct_aad() {
         .profile_config
         .as_ref()
         .expect("profile_config must be present for a linked plugin_config");
+    assert!(
+        profile_config.is_db_value_encrypted(),
+        "the stored value must actually be ciphertext -- otherwise the JSON assertion below \
+         cannot distinguish a real decrypt from plaintext passthrough"
+    );
     assert_eq!(
         profile_config.as_json(),
         &serde_json::json!({"auth_token": "aliased-decrypt-secret"}),
