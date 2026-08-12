@@ -4,9 +4,11 @@ use super::{AutodiscoveryError, Result};
 use rootcause::prelude::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use time::OffsetDateTime;
+use uptrakit_plugin_infrastructure_registry::PluginConfigOps;
 use uptrakit_shared_db::encrypted_columns::EncryptedPluginConfig;
 use uptrakit_shared_db::entity::{plugin_config, prelude::*};
 use uptrakit_shared_db::is_unique_constraint_violation;
+use uptrakit_shared_types::PluginTypeId;
 use uuid::Uuid;
 
 /// Find or create a plugin config matched by `(plugin_type, name)`.
@@ -27,6 +29,16 @@ use uuid::Uuid;
 /// active config with a given `(tenant_id, name)` pair exists at any time. On a
 /// unique-constraint violation (two concurrent auto-creates racing), the function
 /// re-queries by name and returns the winner's ID.
+///
+/// `credential_updated_at` is stamped honestly on both paths: on overwrite,
+/// only when a sensitive path actually differs from the stored value; on
+/// insert, only when `config_json` holds a live secret. This path has NO
+/// restore step -- there is nothing to restore from on a fresh discovery
+/// report, and on overwrite `config_json` fully replaces the stored value.
+/// An agent report that omits a previously-reported secret therefore drops
+/// the credential from the stored config, and that removal is honestly
+/// stamped like any other credential change (spec §8) -- there is no masked
+/// echo-back path here the way there is for the REST writers.
 #[tracing::instrument(skip_all, fields(%tenant_id))]
 pub async fn find_or_create_default_plugin_config(
     db: &sea_orm::DatabaseConnection,
@@ -34,7 +46,10 @@ pub async fn find_or_create_default_plugin_config(
     plugin_type: &str,
     config_json: &serde_json::Value,
     display_name: &str,
+    ops: &dyn PluginConfigOps,
 ) -> Result<Uuid> {
+    let type_id = PluginTypeId::new(plugin_type);
+
     // Search by the natural identity key: (tenant_id, plugin_type, name).
     // Matching on name -- rather than JSON content -- means that when a plugin
     // update rewrites a default command template, the existing row is updated
@@ -56,11 +71,15 @@ pub async fn find_or_create_default_plugin_config(
         }
         // Config JSON has changed. Update in-place so existing role assignments
         // referencing this ID continue to work with the new configuration.
+        let stored_config = cfg.config.as_json().clone();
         let now = OffsetDateTime::now_utc();
         let mut active: plugin_config::ActiveModel = cfg.into();
         active.config = Set(EncryptedPluginConfig::from_json(config_json)
             .map_err(|e| report!(AutodiscoveryError::Encryption(e.to_string())))?);
         active.updated_at = Set(now);
+        if ops.sensitive_value_changed_for(&type_id, config_json, &stored_config) {
+            active.credential_updated_at = Set(Some(now));
+        }
         active.update(db).await.context_to()?;
         tracing::debug!(
             %id,
@@ -85,7 +104,9 @@ pub async fn find_or_create_default_plugin_config(
         created_at: Set(now),
         updated_at: Set(now),
         deactivated_at: Set(None),
-        credential_updated_at: Set(None),
+        credential_updated_at: Set(ops
+            .has_live_secret_in(&type_id, config_json)
+            .then(OffsetDateTime::now_utc)),
     };
 
     match PluginConfig::insert(record).exec(db).await {
@@ -111,7 +132,9 @@ pub async fn find_or_create_default_plugin_config(
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
     use super::*;
-    use crate::queries::autodiscovery::tests_common::{insert_tenant, setup_db};
+    use crate::queries::autodiscovery::tests_common::{
+        NoopOps, insert_tenant, real_plugin_ops, setup_db,
+    };
     use sea_orm::PaginatorTrait;
 
     /// When a plugin config with the same `(plugin_type, name)` already exists
@@ -144,6 +167,7 @@ mod tests {
             "generic.shell",
             &old_config,
             "PHS Shell",
+            &NoopOps,
         )
         .await
         .expect("create first");
@@ -155,6 +179,7 @@ mod tests {
             "generic.shell",
             &new_config,
             "PHS Shell",
+            &NoopOps,
         )
         .await
         .expect("update in-place");
@@ -204,6 +229,7 @@ mod tests {
             "releases.github",
             &config,
             "GitHub Releases",
+            &NoopOps,
         )
         .await
         .expect("first call");
@@ -214,6 +240,7 @@ mod tests {
             "releases.github",
             &config,
             "GitHub Releases",
+            &NoopOps,
         )
         .await
         .expect("second call");
@@ -228,5 +255,115 @@ mod tests {
             .await
             .expect("count");
         assert_eq!(count, 1, "must not create duplicate rows");
+    }
+
+    /// `credential_updated_at` must be stamped honestly across all three
+    /// shapes this writer can take: insert-with-secret, insert-without,
+    /// and overwrite-with-changed-secret vs. overwrite-with-unchanged-config.
+    #[tokio::test]
+    async fn default_config_writer_stamps_changes() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        insert_tenant(&db, tenant_id).await;
+        let ops = real_plugin_ops();
+
+        // Insert without a live secret -> not stamped.
+        let no_secret = serde_json::json!({"tag_strip_prefix": "v"});
+        let id_no_secret = find_or_create_default_plugin_config(
+            &db,
+            tenant_id,
+            "releases.github",
+            &no_secret,
+            "GitHub No Token",
+            &ops,
+        )
+        .await
+        .expect("insert without secret");
+        let stored = PluginConfig::find()
+            .filter(plugin_config::Column::Id.eq(id_no_secret))
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row exists");
+        assert_eq!(
+            stored.credential_updated_at, None,
+            "insert without a live secret must not stamp"
+        );
+
+        // Insert with a live secret -> stamped.
+        let with_secret = serde_json::json!({"auth_token": "ghp_live"});
+        let id_with_secret = find_or_create_default_plugin_config(
+            &db,
+            tenant_id,
+            "releases.github",
+            &with_secret,
+            "GitHub With Token",
+            &ops,
+        )
+        .await
+        .expect("insert with secret");
+        let stored = PluginConfig::find()
+            .filter(plugin_config::Column::Id.eq(id_with_secret))
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row exists");
+        let first_stamp = stored
+            .credential_updated_at
+            .expect("insert with a live secret must stamp");
+
+        // Overwrite with an unchanged config -> timestamp untouched. Note:
+        // `find_or_create_default_plugin_config` short-circuits on an exact
+        // JSON match before reaching the update branch, so this call is a
+        // pure no-op -- the assertion still pins the "unchanged" behavior.
+        find_or_create_default_plugin_config(
+            &db,
+            tenant_id,
+            "releases.github",
+            &with_secret,
+            "GitHub With Token",
+            &ops,
+        )
+        .await
+        .expect("re-call with identical config");
+        let stored = PluginConfig::find()
+            .filter(plugin_config::Column::Id.eq(id_with_secret))
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row exists");
+        assert_eq!(
+            stored.credential_updated_at,
+            Some(first_stamp),
+            "unchanged config must not re-stamp"
+        );
+
+        // Overwrite with a changed secret -> newly stamped.
+        let changed_secret = serde_json::json!({"auth_token": "ghp_rotated"});
+        find_or_create_default_plugin_config(
+            &db,
+            tenant_id,
+            "releases.github",
+            &changed_secret,
+            "GitHub With Token",
+            &ops,
+        )
+        .await
+        .expect("overwrite with changed secret");
+        let stored = PluginConfig::find()
+            .filter(plugin_config::Column::Id.eq(id_with_secret))
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row exists");
+        assert!(
+            stored.credential_updated_at.is_some(),
+            "changed secret must stamp"
+        );
+        assert_ne!(
+            stored.config.as_json(),
+            &with_secret,
+            "sanity: config must actually have changed"
+        );
     }
 }

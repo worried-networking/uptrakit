@@ -598,6 +598,322 @@ async fn update_sentinel_without_stored_value_is_400() {
     );
 }
 
+/// Task 4: creating a config with a live secret at a sensitive path must
+/// stamp `credential_updated_at`. `credential_updated_at` is internal-only
+/// (never echoed on the masked REST response), so this asserts against the
+/// raw stored row, mirroring `docker_basic_to_bearer_switch_drops_stale_password`.
+#[tokio::test]
+async fn credential_updated_at_stamped_on_secret_create() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let (create_status, created): (_, serde_json::Value) = client
+        .post_json(
+            "/api/v1/plugin-configs",
+            &serde_json::json!({
+                "name": "Stamped GitHub Config",
+                "plugin_type": "releases.github",
+                "config": {"auth_token": "live-secret-token"}
+            }),
+        )
+        .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
+        .send_json()
+        .await;
+    assert_eq!(create_status, http::StatusCode::CREATED);
+    let id = created["id"].as_str().expect("id");
+
+    let stored = plugin_config::Entity::find_by_id(Uuid::parse_str(id).expect("uuid"))
+        .one(&app.db)
+        .await
+        .expect("query plugin_config")
+        .expect("plugin_config row exists");
+
+    assert!(
+        stored.credential_updated_at.is_some(),
+        "a config created with a live secret must stamp credential_updated_at"
+    );
+}
+
+/// Task 4: creating a config with no value at any sensitive path must leave
+/// `credential_updated_at` unset — a stamp here would lie about a credential
+/// having been set.
+#[tokio::test]
+async fn credential_updated_at_not_stamped_on_secretless_create() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let (create_status, created): (_, serde_json::Value) = client
+        .post_json(
+            "/api/v1/plugin-configs",
+            &serde_json::json!({
+                "name": "Secretless GitHub Config",
+                "plugin_type": "releases.github",
+                "config": {}
+            }),
+        )
+        .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
+        .send_json()
+        .await;
+    assert_eq!(create_status, http::StatusCode::CREATED);
+    let id = created["id"].as_str().expect("id");
+
+    let stored = plugin_config::Entity::find_by_id(Uuid::parse_str(id).expect("uuid"))
+        .one(&app.db)
+        .await
+        .expect("query plugin_config")
+        .expect("plugin_config row exists");
+
+    assert!(
+        stored.credential_updated_at.is_none(),
+        "a config created without a live secret must not stamp credential_updated_at"
+    );
+}
+
+/// Task 4: a follow-up update that touches only non-secret fields must leave
+/// the previously-stamped `credential_updated_at` value byte-for-byte
+/// unchanged — not merely "still Some", but pinned to the exact prior value.
+#[tokio::test]
+async fn credential_updated_at_untouched_on_nonsecret_update() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let (create_status, created): (_, serde_json::Value) = client
+        .post_json(
+            "/api/v1/plugin-configs",
+            &serde_json::json!({
+                "name": "Pinned Stamp GitHub Config",
+                "plugin_type": "releases.github",
+                "config": {"auth_token": "live-secret-token"}
+            }),
+        )
+        .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
+        .send_json()
+        .await;
+    assert_eq!(create_status, http::StatusCode::CREATED);
+    let id = created["id"].as_str().expect("id");
+
+    let before = plugin_config::Entity::find_by_id(Uuid::parse_str(id).expect("uuid"))
+        .one(&app.db)
+        .await
+        .expect("query plugin_config")
+        .expect("plugin_config row exists");
+    let stamped_at = before
+        .credential_updated_at
+        .expect("create with a live secret must stamp credential_updated_at");
+
+    let (update_status, _body): (_, serde_json::Value) = client
+        .put_json(
+            &format!("/api/v1/plugin-configs/{id}"),
+            &serde_json::json!({
+                "name": "Pinned Stamp GitHub Config Renamed",
+                "enabled": false
+            }),
+        )
+        .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
+        .send_json()
+        .await;
+    assert_eq!(update_status, http::StatusCode::OK);
+
+    let after = plugin_config::Entity::find_by_id(Uuid::parse_str(id).expect("uuid"))
+        .one(&app.db)
+        .await
+        .expect("query plugin_config")
+        .expect("plugin_config row exists");
+
+    assert_eq!(
+        after.credential_updated_at,
+        Some(stamped_at),
+        "an update that never touches config must leave credential_updated_at at its exact prior value"
+    );
+}
+
+/// Task 4: changing a live secret's value must re-stamp
+/// `credential_updated_at`, and removing it entirely (not merely changing
+/// it) must also re-stamp — `sensitive_value_changed_for` treats removal as
+/// a credential change, since a stale "credential is live" record would be
+/// as much of a lie as a stale timestamp.
+#[tokio::test]
+async fn credential_updated_at_stamped_on_secret_change_and_removal() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let (create_status, created): (_, serde_json::Value) = client
+        .post_json(
+            "/api/v1/plugin-configs",
+            &serde_json::json!({
+                "name": "Rotating GitHub Config",
+                "plugin_type": "releases.github",
+                "config": {"auth_token": "token-v1"}
+            }),
+        )
+        .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
+        .send_json()
+        .await;
+    assert_eq!(create_status, http::StatusCode::CREATED);
+    let id = created["id"].as_str().expect("id");
+
+    let after_create = plugin_config::Entity::find_by_id(Uuid::parse_str(id).expect("uuid"))
+        .one(&app.db)
+        .await
+        .expect("query plugin_config")
+        .expect("plugin_config row exists");
+    let stamp_after_create = after_create
+        .credential_updated_at
+        .expect("create with a live secret must stamp credential_updated_at");
+
+    // Change the secret's value.
+    let (change_status, _body): (_, serde_json::Value) = client
+        .put_json(
+            &format!("/api/v1/plugin-configs/{id}"),
+            &serde_json::json!({
+                "config": {"auth_token": "token-v2"}
+            }),
+        )
+        .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
+        .send_json()
+        .await;
+    assert_eq!(change_status, http::StatusCode::OK);
+
+    let after_change = plugin_config::Entity::find_by_id(Uuid::parse_str(id).expect("uuid"))
+        .one(&app.db)
+        .await
+        .expect("query plugin_config")
+        .expect("plugin_config row exists");
+    let stamp_after_change = after_change
+        .credential_updated_at
+        .expect("changing the secret's value must re-stamp credential_updated_at");
+    assert_ne!(
+        stamp_after_change, stamp_after_create,
+        "a changed secret value must produce a new credential_updated_at stamp"
+    );
+    assert_eq!(
+        after_change.config.as_json()["auth_token"],
+        serde_json::json!("token-v2")
+    );
+
+    // Remove the secret entirely.
+    let (removal_status, _body): (_, serde_json::Value) = client
+        .put_json(
+            &format!("/api/v1/plugin-configs/{id}"),
+            &serde_json::json!({
+                "config": {}
+            }),
+        )
+        .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
+        .send_json()
+        .await;
+    assert_eq!(removal_status, http::StatusCode::OK);
+
+    let after_removal = plugin_config::Entity::find_by_id(Uuid::parse_str(id).expect("uuid"))
+        .one(&app.db)
+        .await
+        .expect("query plugin_config")
+        .expect("plugin_config row exists");
+    let stamp_after_removal = after_removal
+        .credential_updated_at
+        .expect("removing a live secret is itself a credential change and must re-stamp");
+    assert_ne!(
+        stamp_after_removal, stamp_after_change,
+        "removing the secret must produce a new credential_updated_at stamp, not reuse the prior one"
+    );
+    assert!(
+        after_removal
+            .config
+            .as_json()
+            .get("auth_token")
+            .is_none_or(serde_json::Value::is_null),
+        "the secret must actually be gone from the stored config after removal"
+    );
+}
+
+/// Task 4: a stale sensitive key silently dropped by
+/// `prune_stale_sensitive_keys` (the Basic->Bearer switch covered by
+/// `docker_basic_to_bearer_switch_drops_stale_password`) is itself a
+/// credential change and must re-stamp `credential_updated_at` — the prune
+/// runs before `sensitive_value_changed_for` sees the config, so a pruned
+/// key must not be invisible to the stamp.
+#[tokio::test]
+async fn credential_updated_at_stamped_on_prune_removal() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let (create_status, created): (_, serde_json::Value) = client
+        .post_json(
+            "/api/v1/plugin-configs",
+            &serde_json::json!({
+                "name": "Pruned Docker Registry",
+                "plugin_type": "releases.docker",
+                "config": {
+                    "auth": {"type": "basic", "username": "u", "password": "pw-1"}
+                }
+            }),
+        )
+        .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
+        .send_json()
+        .await;
+    assert_eq!(create_status, http::StatusCode::CREATED);
+    let id = created["id"].as_str().expect("id");
+
+    let after_create = plugin_config::Entity::find_by_id(Uuid::parse_str(id).expect("uuid"))
+        .one(&app.db)
+        .await
+        .expect("query plugin_config")
+        .expect("plugin_config row exists");
+    let stamp_after_create = after_create
+        .credential_updated_at
+        .expect("create with a live secret must stamp credential_updated_at");
+
+    // Basic->Bearer switch: the frontend resubmits the full auth object,
+    // including the stale masked `password` key, which the write path
+    // prunes rather than restores as a live value.
+    let (update_status, _body): (_, serde_json::Value) = client
+        .put_json(
+            &format!("/api/v1/plugin-configs/{id}"),
+            &serde_json::json!({
+                "config": {
+                    "auth": {
+                        "type": "bearer",
+                        "token": "tok-2",
+                        "password": "***",
+                        "username": "u"
+                    }
+                }
+            }),
+        )
+        .bearer(&token)
+        .header("if-match", "W/\"settings-v0\"")
+        .send_json()
+        .await;
+    assert_eq!(update_status, http::StatusCode::OK);
+
+    let after_update = plugin_config::Entity::find_by_id(Uuid::parse_str(id).expect("uuid"))
+        .one(&app.db)
+        .await
+        .expect("query plugin_config")
+        .expect("plugin_config row exists");
+    let stamp_after_update = after_update
+        .credential_updated_at
+        .expect("the auth-variant switch must re-stamp credential_updated_at");
+    assert_ne!(
+        stamp_after_update, stamp_after_create,
+        "pruning the stale password during the auth-variant switch is a credential change \
+         and must produce a new credential_updated_at stamp"
+    );
+}
+
 /// Intent pin (task 6a spec §5.2): `resolve_effective_config` merge
 /// semantics don't change across the flip, but WHICH stored shape a profile
 /// takes does — this pins the later-wins result for both. An

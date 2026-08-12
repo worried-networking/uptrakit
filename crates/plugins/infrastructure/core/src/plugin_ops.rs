@@ -391,6 +391,13 @@ pub trait PluginConfigOps: PluginMetadataOps {
         crate::secret_paths::first_sensitive_path_present(config, &paths)
     }
 
+    /// True when `config` holds a live (non-empty, non-sentinel) value at
+    /// any sensitive path. Used to stamp `credential_updated_at` on create.
+    fn has_live_secret_in(&self, id: &PluginTypeId, config: &serde_json::Value) -> bool {
+        let paths = self.sensitive_paths(id);
+        crate::secret_paths::has_live_secret_value(config, &paths)
+    }
+
     /// Prune-only variant hygiene (spec §5): remove sensitive paths present
     /// in `config` but absent from its typed round-trip. Returns pruned paths.
     ///

@@ -67,6 +67,7 @@ pub struct PluginConfigView {
     #[audit(skip)]
     pub config: serde_json::Value,
     pub enabled: bool,
+    pub credential_updated_at: Option<OffsetDateTime>,
 }
 
 impl From<&plugin_config::Model> for PluginConfigView {
@@ -78,6 +79,7 @@ impl From<&plugin_config::Model> for PluginConfigView {
             plugin_type: m.plugin_type.clone(),
             config: m.config.as_json().clone(),
             enabled: m.enabled,
+            credential_updated_at: m.credential_updated_at,
         }
     }
 }
@@ -174,7 +176,9 @@ pub async fn create_plugin_config_in_tx(
         created_at: Set(now),
         updated_at: Set(now),
         deactivated_at: Set(None),
-        credential_updated_at: Set(None),
+        credential_updated_at: Set(ops
+            .has_live_secret_in(&req.plugin_type, &req.config)
+            .then(OffsetDateTime::now_utc)),
     };
 
     model.insert(tx).await.map_err(|e| {
@@ -230,6 +234,9 @@ pub async fn update_plugin_config_in_tx(
         let _pruned = ops.prune_stale_sensitive_keys(&type_id, &mut config);
         ops.assert_no_sentinel(&type_id, &config)
             .map_err(|e| report!(PluginConfigError::ConfigValidation(e.to_string())))?;
+        if ops.sensitive_value_changed_for(&type_id, &config, before.config.as_json()) {
+            model.credential_updated_at = Set(Some(now));
+        }
         model.config = Set(EncryptedPluginConfig::from_json(&config)
             .map_err(|e| report!(PluginConfigError::Encryption(e.to_string())))?);
     }
@@ -292,7 +299,9 @@ pub async fn create_plugin_config(
         created_at: Set(now),
         updated_at: Set(now),
         deactivated_at: Set(None),
-        credential_updated_at: Set(None),
+        credential_updated_at: Set(ops
+            .has_live_secret_in(&type_id, &req.config)
+            .then(OffsetDateTime::now_utc)),
     };
 
     let inserted = model.insert(tenant_db.db()).await.map_err(|e| {
@@ -397,7 +406,7 @@ pub async fn update_plugin_config(
     // new config value can come from, and it always runs when the caller
     // supplied one.
     let type_id = PluginTypeId::new(&plugin_type);
-    let new_config: Option<EncryptedPluginConfig> = if let Some(mut config) = req.config {
+    let new_config: Option<(EncryptedPluginConfig, bool)> = if let Some(mut config) = req.config {
         let existing_config = existing.config.as_json().clone();
 
         ops.restore_config_secrets(&type_id, &mut config, &existing_config);
@@ -407,11 +416,14 @@ pub async fn update_plugin_config(
         let _pruned = ops.prune_stale_sensitive_keys(&type_id, &mut config);
         ops.assert_no_sentinel(&type_id, &config)
             .map_err(|e| report!(PluginConfigError::ConfigValidation(e.to_string())))?;
+        let credential_changed =
+            ops.sensitive_value_changed_for(&type_id, &config, &existing_config);
 
-        Some(
+        Some((
             EncryptedPluginConfig::from_json(&config)
                 .map_err(|e| report!(PluginConfigError::Encryption(e.to_string())))?,
-        )
+            credential_changed,
+        ))
     } else {
         None
     };
@@ -422,8 +434,11 @@ pub async fn update_plugin_config(
     if let Some(name) = req.name {
         model.name = Set(name);
     }
-    if let Some(new_config) = new_config {
+    if let Some((new_config, credential_changed)) = new_config {
         model.config = Set(new_config);
+        if credential_changed {
+            model.credential_updated_at = Set(Some(now));
+        }
     }
     if let Some(enabled) = req.enabled {
         model.enabled = Set(enabled);

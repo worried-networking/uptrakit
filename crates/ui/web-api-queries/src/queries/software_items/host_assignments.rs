@@ -210,7 +210,9 @@ async fn resolve_plugin_config_txn(
                 created_at: Set(now),
                 updated_at: Set(now),
                 deactivated_at: Set(None),
-                credential_updated_at: Set(None),
+                credential_updated_at: Set(ops
+                    .has_live_secret_in(&id, &config)
+                    .then(OffsetDateTime::now_utc)),
             };
             let inserted = model.insert(txn).await.context_to()?;
             Ok((pcid, inserted))
@@ -809,12 +811,14 @@ pub async fn load_host_assignment(
 #[cfg(test)]
 mod tests {
     use super::resolve_type_only_inline_override;
-    use sea_orm::{ActiveModelTrait, Database, DatabaseConnection, Set};
+    use sea_orm::{
+        ActiveModelTrait, ColumnTrait, Database, DatabaseConnection, EntityTrait, QueryFilter, Set,
+    };
     use time::OffsetDateTime;
     use uptrakit_shared_db::begin_immediate;
     use uptrakit_shared_db::entity::{host, software_item, tenant};
     use uptrakit_web_api_types::software_items::{
-        HostSoftwareAssignment, JsonObjectMap, JsonObjectMapPatch,
+        HostPluginRoleAssignment, HostSoftwareAssignment, JsonObjectMap, JsonObjectMapPatch,
     };
     use uuid::Uuid;
 
@@ -838,6 +842,16 @@ mod tests {
     }
 
     impl uptrakit_plugin_infrastructure_registry::PluginConfigOps for StubOps {}
+
+    /// Real, fully-populated plugin catalog for tests that need a live
+    /// descriptor's sensitive-path metadata (`releases.github`'s `auth_token`).
+    fn real_plugin_ops() -> uptrakit_plugin_infrastructure_registry::PluginCatalog {
+        uptrakit_plugin_infrastructure_registry::build_catalog(
+            &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
+        )
+        .expect("build production plugin catalog")
+    }
 
     async fn idor_db() -> DatabaseConnection {
         let db = Database::connect("sqlite::memory:")
@@ -957,6 +971,65 @@ mod tests {
                 Err(super::SoftwareItemQueryError::HostNotFound(id)) if *id == host_b
             ),
             "cross-tenant host must be rejected as HostNotFound, got {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn assign_hosts_in_tx_stamps_credential_updated_at_for_inline_config_with_live_secret() {
+        use uptrakit_shared_db::entity::prelude::PluginConfig;
+        use uptrakit_web_api_types::plugin_configs::CreatePluginConfigRequest;
+
+        // Inline plugin config creation encrypts `config` via the real crypto
+        // path; tests never initialize a master key, so plaintext mode lets
+        // the encrypted column round-trip without one (see `setup_db()` in
+        // `autodiscovery/mod.rs`'s test helpers for the same pattern).
+        uptrakit_crypto::enable_plaintext_mode();
+        let db = idor_db().await;
+        let (tenant_a, item_a) = seed_tenant_with_item(&db, "a").await;
+        let host_a = seed_host(&db, tenant_a).await;
+        let ops = real_plugin_ops();
+
+        // `execution_site: "controller"` short-circuits `validate_host_compatibility`
+        // (only valid combo with role `FetchReleases`), so the freshly-seeded host
+        // (no `host_features`) doesn't need to satisfy any capability requirement.
+        let req = super::AssignHostsRequest {
+            host_assignments: vec![HostSoftwareAssignment {
+                host_id: host_a,
+                plugins: vec![HostPluginRoleAssignment {
+                    role: uptrakit_web_api_types::PluginRole::FetchReleases,
+                    ordinal: 0,
+                    plugin_config_id: None,
+                    plugin_config: Some(CreatePluginConfigRequest {
+                        name: "gh-token".to_string(),
+                        plugin_type: uptrakit_shared_types::PluginTypeId::new("releases.github"),
+                        config: serde_json::json!({"auth_token": "ghp_live_token"}),
+                        enabled: true,
+                    }),
+                    package_identifier: "octocat/Hello-World".to_string(),
+                    config_override: None,
+                    execution_site: "controller".to_string(),
+                }],
+            }],
+        };
+
+        let txn = begin_immediate(&db).await.expect("begin");
+        super::assign_hosts_in_tx(&ops, &txn, tenant_a, item_a, &req)
+            .await
+            .expect("assign hosts with inline plugin config carrying a live secret");
+        txn.commit().await.expect("commit");
+
+        let created = PluginConfig::find()
+            .filter(uptrakit_shared_db::entity::plugin_config::Column::TenantId.eq(tenant_a))
+            .filter(uptrakit_shared_db::entity::plugin_config::Column::Name.eq("gh-token"))
+            .one(&db)
+            .await
+            .expect("query plugin_config")
+            .expect("inline plugin config row must exist");
+
+        assert!(
+            created.credential_updated_at.is_some(),
+            "inline plugin config carrying a live secret must be stamped with \
+             credential_updated_at on create, got {created:?}"
         );
     }
 

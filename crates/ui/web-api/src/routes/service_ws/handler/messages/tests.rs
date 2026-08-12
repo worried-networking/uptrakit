@@ -932,6 +932,58 @@ async fn handle_report_plugin_config_emits_validation_failed_tenant_audit_row_fo
 }
 
 #[tokio::test]
+async fn handle_report_plugin_config_rejects_sentinel_in_reported_config() {
+    let db = setup_migrated_db().await;
+    let tenant_id = insert_default_tenant(&db).await;
+    let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+    let svc = insert_service(&db, tenant_id).await;
+
+    // "***" at a sensitive path (`releases.github`'s `auth_token`) must be
+    // rejected before any write: read back as a live credential, it would
+    // stamp `credential_updated_at` as "just changed" for the redaction
+    // marker, not a real secret.
+    let payload = report_plugin_config_payload(
+        "req-plugin-config-sentinel",
+        "releases.github",
+        "Sentinel GitHub Config",
+        serde_json::json!({
+            "auth_token": "***"
+        }),
+    );
+
+    let response = handle_report_plugin_config(&state, svc.id, &payload).await;
+    let reply = assert_report_plugin_config_reply(&response);
+    assert!(!reply.success);
+    assert_eq!(reply.plugin_config_id, None);
+
+    let row = wait_for_tenant_audit_row_for_action(
+        &db,
+        uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
+    )
+    .await;
+    assert_eq!(
+        row.outcome,
+        uptrakit_audit_log::AuditOutcome::ValidationFailed.as_str()
+    );
+    let details = row.details_json.expect("plugin_config.create details");
+    assert_eq!(
+        details["reason_code"],
+        serde_json::json!("sentinel_in_reported_config")
+    );
+
+    let created = plugin_config::Entity::find()
+        .filter(plugin_config::Column::TenantId.eq(tenant_id))
+        .filter(plugin_config::Column::Name.eq("Sentinel GitHub Config"))
+        .all(&db)
+        .await
+        .expect("query plugin_configs");
+    assert!(
+        created.is_empty(),
+        "no plugin_config row must be written for a sentinel-bearing reported config"
+    );
+}
+
+#[tokio::test]
 async fn handle_report_plugin_config_missing_service_emits_denied_system_audit_row() {
     let db = setup_migrated_db().await;
     let tenant_id = insert_default_tenant(&db).await;

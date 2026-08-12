@@ -174,6 +174,48 @@ pub(in super::super) async fn handle_report_plugin_config(
         ));
     }
 
+    // Reject a reported config that still carries the masking sentinel at a
+    // sensitive path. This must run before the write path below: `"***"`
+    // read back as a live credential would silently poison
+    // `credential_updated_at` (a stamp saying "just changed" for a value that
+    // is, in fact, the redaction marker, not a real secret).
+    if let Err(e) = state
+        .plugin
+        .plugin_ops
+        .assert_no_sentinel(&plugin_type_id, &payload.config)
+    {
+        tracing::warn!(
+            %service_id,
+            plugin_type = %payload.plugin_type,
+            error = %e,
+            "ReportPluginConfig: sentinel present at sensitive path in reported config"
+        );
+        emit_report_plugin_config_audit(
+            &PluginConfigReportAuditCtx {
+                state,
+                service_id,
+                service_tenant_id: Some(service_model.tenant_id),
+                service_app_name: service_model.service_app_name.as_deref(),
+            },
+            &request_id,
+            &payload.plugin_type,
+            &payload.name,
+            None,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            Some("sentinel_in_reported_config"),
+        );
+        let resp_payload: ReportPluginConfigResponsePayload =
+            serde_json::from_value(serde_json::json!({
+                "request_id": request_id,
+                "success": false,
+                "error": format!("reported plugin config rejected: {e}"),
+            }))
+            .expect("ReportPluginConfigResponsePayload JSON is always valid");
+        return ProcessorResponse::reply(ControllerMessage::ReportPluginConfigResponse(
+            resp_payload,
+        ));
+    }
+
     // Find or create the plugin config
     let result = crate::queries::autodiscovery::find_or_create_default_plugin_config(
         state.db(),
@@ -181,6 +223,7 @@ pub(in super::super) async fn handle_report_plugin_config(
         &payload.plugin_type,
         &payload.config,
         &payload.name,
+        state.plugin.plugin_ops.as_ref(),
     )
     .await;
 

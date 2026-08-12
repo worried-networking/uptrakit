@@ -226,6 +226,24 @@ async fn process_targets_discovery(
         let pc_id = if is_package_manager_plugin(&target.plugin_type) {
             None
         } else {
+            // Belt-and-braces: reject a reported config that still carries the
+            // masking sentinel at a sensitive path before it can be persisted
+            // as a "credential". Skip only this target -- nothing has been
+            // written for it yet, so `continue` leaves no partial state and no
+            // software item / HSIP row is created under the wrong identity
+            // key (a NULL `plugin_config_id` here would be misread as the
+            // package-manager identity selector by `find_or_create_software_item`).
+            if let Err(e) = ctx
+                .ops
+                .assert_no_sentinel(&target.plugin_type, &target.plugin_config)
+            {
+                tracing::warn!(
+                    plugin_type = %target.plugin_type,
+                    error = %e,
+                    "skipping discovery target: sentinel at sensitive path in reported plugin config"
+                );
+                continue;
+            }
             Some(
                 find_or_create_default_plugin_config(
                     db,
@@ -233,6 +251,7 @@ async fn process_targets_discovery(
                     &target_plugin_type_str,
                     &target.plugin_config,
                     &target.plugin_config_name,
+                    ctx.ops,
                 )
                 .await?,
             )
@@ -1722,6 +1741,86 @@ mod tests {
             plugin_links.len(),
             3,
             "expected three role-based plugin links"
+        );
+    }
+
+    /// A discovery target whose `plugin_config` still carries the masking
+    /// sentinel at a sensitive path (`auth_token`) must be skipped entirely:
+    /// no plugin config, software item, or HSIP row created for that target,
+    /// and no error surfaced -- the report as a whole still succeeds so
+    /// other targets in the same report are unaffected.
+    #[tokio::test]
+    async fn discovery_target_with_sentinel_plugin_config_is_skipped() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+        let ops = real_plugin_ops();
+
+        insert_tenant(&db, tenant_id).await;
+        insert_host(&db, host_id, tenant_id).await;
+
+        let result = DiscoveryPluginResult {
+            plugin_type: plugin_ids::DISCOVERY_PROXMOX_HELPER_SCRIPTS.clone(),
+            plugin_config_id: None,
+            error: None,
+            discoveries: vec![WireDiscoveredSoftware {
+                package_identifier: "booklore".to_string(),
+                name: "BookLore".to_string(),
+                installed_version: "1.18.5".to_string(),
+                targets: vec![DiscoveryTarget {
+                    plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
+                    plugin_config: serde_json::json!({
+                        "owner": "BookLore",
+                        "repo": "BookLore",
+                        "tag_strip_prefix": "v",
+                        "auth_token": "***",
+                    }),
+                    plugin_config_name: "BookLore/BookLore".to_string(),
+                    roles: all_roles(),
+                    package_identifier: None,
+                    config_override: None,
+                    execution_site: None,
+                }],
+                extra: None,
+                featured: false,
+                qualifier: None,
+                plugin_package_identifier: None,
+                installed_display_version: None,
+            }],
+        };
+
+        process_plugin_result(
+            &db,
+            &DiscoveryDeps::new(&test_emitter(), &ops),
+            tenant_id,
+            host_id,
+            now,
+            &result,
+            &HashSet::new(),
+        )
+        .await
+        .expect("process_plugin_result must succeed even when a target is skipped");
+
+        let configs = PluginConfig::find()
+            .filter(plugin_config::Column::TenantId.eq(tenant_id))
+            .filter(plugin_config::Column::PluginType.eq("releases.github"))
+            .all(&db)
+            .await
+            .expect("query configs");
+        assert!(
+            configs.is_empty(),
+            "no plugin config must be created for a sentinel-bearing target"
+        );
+
+        let hsi_links = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .all(&db)
+            .await
+            .expect("query hsi links");
+        assert!(
+            hsi_links.is_empty(),
+            "no software item / host link must be created for the skipped target"
         );
     }
 
