@@ -225,6 +225,12 @@ impl From<Report<PluginConfigError>> for ApiError {
                 "plugin_config.config_validation",
                 None,
             ),
+            Encryption(_) => ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "An internal error occurred.",
+                "plugin_config.encryption_error",
+                Some(format_report_summary(&report)),
+            ),
             Db(_) | Internal(_) => ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "An internal error occurred.",

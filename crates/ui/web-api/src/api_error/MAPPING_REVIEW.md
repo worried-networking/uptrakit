@@ -56,6 +56,7 @@ including intentional pre-migration status-code deltas.
 | `PluginConfigError::DuplicateName` | 409 | static | `plugin_config.duplicate_name` | — | — |
 | `PluginConfigError::ConfigValidation` | 400 | dynamic_display | `plugin_config.config_validation` | Contains human-readable plugin schema validation message; no secrets | **500→400** — was falling through `_ =>` catch-all |
 | `PluginConfigError::Db` | 500 | static | `plugin_config.internal_error` | — | — |
+| `PluginConfigError::Encryption` | 500 | static | `plugin_config.encryption_error` | — | — |
 | `PluginConfigError::Internal` | 500 | static | `plugin_config.internal_error` | — | — |
 
 ---

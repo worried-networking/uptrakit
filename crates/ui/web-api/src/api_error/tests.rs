@@ -454,6 +454,12 @@ async fn plugin_config_error_all_variants() {
     )
     .await;
     check(
+        report!(PluginConfigError::Encryption("boom".into())),
+        500,
+        "plugin_config.encryption_error",
+    )
+    .await;
+    check(
         report!(PluginConfigError::Internal("oops".into())),
         500,
         "plugin_config.internal_error",

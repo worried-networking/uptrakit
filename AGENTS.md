@@ -194,7 +194,9 @@ These are non-negotiable design constraints. Do not violate them.
    lives on `host_software_items`. See `PluginRole` (`crates/shared/types/src/plugin_role.rs`).
 1. **No shell injection.** Any path that constructs or executes shell commands must validate inputs; custom scripts are untrusted input.
 1. **No secrets in logs.** Never log tokens, passwords, API keys, or credentials. Secret fields in `uptrakit-web-api-types` must use
-   `SecretString`, not `String`. See [Secrets Handling](docs/security/secrets-and-encryption.md).
+   `SecretString`, not `String`. The plugin config stores (`plugin_configs`, `plugin_type_settings`, `instance_plugin_setting`) are encrypted at
+   rest via compile-time-AAD newtypes ([ADR-0041](docs/adr/0041-compile-time-aad-encrypted-column-newtypes.md)). See [Secrets
+   Handling](docs/security/secrets-and-encryption.md).
 1. **Logging goes to journald or stdout.** No internal log storage; full command output is not captured internally, only high-level summaries are
    retained for display. See [Logging](docs/development/logging.md).
 1. **Tracing spans use `skip_all`.** All `#[tracing::instrument]` must use `skip_all` and explicitly list relevant fields — never auto-capture

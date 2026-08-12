@@ -20,10 +20,6 @@ use crate::entity::proxmox_host_mapping;
 use crate::matching::{manual_match, unmatch};
 
 pub(crate) async fn setup_db() -> DatabaseConnection {
-    // Tests never initialize a real master key; plaintext mode lets
-    // `EncryptedPluginConfig::from_json` work without one. Safe to call
-    // repeatedly.
-    uptrakit_crypto::enable_plaintext_mode();
     let db = sea_orm::Database::connect("sqlite::memory:")
         .await
         .expect("connect in-memory sqlite");
@@ -80,6 +76,13 @@ pub(crate) async fn insert_host(db: &DatabaseConnection, tenant_id: Uuid) -> Uui
 }
 
 pub(crate) async fn insert_plugin_config(db: &DatabaseConnection, tenant_id: Uuid) -> Uuid {
+    // Tests never initialize a real master key; plaintext mode lets
+    // `EncryptedPluginConfig::from_json` below work without one. Safe to call
+    // repeatedly. It lives here rather than in `setup_db` because callers that
+    // build their own connection (the concurrent-writer tests need a
+    // file-backed DB) still reach the encryption path through this helper, and
+    // under a process-per-test runner nothing else enables the mode for them.
+    uptrakit_crypto::enable_plaintext_mode();
     let id = Uuid::now_v7();
     let now = OffsetDateTime::now_utc();
     uptrakit_shared_db::entity::plugin_config::ActiveModel {

@@ -1106,6 +1106,11 @@ async fn insert_test_proxmox_plugin_config(
     use sea_orm::{ActiveModelTrait, Set};
     use uptrakit_shared_db::entity::plugin_config;
 
+    // Tests never initialize a real master key; plaintext mode lets
+    // `EncryptedPluginConfig::from_json` below work without one. Safe to call
+    // repeatedly, and it must live in this helper so every caller reaches it
+    // under a process-per-test runner.
+    uptrakit_crypto::enable_plaintext_mode();
     let id = Uuid::now_v7();
     let now = time::OffsetDateTime::now_utc();
     plugin_config::ActiveModel {

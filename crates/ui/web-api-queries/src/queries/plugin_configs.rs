@@ -38,6 +38,9 @@ pub enum PluginConfigError {
     /// A database error occurred.
     #[error("database error: {0}")]
     Db(sea_orm::DbErr),
+    /// Encrypting the config JSON for storage failed.
+    #[error("config encryption failed: {0}")]
+    Encryption(String),
     /// An unexpected internal invariant was violated.
     #[error("internal error: {0}")]
     Internal(String),
@@ -165,11 +168,8 @@ pub async fn create_plugin_config_in_tx(
         tenant_id: Set(tenant_id),
         name: Set(req.name),
         plugin_type: Set(req.plugin_type.to_string()),
-        config: Set(EncryptedPluginConfig::from_json(&req.config).map_err(|e| {
-            report!(PluginConfigError::Internal(format!(
-                "config encryption failed: {e}"
-            )))
-        })?),
+        config: Set(EncryptedPluginConfig::from_json(&req.config)
+            .map_err(|e| report!(PluginConfigError::Encryption(e.to_string())))?),
         enabled: Set(req.enabled),
         created_at: Set(now),
         updated_at: Set(now),
@@ -230,11 +230,8 @@ pub async fn update_plugin_config_in_tx(
         let _pruned = ops.prune_stale_sensitive_keys(&type_id, &mut config);
         ops.assert_no_sentinel(&type_id, &config)
             .map_err(|e| report!(PluginConfigError::ConfigValidation(e.to_string())))?;
-        model.config = Set(EncryptedPluginConfig::from_json(&config).map_err(|e| {
-            report!(PluginConfigError::Internal(format!(
-                "config encryption failed: {e}"
-            )))
-        })?);
+        model.config = Set(EncryptedPluginConfig::from_json(&config)
+            .map_err(|e| report!(PluginConfigError::Encryption(e.to_string())))?);
     }
     if let Some(enabled) = req.enabled {
         model.enabled = Set(enabled);
@@ -289,11 +286,8 @@ pub async fn create_plugin_config(
         tenant_id: Set(tenant_db.tenant_id()),
         name: Set(req.name),
         plugin_type: Set(req.plugin_type.to_string()),
-        config: Set(EncryptedPluginConfig::from_json(&req.config).map_err(|e| {
-            report!(PluginConfigError::Internal(format!(
-                "config encryption failed: {e}"
-            )))
-        })?),
+        config: Set(EncryptedPluginConfig::from_json(&req.config)
+            .map_err(|e| report!(PluginConfigError::Encryption(e.to_string())))?),
         enabled: Set(req.enabled),
         created_at: Set(now),
         updated_at: Set(now),
@@ -414,11 +408,10 @@ pub async fn update_plugin_config(
         ops.assert_no_sentinel(&type_id, &config)
             .map_err(|e| report!(PluginConfigError::ConfigValidation(e.to_string())))?;
 
-        Some(EncryptedPluginConfig::from_json(&config).map_err(|e| {
-            report!(PluginConfigError::Internal(format!(
-                "config encryption failed: {e}"
-            )))
-        })?)
+        Some(
+            EncryptedPluginConfig::from_json(&config)
+                .map_err(|e| report!(PluginConfigError::Encryption(e.to_string())))?,
+        )
     } else {
         None
     };

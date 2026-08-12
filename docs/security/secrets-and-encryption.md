@@ -148,6 +148,27 @@ registry the rest of this table's columns rely on — the AAD is a `pub const` b
 plugin configs is unchanged by this — masking of sensitive fields in API responses remains schema-driven per
 [plugin-guidelines.md](../development/plugin-guidelines.md), independent of storage-at-rest encryption.
 
+### The `"***"` masking sentinel
+
+Encryption at rest is orthogonal to what the API returns. Sensitive plugin-config values are replaced in API
+responses by the literal string `"***"` (`SECRET_SENTINEL`, `crates/plugins/infrastructure/core/src/secret_paths.rs`),
+at the paths the plugin's form schema marks `.sensitive()`. On write, every sensitive path whose incoming value equals
+`"***"` is restored from the stored row before validation and persist; absent paths are never injected. A post-restore
+assertion (`PluginConfigOps::assert_no_sentinel`) then rejects the write with a validation error if any sensitive path
+still holds `"***"` — on create too, where there is no stored row to restore from. A masked value can therefore never
+be persisted as a live credential.
+
+The accepted consequence: **`"***"` is unsettable as a literal secret value.** A user whose real token is `***` cannot
+store it through the API.
+
+### `credential_updated_at`
+
+`plugin_configs` carries a nullable `credential_updated_at` (`OffsetDateTime`) column, added by the same migration
+that encrypted `plugin_configs.config`. It records when a credential value inside the config JSON last changed —
+distinct from the row's `updated_at`, which moves for any edit (renaming a profile, changing an endpoint). It exists
+so that credential age is auditable without decrypting the config. No write path stamps it yet; every current
+`ActiveModel` sets it to `None`.
+
 ### Envelope encryption
 
 The system uses **envelope encryption**: a master key (KEK — key encryption key) wraps data encryption

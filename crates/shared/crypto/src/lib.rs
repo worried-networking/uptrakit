@@ -58,11 +58,15 @@ pub use encrypted_string::EncryptedString;
 // `macro_rules!` macros expand in the *invoking* crate's scope, so a bare
 // `rootcause::report!` or `serde_json::Value` inside the macro body would
 // resolve against the consuming crate's own dependency graph, not this
-// crate's. Routing through `$crate::rootcause`/`$crate::serde_json` instead
-// guarantees the macro always finds these crates, regardless of whether the
-// consumer happens to depend on them directly.
+// crate's. Routing through `$crate::rootcause`/`$crate::serde_json`/
+// `$crate::sea_orm` instead guarantees the macro always finds these crates,
+// regardless of whether the consumer happens to depend on them directly (or
+// depends on them under a renamed Cargo alias).
 #[doc(hidden)]
 pub use rootcause;
+#[cfg(feature = "sea-orm")]
+#[doc(hidden)]
+pub use sea_orm;
 #[doc(hidden)]
 pub use serde_json;
 

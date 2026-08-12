@@ -194,6 +194,13 @@ pub(crate) mod tests_common {
     use uuid::Uuid;
 
     pub async fn setup_db() -> DatabaseConnection {
+        // Tests never initialize a real master key; plaintext mode lets the
+        // encrypted `plugin_configs.config` column round-trip without one --
+        // both the fixture helper below and the production paths under test
+        // (`find_or_create_default_plugin_config`, `process_plugin_result`)
+        // encrypt. Safe to call repeatedly, and it must live here so every
+        // test reaches it under a process-per-test runner.
+        uptrakit_crypto::enable_plaintext_mode();
         let opt = ConnectOptions::new("sqlite::memory:");
         let db = Database::connect(opt).await.expect("test db");
         uptrakit_shared_db::migration::run_migrations(&db)

@@ -108,7 +108,7 @@ macro_rules! encrypted_column {
             }
         }
 
-        impl sea_orm::sea_query::ValueType for $name {
+        impl $crate::sea_orm::sea_query::ValueType for $name {
             // `ValueType::try_from`'s error type is fixed by the sea-orm trait
             // signature (`ValueTypeErr`, a unit struct) and cannot carry any
             // context, unlike the `TryGetable` path above which reports the
@@ -123,12 +123,12 @@ macro_rules! encrypted_column {
                 clippy::map_err_ignore,
                 reason = "ValueTypeErr is a unit struct that carries no additional context; the original error is discarded intentionally"
             )]
-            fn try_from(v: sea_orm::Value) -> Result<Self, sea_orm::sea_query::ValueTypeErr> {
+            fn try_from(v: $crate::sea_orm::Value) -> Result<Self, $crate::sea_orm::sea_query::ValueTypeErr> {
                 match v {
-                    sea_orm::Value::String(Some(s)) => {
-                        Self::decode(s).map_err(|_| sea_orm::sea_query::ValueTypeErr)
+                    $crate::sea_orm::Value::String(Some(s)) => {
+                        Self::decode(s).map_err(|_| $crate::sea_orm::sea_query::ValueTypeErr)
                     }
-                    _ => Err(sea_orm::sea_query::ValueTypeErr),
+                    _ => Err($crate::sea_orm::sea_query::ValueTypeErr),
                 }
             }
 
@@ -136,38 +136,38 @@ macro_rules! encrypted_column {
                 stringify!($name).to_string()
             }
 
-            fn array_type() -> sea_orm::sea_query::ArrayType {
-                sea_orm::sea_query::ArrayType::String
+            fn array_type() -> $crate::sea_orm::sea_query::ArrayType {
+                $crate::sea_orm::sea_query::ArrayType::String
             }
 
-            fn column_type() -> sea_orm::sea_query::ColumnType {
-                sea_orm::sea_query::ColumnType::Text
-            }
-        }
-
-        impl sea_orm::sea_query::Nullable for $name {
-            fn null() -> sea_orm::Value {
-                sea_orm::Value::String(None)
+            fn column_type() -> $crate::sea_orm::sea_query::ColumnType {
+                $crate::sea_orm::sea_query::ColumnType::Text
             }
         }
 
-        impl From<$name> for sea_orm::Value {
+        impl $crate::sea_orm::sea_query::Nullable for $name {
+            fn null() -> $crate::sea_orm::Value {
+                $crate::sea_orm::Value::String(None)
+            }
+        }
+
+        impl From<$name> for $crate::sea_orm::Value {
             fn from(val: $name) -> Self {
                 val.inner.into()
             }
         }
 
-        impl sea_orm::TryGetable for $name {
-            fn try_get_by<I: sea_orm::ColIdx>(
-                res: &sea_orm::QueryResult,
+        impl $crate::sea_orm::TryGetable for $name {
+            fn try_get_by<I: $crate::sea_orm::ColIdx>(
+                res: &$crate::sea_orm::QueryResult,
                 index: I,
-            ) -> Result<Self, sea_orm::TryGetError> {
-                let s: Option<String> = res.try_get_by(index).map_err(sea_orm::TryGetError::DbErr)?;
+            ) -> Result<Self, $crate::sea_orm::TryGetError> {
+                let s: Option<String> = res.try_get_by(index).map_err($crate::sea_orm::TryGetError::DbErr)?;
                 let Some(s) = s else {
                     let column_name = index
                         .as_str()
                         .map_or_else(|| "encrypted_column".to_string(), ToString::to_string);
-                    return Err(sea_orm::TryGetError::Null(column_name));
+                    return Err($crate::sea_orm::TryGetError::Null(column_name));
                 };
                 // Row identity for operators: TryGetable cannot see the primary key,
                 // so the ciphertext prefix (version tag + key-id + per-row random
@@ -182,7 +182,7 @@ macro_rules! encrypted_column {
                     format!("<plaintext, {} bytes>", s.len())
                 };
                 Self::decode(s).map_err(|e| {
-                    sea_orm::TryGetError::DbErr(sea_orm::DbErr::Type(format!(
+                    $crate::sea_orm::TryGetError::DbErr($crate::sea_orm::DbErr::Type(format!(
                         "encrypted column decode failed ({}, row value {handle}): {e}",
                         Self::AAD
                     )))
