@@ -790,7 +790,7 @@ pub async fn delete_plugin_config(
     };
 
     let before_view = PluginConfigView::from(&before_model);
-    let config_risk = CommandRiskSummary::from_config(&before_model.config);
+    let config_risk = CommandRiskSummary::from_config(before_model.config.as_json());
     let hook = state.audit_emitter.commit_hook();
     let audit_entry = match AuditEntry::<Stateful>::plugin_config_delete(
         &before_view,

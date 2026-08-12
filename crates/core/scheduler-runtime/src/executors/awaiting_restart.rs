@@ -185,7 +185,7 @@ impl AwaitingRestartExecutor {
             plugin_type: String,
             package_identifier: String,
             host_software_item_id: Uuid,
-            profile_config: Option<serde_json::Value>,
+            profile_config: Option<uptrakit_shared_db::encrypted_columns::EncryptedPluginConfig>,
             assignment_config: Option<serde_json::Value>,
         }
 
@@ -276,7 +276,7 @@ impl AwaitingRestartExecutor {
             let plugin_type = PluginTypeId::new(&row.plugin_type);
             let config = uptrakit_config_merge::resolve_effective_config(
                 None,
-                row.profile_config.as_ref(),
+                row.profile_config.as_ref().map(|c| c.as_json()),
                 row.assignment_config.as_ref(),
             );
             let assignment = PluginAssignment {

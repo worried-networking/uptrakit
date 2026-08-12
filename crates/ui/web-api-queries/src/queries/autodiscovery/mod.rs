@@ -38,6 +38,8 @@ pub enum AutodiscoveryError {
     Db(sea_orm::DbErr),
     #[error("audit log error: {0}")]
     Audit(uptrakit_audit_log::AuditLogError),
+    #[error("config encryption failed: {0}")]
+    Encryption(String),
 }
 
 pub type Result<T> = std::result::Result<T, rootcause::Report<AutodiscoveryError>>;
@@ -257,11 +259,17 @@ pub(crate) mod tests_common {
             tenant_id: Set(tenant_id),
             name: Set(format!("Test Plugin Config {id}")),
             plugin_type: Set("package-manager.homebrew".to_string()),
-            config: Set(serde_json::json!({})),
+            config: Set(
+                uptrakit_shared_db::encrypted_columns::EncryptedPluginConfig::from_json(
+                    &serde_json::json!({}),
+                )
+                .expect("encrypt test config"),
+            ),
             enabled: Set(true),
             created_at: Set(now),
             updated_at: Set(now),
             deactivated_at: Set(None),
+            credential_updated_at: Set(None),
         }
         .insert(db)
         .await

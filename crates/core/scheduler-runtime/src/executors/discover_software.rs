@@ -269,7 +269,7 @@ fn build_assignments(
                 assignments.push(DiscoveryPluginAssignment {
                     plugin_config_id: Some(cfg.id),
                     plugin_type: plugin_type.clone(),
-                    config: cfg.config.clone(),
+                    config: cfg.config.as_json().clone(),
                 });
             }
         } else {

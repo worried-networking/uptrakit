@@ -1626,7 +1626,7 @@ mod tests {
         assert_eq!(configs.len(), 1, "expected one github_releases config");
         assert_eq!(configs[0].name, "BookLore/BookLore");
 
-        let cfg_json = &configs[0].config;
+        let cfg_json = configs[0].config.as_json();
         assert_eq!(cfg_json["owner"], "BookLore");
         assert_eq!(cfg_json["repo"], "BookLore");
 

@@ -327,6 +327,7 @@ mod tests {
     use crate::queries::update_batches::tests::{insert_base_fixture, setup_db};
     use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
     use time::OffsetDateTime;
+    use uptrakit_shared_db::encrypted_columns::EncryptedPluginConfig;
     use uptrakit_shared_db::entity::{
         host_software_item, host_software_item_plugin, plugin_config, software_item,
     };
@@ -405,11 +406,13 @@ mod tests {
             tenant_id: Set(f.tenant_id),
             name: Set("test-plugin-2".to_string()),
             plugin_type: Set("releases.github".to_string()),
-            config: Set(serde_json::json!({})),
+            config: Set(EncryptedPluginConfig::from_json(&serde_json::json!({}))
+                .expect("encrypt test config")),
             enabled: Set(true),
             created_at: Set(now),
             updated_at: Set(now),
             deactivated_at: Set(None),
+            credential_updated_at: Set(None),
         }
         .insert(&db)
         .await
@@ -607,11 +610,13 @@ mod tests {
             tenant_id: Set(f.tenant_id),
             name: Set("feat-plugin".to_string()),
             plugin_type: Set("releases.github".to_string()),
-            config: Set(serde_json::json!({})),
+            config: Set(EncryptedPluginConfig::from_json(&serde_json::json!({}))
+                .expect("encrypt test config")),
             enabled: Set(true),
             created_at: Set(now),
             updated_at: Set(now),
             deactivated_at: Set(None),
+            credential_updated_at: Set(None),
         }
         .insert(&db)
         .await

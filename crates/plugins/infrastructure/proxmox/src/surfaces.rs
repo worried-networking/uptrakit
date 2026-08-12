@@ -1790,7 +1790,7 @@ async fn load_proxmox_config(
         ));
     }
 
-    serde_json::from_value::<ProxmoxConfig>(pc.config)
+    serde_json::from_value::<ProxmoxConfig>(pc.config.as_json().clone())
         .map_err(|e| format!("failed to parse Proxmox config: {e}"))
 }
 
@@ -2023,16 +2023,24 @@ mod tests {
         tenant_id: Uuid,
         plugin_config_id: Uuid,
     ) -> uptrakit_shared_db::entity::plugin_config::Model {
+        // Tests never initialize a real master key; plaintext mode lets
+        // `EncryptedPluginConfig::from_json` work without one. Safe to call
+        // repeatedly.
+        uptrakit_crypto::enable_plaintext_mode();
         uptrakit_shared_db::entity::plugin_config::Model {
             id: plugin_config_id,
             tenant_id,
             name: "PVE Main".to_string(),
             plugin_type: "infrastructure.proxmox".to_string(),
-            config: serde_json::json!({}),
+            config: uptrakit_shared_db::encrypted_columns::EncryptedPluginConfig::from_json(
+                &serde_json::json!({}),
+            )
+            .expect("encrypt test config"),
             enabled: true,
             created_at: OffsetDateTime::now_utc(),
             updated_at: OffsetDateTime::now_utc(),
             deactivated_at: None,
+            credential_updated_at: None,
         }
     }
 
@@ -2497,6 +2505,10 @@ mod tests {
     // LIMIT clauses), so this runs the shared-db + proxmox migrations on an
     // in-memory SQLite DB. Idiom copied from `matching_isolation_tests.rs`.
     async fn setup_db() -> DatabaseConnection {
+        // Tests never initialize a real master key; plaintext mode lets
+        // `EncryptedPluginConfig::from_json` work without one. Safe to call
+        // repeatedly.
+        uptrakit_crypto::enable_plaintext_mode();
         let db = sea_orm::Database::connect("sqlite::memory:")
             .await
             .expect("connect in-memory sqlite");
@@ -2535,11 +2547,17 @@ mod tests {
             tenant_id: Set(tenant_id),
             name: Set(format!("pve-{id}")),
             plugin_type: Set("infrastructure.proxmox".to_string()),
-            config: Set(serde_json::json!({})),
+            config: Set(
+                uptrakit_shared_db::encrypted_columns::EncryptedPluginConfig::from_json(
+                    &serde_json::json!({}),
+                )
+                .expect("encrypt test config"),
+            ),
             enabled: Set(true),
             created_at: Set(now),
             updated_at: Set(now),
             deactivated_at: sea_orm::ActiveValue::NotSet,
+            credential_updated_at: sea_orm::ActiveValue::NotSet,
         }
         .insert(db)
         .await

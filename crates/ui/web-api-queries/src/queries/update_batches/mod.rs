@@ -370,6 +370,7 @@ pub(crate) mod tests {
         ControllerPostUpdateContext, ControllerProtectionContext, ControllerProtectionDecision,
         ControllerUpdateProtection, PluginError, PluginResult, PostUpdateOutcome,
     };
+    use uptrakit_shared_db::encrypted_columns::EncryptedPluginConfig;
     use uptrakit_shared_db::entity::{
         host, host_software_item, host_software_item_plugin, plugin_config, prelude::*, service,
         service_host, software_item, tenant, update_history,
@@ -561,11 +562,13 @@ pub(crate) mod tests {
             tenant_id: Set(tenant_id),
             name: Set("test-plugin".to_string()),
             plugin_type: Set("releases.github".to_string()),
-            config: Set(serde_json::json!({})),
+            config: Set(EncryptedPluginConfig::from_json(&serde_json::json!({}))
+                .expect("encrypt test config")),
             enabled: Set(true),
             created_at: Set(now),
             updated_at: Set(now),
             deactivated_at: Set(None),
+            credential_updated_at: Set(None),
         }
         .insert(db)
         .await
@@ -653,11 +656,13 @@ pub(crate) mod tests {
             tenant_id: Set(f.tenant_id),
             name: Set("test-plugin-2".to_string()),
             plugin_type: Set("releases.github".to_string()),
-            config: Set(serde_json::json!({})),
+            config: Set(EncryptedPluginConfig::from_json(&serde_json::json!({}))
+                .expect("encrypt test config")),
             enabled: Set(true),
             created_at: Set(now),
             updated_at: Set(now),
             deactivated_at: Set(None),
+            credential_updated_at: Set(None),
         }
         .insert(db)
         .await

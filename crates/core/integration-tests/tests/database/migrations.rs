@@ -174,7 +174,22 @@ async fn test_drop_permissions_down_recreates_schema(harness: &TestHarness) {
 
     // down(): schema-only recreation — parent (`permissions`) before FK
     // child (`role_permissions`); PostgreSQL enforces the order here.
-    Migrator::down(&harness.db, Some(1))
+    //
+    // Migrator::down(&db, Some(1)) would revert whichever migration is
+    // LAST-APPLIED, not necessarily the M1.8 drop migration — compute the
+    // step count from this migration's registered index to the tip so
+    // appending a later migration cannot silently retarget this call.
+    // `Migration` itself is `pub(super)` in the db crate and unreachable
+    // from this crate, so unlike the in-crate down-test this cannot call
+    // its down() directly and must go through `Migrator::down`.
+    let total = Migrator::migrations().len();
+    let idx = Migrator::migrations()
+        .iter()
+        .position(|m| m.name() == "m20260807_000001_drop_permissions_tables")
+        .expect("drop migration must be registered");
+    let steps =
+        <u32 as std::convert::TryFrom<usize>>::try_from(total - idx).expect("steps fit u32");
+    Migrator::down(&harness.db, Some(steps))
         .await
         .expect("drop migration down() must succeed");
     for (table, col) in TABLES {

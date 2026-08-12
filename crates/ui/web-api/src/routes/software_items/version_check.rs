@@ -327,7 +327,7 @@ async fn classify_role_assignments(
         let plugin_type = PluginTypeId::new(plugin_type_str);
         let merged = uptrakit_config_merge::resolve_effective_config(
             None,
-            config.as_ref().map(|c| &c.config),
+            config.as_ref().map(|c| c.config.as_json()),
             plugin.config.as_ref(),
         );
         let pa = uptrakit_wire::PluginAssignment {

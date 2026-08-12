@@ -6,6 +6,7 @@ use sea_orm::{
 use thiserror::Error;
 use time::OffsetDateTime;
 use uptrakit_plugin_infrastructure_registry::PluginConfigOps;
+use uptrakit_shared_db::encrypted_columns::EncryptedPluginConfig;
 use uptrakit_shared_db::entity::plugin_config;
 use uptrakit_shared_db::is_unique_constraint_violation;
 use uptrakit_shared_macros::impl_report_conversion;
@@ -72,7 +73,7 @@ impl From<&plugin_config::Model> for PluginConfigView {
             tenant_id: m.tenant_id,
             name: m.name.clone(),
             plugin_type: m.plugin_type.clone(),
-            config: m.config.clone(),
+            config: m.config.as_json().clone(),
             enabled: m.enabled,
         }
     }
@@ -85,7 +86,7 @@ pub fn plugin_config_to_response(
     m: plugin_config::Model,
 ) -> Option<PluginConfigResponse> {
     let id = PluginTypeId::new(&m.plugin_type);
-    let config = ops.mask_config_secrets(&id, &m.config);
+    let config = ops.mask_config_secrets(&id, m.config.as_json());
     let capabilities: Vec<String> = ops
         .capabilities(&id)
         .into_iter()
@@ -164,11 +165,16 @@ pub async fn create_plugin_config_in_tx(
         tenant_id: Set(tenant_id),
         name: Set(req.name),
         plugin_type: Set(req.plugin_type.to_string()),
-        config: Set(req.config),
+        config: Set(EncryptedPluginConfig::from_json(&req.config).map_err(|e| {
+            report!(PluginConfigError::Internal(format!(
+                "config encryption failed: {e}"
+            )))
+        })?),
         enabled: Set(req.enabled),
         created_at: Set(now),
         updated_at: Set(now),
         deactivated_at: Set(None),
+        credential_updated_at: Set(None),
     };
 
     model.insert(tx).await.map_err(|e| {
@@ -207,7 +213,7 @@ pub async fn update_plugin_config_in_tx(
     let type_id = PluginTypeId::new(&plugin_type);
     if let Some(ref new_config) = req.config {
         let mut merged = new_config.clone();
-        ops.restore_config_secrets(&type_id, &mut merged, &before.config);
+        ops.restore_config_secrets(&type_id, &mut merged, before.config.as_json());
         if let Err(e) = ops.validate_config(&type_id, &merged) {
             bail!(PluginConfigError::ConfigValidation(e.to_string()));
         }
@@ -220,11 +226,15 @@ pub async fn update_plugin_config_in_tx(
         model.name = Set(name);
     }
     if let Some(mut config) = req.config {
-        ops.restore_config_secrets(&type_id, &mut config, model.config.as_ref());
+        ops.restore_config_secrets(&type_id, &mut config, before.config.as_json());
         let _pruned = ops.prune_stale_sensitive_keys(&type_id, &mut config);
         ops.assert_no_sentinel(&type_id, &config)
             .map_err(|e| report!(PluginConfigError::ConfigValidation(e.to_string())))?;
-        model.config = Set(config);
+        model.config = Set(EncryptedPluginConfig::from_json(&config).map_err(|e| {
+            report!(PluginConfigError::Internal(format!(
+                "config encryption failed: {e}"
+            )))
+        })?);
     }
     if let Some(enabled) = req.enabled {
         model.enabled = Set(enabled);
@@ -279,11 +289,16 @@ pub async fn create_plugin_config(
         tenant_id: Set(tenant_db.tenant_id()),
         name: Set(req.name),
         plugin_type: Set(req.plugin_type.to_string()),
-        config: Set(req.config),
+        config: Set(EncryptedPluginConfig::from_json(&req.config).map_err(|e| {
+            report!(PluginConfigError::Internal(format!(
+                "config encryption failed: {e}"
+            )))
+        })?),
         enabled: Set(req.enabled),
         created_at: Set(now),
         updated_at: Set(now),
         deactivated_at: Set(None),
+        credential_updated_at: Set(None),
     };
 
     let inserted = model.insert(tenant_db.db()).await.map_err(|e| {
@@ -376,9 +391,18 @@ pub async fn update_plugin_config(
     }
 
     // Validate new config if provided; restore masked secrets from the existing value.
+    // Only clone the decrypted existing config when there is actually a new
+    // config to restore secrets into — a metadata-only update (no `config`
+    // field) must not allocate plaintext secret material it will never use.
     let type_id = PluginTypeId::new(&plugin_type);
-    if let Some(ref mut new_config) = req.config.clone() {
-        ops.restore_config_secrets(&type_id, new_config, &existing.config);
+    let existing_config = req
+        .config
+        .is_some()
+        .then(|| existing.config.as_json().clone());
+    if let Some(ref mut new_config) = req.config.clone()
+        && let Some(ref existing_config) = existing_config
+    {
+        ops.restore_config_secrets(&type_id, new_config, existing_config);
 
         if let Err(e) = ops.validate_config(&type_id, new_config) {
             bail!(PluginConfigError::ConfigValidation(e.to_string()));
@@ -391,13 +415,19 @@ pub async fn update_plugin_config(
     if let Some(name) = req.name {
         model.name = Set(name);
     }
-    if let Some(mut config) = req.config {
+    if let Some(mut config) = req.config
+        && let Some(ref existing_config) = existing_config
+    {
         // Re-apply secret restoration on the actual value being persisted.
-        ops.restore_config_secrets(&type_id, &mut config, model.config.as_ref());
+        ops.restore_config_secrets(&type_id, &mut config, existing_config);
         let _pruned = ops.prune_stale_sensitive_keys(&type_id, &mut config);
         ops.assert_no_sentinel(&type_id, &config)
             .map_err(|e| report!(PluginConfigError::ConfigValidation(e.to_string())))?;
-        model.config = Set(config);
+        model.config = Set(EncryptedPluginConfig::from_json(&config).map_err(|e| {
+            report!(PluginConfigError::Internal(format!(
+                "config encryption failed: {e}"
+            )))
+        })?);
     }
     if let Some(enabled) = req.enabled {
         model.enabled = Set(enabled);

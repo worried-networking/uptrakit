@@ -148,14 +148,18 @@ impl TestFixtures {
             tenant_id: Set(tenant_id),
             name: Set("test-shell-config".to_string()),
             plugin_type: Set("generic.shell".to_string()),
-            config: Set(json!({
-                "update_command": "echo ok",
-                "version_command": "echo 1.0.0"
-            })),
+            config: Set(
+                uptrakit_shared_db::encrypted_columns::EncryptedPluginConfig::from_json(&json!({
+                    "update_command": "echo ok",
+                    "version_command": "echo 1.0.0"
+                }))
+                .expect("encrypt test config"),
+            ),
             enabled: Set(true),
             created_at: Set(now),
             updated_at: Set(now),
             deactivated_at: Set(None),
+            credential_updated_at: Set(None),
         }
         .insert(db)
         .await
@@ -167,15 +171,19 @@ impl TestFixtures {
             tenant_id: Set(tenant_id),
             name: Set("test-proxmox-config".to_string()),
             plugin_type: Set("infrastructure.proxmox".to_string()),
-            config: Set(json!({
-                "api_url": proxmox_api_url,
-                "api_token": "root@pam!tok=secret",
-                "verify_tls": false
-            })),
+            config: Set(
+                uptrakit_shared_db::encrypted_columns::EncryptedPluginConfig::from_json(&json!({
+                    "api_url": proxmox_api_url,
+                    "api_token": "root@pam!tok=secret",
+                    "verify_tls": false
+                }))
+                .expect("encrypt test config"),
+            ),
             enabled: Set(true),
             created_at: Set(now),
             updated_at: Set(now),
             deactivated_at: Set(None),
+            credential_updated_at: Set(None),
         }
         .insert(db)
         .await

@@ -4,6 +4,7 @@ use super::{AutodiscoveryError, Result};
 use rootcause::prelude::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use time::OffsetDateTime;
+use uptrakit_shared_db::encrypted_columns::EncryptedPluginConfig;
 use uptrakit_shared_db::entity::{plugin_config, prelude::*};
 use uptrakit_shared_db::is_unique_constraint_violation;
 use uuid::Uuid;
@@ -49,7 +50,7 @@ pub async fn find_or_create_default_plugin_config(
 
     if let Some(cfg) = existing {
         let id = cfg.id;
-        if &cfg.config == config_json {
+        if cfg.config.as_json() == config_json {
             // Config is already up-to-date.
             return Ok(id);
         }
@@ -57,7 +58,8 @@ pub async fn find_or_create_default_plugin_config(
         // referencing this ID continue to work with the new configuration.
         let now = OffsetDateTime::now_utc();
         let mut active: plugin_config::ActiveModel = cfg.into();
-        active.config = Set(config_json.clone());
+        active.config = Set(EncryptedPluginConfig::from_json(config_json)
+            .map_err(|e| report!(AutodiscoveryError::Encryption(e.to_string())))?);
         active.updated_at = Set(now);
         active.update(db).await.context_to()?;
         tracing::debug!(
@@ -77,11 +79,13 @@ pub async fn find_or_create_default_plugin_config(
         tenant_id: Set(tenant_id),
         name: Set(display_name.to_string()),
         plugin_type: Set(plugin_type.to_string()),
-        config: Set(config_json.clone()),
+        config: Set(EncryptedPluginConfig::from_json(config_json)
+            .map_err(|e| report!(AutodiscoveryError::Encryption(e.to_string())))?),
         enabled: Set(true),
         created_at: Set(now),
         updated_at: Set(now),
         deactivated_at: Set(None),
+        credential_updated_at: Set(None),
     };
 
     match PluginConfig::insert(record).exec(db).await {

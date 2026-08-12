@@ -386,7 +386,11 @@ async fn docker_basic_to_bearer_switch_drops_stale_password() {
         .expect("query plugin_config")
         .expect("plugin_config row exists");
 
-    let auth = stored.config.get("auth").expect("auth key present");
+    let auth = stored
+        .config
+        .as_json()
+        .get("auth")
+        .expect("auth key present");
     assert!(
         auth.get("password").is_none(),
         "stale Basic password must be pruned after the Basic->Bearer switch, got: {auth:?}"
@@ -440,14 +444,18 @@ async fn github_update_stays_sparse_no_materialized_defaults() {
         .expect("query plugin_config")
         .expect("plugin_config row exists");
 
-    let obj = stored.config.as_object().expect("config is object");
+    let obj = stored
+        .config
+        .as_json()
+        .as_object()
+        .expect("config is object");
     assert_eq!(
         obj.keys().map(String::as_str).collect::<Vec<_>>(),
         vec!["tag_strip_prefix"],
         "stored config must contain exactly the keys the request sent, got: {obj:?}"
     );
     assert_eq!(
-        stored.config["tag_strip_prefix"],
+        stored.config.as_json()["tag_strip_prefix"],
         serde_json::json!("release-")
     );
 }
@@ -538,7 +546,7 @@ async fn update_echoing_sentinel_preserves_stored_secret() {
         .expect("plugin_config row exists");
 
     assert_eq!(
-        stored.config["auth_token"],
+        stored.config.as_json()["auth_token"],
         serde_json::json!("original-secret-token"),
         "the echoed sentinel must restore the previously stored secret, not overwrite it"
     );
@@ -801,14 +809,20 @@ async fn config_test_merge_restores_stored_secret_before_dispatch() {
         tenant_id: Set(app.tenant_id),
         name: Set("Proxmox Config".to_string()),
         plugin_type: Set("infrastructure.proxmox".to_string()),
-        config: Set(serde_json::json!({
-            "api_url": "https://pve.example.com:8006",
-            "api_token": "svc@pve!apitoken=tok-1-secret"
-        })),
+        config: Set(
+            uptrakit_shared_db::encrypted_columns::EncryptedPluginConfig::from_json(
+                &serde_json::json!({
+                    "api_url": "https://pve.example.com:8006",
+                    "api_token": "svc@pve!apitoken=tok-1-secret"
+                }),
+            )
+            .expect("encrypt test config"),
+        ),
         enabled: Set(true),
         created_at: Set(now),
         updated_at: Set(now),
         deactivated_at: Set(None),
+        credential_updated_at: Set(None),
     }
     .insert(&app.db)
     .await
@@ -1168,11 +1182,17 @@ async fn insert_plugin_config_for_dashboard_icons(app: &TestApp) -> Uuid {
         tenant_id: Set(app.tenant_id),
         name: Set("Existing Dashboard Icons Config".to_string()),
         plugin_type: Set("enhancement.dashboard-icons".to_string()),
-        config: Set(serde_json::json!({})),
+        config: Set(
+            uptrakit_shared_db::encrypted_columns::EncryptedPluginConfig::from_json(
+                &serde_json::json!({}),
+            )
+            .expect("encrypt test config"),
+        ),
         enabled: Set(true),
         created_at: Set(now),
         updated_at: Set(now),
         deactivated_at: Set(None),
+        credential_updated_at: Set(None),
     }
     .insert(&app.db)
     .await

@@ -219,7 +219,7 @@ fn merged_plugin_config(
 ) -> serde_json::Value {
     uptrakit_config_merge::resolve_effective_config(
         None,
-        config.map(|c| &c.config),
+        config.map(|c| c.config.as_json()),
         assignment.config.as_ref(),
     )
 }

@@ -98,16 +98,22 @@ async fn insert_active_proxmox_plugin_config(db: &sea_orm::DatabaseConnection) -
         tenant_id: Set(tenant_id()),
         name: Set("test-proxmox".to_string()),
         plugin_type: Set("infrastructure.proxmox".to_string()),
-        config: Set(serde_json::json!({
-            "api_url": "https://pve.test:8006",
-            "api_token": "tok",
-            "verify_tls": true,
-            "node_filter": []
-        })),
+        config: Set(
+            uptrakit_shared_db::encrypted_columns::EncryptedPluginConfig::from_json(
+                &serde_json::json!({
+                    "api_url": "https://pve.test:8006",
+                    "api_token": "tok",
+                    "verify_tls": true,
+                    "node_filter": []
+                }),
+            )
+            .expect("encrypt test config"),
+        ),
         enabled: Set(true),
         created_at: Set(now),
         updated_at: Set(now),
         deactivated_at: sea_orm::ActiveValue::NotSet,
+        credential_updated_at: sea_orm::ActiveValue::NotSet,
     }
     .insert(db)
     .await

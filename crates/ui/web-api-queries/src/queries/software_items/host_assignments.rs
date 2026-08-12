@@ -5,6 +5,7 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilte
 use time::OffsetDateTime;
 use uptrakit_plugin_infrastructure_registry::{PluginConfigOps, RoleKey};
 use uptrakit_shared_db::begin_immediate;
+use uptrakit_shared_db::encrypted_columns::EncryptedPluginConfig;
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, plugin_config, prelude::*,
 };
@@ -190,11 +191,16 @@ async fn resolve_plugin_config_txn(
                 tenant_id: Set(tenant_id),
                 name: Set(inline.name.clone()),
                 plugin_type: Set(inline.plugin_type.to_string()),
-                config: Set(config),
+                config: Set(EncryptedPluginConfig::from_json(&config).map_err(|e| {
+                    report!(SoftwareItemQueryError::Internal(format!(
+                        "config encryption failed: {e}"
+                    )))
+                })?),
                 enabled: Set(inline.enabled),
                 created_at: Set(now),
                 updated_at: Set(now),
                 deactivated_at: Set(None),
+                credential_updated_at: Set(None),
             };
             let inserted = model.insert(txn).await.context_to()?;
             Ok((pcid, inserted))
@@ -316,7 +322,7 @@ async fn upsert_role_assignment(
     validate_assignment(
         ops,
         &config.plugin_type,
-        Some(&config.config),
+        Some(config.config.as_json()),
         &role_assignment.package_identifier,
         role_assignment.config_override.as_ref(),
     )?;
@@ -598,7 +604,7 @@ pub async fn update_host_assignment_in_tx(
         validate_assignment(
             ops,
             &config.plugin_type,
-            Some(&config.config),
+            Some(config.config.as_json()),
             &synthetic.package_identifier,
             synthetic.config_override.as_ref(),
         )?;

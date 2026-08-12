@@ -68,7 +68,8 @@ fn host_assignment_error_response(
         | item_queries::SoftwareItemQueryError::PluginAssignmentNotFound
         | item_queries::SoftwareItemQueryError::InvalidMergeRequest(_)
         | item_queries::SoftwareItemQueryError::IncompatibleHost(_)
-        | item_queries::SoftwareItemQueryError::Db(_) => {
+        | item_queries::SoftwareItemQueryError::Db(_)
+        | item_queries::SoftwareItemQueryError::Internal(_) => {
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }

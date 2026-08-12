@@ -197,7 +197,7 @@ impl ProxmoxProtectionStore for DbProxmoxProtectionStore<'_> {
                 ))
             })?;
 
-        Ok(config.config)
+        Ok(config.config.as_json().clone())
     }
 
     async fn load_effective_policy(

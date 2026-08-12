@@ -1113,11 +1113,17 @@ async fn insert_test_proxmox_plugin_config(
         tenant_id: Set(tenant_id),
         name: Set("Test Proxmox Config".to_string()),
         plugin_type: Set("infrastructure.proxmox".to_string()),
-        config: Set(serde_json::json!({})),
+        config: Set(
+            uptrakit_shared_db::encrypted_columns::EncryptedPluginConfig::from_json(
+                &serde_json::json!({}),
+            )
+            .expect("encrypt test config"),
+        ),
         enabled: Set(true),
         created_at: Set(now),
         updated_at: Set(now),
         deactivated_at: Set(None),
+        credential_updated_at: Set(None),
     }
     .insert(db)
     .await

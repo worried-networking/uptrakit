@@ -85,6 +85,9 @@ pub enum SoftwareItemQueryError {
     /// A database error occurred.
     #[error("database error: {0}")]
     Db(sea_orm::DbErr),
+    /// An unexpected internal invariant was violated (e.g. config encryption failed).
+    #[error("internal error: {0}")]
+    Internal(String),
 }
 
 pub type Result<T> = std::result::Result<T, rootcause::Report<SoftwareItemQueryError>>;
@@ -153,6 +156,10 @@ impl SoftwareItemQueryError {
             Self::Db(_) => (
                 uptrakit_audit_log::AuditOutcome::Failed,
                 "software_item.database_error",
+            ),
+            Self::Internal(_) => (
+                uptrakit_audit_log::AuditOutcome::Failed,
+                "software_item.internal_error",
             ),
         }
     }

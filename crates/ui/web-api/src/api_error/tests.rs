@@ -668,6 +668,12 @@ async fn software_item_query_error_all_variants() {
         "software_item.database_error",
     )
     .await;
+    check(
+        report!(SoftwareItemQueryError::Internal("test".into())),
+        500,
+        "software_item.internal_error",
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -871,6 +877,13 @@ async fn autodiscovery_error_all_variants() {
     .await;
     assert_eq!(status.as_u16(), 500);
     assert_eq!(code_of(&json), "autodiscovery.database_error");
+
+    let (status, json) = read_response(
+        ApiError::from(report!(AutodiscoveryError::Encryption("test".into()))).into_response(),
+    )
+    .await;
+    assert_eq!(status.as_u16(), 500);
+    assert_eq!(code_of(&json), "autodiscovery.encryption_error");
 }
 
 #[tokio::test]

@@ -20,6 +20,10 @@ use crate::entity::proxmox_host_mapping;
 use crate::matching::{manual_match, unmatch};
 
 pub(crate) async fn setup_db() -> DatabaseConnection {
+    // Tests never initialize a real master key; plaintext mode lets
+    // `EncryptedPluginConfig::from_json` work without one. Safe to call
+    // repeatedly.
+    uptrakit_crypto::enable_plaintext_mode();
     let db = sea_orm::Database::connect("sqlite::memory:")
         .await
         .expect("connect in-memory sqlite");
@@ -83,11 +87,17 @@ pub(crate) async fn insert_plugin_config(db: &DatabaseConnection, tenant_id: Uui
         tenant_id: Set(tenant_id),
         name: Set(format!("pve-{id}")),
         plugin_type: Set("infrastructure.proxmox".to_string()),
-        config: Set(serde_json::json!({})),
+        config: Set(
+            uptrakit_shared_db::encrypted_columns::EncryptedPluginConfig::from_json(
+                &serde_json::json!({}),
+            )
+            .expect("encrypt test config"),
+        ),
         enabled: Set(true),
         created_at: Set(now),
         updated_at: Set(now),
         deactivated_at: sea_orm::ActiveValue::NotSet,
+        credential_updated_at: sea_orm::ActiveValue::NotSet,
     }
     .insert(db)
     .await

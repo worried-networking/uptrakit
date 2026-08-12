@@ -113,6 +113,7 @@ mod tests {
     use sea_orm::{ConnectOptions, ConnectionTrait, Database, DatabaseConnection};
     use sea_orm_migration::prelude::*;
 
+    use super::Migration;
     use crate::migration::Migrator;
 
     async fn test_db() -> DatabaseConnection {
@@ -152,7 +153,12 @@ mod tests {
     async fn down_recreates_empty_schema() {
         let db = test_db().await;
         Migrator::up(&db, None).await.expect("up");
-        Migrator::down(&db, Some(1)).await.expect("down");
+        // Migrator::down(&db, Some(1)) would revert whichever migration is
+        // LAST-APPLIED, not necessarily this one — call this migration's
+        // own down() directly so appending a later migration cannot
+        // silently retarget this test.
+        let schema_manager = SchemaManager::new(&db);
+        Migration.down(&schema_manager).await.expect("down");
         assert!(
             table_exists(&db, "permissions").await,
             "down must recreate permissions (schema-only)"

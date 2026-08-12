@@ -674,11 +674,17 @@ async fn zero_source_patch_keeps_config_backed_plugin_source() {
         tenant_id: Set(tenant_id),
         name: Set("Test Apt Config".to_string()),
         plugin_type: Set("package-manager.apt".to_string()),
-        config: Set(serde_json::json!({})),
+        config: Set(
+            uptrakit_shared_db::encrypted_columns::EncryptedPluginConfig::from_json(
+                &serde_json::json!({}),
+            )
+            .expect("encrypt test config"),
+        ),
         enabled: Set(true),
         created_at: Set(now),
         updated_at: Set(now),
         deactivated_at: Set(None),
+        credential_updated_at: Set(None),
     }
     .insert(&db)
     .await

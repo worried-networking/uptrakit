@@ -117,6 +117,7 @@ including intentional pre-migration status-code deltas.
 | `SoftwareItemQueryError::DuplicateItem` | 409 | static | `software_item.duplicate_item` | — |
 | `SoftwareItemQueryError::DuplicateHostAssignment` | 409 | static | `software_item.duplicate_host_assignment` | — |
 | `SoftwareItemQueryError::Db` | 500 | static | `software_item.database_error` | — |
+| `SoftwareItemQueryError::Internal` | 500 | static | `software_item.internal_error` | — |
 
 ---
 
@@ -188,6 +189,7 @@ needed — they are available for future use.
 | Variant | Status | Message Strategy | Code |
 | --- | --- | --- | --- |
 | `AutodiscoveryError::Db` | 500 | static | `autodiscovery.database_error` |
+| `AutodiscoveryError::Encryption` | 500 | static | `autodiscovery.encryption_error` |
 
 ### ResetDataQueryError
 

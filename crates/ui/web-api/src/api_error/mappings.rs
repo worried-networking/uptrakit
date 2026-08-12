@@ -468,6 +468,12 @@ impl From<Report<SoftwareItemQueryError>> for ApiError {
                 "software_item.database_error",
                 Some(format_report_summary(&report)),
             ),
+            Internal(_) => ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "An internal error occurred.",
+                "software_item.internal_error",
+                Some(format_report_summary(&report)),
+            ),
         }
     }
 }
@@ -710,6 +716,12 @@ impl From<Report<AutodiscoveryError>> for ApiError {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "An internal error occurred.",
                 "autodiscovery.audit_error",
+                Some(format_report_summary(&report)),
+            ),
+            Encryption(_) => ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "An internal error occurred.",
+                "autodiscovery.encryption_error",
                 Some(format_report_summary(&report)),
             ),
         }

@@ -149,7 +149,7 @@ pub async fn test_plugin_config(
             }
         };
         // Shallow-merge incoming config on top of saved config.
-        let mut merged = saved.config.clone();
+        let mut merged = saved.config.as_json().clone();
         if let (Some(base), Some(overlay)) = (merged.as_object_mut(), body.config.as_object()) {
             for (k, v) in overlay {
                 base.insert(k.clone(), v.clone());
@@ -157,10 +157,11 @@ pub async fn test_plugin_config(
         }
         // A UI-echoed masked sentinel at a sensitive path must not overwrite
         // the real stored secret with "***" before dispatch.
-        state
-            .plugin
-            .plugin_ops
-            .restore_config_secrets(&plugin_type_id, &mut merged, &saved.config);
+        state.plugin.plugin_ops.restore_config_secrets(
+            &plugin_type_id,
+            &mut merged,
+            saved.config.as_json(),
+        );
         merged
     } else {
         body.config.clone()

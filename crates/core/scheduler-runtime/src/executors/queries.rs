@@ -3,6 +3,7 @@ use sea_orm::{
     ColumnTrait, Condition, DatabaseConnection, EntityTrait, JoinType, QueryFilter, QuerySelect,
     RelationTrait,
 };
+use uptrakit_shared_db::encrypted_columns::EncryptedPluginConfig;
 use uptrakit_shared_db::entity::{
     host, host_software_item_plugin, plugin_config, service, service_host, software_item,
 };
@@ -29,7 +30,7 @@ pub(crate) struct AgentAssignmentRow {
     pub(crate) host_software_item_id: Uuid,
     /// Profile config from `plugin_configs.config`. NULL when `plugin_config_id`
     /// is NULL (package manager assignments after type settings migration).
-    pub(crate) profile_config: Option<serde_json::Value>,
+    pub(crate) profile_config: Option<EncryptedPluginConfig>,
     pub(crate) assignment_config: Option<serde_json::Value>,
     pub(crate) execution_site: String,
 }

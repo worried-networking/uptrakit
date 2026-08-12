@@ -790,21 +790,29 @@ mod tests {
         plugin_config_id: Uuid,
         api_url: &str,
     ) -> uptrakit_shared_db::entity::plugin_config::Model {
+        // Tests never initialize a real master key; plaintext mode lets
+        // `EncryptedPluginConfig::from_json` work without one. Safe to call
+        // repeatedly.
+        uptrakit_crypto::enable_plaintext_mode();
         let now = OffsetDateTime::now_utc();
         uptrakit_shared_db::entity::plugin_config::Model {
             id: plugin_config_id,
             tenant_id,
             name: "test".to_string(),
             plugin_type: "infrastructure.proxmox".to_string(),
-            config: serde_json::json!({
-                "api_url": api_url,
-                "api_token": "root@pam!tok=secret",
-                "verify_tls": false
-            }),
+            config: uptrakit_shared_db::encrypted_columns::EncryptedPluginConfig::from_json(
+                &serde_json::json!({
+                    "api_url": api_url,
+                    "api_token": "root@pam!tok=secret",
+                    "verify_tls": false
+                }),
+            )
+            .expect("encrypt test config"),
             enabled: true,
             created_at: now,
             updated_at: now,
             deactivated_at: None,
+            credential_updated_at: None,
         }
     }
 

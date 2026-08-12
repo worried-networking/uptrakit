@@ -104,7 +104,7 @@ struct ControllerFetchRow {
     package_identifier: String,
     plugin_type: String,
     /// NULL when `plugin_config_id` is NULL (package manager rows have no config row).
-    profile_config: Option<serde_json::Value>,
+    profile_config: Option<uptrakit_shared_db::encrypted_columns::EncryptedPluginConfig>,
     assignment_config: Option<serde_json::Value>,
     execution_site: String,
 }
@@ -252,7 +252,7 @@ impl FetchReleasesExecutor {
             let entry = groups.entry(group_key).or_insert_with(|| {
                 let merged_config = merged_plugin_config(
                     &plugin_type,
-                    row.profile_config.as_ref(),
+                    row.profile_config.as_ref().map(|c| c.as_json()),
                     row.assignment_config.as_ref(),
                 );
                 PhaseAGroup {
@@ -605,7 +605,7 @@ impl FetchReleasesExecutor {
 
             let config = merged_plugin_config(
                 &plugin_type,
-                row.profile_config.as_ref(),
+                row.profile_config.as_ref().map(|c| c.as_json()),
                 row.assignment_config.as_ref(),
             );
 

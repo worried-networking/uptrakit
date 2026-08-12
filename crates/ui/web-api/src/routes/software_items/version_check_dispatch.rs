@@ -47,7 +47,7 @@ impl VersionCheckContext {
         let _ = plugin_type;
         uptrakit_config_merge::resolve_effective_config(
             None,
-            config_model.map(|c| &c.config),
+            config_model.map(|c| c.config.as_json()),
             assignment_config,
         )
     }

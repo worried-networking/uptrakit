@@ -128,7 +128,7 @@ pub(crate) async fn trigger_discovery_for_agent_host(
                     plugins.push(DiscoveryPluginAssignment {
                         plugin_config_id: Some(cfg.id),
                         plugin_type: wire_plugin_type.clone(),
-                        config: cfg.config,
+                        config: cfg.config.as_json().clone(),
                     });
                 }
             }

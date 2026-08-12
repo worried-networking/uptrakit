@@ -126,7 +126,7 @@ pub async fn discover_plugin_config(
                     plugins: vec![uptrakit_wire::DiscoveryPluginAssignment {
                         plugin_config_id: Some(cfg.id),
                         plugin_type: PluginTypeId::new(cfg.plugin_type.clone()),
-                        config: cfg.config.clone(),
+                        config: cfg.config.as_json().clone(),
                     }],
                 },
             );

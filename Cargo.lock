@@ -8017,6 +8017,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uptrakit-command",
+ "uptrakit-crypto",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-plugin-infrastructure-proxmox",
  "uptrakit-shared-db",

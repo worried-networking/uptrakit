@@ -619,11 +619,17 @@ mod tests {
             tenant_id: Set(tenant_id),
             name: Set(format!("cfg-{plugin_config_id}")),
             plugin_type: Set("releases.github".to_string()),
-            config: Set(serde_json::json!({})),
+            config: Set(
+                uptrakit_shared_db::encrypted_columns::EncryptedPluginConfig::from_json(
+                    &serde_json::json!({}),
+                )
+                .expect("encrypt test config"),
+            ),
             enabled: Set(true),
             created_at: Set(now),
             updated_at: Set(now),
             deactivated_at: Set((!active).then_some(now)),
+            credential_updated_at: Set(None),
         }
         .insert(db)
         .await

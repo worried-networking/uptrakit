@@ -105,17 +105,19 @@ pub async fn run_embedded_message_handler(params: EmbeddedHandlerParams, tenant_
         service_rx,
         cancel,
     } = params;
-    crate::routes::service_ws::handler::run_embedded_message_handler(
-        crate::routes::service_ws::handler::EmbeddedHandlerCallParams {
-            state,
-            service_id,
-            connection_id,
-            capabilities: &capabilities,
-            app_name: &app_name,
-            service_rx,
-            cancel,
-        },
-        tenant_id,
+    Box::pin(
+        crate::routes::service_ws::handler::run_embedded_message_handler(
+            crate::routes::service_ws::handler::EmbeddedHandlerCallParams {
+                state,
+                service_id,
+                connection_id,
+                capabilities: &capabilities,
+                app_name: &app_name,
+                service_rx,
+                cancel,
+            },
+            tenant_id,
+        ),
     )
     .await;
 }
@@ -134,17 +136,19 @@ pub async fn run_embedded_system_message_handler(
         service_rx,
         cancel,
     } = params;
-    crate::routes::service_ws::handler::run_embedded_system_message_handler(
-        crate::routes::service_ws::handler::EmbeddedHandlerCallParams {
-            state,
-            service_id,
-            connection_id,
-            capabilities: &capabilities,
-            app_name: &app_name,
-            service_rx,
-            cancel,
-        },
-        service_tenant_id,
+    Box::pin(
+        crate::routes::service_ws::handler::run_embedded_system_message_handler(
+            crate::routes::service_ws::handler::EmbeddedHandlerCallParams {
+                state,
+                service_id,
+                connection_id,
+                capabilities: &capabilities,
+                app_name: &app_name,
+                service_rx,
+                cancel,
+            },
+            service_tenant_id,
+        ),
     )
     .await;
 }
