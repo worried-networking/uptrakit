@@ -253,7 +253,7 @@ pub(crate) async fn upsert_instance_plugin_setting(
         model.plugin_type_id.clone(),
         uptrakit_web_api_queries::instance_plugin_settings::InstancePluginRow {
             enabled: model.enabled,
-            config: model.config.clone(),
+            config: model.config.as_json().clone(),
             updated_at: model.updated_at,
         },
     );

@@ -4,14 +4,15 @@
 use sea_orm::entity::prelude::*;
 use time::OffsetDateTime;
 
+use crate::encrypted_columns::EncryptedInstancePluginConfig;
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
 #[sea_orm(table_name = "instance_plugin_setting")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub plugin_type_id: String,
     pub enabled: bool,
-    #[sea_orm(column_type = "Json")]
-    pub config: serde_json::Value,
+    pub config: EncryptedInstancePluginConfig,
     pub updated_at: OffsetDateTime,
 }
 

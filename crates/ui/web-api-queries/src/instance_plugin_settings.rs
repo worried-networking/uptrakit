@@ -9,6 +9,7 @@ use rootcause::prelude::*;
 use sea_orm::{ActiveModelTrait, ConnectionTrait, DatabaseConnection, EntityTrait, Set};
 use thiserror::Error;
 use time::OffsetDateTime;
+use uptrakit_shared_db::encrypted_columns::EncryptedInstancePluginConfig;
 use uptrakit_shared_db::entity::instance_plugin_setting::{ActiveModel, Entity, Model};
 use uptrakit_shared_macros::impl_report_conversion;
 
@@ -18,6 +19,9 @@ pub enum InstancePluginSettingsError {
     /// A database error occurred.
     #[error("database error: {0}")]
     Db(sea_orm::DbErr),
+    /// Encrypting the `config` column failed.
+    #[error("config encryption failed: {0}")]
+    Encryption(String),
 }
 
 pub type Result<T> = std::result::Result<T, rootcause::Report<InstancePluginSettingsError>>;
@@ -94,7 +98,7 @@ pub async fn load_at_boot(db: &DatabaseConnection) -> Result<InstancePluginSnaps
                     m.plugin_type_id,
                     InstancePluginRow {
                         enabled: m.enabled,
-                        config: m.config,
+                        config: m.config.as_json().clone(),
                         updated_at: m.updated_at,
                     },
                 )
@@ -134,7 +138,11 @@ pub async fn set_enabled(
             let active = ActiveModel {
                 plugin_type_id: Set(plugin_type_id.to_string()),
                 enabled: Set(new_enabled),
-                config: Set(serde_json::json!({})),
+                config: Set(
+                    EncryptedInstancePluginConfig::from_json(&serde_json::json!({})).map_err(
+                        |e| report!(InstancePluginSettingsError::Encryption(e.to_string())),
+                    )?,
+                ),
                 updated_at: Set(now),
             };
             active.insert(&txn).await.context_to()?
@@ -167,7 +175,8 @@ pub async fn upsert_config(
     let model = match existing {
         Some(m) => {
             let mut active: ActiveModel = m.into();
-            active.config = Set(new_config);
+            active.config = Set(EncryptedInstancePluginConfig::from_json(&new_config)
+                .map_err(|e| report!(InstancePluginSettingsError::Encryption(e.to_string())))?);
             active.updated_at = Set(now);
             active.update(&txn).await.context_to()?
         }
@@ -175,7 +184,11 @@ pub async fn upsert_config(
             let active = ActiveModel {
                 plugin_type_id: Set(plugin_type_id.to_string()),
                 enabled: Set(false),
-                config: Set(new_config),
+                config: Set(
+                    EncryptedInstancePluginConfig::from_json(&new_config).map_err(|e| {
+                        report!(InstancePluginSettingsError::Encryption(e.to_string()))
+                    })?,
+                ),
                 updated_at: Set(now),
             };
             active.insert(&txn).await.context_to()?
@@ -261,7 +274,11 @@ pub async fn set_enabled_in_tx(
             let active = ActiveModel {
                 plugin_type_id: Set(plugin_type_id.to_string()),
                 enabled: Set(new_enabled),
-                config: Set(serde_json::json!({})),
+                config: Set(
+                    EncryptedInstancePluginConfig::from_json(&serde_json::json!({})).map_err(
+                        |e| report!(InstancePluginSettingsError::Encryption(e.to_string())),
+                    )?,
+                ),
                 updated_at: Set(now),
             };
             let after = active.insert(tx).await.context_to()?;
@@ -289,7 +306,8 @@ pub async fn upsert_config_in_tx(
     match existing {
         Some(before) => {
             let mut active: ActiveModel = before.clone().into();
-            active.config = Set(new_config);
+            active.config = Set(EncryptedInstancePluginConfig::from_json(&new_config)
+                .map_err(|e| report!(InstancePluginSettingsError::Encryption(e.to_string())))?);
             active.updated_at = Set(now);
             let after = active.update(tx).await.context_to()?;
             Ok((Some(before), after))
@@ -298,7 +316,11 @@ pub async fn upsert_config_in_tx(
             let active = ActiveModel {
                 plugin_type_id: Set(plugin_type_id.to_string()),
                 enabled: Set(false),
-                config: Set(new_config),
+                config: Set(
+                    EncryptedInstancePluginConfig::from_json(&new_config).map_err(|e| {
+                        report!(InstancePluginSettingsError::Encryption(e.to_string()))
+                    })?,
+                ),
                 updated_at: Set(now),
             };
             let after = active.insert(tx).await.context_to()?;
@@ -362,7 +384,7 @@ mod tests {
             .await
             .unwrap();
         assert!(!model.enabled, "new row should default to disabled");
-        assert_eq!(model.config, config);
+        assert_eq!(model.config.as_json(), &config);
     }
 
     #[tokio::test]
@@ -381,7 +403,7 @@ mod tests {
             model.enabled,
             "enabled must be preserved after config upsert"
         );
-        assert_eq!(model.config, new_config);
+        assert_eq!(model.config.as_json(), &new_config);
     }
 
     #[tokio::test]

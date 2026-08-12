@@ -61,6 +61,7 @@ async fn test_all_core_entities_queryable(harness: &TestHarness) {
     assert_queryable!(notification_rule::Entity);
     assert_queryable!(plugin_config::Entity);
     assert_queryable!(plugin_type_setting::Entity);
+    assert_queryable!(instance_plugin_setting::Entity);
     assert_queryable!(setting::Entity);
     assert_queryable!(global_setting::Entity);
     assert_queryable!(update_history::Entity);
@@ -217,4 +218,274 @@ async fn test_drop_permissions_down_recreates_schema(harness: &TestHarness) {
 db_test!(
     drop_permissions_down_recreates_schema,
     test_drop_permissions_down_recreates_schema
+);
+
+/// Combined down-refuse coverage for all three `ENC:`-column migrations
+/// (`plugin_configs`, `plugin_type_settings`, `instance_plugin_setting`).
+///
+/// This test intentionally lives in the LAST of the three per-entity
+/// sub-passes: writing it after only one or two of the migrations existed
+/// would silently exercise `Migrator::down(&db, Some(1))` against whatever
+/// migration happened to be the tip at the time, not necessarily the
+/// intended target — and a later migration appended after it would then
+/// retarget the same call without the test noticing. All three migrations
+/// must already be registered (tip-most, in landing order) for the
+/// step-counted `Migrator::down` calls below to hit their intended targets.
+///
+/// Each `Migration` type is `pub(super)` in `uptrakit-shared-db` and
+/// unreachable from this crate (unlike the in-crate per-migration tests),
+/// so this test drives reverts through `Migrator::down`/`Migrator::up`
+/// rather than calling `.down()` directly.
+async fn test_encrypt_config_columns_down(harness: &TestHarness) {
+    use sea_orm::ConnectionTrait;
+    use sea_orm::sea_query::{Alias, Expr, ExprTrait, Query};
+    use sea_orm_migration::MigratorTrait as _;
+    use uptrakit_shared_db::migration::Migrator;
+    use uuid::Uuid;
+
+    const MIGRATION_NAMES: [&str; 3] = [
+        "m20260812_000001_encrypt_plugin_configs_config",
+        "m20260812_000002_encrypt_plugin_type_settings_config",
+        "m20260812_000003_encrypt_instance_plugin_setting_config",
+    ];
+    let all_migrations = Migrator::migrations();
+    let tail: Vec<&str> = all_migrations
+        .iter()
+        .rev()
+        .take(MIGRATION_NAMES.len())
+        .map(|m| m.name())
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    assert_eq!(
+        tail, MIGRATION_NAMES,
+        "the three ENC: migrations must be the tip-most three entries in Migrator::migrations(), \
+         in this exact order — this test drives them with step-counted Migrator::down/up calls \
+         (Some(3), then three Some(1) calls), and a migration appended after them would silently \
+         retarget every one of those calls to the wrong migration without any test noticing"
+    );
+
+    // Every timestamp column below is `timestamptz` on Postgres, which rejects a bare string
+    // literal (unlike SQLite, which accepts it via type affinity) — always pass a typed
+    // `OffsetDateTime`, as a real `ActiveModel` would.
+    let now = time::OffsetDateTime::now_utc();
+
+    async fn seed_plugin_config(
+        db: &sea_orm::DatabaseConnection,
+        tenant_id: Uuid,
+        name: &str,
+        config: &str,
+        now: time::OffsetDateTime,
+    ) {
+        db.execute(
+            &Query::insert()
+                .into_table(Alias::new("plugin_configs"))
+                .columns([
+                    Alias::new("id"),
+                    Alias::new("tenant_id"),
+                    Alias::new("name"),
+                    Alias::new("plugin_type"),
+                    Alias::new("config"),
+                    Alias::new("created_at"),
+                    Alias::new("updated_at"),
+                ])
+                .values_panic([
+                    Uuid::now_v7().into(),
+                    tenant_id.into(),
+                    name.into(),
+                    "releases_docker".into(),
+                    config.into(),
+                    now.into(),
+                    now.into(),
+                ])
+                .to_owned(),
+        )
+        .await
+        .expect("seed plugin_configs row");
+    }
+
+    async fn seed_plugin_type_setting(
+        db: &sea_orm::DatabaseConnection,
+        tenant_id: Uuid,
+        plugin_type: &str,
+        config: &str,
+        now: time::OffsetDateTime,
+    ) {
+        db.execute(
+            &Query::insert()
+                .into_table(Alias::new("plugin_type_settings"))
+                .columns([
+                    Alias::new("id"),
+                    Alias::new("tenant_id"),
+                    Alias::new("plugin_type"),
+                    Alias::new("config"),
+                    Alias::new("created_at"),
+                    Alias::new("updated_at"),
+                ])
+                .values_panic([
+                    Uuid::now_v7().into(),
+                    tenant_id.into(),
+                    plugin_type.into(),
+                    config.into(),
+                    now.into(),
+                    now.into(),
+                ])
+                .to_owned(),
+        )
+        .await
+        .expect("seed plugin_type_settings row");
+    }
+
+    async fn seed_instance_plugin_setting(
+        db: &sea_orm::DatabaseConnection,
+        plugin_type_id: &str,
+        config: &str,
+        now: time::OffsetDateTime,
+    ) {
+        db.execute(
+            &Query::insert()
+                .into_table(Alias::new("instance_plugin_setting"))
+                .columns([
+                    Alias::new("plugin_type_id"),
+                    Alias::new("enabled"),
+                    Alias::new("config"),
+                    Alias::new("updated_at"),
+                ])
+                .values_panic([
+                    plugin_type_id.into(),
+                    true.into(),
+                    config.into(),
+                    now.into(),
+                ])
+                .to_owned(),
+        )
+        .await
+        .expect("seed instance_plugin_setting row");
+    }
+
+    // Phase 1: at tip, seed one plaintext row per table, then revert all
+    // three encryption migrations in one shot — proves a clean three-step
+    // down over plaintext data on both backends.
+    //
+    // `plugin_configs.name` is unique per (tenant_id, name) among
+    // non-deactivated rows, and `plugin_type_settings.plugin_type` is unique
+    // per (tenant_id, plugin_type); the down/up round trip only changes
+    // column TYPES, so these rows survive into phase 2 below — phase 2 must
+    // use distinct key values or it collides with these unique indexes.
+    seed_plugin_config(
+        &harness.db,
+        harness.tenant_id,
+        "subpass3-combined-test-plain",
+        r#"{"foo":"bar"}"#,
+        now,
+    )
+    .await;
+    seed_plugin_type_setting(
+        &harness.db,
+        harness.tenant_id,
+        "subpass3-combined-test-plain",
+        r#"{"foo":"bar"}"#,
+        now,
+    )
+    .await;
+    seed_instance_plugin_setting(&harness.db, "subpass3.plain", r#"{"foo":"bar"}"#, now).await;
+
+    Migrator::down(&harness.db, Some(3))
+        .await
+        .expect("three-step down over plaintext rows must succeed on both backends");
+
+    // Re-apply so the tip is back at m20260812_000003 for phase 2.
+    Migrator::up(&harness.db, None)
+        .await
+        .expect("re-apply the three encryption migrations");
+
+    // Phase 2: seed an ENC:-prefixed row per table, using key values distinct
+    // from phase 1's (still-present) rows, and confirm each migration's
+    // single-step down refuses, one at a time, walking the tip backward:
+    // instance_plugin_setting -> plugin_type_settings -> plugin_configs.
+    seed_instance_plugin_setting(&harness.db, "subpass3.enc", "ENC:v3:deadbeef", now).await;
+    seed_plugin_type_setting(
+        &harness.db,
+        harness.tenant_id,
+        "subpass3-combined-test-enc",
+        "ENC:v3:deadbeef",
+        now,
+    )
+    .await;
+    seed_plugin_config(
+        &harness.db,
+        harness.tenant_id,
+        "subpass3-combined-test-enc",
+        "ENC:v3:deadbeef",
+        now,
+    )
+    .await;
+
+    // instance_plugin_setting (tip: m20260812_000003).
+    let err = Migrator::down(&harness.db, Some(1))
+        .await
+        .expect_err("down must refuse while instance_plugin_setting holds an ENC: row");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("instance_plugin_setting"),
+        "error must name instance_plugin_setting; got: {msg}"
+    );
+    harness
+        .db
+        .execute(
+            &Query::delete()
+                .from_table(Alias::new("instance_plugin_setting"))
+                .and_where(Expr::col(Alias::new("plugin_type_id")).eq("subpass3.enc"))
+                .to_owned(),
+        )
+        .await
+        .expect("delete the ENC: instance_plugin_setting row");
+    Migrator::down(&harness.db, Some(1))
+        .await
+        .expect("instance_plugin_setting down must succeed once no ENC: rows remain");
+
+    // plugin_type_settings (tip: m20260812_000002).
+    let err = Migrator::down(&harness.db, Some(1))
+        .await
+        .expect_err("down must refuse while plugin_type_settings holds an ENC: row");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("plugin_type_settings"),
+        "error must name plugin_type_settings; got: {msg}"
+    );
+    harness
+        .db
+        .execute(
+            &Query::delete()
+                .from_table(Alias::new("plugin_type_settings"))
+                .and_where(Expr::col(Alias::new("config")).eq("ENC:v3:deadbeef"))
+                .to_owned(),
+        )
+        .await
+        .expect("delete the ENC: plugin_type_settings row");
+    Migrator::down(&harness.db, Some(1))
+        .await
+        .expect("plugin_type_settings down must succeed once no ENC: rows remain");
+
+    // plugin_configs (tip: m20260812_000001).
+    let err = Migrator::down(&harness.db, Some(1))
+        .await
+        .expect_err("down must refuse while plugin_configs holds an ENC: row");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("plugin_configs"),
+        "error must name plugin_configs; got: {msg}"
+    );
+    // No cleanup needed: the refused down() returns its error before
+    // performing any schema change. By this point m20260812_000003 and
+    // m20260812_000002 were already reverted (and left reverted) above;
+    // only m20260812_000001 (plugin_configs) is still applied. The harness
+    // is torn down (dropped SQLite file / discarded testcontainer) right
+    // after this test, so no re-migration to full tip is needed here.
+}
+
+db_test!(
+    encrypt_config_columns_down,
+    test_encrypt_config_columns_down
 );

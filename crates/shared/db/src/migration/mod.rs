@@ -91,6 +91,7 @@ mod m20260803_000001_seed_mcp_use_grants;
 mod m20260807_000001_drop_permissions_tables;
 mod m20260812_000001_encrypt_plugin_configs_config;
 mod m20260812_000002_encrypt_plugin_type_settings_config;
+mod m20260812_000003_encrypt_instance_plugin_setting_config;
 
 pub struct Migrator;
 
@@ -185,6 +186,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260807_000001_drop_permissions_tables::Migration),
             Box::new(m20260812_000001_encrypt_plugin_configs_config::Migration),
             Box::new(m20260812_000002_encrypt_plugin_type_settings_config::Migration),
+            Box::new(m20260812_000003_encrypt_instance_plugin_setting_config::Migration),
         ]
     }
 }

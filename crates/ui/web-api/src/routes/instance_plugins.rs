@@ -260,7 +260,7 @@ pub async fn set_instance_plugin_enabled(
     // Atomically update the in-memory snapshot AFTER commit.
     let new_row = InstancePluginRow {
         enabled: after_model.enabled,
-        config: after_model.config,
+        config: after_model.config.as_json().clone(),
         updated_at: after_model.updated_at,
     };
     let new_snapshot = Arc::new(
@@ -416,7 +416,7 @@ pub async fn upsert_instance_plugin_config(
     // Atomically update the in-memory snapshot AFTER commit.
     let new_row = InstancePluginRow {
         enabled: after_model.enabled,
-        config: after_model.config,
+        config: after_model.config.as_json().clone(),
         updated_at: after_model.updated_at,
     };
     let new_snapshot = Arc::new(
