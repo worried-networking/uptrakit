@@ -113,12 +113,17 @@ pub async fn process_discovery_results(
     agent_id: Uuid,
     tenant_id: Uuid,
     host_id: Uuid,
+    ops: &dyn uptrakit_plugin_infrastructure_registry::PluginConfigOps,
     payload: DiscoveryResultsPayload,
 ) -> Result<()> {
     let now = OffsetDateTime::now_utc();
 
     // Load the tenant-wide ignore set once for the entire discovery run.
     let ignore_set = discovery_items::load_ignore_set(db, tenant_id).await?;
+
+    // Bundles `audit` + `ops` once for every write site reachable from the
+    // per-target loop (see `DiscoveryDeps` for why).
+    let deps = discovery_items::DiscoveryDeps::new(audit, ops);
 
     for result in payload.results {
         if let Some(ref err) = result.error {
@@ -139,7 +144,7 @@ pub async fn process_discovery_results(
         if !result.discoveries.is_empty() {
             discovery_items::process_plugin_result(
                 db,
-                audit,
+                &deps,
                 tenant_id,
                 host_id,
                 now,
@@ -183,15 +188,52 @@ pub(crate) mod tests_common {
         ActiveModelTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait, Set,
     };
     use uptrakit_audit_log::{AuditEmitter, AuditLogDispatcher, NoopBackend};
+    use uptrakit_plugin_infrastructure_registry::{
+        CatalogConfig, InstancePluginStates, PluginCatalog, PluginConfigOps, PluginDescriptor,
+        PluginMetadataOps, build_catalog,
+    };
     use uptrakit_shared_db::entity::{
         host, host_software_item, host_software_item_plugin, plugin_config, prelude::*,
         software_item, tenant,
     };
+    use uptrakit_shared_types::PluginTypeId;
     use uptrakit_wire::{
         DiscoveredSoftware as WireDiscoveredSoftware, DiscoveryPluginResult, DiscoveryTarget,
         PluginRole, plugin_ids,
     };
     use uuid::Uuid;
+
+    /// No-op `PluginConfigOps` stub for tests that never set a target's
+    /// `config_override` (i.e. every fixture in this module except the
+    /// sensitive-stripping tests): `get()` always returns `None`, so the
+    /// discovery config-override strip/fail-closed guard degrades to
+    /// "drop wholesale" -- a no-op when the override was already `None`.
+    pub struct NoopOps;
+
+    impl PluginMetadataOps for NoopOps {
+        fn get(&self, _id: &PluginTypeId) -> Option<&PluginDescriptor> {
+            None
+        }
+        fn all(&self) -> Vec<&PluginDescriptor> {
+            vec![]
+        }
+        fn instance_enabled(&self, _id: &PluginTypeId) -> bool {
+            true
+        }
+    }
+    impl PluginConfigOps for NoopOps {}
+
+    /// Real, fully-populated plugin catalog (all compiled-in descriptors,
+    /// every instance-scoped plugin disabled) for tests that need a live
+    /// descriptor's actual sensitive-path metadata -- e.g. asserting that
+    /// GitHub's `auth_token` is stripped from a discovery `config_override`.
+    pub fn real_plugin_ops() -> PluginCatalog {
+        build_catalog(
+            &CatalogConfig::default(),
+            InstancePluginStates::all_disabled(),
+        )
+        .expect("build production plugin catalog")
+    }
 
     pub async fn setup_db() -> DatabaseConnection {
         // Tests never initialize a real master key; plaintext mode lets the
@@ -754,9 +796,17 @@ mod tests {
             }],
         };
 
-        process_discovery_results(&db, &test_emitter(), agent_id, tenant_id, host_id, payload)
-            .await
-            .expect("process must succeed");
+        process_discovery_results(
+            &db,
+            &test_emitter(),
+            agent_id,
+            tenant_id,
+            host_id,
+            &NoopOps,
+            payload,
+        )
+        .await
+        .expect("process must succeed");
 
         // No plugin_config should be created for package manager types.
         let configs = PluginConfig::find()
@@ -837,6 +887,7 @@ mod tests {
             agent_id,
             tenant_id,
             host_id,
+            &NoopOps,
             make_payload("1.24.4"),
         )
         .await
@@ -849,6 +900,7 @@ mod tests {
             agent_id,
             tenant_id,
             host_id,
+            &NoopOps,
             make_payload("1.24.5"),
         )
         .await

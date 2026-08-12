@@ -61,6 +61,7 @@ async fn process_discovery_page_for_host(
         svc.id,
         svc.tenant_id,
         host_id,
+        state.plugin.plugin_ops.as_ref(),
         payload,
     )
     .await

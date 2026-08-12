@@ -11,7 +11,7 @@ use time::OffsetDateTime;
 use uptrakit_audit_log::{
     AuditActionType, AuditEmitter, AuditEntry, AuditOutcome, AuditView, Event,
 };
-use uptrakit_plugin_infrastructure_registry::is_package_manager_plugin;
+use uptrakit_plugin_infrastructure_registry::{PluginConfigOps, is_package_manager_plugin};
 use uptrakit_shared_db::entity::{
     host_software_item, host_software_item_plugin, prelude::*, software_ignore, software_item,
 };
@@ -83,13 +83,35 @@ impl<'a> DiscoveredItemInfo<'a> {
 /// functions stay within the workspace's argument-count lint. `discovery_source`
 /// is the *discovering* plugin type (`result.plugin_type`) -- for PHS targets
 /// this remains `discovery.proxmox-helper-scripts`, never the target's own
-/// management plugin type.
+/// management plugin type. `ops` is threaded here -- rather than as a bare
+/// parameter on the functions below -- so every write site reachable from the
+/// per-target loop (including the config-override strip/fail-closed guard at
+/// the role-assignment build, and `find_or_create_default_plugin_config`'s
+/// future `ops` need) gets it for free via `ctx.ops`, without widening any
+/// function's own argument list.
 struct DiscoveryContext<'a> {
     tenant_id: Uuid,
     host_id: Uuid,
     now: OffsetDateTime,
     discovery_source: &'a str,
     audit: &'a AuditEmitter,
+    ops: &'a dyn PluginConfigOps,
+}
+
+/// Bundles the two call-scoped service handles (`audit`, `ops`) that
+/// `process_plugin_result` needs, keeping its own parameter count within the
+/// workspace's argument-count lint even after gaining `ops`. Both fields feed
+/// straight into the per-item [`DiscoveryContext`], so this is purely a
+/// plumbing container -- it carries no behavior of its own.
+pub(super) struct DiscoveryDeps<'a> {
+    audit: &'a AuditEmitter,
+    ops: &'a dyn PluginConfigOps,
+}
+
+impl<'a> DiscoveryDeps<'a> {
+    pub(super) fn new(audit: &'a AuditEmitter, ops: &'a dyn PluginConfigOps) -> Self {
+        Self { audit, ops }
+    }
 }
 
 /// Process a single plugin's discovery results.
@@ -98,7 +120,7 @@ struct DiscoveryContext<'a> {
 /// and the result's `plugin_config_id`.
 pub(super) async fn process_plugin_result(
     db: &sea_orm::DatabaseConnection,
-    audit: &AuditEmitter,
+    deps: &DiscoveryDeps<'_>,
     tenant_id: Uuid,
     host_id: Uuid,
     now: OffsetDateTime,
@@ -131,7 +153,8 @@ pub(super) async fn process_plugin_result(
             host_id,
             now,
             discovery_source: &discovery_source,
-            audit,
+            audit: deps.audit,
+            ops: deps.ops,
         };
         if !item.targets.is_empty() {
             process_targets_discovery(db, &ctx, &item_info, &item.targets).await?;
@@ -234,6 +257,40 @@ async fn process_targets_discovery(
             continue;
         };
 
+        // Strip sensitive keys from the agent-reported config override before
+        // it ever reaches `host_software_item_plugin.config` -- an unencrypted
+        // JSON column (unlike `plugin_configs.config`). Agents are untrusted
+        // input for this purpose: they must never be able to smuggle a
+        // credential into layer-3 storage. When the plugin type has no live
+        // descriptor, the sensitive-path set is unknowable, so the whole
+        // override is dropped (fail-closed) rather than assumed safe.
+        let config_override = match ctx.ops.get(&target.plugin_type) {
+            None => {
+                if target.config_override.is_some() {
+                    tracing::warn!(
+                        plugin_type = %target.plugin_type,
+                        "dropping discovery config_override wholesale: plugin type has no live \
+                         descriptor, sensitive-path set unknowable (fail-closed)"
+                    );
+                }
+                None
+            }
+            Some(_) => target.config_override.clone().map(|mut value| {
+                let removed = ctx
+                    .ops
+                    .strip_sensitive_paths_from(&target.plugin_type, &mut value);
+                if !removed.is_empty() {
+                    tracing::warn!(
+                        plugin_type = %target.plugin_type,
+                        dropped_keys = ?removed,
+                        "stripped sensitive keys from discovery config_override; agents must \
+                         never report credentials"
+                    );
+                }
+                value
+            }),
+        };
+
         // Create role assignments from the target's role list.
         for role in &target.roles {
             let plugin_link = host_software_item_plugin::ActiveModel {
@@ -246,7 +303,7 @@ async fn process_targets_discovery(
                 role: Set(role.as_str().to_string()),
                 ordinal: Set(0),
                 package_identifier: Set(target_item.effective_plugin_pkg_id().to_string()),
-                config: Set(target.config_override.clone()),
+                config: Set(config_override.clone()),
                 execution_site: Set(execution_site.to_owned()),
                 created_at: Set(ctx.now),
                 updated_at: Set(ctx.now),
@@ -853,9 +910,10 @@ mod tests {
 
     use super::*;
     use crate::queries::autodiscovery::tests_common::{
-        all_roles, insert_host, insert_host_link, insert_plugin_config, insert_software_item,
-        insert_tenant, phs_result_no_targets, phs_result_with_apt_target,
-        phs_result_with_github_target, phs_result_with_two_targets, setup_db, test_emitter,
+        NoopOps, all_roles, insert_host, insert_host_link, insert_plugin_config,
+        insert_software_item, insert_tenant, phs_result_no_targets, phs_result_with_apt_target,
+        phs_result_with_github_target, phs_result_with_two_targets, real_plugin_ops, setup_db,
+        test_emitter,
     };
     use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};
     use std::sync::Arc;
@@ -937,6 +995,7 @@ mod tests {
             now,
             discovery_source: "package-manager.homebrew",
             audit: &audit,
+            ops: &NoopOps,
         };
         process_one_discovery(&db, &ctx, pc_id, "package-manager.homebrew", args)
             .await
@@ -1060,6 +1119,7 @@ mod tests {
             now,
             discovery_source: "package-manager.homebrew",
             audit: &audit,
+            ops: &NoopOps,
         };
         process_one_discovery(&db, &ctx, pc_id, "package-manager.homebrew", args)
             .await
@@ -1124,6 +1184,7 @@ mod tests {
             now,
             discovery_source: "package-manager.homebrew",
             audit: &audit,
+            ops: &NoopOps,
         };
         process_one_discovery(&db, &ctx, pc_id, "package-manager.homebrew", args)
             .await
@@ -1198,6 +1259,7 @@ mod tests {
             now,
             discovery_source: "package-manager.homebrew",
             audit: &audit,
+            ops: &NoopOps,
         };
         process_one_discovery(&db, &ctx, pc_id, "package-manager.homebrew", args)
             .await
@@ -1278,6 +1340,7 @@ mod tests {
             now,
             discovery_source: "package-manager.homebrew",
             audit: &audit,
+            ops: &NoopOps,
         };
         process_one_discovery(&db, &ctx, pc_id, "package-manager.homebrew", args)
             .await
@@ -1390,6 +1453,7 @@ mod tests {
             now,
             discovery_source: "package-manager.homebrew",
             audit: &audit,
+            ops: &NoopOps,
         };
         process_one_discovery(&db, &ctx, pc_id, "package-manager.homebrew", args)
             .await
@@ -1478,6 +1542,7 @@ mod tests {
             now,
             discovery_source: "package-manager.homebrew",
             audit: &audit,
+            ops: &NoopOps,
         };
         process_one_discovery(&db, &ctx, pc_id, "package-manager.homebrew", args)
             .await
@@ -1566,6 +1631,7 @@ mod tests {
             now,
             discovery_source: "package-manager.homebrew",
             audit: &audit,
+            ops: &NoopOps,
         };
         process_one_discovery(&db, &ctx, pc_id, "package-manager.homebrew", args)
             .await
@@ -1607,7 +1673,7 @@ mod tests {
 
         process_plugin_result(
             &db,
-            &test_emitter(),
+            &DiscoveryDeps::new(&test_emitter(), &NoopOps),
             tenant_id,
             host_id,
             now,
@@ -1649,6 +1715,267 @@ mod tests {
             3,
             "expected three role-based plugin links"
         );
+    }
+
+    /// A discovery target's `config_override` for a cataloged plugin type
+    /// (github) must have its sensitive keys (`auth_token`) stripped before
+    /// landing in `host_software_item_plugins.config` -- an unencrypted JSON
+    /// column -- while non-sensitive keys (`asset_patterns`) survive.
+    #[tokio::test]
+    async fn discovery_override_sensitive_keys_are_stripped() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+
+        insert_tenant(&db, tenant_id).await;
+        insert_host(&db, host_id, tenant_id).await;
+
+        let result = DiscoveryPluginResult {
+            plugin_type: plugin_ids::DISCOVERY_PROXMOX_HELPER_SCRIPTS.clone(),
+            plugin_config_id: None,
+            error: None,
+            discoveries: vec![WireDiscoveredSoftware {
+                package_identifier: "booklore".to_string(),
+                name: "BookLore".to_string(),
+                installed_version: "1.18.5".to_string(),
+                targets: vec![DiscoveryTarget {
+                    plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
+                    plugin_config: serde_json::json!({
+                        "owner": "BookLore",
+                        "repo": "BookLore",
+                        "tag_strip_prefix": "v",
+                        "include_prereleases": false,
+                        "asset_patterns": [],
+                    }),
+                    plugin_config_name: "BookLore/BookLore".to_string(),
+                    roles: all_roles(),
+                    package_identifier: None,
+                    config_override: Some(serde_json::json!({
+                        "auth_token": "leak",
+                        "asset_patterns": ["x"],
+                    })),
+                    execution_site: None,
+                }],
+                extra: None,
+                featured: false,
+                qualifier: None,
+                plugin_package_identifier: None,
+                installed_display_version: None,
+            }],
+        };
+
+        let ops = real_plugin_ops();
+        process_plugin_result(
+            &db,
+            &DiscoveryDeps::new(&test_emitter(), &ops),
+            tenant_id,
+            host_id,
+            now,
+            &result,
+            &HashSet::new(),
+        )
+        .await
+        .expect("process_plugin_result");
+
+        let plugin_links = HostSoftwareItemPlugin::find()
+            .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+            .filter(host_software_item_plugin::Column::PackageIdentifier.eq("booklore"))
+            .all(&db)
+            .await
+            .expect("query plugin links");
+        assert_eq!(
+            plugin_links.len(),
+            3,
+            "expected three role-based plugin links"
+        );
+        for link in &plugin_links {
+            let config = link
+                .config
+                .as_ref()
+                .expect("config_override must be persisted (stripped, not dropped)");
+            assert_eq!(
+                config.get("asset_patterns"),
+                Some(&serde_json::json!(["x"])),
+                "non-sensitive override key must survive stripping"
+            );
+            assert!(
+                config.get("auth_token").is_none(),
+                "sensitive override key must be stripped, got: {config:?}"
+            );
+        }
+    }
+
+    /// A discovery target whose plugin type has no live catalog descriptor
+    /// must have its entire `config_override` dropped wholesale (fail-closed)
+    /// -- the sensitive-path set for an uncataloged type is unknowable, so it
+    /// cannot be assumed safe to persist any part of it.
+    #[tokio::test]
+    async fn discovery_override_unknown_plugin_type_dropped_wholesale() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+
+        insert_tenant(&db, tenant_id).await;
+        insert_host(&db, host_id, tenant_id).await;
+
+        let unknown_type = uptrakit_shared_types::PluginTypeId::new("totally-unknown-plugin-type");
+
+        let result = DiscoveryPluginResult {
+            plugin_type: plugin_ids::DISCOVERY_PROXMOX_HELPER_SCRIPTS.clone(),
+            plugin_config_id: None,
+            error: None,
+            discoveries: vec![WireDiscoveredSoftware {
+                package_identifier: "mystery-app".to_string(),
+                name: "Mystery App".to_string(),
+                installed_version: "1.0.0".to_string(),
+                targets: vec![DiscoveryTarget {
+                    plugin_type: unknown_type.clone(),
+                    plugin_config: serde_json::json!({}),
+                    plugin_config_name: "Mystery App".to_string(),
+                    roles: all_roles(),
+                    package_identifier: None,
+                    config_override: Some(serde_json::json!({
+                        "auth_token": "leak",
+                        "anything": "goes",
+                    })),
+                    execution_site: None,
+                }],
+                extra: None,
+                featured: false,
+                qualifier: None,
+                plugin_package_identifier: None,
+                installed_display_version: None,
+            }],
+        };
+
+        let ops = real_plugin_ops();
+        process_plugin_result(
+            &db,
+            &DiscoveryDeps::new(&test_emitter(), &ops),
+            tenant_id,
+            host_id,
+            now,
+            &result,
+            &HashSet::new(),
+        )
+        .await
+        .expect("process_plugin_result");
+
+        let plugin_links = HostSoftwareItemPlugin::find()
+            .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+            .filter(host_software_item_plugin::Column::PackageIdentifier.eq("mystery-app"))
+            .all(&db)
+            .await
+            .expect("query plugin links");
+        assert_eq!(
+            plugin_links.len(),
+            3,
+            "expected three role-based plugin links"
+        );
+        for link in &plugin_links {
+            assert!(
+                link.config.is_none(),
+                "config_override for an uncataloged plugin type must be dropped wholesale, got: {:?}",
+                link.config
+            );
+        }
+    }
+
+    /// A discovery report combining a stripped override (cataloged type) and
+    /// a wholesale-dropped override (uncataloged type) must still succeed as
+    /// a whole -- neither condition may fail the report.
+    #[tokio::test]
+    async fn discovery_report_never_fails_over_stripping() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let agent_id = Uuid::now_v7();
+
+        insert_tenant(&db, tenant_id).await;
+        insert_host(&db, host_id, tenant_id).await;
+
+        let unknown_type = uptrakit_shared_types::PluginTypeId::new("totally-unknown-plugin-type");
+
+        let payload = uptrakit_wire::DiscoveryResultsPayload {
+            host_machine_id: "test-machine".to_string(),
+            results: vec![
+                DiscoveryPluginResult {
+                    plugin_type: plugin_ids::DISCOVERY_PROXMOX_HELPER_SCRIPTS.clone(),
+                    plugin_config_id: None,
+                    error: None,
+                    discoveries: vec![WireDiscoveredSoftware {
+                        package_identifier: "booklore".to_string(),
+                        name: "BookLore".to_string(),
+                        installed_version: "1.18.5".to_string(),
+                        targets: vec![DiscoveryTarget {
+                            plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
+                            plugin_config: serde_json::json!({
+                                "owner": "BookLore",
+                                "repo": "BookLore",
+                                "tag_strip_prefix": "v",
+                                "include_prereleases": false,
+                                "asset_patterns": [],
+                            }),
+                            plugin_config_name: "BookLore/BookLore".to_string(),
+                            roles: all_roles(),
+                            package_identifier: None,
+                            config_override: Some(serde_json::json!({
+                                "auth_token": "leak",
+                                "asset_patterns": ["x"],
+                            })),
+                            execution_site: None,
+                        }],
+                        extra: None,
+                        featured: false,
+                        qualifier: None,
+                        plugin_package_identifier: None,
+                        installed_display_version: None,
+                    }],
+                },
+                DiscoveryPluginResult {
+                    plugin_type: plugin_ids::DISCOVERY_PROXMOX_HELPER_SCRIPTS.clone(),
+                    plugin_config_id: None,
+                    error: None,
+                    discoveries: vec![WireDiscoveredSoftware {
+                        package_identifier: "mystery-app".to_string(),
+                        name: "Mystery App".to_string(),
+                        installed_version: "1.0.0".to_string(),
+                        targets: vec![DiscoveryTarget {
+                            plugin_type: unknown_type.clone(),
+                            plugin_config: serde_json::json!({}),
+                            plugin_config_name: "Mystery App".to_string(),
+                            roles: all_roles(),
+                            package_identifier: None,
+                            config_override: Some(serde_json::json!({
+                                "auth_token": "leak",
+                                "anything": "goes",
+                            })),
+                            execution_site: None,
+                        }],
+                        extra: None,
+                        featured: false,
+                        qualifier: None,
+                        plugin_package_identifier: None,
+                        installed_display_version: None,
+                    }],
+                },
+            ],
+        };
+
+        let ops = real_plugin_ops();
+        crate::queries::autodiscovery::process_discovery_results(
+            &db,
+            &test_emitter(),
+            agent_id,
+            tenant_id,
+            host_id,
+            &ops,
+            payload,
+        )
+        .await
+        .expect("discovery report must succeed despite stripped/dropped overrides");
     }
 
     #[tokio::test]
@@ -1694,7 +2021,7 @@ mod tests {
 
         process_plugin_result(
             &db,
-            &test_emitter(),
+            &DiscoveryDeps::new(&test_emitter(), &NoopOps),
             tenant_id,
             host_id,
             now,
@@ -1735,7 +2062,7 @@ mod tests {
 
         process_plugin_result(
             &db,
-            &test_emitter(),
+            &DiscoveryDeps::new(&test_emitter(), &NoopOps),
             tenant_id,
             host_id,
             now,
@@ -1804,7 +2131,7 @@ mod tests {
 
         process_plugin_result(
             &db,
-            &test_emitter(),
+            &DiscoveryDeps::new(&test_emitter(), &NoopOps),
             tenant_id,
             host_id,
             now,
@@ -1858,7 +2185,7 @@ mod tests {
 
         process_plugin_result(
             &db,
-            &test_emitter(),
+            &DiscoveryDeps::new(&test_emitter(), &NoopOps),
             tenant_id,
             host_id,
             now,
@@ -1906,7 +2233,7 @@ mod tests {
 
         process_plugin_result(
             &db,
-            &test_emitter(),
+            &DiscoveryDeps::new(&test_emitter(), &NoopOps),
             tenant_id,
             host1,
             now,
@@ -1917,7 +2244,7 @@ mod tests {
         .expect("host1");
         process_plugin_result(
             &db,
-            &test_emitter(),
+            &DiscoveryDeps::new(&test_emitter(), &NoopOps),
             tenant_id,
             host2,
             now,
@@ -1985,7 +2312,7 @@ mod tests {
 
         process_plugin_result(
             &db,
-            &test_emitter(),
+            &DiscoveryDeps::new(&test_emitter(), &NoopOps),
             tenant_id,
             host_id,
             now,
@@ -2043,7 +2370,7 @@ mod tests {
 
         process_plugin_result(
             &db,
-            &test_emitter(),
+            &DiscoveryDeps::new(&test_emitter(), &NoopOps),
             tenant_id,
             host_id,
             now,
@@ -2117,7 +2444,7 @@ mod tests {
 
         process_plugin_result(
             &db,
-            &test_emitter(),
+            &DiscoveryDeps::new(&test_emitter(), &NoopOps),
             tenant_id,
             host_id,
             now,
@@ -2155,7 +2482,7 @@ mod tests {
         let ignore_set = HashSet::new();
         process_plugin_result(
             &db,
-            &test_emitter(),
+            &DiscoveryDeps::new(&test_emitter(), &NoopOps),
             tenant_id,
             host_id,
             now,
@@ -2179,7 +2506,7 @@ mod tests {
         let result2 = phs_result_with_apt_target("wget", "Wget", "1.21.4");
         process_plugin_result(
             &db,
-            &test_emitter(),
+            &DiscoveryDeps::new(&test_emitter(), &NoopOps),
             tenant_id,
             host_id,
             now,
@@ -2222,7 +2549,7 @@ mod tests {
 
         process_plugin_result(
             &db,
-            &test_emitter(),
+            &DiscoveryDeps::new(&test_emitter(), &NoopOps),
             tenant_id,
             host_id,
             now,
@@ -2342,7 +2669,7 @@ mod tests {
         // First pass: create.
         process_plugin_result(
             &db,
-            &test_emitter(),
+            &DiscoveryDeps::new(&test_emitter(), &NoopOps),
             tenant_id,
             host_id,
             now,
@@ -2375,7 +2702,7 @@ mod tests {
         // Second pass: re-match (Phase 1 in-place update).
         process_plugin_result(
             &db,
-            &test_emitter(),
+            &DiscoveryDeps::new(&test_emitter(), &NoopOps),
             tenant_id,
             host_id,
             now,
@@ -2466,6 +2793,7 @@ mod tests {
             now,
             discovery_source: "package-manager.homebrew",
             audit: &audit,
+            ops: &NoopOps,
         };
         process_one_discovery(&db, &ctx, pc_id, "package-manager.homebrew", args)
             .await
@@ -2583,6 +2911,7 @@ mod tests {
             now,
             discovery_source: "package-manager.homebrew",
             audit: &audit,
+            ops: &NoopOps,
         };
         process_one_discovery(&db, &ctx, pc_id, "package-manager.homebrew", args)
             .await
@@ -2691,6 +3020,7 @@ mod tests {
             now,
             discovery_source: "package-manager.homebrew",
             audit: &audit,
+            ops: &NoopOps,
         };
         process_one_discovery(&db, &ctx, pc_id, "package-manager.homebrew", args)
             .await
@@ -2849,6 +3179,7 @@ mod tests {
             now,
             discovery_source: "package-manager.homebrew",
             audit: &audit,
+            ops: &NoopOps,
         };
         process_one_discovery(&db, &ctx, pc_id, "package-manager.homebrew", args)
             .await
