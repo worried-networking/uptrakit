@@ -391,23 +391,37 @@ pub async fn update_plugin_config(
     }
 
     // Validate new config if provided; restore masked secrets from the existing value.
-    // Only clone the decrypted existing config when there is actually a new
-    // config to restore secrets into — a metadata-only update (no `config`
-    // field) must not allocate plaintext secret material it will never use.
+    //
+    // Everything that depends on both `req.config` and the pre-update value
+    // happens inside this single `if let Some(mut config) = req.config`
+    // block, computed and consumed before `existing` is moved into the
+    // active model below. The two used to be split across a presence check
+    // computed early (`existing_config`) and a second, independently-typed
+    // `Some` match at the persist call site — coupled only by construction,
+    // not by the compiler. Collapsing them into one block removes that
+    // latent double-`Option` seam entirely: there is exactly one place a
+    // new config value can come from, and it always runs when the caller
+    // supplied one.
     let type_id = PluginTypeId::new(&plugin_type);
-    let existing_config = req
-        .config
-        .is_some()
-        .then(|| existing.config.as_json().clone());
-    if let Some(ref mut new_config) = req.config.clone()
-        && let Some(ref existing_config) = existing_config
-    {
-        ops.restore_config_secrets(&type_id, new_config, existing_config);
+    let new_config: Option<EncryptedPluginConfig> = if let Some(mut config) = req.config {
+        let existing_config = existing.config.as_json().clone();
 
-        if let Err(e) = ops.validate_config(&type_id, new_config) {
+        ops.restore_config_secrets(&type_id, &mut config, &existing_config);
+        if let Err(e) = ops.validate_config(&type_id, &config) {
             bail!(PluginConfigError::ConfigValidation(e.to_string()));
         }
-    }
+        let _pruned = ops.prune_stale_sensitive_keys(&type_id, &mut config);
+        ops.assert_no_sentinel(&type_id, &config)
+            .map_err(|e| report!(PluginConfigError::ConfigValidation(e.to_string())))?;
+
+        Some(EncryptedPluginConfig::from_json(&config).map_err(|e| {
+            report!(PluginConfigError::Internal(format!(
+                "config encryption failed: {e}"
+            )))
+        })?)
+    } else {
+        None
+    };
 
     let now = OffsetDateTime::now_utc();
     let mut model: plugin_config::ActiveModel = existing.into();
@@ -415,19 +429,8 @@ pub async fn update_plugin_config(
     if let Some(name) = req.name {
         model.name = Set(name);
     }
-    if let Some(mut config) = req.config
-        && let Some(ref existing_config) = existing_config
-    {
-        // Re-apply secret restoration on the actual value being persisted.
-        ops.restore_config_secrets(&type_id, &mut config, existing_config);
-        let _pruned = ops.prune_stale_sensitive_keys(&type_id, &mut config);
-        ops.assert_no_sentinel(&type_id, &config)
-            .map_err(|e| report!(PluginConfigError::ConfigValidation(e.to_string())))?;
-        model.config = Set(EncryptedPluginConfig::from_json(&config).map_err(|e| {
-            report!(PluginConfigError::Internal(format!(
-                "config encryption failed: {e}"
-            )))
-        })?);
+    if let Some(new_config) = new_config {
+        model.config = Set(new_config);
     }
     if let Some(enabled) = req.enabled {
         model.enabled = Set(enabled);
