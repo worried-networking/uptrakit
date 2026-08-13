@@ -138,9 +138,12 @@ if ! systemctl is-active --quiet uptrakit; then
 fi
 REGISTRATION_TOKEN=""
 for _ in {1..30}; do
-  REGISTRATION_TOKEN=$(journalctl -u uptrakit --no-pager -o cat -n 100 \
+  # `|| true` is load-bearing: build.func runs under `set -Eeuo pipefail`, so a
+  # grep miss (journal not flushed yet) would abort the install instead of
+  # letting this poll loop retry.
+  REGISTRATION_TOKEN=$(journalctl -u uptrakit --no-pager -o cat \
     | grep -A1 "one-time registration token" \
-    | tail -1 | tr -d ' ')
+    | tail -1 | tr -d ' ' || true)
   echo "$REGISTRATION_TOKEN" | grep -qE '^[A-Za-z0-9_-]+$' || REGISTRATION_TOKEN=""
   [ -n "$REGISTRATION_TOKEN" ] && break
   sleep 2
@@ -165,7 +168,9 @@ chmod +x /usr/bin/update
 cleanup_lxc
 
 msg_ok "Completed Successfully!\n"
-echo -e "${GN}${APP} is running at https://${IP}:8443${CL}"
-echo -e "${GN}PKI HTTP endpoint: http://${IP}:8080${CL}"
+# Upstream install.func exports no `IP`; under `set -u` referencing it aborts the
+# install after every step already succeeded. Reuse the address resolved above.
+echo -e "${GN}${APP} is running at https://${CTRL_IP}:8443${CL}"
+echo -e "${GN}PKI HTTP endpoint: http://${CTRL_IP}:8080${CL}"
 echo -e "${YW}Registration token:${CL} ${REGISTRATION_TOKEN}"
 echo -e "${YW}Master key:${CL} /opt/uptrakit/master.key — back this up!"

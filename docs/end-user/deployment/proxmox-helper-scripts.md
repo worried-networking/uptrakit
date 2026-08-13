@@ -22,7 +22,7 @@ infrastructure.
 
 ## Prerequisites
 
-- Proxmox VE 7.x or 8.x
+- Proxmox VE 8.x or 9.x (verified on 9.2)
 - Internet access from the Proxmox host (for CT template download and binary fetch)
 
 ## Installation
