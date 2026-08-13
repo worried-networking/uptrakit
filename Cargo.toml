@@ -79,10 +79,10 @@ x509-ocsp = "0.2"
 # (latest: 0.8/0.8/0.10/0.3). Two independent gates, both already at their newest release:
 #   - x509-ocsp 0.2.1 requires der ^0.7.8, spki ^0.7.2, x509-cert ^0.2.4
 #   - openidconnect 4.0.1 → rsa/ecdsa → pkcs8 0.10 → spki 0.7 → der 0.7
-der = { version = "0.7", features = ["alloc", "derive", "oid", "pem"] }
-spki = { version = "0.7", features = ["alloc"] }
-x509-cert = { version = "0.2", default-features = false, features = ["pem"] }
-const-oid = { version = "0.9", features = ["db"] }
+der = { version = "0.8", features = ["alloc", "derive", "oid", "pem"] }
+spki = { version = "0.8", features = ["alloc"] }
+x509-cert = { version = "0.3", default-features = false, features = ["pem"] }
+const-oid = { version = "0.10", features = ["db"] }
 aws-lc-rs = "1"
 strum = { version = "0.28", features = ["derive"] }
 syn = { version = "3", features = ["full", "extra-traits"] }
