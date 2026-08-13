@@ -1028,6 +1028,54 @@ async fn surface_registration_success_broadcasts_surfaces_changed() {
 
 #[cfg(feature = "db-sqlite")]
 #[tokio::test]
+async fn untenanted_system_surface_registration_broadcasts_globally() {
+    let db = crate::test_harness::setup_migrated_db().await;
+    let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+    let state = build_db_audited_state(db.clone(), tenant_id).await;
+    let service_id = uuid::Uuid::now_v7();
+    insert_test_system_service_row(&db, service_id, "uptrakit-mqtt").await;
+
+    // The event broadcaster keys local channels by tenant; `send_global`
+    // fans out to every subscribed channel regardless of key, so subscribing
+    // under any tenant is sufficient to observe a global broadcast.
+    let mut rx = state
+        .notification
+        .event_broadcaster
+        .subscribe(tenant_id)
+        .await;
+
+    let processor = MessageProcessor {
+        state: Arc::clone(&state),
+        service_id,
+        cert: None,
+        is_system: true,
+        has_update_tracking: false,
+        has_software_discovery: false,
+        has_update_hooks: false,
+        has_ui_surfaces: true,
+        has_workload_claims: false,
+        runtime_instance_id: None,
+        service_app_name: Some("uptrakit-mqtt".to_string()),
+        service_tenant_id: None,
+        linked_host_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
+        report_tracker: ReportTracker::new(),
+    };
+    let mut registration = test_surface_registration("service.uptrakit-mqtt", tenant_id);
+    registration.effective_tenant_binding.scope = surfaces::Scope::Global;
+    registration.effective_tenant_binding.tenant_id = None;
+
+    let response = processor.handle_surface_registration(registration).await;
+
+    assert!(response.replies.is_empty(), "success path returns cont()");
+
+    match rx.try_recv() {
+        Ok(AdminEvent::SurfacesChanged) => {}
+        other => panic!("expected SurfacesChanged broadcast via send_global, got {other:?}"),
+    }
+}
+
+#[cfg(feature = "db-sqlite")]
+#[tokio::test]
 async fn surface_registration_rejection_does_not_broadcast() {
     let db = crate::test_harness::setup_migrated_db().await;
     let tenant_id = crate::test_harness::insert_default_tenant(&db).await;

@@ -480,6 +480,7 @@ surface_action_scope_violation_emits_denied_tenant_audit_row = "ignore"
 surface_action_success_emits_success_tenant_audit_row = "ignore"
 surface_registration_rejection_does_not_broadcast = "ignore"
 surface_registration_success_broadcasts_surfaces_changed = "ignore"
+untenanted_system_surface_registration_broadcasts_globally = "ignore"
 
 [routes."service_ws/handler/renewal.rs"]
 sign_renewal_csr = "no-db"

@@ -30,6 +30,36 @@ const LIST_DEFAULT_PAGE: u64 = 1;
 const LIST_DEFAULT_PER_PAGE: u64 = 50;
 const LIST_MAX_PER_PAGE: u64 = 200;
 
+/// Build the `ProviderIdentity` block shared by every MQTT surface
+/// registration (populated and empty alike).
+fn provider_identity(service_id: Option<uuid::Uuid>) -> surfaces::ProviderIdentity {
+    let provider_id = service_id
+        .map(|id| format!("service.uptrakit-mqtt.{id}"))
+        .unwrap_or_else(|| "service.uptrakit-mqtt".to_string());
+    surfaces::ProviderIdentity {
+        provider_id,
+        provider_kind: surfaces::ProviderKind::Service,
+        provider_namespace: "service".to_string(),
+    }
+}
+
+/// Build an empty registration (`surfaces: vec![]`) for the same provider,
+/// used to relinquish the surface — e.g. when yielding to an external MQTT
+/// service.
+pub fn build_empty_surface_registration(service_id: Option<uuid::Uuid>) -> SurfaceRegistration {
+    SurfaceRegistration {
+        provider: provider_identity(service_id),
+        framework_generation: FrameworkGeneration::new(1, 0),
+        capabilities: CapabilitySet::default(),
+        effective_tenant_binding: surfaces::EffectiveTenantBinding {
+            scope: surfaces::Scope::Global,
+            tenant_id: None,
+        },
+        surfaces: Vec::new(),
+        encryption_metadata: None,
+    }
+}
+
 #[expect(
     clippy::expect_used,
     reason = "infallible: all IDs and interaction IDs are compile-time-valid constants; a parse failure indicates a programming error"
@@ -37,16 +67,11 @@ const LIST_MAX_PER_PAGE: u64 = 200;
 pub(crate) fn build_surface_registration_with_ids(
     encryption_public_key: Option<String>,
     service_id: Option<uuid::Uuid>,
-    service_tenant_id: Option<uuid::Uuid>,
-) -> Option<SurfaceRegistration> {
-    let tenant_id = service_tenant_id?;
-    let provider_id = service_id
-        .map(|id| format!("service.uptrakit-mqtt.{id}"))
-        .unwrap_or_else(|| "service.uptrakit-mqtt".to_string());
-    let scope = surfaces::Scope::Tenant;
-    let targeting = surfaces::Targeting::Targeted;
-    let binding_scope = surfaces::Scope::Tenant;
-    let binding_tenant_id = Some(tenant_id.to_string());
+) -> SurfaceRegistration {
+    let scope = surfaces::Scope::Global;
+    let targeting = surfaces::Targeting::Universal;
+    let binding_scope = surfaces::Scope::Global;
+    let binding_tenant_id: Option<String> = None;
 
     let required_capabilities = CapabilitySet::from_capabilities([
         Capability::SectionNode,
@@ -141,12 +166,8 @@ pub(crate) fn build_surface_registration_with_ids(
         }],
     };
 
-    Some(SurfaceRegistration {
-        provider: surfaces::ProviderIdentity {
-            provider_id,
-            provider_kind: surfaces::ProviderKind::Service,
-            provider_namespace: "service".to_string(),
-        },
+    SurfaceRegistration {
+        provider: provider_identity(service_id),
         framework_generation: FrameworkGeneration::new(1, 0),
         capabilities: required_capabilities,
         effective_tenant_binding: surfaces::EffectiveTenantBinding {
@@ -161,7 +182,7 @@ pub(crate) fn build_surface_registration_with_ids(
             algorithm: ProviderEncryptionAlgorithm::EciesP256,
             public_key,
         }),
-    })
+    }
 }
 
 /// Handle a `clients` GET request: merged list/item read (REST method model).
@@ -310,12 +331,7 @@ mod tests {
 
     #[test]
     fn registration_places_surface_in_settings_tab() {
-        let payload = build_surface_registration_with_ids(
-            Some("test-key".to_string()),
-            None,
-            Some(Uuid::now_v7()),
-        )
-        .expect("registration");
+        let payload = build_surface_registration_with_ids(Some("test-key".to_string()), None);
         assert_eq!(
             payload
                 .encryption_metadata
@@ -335,8 +351,7 @@ mod tests {
 
     #[test]
     fn edit_form_uses_dedicated_preload_action() {
-        let registration = build_surface_registration_with_ids(None, None, Some(Uuid::now_v7()))
-            .expect("registration");
+        let registration = build_surface_registration_with_ids(None, None);
         let interactions = &registration.surfaces[0].interactions;
         let edit = interactions
             .iter()
@@ -358,8 +373,7 @@ mod tests {
 
     #[test]
     fn mutating_interactions_publish_their_actual_result_schema() {
-        let registration = build_surface_registration_with_ids(None, None, Some(Uuid::now_v7()))
-            .expect("registration");
+        let registration = build_surface_registration_with_ids(None, None);
         let interactions = &registration.surfaces[0].interactions;
         let create = interactions
             .iter()
@@ -390,8 +404,66 @@ mod tests {
     }
 
     #[test]
-    fn registration_is_omitted_without_tenant_binding() {
-        assert!(build_surface_registration_with_ids(None, None, None).is_none());
+    fn registration_is_global_and_universal_with_no_tenant_binding() {
+        let registration = build_surface_registration_with_ids(None, None);
+
+        let surface = &registration.surfaces[0].descriptor;
+        assert_eq!(surface.scope, surfaces::Scope::Global);
+        assert_eq!(surface.targeting, surfaces::Targeting::Universal);
+        assert_eq!(
+            registration.effective_tenant_binding.scope,
+            surfaces::Scope::Global
+        );
+        assert_eq!(registration.effective_tenant_binding.tenant_id, None);
+        assert!(
+            registration
+                .capabilities
+                .0
+                .contains(&Capability::UniversalTargeting)
+        );
+        assert!(
+            !registration
+                .capabilities
+                .0
+                .contains(&Capability::TargetedTargeting)
+        );
+    }
+
+    #[test]
+    fn registration_preserves_provider_surface_and_action_identity() {
+        let service_id = Uuid::now_v7();
+        let registration = build_surface_registration_with_ids(None, Some(service_id));
+
+        assert_eq!(
+            registration.provider.provider_id,
+            format!("service.uptrakit-mqtt.{service_id}")
+        );
+        let surface = &registration.surfaces[0].descriptor;
+        assert_eq!(surface.surface_id.as_str(), EXT_ID);
+        assert_eq!(surface.slot, surfaces::SLOT_SETTINGS_TABS);
+        assert_eq!(
+            surface.required_action.as_deref(),
+            Some(uptrakit_shared_types::access::actions::SYSTEM_SERVICES_UPDATE_STR)
+        );
+    }
+
+    #[test]
+    fn registration_encryption_metadata_tracks_public_key_presence() {
+        let with_key = build_surface_registration_with_ids(Some("test-key".to_string()), None);
+        assert!(with_key.encryption_metadata.is_some());
+
+        let without_key = build_surface_registration_with_ids(None, None);
+        assert!(without_key.encryption_metadata.is_none());
+    }
+
+    #[test]
+    fn empty_registration_carries_same_provider_block_with_no_surfaces() {
+        let service_id = Uuid::now_v7();
+        let full = build_surface_registration_with_ids(None, Some(service_id));
+        let empty = build_empty_surface_registration(Some(service_id));
+
+        assert_eq!(empty.provider, full.provider);
+        assert!(empty.surfaces.is_empty());
     }
 
     #[test]
@@ -706,8 +778,7 @@ mod tests {
     /// (`Some(actions::X.to_string())` refactors gone wrong), not presence.
     #[test]
     fn declared_required_action_values_parse_against_the_catalog() {
-        let registration = build_surface_registration_with_ids(None, None, Some(Uuid::now_v7()))
-            .expect("registration");
+        let registration = build_surface_registration_with_ids(None, None);
         let mut checked = 0usize;
         for surface in &registration.surfaces {
             let surface_id = surface.descriptor.surface_id.as_str();
@@ -765,8 +836,7 @@ mod tests {
             true
         }
 
-        let registration = build_surface_registration_with_ids(None, None, Some(Uuid::now_v7()))
-            .expect("registration");
+        let registration = build_surface_registration_with_ids(None, None);
         let surface = &registration.surfaces[0];
 
         for segment in surface.descriptor.surface_id.as_str().split('.') {

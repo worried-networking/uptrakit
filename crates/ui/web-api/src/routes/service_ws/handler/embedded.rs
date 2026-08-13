@@ -223,14 +223,23 @@ pub(super) async fn cleanup_embedded_service_session(
             .surface_proxy_deps
             .proxy
             .fail_in_flight_for_provider(&provider_id);
-        if let Some(tid) = tenant_id
-            && !state.shutdown_token.is_cancelled()
-        {
-            state
-                .notification
-                .event_broadcaster
-                .send(tid, AdminEvent::SurfacesChanged)
-                .await;
+        if !state.shutdown_token.is_cancelled() {
+            match tenant_id {
+                Some(tid) => {
+                    state
+                        .notification
+                        .event_broadcaster
+                        .send(tid, AdminEvent::SurfacesChanged)
+                        .await;
+                }
+                None => {
+                    state
+                        .notification
+                        .event_broadcaster
+                        .send_global(AdminEvent::SurfacesChanged)
+                        .await;
+                }
+            }
         }
     }
     state
@@ -448,13 +457,19 @@ mod tests {
 
     #[cfg(feature = "db-sqlite")]
     #[tokio::test]
-    async fn cleanup_embedded_session_skips_broadcast_when_no_tenant_id() {
+    async fn cleanup_embedded_session_broadcasts_globally_when_no_tenant_id() {
+        // An untenanted (system-service) provider has no tenant channel of its
+        // own, so cleanup must fall back to `send_global` — otherwise the UI
+        // for every tenant would silently never learn the surface was removed.
         let db = crate::test_harness::setup_migrated_db().await;
         let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
         let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
         let service_id = uuid::Uuid::now_v7();
         register_test_runtime_state(&state, service_id, tenant_id);
 
+        // `send_global` fans out to every locally subscribed channel
+        // regardless of key, so subscribing under any tenant is sufficient
+        // to observe the broadcast.
         let mut rx = state
             .notification
             .event_broadcaster
@@ -471,9 +486,9 @@ mod tests {
         )
         .await;
 
-        assert!(
-            rx.try_recv().is_err(),
-            "no broadcast expected for system service"
-        );
+        match rx.try_recv() {
+            Ok(AdminEvent::SurfacesChanged) => {}
+            other => panic!("expected SurfacesChanged via send_global, got {other:?}"),
+        }
     }
 }

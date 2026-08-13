@@ -88,15 +88,17 @@ impl ServiceHandler for MqttHandler {
 
     async fn on_settings(
         &mut self,
-        settings: &uptrakit_wire::ServiceSettingsPayload,
+        _settings: &uptrakit_wire::ServiceSettingsPayload,
         conn: &mut dyn ServiceTransport,
         agreed_capabilities: &BTreeSet<Capability>,
     ) {
+        // MQTT is a system service with no tenant binding: the settings
+        // surface registers globally regardless of any tenant scope carried
+        // on the settings payload (see `MqttRuntime::apply_settings`).
         self.runtime
             .apply_settings(
                 MqttRuntimeSettings {
                     ui_surfaces_enabled: agreed_capabilities.contains(&Capability::UiSurfaces),
-                    tenant_id: settings.tenant_id,
                 },
                 conn,
             )
@@ -325,22 +327,23 @@ mod tests {
     // ---------------------------------------------------------------------------
 
     /// Verify that when the embedded MQTT handler receives `ServiceSettings` with
-    /// `UiSurfaces` capability and a tenant ID, it emits a `SurfaceRegistration`
-    /// message whose `effective_tenant_binding.tenant_id` matches the tenant.
+    /// `UiSurfaces` capability, it emits a `SurfaceRegistration` message that is
+    /// Global-scoped with no tenant binding — MQTT is a system service, so its
+    /// settings surface is untenanted regardless of any tenant carried on the
+    /// settings payload itself.
     #[tokio::test]
-    async fn embedded_mqtt_registers_surface_with_default_tenant_binding() {
+    async fn embedded_mqtt_registers_surface_as_global_with_no_tenant_binding() {
         let handler = MqttHandler::new();
         let (transport, ctrl_tx, mut svc_rx) = make_transport();
         let drain = CancellationToken::new();
         let abort = CancellationToken::new();
 
-        let default_tenant_id = Uuid::now_v7();
-
         // Send settings that include UiSurfaces so the agreed set enables surface
-        // registration, and supply the tenant ID that must appear in the binding.
+        // registration. A tenant ID is still supplied on the settings payload to
+        // prove it has no bearing on the (Global) registration shape.
         ctrl_tx
             .send(ControllerMessage::ServiceSettings(make_settings(
-                Some(default_tenant_id),
+                Some(Uuid::now_v7()),
                 [Capability::UiSurfaces],
             )))
             .await
@@ -401,11 +404,14 @@ mod tests {
             "expected exactly one SurfaceRegistration; got {messages:?}"
         );
         let registration = &registrations[0];
-        let expected_tenant = default_tenant_id.to_string();
         assert_eq!(
-            registration.effective_tenant_binding.tenant_id.as_deref(),
-            Some(expected_tenant.as_str()),
-            "SurfaceRegistration tenant binding must match the configured default tenant"
+            registration.effective_tenant_binding.scope,
+            uptrakit_wire::surfaces::Scope::Global,
+            "SurfaceRegistration must be Global-scoped for the untenanted MQTT system service"
+        );
+        assert_eq!(
+            registration.effective_tenant_binding.tenant_id, None,
+            "SurfaceRegistration must carry no tenant binding for the untenanted MQTT system service"
         );
     }
 }

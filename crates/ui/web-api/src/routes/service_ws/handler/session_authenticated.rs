@@ -546,14 +546,23 @@ pub(super) async fn cleanup_authenticated_session(
             .surface_proxy_deps
             .proxy
             .fail_in_flight_for_provider(&provider_id);
-        if let Some(tenant_id) = service_tenant_id
-            && !state.shutdown_token.is_cancelled()
-        {
-            state
-                .notification
-                .event_broadcaster
-                .send(tenant_id, AdminEvent::SurfacesChanged)
-                .await;
+        if !state.shutdown_token.is_cancelled() {
+            match service_tenant_id {
+                Some(tenant_id) => {
+                    state
+                        .notification
+                        .event_broadcaster
+                        .send(tenant_id, AdminEvent::SurfacesChanged)
+                        .await;
+                }
+                None => {
+                    state
+                        .notification
+                        .event_broadcaster
+                        .send_global(AdminEvent::SurfacesChanged)
+                        .await;
+                }
+            }
         }
     }
     state
@@ -661,14 +670,23 @@ pub(super) async fn finalize_authenticated_session(
                     .surface_proxy_deps
                     .proxy
                     .fail_in_flight_for_provider(&provider_id);
-                if let Some(tenant_id) = service_tenant_id
-                    && !state.shutdown_token.is_cancelled()
-                {
-                    state
-                        .notification
-                        .event_broadcaster
-                        .send(tenant_id, AdminEvent::SurfacesChanged)
-                        .await;
+                if !state.shutdown_token.is_cancelled() {
+                    match service_tenant_id {
+                        Some(tenant_id) => {
+                            state
+                                .notification
+                                .event_broadcaster
+                                .send(tenant_id, AdminEvent::SurfacesChanged)
+                                .await;
+                        }
+                        None => {
+                            state
+                                .notification
+                                .event_broadcaster
+                                .send_global(AdminEvent::SurfacesChanged)
+                                .await;
+                        }
+                    }
                 }
             }
             // Always call unregister_service — idempotent no-op when nothing is registered.
@@ -1177,7 +1195,7 @@ mod tests {
 
         #[cfg(feature = "db-sqlite")]
         #[tokio::test]
-        async fn finalize_replaced_session_skips_broadcast_when_no_tenant_id() {
+        async fn finalize_replaced_session_broadcasts_globally_when_no_tenant_id() {
             let db = crate::test_harness::setup_migrated_db().await;
             let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
             let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
@@ -1221,10 +1239,10 @@ mod tests {
             )
             .await;
 
-            assert!(
-                rx.try_recv().is_err(),
-                "no broadcast for system service (no tenant_id)"
-            );
+            match rx.try_recv() {
+                Ok(AdminEvent::SurfacesChanged) => {}
+                other => panic!("expected SurfacesChanged via send_global, got {other:?}"),
+            }
         }
 
         #[cfg(feature = "db-sqlite")]
@@ -1693,7 +1711,7 @@ mod tests {
 
     #[cfg(feature = "db-sqlite")]
     #[tokio::test]
-    async fn cleanup_authenticated_session_skips_broadcast_when_no_tenant_id() {
+    async fn cleanup_authenticated_session_broadcasts_globally_when_no_tenant_id() {
         let db = crate::test_harness::setup_migrated_db().await;
         let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
         let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
@@ -1735,9 +1753,9 @@ mod tests {
         )
         .await;
 
-        assert!(
-            rx.try_recv().is_err(),
-            "no broadcast expected for system service"
-        );
+        match rx.try_recv() {
+            Ok(AdminEvent::SurfacesChanged) => {}
+            other => panic!("expected SurfacesChanged via send_global, got {other:?}"),
+        }
     }
 }

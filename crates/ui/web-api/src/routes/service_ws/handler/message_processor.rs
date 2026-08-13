@@ -512,12 +512,21 @@ impl MessageProcessor {
             uptrakit_audit_log::AuditOutcome::Success,
             None,
         );
-        if let Some(tenant_id) = self.service_tenant_id {
-            self.state
-                .notification
-                .event_broadcaster
-                .send(tenant_id, AdminEvent::SurfacesChanged)
-                .await;
+        match self.service_tenant_id {
+            Some(tenant_id) => {
+                self.state
+                    .notification
+                    .event_broadcaster
+                    .send(tenant_id, AdminEvent::SurfacesChanged)
+                    .await;
+            }
+            None => {
+                self.state
+                    .notification
+                    .event_broadcaster
+                    .send_global(AdminEvent::SurfacesChanged)
+                    .await;
+            }
         }
         ProcessorResponse::cont()
     }

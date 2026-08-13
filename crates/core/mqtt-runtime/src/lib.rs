@@ -44,6 +44,12 @@ pub mod ha_discovery;
 mod mqtt_client;
 mod state_publisher;
 mod surface_runtime;
+// Re-exported so the crate exposes a real public reachability path: without
+// this, `build_empty_surface_registration` (used only by the yield-driven
+// re-registration path added in a follow-up task) is unreachable from
+// outside `surface_runtime` and would be flagged dead code by non-test
+// builds even though its tests exercise it.
+pub use crate::surface_runtime::build_empty_surface_registration;
 mod tenant_manager;
 mod types;
 
@@ -96,7 +102,6 @@ pub struct MqttRuntimeIdentity {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MqttRuntimeSettings {
     pub ui_surfaces_enabled: bool,
-    pub tenant_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,8 +131,12 @@ pub struct MqttRuntime {
     encryption_public_key: Option<String>,
     /// Stable controller-assigned service id for provider identity composition.
     service_id: Option<Uuid>,
-    /// Effective service tenant scope from settings negotiation.
-    service_tenant_id: Option<Uuid>,
+    /// Whether the last negotiated settings enabled the UI-surfaces capability.
+    ///
+    /// Retained so the settings surface can be re-registered whenever the
+    /// runtime resumes (e.g. after an external MQTT service yields control
+    /// back), without waiting for a fresh `ServiceSettings` message.
+    ui_surfaces_enabled: bool,
     /// Whether this runtime is currently yielded to an external MQTT service.
     yielded: bool,
 }
@@ -153,7 +162,7 @@ impl MqttRuntime {
             private_key_der: None,
             encryption_public_key: None,
             service_id: None,
-            service_tenant_id: None,
+            ui_surfaces_enabled: false,
             yielded: false,
         }
     }
@@ -179,21 +188,15 @@ impl MqttRuntime {
         settings: MqttRuntimeSettings,
         transport: &mut dyn uptrakit_wire::ServiceTransport,
     ) {
-        self.service_tenant_id = settings.tenant_id;
+        self.ui_surfaces_enabled = settings.ui_surfaces_enabled;
         if !settings.ui_surfaces_enabled {
             return;
         }
 
-        let Some(register_payload) = surface_runtime::build_surface_registration_with_ids(
+        let register_payload = surface_runtime::build_surface_registration_with_ids(
             self.encryption_public_key.clone(),
             self.service_id,
-            self.service_tenant_id,
-        ) else {
-            tracing::info!(
-                "skipping MQTT settings surface registration: tenant binding unavailable"
-            );
-            return;
-        };
+        );
         transport
             .transport_send_best_effort(ServiceMessage::SurfaceRegistration(register_payload))
             .await;
@@ -480,21 +483,10 @@ impl MqttRuntime {
         &self,
         request: &SurfaceActionRequest,
     ) -> Result<Uuid, (SurfaceActionErrorCode, String)> {
-        let Some(bound_tenant_id) = self.service_tenant_id else {
-            return Err((
-                SurfaceActionErrorCode::PermissionDenied,
-                "MQTT surface is unavailable without tenant binding".to_string(),
-            ));
-        };
-
         let expected_provider_id = self.expected_provider_id();
-        let Some(target_provider_id) = request.target_provider_id.as_deref() else {
-            return Err((
-                SurfaceActionErrorCode::PermissionDenied,
-                "missing target provider id".to_string(),
-            ));
-        };
-        if target_provider_id != expected_provider_id {
+        if let Some(target_provider_id) = request.target_provider_id.as_deref()
+            && target_provider_id != expected_provider_id
+        {
             return Err((
                 SurfaceActionErrorCode::PermissionDenied,
                 format!(
@@ -509,12 +501,6 @@ impl MqttRuntime {
                 "missing tenant scope for MQTT client config".to_string(),
             ));
         };
-        if request_tenant_id != bound_tenant_id {
-            return Err((
-                SurfaceActionErrorCode::PermissionDenied,
-                "tenant scope does not match MQTT runtime binding".to_string(),
-            ));
-        }
 
         Ok(request_tenant_id)
     }
@@ -1352,16 +1338,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn surface_action_rejects_requests_without_runtime_tenant_binding() {
+    async fn surface_action_rejects_requests_with_unparseable_tenant() {
         let mut runtime = MqttRuntime::new();
         let mut transport = MockTransport::new();
-        let request = action_request(
+        let mut request = action_request(
             surface_runtime::ACTION_CLIENTS,
             InteractionHttpMethod::Get,
             Uuid::now_v7(),
             Some("service.uptrakit-mqtt"),
             serde_json::Map::new(),
         );
+        request.tenant_id = "not-a-uuid".to_string();
 
         runtime
             .handle_controller_message(
@@ -1372,25 +1359,55 @@ mod tests {
             .expect("request handling");
 
         let error = expect_last_surface_error(&transport);
-        assert_eq!(error.code, SurfaceActionErrorCode::PermissionDenied);
+        assert_eq!(error.code, SurfaceActionErrorCode::InvalidRequest);
         assert!(
-            error.message.contains("tenant binding"),
+            error.message.contains("tenant scope"),
             "unexpected message: {}",
             error.message
         );
     }
 
     #[tokio::test]
-    async fn surface_action_enforces_provider_target_and_tenant_match() {
+    async fn surface_action_accepts_universal_request_with_no_target_provider() {
         let mut runtime = MqttRuntime::new();
         let mut transport = MockTransport::new();
-        let bound_tenant = Uuid::now_v7();
-        runtime.service_tenant_id = Some(bound_tenant);
+        let tenant_id = Uuid::now_v7();
+
+        let request = action_request(
+            surface_runtime::ACTION_CLIENTS,
+            InteractionHttpMethod::Get,
+            tenant_id,
+            None,
+            serde_json::Map::new(),
+        );
+        runtime
+            .handle_controller_message(
+                ControllerMessage::SurfaceActionRequest(request),
+                &mut transport,
+            )
+            .await
+            .expect("request handling");
+
+        let Some(ServiceMessage::SurfaceActionResponse(response)) = transport.send_log().last()
+        else {
+            panic!("expected SurfaceActionResponse");
+        };
+        assert!(
+            response.success,
+            "a request with no target_provider_id must be treated as a valid Universal request"
+        );
+    }
+
+    #[tokio::test]
+    async fn surface_action_rejects_foreign_target_provider() {
+        let mut runtime = MqttRuntime::new();
+        let mut transport = MockTransport::new();
+        let tenant_id = Uuid::now_v7();
 
         let wrong_target = action_request(
             surface_runtime::ACTION_CLIENTS,
             InteractionHttpMethod::Get,
-            bound_tenant,
+            tenant_id,
             Some("service.other"),
             serde_json::Map::new(),
         );
@@ -1412,28 +1429,50 @@ mod tests {
             "unexpected message: {}",
             provider_error.message
         );
+    }
 
-        let mismatched_tenant = action_request(
+    #[tokio::test]
+    async fn create_action_stamps_stored_config_with_request_tenant() {
+        let mut runtime = MqttRuntime::new();
+        let mut transport = MockTransport::new();
+        let tenant_a = Uuid::now_v7();
+
+        let request = action_request(
             surface_runtime::ACTION_CLIENTS,
-            InteractionHttpMethod::Get,
-            Uuid::now_v7(),
+            InteractionHttpMethod::Post,
+            tenant_a,
             Some("service.uptrakit-mqtt"),
-            serde_json::Map::new(),
+            serde_json::Map::from_iter([
+                ("enabled".to_string(), serde_json::json!(true)),
+                ("transport".to_string(), serde_json::json!("tls")),
+                ("host".to_string(), serde_json::json!("broker.example.com")),
+                ("port".to_string(), serde_json::json!(8883)),
+                ("client_id".to_string(), serde_json::json!("new-client")),
+                ("username".to_string(), serde_json::json!("user")),
+                ("topic_prefix".to_string(), serde_json::json!("uptrakit")),
+                ("ha_discovery".to_string(), serde_json::json!(false)),
+                (
+                    "ha_discovery_prefix".to_string(),
+                    serde_json::json!("homeassistant"),
+                ),
+            ]),
         );
+
         runtime
             .handle_controller_message(
-                ControllerMessage::SurfaceActionRequest(mismatched_tenant),
+                ControllerMessage::SurfaceActionRequest(request),
                 &mut transport,
             )
             .await
-            .expect("mismatched tenant request handling");
+            .expect("request handling");
 
-        let tenant_error = expect_last_surface_error(&transport);
-        assert_eq!(tenant_error.code, SurfaceActionErrorCode::PermissionDenied);
-        assert!(
-            tenant_error.message.contains("tenant scope"),
-            "unexpected message: {}",
-            tenant_error.message
+        let Some(ServiceMessage::StoreServiceConfig(store)) = transport.send_log().last() else {
+            panic!("expected StoreServiceConfig to be sent");
+        };
+        assert_eq!(
+            store.tenant_id,
+            Some(tenant_a),
+            "created config must be scoped to the request's stamped tenant"
         );
     }
 
@@ -1444,7 +1483,6 @@ mod tests {
         let request_tenant_id = Uuid::now_v7();
         let config_tenant_id = Uuid::now_v7();
         let mqtt_client_id = Uuid::now_v7();
-        runtime.service_tenant_id = Some(request_tenant_id);
         runtime.configs =
             parse_client_configs(vec![config_entry(config_tenant_id, mqtt_client_id)]);
 
@@ -1490,7 +1528,6 @@ mod tests {
         let request_tenant_id = Uuid::now_v7();
         let config_tenant_id = Uuid::now_v7();
         let mqtt_client_id = Uuid::now_v7();
-        runtime.service_tenant_id = Some(request_tenant_id);
         runtime.configs =
             parse_client_configs(vec![config_entry(config_tenant_id, mqtt_client_id)]);
 
@@ -1549,7 +1586,6 @@ mod tests {
             .apply_settings(
                 MqttRuntimeSettings {
                     ui_surfaces_enabled: true,
-                    tenant_id: Some(Uuid::now_v7()),
                 },
                 &mut transport,
             )
@@ -1587,7 +1623,6 @@ mod tests {
             .apply_settings(
                 MqttRuntimeSettings {
                     ui_surfaces_enabled: true,
-                    tenant_id: Some(Uuid::now_v7()),
                 },
                 &mut transport,
             )
@@ -1609,7 +1644,6 @@ mod tests {
         let mut transport = MockTransport::new();
         let existing = existing_config();
         let tenant_id = existing.tenant_id;
-        runtime.service_tenant_id = Some(tenant_id);
         runtime.service_id = Some(Uuid::now_v7());
         runtime.configs = vec![existing.clone()];
 
@@ -1689,7 +1723,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn apply_settings_skips_surface_registration_without_tenant_binding() {
+    async fn apply_settings_registers_surface_for_untenanted_system_service() {
+        // MQTT is a system service with no tenant binding; a `ServiceSettings`
+        // negotiation with `ui_surfaces_enabled: true` (and no tenant scope
+        // anywhere in the payload — `MqttRuntimeSettings` has no tenant field
+        // at all) must still register the settings surface. This was the bug
+        // under fix: registration used to be skipped whenever no tenant
+        // binding was available, permanently hiding the surface for MQTT.
         let mut runtime = MqttRuntime::new();
         let mut transport = MockTransport::new();
 
@@ -1708,7 +1748,41 @@ mod tests {
             .apply_settings(
                 MqttRuntimeSettings {
                     ui_surfaces_enabled: true,
-                    tenant_id: None,
+                },
+                &mut transport,
+            )
+            .await;
+
+        assert!(matches!(
+            transport.send_log().first(),
+            Some(ServiceMessage::Register(_))
+        ));
+        assert!(matches!(
+            transport.send_log().get(1),
+            Some(ServiceMessage::SurfaceRegistration(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn apply_settings_sends_nothing_when_surfaces_disabled() {
+        let mut runtime = MqttRuntime::new();
+        let mut transport = MockTransport::new();
+
+        runtime
+            .on_connected(
+                &mut transport,
+                MqttRuntimeIdentity {
+                    service_id: Some(Uuid::now_v7()),
+                    private_key_der: None,
+                    encryption_public_key: Some("public-key".to_string()),
+                },
+            )
+            .await
+            .expect("connect should succeed");
+        runtime
+            .apply_settings(
+                MqttRuntimeSettings {
+                    ui_surfaces_enabled: false,
                 },
                 &mut transport,
             )
