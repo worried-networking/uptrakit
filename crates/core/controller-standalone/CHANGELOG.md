@@ -7,6 +7,1141 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.6](https://github.com/worried-networking/uptrakit/compare/uptrakit-controller-standalone-v0.0.5...uptrakit-controller-standalone-v0.0.6) - 2026-08-13
+
+### Added
+
+- *(reencrypt)* startup sweep counting layer-3 rows holding sensitive or unknowable overrides
+- *(reencrypt)* lazy v3 encryption of plugin config stores with plaintext-residue counters
+- *(mcp)* [**breaking**] thread the shared AccessEngine into McpState
+- *(web-api)* route AccessInvalidated events to the engine cache
+- *(surface-proxy)* required plugin-provider visibility filter on every tenant-facing surfaces leg
+- *(web-api)* route reconnect-orphan updates to Interrupted not Failed
+- *(web-api)* spawn absolute-deadline update reaper at boot
+- *(auth)* [**breaking**] remove the JWT permissions claim and AuthenticatedUser authorization snapshot
+- *(access)* add AccessEngine::allowed_actions expansion
+- *(access)* add dynamic-action enumeration to the registry seam
+- *(shared-db)* grant management listing and role-grant cleanup
+- *(controller-core)* derive Clone on AccessContext for request extensions
+- *(controller-core)* temporary Permission-to-Action shim
+- *(controller-core)* access cache invalidation API
+- *(controller-core)* AccessEngine core with TTL-backstopped cache and decision path
+- *(service-connections)* add current_connection_id accessor + cleanup-race invariant docs
+- *(mcp)* emit access.denied audit Events on mcp gate denials
+- *(mcp)* [**breaking**] get_current_user reports catalog-expanded actions
+- *(mcp)* [**breaking**] per-tool actions enforced through one require_tool_auth helper
+- *(mcp)* [**breaking**] mcp:use connection gate enforces through AccessEngine
+- *(web-api)* [**breaking**] retire the wire-level Permission vocabulary
+- *(frontend)* gate the UI on branded action strings with a degraded-authority banner
+- *(auth)* [**breaking**] add actions and authority fields to UserResponse
+- *(web-api)* [**breaking**] retire the bearer_token security scheme
+- *(web-api)* [**breaking**] remove the access-preset endpoints and consumers
+- *(web-api)* add the access catalog endpoint
+- *(web-api)* [**breaking**] users:manage/access:manage split with engine-backed lockout guard
+- *(web-api)* [**breaking**] role CRUD on access:manage with reshaped RoleResponse
+- *(web-api)* grant update/delete with lockout guard and system-plane fine check
+- *(web-api)* grant create/list/get endpoints with audit and invalidation
+- *(frontend)* migrate OAuth clients/consents pages to generated SDK
+- *(web-api)* expose OAuth clients/consents API in OpenAPI via routes!()
+- *(web-api)* [**breaking**] remaining route families declare native AccessEngine action security
+- *(surfaces)* [**breaking**] required_permission becomes required_action, typed and engine-enforced
+- *(web-api)* [**breaking**] auth-adjacent, audit, and notification families enforce through AccessEngine action extractors
+- *(web-api)* [**breaking**] host-tag and scheduler families enforce through AccessEngine action extractors
+- *(web-api)* [**breaking**] settings families enforce through AccessEngine action extractors
+- *(web-api)* [**breaking**] software and update families enforce through AccessEngine action extractors
+- *(web-api)* [**breaking**] services families enforce through AccessEngine action extractors
+- *(web-api)* [**breaking**] hosts family enforces through AccessEngine action extractors
+- *(web-api)* register oauth2 + developer_token security schemes
+- *(frontend)* [**breaking**] dispatch surface interactions by declared HTTP method
+- *(web-api)* [**breaking**] method-mapped surface interaction routes with 405/Allow, HEAD, item segment, GET coercion
+- *(surfaces)* [**breaking**] read model at GET /surfaces/{surface_id}; register surface routes in OpenAPI
+- *(frontend)* 401 refresh-retry with ApiError identity (spike S-A)
+- *(frontend)* configure hey-api client + cross-cutting interceptors
+- *(frontend)* standalone ApiError module for generated client
+- *(frontend)* generate committed OpenAPI client + analysis exclusions
+- *(frontend)* render interrupted update status in history
+- *(frontend)* short-SHA fallback in formatVersion
+- *(frontend)* hide embedded services from merge dialog + surface reason codes
+- *(frontend)* wire empty FilterBar to /hosts page for layout consistency
+- *(frontend)* migrate /system-services page to URL-reactive filter state and FilterBar
+- *(frontend)* migrate /services page to URL-reactive filter state and FilterBar
+- *(frontend)* migrate /history page to URL-reactive filter state and FilterBar
+- *(frontend)* migrate /host-tags page to URL-reactive filter state and FilterBar
+- *(frontend)* migrate /software page to URL-reactive filter state and FilterBar
+- *(frontend)* add filterBar snippet prop to SectionCard
+- *(frontend)* add ExpandableSearch component with debounce and collapse
+- *(frontend)* add FilterBar layout component
+- *(frontend)* add bind:el ref prop to Input component
+- *(frontend)* add createUrlParam factory for URL-reactive filter state
+- *(frontend)* add draft mode to SchemaForm with dirty tracking and Discard button
+- *(frontend)* render section header_action_ids in SurfaceRenderer via SectionCard
+- *(surfaces)* add submit_label field to InteractionDescriptor
+- *(settings)* rename RadioCardGroup description→tooltip in modeOptions
+- *(ui)* migrate RadioCardGroup descriptions to Tooltip; card button→div
+- *(ui)* export Tooltip from UI barrel
+- *(ui)* add Tooltip positioning logic (top/bottom flip, horizontal clamp)
+- *(ui)* add Tooltip show/hide behavior with debounce and hover-bridge
+- *(ui)* add Tooltip component static structure and ARIA
+- *(ui)* pin tooltip z-index in app.css and css-contract test
+- *(ui)* wire AccessSettings + McpAccessTab into settings page; remove old components
+- *(ui)* add McpAccessTab; migrate AgentCertificateSettings to createFormDraft
+- *(ui)* add AccessSettings component with draft pattern and RadioCardGroup
+- *(ui)* add RadioCardGroup; fix FormFieldRow label width + dirty highlight
+- *(frontend)* add createFormDraft Svelte 5 reactive utility
+- *(frontend)* add AccessSettings types and ETag-aware API functions
+- *(ui)* replace device approval callout with ConsentPrompt
+- *(ui)* redesign OAuth consent page with ConsentPrompt and PublicEntryShell
+- *(ui)* add ConsentPrompt shared component
+- *(frontend/oauth)* add draft state, Save/Discard buttons, design primitives to settings card
+- *(oauth)* wire Task 7 settings toggles — GET/PUT backend + remove VITE gate
+- *(frontend)* SSE cache, four-way badge split, and 409 handling on software detail page
+- *(frontend)* SSE cache updates, 409 handling, modal active-host disable in software list page
+- *(frontend)* add live status badges + allUpdatableHostsActive to SoftwareGroupList
+- *(frontend)* remove auto-open terminal on update trigger
+- *(frontend)* add ApiError class with errorCode for structured error handling
+- *(frontend)* add active_update_status to SoftwareItemHostSummary + fix SSE debounce key
+- *(frontend)* hide name filter behind search icon toggle on /software
+- *(frontend)* software name filter — state, URL persistence, debounced input
+- *(frontend)* 2FA — login MFA step, enrollment, settings toggle, 403 intercept
+- *(frontend)* show details_json in audit log detail view
+- *(frontend)* register Instance Configuration tab in settings nav
+- *(frontend)* Instance Configuration tab (settings/InstanceConfigTab.svelte)
+- *(frontend)* add ConfigStateResponse types and instance config API
+- *(audit-v2)* surface V2 fields in frontend, CLI, and API
+- *(frontend)* login screen recognises _auth_context=oauth
+- *(frontend)* OAuth settings toggles (behind VITE_OAUTH_TOGGLE_PREVIEW flag)
+- *(frontend)* Authorized Apps end-user view and Operator OAuth Clients management
+- *(frontend)* OAuth consent screen route
+- *(frontend)* OAuth consent screen route
+- *(frontend)* OAuth API infrastructure and htmlEscape helper
+- *(frontend/device)* unified device auth UI with phase-based error handling
+- *(frontend)* rename ?code -> ?user_code, add Deny button + lookup context
+- *(frontend)* Instance Plugins section in Plugin Configs tab
+- *(frontend)* API client for /api/v1/instance-plugins
+- *(frontend)* InstancePluginSummary type
+- *(frontend/software)* hide up-to-date hosts under "Updates available" filter
+- *(frontend)* update mobile bottom nav to render badge as separate link (Variant B)
+- *(frontend)* update mobile overflow sheet nav to render badge as separate link
+- *(frontend)* update tablet overlay nav to render badge as separate link
+- *(frontend)* update desktop sidebar nav to render badge as separate link
+- *(frontend)* extend ShellNavItem with badgeHref discriminated union
+- *(frontend)* export UPDATES_AVAILABLE_HREF constant from software route
+- *(surfaces)* add tab_group concept; split Proxmox update-hooks into two surfaces
+- *(frontend)* add --bg-raised to software filter header
+- *(frontend)* SurfaceTable row actions go single-line and icon-only when icon set
+- *(frontend)* SurfaceActionBar opts into container query and auto labelDisplay
+- *(frontend)* add SurfaceActionButton with adaptive labelDisplay and icon
+- *(frontend)* add LabelDisplay const-object type
+- *(frontend)* add icon field to InteractionDescriptor contract type
+- *(frontend)* add unified kebab-case icon registry with logged fallback
+- *(frontend)* widen modals, add subtitle prop, narrow form label column
+- *(frontend)* tabbed layout for software item detail page
+- *(frontend)* zebra rows and hover on software table
+- *(frontend)* add surfaces_changed to AdminEventType and subscribe in layout
+- *(ui)* add data-ui markers to Input, Textarea, Checkbox primitives
+- *(frontend)* replace toast Dismiss text with X icon button
+- *(frontend)* add optional icon prop to EmptyState component
+- *(frontend)* add tone icons to Callout component
+- *(frontend)* replace inline SVGs with lucide Menu/Sun/Moon/Monitor, add LogOut to logout button
+- *(frontend)* render lucide icons in all four nav templates
+- *(frontend)* add lucide imports and icon field to ShellNavItem and nav item arrays
+- *(frontend)* add icon field to SurfacePageNavItem, default to Box
+- *(frontend)* add nav-icons allowlist and nav_icon field on SurfaceDescriptor
+- *(profile)* add inline Copy icon button to token reveal modal
+- *(profile)* filter revoked tokens, add EmptyState, remove Status column
+- *(profile)* add Security card and Change Password modal, remove inline password section
+- *(profile)* replace inline change-email section with ModalShell
+- *(profile)* add StatusBadge for pending email + wire Change email to modal state
+- *(profile)* add TabStrip with Account/API Tokens tabs and URL sync
+- *(profile)* add lucide-svelte to dependencies
+- *(forms)* extend Select primitive with optgroup support, width variant, data-ui marker
+- *(forms)* add Select demo to form-primitive-preview and fix inline error rendering
+- *(forms)* migrate settings and route selects to Select primitive
+- *(forms)* migrate modal selects to Select primitive
+- *(forms)* migrate audit-logs filter selects to Select primitive
+- *(forms)* migrate SchemaForm select to Select primitive
+- *(forms)* export Select from forms barrel
+- *(forms)* add Select primitive component
+- *(audit-logs)* replace actor column with PillBadge and enriched display name
+- *(audit-logs)* remove SectionCard wrapper from TabStrip and drop system-only info card
+- *(audit-logs)* replace FormFieldRow grid with compact label-above-input filter panel
+- *(ui)* apply zebra+hover row styles via tbody child selectors in DataTable
+- *(frontend)* support GitHub-style alerts, footnotes, and emoji in release notes
+- *(frontend)* render release notes as markdown in software list modal, widen to max-w-3xl
+- *(frontend)* render release notes as markdown in [id] modals, widen to max-w-3xl
+- *(frontend)* add ReleaseNotes markdown rendering component
+- *(software)* single-host update from list triggers live terminal
+- *(software-detail)* defer live modal until protection-started SSE fires
+- *(history)* show in_progress on update_protection_started SSE
+- *(sse)* add update_protection_started to AdminEventType
+- redesign history page layout
+- *(frontend)* align software live terminal with shared shell
+- *(frontend)* redesign shared terminal shell
+- *(surfaces)* sync SurfaceTable pagination page to URL search params
+- *(surfaces)* thread pageBySource and onPageChange through SurfaceReadPanel
+- *(surfaces)* thread pageBySource and onPageChange through SurfaceRenderer
+- *(surfaces)* add initialPage prop and onPageChange callback to SurfaceTable
+- *(frontend)* add zebra striping to DataTable rows
+- *(frontend)* add accent Button variant, use for active pagination page
+- *(frontend)* render entity-link cells in SurfaceTable with 5-state logic
+- *(frontend)* add entity-link types to contract and entity-routes module
+- *(frontend)* add email change confirmation route
+- *(frontend)* add Change Password section to profile page
+- *(frontend)* add Change Email section to profile page
+- *(frontend)* add Profile Details section to profile page
+- *(frontend)* add profile types, JWT auth_method helper, and API functions
+- *(ui)* add mobile card layout to SoftwareGroupList
+- *(ui)* extract SoftwareGroupList component from software page
+- *(ui)* add mobileMode, mobileRow, and column responsive flags to DataTable
+- *(surfaces)* add context selector to SurfaceReadPanel with effectiveBaseParams
+- *(surfaces)* forward requiredContextParam props through SurfaceRenderer to action bars
+- *(surfaces)* thread requiredContextParam/requiredForInteractionIds through SurfaceActionBar
+- *(surfaces)* add requiredContextParam disabled guard to SurfaceInteractionButton
+- *(surfaces)* add SurfaceContextSelector contract type
+- *(tests)* add chromium-dark Playwright project for dark theme parity
+- *(frontend)* render updatable-software badge in all nav templates
+- *(frontend)* add software-updates store with updatable count
+- *(home)* migrate stat cards to StatCard component
+- *(ui)* export StatCard from barrel
+- *(ui)* add StatCard primitive
+- *(software)* restructure host sub-rows to unified 3-col grid, move dot inside name cell
+- *(software)* unify grid to 1fr 120px 88px, add expand/collapse pill to sub-line
+- *(frontend)* add indeterminate prop to Checkbox, add min/max/onkeydown/aria-label to Input
+- *(ui)* migrate OidcProvidersSettings to Button primitive (#3e)
+- *(ui)* migrate NotificationLogView to Button primitive (#3e)
+- *(ui)* migrate NotificationRulesSettings to Button primitive (#3e)
+- *(ui)* migrate AgentCertificateSettings to Button primitive (#3d)
+- *(ui)* migrate EnrollmentTokenSettings to Button primitive (#3d)
+- *(ui)* migrate SystemServicesSettings to Button primitive (#3d)
+- *(ui)* migrate SchedulerTab to Button primitive (#3d)
+- *(ui)* migrate PluginConfigsTab to Button primitive (#3d)
+- *(ui)* add surface-preview dev route and e2e snapshots ([#4](https://github.com/worried-networking/uptrakit/pull/4))
+- *(ui)* migrate host-tags, audit-logs, profile to Button primitive (#3j)
+- *(ui)* migrate hosts pages to Button primitive (#3h)
+- *(ui)* migrate settings pages to Button primitive (#3c)
+- *(ui)* migrate history page to Button primitive (#3g)
+- *(ui)* migrate surface layer components to Button primitive ([#4](https://github.com/worried-networking/uptrakit/pull/4))
+- *(ui)* add form prop to Button primitive for out-of-form submit
+- *(ui)* add aria-controls/expanded/haspopup and target/rel props to Button; eliminate raw-button deviations
+- *(ui/shared)* migrate shared components to Button; drop confirmClass (#3k)
+- *(ui/services)* add EllipsisIcon; migrate services and system-services to Button (#3i)
+- *(ui/software)* migrate software area to Button primitive (#3f)
+- *(ui/layout)* migrate layout shell and home page to Button primitive (#3b)
+- *(ui/public-entry)* migrate login and register forms to Input/Checkbox/Link (#3a2)
+- *(ui/forms)* wire FormFieldRow aria-describedby context to Input
+- *(ui)* extend Button primitive with ariaCurrent and data-ui props
+- *(ui)* add Textarea primitive with variant matrix, error/aria-invalid wiring (sub-spec #2d)
+- *(ui)* add Link primitive with variant matrix, external attr wiring (sub-spec #2b)
+- *(button-preview)* add secondary row + arialabel section; re-baseline snapshots
+- *(ui)* add Checkbox primitive with bindable checked, disabled gating (sub-spec #2b)
+- *(button)* add secondary variant and ariaLabel prop
+- *(ui)* add Input primitive with type matrix, error/aria-invalid wiring (sub-spec #2b)
+- *(tokens)* add --bg-hover token for secondary button hover state
+- *(theme)* extract terminal palette bound to tokens.ts (sub-spec #2 PR1)
+- *(ui)* add UpdateAllButton primitive (sub-spec #2 PR1)
+- *(ui)* add Button primitive component (sub-spec #2 PR1)
+- *(theme)* add danger-variant hover tokens (sub-spec #2 PR1)
+- *(frontend)* switch app.css to virtual tokens module (sub-spec #1)
+- *(frontend)* register theme-tokens Vite plugin (sub-spec #1)
+- *(frontend)* add theme-tokens Vite plugin (sub-spec #1)
+- *(frontend)* add typed tokens module (sub-spec #1)
+- align shared shell and interaction contract
+- *(audit)* add semantic audit log infrastructure
+- *(frontend)* add global GitHub provider settings panel
+- align shared ui primitives with design spec
+- complete ui design language frontend migration
+- add shared ui design language primitives
+- add ui design token adapter
+- *(update-history)* add shared protection and recovery fields
+- port service providers and cli to surface runtime
+- port representative plugins to native surfaces
+- migrate built-in and extension pages to surface slots
+- add frontend surface store and renderer
+- *(surfaces)* method on SurfaceActionRequest; proxy stamps effective method; per-field body validation
+- *(surfaces)* ActionRef two-form reader + method disambiguation on reference nodes
+- *(command)* expose child_pid on InteractiveHandle and pub kill_process_group
+- *(agent-ssh)* add russh client keepalive (15s/4x)
+- *(backoff)* [**breaking**] rewrite API with consuming guard pattern
+- *(db)* [**breaking**] encrypt plugin_configs.config at rest via compile-time AAD newtype
+- *(scheduler-runtime)* heartbeat-backed claim leases via live-task set
+- *(db)* host_software_items discovery provenance + hysteresis columns
+- *(plugin-configs)* stamp credential_updated_at on credential changes across all four writers
+- *(autodiscovery)* strip sensitive override keys and fail closed for uncataloged plugin types
+- *(software-items)* reject sensitive fields in per-host config overrides
+- *(db)* [**breaking**] encrypt instance_plugin_setting.config at rest via compile-time AAD newtype
+- *(db)* [**breaking**] encrypt plugin_type_settings.config at rest via compile-time AAD newtype
+- *(web-api)* add sealed RoutingEnvelope projection on Unvalidated bodies
+- *(web-api)* audit device_auth_approve validation rejects
+- *(web-api)* audit rejected trigger_update requests with a family reason code
+- *(web-api)* audit-mirror update_software_item validation rejects
+- *(web-api)* add MissingPluginSource error with exhaustive route mapping
+- *(web-api)* emit access.denied audit Events for qualifying denials
+- *(web-api-auth)* [**breaking**] lockout-guard the OIDC role sync with a typed outcome
+- *(web-api)* add Unvalidated/UnvalidatedForm type-state body extractors
+- *(web-api)* access/users action extractors
+- *(shared-types)* add system.access:manage catalog action
+- *(web-api)* consents list joins client_name, typed + ordered + authenticated-only annotations
+- *(web-api)* typed, ordered, RFC 3339 list_clients response
+- *(web-api)* [**breaking**] service batch-action gates enforce through AccessEngine
+- *(web-api)* [**breaking**] plugin visibility and plugin-config read gates enforce through AccessEngine
+- *(web-api)* [**breaking**] interactive update WS gate enforces updates:trigger through AccessEngine
+- *(web-api)* [**breaking**] live surface-backed DynamicActionRegistry wired into the engine
+- *(plugins)* derive plugin surface provider ids from descriptor type ids
+- *(surface-proxy)* enforce provider-id namespaces at surface admission
+- *(web-api)* build AccessContext in require_auth behind AccessAuthority marker
+- *(web-api)* action_extractor! macro with AccessAuthority verdict set
+- *(web-api)* construct AccessEngine in AppState with AccessState sub-state
+- *(web-api)* plugin-ops override and visibility filter reach the surfaces test harness
+- *(web-api)* plugin visibility derives from effective instance enablement
+- *(db)* access_grants table + per-scope role naming
+- *(surface-proxy)* method-aware surface action resolution threaded through proxy invocation
+- *(web-api)* stub surface provider + arbitrary-method TestClient helpers in test harness
+- *(surface-proxy)* normalize DataLoad methods at admission; method column on executor table; missing-params advisory
+- *(plugins)* AgentInteraction authoring type + agent_surfaces descriptor hook
+- *(plugins)* unified_surfaces declare_plugin! arm + catalog exact-id dispatch map
+- *(autodiscovery)* discovery-based uninstall reconciliation
+- *(web-api)* annotate email-change/password endpoints into OpenAPI
+- *(web-api)* typed-slot dispatch for InstalledVersionEnricher
+- *(web-api)* apply_version_update_to_db accepts display override
+- *(plugin-infra)* add InstalledVersionEnricherSlot + RoleCreators field
+- *(web-api/providers)* implement list_recent_commit_dates_for_path
+- *(web-api)* thread GlobalProviderLookup into controller fetch jobs
+- *(web-api)* redirect-aware bearer auth + rekey_resolved audit
+- *(web-api)* route-level 400 for embedded merge with ValidationFailed audit
+- *(web-api)* typed errors for embedded-merge ban + invariant violation
+- *(web-api-queries)* role CRUD query module
+- *(autodiscovery)* in-place reactivation of deactivated links and items
+- *(autodiscovery)* stamp discovery provenance on link create/match
+- *(web-api-queries)* reap_overdue_updates marks stuck updates Interrupted
+- *(web-api-queries)* add consolidate_protection_output query
+- *(web-api-queries)* tenant-scoped plugin_types_for_role lookup
+- *(web-api-queries)* embedded-merge ban + redirect upsert + invariant assert
+- *(surfaces)* admission rejects provider_invocable under a gated descriptor
+- *(surface-proxy)* honor provider_invocable in the provider-permission gate
+- *(surface-proxy)* validate header_action_ids kind and form_ui at registration
+- *(audit-v2)* convert all remaining Event producers to emit_event
+- *(plugins)* gate instance-scoped plugin construction by snapshot
+- *(surfaces)* add icon field to InteractionDescriptor and validate it
+- *(surface-proxy)* harden notification audit fns for Task 1 wiring
+- *(surface-proxy)* implement tenant_db() on AppStateSurfaceActionController
+- *(surface-proxy)* wire local_executor into proxy and extract tests tree
+- *(surface-proxy)* add proxmox_update_protection controller_local submodule
+- *(surface-proxy)* add docker controller_local submodule
+- *(surface-proxy)* add notification_settings submodule and notification channel audit functions
+- *(surface-proxy)* create uptrakit-surface-proxy crate scaffold with all files moved in
+- *(notifications)* report all failed email recipients on partial delivery
+- *(notifications)* declare sensitive paths for schema-less telegram and webhook plugins
+- *(plugins)* derive sensitive paths from form schemas with explicit-declaration union
+- *(plugins)* add sensitive_paths declarations and normalize slot to plugin descriptors
+- *(plugins)* add sparse-preserving sensitive-path masking helpers
+- *(plugins)* boot-disabled instance plugins contribute no surface registrations
+- *(plugins)* add single-source RegisteredInteraction registration types
+- *(plugin-infra)* add RecordingActionInvoker test double
+- *(plugin-infra)* declare_plugin! supports installed_version_enricher_create
+- *(plugin-infra)* add InstalledVersionEnricher trait + context
+- *(proxmox)* label protection snapshots and backups with software context
+- *(proxmox)* bound pending-match drain with attempts + dead-letter
+- *(proxmox)* stream protection start-time errors to update output
+- *(plugins)* catalog contribution dump example for ADR-0032 layer B
+- *(registry)* register PACKAGE_MANAGER_SKILLS in all_descriptors and is_package_manager_plugin
+- *(skills)* add crate skeleton and workspace registration
+- *(plugin-infra-core)* add ReleaseFetchContext, CreateReleaseFetcherFn, ReleaseFetcherSlot
+- *(web-api)* visibility predicate for instance-scoped plugins
+- *(plugins)* scope + instance_config on PluginDescriptor
+- *(registry)* register RouterOS plugin in catalog
+- *(agent-ssh)* add RouterOsSshExecutor with typed RouterOS CLI methods
+- *(plugin-infra-registry)* add copy/clean/verify_plugin_tables helpers
+- *(plugin-infra-core)* add db_migrate_tables to declare_plugin! macro
+- *(dispatch)* wire resource scaling hook into updates.rs pre/post dispatch sites
+- *(dispatch)* add QueryUpdateHookController, prepare_pre_update_hook, finalize_post_update_hook
+- *(core)* add ControllerUpdateHookOps trait and add to PluginOps supertrait
+- *(registry,reset)* wire reset_plugin_tenant_data into reset_data.rs; remove proxmox_host_mapping from reset_data.rs
+- *(plugin-core)* add optional reset_tenant_data parameter to declare_plugin! macro
+- *(task-18)* wire UptrakitSelfUpdatePlugin into controller-standalone registry
+- *(plugins)* update all UpdateExecutor impls to return ExecuteUpdateResult
+- *(plugin-core)* add controller update protection singleton role
+- *(plugins/skills)* register InstalledVersionEnricher role
+- *(plugins/skills)* implement InstalledVersionEnricher
+- *(plugins/skills)* emit commit-date display_version from batch_fetch
+
+### Fixed
+
+- *(build-info)* align --version with binary crate via build_info! macro
+- *(controller-runtime)* reach PluginConfigOps through the registry facade
+- *(plugin-configs)* correct layer-3 inline-assignment claim, sweep remediation advice, and non-string secret detection
+- *(reencrypt)* name the affected table in the undecodable-row error log
+- *(reencrypt)* recover per row when a v3 upgrade page fails to load
+- *(reencrypt)* keyset pagination in v3 upgrade scans
+- *(controller-runtime)* cfg-gate embedded drain token for toolchain-proof dead-code
+- *(db)* replace CombinedMigrator thread-local with instance-based MigratorTraitSelf
+- *(web-api)* reject manual server-cert renewal when TLS cert is externally managed
+- *(controller-runtime)* listener addr and zeroconf reloads are honest validate-reject gates
+- *(controller-runtime)* TLS cert/key reload genuinely hot-swaps via the server cert resolver
+- *(controller-runtime)* nats reload is an honest validate-reject gate with reexec triage
+- *(db-migrate)* complete agent-only exclusions, annotate raw SQL, add data-loss advisory
+- *(db-migrate)* register user_totp.secret AAD, initialize crypto read path, add sensitive-table roundtrip test
+- *(web-api,controller-runtime)* embedded WS cleanup uses connection_id via unregister_current
+- *(controller)* correct too_many_arguments expect feature gate
+- *(controller)* use additive nats gating in boot::components
+- *(controller-core)* consolidate protection output on pre-dispatch failure
+- *(web-api-queries)* stop clobbering output on pre-dispatch failure, carry real summary
+- *(mcp)* count and audit unknown Decision variants as no_grant denials
+- *(frontend-build)* fail release-profile builds on absent frontend assets
+- *(frontend)* filter sensitive fields from layer-3 overrides and hidden submits
+- report awaiting_restart update-history status instead of pending
+- *(frontend)* stop treating unavailable-authority empty actions as denial
+- *(frontend)* close action-gating review gaps from Task 4
+- *(web-api)* restore access-catalog doc comments and assertion strength
+- *(web-api)* declare 400 responses on newly validated mutation paths
+- *(frontend)* widen surface e2e route matcher to item paths; cover delete base dispatch
+- *(web-api)* dedupe ReadSurfaceInteractionQuery to web-api-types; drop unnecessary clippy expect
+- *(frontend)* clear stale settings ETag on 409 if_match.stale
+- *(frontend)* guard host-scoped allowlist + assigned-software loaders against out-of-order resolution
+- *(frontend)* detail pages reload on param-only navigation
+- *(frontend)* post-refresh non-OK retry surfaces a typed ApiError instead of opaque Error
+- *(frontend)* surface read-model failures retain instead of re-arming the load loop
+- *(frontend)* SSE streams join the deduped 401 refresh path
+- *(frontend)* preserve xterm buffer across interactive unlock — snapshot liveMode at construction so the mid-stream onInput flip no longer remounts the terminal
+- *(frontend)* keep interactive terminal read-only until PTY output or stdin attention
+- *(ci)* run svelte-kit sync before openapi-ts in gen:api
+- *(frontend)* set client baseUrl to origin to stop /api/v1 double-prefix
+- *(web-api)* annotate software-items query+plugin_type params (restore name filter)
+- *(web-api-types)* emit serde wire strings in ToSchema for catch-all enums
+- *(frontend)* harden refresh shape-check + strengthen client test assertions
+- *(frontend)* regenerate client to steady-state gen:api formatting
+- *(frontend)* consume refresh rejection in dedup clear (no floating rejection)
+- *(web-api)* verify fixes — feature-gate golden spec test, annotation accuracy, AGENTS placement rule
+- *(frontend)* auto-attach If-Match on settings updates
+- *(frontend)* sync pagination to URL and clean merge_success param
+- *(frontend)* rename Save GitHub Provider to Save; extend flaky test timeout
+- *(frontend)* update tests and components for unified Save label
+- *(frontend)* unify modal footer submit labels to 'Save'
+- *(frontend)* move modal-trigger buttons to SectionCard header; remove Load/Refresh
+- *(frontend)* title-case SectionCard titles in McpAccessTab
+- *(frontend)* default submit label to 'Save'; read interaction.submit_label
+- *(frontend)* right-align form action buttons across settings components
+- *(surfaces)* add header_action_ids to section node type in TypeScript contract
+- *(ui)* wire dirty markers to renewal strategy fields
+- *(ui)* inherit parent color for Tooltip info icon
+- *(ui)* apply verify fixes — rounded-panel token, accent-rgb fallback removal, grid class split
+- *(ui)* add global Escape listener to Tooltip for WCAG 1.4.13 hover path
+- *(ui)* align FormFieldRow in multi-column grids + container query upgrade
+- *(forms)* treat null/undefined/''/NaN as equivalent in dirty check
+- *(ui)* compensate for permanent left border in FormFieldRow
+- *(ui)* stable label position for dirty field indicator
+- *(settings)* delete old settings/auth modules, fix canonical_host null mapping
+- *(device-ui)* add POST guard to mock helpers and use toBeVisible in Playwright tests
+- *(ui)* remove duplicate client name and double warning icon on OAuth consent page
+- *(oauth)* break infinite redirect loop and fix CSP-blocked callback
+- *(oauth)* break infinite redirect loop for browser-initiated OAuth flows
+- *(oauth)* fix login redirect loop for browser-initiated OAuth flows
+- *(frontend/oauth)* send If-Match header on OAuth settings PUT
+- *(frontend/nav)* add nav links to OAuth Clients and Authorized Apps pages
+- *(software)* show active-update badge on single-host list rows
+- *(frontend)* handle awaiting_restart in status switches; add missing SSE + UpdateAll tests
+- *(frontend)* explicit canView guard in badge block + cleanup on detail page
+- *(frontend)* allUpdatableHostsActive use filteredHosts for showUpdatableOnly consistency
+- *(frontend)* add aria-label to name filter input; add getSoftwareItems 7th-arg test
+- *(frontend)* verify fixes — typed 2FA error, loginRaw helper, code clear on failure, otpauth link
+- *(verify)* address /verify findings in Plan 4 frontend+docs
+- *(frontend)* rename state variable to configState to avoid Svelte 5 rune conflict
+- *(audit-v2)* address /verify findings — rootcause import placement and missing frontend filters
+- *(frontend/oauth)* spec compliance fixes from verify pass
+- *(frontend)* combine duplicate imports and remove redundant Content-Type headers in oauth.ts
+- *(frontend)* align read-only rows + add section rhythm in global settings
+- *(frontend)* host status badge respects item-level latest fallback
+- *(frontend)* portal fixed overlays to <body>; rebuild ContextMenu placement
+- *(frontend)* contain <main> layout so surface tables stop overflowing the document
+- *(frontend)* correct software list host update actions
+- *(nav)* badge vertical centering, full-row hover, and absolute positioning
+- *(frontend)* use URLSearchParams subset check for badge href active state
+- *(proxmox)* route scaling actions to new surface IDs; split software-item surface
+- *(frontend)* remove @container/buttons wrapper from SurfaceWorkflow trigger
+- add #[non_exhaustive] to interaction enums; add @container/buttons to workflow trigger
+- move NotificationOps import under plugin-ops cfg gate; fix zebra stripe parity
+- *(frontend)* forward labelDisplay to SurfaceWorkflow in SurfaceInteractionButton
+- *(frontend)* fix zebra striping parity and deduplicate mobile row class
+- *(frontend)* restore wide label column for page forms, context-aware layout
+- *(frontend)* add spacing between adjacent form fields and save button
+- *(frontend)* set document title on all native pages via PageShell
+- *(frontend-tests)* stub subscribeToEvent in layout test files
+- *(clippy)* remediate new lint violations (panic, silent-failure, unsafe)
+- *(frontend-tests)* align Modal default and toast z-index assertions with current values
+- *(frontend)* widen modal default and align edit-software form primitives
+- *(frontend)* embed assets from OUT_DIR for cargo verify
+- *(release-plz)* unblock cargo package verify in git_only mode
+- *(forms)* unclip input/select text and add chevron padding for select
+- *(forms)* restore error paragraphs dropped during AssignToHostModal Select migration
+- *(forms)* remove unsolicited inline error text from Select
+- *(ui)* restore divide-y inter-card borders in auto-generated mobile cards
+- add license to frontend stub for cargo deny
+- *(frontend)* restore nested list marker rotation (disc→circle→square, decimal→lower-alpha→lower-roman)
+- *(frontend)* restore list markers stripped by Tailwind preflight
+- *(frontend)* strengthen javascript: href tests to cover both security layers
+- *(frontend)* remove class and target from DOMPurify allowlist to prevent CSS injection and tab-napping
+- correct history page structure, mobile layout, token discipline, and test gaps
+- restore StatusBadge in row metadata, correct actor label, fix chip display
+- make history row actions stable dialog launches
+- *(frontend)* correct history terminal mapping spec gaps
+- *(surfaces)* restore untrack in SurfaceTable state init to silence svelte-check warning
+- *(surfaces)* remove unnecessary untrack in SurfaceTable, strengthen back-nav test
+- *(frontend)* correct toast layering, animation, dismiss, and hover-pause
+- *(frontend)* add description to Change Email section idle state
+- quality gate fixups for profile management
+- *(frontend)* refresh user state after cancelling email change
+- *(surfaces,proxmox)* fix proxmox.hosts context selector and discovery
+- *(e2e,ui)* broaden font-mono snapshot mask to cover card layout; document mobile star intent
+- *(e2e)* set explicit 1280px viewport in desktop layout test
+- *(ui)* hide loading text when mobile group is collapsed
+- *(software-updates)* scope updatable badge count to featured items only
+- *(surfaces-ui)* forward context props through section/tabs, effectiveBaseParams in targeted branch, show selector during fetch
+- make all pre-push quality gates pass
+- *(tests)* use emulateMedia colorScheme for dark snapshot baselines
+- *(software)* tighten row layout and update version arrow direction
+- *(frontend)* add variant="mono" to role_mapping_json Textarea in OidcProvidersSettings
+- *(frontend)* replace raw inputs with Input primitive in settings files
+- *(frontend)* replace raw form elements with Input/Checkbox/Textarea primitives in EditHostAssignmentModal
+- *(DangerZone)* composite danger tint over solid surface to prevent hazard tape bleed-through
+- *(Checkbox)* fix indeterminate state via Svelte action + unblock CSP data: SVGs
+- *(frontend)* remaining UI design-language token fixes
+- *(Checkbox)* use effect+bind:this to set indeterminate reliably
+- *(frontend)* replace magic values with design-language tokens
+- *(software)* constrain plugin select width and fix select-all label association
+- *(frontend)* align all pages with UI design language spec
+- *(hosts)* DataTable primitive, FormFieldRow wrappers in modals
+- *(settings)* rounded-[3px] on skeletons, FormFieldRow, token colors
+- *(settings)* token colors, DataTable, rounded-[3px] on skeletons
+- *(settings)* border radius, ModalShell import, DataTable in scheduler
+- *(hosts)* Checkbox primitive, rounded-[4px], ContextMenuItem, FormFieldRow
+- *(history)* ModalShell, TableFooterBar, FormFieldRow wrappers, typography
+- *(profile,device)* border radius, FormFieldRow + Input in profile form
+- *(audit-logs)* FormFieldRow wrappers, table header typography
+- *(services)* FormFieldRow wrappers in modal forms
+- *(software)* FormFieldRow wrappers, token colors, typography scale
+- *(ui)* use explicit px for table headers and top-bar title
+- *(software)* fix UI doc violations — transitions, focus rings, EmptyState, FormFieldRow, rounded
+- *(software)* replace text-muted star-off with scoped .star-unfeatured for higher contrast
+- *(software)* update N-more truncation row to unified 3-col grid, adjust padding to 49px
+- *(software)* update loading skeleton to unified 3-col grid
+- *(frontend)* replace remaining Skeleton surface/error/primary tokens across all files
+- *(frontend)* replace h3 Skeleton class in software/[id] release notes modal
+- *(frontend)* replace remaining Skeleton tokens in GlobalSettingsTab
+- *(frontend)* badge → StatusBadge, card/surface tokens, h3 typography in software and history routes
+- *(frontend)* migrate hosts pages — preset/surface tokens, btn → Button, badge → StatusBadge
+- *(frontend)* replace residual Skeleton surface/error tokens in route files
+- *(frontend)* replace Skeleton preset/primary/surface tokens in SurfaceWorkflow
+- *(frontend)* replace Skeleton preset/surface tokens in ToastNotifications and SoftwareMergeWizard
+- *(frontend)* migrate BatchActionBar raw button to <Button variant=ghost>, replace surface tokens
+- *(frontend)* replace all Skeleton tokens in EditHostAssignmentModal
+- *(frontend)* replace preset-filled/tonal aside and surface tokens in AssignToHostModal
+- *(ui)* use text-[var(--accent)] on Checkbox so checked fill uses currentColor not browser blue
+- *(frontend)* replace Skeleton surface tokens in CheckboxList, AddSoftwareModal, SurfaceKeyValue, Modal, and BatchResultDialog
+- *(test)* provide complete AgentCertificateSettings fixture in surface-tabs.test.ts
+- *(frontend)* add class=w-full to services/system-services ping-interval Input
+- *(frontend)* services and system-services filter input → Input primitive
+- *(frontend)* software detail and IgnoreRulesTab raw inputs/checkboxes → Input/Checkbox
+- *(frontend)* software list page raw checkboxes/inputs → Checkbox/Input primitives
+- *(frontend)* SoftwareMergeWizard raw search input → Input
+- *(frontend)* AssignToHostModal raw inputs/checkbox → Input/Checkbox with role-derived ids
+- *(frontend)* CheckboxList raw checkbox → Checkbox with dynamic id
+- *(frontend)* AddSoftwareModal raw inputs/checkbox → Input/Checkbox primitives
+- *(frontend)* Input accepts string|number value; migrate AgentCertificateSettings number inputs
+- *(frontend)* settings raw checkboxes → Checkbox primitive with derived ids
+- *(frontend)* settings raw checkboxes → Checkbox in AuthenticationSettings and RegistrationSettings
+- *(frontend)* SurfaceForm raw textarea → Textarea variant=mono
+- *(frontend)* SoftwareMergeWizard h4 → text-[13px] font-bold per spec §2.4 (Q5)
+- *(frontend)* SurfaceSlot card → token classes, h3 → explicit typography; add data-ui attr
+- *(frontend)* replace Skeleton h3 class with explicit token typography in Modal and SurfaceRenderer
+- *(frontend)* PageShell h1 to text-[20px] font-bold per spec §2.4
+- *(frontend)* TabStrip radius + tint active state per spec §2.3/§4.11; regen parity baselines
+- *(frontend)* ProviderSelector rounded-[3px], DataTable header px-[10px] per spec §2.3/§4.12
+- *(frontend)* correct border-radius on Callout, EmptyState, SectionCard to spec §2.3
+- *(frontend)* correct pre-existing type errors in settings test suite
+- *(test)* use OidcProviderInfo-compatible fixture in OIDC loading test (#3a)
+- *(frontend)* restore PUBLIC_ENTRY_PRIMARY_BUTTON_CLASS, add focus-visible to Button BASE, update token snapshots
+- *(ci)* fix release-plz workflow failures
+- *(ci)* resolve all backend-lint, frontend, semantic-boundary, markdown, and edition CI failures
+- restore software tab URL contract
+- default software tab state to all
+- restore software group folding behavior
+- align software page with ui design spec
+- space stacked service status badges
+- *(frontend)* handle failed trigger responses in history and software pages
+- *(web-api)* sync failed trigger statuses in batch response and software UI
+- *(settings)* preserve surface tabs during initial hydration
+- *(frontend)* coerce schema number fields before submit
+- *(frontend)* stabilize shared-surface loading
+- align rebased surface runtime seams
+- *(agent-runtime)* resolve interactive channels in the event loop select
+- *(agent-core)* interactive updates return immediately; UpdateStarted carries dispatch intent
+- *(agent-ssh-runtime)* bound spawned surface tasks with an agent-side timeout backstop
+- *(agent-ssh-runtime)* run plugin agent migrations again
+- *(agent-ssh)* bridge interactive channels via bounded proxy pairs resolved in the forwarder task
+- *(update-liveness)* verify-pass fixes for Interrupted terminal handling
+- *(agent-ssh)* enforce update timeout on interactive PTY loop
+- *(agent-core)* bound and group-kill interactive PTY child on cancellation
+- *(agent-core)* PTY promotion targets only the update command via update_exec_runtime seam
+- *(scheduler-runtime)* purge expired sessions in AuthCleanupExecutor
+- *(scheduler-runtime)* ownership-scoped release_claim with lost-claim detection
+- *(verify)* harden plugin-config encryption paths and test crypto init
+- *(plugin-configs)* restore stored secrets into config-test merge before dispatch
+- *(notifications)* restore masked secrets on channel update and reject unresolved sentinels
+- *(web-api)* mask and restore plugin secrets on type-settings and instance-plugin endpoints
+- *(plugin-configs)* reject the masked sentinel on every write path including create
+- *(proxmox)* wrap protection audit upsert in BEGIN IMMEDIATE
+- *(validation)* unify invoke envelope type and tighten gate skip paths
+- close the peek_envelope doc gap and the untested gate baseline modes
+- *(web-api-types)* relax UpdateHostAssignmentRequest to at-most-one plugin source
+- *(surfaces)* provider-origin gate enforces the descriptor action
+- *(web-api)* correct effective_actions db_access_policy classification
+- *(verify)* drop a duplicate access test and refresh preset-era docs
+- *(web-api)* retire the dangling access_presets allowlist row and doc drift
+- *(web-api)* sandwich the deny-Event absence probes with positive controls
+- *(web-api)* keep the OIDC lockout Event on a failed link commit
+- *(web-api)* scope by-name role resolvers to global rows
+- *(web-api-auth)* close review findings on the OIDC role-sync guard
+- *(web-api)* audit-mirror merge-execute validation failures
+- *(web-api)* validate OIDC exchange/registration and consent bodies
+- *(web-api)* validate surface interaction bodies incl. optional method-mapped routes
+- *(web-api)* validate software-item mutation bodies; reject ambiguous assignment config sources
+- *(web-api)* validate host/user/plugin-config/service/discovery/cert/device mutation bodies
+- *(web-api)* validate OIDC provider update bodies via Unvalidated extractor
+- *(web-api)* scope lockout-denial audit by plane and share the system-plane role check
+- *(web-api)* close verify findings in the B6 access-route sweep
+- *(web-api)* attribute action-extractor imports per-name, bundle write-auth extractors
+- *(surfaces)* gate provider-origin on the typed action, correct upgrade docs
+- *(proxmox)* surfaces register in every feature configuration
+- *(surfaces)* align MethodNotAllowed and resolver signature with task-1 brief
+- *(surfaces)* resolve provider-origin target from surface, not caller
+- *(web-api)* drop redundant refs in format! args
+- *(web-api)* consolidate first-user bootstrap, propagate errors, publish post-commit
+- *(web-api)* return 500 on permission-load DB error in auth handlers
+- *(web-api)* gate OIDC token mint on is_active and honest permission load
+- *(web-api)* enrolled WS cleanup uses connection_id via unregister_current
+- *(web-api)* authenticated WS cleanup uses connection_id, deletes connected_at panic
+- *(web-api)* correct embedded test homing and remove run_embedded arg-count suppression
+- *(web-api)* treat Interrupted as terminal in log-stream and batch projections
+- *(plugin-infra)* verify-pass cleanups for enricher role
+- *(web-api-auth)* qualify iat_cutoff in denylist upsert WHERE for Postgres
+- *(web-api-auth)* make deny_user DB persistence monotonic via guarded upsert
+- *(plugin-configs)* narrow has_live_secret_value's object-root claim, de-vacuous the re-stamp test
+- *(autodiscovery)* fail closed on non-object discovery config_override
+- *(plugin-configs)* restructure the config persist guard so it cannot silently no-op
+- *(plugin-configs)* prune stale sensitive keys on the inline-create path
+- *(web-api)* route zero-source assignment updates to the existing plugin source
+- *(autodiscovery)* preserve registered installed_version on re-discovery
+- *(autodiscovery)* stamp version/provenance for featured items on re-discovery
+- *(web-api-queries)* tenant-scope host loads in software_states
+- *(web-api-queries)* tenant-scope read-path host loads
+- *(web-api-queries)* tenant-filter write-path host lookups (IDOR)
+- *(web-api-queries)* mirror plugin_package_identifier in reconcile presence set
+- *(audit)* emit reconciliation Stateful actions via named builders
+- *(update-dispatch)* exclude deactivated host links from dispatch resolver
+- *(update-batches)* exclude deactivated host links from candidate selection
+- *(autodiscovery)* emit reactivation audit events + review fixes
+- *(autodiscovery)* repoint plugin-link rows on cascade reactivation
+- *(autodiscovery)* remove unreachable orphaned-link fallback branch
+- *(web-api)* let a late agent result upgrade a reaped Interrupted update
+- *(web-api-queries)* map DB Interrupted to API Interrupted explicitly
+- *(surfaces)* harden descriptor-gate test and doc wording after review
+- *(surfaces)* guard skew on the real descriptor, align the orphaned prepare gate
+- *(surface-proxy)* normalize registration before collision check
+- *(surface-proxy)* deadline-keyed backstop sweep for orphaned in-flight reservations
+- *(surface-proxy)* drop-safe ControllerLocal idempotency cleanup via IdempotencyGuard
+- *(surface-proxy)* drop-safe ProviderProxied cleanup via PendingGuard
+- *(surface-proxy)* identity-tag in-flight idempotency reservations by owning request_id
+- *(release-plz)* pin explicit versions, drop workspace.package.version, silence debug logs
+- *(tests)* align proxmox test fixtures with post-refactor surface and validation changes
+- *(proxmox)* apply verify fixes — DeriveActiveEnum, tenant isolation, audit coverage
+- *(proxmox)* fix clippy warnings and surface ID rename in surface-proxy
+- *(surface-proxy,queries)* fix unfulfilled lint expectation and audit field name
+- *(surface-proxy,ci)* fix plugin_ids::INFRASTRUCTURE_PROXMOX violation; add semantic boundary allowlist
+- *(verify)* address idiomatic Rust issues from post-implementation review
+- *(surface-proxy)* address code quality issues in notification audit helpers
+- *(clippy)* apply hardening to post-rebase code from main
+- *(clippy)* convert remaining cfg_attr allow → expect and fix unfulfilled expectations
+- *(clippy)* convert all remaining #[allow] to #[expect] with reason
+- *(surface-proxy,service-connections)* add #[non_exhaustive] to all extensible public types
+- *(surface-proxy)* use runtime-tokio not runtime-tokio-rustls in dev-deps
+- *(notifications)* strip request URL from persisted HTTP send errors
+- *(plugins)* close discovery error-contract gaps found in verify
+- *(plugin-phs)* report discovery fetch/read failures as errors
+- *(proxmox)* surface discovered-guests failures instead of empty options
+- *(proxmox)* serialize protection-policy upserts in a BEGIN IMMEDIATE transaction
+- *(proxmox)* honor requested per_page up to 1000 in unmatched-guests list
+- *(proxmox)* register unmatched-guests interaction, flag match provider-invocable
+- *(proxmox)* repair TEXT-stored scaling uuids on SQLite
+- *(proxmox)* generate scaling migration ids in Rust as Value::Uuid
+- *(proxmox)* declare scaling-table uuid columns via sea_query builders
+- *(proxmox)* validate software_item tenant ownership in scaling item-override actions
+- *(proxmox)* validate software_item tenant ownership in item-override actions
+- *(proxmox)* tenant-scope match/unmatch writes, BEGIN IMMEDIATE, atomic unmatch
+- *(db-migrate)* register proxmox scaling tables in plugin descriptor
+- *(proxmox)* reject non-UPID responses from PVE task endpoints
+- *(infra)* address verify-pass findings in agent-skills-a-infra
+- *(agent-core)* silence RouterOsHostRuntime::executor() noise on cross-OS hosts
+- *(proxmox)* add UptrakitScaling role to resolve VM.Audit shadowing on /vms
+- *(web-api)* remove direct uptrakit-notification-plugin-core dep
+- make plugin surface API the real public boundary
+- *(plugin-skills)* enforce discovery/detection error contract
+- *(plugins/skills)* route fetch_releases to controller
+- *(docker-surfaces)* tenant-scope switch-tag writes through both parents
+- *(docker-surfaces)* tenant-scope get-current-tag through both parents
+- *(plugin-releases-docker)* fail discovery when image inspect fails
+
+### Other
+
+- *(crypto)* real-key acceptance for encrypted plugin config columns
+- *(db)* migrate begin_with_options sites to begin_immediate()
+- *(auth)* [**breaking**] delete the legacy Permission model and its tables
+- *(deps)* update Rust dependencies, bump rand to 0.10 and syn to 3
+- *(controller-runtime)* advertise via shared zeroconf contract
+- *(web-api)* bundle embedded-handler params into structs; harden notification tests
+- *(reload)* correct NatsReloadable reachability comment
+- *(db-migrate)* replace four hand-synced core-table lists with CoreTableDescriptor vec
+- *(controller)* use config-reload canonical digest; drop duplicates
+- *(controller)* unify startup/ into boot/init/
+- *(controller)* extract boot::serve phase; run_server now ~40 lines
+- *(controller)* extract boot::recovery phase
+- *(controller)* extract boot::reload + boot::app_state
+- *(controller)* extract boot::components + boot::nats
+- *(controller)* extract boot::identity sub-module
+- *(controller)* extract boot::listeners phase (FD-atomic)
+- *(controller)* extract boot::settings phase
+- *(controller)* extract boot::persistence phase
+- *(controller)* extract boot::directories phase
+- *(controller)* extract boot::crypto phase
+- *(controller)* extract boot::config phase
+- *(controller)* introduce boot/ module, move run_server
+- *(controller)* pre-decomposition latent fixes
+- scrub remaining Permission-model residue after M1.7
+- *(wire)* seal AccessInvalidatedPayload with #[non_exhaustive] + new()
+- *(controller-core)* decision-path coverage for AccessEngine
+- *(plugins)* [**breaking**] plugin type IDs adopt dot-separated kebab-case grammar
+- *(web-api-queries)* cover list path; docs(controller-core): autocommit invariant at call sites
+- fix UpdateStatus doc drift left by the DB/API enum de-duplication
+- *(mcp)* derive get_current_user actions via AccessEngine::allowed_actions
+- *(frontend)* stop over-granting the e2e auth fixture after the action swap
+- document operator OAuth clients/consents endpoints
+- *(frontend)* drop the now-callerless oauthRequestVoid helper
+- *(frontend)* plugin type ID fixtures adopt kebab grammar
+- *(frontend)* retarget surface fixtures to REST-noun interaction IDs
+- *(frontend)* cover SurfaceWorkflow GET pre-load dispatch wiring
+- *(frontend)* drop direct_built_in_api from surface transport union
+- *(frontend)* repoint surface-read e2e parity mocks to resource path
+- *(frontend)* surface API calls via generated SDK
+- *(wire)* UpdateStarted.interactive carries dispatch intent
+- slim root AGENTS.md to invariants + pointers; fix stale facts
+- *(web-api)* guard + document drift-proof OpenAPI param authoring (+ ADR-0025)
+- *(web-api)* drift-proof remaining query handlers via params(<IntoParamsStruct>)
+- *(web-api)* convert list handlers to params(<IntoParamsStruct>) (drift-proof)
+- *(frontend)* update AGENTS for generated API client; add runbook
+- *(frontend)* extract unauthorizedApiError to restore client.ts to green
+- *(frontend)* migrate audit/notifications/profile; api.ts→api/index.ts barrel; remove types.ts
+- *(frontend)* migrate audit/notifications/profile; reduce api.ts to a pure barrel
+- *(frontend)* migrate plugins/settings/tokens; delete settings.ts
+- *(frontend)* migrate software-items/scheduler/history call sites
+- *(frontend)* migrate hosts/host-tags/discovery call sites
+- *(frontend)* migrate services/system-services/batch call sites
+- *(frontend)* migrate auth/mfa/oidc call sites to generated SDK
+- *(frontend)* route generated singleton client through 401 refresh-retry
+- *(frontend)* extract surfaces.ts (non-spec) over configured client
+- *(frontend)* extract raw.ts over configured client; migrate importers
+- *(frontend)* extract batch.ts (executeBatchChunked)
+- *(frontend)* extract crypto.ts (sealed-box) from api client
+- *(frontend)* make api.ts the transitional barrel (generated SDK + client)
+- *(frontend)* correct generated-dir exclusion mechanisms in AGENTS
+- *(frontend)* evolve openapi staleness gate to cover generated client
+- *(frontend)* golden enum value-parity guard (spike R5)
+- *(frontend)* add @hey-api/openapi-ts codegen config + regen script
+- *(frontend)* drop libc fields auto-cleaned by npm on darwin
+- *(frontend)* allow 2% cross-host pixel drift in parity snapshots
+- *(frontend)* run Playwright e2e on every push
+- *(frontend)* scope auth e2e selectors to form
+- *(deps)* refresh frontend npm deps to latest
+- bump frontend version to 0.0.5
+- release
+- *(frontend)* hoist SvelteSet import in token-store
+- bump frontend version to 0.0.4
+- *(frontend)* add Playwright parity tests for FilterBar integration
+- *(ui)* assert aria-describedby links to explicit id prop in Tooltip
+- *(ui-parity)* add missing chromium-mobile baseline snapshot
+- *(device-ui)* add Playwright tests for /device approval page
+- *(oauth)* add e2e tests for login→OAuth authorize redirect loop
+- Revert "fix(oauth): break infinite redirect loop for browser-initiated OAuth flows"
+- bump frontend version to 0.0.3
+- release
+- *(deps)* update frontend dependencies to latest versions
+- *(frontend)* add SSE cache handler tests + fix host factory for software list page
+- *(frontend)* add debounce regression test for same update_history_id
+- *(frontend)* update package-lock.json (npm libc field normalization)
+- *(frontend)* bump 9 npm deps to latest patch/minor versions
+- *(frontend)* E2E consent screen flow
+- *(e2e)* add mobile-viewport baselines for button-primitive and surface-preview
+- *(e2e)* re-baseline form-primitive, software-area, and ui-parity snapshots
+- *(frontend)* rename ?code -> ?user_code and cover Approve/Deny/client-name paths
+- *(frontend)* toggle opens confirm dialog with restart copy
+- *(frontend)* Instance Plugins section render + badge
+- *(frontend)* fix page.url mutation pattern and import UPDATES_AVAILABLE_HREF in badge tests
+- *(frontend)* write failing tests for nav badge separate navigation
+- *(web-api,surface-proxy,frontend)* remove surface runtime rollout machinery
+- *(frontend)* sync package-lock.json to package.json v0.0.2
+- bump frontend version to 0.0.2
+- release
+- *(deps)* update frontend npm deps and drop redundant overrides
+- *(frontend)* add SurfaceActionButton examples to dev button preview
+- *(frontend)* delegate SurfaceWorkflow trigger to SurfaceActionButton
+- *(frontend)* delegate SurfaceInteractionButton rendering to SurfaceActionButton
+- *(frontend)* retire nav-icons.ts; use unified kebab-case icon registry
+- *(frontend)* update Modal test to expect max-w-2xl default width
+- *(frontend)* add overflow expand re-stripe test
+- *(frontend)* add surfaces_changed debounce and loadSurfaceRegistry call tests
+- *(ui)* migrate AdminEventType union to TypeScript enum
+- *(ui)* remove ProviderSelector uncontrolled mode and description prop
+- *(verify)* post-implementation polish from /verify pass
+- *(snapshots)* regenerate ui-parity snapshots for lucide icon rollout
+- *(profile)* hoist goToTokensTab helper, add missing getAuthMethod mock
+- *(profile)* explain silent initialize() catch in handleInitiateEmailChange
+- *(profile)* merge TabStrip/TabStripItem into single ui import
+- *(provider-selector)* migrate to Select primitive and drop dead code
+- *(edit-assignment)* migrate plugin-config pickers to Select primitive
+- *(assign-modal)* migrate execution-site dropdown to Select primitive
+- *(software)* migrate plugin-type filter to Select primitive
+- *(services)* migrate merge-target dropdown to Select primitive
+- *(schema-form)* replace stale regression-guard with positive primitive check
+- *(forms)* update all import sites to use forms/ barrel
+- *(forms)* update ui/index.ts and non-route import sites
+- *(forms)* move form primitives into forms/ subfolder with barrel
+- *(audit-logs)* add actor_id-only fallback coverage for actor column
+- *(audit-logs)* remove even:bg from row snippet tr — tbody now owns zebra
+- *(ui)* remove per-tr even:bg from DataTable row snippets — tbody now owns zebra
+- *(release-plz)* unblock PR creation via git_only baseline
+- *(frontend)* update filter chip assertions for solid accent variant
+- *(frontend)* use accent variant for active status filters
+- *(frontend)* promote to proper crate, wire release-plz version cascade
+- fmt frontend stub
+- *(release-plz)* track frontend changes in controller changelog
+- *(frontend)* add markdown-it, dompurify, and task-lists deps
+- *(frontend)* update dependencies to latest patch versions
+- *(software-detail)* update tests for deferred live modal opening
+- replace aria-expanded selectors with stable role queries
+- align history frontend types with actor names
+- *(surfaces)* add handlePageChange URL merge and page-1-clear coverage
+- *(frontend)* update tests for accent page button and renamed badge label
+- *(software)* match update badge style to /software page
+- *(e2e)* add entity-link cell parity fixtures and baseline screenshots
+- *(e2e)* fix beforeEach destructuring and commit snapshot baselines for all projects
+- *(e2e)* add mobile layout tests for software group list
+- *(software)* extract group list into SoftwareGroupList component
+- *(DataTable)* add failing responsive mode tests (TDD task 2/9)
+- *(e2e)* add chromium-mobile and chromium-mobile-dark playwright projects
+- *(ui)* use rounded-card token in ProviderSelector
+- *(frontend)* re-baseline UI parity snapshots after design-language rollout ([#5](https://github.com/worried-networking/uptrakit/pull/5))
+- *(software)* align UpdateAllButton style with ActionBadge, standardise host row actions
+- *(frontend)* align UI with design-language spec
+- *(BatchActionBar)* inline all actions, drop More dropdown
+- *(software)* drop FormFieldRow wrapper from plugin select in card header
+- *(software)* consolidate state containers and strip redundant list border
+- *(software)* add card wrapper and consolidated header
+- *(software)* remove floating controls div outside isItemsTab
+- *(frontend)* replace all arbitrary CSS values with named token utilities
+- *(frontend)* rename --color-error tokens to --color-danger
+- *(ui)* inline toneToken lookup, trim class assertions in StatCard
+- *(software)* add softwareUpdateLabel helper, update test assertion for split pill layout
+- *(frontend)* update parity baselines after Skeleton component → primitive swaps
+- *(ui)* update Checkbox test to expect text-[var(--accent)] after accent-color fix
+- *(docs)* remove obsolete web-ui-inventory, relocate ui-parity-waivers
+- *(frontend)* re-baseline UI parity snapshots after design-language rollout ([#5](https://github.com/worried-networking/uptrakit/pull/5))
+- *(frontend)* remove orphaned parity snapshot for skipped runtime-state test
+- *(ui)* add missing variant coverage for #3d tests
+- *(ui)* add unit tests for settings #3e Button migration
+- *(ui)* add unit tests for settings #3d Button migration
+- *(ui)* fix #3a compliance gaps — standalone text-swap guards, offline+loading combined test, device-auth e2e snapshot
+- *(ui)* add bind:value + bind:checked round-trip tests for Input and Checkbox (#2b)
+- *(dev)* extend form-primitive preview + Playwright baselines with Textarea (sub-spec #2d)
+- *(spec)* surfaces dynamic update via SurfacesChanged AdminEvent
+- *(ui)* remove dead PUBLIC_ENTRY_PRIMARY_BUTTON_CLASS export (no consumers after #3a)
+- *(e2e)* add/re-baseline public-entry snapshots after Button primitive migration (#3a)
+- *(e2e)* add/re-baseline public-entry snapshots after Button primitive migration (#3a)
+- *(public-entry)* replace legacy class assertions, add Button primitive contract tests (#3a)
+- *(error)* migrate Go to Home to Button href branch, drop goto import (#3a)
+- *(device)* migrate Log in anchor and Approve button to Button primitive (#3a)
+- *(dev)* add form-primitive preview route and Playwright baselines (sub-spec #2b)
+- *(login)* migrate all 5 button sites to Button primitive (#3a)
+- *(ui)* remove PUBLIC_ENTRY_PRIMARY/SECONDARY_BUTTON_CLASS from PublicEntryShell
+- *(e2e)* fix register page Login locator after Button migration (sub-spec #2 PR2)
+- *(e2e)* baseline Button + UpdateAllButton preview snapshots (sub-spec #2 PR2)
+- *(dev)* add /dev/button-preview route for primitive snapshots (sub-spec #2 PR2)
+- *(register)* update Login link role assertion to button after Button primitive migration
+- *(software)* migrate Update-all header to UpdateAllButton (sub-spec #2 PR2)
+- *(settings)* migrate first Revoke to Button danger primitive (sub-spec #2 PR2)
+- *(register)* migrate login footer link to Button href primitive (sub-spec #2 PR2)
+- *(ui)* migrate ConfirmDialog Cancel to Button primitive (sub-spec #2 PR2)
+- *(profile)* migrate Create token button to Button primitive (sub-spec #2 PR2)
+- *(ui)* consume TERMINAL_THEME from terminal-palette module
+- *(frontend)* exclude playwright-report and test-results from prettier
+- *(ui)* cover Button primitive variants, sizes, and TS gates (sub-spec #2 PR1)
+- *(e2e)* skip surface runtime-state parity test (runtime gate removed)
+- *(e2e)* refresh software-tabs parity snapshots for featured-default tab
+- *(frontend)* remove decorative adapter-manifest.json (sub-spec #1)
+- *(frontend)* rename adapter-manifest test to css-contract (sub-spec #1)
+- *(frontend)* rewrite design-token-values test to use tokens.ts (sub-spec #1)
+- *(frontend)* pin golden CSS for theme-tokens plugin (sub-spec #1)
+- *(frontend)* suppress expected stderr noise in vitest setup
+- remove surface rollout gate
+- require labels for surface interactions
+- refresh ui parity baselines for aligned routes
+- align remaining route shells with design language
+- harden surface runtime interaction fallbacks
+- refresh ui design language parity coverage
+- align host, software, and history routes
+- align settings and surface runtime with design language
+- *(frontend)* update npm dependencies to latest
+- align built-in pages with ui design spec
+- add route-level ui parity coverage
+- migrate remaining built-in routes to design language
+- migrate parity-sensitive routes to design language
+- migrate shared frontend shell to design language
+- add ui parity fixtures for shared frontend patterns
+- reuse shared ui primitives in surfaces renderer
+- render history protection details and fix route test url typing
+- Add software item tab slot to software detail route
+- *(surfaces)* replace extension-era guidance
+- remove extension framework leftovers
+- drop dead extension frontend helpers
+- canonicalize surface page routes
+- remove extension namespaced form seam
+- remove legacy frontend extension runtime
+- Allow same-key retry after failed host-detail hydration
+- Fix host-detail hydration same-key rerender race
+- Stabilize host-detail hydration retries and cache restoration
+- Fix host-info permission metadata and hydration retry behavior
+- Port proxmox host-detail surface and harden hydration behavior
+- Task 6 follow-up: support controller-local sensitive fields
+- Implement Track C semantic boundary gate
+- enforce plugin semantic boundary
+- *(db)* convert all bare begin() call sites to begin_immediate()
+- *(surfaces)* guard declared required_action values over compiled registrations
+- *(agent-ssh-runtime)* [**breaking**] ssh-hosts surface IDs adopt REST-noun convention
+- *(agent-ssh-runtime)* refresh ssh-hosts golden fixture for http_method field
+- *(agent-ssh)* placement-driven surface assembly from AgentInteraction declarations
+- *(agent-ssh)* pin ssh-agent.hosts wire registration as golden fixture
+- *(wire)* align asyncapi interactive semantics + document cfg(not) select! exception
+- *(plugins)* sweep stray plugin type IDs in Rust comments
+- *(agent-core)* deadlock and PTY-targeting regressions with stub lifecycle-hook plugin
+- *(agent-core)* migrate version_check retry to backon
+- *(backoff)* [**breaking**] drop AttemptGuard, ship plain methods
+- *(mqtt-runtime)* [**breaking**] mqtt.clients surface IDs adopt REST-noun convention; merge list/get
+- *(mqtt-runtime)* migrate reconnect backoff to backon builder
+- *(doctests)* honor doctest=false opt-out; add doctest gate to pre-push
+- *(crypto)* correct the AAD registry entry count and clarify decode paths
+- *(crypto)* assert ciphertext in the aliased-read acceptance test
+- *(scheduler-runtime)* drive heartbeat fatal-path and beat-failure through real extracted fns
+- *(adr)* discovery-based uninstall reconciliation lifecycle
+- *(plugins)* [**breaking**] delete per-plugin secret maskers superseded by schema-driven masking
+- *(plugins)* flip plugin-config masking to schema-driven key sets with stale-variant prune
+- *(web-api)* move surface body validation behind the permission choke point
+- resolve final verification findings
+- *(agents)* retitle authorization rules to action extractors
+- *(auth)* make the interactive-WS unavailable-authority test inject a real fault
+- *(auth)* align docs with the M1.7 claim removal and me reshape
+- *(web-api)* cover me action expansion, dynamic actions, and degraded authority
+- *(shared-types)* rename AccessPreset to RoleBundle
+- *(access)* correct the OIDC role-sync failure and mapping-scope wording
+- *(web-api)* end-to-end access-management flow and E-matrix sweep
+- *(web-api)* dispatch the consents list test via the shared TestClient
+- *(web-api)* give the access-deny counter one owner and share the migrated-db test setup
+- *(web-api)* centralize M1.5 access fixtures and own the deny counter in authorize_any
+- *(web-api)* correct plugin-type-settings test module doc for engine-backed visibility
+- M1.5 enforcement surfaces (MCP, surfaces, WS, inline sites) on the engine
+- *(web-api)* extract build_access_authority as the single context-build path
+- *(web-api)* feature-gate B3 no-credential assertions for optional routes
+- *(web-api)* scope-map golden over per-operation security declarations
+- *(web-api)* mark AccessAuthority #[non_exhaustive]
+- *(web-api)* pin delete-channel cleanup for unknown channel types
+- *(web-api)* provider-origin invocations gated by live effective enablement
+- *(web-api)* per-tier effective-enablement matrix over the surfaces legs
+- *(plugins)* [**breaking**] notifications surface IDs adopt REST-noun convention
+- *(web-api)* router-level battery for surface method model
+- *(web-api)* cover MethodNotAllowed arms in surface lookup-error mapping
+- *(plugins)* [**breaking**] delete legacy surface_actions machinery; surfaces: arm is single-source
+- *(proxmox)* unified surface registrations + bidirectional executor guard replaces parity test
+- *(notifications)* move handle_callback off surface dispatch onto NotificationTransport
+- *(web-api)* cover provider-origin surface invocation end to end
+- *(web-api)* correct handle_new_user return-shape doc and scope failure comment
+- *(web-api)* OIDC first-user bootstrap rollback, default-role clear, mapping pin
+- *(web-api)* password-path first-user bootstrap rollback and publish tests
+- *(autodiscovery)* thread AuditEmitter + effective identifier set (reconcile prep)
+- *(web-api-types)* guard PluginRole schema drift; point staleness msg to regen-api.sh
+- *(web-api)* fix clippy let_underscore in openapi_spec test
+- *(web-api)* guard spec-eligible endpoints against post-split drift
+- *(web-api)* golden-file gate for committed openapi.json
+- *(web-api)* expose assembled OpenAPI from build_router
+- *(web-api)* order plugin_configs facade mod decls before re-exports
+- *(web-api)* extract plugin_configs test-action handler; facade wiring-only
+- *(web-api)* extract plugin_configs batch handler into batch.rs
+- *(web-api)* extract plugin_configs discovery handler into discover.rs
+- *(web-api)* extract plugin_configs CRUD handlers into crud.rs
+- *(web-api)* extract plugin_configs audit context + risk summary
+- *(web-api)* extract plugin_configs command-safety helpers
+- *(web-api)* extract plugin_configs test module into tests.rs
+- *(web-api)* create plugin_configs facade via git mv
+- *(web-api)* extract services merge + batch handlers; facade wiring-only
+- *(web-api)* extract services lifecycle handlers into lifecycle.rs
+- *(web-api)* extract services CRUD handlers into crud.rs
+- *(web-api)* extract services audit-emit helpers into audit.rs
+- *(web-api)* move services test module into services/tests.rs
+- *(web-api)* relocate services.rs into services/ facade dir
+- *(web-api)* consolidate software_items facade re-exports; drop redundant Sized bound
+- *(web-api)* de-dup version_check precondition-error impls via shared trait
+- *(web-api)* extract software_items trigger_update handler; facade now wiring-only
+- *(web-api)* extract software_items batch handler
+- *(web-api)* extract software_items merge handlers
+- *(web-api)* extract software_items version-check handlers
+- *(web-api)* extract software_items host/plugin assignment handlers
+- *(web-api)* extract software_items CRUD handlers to crud.rs
+- *(web-api)* extract software_items audit helpers to audit.rs
+- *(web-api)* move software_items test modules to tests.rs/audit_tests.rs
+- *(web-api)* route messages submodule imports through facade (drop crate::routes::)
+- *(web-api)* de-dup renew-certificate dual path and messages tests
+- *(web-api)* extract messages/restart_progression, finalize facade
+- *(web-api)* extract messages/plugin_config submodule
+- *(web-api)* extract messages/discovery submodule
+- *(web-api)* extract messages/version_check submodule
+- *(web-api)* extract messages/hosts submodule
+- *(web-api)* extract messages/certificate submodule
+- *(web-api)* extract messages/shared submodule (ping + inventory audit)
+- *(web-api)* convert messages.rs to messages/ facade, move tests
+- *(web-api)* extract fail_dispatch_target_load from queued-dispatch loop
+- *(web-api)* finalize updates facade module
+- *(web-api)* move updates test module to updates/tests.rs
+- *(web-api)* extract updates stdin submodule
+- *(web-api)* extract updates batch submodule; name audit-summary predicates
+- *(web-api)* extract updates result submodule; share installed-version setter
+- *(web-api)* extract updates dispatch submodule
+- *(web-api)* extract updates started + output submodules
+- *(web-api)* extract updates replay submodule; flatten per-record loop
+- *(web-api)* extract updates audit submodule with shared display helper
+- *(web-api)* unify post-update finalization into finalize module
+- *(web-api)* extract updates ownership + lookups submodules
+- *(web-api)* move updates.rs into updates/mod.rs
+- *(web-api)* finalize handler-split verification artifacts
+- *(web-api)* reduce service_ws handler mod.rs to facade
+- *(web-api)* extract handler session_enrolled module
+- *(web-api)* extract handler session_authenticated module
+- *(web-api)* collapse duplicated run_embedded_* wrappers
+- *(web-api)* extract handler embedded module
+- *(web-api)* gather cross-cluster handler tests into tests.rs
+- *(web-api)* extract handler message_processor module
+- *(web-api)* collapse duplicated emit_service_* audit helpers
+- *(web-api)* extract handler audit_service module
+- *(web-api)* extract handler audit_surface module
+- *(web-api)* extract handler surface_wire module
+- *(web-api)* extract handler test_support fixtures
+- *(web-api)* hoist HandlerError/Result + consts to shared_types
+- *(web-api)* migrate NATS consumer backoff to backon
+- *(web-api-auth)* drop dead #[from] derives on AuthError
+- *(codereview)* drop fixed db_status_to_api finding from web-api-queries
+- *(web-api-queries)* record the role-name-collision TOCTOU and fix an FK citation
+- *(shared-db)* state the role-delete ordering contract at both ends
+- *(web-api-queries)* scope the role-assignment delete to the tenant
+- *(autodiscovery)* route both discovery link writes through one helper
+- *(autodiscovery)* fix stale comment, item-vs-link wording, and end-user gap
+- *(autodiscovery)* cover Phase-3 preferred-existing version-preservation gate
+- *(adr)* record discovery version preservation decision
+- *(autodiscovery)* cover NULL-fill and presence-only stamping branches
+- *(web-api-queries)* cover cross-tenant host rejection in assign/update paths
+- *(web-api-queries)* batch active-update lookup in reconcile loop
+- *(web-api-queries)* share RECOVERY_HINT constant across reaper and reconnect
+- *(web-api-queries)* assert active indexes match UpdateStatus sets
+- *(architecture)* document output-authoritative contract for pre-dispatch failures
+- *(web-api-queries)* add truncation-aware line loader
+- *(surface-proxy)* demote module-private items to private visibility
+- *(surface-proxy)* scope lint expectations to the modules that fulfil them
+- *(surface-proxy)* move pending-request lifecycle methods into proxy/dispatch.rs
+- *(surface-proxy)* extract transport arms into named methods in proxy/dispatch.rs
+- *(surface-proxy)* extract idempotency key derivation into proxy/idempotency.rs
+- *(surface-proxy)* extract in-flight state machine into proxy/bookkeeping.rs
+- *(surface-proxy)* extract caller-origin/provider resolution into proxy/resolution.rs
+- *(surface-proxy)* extract pure validation helpers into proxy/validation.rs
+- *(surfaces)* pin BuiltIn-kind admission permissiveness for the ADR-0040 gates
+- *(surface-proxy)* remove orphaned, never-compiled proxy module files
+- *(surface-proxy)* drop gratuitous start_paused; allowlist test-harness core import
+- *(plugins)* [**breaking**] proxmox surface IDs adopt REST-noun convention
+- *(surfaces)* [**breaking**] delete dead DirectBuiltInApi transport variant
+- *(surfaces)* delete unreachable proxmox add-config Tier-1b executor
+- *(surfaces)* extract controller-local executor pairs into one const table
+- *(plugins)* address verify findings for unified surface dispatch
+- *(plugin-infrastructure-core)* finish ADR 0018 cross-refs and glossary
+- *(surface-proxy)* mark tracing::error! gap on controller-local mapper
+- *(surfaces)* migrate all InteractionDescriptor struct literals to new() constructor
+- *(surfaces)* migrate SurfaceNode::Section literals to constructors; R1+R4-Rust fixes
+- *(plugins)* migrate ProxmoxSurfaceStore to direct tenant_db calls
+- *(plugins)* migrate NotificationChannelStore to direct tenant_db queries
+- *(telegram)* migrate surface actions to tenant_db(); remove TelegramGlobalSettingsStore; delete settings_store.rs
+- *(email)* migrate surface actions to tenant_db(); remove EmailSmtpSettingsStore
+- *(docker)* migrate surface actions to tenant_db(); remove DockerSurfaceStore
+- *(surface-proxy)* add missing save-item-overrides audit test for proxmox_update_protection
+- *(surface-proxy)* simplify PluginSurfaceActionInvoker trait and implement full five-family dispatch
+- *(surface-proxy)* add proxmox update-protection audit tests
+- *(surface-proxy)* port proxmox add-config audit assertion tests
+- *(surface-proxy)* add docker switch-tag audit tests
+- *(surface-proxy)* port notification settings audit tests
+- *(surface-proxy)* add notification channel create audit assertion test and port builder test
+- *(surface-proxy)* add audit query helpers to controller_owned test module
+- *(surface-proxy)* replace or(x.clone()) with or_else(|| x.clone()) in audit emit functions
+- *(surfaces)* derive Copy on FrameworkGenerationRange, remove redundant clone
+- *(web-api)* wire uptrakit-surface-proxy, introduce SurfaceProxyDeps, remove original surface files
+- update Cargo.toml dependencies
+- *(notifications)* migrate email plugin to unified surface registrations
+- *(notifications)* migrate telegram plugin to unified surface registrations
+- *(notifications)* route plugin HTTP clients through shared builder
+- *(notifications)* migrate webhook plugin to unified surface registrations
+- sweep deleted permission names in architecture and development guides
+- sweep plugin type IDs to kebab grammar
+- *(plugins)* name the reason on every cfg(not) paired stub
+- *(plugins)* hoist unified-dispatch surface-id clone out of the interaction loop
+- *(proxmox)* add a genuinely racing double-upsert regression test
+- *(proxmox)* self dev-dependency fixes bare per-crate test/clippy gates
+- *(proxmox)* drop legacy agent surface action collection path
+- *(proxmox)* agent surface actions onto AgentInteraction table dispatch
+- *(proxmox)* drop stale list-all-unmatched id from parity assert message
+- *(proxmox)* guard legacy dispatch map against registration drift
+- *(proxmox)* sea_query builders + batched insert in scaling migration
+- *(migrations)* document dialect-portable uuid handling in data migrations
+- *(proxmox)* thread TenantDb through all surface handlers, drop Option<Uuid> tenant plumbing
+- *(proxmox)* tenant-isolation tests for match/unmatch on real sqlite
+- *(proxmox)* surface dispatch entry takes &TenantDb
+- *(plugins)* secret fixtures and masking parity gate over the full catalog
+- *(plugins)* guard plugin provider-id identity over the compiled catalog
+- *(plugins)* naming guard now covers proxmox rows under unification
+- *(plugins)* add contribution-monotonicity catalog guard (red under agent-infra)
+- *(plugins)* guard plugin type ID grammar in the catalog
+- *(plugins)* catalog guard enforces surface ID naming convention
+- cargo fmt
+- *(plugin-infra-registry)* add direct shared-db dep gated on migrations
+- *(users)* replace send_email_change_emails with send_transactional_email
+- *(plugins)* migrate ProxmoxProtectionStore to proxmox plugin crate
+- *(agent-infra)* type guest and proxy error contracts
+- *(plugin-core)* type shared http client builder errors
+- *(controller-boundaries)* type docker and proxmox surface requests
+- *(controller-boundaries)* type plugin and web surface contracts
+- *(boundary)* eliminate plugin semantic boundary violations
+- *(deps)* bump strum 0.27 → 0.28, fix test_support descriptor
+- *(surfaces)* remove extension-era runtime leftovers
+- make plugin surface authoring fully surface-native
+- route ssh agent through registry boundary
+- rename notification surface action wrappers
+- rename controller surface action internals
+- drop registry extension framework edge
+- Task 6: register plugin-backed surfaces via surface registry
+- isolate plugin boundaries in track a
+- *(npm)* migrate release fetch retry to backon
+- *(docker-surfaces)* name the unenforced half of the tenant-scoping invariant
+- *(docker)* [**breaking**] rename get-current-tag surface interaction to current-tag
+- *(docker)* migrate to unified surface registrations
+- layer-3 no-secrets rule, sentinel semantics, credential_updated_at
+
 ## [0.0.5](https://github.com/worried-networking/uptrakit/compare/uptrakit-controller-standalone-v0.0.4...uptrakit-controller-standalone-v0.0.5) - 2026-06-05
 
 ### Fixed
