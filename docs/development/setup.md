@@ -174,18 +174,22 @@ cd frontend && npm run check
 cd frontend && npm run build
 ```
 
-The controller serves the static `frontend/build/` output at runtime.
+A debug-profile controller picks up the static `frontend/build/` output from disk at
+runtime (it probes the working directory), so a rebuilt SPA is served without
+recompiling the backend.
 
 ### Embedded frontend (single-binary)
 
-To build a self-contained controller binary with the frontend embedded:
+The controller binaries are self-contained by construction: `embedded-frontend` is
+enabled unconditionally through the `uptrakit-controller-runtime` dependency, so there
+is no feature flag to pass. Build the SPA first, then the binary:
 
 ```bash
 cd frontend && npm ci && npm run build
-cargo build -p uptrakit-controller --features embed-frontend
+cargo build --release -p uptrakit-controller
 ```
 
-The `--static-dir` flag is not available when this feature is enabled.
+A release binary always serves the embedded copy — there is no runtime override.
 See [Embedded Frontend](embedded-frontend.md) for details.
 
 ### Embedded SSH agent
