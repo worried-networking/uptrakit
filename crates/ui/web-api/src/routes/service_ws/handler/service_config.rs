@@ -2,7 +2,13 @@
 //!
 //! Provides:
 //! - [`deliver_service_config`]: called during session setup to send all stored
-//!   entries for this `service_app_name` to the connecting service.
+//!   entries for this `service_app_name` to the connecting external (WebSocket)
+//!   service.
+//! - [`deliver_service_config_embedded`]: the equivalent delivery path for
+//!   in-process (embedded) services, pushed through the service connection
+//!   registry instead of a WebSocket sink. Both senders share their
+//!   transport-independent core via [`load_delivery_entries`] and emit the
+//!   same audit trail via [`emit_service_config_delivery_audit_event`].
 //! - [`handle_store_service_config`]: upsert handler for `StoreServiceConfig`.
 //! - [`handle_delete_service_config`]: delete handler for `DeleteServiceConfig`.
 
@@ -39,12 +45,77 @@ pub(super) struct ServiceConfigAuditCtx<'a> {
     pub(super) service_app_name: &'a str,
 }
 
-struct ServiceScopeCtx<'a> {
-    state: &'a Arc<AppState>,
-    service_id: uuid::Uuid,
-    is_system: bool,
-    service_tenant_id: Option<uuid::Uuid>,
-    service_app_name: &'a str,
+pub(super) struct ServiceScopeCtx<'a> {
+    pub(super) state: &'a Arc<AppState>,
+    pub(super) service_id: uuid::Uuid,
+    pub(super) is_system: bool,
+    pub(super) service_tenant_id: Option<uuid::Uuid>,
+    pub(super) service_app_name: &'a str,
+}
+
+/// Delivered-entry counts for the config-delivery audit event, computed once
+/// by [`load_delivery_entries`] and reused by every sender's success/failure
+/// audit call so the counts always match what was actually loaded.
+struct DeliveryCounts {
+    delivered: usize,
+    tenant: usize,
+    global: usize,
+}
+
+/// Load the stored config entries for `ctx.service_app_name` and build the
+/// wire-ready [`ServiceConfigEntry`] list plus delivery counts.
+///
+/// Transport-independent core shared by [`deliver_service_config_with_sink`]
+/// (external, WebSocket) and [`deliver_service_config_embedded`] (in-process
+/// services). On a load failure this emits the `load_failed` audit event
+/// itself (both senders skip delivery non-fatally in that case) and returns
+/// `None`; callers only need to emit their own transport-specific
+/// success/failure event afterward.
+async fn load_delivery_entries(
+    ctx: &ServiceScopeCtx<'_>,
+) -> Option<(Vec<ServiceConfigEntry>, DeliveryCounts)> {
+    let rows = match crate::queries::service_config::load_for_service(
+        ctx.state.db(),
+        ctx.service_app_name,
+    )
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                service_app_name = ctx.service_app_name,
+                "failed to load service config entries; skipping delivery"
+            );
+            emit_service_config_delivery_audit_event(
+                ctx,
+                0,
+                0,
+                0,
+                AuditOutcome::Failed,
+                Some("load_failed"),
+            );
+            return None;
+        }
+    };
+
+    let delivered_entry_count = rows.len();
+    let tenant_entry_count = rows.iter().filter(|row| row.tenant_id.is_some()).count();
+    let global_entry_count = delivered_entry_count.saturating_sub(tenant_entry_count);
+
+    let entries: Vec<ServiceConfigEntry> = rows
+        .into_iter()
+        .map(|r| ServiceConfigEntry::new(r.tenant_id, r.key, r.value))
+        .collect();
+
+    Some((
+        entries,
+        DeliveryCounts {
+            delivered: delivered_entry_count,
+            tenant: tenant_entry_count,
+            global: global_entry_count,
+        },
+    ))
 }
 
 /// Deliver all stored config entries for `service_app_name` to the connecting service.
@@ -84,58 +155,27 @@ async fn deliver_service_config_with_sink<S>(
 where
     S: Sink<Message> + Unpin,
 {
-    let rows = match crate::queries::service_config::load_for_service(state.db(), service_app_name)
-        .await
-    {
-        Ok(rows) => rows,
-        Err(e) => {
-            tracing::warn!(
-                error = %e,
-                service_app_name,
-                "failed to load service config entries; skipping delivery"
-            );
-            emit_service_config_delivery_audit_event(
-                &ServiceScopeCtx {
-                    state,
-                    service_id,
-                    is_system,
-                    service_tenant_id,
-                    service_app_name,
-                },
-                0,
-                0,
-                0,
-                AuditOutcome::Failed,
-                Some("load_failed"),
-            );
-            return Some(()); // non-fatal: continue session setup
-        }
+    let ctx = ServiceScopeCtx {
+        state,
+        service_id,
+        is_system,
+        service_tenant_id,
+        service_app_name,
     };
 
-    let delivered_entry_count = rows.len();
-    let tenant_entry_count = rows.iter().filter(|row| row.tenant_id.is_some()).count();
-    let global_entry_count = delivered_entry_count.saturating_sub(tenant_entry_count);
-
-    let entries: Vec<ServiceConfigEntry> = rows
-        .into_iter()
-        .map(|r| ServiceConfigEntry::new(r.tenant_id, r.key, r.value))
-        .collect();
+    let Some((entries, counts)) = load_delivery_entries(&ctx).await else {
+        return Some(()); // non-fatal: continue session setup; load_failed already emitted
+    };
 
     let msg = ControllerMessage::ServiceConfigDelivery(ServiceConfigDeliveryPayload::new(entries));
     if let Some(json) = serialize_controller_msg(out_seq, msg)
         && sink.send(Message::Text(json.into())).await.is_err()
     {
         emit_service_config_delivery_audit_event(
-            &ServiceScopeCtx {
-                state,
-                service_id,
-                is_system,
-                service_tenant_id,
-                service_app_name,
-            },
-            delivered_entry_count,
-            tenant_entry_count,
-            global_entry_count,
+            &ctx,
+            counts.delivered,
+            counts.tenant,
+            counts.global,
             AuditOutcome::Failed,
             Some("websocket_write_failed"),
         );
@@ -143,21 +183,57 @@ where
     }
 
     emit_service_config_delivery_audit_event(
-        &ServiceScopeCtx {
-            state,
-            service_id,
-            is_system,
-            service_tenant_id,
-            service_app_name,
-        },
-        delivered_entry_count,
-        tenant_entry_count,
-        global_entry_count,
+        &ctx,
+        counts.delivered,
+        counts.tenant,
+        counts.global,
         AuditOutcome::Success,
         None,
     );
 
     Some(())
+}
+
+/// Deliver all stored config entries for `ctx.service_app_name` to an
+/// embedded (in-process) service via the service connection registry.
+///
+/// Unlike [`deliver_service_config`], this delivers even when the entry set
+/// is empty — every embedded service (agent, agent-ssh, scheduler, MQTT) goes
+/// through the same shared config-delivery path and gets the same audit
+/// trail, whether or not it has any stored config. Non-fatal on any failure:
+/// the caller's session loop continues regardless of outcome.
+pub(super) async fn deliver_service_config_embedded(ctx: &ServiceScopeCtx<'_>) {
+    let Some((entries, counts)) = load_delivery_entries(ctx).await else {
+        return; // non-fatal: load_failed already emitted
+    };
+
+    let msg = ControllerMessage::ServiceConfigDelivery(ServiceConfigDeliveryPayload::new(entries));
+    let sent = ctx
+        .state
+        .service_connections
+        .send(&ctx.service_id, msg)
+        .await;
+
+    if !sent {
+        emit_service_config_delivery_audit_event(
+            ctx,
+            counts.delivered,
+            counts.tenant,
+            counts.global,
+            AuditOutcome::Failed,
+            Some("service_send_failed"),
+        );
+        return;
+    }
+
+    emit_service_config_delivery_audit_event(
+        ctx,
+        counts.delivered,
+        counts.tenant,
+        counts.global,
+        AuditOutcome::Success,
+        None,
+    );
 }
 
 fn service_config_scope_label(tenant_id: Option<uuid::Uuid>) -> &'static str {
@@ -1019,6 +1095,230 @@ mod tests {
         assert_eq!(details["tenant_entry_count"], 0);
         assert_eq!(details["global_entry_count"], 0);
         assert_eq!(details["reason_code"], "load_failed");
+    }
+
+    // ---------------------------------------------------------------------------
+    // Embedded deliver tests — same transport-independent core as the WS path
+    // above, delivered via the service connection registry instead of a sink.
+    // ---------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn deliver_service_config_embedded_reaches_connection_and_emits_success_audit_entry() {
+        let backend = Arc::new(RecordingAuditBackend::default());
+        let (state, tenant_id) =
+            build_test_state_with_recording_backend(Arc::clone(&backend)).await;
+        crate::queries::service_config::upsert(
+            state.db(),
+            "uptrakit-mqtt",
+            None,
+            "smtp.global",
+            serde_json::json!({"host": "smtp.internal"}),
+            true,
+        )
+        .await
+        .expect("insert global service config row");
+        crate::queries::service_config::upsert(
+            state.db(),
+            "uptrakit-mqtt",
+            Some(tenant_id),
+            "clients.primary",
+            serde_json::json!({"enabled": true}),
+            false,
+        )
+        .await
+        .expect("insert tenant service config row");
+
+        let service_id = uuid::Uuid::now_v7();
+        let (mut rx, _connection_handle) = state
+            .service_connections
+            .register(
+                service_id,
+                std::collections::BTreeSet::new(),
+                None,
+                None,
+                Some("uptrakit-mqtt".to_string()),
+            )
+            .await;
+
+        let ctx = ServiceScopeCtx {
+            state: &state,
+            service_id,
+            is_system: true,
+            service_tenant_id: None,
+            service_app_name: "uptrakit-mqtt",
+        };
+
+        deliver_service_config_embedded(&ctx).await;
+
+        let ControllerMessage::ServiceConfigDelivery(delivery) = rx
+            .try_recv()
+            .expect("expected a ServiceConfigDelivery message on the connection")
+        else {
+            panic!("expected ServiceConfigDelivery message");
+        };
+        assert_eq!(delivery.entries.len(), 2);
+        assert!(
+            delivery
+                .entries
+                .iter()
+                .any(|e| e.tenant_id.is_none() && e.key == "smtp.global")
+        );
+        assert!(
+            delivery
+                .entries
+                .iter()
+                .any(|e| e.tenant_id == Some(tenant_id) && e.key == "clients.primary")
+        );
+
+        let entry = wait_for_first_audit_entry(backend.as_ref()).await;
+        assert_eq!(entry.action_type, AuditActionType::SERVICE_CONFIG_DELIVER);
+        assert_eq!(entry.outcome, AuditOutcome::Success);
+        assert_eq!(entry.actor_type, ActorType::Service);
+        assert_eq!(entry.actor_id, Some(service_id));
+        assert_eq!(entry.tenant_id, None);
+        assert_eq!(entry.target_type.as_deref(), Some("service"));
+        assert_eq!(entry.target_display.as_deref(), Some("uptrakit-mqtt"));
+        let details = entry
+            .details_json
+            .as_ref()
+            .expect("delivery audit should include details");
+        assert_eq!(details["service_app_name"], "uptrakit-mqtt");
+        assert_eq!(details["delivered_entry_count"], 2);
+        assert_eq!(details["tenant_entry_count"], 1);
+        assert_eq!(details["global_entry_count"], 1);
+        assert!(details.get("reason_code").is_none());
+    }
+
+    #[tokio::test]
+    async fn deliver_service_config_embedded_delivers_and_audits_on_empty_set() {
+        let backend = Arc::new(RecordingAuditBackend::default());
+        let (state, _tenant_id) =
+            build_test_state_with_recording_backend(Arc::clone(&backend)).await;
+
+        let service_id = uuid::Uuid::now_v7();
+        let (mut rx, _connection_handle) = state
+            .service_connections
+            .register(
+                service_id,
+                std::collections::BTreeSet::new(),
+                None,
+                None,
+                Some("uptrakit-mqtt".to_string()),
+            )
+            .await;
+
+        let ctx = ServiceScopeCtx {
+            state: &state,
+            service_id,
+            is_system: true,
+            service_tenant_id: None,
+            service_app_name: "uptrakit-mqtt",
+        };
+
+        deliver_service_config_embedded(&ctx).await;
+
+        // Unlike the deleted `send_initial_service_config`, an empty entry set
+        // still reaches the connection — every embedded service gets a delivery.
+        let ControllerMessage::ServiceConfigDelivery(delivery) = rx
+            .try_recv()
+            .expect("expected a ServiceConfigDelivery message even for an empty entry set")
+        else {
+            panic!("expected ServiceConfigDelivery message");
+        };
+        assert!(delivery.entries.is_empty());
+
+        let entry = wait_for_first_audit_entry(backend.as_ref()).await;
+        assert_eq!(entry.action_type, AuditActionType::SERVICE_CONFIG_DELIVER);
+        assert_eq!(entry.outcome, AuditOutcome::Success);
+        let details = entry
+            .details_json
+            .as_ref()
+            .expect("delivery audit should include details");
+        assert_eq!(details["delivered_entry_count"], 0);
+        assert_eq!(details["tenant_entry_count"], 0);
+        assert_eq!(details["global_entry_count"], 0);
+        assert!(details.get("reason_code").is_none());
+    }
+
+    #[tokio::test]
+    async fn deliver_service_config_embedded_emits_failed_audit_entry_when_load_fails() {
+        let backend = Arc::new(RecordingAuditBackend::default());
+        let (state, _tenant_id) =
+            build_test_state_with_recording_backend(Arc::clone(&backend)).await;
+        state
+            .db()
+            .clone()
+            .close()
+            .await
+            .expect("test db close should succeed");
+
+        let service_id = uuid::Uuid::now_v7();
+        let ctx = ServiceScopeCtx {
+            state: &state,
+            service_id,
+            is_system: true,
+            service_tenant_id: None,
+            service_app_name: "uptrakit-mqtt",
+        };
+
+        // No connection registered for `service_id`; a load failure must return
+        // before any send is attempted, so this stays non-fatal either way.
+        deliver_service_config_embedded(&ctx).await;
+
+        let entry = wait_for_first_audit_entry(backend.as_ref()).await;
+        assert_eq!(entry.action_type, AuditActionType::SERVICE_CONFIG_DELIVER);
+        assert_eq!(entry.outcome, AuditOutcome::Failed);
+        assert_eq!(entry.actor_type, ActorType::Service);
+        assert_eq!(entry.actor_id, Some(service_id));
+        let details = entry
+            .details_json
+            .as_ref()
+            .expect("delivery load failure audit should include details");
+        assert_eq!(details["delivered_entry_count"], 0);
+        assert_eq!(details["reason_code"], "load_failed");
+    }
+
+    #[tokio::test]
+    async fn deliver_service_config_embedded_emits_failed_audit_entry_when_send_fails() {
+        let backend = Arc::new(RecordingAuditBackend::default());
+        let (state, tenant_id) =
+            build_test_state_with_recording_backend(Arc::clone(&backend)).await;
+        crate::queries::service_config::upsert(
+            state.db(),
+            "uptrakit-mqtt",
+            Some(tenant_id),
+            "clients.primary",
+            serde_json::json!({"enabled": true}),
+            true,
+        )
+        .await
+        .expect("insert service config row");
+
+        // Deliberately do not register a connection for this service_id, so
+        // `service_connections.send` returns `false`.
+        let service_id = uuid::Uuid::now_v7();
+        let ctx = ServiceScopeCtx {
+            state: &state,
+            service_id,
+            is_system: false,
+            service_tenant_id: Some(tenant_id),
+            service_app_name: "uptrakit-mqtt",
+        };
+
+        deliver_service_config_embedded(&ctx).await;
+
+        let entry = wait_for_first_audit_entry(backend.as_ref()).await;
+        assert_eq!(entry.action_type, AuditActionType::SERVICE_CONFIG_DELIVER);
+        assert_eq!(entry.outcome, AuditOutcome::Failed);
+        assert_eq!(entry.actor_type, ActorType::Service);
+        assert_eq!(entry.actor_id, Some(service_id));
+        assert_eq!(entry.tenant_id, Some(tenant_id));
+        let details = entry
+            .details_json
+            .as_ref()
+            .expect("delivery failure audit should include details");
+        assert_eq!(details["delivered_entry_count"], 1);
+        assert_eq!(details["reason_code"], "service_send_failed");
     }
 
     // ---------------------------------------------------------------------------

@@ -453,8 +453,6 @@ pub(crate) async fn register_mqtt(
         },
     );
 
-    crate::mqtt::send_initial_service_config(app_state, add_result.service_id).await;
-
     Ok(())
 }
 

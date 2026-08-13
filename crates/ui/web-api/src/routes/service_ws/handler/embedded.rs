@@ -11,6 +11,7 @@ use uptrakit_wire::report_tracker::ReportTracker;
 use uptrakit_wire::{Capability, ServiceMessage};
 
 use super::message_processor::MessageProcessor;
+use super::service_config::{self, ServiceScopeCtx};
 use super::session_authenticated::load_session_host_ids;
 use super::shared_types::ProcessorAction;
 use super::workload;
@@ -143,6 +144,19 @@ pub(super) async fn run_embedded_message_handler_inner(
         linked_host_ids,
         report_tracker: ReportTracker::new(),
     };
+
+    // Mirrors the external (WebSocket) session's ordering: config delivery
+    // happens before the service starts processing messages, so every
+    // embedded service (agent, agent-ssh, scheduler, MQTT) gets its stored
+    // config — and the same audit trail — before anything else runs.
+    let config_ctx = ServiceScopeCtx {
+        state: &state,
+        service_id: session.service_id,
+        is_system: session.is_system,
+        service_tenant_id: session.service_tenant_id,
+        service_app_name: session.app_name,
+    };
+    service_config::deliver_service_config_embedded(&config_ctx).await;
 
     'msg_loop: loop {
         let msg = tokio::select! {

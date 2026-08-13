@@ -25,8 +25,6 @@ pub(crate) mod embedded;
 #[cfg(feature = "embedded-frontend")]
 mod embedded_frontend;
 mod migration;
-#[cfg(feature = "embedded-mqtt")]
-mod mqtt;
 mod mtls_acceptor;
 pub(crate) mod pki;
 pub(crate) mod reconcile;

@@ -492,7 +492,9 @@ sign_renewal_csr_system = "no-db"
 
 [routes."service_ws/handler/service_config.rs"]
 deliver_service_config = "no-db"
+deliver_service_config_embedded = "no-db"
 deliver_service_config_with_sink = "ignore"
+load_delivery_entries = "ignore"
 handle_store_service_config = "no-db"
 handle_delete_service_config = "no-db"
 
