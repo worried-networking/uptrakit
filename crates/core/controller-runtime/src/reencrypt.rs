@@ -961,7 +961,7 @@ async fn warn_on_instance_plugin_setting_plaintext_residue(db: &DatabaseConnecti
 /// returned.
 pub(crate) async fn sweep_layer3_secret_residue(
     db: &DatabaseConnection,
-    ops: &dyn uptrakit_plugin_infrastructure_core::PluginConfigOps,
+    ops: &dyn uptrakit_plugin_infrastructure_registry::PluginConfigOps,
 ) -> (u64, u64) {
     use sea_orm::ConnectionTrait;
     use sea_orm::sea_query::{Expr, ExprTrait, Order, Query};
@@ -2509,9 +2509,8 @@ mod tests {
     /// `ci/check_plugin_semantic_boundary.py`).
     #[tokio::test]
     async fn sweep_counts_sensitive_and_unknowable_layer3_rows() {
-        use uptrakit_plugin_infrastructure_core::{PluginConfigOps, PluginMetadataOps};
         use uptrakit_plugin_infrastructure_registry::{
-            CatalogConfig, InstancePluginStates, build_catalog,
+            CatalogConfig, InstancePluginStates, PluginConfigOps, PluginMetadataOps, build_catalog,
         };
         use uptrakit_shared_types::PluginTypeId;
 
