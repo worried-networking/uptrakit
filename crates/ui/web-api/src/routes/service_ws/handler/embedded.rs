@@ -386,6 +386,70 @@ mod tests {
             );
             assert_eq!(*notifier.disconnected.lock(), vec![service_id]);
         }
+
+        /// Pins the wiring, not just the sender: an embedded system session
+        /// must push stored config to the service before it processes any
+        /// message. Removing the `deliver_service_config_embedded` call from
+        /// `run_embedded_message_handler_inner` fails this test.
+        #[tokio::test]
+        async fn embedded_system_session_delivers_stored_config_to_the_service() {
+            let db = crate::test_harness::setup_migrated_db().await;
+            let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+            let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+
+            crate::queries::service_config::upsert(
+                state.db(),
+                "uptrakit-mqtt",
+                Some(tenant_id),
+                "clients.primary",
+                serde_json::json!({"enabled": true}),
+                false,
+            )
+            .await
+            .expect("insert tenant service config row");
+
+            let service_id = Uuid::now_v7();
+            let capabilities: BTreeSet<Capability> =
+                [Capability::SystemService].into_iter().collect();
+            let (mut push_rx, connection_handle) = state
+                .service_connections
+                .register(
+                    service_id,
+                    capabilities.clone(),
+                    None,
+                    None,
+                    Some("uptrakit-mqtt".to_string()),
+                )
+                .await;
+            let connection_id = connection_handle.connection_id();
+
+            // Closed service channel: the handler delivers config, then exits.
+            let (service_tx, service_rx) = tokio::sync::mpsc::channel(1);
+            drop(service_tx);
+
+            run_embedded_system_message_handler(EmbeddedHandlerCallParams {
+                state: state.clone(),
+                service_id,
+                connection_id,
+                capabilities: &capabilities,
+                app_name: "uptrakit-mqtt",
+                service_rx,
+                cancel: CancellationToken::new(),
+            })
+            .await;
+
+            let delivered = push_rx
+                .try_recv()
+                .expect("embedded session should push a ServiceConfigDelivery");
+            match delivered {
+                uptrakit_wire::ControllerMessage::ServiceConfigDelivery(payload) => {
+                    let keys: Vec<&str> = payload.entries.iter().map(|e| e.key.as_str()).collect();
+                    assert_eq!(keys, vec!["clients.primary"]);
+                    assert_eq!(payload.entries[0].tenant_id, Some(tenant_id));
+                }
+                other => panic!("expected ServiceConfigDelivery, got {other:?}"),
+            }
+        }
     }
 
     #[cfg(feature = "db-sqlite")]
