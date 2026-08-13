@@ -47,6 +47,11 @@ git_release_body = """{% if changelog | length > 100000 -%}
 {%- endif %}"""
 
 # ===== Excluded from analysis (release = false) =====
+# Repository-only developer tooling; do not version, tag, or publish it.
+[[package]]
+name = "xtask"
+release = false
+
 # Integration tests are runtime-only verification.
 [[package]]
 name = "uptrakit-integration-tests"

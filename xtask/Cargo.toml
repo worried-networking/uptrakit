@@ -6,6 +6,8 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 version = "0.0.2"
+# Repository-only developer tooling; never publish this crate.
+publish = false
 
 [lib]
 name = "xtask"

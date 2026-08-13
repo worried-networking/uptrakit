@@ -29,6 +29,8 @@ const BINARY_TARGETS: &[&str] = &[
     "uptrakit-cli",
 ];
 
+const NEVER_RELEASED_CRATES: &[&str] = &["xtask"];
+
 #[derive(Debug, Deserialize)]
 struct ReleasePlz {
     #[serde(default)]
@@ -39,6 +41,8 @@ struct ReleasePlz {
 struct RpPackage {
     name: String,
     #[serde(default)]
+    release: Option<bool>,
+    #[serde(default)]
     publish: Option<bool>,
     #[serde(default)]
     git_only: Option<bool>,
@@ -48,6 +52,16 @@ struct RpPackage {
     git_tag_enable: Option<bool>,
     #[serde(default)]
     changelog_update: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CargoManifest {
+    package: CargoPackage,
+}
+
+#[derive(Debug, Deserialize)]
+struct CargoPackage {
+    publish: Option<bool>,
 }
 
 fn workspace_root() -> PathBuf {
@@ -125,6 +139,46 @@ fn release_plz_config_is_self_consistent() {
         errors
             .iter()
             .map(|e| format!("  - {e}\n"))
+            .collect::<String>()
+    );
+}
+
+#[test]
+fn repository_tooling_is_never_released() {
+    let rp = load_release_plz();
+    let by: BTreeMap<&str, &RpPackage> = rp.package.iter().map(|p| (p.name.as_str(), p)).collect();
+    let root = workspace_root();
+    let mut errors = Vec::<String>::new();
+
+    for &crate_name in NEVER_RELEASED_CRATES {
+        match by.get(crate_name) {
+            Some(package) if package.release == Some(false) => {}
+            Some(_) => errors.push(format!(
+                "[release-plz] {crate_name}: must set `release = false` to exclude it from release analysis."
+            )),
+            None => errors.push(format!(
+                "[release-plz] {crate_name}: missing from release-plz.toml."
+            )),
+        }
+
+        let manifest_path = root.join(crate_name).join("Cargo.toml");
+        let manifest: CargoManifest = toml::from_str(
+            &std::fs::read_to_string(&manifest_path).expect("never-released crate Cargo.toml"),
+        )
+        .expect("never-released crate Cargo.toml parses");
+        if manifest.package.publish != Some(false) {
+            errors.push(format!(
+                "[cargo] {crate_name}: Cargo.toml must set `publish = false`."
+            ));
+        }
+    }
+
+    assert!(
+        errors.is_empty(),
+        "never-released crate policy violations:\n{}",
+        errors
+            .iter()
+            .map(|error| format!("  - {error}\n"))
             .collect::<String>()
     );
 }
