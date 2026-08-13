@@ -1,14 +1,19 @@
 //! Embedded MQTT service for controller deployments.
+//!
+//! `mqtt_capabilities()` used to live here as a thin wrapper over
+//! `uptrakit_mqtt_runtime::bootstrap::capabilities()`; callers now read
+//! `bootstrap::capabilities()` directly (see
+//! `crates/core/mqtt-runtime/src/bootstrap.rs`), leaving this module with
+//! just the initial-config delivery helper below.
+//!
+//! `send_initial_service_config` is slated for removal in a follow-up task
+//! once shared embedded config delivery lands in `web-api` — do not delete it
+//! before that replacement exists, or embedded MQTT boots with no stored
+//! client configs.
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use uptrakit_mqtt_runtime::mqtt_capabilities as runtime_capabilities;
-use uptrakit_wire::{Capability, ControllerMessage};
-
-pub(crate) fn mqtt_capabilities() -> BTreeSet<Capability> {
-    runtime_capabilities()
-}
+use uptrakit_wire::ControllerMessage;
 
 pub(crate) async fn send_initial_service_config(
     app_state: &Arc<uptrakit_web_api::AppState>,
@@ -50,19 +55,4 @@ pub(crate) async fn send_initial_service_config(
             ),
         )
         .await;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn mqtt_capabilities_includes_expected_set() {
-        let caps = mqtt_capabilities();
-        assert!(caps.contains(&Capability::SystemService));
-        assert!(caps.contains(&Capability::UpdateTracking));
-        assert!(caps.contains(&Capability::GracefulShutdown));
-        assert!(caps.contains(&Capability::UiSurfaces));
-        assert!(caps.contains(&Capability::WorkloadClaims));
-    }
 }

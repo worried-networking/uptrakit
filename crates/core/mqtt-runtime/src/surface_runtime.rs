@@ -33,9 +33,10 @@ const LIST_MAX_PER_PAGE: u64 = 200;
 /// Build the `ProviderIdentity` block shared by every MQTT surface
 /// registration (populated and empty alike).
 fn provider_identity(service_id: Option<uuid::Uuid>) -> surfaces::ProviderIdentity {
+    let app_name = crate::bootstrap::MQTT_SERVICE_APP_NAME;
     let provider_id = service_id
-        .map(|id| format!("service.uptrakit-mqtt.{id}"))
-        .unwrap_or_else(|| "service.uptrakit-mqtt".to_string());
+        .map(|id| format!("service.{app_name}.{id}"))
+        .unwrap_or_else(|| format!("service.{app_name}"));
     surfaces::ProviderIdentity {
         provider_id,
         provider_kind: surfaces::ProviderKind::Service,
@@ -328,6 +329,26 @@ mod tests {
     use crate::client_manager::ParsedMqttClientConfig;
     use uptrakit_wire::SecretString;
     use uuid::Uuid;
+
+    #[test]
+    fn provider_id_embeds_the_single_source_app_name() {
+        let service_id = Uuid::now_v7();
+
+        let without_service = build_surface_registration_with_ids(None, None);
+        assert_eq!(
+            without_service.provider.provider_id,
+            format!("service.{}", crate::bootstrap::MQTT_SERVICE_APP_NAME)
+        );
+
+        let with_service = build_surface_registration_with_ids(None, Some(service_id));
+        assert_eq!(
+            with_service.provider.provider_id,
+            format!(
+                "service.{}.{service_id}",
+                crate::bootstrap::MQTT_SERVICE_APP_NAME
+            )
+        );
+    }
 
     #[test]
     fn registration_places_surface_in_settings_tab() {

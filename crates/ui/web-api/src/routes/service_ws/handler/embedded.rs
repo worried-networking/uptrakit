@@ -24,9 +24,10 @@ use crate::AppState;
 ///
 /// Bundles the fields common to [`run_embedded_message_handler`] and
 /// [`run_embedded_system_message_handler`] so each stays within the
-/// `clippy::too_many_arguments` limit; the two functions still differ in how
-/// they resolve `service_tenant_id`/`is_system`, which callers pass alongside
-/// this struct.
+/// `clippy::too_many_arguments` limit. [`run_embedded_message_handler`] takes
+/// a tenant id alongside this struct (tenant services);
+/// [`run_embedded_system_message_handler`] takes none — system services are
+/// always built with `service_tenant_id: None`.
 pub(crate) struct EmbeddedHandlerCallParams<'a> {
     pub(crate) state: Arc<AppState>,
     pub(crate) service_id: uuid::Uuid,
@@ -73,10 +74,10 @@ pub(crate) async fn run_embedded_message_handler(
     .await;
 }
 
-pub(crate) async fn run_embedded_system_message_handler(
-    params: EmbeddedHandlerCallParams<'_>,
-    service_tenant_id: Option<uuid::Uuid>,
-) {
+/// System services are untenanted by construction: the inner session is
+/// always built with `service_tenant_id: None`, regardless of any tenant
+/// context the caller might otherwise have available.
+pub(crate) async fn run_embedded_system_message_handler(params: EmbeddedHandlerCallParams<'_>) {
     let EmbeddedHandlerCallParams {
         state,
         service_id,
@@ -92,7 +93,7 @@ pub(crate) async fn run_embedded_system_message_handler(
             service_id,
             connection_id,
             is_system: true,
-            service_tenant_id,
+            service_tenant_id: None,
             app_name,
         },
         capabilities,
@@ -344,18 +345,15 @@ mod tests {
             let (service_tx, service_rx) = tokio::sync::mpsc::channel(1);
             drop(service_tx);
 
-            run_embedded_system_message_handler(
-                EmbeddedHandlerCallParams {
-                    state: state.clone(),
-                    service_id,
-                    connection_id,
-                    capabilities: &mqtt_capabilities,
-                    app_name: "uptrakit-mqtt",
-                    service_rx,
-                    cancel: CancellationToken::new(),
-                },
-                Some(tenant_id),
-            )
+            run_embedded_system_message_handler(EmbeddedHandlerCallParams {
+                state: state.clone(),
+                service_id,
+                connection_id,
+                capabilities: &mqtt_capabilities,
+                app_name: "uptrakit-mqtt",
+                service_rx,
+                cancel: CancellationToken::new(),
+            })
             .await;
 
             assert!(!state.service_connections.is_connected(&service_id).await);

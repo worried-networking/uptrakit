@@ -6,9 +6,9 @@
 ))]
 use std::sync::Arc;
 
-#[cfg(feature = "embedded-scheduler")]
+#[cfg(any(feature = "embedded-scheduler", feature = "embedded-mqtt"))]
 use std::collections::BTreeSet;
-#[cfg(feature = "embedded-scheduler")]
+#[cfg(any(feature = "embedded-scheduler", feature = "embedded-mqtt"))]
 use uptrakit_wire::Capability;
 #[cfg(any(
     feature = "embedded-scheduler",
@@ -77,8 +77,8 @@ const SCHEDULER: BuiltinRegistration = BuiltinRegistration {
 #[cfg(feature = "embedded-mqtt")]
 const MQTT: BuiltinRegistration = BuiltinRegistration {
     label: "Embedded MQTT",
-    app_name: "uptrakit-mqtt",
-    yield_policy: uptrakit_service_platform::YieldPolicy::SameServiceAnywhere,
+    app_name: uptrakit_mqtt_runtime::bootstrap::MQTT_SERVICE_APP_NAME,
+    yield_policy: uptrakit_mqtt_runtime::bootstrap::YIELD_POLICY,
 };
 
 #[cfg(any(
@@ -112,13 +112,13 @@ fn map_yield_policy(
     }
 }
 
-#[cfg(feature = "embedded-scheduler")]
+#[cfg(any(feature = "embedded-scheduler", feature = "embedded-mqtt"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EmbeddedBridgeMode {
-    System { service_tenant_id: Option<Uuid> },
+    System,
 }
 
-#[cfg(feature = "embedded-scheduler")]
+#[cfg(any(feature = "embedded-scheduler", feature = "embedded-mqtt"))]
 struct EmbeddedBridgeRegistration {
     service_id: Uuid,
     connection_id: Uuid,
@@ -139,14 +139,16 @@ fn scheduler_bridge_registration(
         capabilities: scheduler_caps,
         app_name: SCHEDULER.app_name.to_string(),
         service_rx: add_result.service_rx,
-        mode: EmbeddedBridgeMode::System {
-            service_tenant_id: None,
-        },
+        mode: EmbeddedBridgeMode::System,
     }
 }
 
-#[cfg(feature = "embedded-scheduler")]
-fn spawn_scheduler_bridge(
+/// Spawn the server-side bridge task for an untenanted system service
+/// (scheduler, MQTT). System bridges are untenanted by construction: the
+/// inner session is always built with `service_tenant_id: None`.
+#[cfg(any(feature = "embedded-scheduler", feature = "embedded-mqtt"))]
+fn spawn_system_bridge(
+    label: &'static str,
     app_state: &Arc<uptrakit_web_api::AppState>,
     bg: &mut BackgroundTasks,
     bridge: EmbeddedBridgeRegistration,
@@ -161,7 +163,7 @@ fn spawn_scheduler_bridge(
         mode,
     } = bridge;
     let bridge_handle = match mode {
-        EmbeddedBridgeMode::System { service_tenant_id } => tokio::spawn(
+        EmbeddedBridgeMode::System => tokio::spawn(
             uptrakit_web_api::embedded_support::run_embedded_system_message_handler(
                 uptrakit_web_api::embedded_support::EmbeddedHandlerParams::new(
                     Arc::clone(app_state),
@@ -172,11 +174,10 @@ fn spawn_scheduler_bridge(
                     service_rx,
                     bridge_cancel,
                 ),
-                service_tenant_id,
             ),
         ),
     };
-    bg.track("Embedded Scheduler (bridge)", bridge_handle);
+    bg.track(label, bridge_handle);
 }
 
 #[cfg(feature = "embedded-scheduler")]
@@ -255,7 +256,8 @@ pub(crate) async fn register_scheduler(
         )
         .await?;
 
-    spawn_scheduler_bridge(
+    spawn_system_bridge(
+        "Embedded Scheduler (bridge)",
         app_state,
         bg,
         scheduler_bridge_registration(scheduler_caps, add_result),
@@ -413,10 +415,7 @@ pub(crate) async fn register_mqtt(
     bg: &mut BackgroundTasks,
     controller_installation_id: Uuid,
 ) -> rootcause::Result<()> {
-    let mqtt_caps = crate::mqtt::mqtt_capabilities();
-    let default_tenant_id = app_state.default_tenant_id;
-
-    let handler = uptrakit_mqtt_runtime::MqttHandler::new();
+    let mqtt_caps = uptrakit_mqtt_runtime::bootstrap::capabilities();
 
     let add_result = host
         .add(
@@ -427,9 +426,8 @@ pub(crate) async fn register_mqtt(
             controller_installation_id,
             map_yield_policy(&MQTT, None),
             move |service_id, transport, tokens| {
-                Box::pin(uptrakit_service_sdk::run_embedded_service(
+                Box::pin(uptrakit_mqtt_runtime::bootstrap::run_embedded(
                     service_id,
-                    handler,
                     transport,
                     tokens.drain,
                     tokens.abort,
@@ -437,26 +435,23 @@ pub(crate) async fn register_mqtt(
             },
             app_state,
             bg,
-            Some(crate::durations::EMBEDDED_MQTT_SHUTDOWN_TIMEOUT),
+            Some(uptrakit_mqtt_runtime::bootstrap::EMBEDDED_SHUTDOWN_TIMEOUT),
         )
         .await?;
 
-    let bridge_cancel = bg.child_token();
-    let bridge_handle = tokio::spawn(
-        uptrakit_web_api::embedded_support::run_embedded_system_message_handler(
-            uptrakit_web_api::embedded_support::EmbeddedHandlerParams::new(
-                Arc::clone(app_state),
-                add_result.service_id,
-                add_result.connection_id,
-                mqtt_caps,
-                MQTT.app_name.to_string(),
-                add_result.service_rx,
-                bridge_cancel,
-            ),
-            Some(default_tenant_id),
-        ),
+    spawn_system_bridge(
+        "Embedded MQTT (bridge)",
+        app_state,
+        bg,
+        EmbeddedBridgeRegistration {
+            service_id: add_result.service_id,
+            connection_id: add_result.connection_id,
+            capabilities: mqtt_caps,
+            app_name: MQTT.app_name.to_string(),
+            service_rx: add_result.service_rx,
+            mode: EmbeddedBridgeMode::System,
+        },
     );
-    bg.track("Embedded MQTT (bridge)", bridge_handle);
 
     crate::mqtt::send_initial_service_config(app_state, add_result.service_id).await;
 
@@ -486,12 +481,7 @@ mod tests {
         assert_eq!(bridge.service_id, service_id);
         assert_eq!(bridge.capabilities, scheduler_caps);
         assert_eq!(bridge.app_name, SCHEDULER.app_name.to_string());
-        assert_eq!(
-            bridge.mode,
-            EmbeddedBridgeMode::System {
-                service_tenant_id: None,
-            }
-        );
+        assert_eq!(bridge.mode, EmbeddedBridgeMode::System);
 
         service_tx
             .send(ServiceMessage::Unknown)

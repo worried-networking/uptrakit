@@ -1,7 +1,7 @@
 mod cli;
 
 use clap::Parser;
-use uptrakit_mqtt_runtime::{MQTT_SERVICE_APP_NAME, MqttHandler};
+use uptrakit_mqtt_runtime::bootstrap::{MQTT_SERVICE_APP_NAME, new_handler};
 
 #[tokio::main]
 async fn main() {
@@ -21,7 +21,7 @@ async fn main() {
 
     tracing::info!("starting uptrakit-mqtt service");
 
-    let mut handler = MqttHandler::new();
+    let mut handler = new_handler();
 
     uptrakit_service_sdk::run_lifecycle_and_handle_errors(
         MQTT_SERVICE_APP_NAME,

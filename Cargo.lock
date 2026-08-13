@@ -7700,6 +7700,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "uptrakit-crypto",
+ "uptrakit-service-platform",
  "uptrakit-service-sdk",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",

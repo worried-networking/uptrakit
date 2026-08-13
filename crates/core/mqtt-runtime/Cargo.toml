@@ -30,6 +30,7 @@ tokio-rustls = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 uptrakit-wire = { workspace = true }
+uptrakit-service-platform = { workspace = true }
 uptrakit-service-sdk = { workspace = true, features = ["sensitive-params"] }
 uptrakit-shared-macros = { workspace = true }
 uptrakit-shared-types = { workspace = true }

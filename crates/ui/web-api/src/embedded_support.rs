@@ -127,10 +127,12 @@ pub async fn run_embedded_message_handler(params: EmbeddedHandlerParams, tenant_
 }
 
 /// Run the server-side message handler for an embedded system service.
-pub async fn run_embedded_system_message_handler(
-    params: EmbeddedHandlerParams,
-    service_tenant_id: Option<Uuid>,
-) {
+///
+/// System services are untenanted by construction: the inner session is
+/// always built with `service_tenant_id: None` (`is_system: true`). There is
+/// no tenant-scoping argument here — see
+/// `crate::routes::service_ws::handler::embedded::run_embedded_system_message_handler`.
+pub async fn run_embedded_system_message_handler(params: EmbeddedHandlerParams) {
     let EmbeddedHandlerParams {
         state,
         service_id,
@@ -155,7 +157,6 @@ pub async fn run_embedded_system_message_handler(
                 service_rx,
                 cancel,
             },
-            service_tenant_id,
         ),
     )
     .await;

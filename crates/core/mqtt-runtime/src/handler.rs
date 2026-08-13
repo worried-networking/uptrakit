@@ -4,10 +4,8 @@ use std::time::Duration;
 use base64::Engine as _;
 use rootcause::prelude::*;
 
-use crate::{
-    MqttRuntime, MqttRuntimeIdentity, MqttRuntimeLoopOutcome, MqttRuntimeSettings,
-    mqtt_capabilities,
-};
+use crate::bootstrap;
+use crate::{MqttRuntime, MqttRuntimeIdentity, MqttRuntimeLoopOutcome, MqttRuntimeSettings};
 use uptrakit_service_sdk::{
     LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState, ShutdownCause,
     default_resolve_shutdown,
@@ -38,7 +36,7 @@ impl Default for MqttHandler {
 impl ServiceHandler for MqttHandler {
     const DIR_NAME: &'static str = crate::MQTT_DIR_NAME;
     const SERVICE_LABEL: &'static str = crate::MQTT_SERVICE_LABEL;
-    const SERVICE_APP_NAME: &'static str = crate::MQTT_SERVICE_APP_NAME;
+    const SERVICE_APP_NAME: &'static str = bootstrap::MQTT_SERVICE_APP_NAME;
 
     type ServiceEvent = Option<crate::MqttServiceEvent>;
 
@@ -106,7 +104,7 @@ impl ServiceHandler for MqttHandler {
     }
 
     fn capabilities(&self) -> BTreeSet<Capability> {
-        mqtt_capabilities()
+        bootstrap::capabilities()
     }
 
     async fn poll_service_event(&mut self) -> Self::ServiceEvent {

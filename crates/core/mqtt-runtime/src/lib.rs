@@ -39,6 +39,8 @@ macro_rules! publish_best_effort {
 mod handler;
 pub use handler::MqttHandler;
 
+pub mod bootstrap;
+
 mod client_manager;
 pub mod ha_discovery;
 mod mqtt_client;
@@ -61,8 +63,8 @@ use uuid::Uuid;
 
 use uptrakit_service_sdk::{PendingServiceConfigRequest, ServiceConfigProxy};
 use uptrakit_wire::{
-    Capability, ControllerMessage, DisconnectReason, DisconnectingPayload, RegisterPayload,
-    ServiceMessage, TransportError,
+    ControllerMessage, DisconnectReason, DisconnectingPayload, RegisterPayload, ServiceMessage,
+    TransportError,
     payloads::ServiceConfigEntry,
     payloads::ServiceConfigUpdatedPayload,
     surfaces::{
@@ -90,7 +92,6 @@ const CONFIG_KEY_PREFIX: &str = "clients.";
 
 pub const MQTT_DIR_NAME: &str = "mqtt";
 pub const MQTT_SERVICE_LABEL: &str = "uptrakit-mqtt service";
-pub const MQTT_SERVICE_APP_NAME: &str = "uptrakit-mqtt";
 
 #[derive(Debug, Clone, Default)]
 pub struct MqttRuntimeIdentity {
@@ -178,7 +179,7 @@ impl MqttRuntime {
 
         transport
             .transport_send(ServiceMessage::Register(RegisterPayload::new(
-                mqtt_capabilities(),
+                bootstrap::capabilities(),
             )))
             .await
     }
@@ -1017,23 +1018,6 @@ fn parse_client_configs(entries: Vec<ServiceConfigEntry>) -> Vec<ParsedMqttClien
 fn parse_client_key(key: &str) -> Option<Uuid> {
     let suffix = key.strip_prefix(CONFIG_KEY_PREFIX)?;
     Uuid::parse_str(suffix).ok()
-}
-
-/// Capabilities advertised by the MQTT service.
-///
-/// `SystemService` marks this service as global infrastructure (routed to the
-/// `system_services` table instead of the per-tenant `services` table).
-/// `UiSurfaces` enables the MQTT clients settings page.
-pub fn mqtt_capabilities() -> BTreeSet<Capability> {
-    [
-        Capability::SystemService,
-        Capability::UpdateTracking,
-        Capability::GracefulShutdown,
-        Capability::UiSurfaces,
-        Capability::WorkloadClaims,
-    ]
-    .into_iter()
-    .collect()
 }
 
 #[cfg(test)]
