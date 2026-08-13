@@ -12,8 +12,11 @@
 #   GH_TOKEN                 — token for `gh release view`/`gh release
 #                               edit` (required; never passed to the
 #                               opencode agent — see step 4)
-#   GEMINI_API_KEY            — model API key (required; consumed by
-#                               opencode, not read directly here)
+#   GEMINI_API_KEY            — model API key (required in CI; consumed by
+#                               opencode via the GOOGLE_GENERATIVE_AI_API_KEY
+#                               export below, not read directly here. A
+#                               local run may omit it and rely on
+#                               `opencode auth login` instead)
 #   MODEL                     — opencode model id, e.g.
 #                               google/gemini-3.6-flash (required)
 #   POLISH_NOTES_SKIP_PUBLISH — if "1", skip `gh release edit` (dry run);
@@ -32,12 +35,33 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 readonly SCRIPT_DIR
 readonly PROMPT_FILE="$SCRIPT_DIR/polish-notes-prompt.md"
 
-: "${RELEASES?RELEASES must be set}"
-: "${GH_TOKEN?GH_TOKEN must be set}"
-: "${GEMINI_API_KEY?GEMINI_API_KEY must be set}"
-: "${MODEL?MODEL must be set}"
+# `:?` not `?`: the plain form only rejects an *unset* variable, so an
+# empty secret or a workflow typo would sail past and fail per-release
+# much later.
+: "${RELEASES:?RELEASES must be set}"
+: "${GH_TOKEN:?GH_TOKEN must be set}"
+: "${MODEL:?MODEL must be set}"
 : "${POLISH_NOTES_SKIP_PUBLISH:=}"
 : "${RUNNER_TEMP:=$(mktemp -d)}"
+
+# Credential. CI must pass it in the environment; a local run may instead
+# rely on `opencode auth login`, which wins over both env names (opencode
+# loads auth.json after env and passes options.apiKey explicitly).
+: "${GEMINI_API_KEY:=}"
+if [ -n "${GITHUB_ACTIONS:-}" ] && [ -z "$GEMINI_API_KEY" ]; then
+  echo "::error::polish-notes: GEMINI_API_KEY must be set in CI" >&2
+  exit 1
+fi
+# opencode only injects an apiKey for providers declaring exactly one env
+# name (`key: provider.env.length === 1 ? apiKey : undefined`). models.dev
+# lists three for google, so opencode enables the provider but leaves
+# authentication to @ai-sdk/google, which reads GOOGLE_GENERATIVE_AI_API_KEY
+# and nothing else — GEMINI_API_KEY alone therefore authenticates nothing.
+# Bridge it. An already-set value wins, so swapping POLISH_NOTES_MODEL to
+# another provider can supply its own credential.
+if [ -n "$GEMINI_API_KEY" ]; then
+  export GOOGLE_GENERATIVE_AI_API_KEY="${GOOGLE_GENERATIVE_AI_API_KEY:-$GEMINI_API_KEY}"
+fi
 
 if [ ! -f "$PROMPT_FILE" ]; then
   echo "::error::polish-notes: missing prompt file $PROMPT_FILE" >&2

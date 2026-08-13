@@ -313,6 +313,15 @@ workflow step. The model is `google/gemini-3.6-flash`, overridable without a wor
 via the repo variable `POLISH_NOTES_MODEL` — swap the variable to move to a replacement
 model (retirement, price change) without touching the workflow.
 
+`polish-notes.sh` re-exports the `GEMINI_API_KEY` secret as `GOOGLE_GENERATIVE_AI_API_KEY` before
+invoking opencode. This is not redundant: opencode only injects an API key for providers that
+declare exactly one environment-variable name, and `google` declares three — so it enables the
+provider but delegates authentication to `@ai-sdk/google`, which reads
+`GOOGLE_GENERATIVE_AI_API_KEY` and nothing else. Swapping `POLISH_NOTES_MODEL` to a non-Google
+provider means supplying that provider's own key variable, which the script leaves untouched if
+already set. The secret is mandatory in CI only — a local run can omit it and rely on
+`opencode auth login`, whose stored credential takes precedence over both variables.
+
 The `GEMINI_API_KEY` secret should be a dedicated CI-only key with a quota/budget cap, not a
 personal key. Rotate it if you suspect it's been exposed: the agent's bash tool inherits the
 key (it needs it to call the model), so a prompt-injected commit message could in principle try
@@ -323,8 +332,20 @@ the billable key, not the repository.
 
 A red `polish-notes` job means partial or zero edits were applied, or the key/model is broken —
 it never means releases or their assets are affected, since the job runs after those already
-exist. Re-run it from the Actions UI; it resumes idempotently, because release bodies that
-already start with `## Summary` are skipped.
+exist. For a transient failure (model timeout, rate limit), re-run it from the Actions UI; it
+resumes idempotently, because release bodies that already start with `## Summary` are skipped.
+
+A re-run checks out the original run's commit, so it cannot pick up a workflow or script fix
+landed afterwards. When the job itself was broken, backfill the affected releases locally once the
+fix is on `main` — the same idempotent skip applies, so listing already-polished tags is harmless:
+
+```sh
+git fetch --tags --force   # prev-tag lookup walks the full tag list
+export GH_TOKEN=$(gh auth token)          # needs contents:write
+export MODEL=google/gemini-3.6-flash      # no default outside the workflow
+export RELEASES='[{"package_name":"uptrakit-controller","tag":"uptrakit-controller-v0.0.6","version":"0.0.6"}]'
+ci/release-plz/polish-notes.sh
+```
 
 `uptrakit-controller` and `uptrakit-controller-standalone` share most of their changes but are
 polished as independent releases, so their notes can end up worded differently even when
