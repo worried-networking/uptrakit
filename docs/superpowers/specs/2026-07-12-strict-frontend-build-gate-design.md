@@ -1,6 +1,8 @@
 # Strict Frontend Build Gate — release builds fail loud instead of shipping a stub UI
 
-**Date:** 2026-07-12 (revised 2026-07-13 — `UPTRAKIT_REQUIRE_FRONTEND` env var dropped for a profile-based gate)
+**Date:** 2026-07-12 (revised 2026-07-13 — `UPTRAKIT_REQUIRE_FRONTEND` env var dropped for a profile-based gate;
+re-verified 2026-08-13 against the two-anchor crates.io publishing model, d58e042cc — gate design unchanged, premise
+wording and doc scope updated)
 **Status:** Design
 **Audit finding:** audit-2026-07-11 HIGH · stability · ci-tooling · effort S
 **Hazard sites:** `frontend/build.rs:22-40`, `.github/workflows/release-plz.yml`,
@@ -16,7 +18,7 @@ embeds the real SvelteKit SPA when `frontend/build/index.html` exists, and other
 and emits only a `cargo::warning`. The same lenient script serves every real ship path:
 
 - **release-plz.yml build-artifacts + backfill** download the `frontend-build` artifact to `frontend/build`, then
-  `cargo build --release -p uptrakit-controller` / `-p uptrakit-controller-standalone` (lines ~374-424, ~658-707 —
+  `cargo build --release -p uptrakit-controller` / `-p uptrakit-controller-standalone` (lines ~405-460, ~750-805 —
   every ship build is `--release`).
 - **docker.yml** (`build`, `build-swagger`) injects the artifact as the `frontend-builder` build-context; the
   Dockerfile's builder stage runs `cargo build --release` after
@@ -33,9 +35,13 @@ warning nobody reads.
    `--no-verify` into every release-plz `cargo package --workspace` invocation (wrapper body, "Inject --no-verify so
    cargo only emits the .crate tarball without building"), and `release-plz.toml` sets `semver_check = false`
    workspace-wide. No release-plz code path runs `build.rs` in a `frontend/build/`-less worktree. `cargo publish` /
-   docs.rs are likewise no release-profile compile path: the workspace root sets `publish = ["uptrakit-private"]`
-   (a named fake registry — cargo refuses crates.io; `release-plz.toml` separately sets `publish = false`), so no
-   crate is ever published or built on docs.rs.
+   docs.rs are likewise no release-profile compile path for this crate. **(Updated 2026-08-13.)** Since the two-anchor
+   publishing model (d58e042cc, spec `2026-06-09-publishable-crate-squat-chain-break-design.md`), a set of public-API
+   library crates (the `publish = true` section of `release-plz.toml`) override the workspace defaults
+   (`publish = ["uptrakit-private"]` in root `Cargo.toml`; `publish = false` in `release-plz.toml`) and ship to
+   crates.io — but `uptrakit-frontend` is not among them, and no published crate depends on it: its only dependent is
+   `uptrakit-controller-runtime`, itself `git_only`/`publish = false`. Even if a publish-verify or docs.rs build ever
+   did reach this crate, both compile in the **dev (debug) profile**, which the gate treats leniently.
 2. **`cargo chef cook` cannot fire the gate.** cargo-chef's skeleton replaces build scripts with **dummy** `build.rs`
    files (cargo-chef `src/skeleton/mod.rs`: "create dummy `lib.rs`, `main.rs` and `build.rs` files where needed";
    dummy build-script artifacts are removed after cook, `mod.rs` ~276, so the real script re-runs at the real build).
@@ -48,15 +54,16 @@ warning nobody reads.
    `OPT_LEVEL` etc. for "a more correct view of the actual settings". That advice targets code that cares about
    optimization settings; ours cares about **shippability**, and for this workspace `OPT_LEVEL` is strictly worse:
    `[profile.release]` sets `opt-level = 3` while `[profile.release-fast]` overrides `opt-level = 2`
-   (root `Cargo.toml` ~278-290), so any `OPT_LEVEL` predicate either misclassifies `release-fast` as non-shippable or
+   (root `Cargo.toml` ~291-302), so any `OPT_LEVEL` predicate either misclassifies `release-fast` as non-shippable or
    degenerates into an allowlist of numbers. `DEBUG` separates nothing (reflects debug-info generation, not profile).
    `PROFILE`'s binary debug/release answer is exactly the question the gate asks.
 4. **Every context that compiles `uptrakit-frontend` without real assets today is a debug build:** CI `backend-lint`
    (`cargo check`/`clippy`, both feature sets — no node step in the job), CI `test` (`cargo llvm-cov`, doctests),
    `.husky/pre-push` (workspace check/clippy/test + doctests, all before its npm section), and local workspace
    `cargo check/test`. None of them ships a binary.
-5. **Every ship path is `--release`:** release-plz build-artifacts + backfill (all eight build invocations),
-   `docker/Dockerfile` builder stage, cross builds. A source install (`cargo install --git …` /
+5. **Every ship path is `--release`:** release-plz build-artifacts + backfill (seven binaries per job — controller,
+   controller-standalone, agent, agent-ssh, mqtt, scheduler, cli — every invocation `--release`; re-verified
+   2026-08-13), `docker/Dockerfile` builder stage, cross builds. A source install (`cargo install --git …` /
    `cargo build --release`) is also release-profile — today it silently self-ships a stub; under this fix it fails
    loud.
 
@@ -183,6 +190,16 @@ build?`) that cargo already provides as `PROFILE`. It also kept the false in-cod
     smoke-test job) must supply `frontend/build/` first, or the job fails at `uptrakit-frontend`'s build script. The
     failure direction is safe (loud CI breakage, never a shipped stub), but the note saves the next maintainer the
     surprise.
+  - **Reconcile the "Installing from source" section (added to `releases.md` after this spec was written;
+    2026-08-13).** It carries two stale `embed-frontend` occurrences (the controller install snippet's
+    `--features embed-frontend,…` and the closing "`embed-frontend` feature requires `frontend/build/`…" paragraph).
+    Neither matches reality: the controller crate declares no such forwarding feature — embedding is hard-wired via
+    `uptrakit-controller-runtime`'s `embedded-frontend` — and `cargo install` builds release-profile, so under this
+    gate it fails loud without `frontend/build/` instead of "requiring" it informally. Per the same in-file rule as
+    the AGENTS.md fix (this spec fixes stale occurrences only inside files it must edit anyway), drop
+    `embed-frontend,` from the snippet and rewrite the closing paragraph: `cargo install` of either controller binary
+    is a release-profile build → needs `frontend/build/` (link `#strict-frontend-gate`); `--static-dir` remains the
+    runtime override for serving assets from disk. The snippet's other feature names are out of scope here.
 - **`frontend/build.rs`** — rewritten branch comment (the load-bearing doc for the next reader).
 - **`AGENTS.md` quick-start note** — the existing "`--all-features` … requires `frontend/build/`" note is stale
   (debug `--all-features` works via the stub, today and after this change). Reword to: release-profile builds of the
@@ -190,7 +207,7 @@ build?`) that cargo already provides as `PROFILE`. It also kept the false in-cod
   the stale feature name `embed-frontend` → `embedded-frontend` (the flag is declared `embedded-frontend` in
   `crates/core/controller-runtime/Cargo.toml`, not the `controller` crate). The typo occurs **twice** in `AGENTS.md`
   — the prose Note and the `npm run build` comment in the Frontend quick-start block (locate by
-  `grep -n embed-frontend AGENTS.md`, currently lines ~50 and ~60); fix both. The same stale name in `docker/Dockerfile`
+  `grep -n embed-frontend AGENTS.md`, currently lines ~57 and ~67); fix both. The same stale name in `docker/Dockerfile`
   is **out of scope** for this finding. The reworded prose need not name the flag at all.
 - **No ADR** — build-integrity mechanics, not an architectural decision. **No wire/OpenAPI/frontend-source change.**
   **No new dependency** (`std::env::var` only). **No `docs/development/quality-gates.md` change** — no gate command
@@ -199,7 +216,7 @@ build?`) that cargo already provides as `PROFILE`. It also kept the false in-cod
 ## Optional cleanup (deferred, named for honesty)
 
 - The release-pr job step `Build frontend (required by uptrakit-frontend cargo package verify)`
-  (`release-plz.yml` ~157) is vestigial: under the `--no-verify` wrapper no compile happens in that job, and even a
+  (`release-plz.yml` ~165) is vestigial: under the `--no-verify` wrapper no compile happens in that job, and even a
   wrapper regression would package-verify in **debug** profile (lenient). Removing it saves ~1-2 min per release-PR
   run but touches release infrastructure beyond this finding — deferred.
 - A CI guard asserting `git ls-files frontend/build/` returns nothing would turn the break-glass "never commit the
@@ -207,10 +224,19 @@ build?`) that cargo already provides as `PROFILE`. It also kept the false in-cod
   `ci/verify_require_frontend.sh` (which protected forgettable per-site wiring), this guards a repo state no build
   exercises. Deferred: the hazard requires a deliberate `git add -f` or `.gitignore` edit, both visible in review.
 - The stale feature name `embed-frontend` (actual: `embedded-frontend`) is **repo-wide doc drift**, not just the
-  AGENTS.md note this spec fixes: `grep -rn embed-frontend` hits ~14 canonical docs (`ARCHITECTURE.md`,
-  `frontend/AGENTS.md`, `docs/development/{quality-gates,setup,feature-flags,coding-standards,docker,…}.md`,
+  AGENTS.md note this spec fixes: `grep -rln embed-frontend --include='*.md'` hits numerous canonical docs
+  (`ARCHITECTURE.md`, `frontend/AGENTS.md`, `docs/README.md`,
+  `docs/development/{quality-gates,setup,feature-flags,coding-standards,docker,dependency-policy,embedded-frontend,…}.md`,
   `docs/end-user/deployment/*`) plus `docker/Dockerfile` comments. A rename sweep is a separate doc-cleanup change —
-  deferred; this spec fixes only the two occurrences inside the file it must edit anyway.
+  deferred; this spec fixes only the occurrences inside the two docs it must edit anyway (AGENTS.md and
+  `releases.md`'s "Installing from source" section).
+- `docs/development/embedded-frontend.md` — the canonical embedded-frontend doc — needs its own reconciliation pass
+  (deferred with the sweep, but named because the gate changes its truth value): it claims the feature "**hard-fails
+  at compile time** if `frontend/build/index.html` does not exist" (false today — every profile stubs; true post-fix
+  only for release-profile builds), uses the stale `embed-frontend` name throughout, and its "CI considerations"
+  section claims the backend CI job builds the frontend before Cargo commands (contradicts Verified reality #4 —
+  backend-lint has no node step; backend-test's npm step is `gen:api` client-regen only, never `npm run build`).
+  Post-fix, its Build requirements section should state the profile-keyed contract and link `#strict-frontend-gate`.
 
 ## Quality gates
 
