@@ -163,6 +163,9 @@ This profile inherits from `release` but disables LTO and uses
 slightly larger binaries and marginally lower runtime performance. It is
 not intended for production artifacts.
 
+Release-profile controller builds require `frontend/build/` — run `cd frontend && npm run build` first, or the
+build fails (see [Strict frontend gate](releases.md#strict-frontend-gate)).
+
 ## Frontend Workflow
 
 ```bash

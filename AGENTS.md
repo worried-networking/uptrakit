@@ -54,8 +54,10 @@ bash ci/verify_adr_numbers.sh                                        # No duplic
 bash scripts/regen-adr-toc.sh --check                                # docs/adr/README.md staleness + links
 ```
 
-> **Note:** `--all-features` includes `embed-frontend`, which requires `frontend/build/`. Build the frontend first
-> (`cd frontend && npm ci && npm run build`) before running `--all-features` checks.
+> **Note:** Release-profile builds of the controller (`--release`, `--profile release-fast`) require
+> `frontend/build/` — run `cd frontend && npm ci && npm run build` first or the build fails. Debug builds
+> (including `--all-features` checks) embed a stub UI when `frontend/build/` is absent. See
+> [docs/development/releases.md](docs/development/releases.md#strict-frontend-gate).
 
 ### Frontend
 
@@ -64,7 +66,7 @@ cd frontend
 npm run lint          # ESLint
 npm run format:check  # Prettier — read-only
 npm run check         # Svelte type-check via svelte-check
-npm run build         # SvelteKit build — required before `cargo build` with `embed-frontend`
+npm run build         # SvelteKit build — required for release-profile controller builds
 ```
 
 ### Markdown and integration tests (Docker)
