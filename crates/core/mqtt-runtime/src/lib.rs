@@ -1567,6 +1567,118 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn list_action_returns_only_request_tenant_items() {
+        let mut runtime = MqttRuntime::new();
+        let mut transport = MockTransport::new();
+        let tenant_a = Uuid::now_v7();
+        let tenant_b = Uuid::now_v7();
+        let client_a = Uuid::now_v7();
+        let client_b = Uuid::now_v7();
+        runtime.configs = parse_client_configs(vec![
+            config_entry_with_host(tenant_a, client_a, "broker-a.example.com"),
+            config_entry_with_host(tenant_b, client_b, "broker-b.example.com"),
+        ]);
+
+        let request = action_request(
+            surface_runtime::ACTION_CLIENTS,
+            InteractionHttpMethod::Get,
+            tenant_a,
+            Some("service.uptrakit-mqtt"),
+            serde_json::Map::new(),
+        );
+
+        runtime
+            .handle_controller_message(
+                ControllerMessage::SurfaceActionRequest(request),
+                &mut transport,
+            )
+            .await
+            .expect("request handling");
+
+        let Some(ServiceMessage::SurfaceActionResponse(response)) = transport.send_log().last()
+        else {
+            panic!("expected SurfaceActionResponse");
+        };
+        assert!(response.success, "list request should succeed");
+        let result = response.result.as_ref().expect("list result");
+        let items = result
+            .get("items")
+            .and_then(serde_json::Value::as_array)
+            .expect("items array");
+        let ids: Vec<&str> = items
+            .iter()
+            .map(|item| {
+                item.get("id")
+                    .and_then(serde_json::Value::as_str)
+                    .expect("id")
+            })
+            .collect();
+        assert_eq!(
+            ids,
+            vec![client_a.to_string()],
+            "list must contain exactly tenant A's client id"
+        );
+        let hosts: Vec<&str> = items
+            .iter()
+            .map(|item| {
+                item.get("host")
+                    .and_then(serde_json::Value::as_str)
+                    .expect("host")
+            })
+            .collect();
+        assert_eq!(
+            hosts,
+            vec!["broker-a.example.com"],
+            "list must contain exactly tenant A's host value"
+        );
+        assert!(
+            !ids.contains(&client_b.to_string().as_str()),
+            "tenant B's client id must be absent from tenant A's list response"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_action_rejects_cross_tenant_item_lookup() {
+        let mut runtime = MqttRuntime::new();
+        let mut transport = MockTransport::new();
+        let tenant_a = Uuid::now_v7();
+        let tenant_b = Uuid::now_v7();
+        let client_a = Uuid::now_v7();
+        let client_b = Uuid::now_v7();
+        runtime.configs = parse_client_configs(vec![
+            config_entry_with_host(tenant_a, client_a, "broker-a.example.com"),
+            config_entry_with_host(tenant_b, client_b, "broker-b.example.com"),
+        ]);
+
+        let request = action_request(
+            surface_runtime::ACTION_CLIENTS,
+            InteractionHttpMethod::Get,
+            tenant_a,
+            Some("service.uptrakit-mqtt"),
+            serde_json::Map::from_iter([(
+                "id".to_string(),
+                serde_json::json!(client_b.to_string()),
+            )]),
+        );
+
+        runtime
+            .handle_controller_message(
+                ControllerMessage::SurfaceActionRequest(request),
+                &mut transport,
+            )
+            .await
+            .expect("request handling");
+
+        let error = expect_last_surface_error(&transport);
+        assert_eq!(error.code, SurfaceActionErrorCode::InvalidRequest);
+        assert!(
+            error.message.contains("missing or invalid"),
+            "unexpected message: {}",
+            error.message
+        );
+    }
+
+    #[tokio::test]
     async fn apply_settings_registers_extensions_when_enabled() {
         let mut runtime = MqttRuntime::new();
         let mut transport = MockTransport::new();
