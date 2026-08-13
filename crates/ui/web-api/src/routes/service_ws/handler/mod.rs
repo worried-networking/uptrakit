@@ -38,6 +38,7 @@ mod service_config;
 mod session_authenticated;
 mod session_enrolled;
 mod shared_types;
+mod surface_eviction;
 mod surface_wire;
 #[cfg(test)]
 pub(super) mod test_support;

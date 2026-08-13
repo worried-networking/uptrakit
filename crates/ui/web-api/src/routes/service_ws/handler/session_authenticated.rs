@@ -185,6 +185,10 @@ pub(super) async fn register_connection(
     if let Some(ref notifier) = state.embedded_service_notifier {
         notifier.on_external_connected(service_id, capabilities, None, false);
     }
+    // Now-yielded embedded services must give up their surface providers
+    // before this connection's own registration can be admitted, or a
+    // matching Universal registration would collide (A3).
+    super::surface_eviction::evict_yielded_service_surfaces(state).await;
 
     let connection_id = connection_handle.connection_id();
     let cancel_token = cancellation_token_from_connection_handle(connection_handle);

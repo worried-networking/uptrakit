@@ -169,6 +169,10 @@ async fn setup_enrolled_session(
     if let Some(ref notifier) = state.embedded_service_notifier {
         notifier.on_external_connected(service_id, &capabilities, None, is_system);
     }
+    // Now-yielded embedded services must give up their surface providers
+    // before this connection's own registration can be admitted, or a
+    // matching Universal registration would collide (A3).
+    super::surface_eviction::evict_yielded_service_surfaces(state).await;
 
     // Check current status to set initial approved flag.
     let mut approved = false;

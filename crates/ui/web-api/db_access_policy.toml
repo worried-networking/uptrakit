@@ -337,6 +337,9 @@ deliver_service_credentials_with_sink = "ignore"
 [routes."service_ws/handler/discovery.rs"]
 trigger_discovery_for_agent_host = "ignore"
 
+[routes."service_ws/handler/surface_eviction.rs"]
+evict_yielded_service_surfaces = "ignore"
+
 [routes."service_ws/handler/messages/shared.rs"]
 handle_ping = "no-db"
 

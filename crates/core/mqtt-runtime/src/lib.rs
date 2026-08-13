@@ -418,6 +418,18 @@ impl MqttRuntime {
         self.yielded = yielded;
         if yielded {
             tracing::info!("MQTT runtime yielded to external service");
+            // Relinquish the settings surface provider before releasing
+            // workload claims, so an admission race with the external
+            // service's own (Universal) registration for the same surface
+            // id cannot occur (A3). Sent unconditionally: even if this
+            // runtime never registered a surface (`ui_surfaces_enabled ==
+            // false`), an empty registration for a not-yet-registered
+            // provider is a harmless no-op on the controller side.
+            let empty_registration =
+                surface_runtime::build_empty_surface_registration(self.service_id);
+            transport
+                .transport_send_best_effort(ServiceMessage::SurfaceRegistration(empty_registration))
+                .await;
             // Yielding uses the workload-claim full replacement protocol to
             // release every previously granted config key.
             self.granted_keys.clear();
@@ -427,6 +439,21 @@ impl MqttRuntime {
             tracing::info!("MQTT runtime resumed after external service disconnected");
             self.send_workload_claim(transport).await;
             self.apply_granted_configs().await;
+            // Re-claim the settings surface provider now that the external
+            // service is gone. Only when the last negotiated settings
+            // actually enabled it — otherwise this runtime never held the
+            // surface in the first place.
+            if self.ui_surfaces_enabled {
+                let register_payload = surface_runtime::build_surface_registration_with_ids(
+                    self.encryption_public_key.clone(),
+                    self.service_id,
+                );
+                transport
+                    .transport_send_best_effort(ServiceMessage::SurfaceRegistration(
+                        register_payload,
+                    ))
+                    .await;
+            }
         }
     }
 
@@ -1276,6 +1303,23 @@ mod tests {
         };
         assert!(payload.claims.is_empty());
         assert!(runtime.tenant_mgr.clients.is_empty());
+
+        // Guard-to-delete: removing the `transport_send_best_effort(...
+        // SurfaceRegistration(empty_registration))` call in the `yielded`
+        // branch of `handle_yield_change` makes this `expect` panic — no
+        // SurfaceRegistration message would be in the log at all.
+        let surface_registration = transport
+            .send_log()
+            .iter()
+            .find_map(|msg| match msg {
+                ServiceMessage::SurfaceRegistration(registration) => Some(registration),
+                _ => None,
+            })
+            .expect("yielding should send a SurfaceRegistration message");
+        assert!(
+            surface_registration.surfaces.is_empty(),
+            "yielding must relinquish the provider with an EMPTY surface registration"
+        );
     }
 
     #[tokio::test]
@@ -1335,6 +1379,60 @@ mod tests {
             panic!("expected WorkloadClaim to be sent");
         };
         assert_eq!(payload.claims.get(&key), Some(&tenant_id));
+
+        // `runtime` never had `ui_surfaces_enabled` turned on (no
+        // `apply_settings` call), so resuming must not re-send a full
+        // registration. Guard-to-delete: dropping the `if
+        // self.ui_surfaces_enabled { ... }` gate around the resume-side
+        // `transport_send_best_effort(...SurfaceRegistration(register_payload))`
+        // call in `handle_yield_change` (making the resend unconditional)
+        // makes this assertion fail.
+        assert!(
+            !transport.send_log().iter().any(|msg| matches!(
+                msg,
+                ServiceMessage::SurfaceRegistration(registration)
+                    if !registration.surfaces.is_empty()
+            )),
+            "resume must not resend a full registration when ui_surfaces_enabled is false"
+        );
+    }
+
+    #[tokio::test]
+    async fn resuming_with_ui_surfaces_enabled_resends_full_registration() {
+        let mut runtime = MqttRuntime::new();
+        let mut transport = MockTransport::new();
+        runtime.ui_surfaces_enabled = true;
+
+        runtime.handle_yield_change(true, &mut transport).await;
+        runtime.handle_yield_change(false, &mut transport).await;
+
+        let surface_registrations: Vec<_> = transport
+            .send_log()
+            .iter()
+            .filter_map(|msg| match msg {
+                ServiceMessage::SurfaceRegistration(registration) => Some(registration),
+                _ => None,
+            })
+            .collect();
+
+        // Guard-to-delete: removing the resume-side `if
+        // self.ui_surfaces_enabled { ... transport_send_best_effort(...
+        // SurfaceRegistration(register_payload))... }` block in
+        // `handle_yield_change` drops this to a single (empty, yield-side)
+        // entry, failing the length assertion below.
+        assert_eq!(
+            surface_registrations.len(),
+            2,
+            "expected an empty registration on yield and a full one on resume"
+        );
+        assert!(
+            surface_registrations[0].surfaces.is_empty(),
+            "the yield-side registration must be empty"
+        );
+        assert!(
+            !surface_registrations[1].surfaces.is_empty(),
+            "the resume-side registration must be non-empty (full) when ui_surfaces_enabled"
+        );
     }
 
     #[tokio::test]

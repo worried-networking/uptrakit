@@ -744,6 +744,43 @@ impl SurfaceRegistry {
             .cloned()
     }
 
+    /// Effective tenant id of the surface provider bound to `service_id`.
+    ///
+    /// Returns `None` both when the service has no registered provider and
+    /// when the provider's registration is `Scope::Global` — callers should
+    /// broadcast globally in the latter case, matching
+    /// `effective_tenant_binding.scope` (mirrors the `service_tenant_id`
+    /// `Option<Uuid>` convention used at the WebSocket connect/disconnect
+    /// sites for `SurfacesChanged` fan-out, A4).
+    pub fn tenant_id_for_service(&self, service_id: &Uuid) -> Option<Uuid> {
+        let inner = self.inner.lock();
+        let provider_id = inner.service_to_provider.get(service_id)?;
+        let provider = inner.providers.get(provider_id)?;
+        let binding = &provider.registration.effective_tenant_binding;
+        if binding.scope != surfaces::Scope::Tenant {
+            return None;
+        }
+        binding.tenant_id.as_deref().and_then(parse_uuid_like)
+    }
+
+    /// Every service id that currently owns a registered surface provider —
+    /// the keys of `service_to_provider`, cloned under the lock and returned
+    /// as a fully-released snapshot.
+    ///
+    /// Callers must never call `ServiceConnectionRegistry::is_yielded` (or
+    /// anything else that could re-enter this registry) while still holding
+    /// this method's lock — it always returns after the lock is dropped, so
+    /// that invariant is on the caller's subsequent use of the result, not on
+    /// this method itself.
+    pub fn service_ids(&self) -> Vec<Uuid> {
+        self.inner
+            .lock()
+            .service_to_provider
+            .keys()
+            .copied()
+            .collect()
+    }
+
     /// Is any provider currently registered for this surface id? Narrow read
     /// for the controller's dynamic-action registry seam (M1.5).
     ///
@@ -1768,6 +1805,49 @@ mod tests {
 
     fn registry() -> SurfaceRegistry {
         SurfaceRegistry::new(SurfaceRegistryConfig::default())
+    }
+
+    /// Builds a minimal untenanted system-service registration (Global scope,
+    /// Universal targeting) on the `mqtt.clients` surface id, mirroring what
+    /// MQTT (a system service with no tenant binding) registers after A1/T1.
+    fn registration_for_system_service(provider_id: &str) -> surfaces::SurfaceRegistration {
+        surfaces::SurfaceRegistration {
+            provider: surfaces::ProviderIdentity {
+                provider_id: provider_id.to_string(),
+                provider_kind: surfaces::ProviderKind::Service,
+                provider_namespace: "service".to_string(),
+            },
+            framework_generation: surfaces::FrameworkGeneration::new(1, 0),
+            capabilities: surfaces::CapabilitySet::from_capabilities([
+                surfaces::Capability::TextBlockNode,
+                surfaces::Capability::UniversalTargeting,
+            ]),
+            effective_tenant_binding: surfaces::EffectiveTenantBinding {
+                scope: surfaces::Scope::Global,
+                tenant_id: None,
+            },
+            surfaces: vec![surfaces::RegisteredSurface {
+                descriptor: surfaces::SurfaceDescriptor::builder()
+                    .surface_id(surfaces::SurfaceId::new("mqtt.clients").unwrap())
+                    .label("MQTT Clients")
+                    .priority(100)
+                    .slot(surfaces::SLOT_SETTINGS_BELOW_GLOBAL)
+                    .scope(surfaces::Scope::Global)
+                    .targeting(surfaces::Targeting::Universal)
+                    .provider_kind(surfaces::ProviderKind::Service)
+                    .required_capabilities(surfaces::CapabilitySet::from_capabilities([
+                        surfaces::Capability::TextBlockNode,
+                        surfaces::Capability::UniversalTargeting,
+                    ]))
+                    .root_node(surfaces::SurfaceNode::TextBlock {
+                        text: "ok".to_string(),
+                    })
+                    .build(),
+                interactions: vec![],
+                data_sources: vec![],
+            }],
+            encryption_metadata: None,
+        }
     }
 
     fn registration_for_plugin_same_surface(provider_id: &str) -> surfaces::SurfaceRegistration {
@@ -3931,6 +4011,212 @@ mod tests {
         assert!(
             !registry.has_surface("ssh.guest.panel"),
             "surface must be absent again after the registering service unregisters"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // A3: embedded/external coexistence (Global/Universal system-service
+    // admission, visibility, collision, and service_ids()).
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn untenanted_system_service_registering_global_universal_is_admitted() {
+        let registry = registry();
+        let result = registry.register_service(
+            Uuid::now_v7(),
+            "uptrakit-mqtt",
+            None,
+            registration_for_system_service("service.mqtt"),
+        );
+        assert!(
+            result.is_ok(),
+            "untenanted system service registering Global/Universal must be admitted: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn untenanted_system_service_registering_tenant_scope_is_fail_closed_rejected() {
+        let registry = registry();
+
+        // Pins the existing fail-closed behavior from `validate_registration_basics`:
+        // a `service_tenant_id: None` caller (untenanted system service) must be
+        // rejected if its registration claims `Scope::Tenant` ...
+        let mut tenant_scoped = registration_for_system_service("service.mqtt");
+        tenant_scoped.effective_tenant_binding.scope = surfaces::Scope::Tenant;
+        tenant_scoped.effective_tenant_binding.tenant_id = Some(tenant_a().to_string());
+        let err = registry
+            .register_service(Uuid::now_v7(), "uptrakit-mqtt", None, tenant_scoped)
+            .expect_err("Scope::Tenant registration from an untenanted caller must be rejected");
+        let scope_rejection = rejection(err);
+        assert!(
+            scope_rejection
+                .reasons
+                .iter()
+                .any(|reason| reason.code == SurfaceProviderRejectionCode::InvalidTransport),
+            "rejection reasons: {:?}",
+            scope_rejection.reasons
+        );
+
+        // ... or carries a tenant binding at all, even while nominally Global-scoped.
+        let mut bound = registration_for_system_service("service.mqtt");
+        bound.effective_tenant_binding.tenant_id = Some(tenant_a().to_string());
+        let err = registry
+            .register_service(Uuid::now_v7(), "uptrakit-mqtt", None, bound)
+            .expect_err("a tenant-bound registration from an untenanted caller must be rejected");
+        let binding_rejection = rejection(err);
+        assert!(
+            binding_rejection
+                .reasons
+                .iter()
+                .any(|reason| reason.code == SurfaceProviderRejectionCode::InvalidTransport),
+            "rejection reasons: {:?}",
+            binding_rejection.reasons
+        );
+    }
+
+    #[test]
+    fn global_surface_is_visible_to_a_non_default_tenant() {
+        let registry = registry();
+        registry
+            .register_service(
+                Uuid::now_v7(),
+                "uptrakit-mqtt",
+                None,
+                registration_for_system_service("service.mqtt"),
+            )
+            .expect("global registration should succeed");
+
+        // tenant_b is not the tenant that registered anything — a Global surface
+        // must still be visible to it.
+        let items = registry.list_surfaces_for_tenant(tenant_b(), None, None, &AllProvidersVisible);
+        assert!(
+            items.iter().any(|item| item.surface_id == "mqtt.clients"),
+            "Global-scoped surface must be visible to every tenant, including a non-default one"
+        );
+    }
+
+    #[test]
+    fn duplicate_universal_provider_for_mqtt_clients_is_rejected_then_admitted_after_unregister() {
+        let registry = registry();
+        let first_service_id = Uuid::now_v7();
+        registry
+            .register_service(
+                first_service_id,
+                "uptrakit-mqtt",
+                None,
+                registration_for_system_service("service.mqtt-a"),
+            )
+            .expect("first Universal registration should succeed");
+
+        let err = registry
+            .register_service(
+                Uuid::now_v7(),
+                "uptrakit-mqtt",
+                None,
+                registration_for_system_service("service.mqtt-b"),
+            )
+            .expect_err(
+                "a second Universal provider for the same surface_id in the same scope must be rejected while the first is live",
+            );
+        assert!(matches!(err, SurfaceRegistryError::ProviderConflict(_)));
+
+        // Unregistering the first provider clears the collision.
+        registry.unregister_service(&first_service_id);
+        let result = registry.register_service(
+            Uuid::now_v7(),
+            "uptrakit-mqtt",
+            None,
+            registration_for_system_service("service.mqtt-b"),
+        );
+        assert!(
+            result.is_ok(),
+            "the second provider must be admitted once the first is unregistered: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn service_ids_returns_only_service_backed_providers_and_drops_after_unregister() {
+        let registry = registry();
+
+        // A BuiltIn provider is not service-backed and must never appear.
+        registry
+            .bootstrap_builtin(surfaces::SurfaceRegistration {
+                provider: surfaces::ProviderIdentity {
+                    provider_id: "builtin.controller".to_string(),
+                    provider_kind: surfaces::ProviderKind::BuiltIn,
+                    provider_namespace: "controller".to_string(),
+                },
+                framework_generation: surfaces::FrameworkGeneration::new(1, 0),
+                capabilities: surfaces::CapabilitySet::from_capabilities([
+                    surfaces::Capability::TextBlockNode,
+                    surfaces::Capability::UniversalTargeting,
+                    surfaces::Capability::TargetedTargeting,
+                ]),
+                effective_tenant_binding: surfaces::EffectiveTenantBinding {
+                    scope: surfaces::Scope::Tenant,
+                    tenant_id: Some(tenant_a().to_string()),
+                },
+                surfaces: vec![surfaces::RegisteredSurface {
+                    descriptor: surfaces::SurfaceDescriptor::builder()
+                        .surface_id(surfaces::SurfaceId::new("builtin.only.panel").unwrap())
+                        .label("Built-in")
+                        .priority(0)
+                        .slot("software.tabs")
+                        .scope(surfaces::Scope::Tenant)
+                        .targeting(surfaces::Targeting::Targeted)
+                        .provider_kind(surfaces::ProviderKind::BuiltIn)
+                        .required_capabilities(surfaces::CapabilitySet::from_capabilities([
+                            surfaces::Capability::TextBlockNode,
+                            surfaces::Capability::TargetedTargeting,
+                        ]))
+                        .root_node(surfaces::SurfaceNode::TextBlock {
+                            text: "built-in".to_string(),
+                        })
+                        .build(),
+                    interactions: vec![],
+                    data_sources: vec![],
+                }],
+                encryption_metadata: None,
+            })
+            .expect("built-in bootstrap should succeed");
+
+        assert!(
+            registry.service_ids().is_empty(),
+            "service_ids() must not report BuiltIn-kind providers"
+        );
+
+        let service_a = Uuid::now_v7();
+        let service_b = Uuid::now_v7();
+        registry
+            .register_service(
+                service_a,
+                "uptrakit-agent-ssh",
+                Some(tenant_a()),
+                registration_for_service("service.provider-a", tenant_a()),
+            )
+            .expect("service A registration should succeed");
+        registry
+            .register_service(
+                service_b,
+                "uptrakit-agent-ssh",
+                Some(tenant_a()),
+                registration_for_service("service.provider-b", tenant_a()),
+            )
+            .expect("service B registration should succeed");
+
+        let ids = registry.service_ids();
+        assert_eq!(ids.len(), 2, "service_ids(): {ids:?}");
+        assert!(ids.contains(&service_a));
+        assert!(ids.contains(&service_b));
+
+        registry.unregister_service(&service_a);
+        let ids = registry.service_ids();
+        assert_eq!(
+            ids,
+            vec![service_b],
+            "service_ids() must drop an id after unregister_service"
         );
     }
 }
