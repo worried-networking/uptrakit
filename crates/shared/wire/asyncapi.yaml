@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: Uptrakit Service-Controller Protocol
-  version: 0.0.2
+  version: 0.0.3
   description: 'Generated from the Rust wire types (uptrakit-wire). Do not edit by hand; regenerate with the golden test in tests.rs (UPDATE_ASYNCAPI=1). Protocol narrative (enrollment lifecycle, CSR issuance, reconnection semantics): docs/api/wire-protocol.md.'
 channels:
   service:
