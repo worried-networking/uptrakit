@@ -1,14 +1,16 @@
 # Strict Frontend Build Gate — release builds fail loud instead of shipping a stub UI
 
 **Date:** 2026-07-12 (revised 2026-07-13 — `UPTRAKIT_REQUIRE_FRONTEND` env var dropped for a profile-based gate;
-re-verified 2026-08-13 against the two-anchor crates.io publishing model, d58e042cc — gate design unchanged, premise
-wording and doc scope updated)
+re-verified 2026-08-13 against the two-anchor crates.io publishing model, d58e042cc — premise wording and doc scope
+updated; revised again 2026-08-13 in plan review — failure mechanism switched from `panic!` to the `cargo::error`
+build-script directive, deleting the `#[expect]` widening)
 **Status:** Design
 **Audit finding:** audit-2026-07-11 HIGH · stability · ci-tooling · effort S
 **Hazard sites:** `frontend/build.rs:22-40`, `.github/workflows/release-plz.yml`,
 `.github/workflows/docker.yml` (`build` + `build-swagger`), `docker/Dockerfile`
 **Edited by fix:** `frontend/build.rs`, `docs/development/releases.md`, `AGENTS.md` (stale frontend note + quick-start
-comment) — **nothing else**
+comment), `docs/development/setup.md` (one-sentence gate note on the blessed `release-fast` iteration command) —
+**nothing else**; in particular no workflow, Dockerfile, or `ci/` script changes
 
 ## Problem
 
@@ -75,62 +77,62 @@ profile **is** the signal that separates the audiences; no external flag is need
 
 ## Chosen approach — profile-based gate, no environment variable
 
-In the `else` branch (assets absent), fail hard unless the profile is `debug`:
+Split the assets-absent branch on the profile: `debug` keeps the stub, anything else emits the `cargo::error`
+build-script directive (stable since cargo 1.84; the crate's workspace-inherited `edition = "2024"` already floors
+cargo at ≥ 1.85), which fails the build with a clean `error:` diagnostic after the script finishes — no panic, no
+backtrace, no lint-attribute change:
 
 ```rust
-// frontend/build/ is gitignored; compile-only debug contexts (CI lint/test
-// jobs, pre-push, local workspace builds) may legitimately lack it — they
-// embed a stub and warn. A release-profile build produces a shippable
-// binary, where a stub would silently replace the real UI (the exact
-// hazard: release-plz binaries, docker images, `cargo install`). Fail-closed:
-// anything cargo ever reports other than "debug" is treated as shippable.
-let debug_profile = std::env::var("PROFILE").as_deref() == Ok("debug");
-if !debug_profile {
-    panic!(
-        "frontend/build/index.html missing in a release-profile build — \
-         refusing to embed the stub UI. Run `npm run build` in frontend/ \
-         (CI: ensure the frontend-build artifact was downloaded to \
-         frontend/build/)."
-    );
-}
-// … existing stub write + cargo::warning (debug only) …
+    if src_index.is_file() {
+        copy_dir_recursive(&src_build, &embed_dir).expect("copy build/ to OUT_DIR");
+    } else if std::env::var("PROFILE").as_deref() == Ok("debug") {
+        // frontend/build/ is gitignored; compile-only debug contexts (CI
+        // lint/test jobs, pre-push, local workspace builds) may legitimately
+        // lack it — embed a stub and warn.
+        // … existing stub write + cargo::warning, unchanged …
+    } else {
+        // A release-profile build produces a shippable binary, where a stub
+        // would silently replace the real UI (the exact hazard: release-plz
+        // binaries, docker images, `cargo install`). Fail-closed: anything
+        // cargo ever reports other than "debug" (i.e. any profile not
+        // inheriting `dev`) is treated as shippable.
+        println!(
+            "cargo::error=frontend/build/index.html missing in a release-profile \
+             build — refusing to embed the stub UI. Run `npm run build` in \
+             frontend/ (CI: ensure the frontend-build artifact was downloaded \
+             to frontend/build/)."
+        );
+    }
+    println!("cargo::rerun-if-changed=build");
 ```
+
+The trailing `rerun-if-changed` line is the existing one — the `else` chain keeps it unconditionally emitted (no
+early `return`), so re-run semantics are identical in every branch.
 
 Design points:
 
-- **Fail-closed predicate.** Only the exact value `debug` is lenient. `release`, a future cargo value, or a missing
-  var all resolve to strict — for a safety gate the dangerous direction is "guard silently does nothing", so
-  ambiguity must fail loud, never stub.
+- **Fail-closed predicate.** Only the exact value `debug` is lenient; `release`, an unknown future value, or a
+  missing var all resolve to strict — for a safety gate the dangerous direction is "guard silently does nothing", so
+  ambiguity must fail loud, never stub. Stated precisely (probed): cargo derives `PROFILE` from the `inherits` chain,
+  so the predicate is really "inherits `dev` ⇒ lenient" — a custom profile inheriting `dev` reports `debug` and keeps
+  the stub; every profile inheriting `release` reports `release` and is strict. Do not describe the gate as "any
+  future profile is strict" — only non-`dev`-rooted ones are.
 - **No `rerun-if-env-changed=PROFILE`.** Profile selection changes `OUT_DIR`/fingerprint; cargo re-runs the script
   per profile already. The existing `cargo::rerun-if-changed=build` stays.
-- **`panic!` is the sanctioned failure mechanism in this build script** — cargo wraps a build-script panic in
-  `error: failed to run custom build command for uptrakit-frontend` and prints the panic message above the backtrace
-  note, so the actionable text still reaches the operator; it also matches how this script already fails (every
-  `.expect()` call). `eprintln!` + `std::process::exit(1)` would print marginally cleaner but diverge from the file's
-  established failure idiom for no behavioural gain. Accepted cost: widening the `#[expect]` suppresses `clippy::panic`
-  for the whole of `main()`, not just the gate — acceptable in a 60-line build script where panicking is the uniform
-  error policy. `[workspace.lints.clippy]` sets `panic = "deny"` and the crate inherits workspace lints, so the
-  existing attribute on `main()` **must be widened** (firm step, not conditional):
-
-  ```rust
-  #[expect(
-      clippy::expect_used,
-      clippy::panic,
-      reason = "build script — panicking on missing environment variables, I/O \
-                errors, or absent frontend assets in a release-profile build is \
-                the correct behaviour"
-  )]
-  fn main() { … }
-  ```
-
-  `allow_attributes_without_reason = "deny"` makes the `reason` mandatory; do not substitute a bare `#[allow]`.
-  This **replaces** the existing `#[expect(clippy::expect_used, …)]` attribute on `main()` — do not stack a second
-  attribute.
+- **`cargo::error` is the failure mechanism — no lint change.** (Revised 2026-08-13; supersedes the `panic!`
+  mechanism of the 2026-07-13 revision, recorded in Alternatives.) The directive is designed for exactly this: the
+  script completes normally, cargo prints `error: <message>` plus `error: build script logged errors` and fails the
+  build — the actionable text reaches the operator without a panic backtrace. Because nothing panics, the existing
+  `#[expect(clippy::expect_used, reason = …)]` attribute on `main()` stays **byte-for-byte untouched** — no widening
+  to `clippy::panic`, no `#[expect]` surgery, no `unfulfilled_lint_expectations` risk. Version floor: `cargo::error`
+  stabilized in cargo 1.84; `uptrakit-frontend` declares no `rust-version`, but its workspace-inherited
+  `edition = "2024"` already requires cargo ≥ 1.85, and older cargos reject unknown `cargo::` directives with an
+  error anyway — fail-closed in both directions.
 
 - **Rewrite the stale stub comment.** The current comment justifies the stub with release-plz `cargo package`
-  verification, which no longer compiles anything (Verified reality #1). The replacement text is the comment block in
-  the snippet above — it names the real remaining audience (debug-only compile contexts) and the fail-closed rule;
-  use it verbatim.
+  verification, which no longer compiles anything (Verified reality #1). The replacement text is the two comment
+  blocks in the snippet above — they name the real remaining audience (debug-only compile contexts) and the
+  fail-closed rule; use them verbatim.
 - **Nothing else changes.** No workflow edits, no Dockerfile edits, no `ci/verify_*` script: there is no per-site
   flag anyone can forget — the gate lives inside the build script every ship path already executes. The prior
   revision's `UPTRAKIT_REQUIRE_FRONTEND` + step-level `env:` wiring + Dockerfile `ENV` + `ci/verify_require_frontend.sh`
@@ -154,6 +156,13 @@ Design points:
 
 ## Alternatives considered
 
+- **`panic!` as the failure mechanism** — the 2026-07-13 revision's choice, superseded 2026-08-13 in plan review.
+  It worked, but under the workspace's `clippy::panic = "deny"` it forced widening the `#[expect]` on `main()` (the
+  most delicate step of the plan: replace-don't-stack, mandatory `reason`, `unfulfilled_lint_expectations` hazard)
+  and printed a backtrace note behind the actionable message. The `cargo::error` directive is the purpose-built
+  mechanism: same fail-closed outcome, cleaner diagnostic, zero lint-suppression change. The `.expect()` calls for
+  genuinely unexpected conditions (missing cargo env vars, I/O errors) remain — those are defects, not gate
+  outcomes, and keep the existing narrow `#[expect(clippy::expect_used)]`.
 - **Opt-in strict env var (`UPTRAKIT_REQUIRE_FRONTEND`) set at ship sites** — the previous revision of this spec.
   Rejected on review: it adds per-site wiring (two release-plz steps + a Dockerfile `ENV`), a CI grep script to
   protect that wiring, and an env-var contract to document — all to reconstruct a signal (`is this a shippable
@@ -195,12 +204,20 @@ build?`) that cargo already provides as `PROFILE`. It also kept the false in-cod
     `--features embed-frontend,…` and the closing "`embed-frontend` feature requires `frontend/build/`…" paragraph).
     Neither matches reality: the controller crate declares no such forwarding feature — embedding is hard-wired via
     `uptrakit-controller-runtime`'s `embedded-frontend` — and `cargo install` builds release-profile, so under this
-    gate it fails loud without `frontend/build/` instead of "requiring" it informally. Per the same in-file rule as
-    the AGENTS.md fix (this spec fixes stale occurrences only inside files it must edit anyway), drop
-    `embed-frontend,` from the snippet and rewrite the closing paragraph: `cargo install` of either controller binary
-    is a release-profile build → needs `frontend/build/` (link `#strict-frontend-gate`); `--static-dir` remains the
-    runtime override for serving assets from disk. The snippet's other feature names are out of scope here.
-- **`frontend/build.rs`** — rewritten branch comment (the load-bearing doc for the next reader).
+    gate it fails loud without `frontend/build/`. Crucially (plan review, 2026-08-13): **`cargo install --git` of the
+    controller binaries can never satisfy the gate** — cargo clones into its own temp checkout, where the gitignored
+    `frontend/build/` cannot exist and there is no opportunity to run `npm run build`. "Build the frontend first" is
+    a no-op instruction for `--git`. The rewrite must therefore replace the controller `--git` recipe with the
+    working path — `git clone` → `cd frontend && npm ci && npm run build` → `cargo install --path
+    crates/core/controller` (or `controller-standalone`) — and state that direct `--git` installs of the controller
+    binaries are unsupported (use release binaries or docker images). The other binaries' `--git` recipes (agent,
+    agent-ssh, mqtt, scheduler, cli — no frontend dependency) stay as they are. `--static-dir` remains the runtime
+    override for serving assets from disk. The snippet's other feature names are out of scope here.
+- **`frontend/build.rs`** — rewritten branch comments (the load-bearing doc for the next reader).
+- **`docs/development/setup.md`** — (plan review, 2026-08-13) the build-speed section recommends
+  `cargo build --profile release-fast -p uptrakit-controller` for iterative release testing — the single most likely
+  place a human meets the new failure. Add one sentence + `#strict-frontend-gate` link: release-profile controller
+  builds need `frontend/build/` (`npm run build` first).
 - **`AGENTS.md` quick-start note** — the existing "`--all-features` … requires `frontend/build/`" note is stale
   (debug `--all-features` works via the stub, today and after this change). Reword to: release-profile builds of the
   controller require `frontend/build/` (`npm run build` first); debug builds embed a stub UI. While editing, also fix
@@ -243,16 +260,17 @@ build?`) that cargo already provides as `PROFILE`. It also kept the false in-cod
 - `cargo fmt --all`; `cargo clippy --all-targets --all-features` (with `frontend/build/` present) **and**
   `cargo clippy --all-targets --no-default-features --features db-sqlite` **without** `frontend/build/` — the latter
   proves the debug stub path still compiles clean. Note: clippy always compiles in **debug** profile, so neither
-  clippy run can reach the panic branch — clippy validates the copy path and the stub path respectively; only manual
-  steps 1-2 below exercise the fail-closed gate.
+  clippy run can reach the `cargo::error` branch — clippy validates the copy path and the stub path respectively;
+  only manual steps 1-2 below exercise the fail-closed gate.
 - `markdownlint --config .markdownlint.json` on the edited docs.
 - Manual verification at implementation (build.rs is not compiled into any test target; a unit test is impossible,
-  not skipped):
-  1. `rm -rf frontend/build && cargo build --release -p uptrakit-frontend` → **fails** with the gate message (fires
-     even on a warm `target/`: the deleted `frontend/build` dir is itself the `cargo::rerun-if-changed=build` path,
-     so its disappearance forces the script to re-run);
-  2. same command with `--profile release-fast` → **fails** (inherited release, probed);
-  3. `cargo check -p uptrakit-frontend` (debug, no build dir) → succeeds with the stub warning;
+  not skipped). Checks 1-2 must assert **both** the non-zero exit status and the message — a text-only grep passes
+  on replayed cached output without proving the build failed:
+  1. `rm -rf frontend/build && cargo build --release -p uptrakit-frontend` → **fails** (non-zero exit) with the gate
+     message (fires even on a warm `target/`: the deleted `frontend/build` dir is itself the
+     `cargo::rerun-if-changed=build` path, so its disappearance forces the script to re-run);
+  2. same command with `--profile release-fast` → **fails** (non-zero exit; inherited release, probed);
+  3. `cargo check -p uptrakit-frontend` (debug, no build dir) → **succeeds** (zero exit) with the stub warning;
   4. after `npm run build`: `cargo build --release -p uptrakit-frontend` → succeeds, `$OUT_DIR/embed/` holds real
      assets;
   5. a local `docker build -f docker/Dockerfile …` → succeeds (frontend-builder stage supplies assets; cook stage
