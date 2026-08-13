@@ -131,6 +131,9 @@ git clone https://github.com/worried-networking/uptrakit
 cd uptrakit/frontend && npm ci && npm run build && cd ..
 cargo install --path crates/core/controller \
   --features db-all,embedded-scheduler,nats
+
+# All-in-one (embedded scheduler/mqtt/agent/ssh-agent are already on):
+# cargo install --path crates/core/controller-standalone --features db-all,nats
 ```
 
 ```sh
@@ -155,8 +158,9 @@ cargo install --git https://github.com/worried-networking/uptrakit uptrakit-cli
 to exist at compile time — the build fails otherwise (see
 [Strict frontend gate](#strict-frontend-gate)). Direct `cargo install --git` of the controller binaries is
 therefore unsupported (cargo's temp checkout can never contain the built frontend) — install from a local clone
-as above, or use the release binaries / docker images. At runtime, `--static-dir` can still serve frontend
-assets from a filesystem directory, overriding the embedded copy.
+as above, or use the release binaries / docker images. Release controller binaries always serve the embedded
+copy, with no runtime override; only debug builds auto-detect `./frontend/build` (or `./frontend`) relative to
+the working directory.
 
 ## Configuration files
 

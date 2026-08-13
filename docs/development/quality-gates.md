@@ -68,8 +68,10 @@ Workspace lints (`[workspace.lints]` in root `Cargo.toml`) enforce `warnings = "
 `clippy::all = "deny"` across all 28 crates. The `-- -D warnings` flag is no longer needed on
 clippy commands — it is inherited automatically via `[lints] workspace = true` in each crate.
 
-**Note:** `--all-features` includes `embed-frontend`, which requires `frontend/build/` to exist.
-Build the frontend first (`cd frontend && npm ci && npm run build`) before running `--all-features` checks.
+**Note:** debug builds — including every `--all-features` check, clippy run, and test run — embed a stub UI when
+`frontend/build/` is absent (a `cargo::warning` is emitted); no frontend build is required first. Release-profile
+controller builds (`--release`, `--profile release-fast`) require `frontend/build/` to exist, or the build fails.
+See [Strict frontend gate](releases.md#strict-frontend-gate).
 
 The semantic-boundary gate applies to production code paths, including non-plugin Rust under `crates/**`,
 production frontend code under `frontend/src/**`, and in-scope manifest dependency tables. It intentionally exempts
