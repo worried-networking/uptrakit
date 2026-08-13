@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.5](https://github.com/worried-networking/uptrakit/compare/uptrakit-mqtt-v0.0.4...uptrakit-mqtt-v0.0.5) - 2026-08-13
+
+### Added
+
+- *(surfaces)* [**breaking**] required_permission becomes required_action, typed and engine-enforced
+- *(surfaces)* method on SurfaceActionRequest; proxy stamps effective method; per-field body validation
+- *(surfaces)* ActionRef two-form reader + method disambiguation on reference nodes
+- *(backoff)* [**breaking**] rewrite API with consuming guard pattern
+
+### Fixed
+
+- *(build-info)* align --version with binary crate via build_info! macro
+
+### Other
+
+- *(surfaces)* guard declared required_action values over compiled registrations
+- *(mqtt-runtime)* [**breaking**] mqtt.clients surface IDs adopt REST-noun convention; merge list/get
+- *(mqtt-runtime)* migrate reconnect backoff to backon builder
+- *(doctests)* honor doctest=false opt-out; add doctest gate to pre-push
+- *(backoff)* [**breaking**] drop AttemptGuard, ship plain methods
+
 ## [0.0.4](https://github.com/worried-networking/uptrakit/compare/uptrakit-mqtt-v0.0.3...uptrakit-mqtt-v0.0.4) - 2026-06-04
 
 ### Added
