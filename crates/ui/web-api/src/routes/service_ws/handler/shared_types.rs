@@ -148,19 +148,6 @@ pub(super) async fn load_linked_host_ids(
 /// the stuck connection first.
 pub(super) const WS_WRITE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
-const MQTT_SERVICE_APP_NAME: &str = "uptrakit-mqtt";
-
-/// Returns the tenant ID that a system service is bound to, if any.
-///
-/// Only the MQTT service carries a single-tenant binding; all other system
-/// services (scheduler, etc.) operate globally and return `None`.
-pub(super) fn system_service_tenant_binding(
-    service_app_name: Option<&str>,
-    default_tenant_id: uuid::Uuid,
-) -> Option<uuid::Uuid> {
-    (service_app_name == Some(MQTT_SERVICE_APP_NAME)).then_some(default_tenant_id)
-}
-
 /// Returns `true` when `payload_tenant_id` is within the scope that
 /// `service_tenant_id` is allowed to access.
 ///

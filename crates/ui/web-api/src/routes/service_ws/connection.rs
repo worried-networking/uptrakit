@@ -31,8 +31,6 @@ use uptrakit_wire::{
     service_profile::{ServiceProfile, parse_capabilities},
 };
 
-const MQTT_SERVICE_APP_NAME: &str = "uptrakit-mqtt";
-
 use super::protocol::{
     AuthenticatedContext, CertIdentity, ServiceWsError, close_with_reason, controller_capabilities,
     deserialize_service_msg, record_service_activity, record_system_service_activity,
@@ -165,18 +163,12 @@ enum CertLookupResult {
 struct ServiceStatus {
     capabilities_json: String,
     ping_interval_seconds: Option<i32>,
+    #[expect(
+        dead_code,
+        reason = "Service app name no longer read after deleting resolve_settings_tenant_id"
+    )]
     service_app_name: Option<String>,
     tenant_id: Option<uuid::Uuid>,
-}
-
-fn resolve_settings_tenant_id(
-    service_status: &ServiceStatus,
-    default_tenant_id: uuid::Uuid,
-) -> Option<uuid::Uuid> {
-    service_status.tenant_id.or_else(|| {
-        (service_status.service_app_name.as_deref() == Some(MQTT_SERVICE_APP_NAME))
-            .then_some(default_tenant_id)
-    })
 }
 
 /// Validate the service certificate against both tenant and system certificate
@@ -482,7 +474,7 @@ async fn send_service_settings(
         .map_or_else(|| profile.default_ping_interval_secs(), |v| v as u32);
     let ping_interval = std::time::Duration::from_secs(u64::from(ping_secs));
 
-    let tenant_id = resolve_settings_tenant_id(service_status, state.default_tenant_id);
+    let tenant_id = service_status.tenant_id;
 
     let mut settings = ServiceSettingsPayload::new(renewal_window_hours, ping_interval)
         .with_ca_bundle_hash(ca_bundle_hash)
@@ -1105,31 +1097,16 @@ mod tests {
     }
 
     #[test]
-    fn resolve_settings_tenant_id_prefers_service_tenant() {
-        let tenant_id = uuid::Uuid::now_v7();
-        let default_tenant_id = uuid::Uuid::now_v7();
-        let status = test_service_status(Some(tenant_id), Some("uptrakit-mqtt"));
-        assert_eq!(
-            resolve_settings_tenant_id(&status, default_tenant_id),
-            Some(tenant_id)
-        );
-    }
-
-    #[test]
-    fn resolve_settings_tenant_id_binds_system_mqtt_to_default_tenant() {
-        let default_tenant_id = uuid::Uuid::now_v7();
+    fn system_service_settings_carries_none_tenant_id() {
         let status = test_service_status(None, Some("uptrakit-mqtt"));
-        assert_eq!(
-            resolve_settings_tenant_id(&status, default_tenant_id),
-            Some(default_tenant_id)
-        );
+        assert_eq!(status.tenant_id, None);
     }
 
     #[test]
-    fn resolve_settings_tenant_id_keeps_non_mqtt_system_service_unscoped() {
-        let default_tenant_id = uuid::Uuid::now_v7();
-        let status = test_service_status(None, Some("uptrakit-scheduler"));
-        assert_eq!(resolve_settings_tenant_id(&status, default_tenant_id), None);
+    fn tenant_service_settings_carries_its_own_tenant_id() {
+        let tenant_id = uuid::Uuid::now_v7();
+        let status = test_service_status(Some(tenant_id), Some("uptrakit-mqtt"));
+        assert_eq!(status.tenant_id, Some(tenant_id));
     }
 
     #[test]

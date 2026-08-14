@@ -1,4 +1,4 @@
-use super::shared_types::{is_valid_service_config_scope, system_service_tenant_binding};
+use super::shared_types::is_valid_service_config_scope;
 use super::test_support::*;
 
 use std::collections::{BTreeSet, HashSet};
@@ -13,20 +13,6 @@ use uuid::Uuid;
 
 use super::message_processor::MessageProcessor;
 use super::shared_types::ProcessorAction;
-
-#[test]
-fn system_service_tenant_binding_only_targets_mqtt() {
-    let tenant_id = uuid::Uuid::now_v7();
-    assert_eq!(
-        system_service_tenant_binding(Some("uptrakit-mqtt"), tenant_id),
-        Some(tenant_id)
-    );
-    assert_eq!(
-        system_service_tenant_binding(Some("uptrakit-scheduler"), tenant_id),
-        None
-    );
-    assert_eq!(system_service_tenant_binding(None, tenant_id), None);
-}
 
 #[test]
 fn service_config_scope_validation_requires_exact_tenant_for_bound_sessions() {

@@ -119,10 +119,7 @@ pub(super) async fn load_service_capabilities(
             Ok(Some(svc)) => (
                 parse_capabilities(&svc.capabilities),
                 svc.service_app_name.clone(),
-                super::shared_types::system_service_tenant_binding(
-                    svc.service_app_name.as_deref(),
-                    state.default_tenant_id,
-                ),
+                None,
             ),
             _ => (BTreeSet::new(), None, None),
         }
