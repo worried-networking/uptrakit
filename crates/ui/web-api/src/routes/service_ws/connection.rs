@@ -163,11 +163,6 @@ enum CertLookupResult {
 struct ServiceStatus {
     capabilities_json: String,
     ping_interval_seconds: Option<i32>,
-    #[expect(
-        dead_code,
-        reason = "Service app name no longer read after deleting resolve_settings_tenant_id"
-    )]
-    service_app_name: Option<String>,
     tenant_id: Option<uuid::Uuid>,
 }
 
@@ -367,7 +362,6 @@ async fn load_system_service_status(
     Ok(ServiceStatus {
         capabilities_json: svc.capabilities.clone(),
         ping_interval_seconds: svc.ping_interval_seconds,
-        service_app_name: svc.service_app_name.clone(),
         tenant_id: None,
     })
 }
@@ -406,7 +400,6 @@ async fn load_tenant_service_status(
     Ok(ServiceStatus {
         capabilities_json: svc.capabilities.clone(),
         ping_interval_seconds: svc.ping_interval_seconds,
-        service_app_name: svc.service_app_name.clone(),
         tenant_id: Some(svc.tenant_id),
     })
 }
@@ -454,6 +447,40 @@ async fn record_activity_and_update_cert(
     }
 }
 
+/// Build the [`ServiceSettingsPayload`] for a connecting service.
+///
+/// The payload's `tenant_id` is the service's own tenant and nothing else:
+/// tenant services carry `Some(their tenant)`, system services carry `None`.
+/// There is no per-app override — MQTT used to be pinned to the default
+/// tenant here, which is what made its settings surface tenant-bound.
+fn build_service_settings(
+    service_status: &ServiceStatus,
+    renewal_window_hours: u16,
+    ca_bundle_hash: String,
+    trust_domain: String,
+) -> ServiceSettingsPayload {
+    let capabilities = parse_capabilities(&service_status.capabilities_json);
+    let profile = ServiceProfile::from_capabilities(&capabilities);
+    let ping_secs = service_status
+        .ping_interval_seconds
+        .map_or_else(|| profile.default_ping_interval_secs(), |v| v as u32);
+    let ping_interval = std::time::Duration::from_secs(u64::from(ping_secs));
+
+    let mut settings = ServiceSettingsPayload::new(renewal_window_hours, ping_interval)
+        .with_ca_bundle_hash(ca_bundle_hash)
+        .with_capabilities(controller_capabilities());
+    if let Some(secs) = profile.shutdown_timeout_secs() {
+        settings = settings.with_shutdown_timeout(std::time::Duration::from_secs(u64::from(secs)));
+    }
+    if let Some(tenant_id) = service_status.tenant_id {
+        settings = settings.with_tenant_id(tenant_id);
+    }
+    if !trust_domain.is_empty() {
+        settings = settings.with_trust_domain(trust_domain);
+    }
+    settings
+}
+
 /// Build and send the [`ServiceSettingsPayload`] message over the WebSocket.
 ///
 /// Returns `Err(())` if serialization or sending fails (connection should be
@@ -464,31 +491,12 @@ async fn send_service_settings(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     out_seq: &mut OutgoingSeq,
 ) -> Result<(), ()> {
-    let renewal_window_hours = state.settings.renewal_window_hours();
-    let ca_bundle_hash = state.cert.ca_snapshot.borrow().bundle_hash.clone();
-    let capabilities = parse_capabilities(&service_status.capabilities_json);
-    let profile = ServiceProfile::from_capabilities(&capabilities);
-    let shutdown_timeout = profile.shutdown_timeout_secs();
-    let ping_secs = service_status
-        .ping_interval_seconds
-        .map_or_else(|| profile.default_ping_interval_secs(), |v| v as u32);
-    let ping_interval = std::time::Duration::from_secs(u64::from(ping_secs));
-
-    let tenant_id = service_status.tenant_id;
-
-    let mut settings = ServiceSettingsPayload::new(renewal_window_hours, ping_interval)
-        .with_ca_bundle_hash(ca_bundle_hash)
-        .with_capabilities(controller_capabilities());
-    if let Some(secs) = shutdown_timeout {
-        settings = settings.with_shutdown_timeout(std::time::Duration::from_secs(u64::from(secs)));
-    }
-    if let Some(tid) = tenant_id {
-        settings = settings.with_tenant_id(tid);
-    }
-    let trust_domain = state.tls_config_rx.borrow().trust_domain.clone();
-    if !trust_domain.is_empty() {
-        settings = settings.with_trust_domain(trust_domain);
-    }
+    let settings = build_service_settings(
+        service_status,
+        state.settings.renewal_window_hours(),
+        state.cert.ca_snapshot.borrow().bundle_hash.clone(),
+        state.tls_config_rx.borrow().trust_domain.clone(),
+    );
     let settings_msg = ControllerMessage::ServiceSettings(settings);
 
     let json = serialize_controller_msg(out_seq, settings_msg).ok_or(())?;
@@ -1084,29 +1092,35 @@ async fn emit_service_authentication_failure_audit(
 mod tests {
     use super::*;
 
-    fn test_service_status(
-        tenant_id: Option<uuid::Uuid>,
-        service_app_name: Option<&str>,
-    ) -> ServiceStatus {
+    fn test_service_status(tenant_id: Option<uuid::Uuid>) -> ServiceStatus {
         ServiceStatus {
-            capabilities_json: String::new(),
+            capabilities_json: serde_json::json!(["system_service", "ui_surfaces"]).to_string(),
             ping_interval_seconds: None,
-            service_app_name: service_app_name.map(ToString::to_string),
             tenant_id,
         }
     }
 
     #[test]
-    fn system_service_settings_carries_none_tenant_id() {
-        let status = test_service_status(None, Some("uptrakit-mqtt"));
-        assert_eq!(status.tenant_id, None);
+    fn system_service_settings_carry_no_tenant_id() {
+        let settings = build_service_settings(
+            &test_service_status(None),
+            6,
+            "bundle-hash".to_string(),
+            String::new(),
+        );
+        assert_eq!(settings.tenant_id, None);
     }
 
     #[test]
-    fn tenant_service_settings_carries_its_own_tenant_id() {
+    fn tenant_service_settings_carry_the_services_own_tenant_id() {
         let tenant_id = uuid::Uuid::now_v7();
-        let status = test_service_status(Some(tenant_id), Some("uptrakit-mqtt"));
-        assert_eq!(status.tenant_id, Some(tenant_id));
+        let settings = build_service_settings(
+            &test_service_status(Some(tenant_id)),
+            6,
+            "bundle-hash".to_string(),
+            String::new(),
+        );
+        assert_eq!(settings.tenant_id, Some(tenant_id));
     }
 
     #[test]
