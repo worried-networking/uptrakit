@@ -708,8 +708,10 @@ the instance that initiated the request (not broadcast).
 
 ### `service_config_delivery` (controller -> service)
 
-Sent once per service app name after mTLS authentication. Contains all stored config entries
-for the service (both tenant-scoped and global).
+Sent once per connecting service instance — after mTLS authentication for external (WebSocket)
+services, over the in-process service connection registry for embedded services (agent,
+agent-ssh, scheduler, MQTT), which never perform an mTLS handshake. Contains all stored config
+entries for the service (both tenant-scoped and global), sent even when the entry set is empty.
 
 ```json
 {
