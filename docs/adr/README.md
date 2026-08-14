@@ -42,3 +42,4 @@
 - [0039 — Replace Enum RBAC With Action String Grants And A Central Access Engine](0039-replace-enum-rbac-with-action-string-grants-and-a-central-access-engine.md)
 - [0040 — Provider-Origin Surface Invocation Enforces the Descriptor Action Gate](0040-provider-origin-surface-invocation-enforces-the-descriptor-action-gate.md)
 - [0041 — Compile-time AAD encrypted column newtypes](0041-compile-time-aad-encrypted-column-newtypes.md)
+- [0042 — Untenanted System-Service Surfaces and a Single Runtime-Owned MQTT Definition](0042-untenanted-system-service-surfaces-and-a-single-runtime-owned-mqtt-definition.md)

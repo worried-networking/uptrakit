@@ -152,6 +152,20 @@ For service providers:
 - tenant services must register tenant-scoped bindings matching authenticated tenant
 - system services must register global scope with no tenant binding
 
+### Yielded-provider eviction
+
+`validate_contract_collisions` rejects a second provider registering the same `surface_id` with
+`Universal` targeting in the same effective scope — the fail-closed default that prevents two
+providers from silently racing for the same surface. When an external service connects and an
+embedded counterpart with the same app name yields to it, the controller unregisters the yielded
+service's surface provider and fails its in-flight requests
+(`evict_yielded_service_surfaces`) synchronously with the yield-flag flip, before the
+newly-connecting external service's own registration is processed. This closes the window where
+the external provider's equivalent `Universal` registration could otherwise be rejected as a
+collision against a provider that has already stopped serving traffic, without ever admitting two
+live providers for the same surface at once. See
+[ADR-0042](../adr/0042-untenanted-system-service-surfaces-and-a-single-runtime-owned-mqtt-definition.md).
+
 ## Sensitive parameter handling
 
 Sensitive interaction values are not sent in plaintext `params`. Clients send `encrypted_sensitive_params` (ECIES P-256
@@ -204,6 +218,7 @@ behavior.
 | `crates/ui/surface-proxy/src/proxy.rs` (+ `proxy/{validation,resolution,idempotency,bookkeeping,dispatch}.rs`) | Invocation coordination (ADR-0040 gate), validation, resolution, idempotency, in-flight bookkeeping, transport dispatch |
 | `crates/ui/web-api/src/routes/surfaces.rs`                                                                     | Authz enforcement and API error mapping                                                                                 |
 | `crates/ui/web-api/src/routes/service_ws/handler/mod.rs`                                                       | Service message handling for surface registration and actions                                                           |
+| `crates/ui/web-api/src/routes/service_ws/handler/surface_eviction.rs`                                          | Eviction of yielded services' surface providers on external service connect                                             |
 
 ## See also
 

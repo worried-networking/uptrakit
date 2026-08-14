@@ -68,9 +68,12 @@ Each registration includes:
 - one or more `RegisteredSurface` entries (descriptor + interactions + data sources)
 - optional encryption metadata for sensitive interaction parameters
 
-Service registrations are tied to authenticated service identity and tenant context.
-Provider rotation for a service ID is supported; in-flight requests for the replaced provider are
-failed to avoid stale routing.
+Service registrations are tied to authenticated service identity. Tenant-scoped services (agents,
+SSH agents) register with `Scope::Tenant` and their authenticated tenant context; system services
+(MQTT, scheduler) register with `Scope::Global` and `Targeting::Universal` and carry no tenant
+binding — tenancy for their surfaces is instead resolved per interaction request. Provider
+rotation for a service ID is supported; in-flight requests for the replaced provider are failed to
+avoid stale routing.
 
 ## Strict capability gating
 

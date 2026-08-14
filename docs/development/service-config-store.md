@@ -12,19 +12,23 @@ external coordination.
   tables (depending on whether a `tenant_id` is provided).
 - Sensitive values are encrypted at rest using `EncryptedString` with per-entry AAD.
 - On connect: the controller delivers all stored entries via `ServiceConfigDelivery` once per
-  service `app_name` after mTLS authentication.
+  connecting service instance. External (WebSocket) services receive it after mTLS
+  authentication; embedded (in-process) services — agent, agent-ssh, scheduler, MQTT — receive
+  the same delivery, with the same audit trail, over the in-process service connection registry
+  instead, since they never perform an mTLS handshake. Delivery happens even when the entry set
+  is empty.
 - On change: all connected instances of the same `service_app_name` receive
   `ServiceConfigUpdated` so they can apply the new or deleted entry immediately.
 
 ## Wire Messages
 
-| Message                   | Direction            | Description                                                                                                                                                                                         |
-| ------------------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `store_service_config`    | service → controller | Store a named config entry (tenant-scoped or global). The controller persists to DB, ACKs, and broadcasts `service_config_updated` to all other connected instances of the same `service_app_name`. |
-| `delete_service_config`   | service → controller | Delete a config entry by key. The controller removes from DB, ACKs, and broadcasts `service_config_updated` with `deleted: true`.                                                                   |
-| `service_config_ack`      | controller → service | Acknowledges a store or delete operation. Carries `request_id` for correlation, a `success` flag, and an optional `error` message. Sent only to the requesting instance.                            |
-| `service_config_delivery` | controller → service | Sent once after mTLS authentication. Contains all stored config entries (tenant-scoped and global) for the connecting service's `app_name`.                                                         |
-| `service_config_updated`  | controller → service | Pushed to all connected instances when any instance changes a config entry. Contains the updated key, value (absent when deleted), `tenant_id` (absent for global entries), and a `deleted` flag.   |
+| Message                   | Direction            | Description                                                                                                                                                                                                                                                |
+| ------------------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `store_service_config`    | service → controller | Store a named config entry (tenant-scoped or global). The controller persists to DB, ACKs, and broadcasts `service_config_updated` to all other connected instances of the same `service_app_name`.                                                        |
+| `delete_service_config`   | service → controller | Delete a config entry by key. The controller removes from DB, ACKs, and broadcasts `service_config_updated` with `deleted: true`.                                                                                                                          |
+| `service_config_ack`      | controller → service | Acknowledges a store or delete operation. Carries `request_id` for correlation, a `success` flag, and an optional `error` message. Sent only to the requesting instance.                                                                                   |
+| `service_config_delivery` | controller → service | Sent once per connecting instance — after mTLS authentication for external services, over the in-process connection registry for embedded services. Contains all stored config entries (tenant-scoped and global) for the connecting service's `app_name`. |
+| `service_config_updated`  | controller → service | Pushed to all connected instances when any instance changes a config entry. Contains the updated key, value (absent when deleted), `tenant_id` (absent for global entries), and a `deleted` flag.                                                          |
 
 See [Wire Protocol — Generic Service Config Messages](../api/wire-protocol.md#generic-service-config-messages)
 for full payload schemas.
@@ -101,7 +105,9 @@ configurations. Here is the end-to-end flow:
 
 ### 1. On connect: receive stored config and start clients
 
-The controller delivers `ServiceConfigDelivery` after mTLS authentication. The MQTT service
+The controller delivers `ServiceConfigDelivery` once per connecting MQTT instance — after mTLS
+authentication for the standalone binary, over the in-process connection registry for the
+controller-embedded MQTT service (`--features embedded-mqtt`). Either way the MQTT service
 iterates all entries, deserializes each value as `ParsedMqttClientConfig`, and starts or
 updates the corresponding `MqttClientHandle`. This is equivalent to the old
 `TenantAssignments` handshake but driven by the generic mechanism.
@@ -146,5 +152,6 @@ This replaces the old `TenantConfigUpdated` and `TenantRevoked` MQTT-specific me
 - **Decryption before delivery:** The controller decrypts values before including them in
   `ServiceConfigDelivery` and `ServiceConfigUpdated` messages. The service receives plaintext
   JSON on the mTLS-secured WebSocket.
-- **mTLS channel:** Config delivery and updates travel only over the authenticated mTLS
-  WebSocket connection. The messages are not published to NATS.
+- **Transport:** Config delivery and updates travel over the authenticated mTLS WebSocket
+  connection for external services, or over the in-process service connection registry for
+  embedded services — never over NATS.

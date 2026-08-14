@@ -255,6 +255,60 @@ when a `service_id` query parameter is present.
 | Action (update)              | `services:update`                      | `system.services:update`                              |
 | Action (delete)              | `services:delete`                      | `system.services:delete`                              |
 
+## Surfaces and Config Delivery Are Untenanted
+
+System services are tenant-agnostic end to end — this extends to the two subsystems that used to
+special-case a "default tenant" for them. See [ADR-0042](../adr/0042-untenanted-system-service-surfaces-and-a-single-runtime-owned-mqtt-definition.md)
+for the full rationale.
+
+### Shared surface registrations
+
+A system service that participates in the shared surface runtime (currently the MQTT bridge —
+see [Surfaces and Config Delivery](../development/surfaces.md)) registers with `Scope::Global` and
+`Targeting::Universal`, and its `effective_tenant_binding.tenant_id` is `None`. Registration never
+depends on resolving a tenant to bind to, so it can never be skipped for lack of one — unlike the
+previous tenant-bound registration model, which failed to register at all when no default tenant
+was available.
+
+Because the provider registration itself carries no tenant, tenancy for interactions on that
+surface is resolved per request instead: the controller stamps each
+`SurfaceActionRequest.tenant_id` from the authenticated caller before dispatch
+(`crates/ui/surface-proxy/src/proxy/dispatch.rs`), and the provider filters its own state (for
+example, MQTT client configs) by that value. One MQTT service instance serves multiple tenants'
+broker connections this way — tenancy is a property of each MQTT client config row, never of the
+service or its surface registration.
+
+`AdminEvent::SurfacesChanged` is broadcast globally (`EventBroadcaster::send_global`) when a
+Global-scope provider's surfaces change, and per-tenant otherwise.
+
+When an embedded system service yields to an external counterpart claiming the same app name, the
+controller unregisters the yielded service's surface provider and fails its in-flight requests
+(`evict_yielded_service_surfaces`,
+`crates/ui/web-api/src/routes/service_ws/handler/surface_eviction.rs`) synchronously with the yield
+handoff, so the external service's equivalent Universal registration is admitted rather than
+rejected as a provider conflict.
+
+### One MQTT service definition, two deployment modes
+
+The MQTT service's deployment facts — app name, capability set, `ServiceScope::System`,
+`YieldPolicy`, embedded shutdown timeout — are declared exactly once, in
+`crates/core/mqtt-runtime/src/bootstrap.rs`. Both the standalone `uptrakit-mqtt` binary and the
+controller's embedded-service host (`--features embedded-mqtt`,
+`crates/core/controller-runtime/src/service_host/builtins.rs`) read these facts from that module
+rather than declaring their own copies, so the two deployment modes cannot drift apart.
+
+Embedded system-service bridges (scheduler, MQTT) are untenanted by construction — the shared
+`spawn_system_bridge` helper always builds the bridge session with `service_tenant_id: None`, never
+a per-service value.
+
+### One config-delivery path for every embedded service
+
+Every embedded service — agent, agent-ssh, scheduler, MQTT — receives its stored
+[service config store](../development/service-config-store.md) entries through the same delivery
+path and the same audit trail, whether over an external mTLS WebSocket or the in-process
+connection registry, and whether or not it has any stored entries. See
+[Service Config Store](../development/service-config-store.md) for the wire-level detail.
+
 ## Frontend
 
 The frontend filters services by capability instead of type and displays `service_label` instead
@@ -267,3 +321,5 @@ of `service_type`.
 - [Authentication and Authorization](../security/auth-and-authorization.md) — action/grant authorization model
 - [Wire Protocol](../api/wire-protocol.md) — capabilities and enrollment flow
 - [Scheduler Architecture](scheduler.md) — external scheduler as a system service
+- [ADR-0042](../adr/0042-untenanted-system-service-surfaces-and-a-single-runtime-owned-mqtt-definition.md) —
+  untenanted system-service surfaces and the single runtime-owned MQTT definition
