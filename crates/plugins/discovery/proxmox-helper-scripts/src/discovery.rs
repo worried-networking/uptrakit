@@ -253,6 +253,39 @@ pub struct PhsScript {
 
 // ── Script analysis ───────────────────────────────────────────────────────────
 
+/// Join shell line continuations: a `\` at end of line is removed along with
+/// the line break, exactly like the shell does. No separator is inserted —
+/// the shell inserts none either; any space in the joined line comes from the
+/// source text before the backslash.
+///
+/// Fed only to the release-call collectors so multi-line
+/// `fetch_and_deploy_gh_release \` invocations parse; every other extractor
+/// keeps the original line structure (spec D7). Runs of spaces in the joined
+/// line are fine — `extract_quoted_arg` trims before each argument. Accepted
+/// simplification: a line ending in `\\` (escaped backslash, a *literal*
+/// backslash in shell) is also treated as a continuation — harmless for the
+/// two collectors this feeds.
+fn join_continuations(content: &str) -> String {
+    let mut joined = String::with_capacity(content.len());
+    for line in content.lines() {
+        if let Some(stripped) = line.strip_suffix('\\') {
+            joined.push_str(stripped);
+        } else {
+            joined.push_str(line);
+            joined.push('\n');
+        }
+    }
+    joined
+}
+
+/// First whitespace-delimited token containing `"://"` — used to surface an
+/// unmatched URL when parsing finds no known source.
+fn first_url_like_token(content: &str) -> Option<&str> {
+    content
+        .split_whitespace()
+        .find(|token| token.contains("://"))
+}
+
 /// Analyse the content of a PHS CT script to determine the upstream source type.
 ///
 /// Detection priority:
@@ -272,9 +305,13 @@ pub struct PhsScript {
 pub fn analyze_phs_script(slug: &str, content: &str) -> PhsScriptAnalysis {
     let app_name = extract_app_name(content);
 
+    // Release calls may be split across `\`-continued lines (the Uptrakit CT
+    // script does this); join once and feed only the two collectors.
+    let joined = join_continuations(content);
+
     // ── GitHub detection ──────────────────────────────────────────────────────
     // Collect all (key, owner, repo) triples from priority-1 patterns.
-    let p1_matches = collect_gh_release_calls(content);
+    let p1_matches = collect_gh_release_calls(&joined);
 
     if !p1_matches.is_empty() {
         // Prefer the first call whose key slug-matches the container slug.
@@ -306,7 +343,7 @@ pub fn analyze_phs_script(slug: &str, content: &str) -> PhsScriptAnalysis {
 
     // ── Codeberg detection ────────────────────────────────────────────────────
     // Priority 3: check_for_codeberg_release / fetch_and_deploy_codeberg_release.
-    let cb_matches = collect_codeberg_release_calls(content);
+    let cb_matches = collect_codeberg_release_calls(&joined);
 
     if !cb_matches.is_empty() {
         let best = cb_matches
@@ -857,7 +894,21 @@ pub fn parse_phs_scripts(content: &str) -> Vec<PhsScript> {
         }
     }
 
-    tracing::debug!(count = scripts.len(), "parsed PHS scripts from update file");
+    if scripts.is_empty() {
+        // WARN only when there is an actionable URL to show. A /usr/bin/update
+        // with no URLs at all is simply not PHS-managed — a recurring WARN
+        // with no payload would be pure noise on such hosts.
+        if let Some(first_url) = first_url_like_token(content) {
+            tracing::warn!(
+                first_url,
+                "no known PHS source matched any URL in the update file"
+            );
+        } else {
+            tracing::debug!("update file contains no URLs; not a PHS-managed host");
+        }
+    } else {
+        tracing::debug!(count = scripts.len(), "parsed PHS scripts from update file");
+    }
     scripts
 }
 
@@ -1127,6 +1178,93 @@ apt install -y somepackage
         let content = r#"GH_REPO="owner/repo/extra""#;
         let result = analyze_phs_script("extra", content);
         assert!(result.github_owner.is_none());
+    }
+
+    // ── continuation joining ─────────────────────────────────────────────
+
+    #[test]
+    fn join_continuations_merges_backslash_lines() {
+        let content = "a \\\nb\nc\n";
+        assert_eq!(join_continuations(content), "a b\nc\n");
+    }
+
+    #[test]
+    fn join_continuations_handles_crlf_and_trailing_backslash() {
+        // str::lines strips \r\n, so CRLF input joins to plain \n output.
+        assert_eq!(join_continuations("a \\\r\nb\r\n"), "a b\n");
+        assert_eq!(join_continuations("tail \\"), "tail ");
+    }
+
+    #[test]
+    fn analyze_parses_multiline_gh_release_call() {
+        // Verbatim shape of scripts/pvehs/ct/uptrakit.sh:54-58.
+        let content = concat!(
+            "APP=\"uptrakit\"\n",
+            "fetch_and_deploy_gh_release \\\n",
+            "  \"uptrakit-controller-standalone\" \\\n",
+            "  \"worried-networking/uptrakit\" \\\n",
+            "  \"prebuild\" \"$RELEASE_TAG\" \"$tmp_dir\" \\\n",
+            "  \"uptrakit-controller-standalone-*-${rust_target}.tar.gz\"\n",
+        );
+        let analysis = analyze_phs_script("uptrakit", content);
+        assert_eq!(analysis.github_owner.as_deref(), Some("worried-networking"));
+        assert_eq!(analysis.github_repo.as_deref(), Some("uptrakit"));
+        assert_eq!(
+            analysis.version_file_basename.as_deref(),
+            Some("uptrakit-controller-standalone")
+        );
+    }
+
+    #[test]
+    fn analyze_feeds_joined_text_only_to_release_collectors() {
+        // An npm install split across a continuation must NOT be detected:
+        // the npm extractor sees the original (unjoined) content (spec D7).
+        let content = "npm install \\\n  -g some-package\n";
+        let analysis = analyze_phs_script("some-package", content);
+        assert!(analysis.npm_package.is_none());
+    }
+
+    #[test]
+    fn analyze_gh_repo_var_detected_after_continuation_line() {
+        // Extractor-isolation (spec D7): the GH_REPO= var extractor sees the
+        // original (unjoined) content. Joining would merge the continuation
+        // into this line ("FOO=bar GH_REPO=…"), losing the line-start prefix.
+        let content = "FOO=bar \\\nGH_REPO=\"someorg/someapp\"\napt upgrade -y\n";
+        let analysis = analyze_phs_script("someapp", content);
+        assert_eq!(analysis.github_owner.as_deref(), Some("someorg"));
+        assert_eq!(analysis.github_repo.as_deref(), Some("someapp"));
+    }
+
+    #[test]
+    fn analyze_parses_multiline_codeberg_release_call() {
+        // Same continuation handling for the Codeberg collector (spec D7).
+        let content = concat!(
+            "fetch_and_deploy_codeberg_release \\\n",
+            "  \"myapp\" \\\n",
+            "  \"myorg/myapp\"\n",
+        );
+        let analysis = analyze_phs_script("myapp", content);
+        assert_eq!(analysis.codeberg_owner.as_deref(), Some("myorg"));
+        assert_eq!(analysis.codeberg_repo.as_deref(), Some("myapp"));
+    }
+
+    #[test]
+    fn analyze_multiline_release_call_malformed_args_yields_none() {
+        // Continuation joins, but the args are unquoted — the collector
+        // extracts nothing (failure path).
+        let content = "fetch_and_deploy_gh_release \\\n  unquoted args\n";
+        let analysis = analyze_phs_script("x", content);
+        assert!(analysis.github_owner.is_none());
+        assert!(analysis.github_repo.is_none());
+    }
+
+    #[test]
+    fn first_url_like_token_finds_first_url() {
+        assert_eq!(
+            first_url_like_token("curl -fsSL https://example.com/x.sh | bash"),
+            Some("https://example.com/x.sh")
+        );
+        assert_eq!(first_url_like_token("no urls here"), None);
     }
 
     // ── Codeberg detection tests ─────────────────────────────────────
