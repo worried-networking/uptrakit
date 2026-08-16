@@ -245,7 +245,9 @@ mod tests {
 
     /// Guard-to-delete for a red check: replacing the `continue` in the
     /// `!is_yielded` branch with unconditional eviction makes this test fail
-    /// — both providers stay registered here because neither is yielded.
+    /// — both providers stay registered here because neither is yielded, and
+    /// the `SurfacesChanged` broadcast that unconditional eviction would emit
+    /// is caught by the `try_recv` assertion.
     #[cfg(feature = "db-sqlite")]
     #[tokio::test]
     async fn no_yielded_services_is_a_no_op() {
@@ -258,8 +260,18 @@ mod tests {
         let (service_b, _rx_b) =
             register_test_service(&state, tenant_id, "service.provider-b").await;
 
+        let mut rx = state
+            .notification
+            .event_broadcaster
+            .subscribe(tenant_id)
+            .await;
+
         evict_yielded_service_surfaces(&state).await;
 
+        assert!(
+            rx.try_recv().is_err(),
+            "no service is yielded — nothing changed, so no SurfacesChanged broadcast"
+        );
         assert!(
             state
                 .surface_proxy_deps
