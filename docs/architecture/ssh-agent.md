@@ -210,31 +210,40 @@ automation/CI use, accepting all defaults.
 CONNECT (read-only: builds a plan for review, mutates nothing remote)
 1. PARSE TARGET & RESOLVE DEFAULTS (target string → SSH config → $USER/port 22)
 2. VALIDATE INPUTS (username format, no DB name conflict)
-3. PREPARE KEY MATERIAL (validate provided key, or prepare an Ed25519 request; not persisted)
+3. VALIDATE KEY MATERIAL (if a private key was provided, verify it derives a
+   public key; nothing is persisted — key generation happens only in execute)
 4. CONNECT & AUTHENTICATE (password, key file, or SSH agent; TOFU or pinned
-   host key; detect privileges via id -u and sudo -n true)
+   host key; detect privileges via id -u and sudo -n -l)
 5. GATHER HOST FACTS (target-user existence, os-release/uname, docker group,
    authorized_keys read for stale-key detection)
 6. PROBE INFRASTRUCTURE PLUGINS (Proxmox: `command -v pveversion`; a probe
    failure degrades to "not detected" rather than failing the review)
-7. DISCONNECT & BUILD PLAN for review
+7. PROBE PLUGIN SUDO COMMANDS (command -v / test -f per candidate; builds the
+   sudoers preview shown at the review step)
+8. DISCONNECT & BUILD PLAN for review
 
 EXECUTE (applies the reviewed plan, skipping any actions the user toggled off)
-8. RECONNECT & AUTHENTICATE (as auth_username; re-detects privileges)
-9. REMOTE SETUP
+9. PREPARE KEY MATERIAL (use the provided private key, or generate a new
+   Ed25519 keypair)
+10. RECONNECT & AUTHENTICATE (as auth_username; re-detects privileges)
+11. REMOTE SETUP
    - Create user with /bin/sh shell (if different from auth user)
    - Configure docker group membership
    - Auto-remove keys matching uptrakit-svc:<this-service-uuid>-host:* (always)
    - Remove all Uptrakit-managed keys (only with --remove-stale-keys)
    - Deploy new key with no-pty/no-agent-forwarding/no-X11-forwarding
-   - Resolve plugin commands (command -v per SudoCommandEntry)
    - Run infrastructure plugins' `on_host_bootstrapped` (e.g. Proxmox credential
-     provisioning, unless skipped) and merge their sudoers entries in
+     provisioning, unless skipped); this detection step always runs, regardless
+     of whether `configure_sudoers` is skipped
+   - Resolve plugin commands (command -v per SudoCommandEntry) and merge in
+     the infra plugins' sudoers entries; both this step and the write below
+     are skipped when `configure_sudoers` is skipped
    - Write minimal /etc/sudoers.d/uptrakit-<username> (or NOPASSWD: ALL with --allow-all)
    - Validate with visudo -cf
-10. DISCONNECT auth session
-11. VERIFY (reconnect as target user, whoami + sudo -n true)
-12. SAVE TO DATABASE (encrypt key, store host entry)
+12. DISCONNECT auth session
+13. VERIFY (reconnect as target user; whoami always, plus sudo -n -l only
+    when a sudoers file was actually written)
+14. SAVE TO DATABASE (encrypt key, store host entry)
 ```
 
 The resolution chain for each field:
