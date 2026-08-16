@@ -3,6 +3,10 @@
 # Skip with: git push --no-verify
 set -euo pipefail
 
+if [[ -x .beads/hooks/pre-push ]]; then
+  .beads/hooks/pre-push "$@"
+fi
+
 # Slurp stdin: lines are "<local-ref> <local-sha1> <remote-ref> <remote-sha1>"
 # When called by git, $1 is the remote name. When triggered manually, $1 is unset.
 # Skip early only when called by git and there is nothing to verify:

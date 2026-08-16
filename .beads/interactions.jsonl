@@ -1,0 +1,1 @@
+{"id":"int-7307a028845149e001cbcfcf626a72cc","kind":"field_change","created_at":"2026-08-16T12:12:10.240272Z","actor":"Andrey Yantsen","issue_id":"uptrakit-cu0","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Integrated Beads hooks into Husky and amended the initialization commit."}}

@@ -3,6 +3,10 @@
 # Skip with: git commit --no-verify
 set -euo pipefail
 
+if [[ -x .beads/hooks/pre-commit ]]; then
+  .beads/hooks/pre-commit "$@"
+fi
+
 _GIT_DIR=$(git rev-parse --git-dir)
 if [[ -f "$_GIT_DIR/MERGE_HEAD" ]]; then
   # ADR dup guard still runs for merge commits: the concluding commit of a
