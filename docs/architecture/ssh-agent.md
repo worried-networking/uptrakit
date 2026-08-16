@@ -192,30 +192,49 @@ For detailed usage instructions, see [SSH Agent Host Management](../end-user/ssh
 ### Bootstrap Workflow
 
 The `bootstrap` wizard action automates the full remote host setup through a
-multi-step flow (Connect -> Review -> Execute). It accepts a target in standard
-SSH format (`[user@]host[:port]` or `ssh://[user@]host[:port]`) and resolves
-defaults from `~/.ssh/config`. Users can review the planned actions (create user,
-deploy key, configure sudoers, etc.) and selectively approve each one before
-execution. An `auto` toggle allows skipping the review step for automation/CI use.
+multi-step flow: **Connect -> Review -> Execute**. It accepts a target in
+standard SSH format (`[user@]host[:port]` or `ssh://[user@]host[:port]`) and
+resolves defaults from `~/.ssh/config`. The connect phase is entirely
+read-only: it authenticates, gathers host facts, and probes infrastructure
+plugins (Proxmox: `command -v pveversion`) without creating a user, writing a
+key, or touching sudoers. Users then review the resulting plan (create user,
+deploy key, configure sudoers, Proxmox VE setup, etc.) and selectively skip
+any skippable action before execution. Provisioning — user creation, key
+deployment, the sudoers write, and any infrastructure-plugin credential setup
+— happens exactly once, in the execute phase; abandoning the wizard at the
+review step leaves the remote host, and any Proxmox VE cluster it belongs to,
+completely untouched. An `auto` toggle allows skipping the review step for
+automation/CI use, accepting all defaults.
 
 ```text
+CONNECT (read-only: builds a plan for review, mutates nothing remote)
 1. PARSE TARGET & RESOLVE DEFAULTS (target string → SSH config → $USER/port 22)
 2. VALIDATE INPUTS (username format, no DB name conflict)
-3. PREPARE KEY MATERIAL (read provided key or generate Ed25519)
-4. CONNECT & AUTHENTICATE (password, key file, or SSH agent; TOFU or pinned host key)
-5. DETECT PRIVILEGES (root check via id -u; sudo -n true)
-6. REMOTE SETUP
+3. PREPARE KEY MATERIAL (validate provided key, or prepare an Ed25519 request; not persisted)
+4. CONNECT & AUTHENTICATE (password, key file, or SSH agent; TOFU or pinned
+   host key; detect privileges via id -u and sudo -n true)
+5. GATHER HOST FACTS (target-user existence, os-release/uname, docker group,
+   authorized_keys read for stale-key detection)
+6. PROBE INFRASTRUCTURE PLUGINS (Proxmox: `command -v pveversion`; a probe
+   failure degrades to "not detected" rather than failing the review)
+7. DISCONNECT & BUILD PLAN for review
+
+EXECUTE (applies the reviewed plan, skipping any actions the user toggled off)
+8. RECONNECT & AUTHENTICATE (as auth_username; re-detects privileges)
+9. REMOTE SETUP
    - Create user with /bin/sh shell (if different from auth user)
-   - Read existing authorized_keys
+   - Configure docker group membership
    - Auto-remove keys matching uptrakit-svc:<this-service-uuid>-host:* (always)
    - Remove all Uptrakit-managed keys (only with --remove-stale-keys)
    - Deploy new key with no-pty/no-agent-forwarding/no-X11-forwarding
    - Resolve plugin commands (command -v per SudoCommandEntry)
+   - Run infrastructure plugins' `on_host_bootstrapped` (e.g. Proxmox credential
+     provisioning, unless skipped) and merge their sudoers entries in
    - Write minimal /etc/sudoers.d/uptrakit-<username> (or NOPASSWD: ALL with --allow-all)
    - Validate with visudo -cf
-7. DISCONNECT auth session
-8. VERIFY (reconnect as target user, whoami + sudo -n true)
-9. SAVE TO DATABASE (encrypt key, store host entry)
+10. DISCONNECT auth session
+11. VERIFY (reconnect as target user, whoami + sudo -n true)
+12. SAVE TO DATABASE (encrypt key, store host entry)
 ```
 
 The resolution chain for each field:

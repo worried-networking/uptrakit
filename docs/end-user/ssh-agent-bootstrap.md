@@ -84,6 +84,10 @@ SSH aliases map naturally to host names.
    toggle off any you do not want.
 6. Click **Execute** to carry out the approved actions.
 
+Each planned action in the review step has an id, and any action marked
+skippable can be toggled off individually at that step; `--auto` skips the
+review step entirely and accepts all defaults.
+
 ### CLI
 
 ```bash
@@ -431,6 +435,13 @@ for details.
 If PVE API credential creation fails (e.g. insufficient permissions), a warning
 is printed and the bootstrap continues normally. You can configure the Proxmox
 plugin manually afterwards.
+
+The wizard's review step lists the planned PVE actions as a single skippable
+**Proxmox VE setup** action. Skipping it disables only the API-credential
+provisioning described above -- PVE detection, marking the host as a PVE node,
+and the pct/qm sudoers entries granted for guest management still apply. A
+host bootstrapped with **Proxmox VE setup** skipped is therefore left fully
+functional once you configure a Proxmox API token for it manually.
 
 ## Related documentation
 
