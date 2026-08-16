@@ -12,15 +12,27 @@
 //! `RUST_LOG` directives are added **after** — so `RUST_LOG` wins for any
 //! same-target match.  This is the opposite of the historical behaviour and
 //! lets operators override any verbosity setting without rebuilding.
+//!
+//! # Output format
+//!
+//! `init()` resolves the log sink at startup: `UPTRAKIT_LOG_FORMAT`
+//! (`auto`/`text`/`journald`, default `auto`) — under `auto`, the native
+//! journald layer is installed when stdout IS the systemd journal
+//! (`JOURNAL_STREAM` matched against `fstat(stdout)`), and the classic
+//! fmt layer (ANSI only on a terminal) otherwise. Every failure falls
+//! back to the fmt layer; logging setup never aborts the process.
 
 use std::collections::BTreeMap;
 
+use tracing_subscriber::filter::FilterExt;
 use tracing_subscriber::{EnvFilter, Layer, Registry, prelude::*};
 
 #[cfg(feature = "cli")]
 use std::io;
 #[cfg(feature = "test-support")]
 use std::sync::Once;
+
+mod format;
 
 /// A type-erased tracing layer that can be stacked with other layers.
 pub type BoxedLayer = Box<dyn Layer<Registry> + Send + Sync + 'static>;
@@ -44,6 +56,7 @@ pub struct TracingBuilder {
     /// Map from verbosity level → list of (target, level) directive pairs.
     directives: BTreeMap<u8, Vec<(String, String)>>,
     extra_layers: Vec<BoxedLayer>,
+    journald_excluded_targets: Vec<&'static str>,
 }
 
 impl Default for TracingBuilder {
@@ -64,6 +77,7 @@ impl TracingBuilder {
             max_verbosity: 2,
             directives,
             extra_layers: Vec::new(),
+            journald_excluded_targets: Vec::new(),
         }
     }
 
@@ -102,6 +116,22 @@ impl TracingBuilder {
     pub fn extra_layer(mut self, layer: BoxedLayer) -> Self {
         self.extra_layers.push(layer);
         self
+    }
+
+    /// Exclude events whose target exactly equals `target` from the main
+    /// journald layer. Text mode is unaffected. Used by the controller to
+    /// keep `uptrakit_audit` events single-sourced in the journal when a
+    /// dedicated audit layer is also installed.
+    pub fn journald_exclude_exact(mut self, target: &'static str) -> Self {
+        self.journald_excluded_targets.push(target);
+        self
+    }
+
+    /// Predicate excluding this builder's exact-match targets from the
+    /// main journald layer.
+    fn exclusion_predicate(&self) -> impl Fn(&tracing::Metadata<'_>) -> bool + use<> {
+        let excluded = self.journald_excluded_targets.clone();
+        move |meta| !excluded.contains(&meta.target())
     }
 
     /// Build the `EnvFilter` without initialising the subscriber.
@@ -174,17 +204,48 @@ impl TracingBuilder {
     /// Consume the builder and install the global tracing subscriber.
     ///
     /// The subscriber is a `tracing_subscriber::registry()` with:
-    /// 1. An `fmt` layer filtered by the verbosity-derived + `RUST_LOG` filter.
+    /// 1. The main layer filtered by the verbosity-derived + `RUST_LOG` filter — native
+    ///    journald when stdout IS the systemd journal, `fmt` otherwise.
     /// 2. Any extra layers registered via [`extra_layer`](Self::extra_layer).
     pub fn init(self) {
         let filter = self.build_env_filter();
-        let fmt_layer: BoxedLayer = Box::new(tracing_subscriber::fmt::layer().with_filter(filter));
+        let selected = format::use_journald(format::env_log_format(), format::stdout_is_journal());
 
-        let mut layers: Vec<BoxedLayer> = vec![fmt_layer];
+        let main_layer: BoxedLayer = if selected {
+            match tracing_journald::layer() {
+                Ok(journald) => {
+                    let combined = filter.and(tracing_subscriber::filter::filter_fn(
+                        self.exclusion_predicate(),
+                    ));
+                    Box::new(journald.with_filter(combined))
+                }
+                Err(error) => {
+                    eprintln!(
+                        "warning: journald log output unavailable ({error}); using text format"
+                    );
+                    Box::new(text_layer(filter))
+                }
+            }
+        } else {
+            Box::new(text_layer(filter))
+        };
+
+        let mut layers: Vec<BoxedLayer> = vec![main_layer];
         layers.extend(self.extra_layers);
 
         tracing_subscriber::registry().with(layers).init();
     }
+}
+
+/// The single constructor for the plain-text stdout layer — both the
+/// text-resolved branch and the journald-failure fallback use it (a
+/// bare `fmt::layer()` copy would reintroduce ANSI escapes in the
+/// journal).
+fn text_layer(filter: EnvFilter) -> impl Layer<Registry> + Send + Sync + 'static {
+    use std::io::IsTerminal;
+    tracing_subscriber::fmt::layer()
+        .with_ansi(std::io::stdout().is_terminal())
+        .with_filter(filter)
 }
 
 /// Initialise tracing for CLI binaries.
@@ -464,6 +525,55 @@ mod tests {
         assert!(
             extra_out.contains("info event"),
             "extra layer (trace filter) should receive info independently"
+        );
+    }
+
+    #[test]
+    fn journald_exclude_exact_accumulates_targets() {
+        let builder = TracingBuilder::new()
+            .journald_exclude_exact("uptrakit_audit")
+            .journald_exclude_exact("other_target");
+        assert_eq!(
+            builder.journald_excluded_targets,
+            vec!["uptrakit_audit", "other_target"]
+        );
+    }
+
+    /// The journald exclusion predicate is exact-match: `uptrakit_audit` is
+    /// denied while `uptrakit_audit_log` and other targets pass.
+    #[test]
+    fn journald_exclusion_is_exact_match() {
+        use tracing_subscriber::filter::FilterExt;
+
+        let builder = TracingBuilder::new().journald_exclude_exact("uptrakit_audit");
+        let filter = EnvFilter::new("trace").and(tracing_subscriber::filter::filter_fn(
+            builder.exclusion_predicate(),
+        ));
+        let buf = Arc::new(Mutex::new(Vec::new()));
+        let writer = BufWriter(buf.clone());
+        let subscriber = tracing_subscriber::registry().with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(writer)
+                .with_filter(filter),
+        );
+        let _guard = tracing::subscriber::set_default(subscriber);
+
+        tracing::info!(target: "uptrakit_audit", "excluded-target event");
+        tracing::info!(target: "uptrakit_audit_log", "audit-crate event");
+        tracing::info!(target: "uptrakit_foo", "ordinary event");
+
+        let out = String::from_utf8(buf.lock().unwrap().clone()).unwrap();
+        assert!(
+            !out.contains("excluded-target event"),
+            "exact-match target should be excluded"
+        );
+        assert!(
+            out.contains("audit-crate event"),
+            "prefix-adjacent target must NOT be excluded"
+        );
+        assert!(
+            out.contains("ordinary event"),
+            "unrelated targets must pass"
         );
     }
 }

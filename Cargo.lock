@@ -8616,7 +8616,10 @@ dependencies = [
 name = "uptrakit-tracing-init"
 version = "0.0.1"
 dependencies = [
+ "rustix",
+ "thiserror 2.0.19",
  "tracing",
+ "tracing-journald",
  "tracing-subscriber",
  "tracing-test",
 ]
