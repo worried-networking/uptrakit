@@ -41,6 +41,37 @@ Interactive terminal runs are fine as-is and must keep the current format.
 
 ## Design
 
+### Prerequisite: unify the duplicated `TracingBuilder` (review finding, pass 1)
+
+The "all daemons" scope is unreachable from `uptrakit-tracing-init` alone: agent, agent-ssh, scheduler, and mqtt call
+`uptrakit_service_sdk::TracingBuilder` (`crates/core/agent/src/main.rs:100`, `agent-ssh/src/main.rs:39,83`,
+`mqtt/src/main.rs:17`, `scheduler/src/main.rs:18`), and `crates/shared/service-sdk/src/tracing_init.rs` is a
+**hand-maintained copy** of `crates/shared/tracing-init/src/lib.rs` — not a re-export (verified by diff: comment-wording
+drift plus a missing test module; `service-sdk/Cargo.toml` has no `uptrakit-tracing-init` dependency). The canonical doc's
+claim that service-sdk "re-exports the full public surface" (`docs/development/tracing.md:32-34`) is currently false in
+code.
+
+Fix as part of this work (the idiomatic dedupe, not a second copy of the new logic):
+
+- `uptrakit-service-sdk` gains `uptrakit-tracing-init = { workspace = true }` (workspace entry already exists with a
+  version field, root `Cargo.toml:142`), deletes its local `src/tracing_init.rs` **and** the `pub mod tracing_init;`
+  declaration (`service-sdk/src/lib.rs:77`), and keeps only the flat re-exports rewritten to the dependency
+  (`pub use uptrakit_tracing_init::{TracingBuilder, BoxedLayer};` plus the feature-gated `init_cli_tracing` /
+  `init_test_tracing` — replacing `lib.rs:89,91-92`). No consumer references the `…::tracing_init::` module path
+  (workspace-grep verified), so the module name itself is not preserved. Existing `cli`/`test-support` features forward
+  to the dependency's features of the same names (`cli = ["uptrakit-tracing-init/cli"]`, etc.).
+- `uptrakit-tracing-init` joins the publishable transitive-dep chain: `release-plz.toml` entry moves from the internal
+  `release = false` group (`release-plz.toml:147-149`) to the "Public-API library crates" section — the exact migration
+  already performed for `uptrakit-shared-macros`/`uptrakit-build-info` for the same reason (`release-plz.toml:70-73`).
+- Publishable-crate hygiene holds: `uptrakit-tracing-init` depends only on tracing-ecosystem crates (+ rustix,
+  tracing-journald below) — none of the banned transitive deps (audit-log/shared-db/tenant-db/crypto).
+- `docs/development/tracing.md:32-34` becomes true; its wording is corrected as part of the doc deliverable.
+
+**Sequencing** (contrarian pass): the unification lands as its own commit(s) ahead of the journald swap — every
+intermediate commit keeps all five daemons compiling with today's behavior; the layer-swap commit then changes behavior
+once, everywhere. The release-plz publishable move ships with the unification commit (it is what makes the dedupe
+publishable-legal), not with the behavior change.
+
 ### Log-format resolution (`uptrakit-tracing-init`)
 
 New types in `crates/shared/tracing-init/src/lib.rs` (or a small submodule):
@@ -64,6 +95,18 @@ Detection is split for testability (pure-helper pattern, cf. commit 9d5a1947e):
 
 The fmt layer's default writer is stdout, so stdout (not stderr) is the stream whose identity matters.
 
+Two clarifications (review pass 1):
+
+- **What detection answers**: `Layer::new()` already answers "is journald reachable" authoritatively (its socket probe).
+  The `JOURNAL_STREAM`/`fstat` check answers a different, narrower question — "is _stdout itself_ the journal" — so
+  journald mode does not silently activate when an operator redirects stdout elsewhere on a systemd host. Do not
+  "simplify" the detection away as redundant with `Layer::new()`; it is not.
+- **Visibility**: `LogFormat`, `JournalStream`, `journal_stream_matches`, and `stdout_is_journal` are crate-internal
+  (`pub(crate)` or private) — nothing outside `uptrakit-tracing-init` constructs them, and bare `pub` would trip the
+  workspace `unreachable_pub = deny` lint. The `#[non_exhaustive]`-by-default rule covers public enums AND structs
+  (docs/development/coding-standards.md:381-385); it is n/a here purely because neither type is `pub` — if either is ever
+  made public, apply it then.
+
 ### Layer construction in `init()`
 
 ```text
@@ -78,6 +121,11 @@ resolved format == text:
 Text-mode addition (post-grilling, motivated by the live ANSI finding above): gate ANSI on `std::io::IsTerminal`
 (stable since 1.70; workspace `rust-version = "1.91"`). Interactive terminals keep colors byte-identically; redirected
 stdout (docker logs, files, journald-with-detection-overridden-to-text) gets clean plain text.
+
+Both fmt-construction sites — the `text`-resolved branch AND the journald-construction-failed fallback — go through **one
+shared text-layer constructor** (single private fn building `fmt::layer().with_ansi(is_terminal)…`). A verbatim copy of
+the old `fmt::layer()` call in the fallback arm would silently reintroduce the ANSI defect exactly where it is hardest to
+notice (forced journald on a non-systemd host).
 
 - `Layer::new()` probes the socket and fails with `NotFound` when journald is absent or on non-unix
   (`tracing-journald-0.3.2/src/lib.rs:98+`) — covers forced `journald` on hosts without systemd. Logging setup must never
@@ -103,9 +151,26 @@ the target from the main layer:
   `env_filter.and(filter_fn(move |meta| !excluded.contains(meta.target())))`
   (`FilterExt::and` + `filter_fn`, tracing-subscriber `filter/layer_filters/mod.rs:224`, `filter/filter_fn.rs:104`).
 - Exact match, not prefix: crate-internal events with targets like `uptrakit_audit_log::…` are unaffected.
-- `controller-runtime` calls `.journald_exclude_exact("uptrakit_audit")` inside the existing `#[cfg(feature = "journald")]`
-  block that adds the audit layer. Feature absent ⇒ no dedicated layer, no exclusion.
+- `controller-runtime` registers the exclusion under the **same runtime boolean** that adds the dedicated audit layer —
+  see the targeted-fix bullet below for the single authoritative wiring instruction (layer constructed ⇒ layer +
+  exclusion; otherwise neither). The `#[cfg(feature = "journald")]` gate bounds where that code compiles; it is not the
+  condition the exclusion follows. Feature absent ⇒ no dedicated layer, no exclusion.
 - Text mode: exclusion not applied — stdout keeps today's behavior (audit lines visible in plain output).
+- **Dormancy note (live- and code-verified, contrarian pass 2)**: the journald **audit** subsystem is unwired in code
+  today — `JournaldBackend` is defined and re-exported but never constructed anywhere in the workspace, and
+  `AuditLogBackendArg` (`controller-runtime/src/cli.rs:203`) is an orphan enum with no field on `Args` reading it; the
+  deployed binary additionally lacks the `journald` feature (`features: db-all,nats`). So no `target: "uptrakit_audit"`
+  events are emitted anywhere today, and this dedup is latent twice over. It is still designed now because the dedicated
+  layer construction is live code in journald-feature builds and the double-write becomes real the day the backend is
+  wired — but do not read "selected backend" semantics into current code; there is no selection mechanism yet.
+- **Targeted fix in the touched block** (contrarian passes 1+2): the existing layer construction panics via
+  `.expect("failed to connect to journald")` (`boot/config.rs:131-136`) even though the layer is added unconditionally
+  under the feature — a journald-feature build launched in Docker or a dev shell aborts at startup for an audit backend
+  that cannot even be selected. Fix: replace the abort with `eprintln!` + skip, and drive **both** the dedicated-layer
+  addition and the `journald_exclude_exact("uptrakit_audit")` registration from one boolean (layer constructed
+  successfully ⇒ both; otherwise ⇒ neither). The two must never diverge: exclusion-without-layer would silently delete
+  all audit output from the journal in journald mode. Re-introduce a fail-closed abort only if/when an actual backend
+  selection mechanism lands (out of scope here).
 
 ### Dependencies
 
@@ -153,7 +218,7 @@ token"` returns the `eprintln!`-origin prompt plus token line.
 
 ### Compatibility notes (verified)
 
-- PVEHS installer token scrape (`scripts/pvehs/install/uptrakit-install.sh:144`) parses lines printed via `eprintln!`
+- PVEHS installer token scrape (`scripts/pvehs/install/uptrakit-install.sh:145`) parses lines printed via `eprintln!`
   (`crates/core/controller-runtime/src/boot/settings.rs:40`), which bypasses tracing entirely; stderr still journals as
   plain `MESSAGE` lines, and `journalctl -o cat` output for those lines is unchanged.
 - Docker / redirected stdout: no `JOURNAL_STREAM` match ⇒ text format, as today.
@@ -161,9 +226,19 @@ token"` returns the `eprintln!`-origin prompt plus token line.
 
 ## Error handling
 
-All failure paths degrade to the text layer with an `eprintln!` warning; no `unwrap`/`panic!`; parse errors are typed
-(`thiserror`) per the error-handling standard. No `Report` plumbing needed — errors never cross the crate boundary
-(consumed inside `init()`).
+All **init-time** failure paths degrade to the text layer with an `eprintln!` warning; no `unwrap`/`panic!`; parse errors
+are typed (`thiserror`) per the error-handling standard. No `Report` plumbing needed — errors never cross the crate
+boundary (consumed inside `init()`).
+
+Accepted residual risks (contrarian pass, verified upstream):
+
+- **Post-init send errors are silently dropped** by tracing-journald (`let _ = self.send_payload(&buf);`,
+  tracing-journald-0.3.2 `src/lib.rs:358`): a journald restart/socket loss after startup loses events with no fallback.
+  Comparable exposure exists today — the stdout stream also breaks on journald restart — so this is a wash, not a
+  regression; accepted, not mitigated.
+- **Blocking datagram socket**: the layer's `UnixDatagram` is blocking, so journald receive-buffer backpressure stalls
+  the emitting thread — same class as today's blocking stdout writes. Accepted; one more reason not to run production
+  units at `-vvv` permanently.
 
 ## Testing
 
@@ -179,9 +254,23 @@ mapping/encoding is not ours to pin):
    (`lib.rs` tests) and assert target `uptrakit_audit` is denied while `uptrakit_audit_log`-prefixed targets and ordinary
    `uptrakit_*` targets pass. This pins our combinator wiring without needing a journald socket.
 
+6. Unification gate — after the service-sdk dedupe, `cargo check --workspace --all-targets` (both `--all-features` and
+   the minimal `--features db-sqlite` variant) proves every daemon still compiles against the re-exported paths; the
+   existing service-sdk re-export lines (`lib.rs:89,91-92`) are the compile-time pin that the public surface survived.
+
 Not unit-tested (thin glue, environment-dependent): the `stdout_is_journal()` wrapper's live `fstat`, the
-`is_terminal()` ANSI gate, and the actual journald socket handshake. Manual verification on the live deployment: `systemctl restart`, then the four `journalctl`
-invocations above.
+`is_terminal()` ANSI gate, and the actual journald socket handshake. Manual verification on the live deployment, in
+order (contrarian pass 2 — do not make the production unit the first execution of the new path):
+
+1. Transient-unit dry run without touching `uptrakit.service`:
+   `systemd-run --unit=uptrakit-logcheck -p StandardOutput=journal -p User=uptrakit <new-binary> -v --config <throwaway>`
+   — **never the live `controller.toml`**: use a scratch `--config-dir`/`--state-dir` (or a copied config with a
+   different port and DB path) so a second controller cannot touch the production SQLite file, state dir, or listen
+   port. Then inspect `journalctl -u uptrakit-logcheck -o verbose` for PRIORITY mapping, clean `MESSAGE`, and `F_*`
+   fields (tracing init runs before any bind, so even an early startup failure still exercises the path under test).
+2. `systemctl restart uptrakit`, then the four `journalctl` invocations above.
+3. `journalctl --disk-usage` before/after (structured fields grow per-entry bytes; watch the retention window at high
+   verbosity).
 
 ## Documentation deliverables (grep-derived sweep of `journald|journalctl|JOURNAL_STREAM|LOG_FORMAT`)
 
@@ -189,11 +278,22 @@ invocations above.
    priority-mapping table, field-prefix filtering examples, fallback semantics. (Canonical home; `RUST_LOG` already
    documented here.)
 2. **`docs/development/tracing.md`** — Subscriber Architecture section: layer selection inside `TracingBuilder::init()`;
-   controller audit-layer + exact-target exclusion note.
+   controller audit-layer + exact-target exclusion note; correct the currently-false "service-sdk re-exports the full
+   public surface" wording (`tracing.md:32-34`) to describe the real (post-unification) re-export.
 3. **New ADR** — created via `adrs new "Journald-native log sink selection"` (number CLI-allocated, never hand-picked; no
    placeholder tokens — `adrs doctor` runs with `warnings_as_errors`).
 4. **`crates/shared/tracing-init/src/lib.rs` module docs** — extend the overview (format resolution alongside the existing
    `RUST_LOG`-precedence section).
+5. **`docs/end-user/logging.md` (new) + index line in `docs/end-user/README.md`** — operator-facing guide (contrarian
+   pass: the person whose grep workflow changes is the single owner-operator): `journalctl` under journald mode
+   (`-p` priorities, `-o verbose`, `F_HOST_ID=…` field filtering — plain `grep host_id=` and `journalctl -g` match
+   `MESSAGE` only and will no longer hit these fields), the rollback lever **as a systemd drop-in**
+   (`/etc/systemd/system/uptrakit.service.d/logging.conf` with `[Service]` + `Environment=UPTRAKIT_LOG_FORMAT=text`,
+   then `daemon-reload` + restart — a direct unit-file edit is clobbered by the PVEHS installer, which heredocs the
+   whole unit on every install/upgrade, `uptrakit-install.sh:110`), the `StandardOutput=journal+console` caveat (fd 1
+   still matches ⇒ journald mode activates and console tee output stops; use the `text` override), and a note that
+   structured entries grow journal disk usage (check `journalctl --disk-usage`; prefer moderate verbosity in
+   production).
 
 Verified no-change (part of the sweep, listed so reviewers need not re-derive):
 
@@ -222,3 +322,10 @@ Verified no-change (part of the sweep, listed so reviewers need not re-derive):
   Rejected in favor of systemd's own `JOURNAL_STREAM` contract with an env escape hatch.
 - **Audit dedup by dropping the dedicated audit layer in journald mode** — fewer layers, but `RUST_LOG=uptrakit_audit=off`
   could then silence the journald audit backend. Rejected: delivery guarantee wins.
+- **Feature-gating `tracing-journald` inside `uptrakit-tracing-init` for external SDK consumers** (contrarian pass) —
+  rejected: unconditional was an explicit grilled decision; the crate compiles on every target, is runtime-inert without
+  a journald socket, and an opt-out feature grows the matrix for no observed consumer need.
+- **Phasing: ship only ANSI fix + `<N>` sd-daemon priority prefix first, native layer later** (contrarian pass) —
+  rejected: re-litigates the grilled mechanism choice; the prefix path still needs a bespoke `FormatEvent` to maintain,
+  still stores level/target/timestamp noise in `MESSAGE`, and delivers no field indexing. The chosen path lands all
+  defect fixes in one behavior change with an env rollback lever.
