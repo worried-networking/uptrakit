@@ -301,8 +301,8 @@ list into an operator-facing summary. Pipeline shape:
    (`git_release_enable = true` in `release-plz.toml`) — `git_only` crates that only get a tag
    are skipped.
 2. **Generate**, per release, via a credential-less, read-only opencode agent: it reads the
-   package's `CHANGELOG.md` plus a `git diff` scoped to the package's directories, and prints a
-   notes document between sentinel markers.
+   package's `CHANGELOG.md`, the full commit messages in the release range, and a `git diff`
+   scoped to the package's directories, and prints a notes document between sentinel markers.
 3. **Extract** the document from between the sentinels.
 4. **Validate** it deterministically (starts with `## Summary`, contains `## Highlights`, links
    the changelog, length and fence-balance checks).

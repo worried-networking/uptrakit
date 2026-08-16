@@ -19,14 +19,22 @@ These variables are exported in your shell environment; do not ask for them, do 
 
 1. Read the top section of `$CHANGELOG_PATH` — the entries for `$TAG`'s version. **The changelog is authoritative for
    WHAT changed.** Every bullet you write must trace back to an entry there.
-2. If `$PREV_TAG` is non-empty, look at `git log` and `git diff "$PREV_TAG..$TAG"` restricted to `$SCOPE_PATHS` for
-   context. Sample the load-bearing diffs (breaking changes, security fixes) rather than reading everything — the
-   diff exists to explain **WHY** a change matters, not to relitigate what the changelog already says. If `$PREV_TAG`
-   is empty, work from the changelog alone.
-   - Some changelog entries roll up from crates whose commits predate `$PREV_TAG`, because release-plz walks each
-     included crate from its own last tag, not from this package's last tag. **A changelog entry's absence from the
-     diff is never grounds to drop it or doubt it** — the changelog is still the ground truth for WHAT changed.
-3. Print, between the literal sentinel lines `=====BEGIN BODY=====` and `=====END BODY=====`, exactly the document
+2. If `$PREV_TAG` is non-empty, read the **full commit messages** — subject and body — for this release's commits via
+   `git log "$PREV_TAG..$TAG" -- $SCOPE_PATHS`. Plain `git log` output already prints complete bodies; do not use
+   subject-only formats (`--oneline`, `--format=%s`, or similar) for this step. Commit bodies carry the WHY, user
+   impact, and breaking-change context that the changelog's one-line bullets strip out — read them before, and in
+   preference to, sampling diffs. As a second-order source, sample the load-bearing diffs from
+   `git diff "$PREV_TAG..$TAG"` restricted to `$SCOPE_PATHS` (breaking changes, security fixes) rather than reading
+   everything — the diff exists to explain **WHY** a change matters when the commit message doesn't say enough, not
+   to relitigate what the changelog already says. If `$PREV_TAG` is empty, work from the changelog alone — but full
+   commit messages can still be looked up by subject via the grep approach in the next step.
+3. Some changelog entries roll up from crates whose commits predate `$PREV_TAG`, because release-plz walks each
+   included crate from its own last tag, not from this package's last tag. For a changelog entry with no matching
+   commit in the `$PREV_TAG..$TAG` range, best-effort locate its commit by subject — e.g.
+   `git log --all --fixed-strings --grep="<entry text>"` — and read its full message too. **A changelog entry's
+   absence from the diff is never grounds to drop it or doubt it** — the changelog is still the ground truth for
+   WHAT changed.
+4. Print, between the literal sentinel lines `=====BEGIN BODY=====` and `=====END BODY=====`, exactly the document
    described in "Output format" below — nothing before the opening sentinel, nothing after the closing one.
 
 ## Output format
