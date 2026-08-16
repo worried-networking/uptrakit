@@ -4,6 +4,7 @@
     reason = "string slices and array indices use byte positions derived from ASCII-only content or fixed-length pattern matching; UTF-8 boundary safety and index bounds are guaranteed by construction"
 )]
 use rootcause::prelude::*;
+use std::borrow::Cow;
 use uptrakit_plugin_infrastructure_core::PluginError;
 
 /// Well-known path where PHS containers store their update script.
@@ -284,6 +285,33 @@ fn first_url_like_token(content: &str) -> Option<&str> {
     content
         .split_whitespace()
         .find(|token| token.contains("://"))
+}
+
+/// Redact a URL's `userinfo@` component before it is logged.
+///
+/// The "No secrets in logs" invariant (AGENTS.md) applies to any URL surfaced
+/// via `tracing`, including the unmatched-source WARN in [`parse_phs_scripts`]:
+/// an untrusted `/usr/bin/update` file can embed a credential directly in a
+/// URL (`https://user:token@host/...`), and that credential must never reach
+/// the log verbatim. Everything between `"://"` and the first following `@`
+/// is replaced with a fixed `***` marker, but only when that `@` occurs
+/// before the first following `/`, `?`, or `#` — an `@` appearing later, in
+/// the path, is not userinfo and is left untouched. URLs with no userinfo (or
+/// no `"://"` at all) are returned unchanged, borrowed rather than allocated.
+fn redact_url_userinfo_for_logging(url: &str) -> Cow<'_, str> {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return Cow::Borrowed(url);
+    };
+    let authority_end = rest.find(['/', '?', '#']);
+    let Some((before_at, after_at)) = rest.split_once('@') else {
+        return Cow::Borrowed(url);
+    };
+    if let Some(boundary) = authority_end
+        && before_at.len() >= boundary
+    {
+        return Cow::Borrowed(url);
+    }
+    Cow::Owned(format!("{scheme}://***@{after_at}"))
 }
 
 /// Analyse the content of a PHS CT script to determine the upstream source type.
@@ -899,8 +927,9 @@ pub fn parse_phs_scripts(content: &str) -> Vec<PhsScript> {
         // with no URLs at all is simply not PHS-managed — a recurring WARN
         // with no payload would be pure noise on such hosts.
         if let Some(first_url) = first_url_like_token(content) {
+            let redacted_first_url = redact_url_userinfo_for_logging(first_url);
             tracing::warn!(
-                first_url,
+                first_url = %redacted_first_url,
                 "no known PHS source matched any URL in the update file"
             );
         } else {
@@ -1265,6 +1294,36 @@ apt install -y somepackage
             Some("https://example.com/x.sh")
         );
         assert_eq!(first_url_like_token("no urls here"), None);
+    }
+
+    // ── redact_url_userinfo_for_logging ──────────────────────────────
+
+    #[test]
+    fn redact_url_userinfo_strips_credentials() {
+        let url = "https://user:ghp_ABC123@raw.githubusercontent.com/private/x.sh";
+        let redacted = redact_url_userinfo_for_logging(url);
+        assert!(
+            redacted.contains("***@raw.githubusercontent.com"),
+            "expected redaction marker in {redacted}"
+        );
+        assert!(
+            !redacted.contains("ghp_ABC123"),
+            "credential token leaked into log output: {redacted}"
+        );
+    }
+
+    #[test]
+    fn redact_url_userinfo_no_userinfo_unchanged() {
+        let url = "https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/x.sh";
+        assert_eq!(redact_url_userinfo_for_logging(url), url);
+    }
+
+    #[test]
+    fn redact_url_userinfo_at_in_path_only_unchanged() {
+        // The '@' appears after the first '/' following "://", so it belongs
+        // to the path (e.g. an npm scoped-package URL), not userinfo.
+        let url = "https://host/@scope/pkg";
+        assert_eq!(redact_url_userinfo_for_logging(url), url);
     }
 
     // ── Codeberg detection tests ─────────────────────────────────────
