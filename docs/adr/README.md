@@ -43,3 +43,4 @@
 - [0040 — Provider-Origin Surface Invocation Enforces the Descriptor Action Gate](0040-provider-origin-surface-invocation-enforces-the-descriptor-action-gate.md)
 - [0041 — Compile-time AAD encrypted column newtypes](0041-compile-time-aad-encrypted-column-newtypes.md)
 - [0042 — Untenanted System-Service Surfaces and a Single Runtime-Owned MQTT Definition](0042-untenanted-system-service-surfaces-and-a-single-runtime-owned-mqtt-definition.md)
+- [0043 — Journald-native log sink selection](0043-journald-native-log-sink-selection.md)
