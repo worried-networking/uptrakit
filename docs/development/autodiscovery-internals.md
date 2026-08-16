@@ -93,7 +93,7 @@ Software identity is the bare slug — when the same slug appears from two sourc
 occurrence wins; within a single line specifically, `SOURCES` declaration order decides which
 source matches first, not the left-to-right position of the matched text (see the
 `parse_phs_scripts` doc comment in `discovery.rs`). A definitive HTTP 404 fetching a CT or install
-script logs a warning and skips that slug -- the script may have vanished upstream, or the slug
+script logs a warning and skips that slug — the script may have vanished upstream, or the slug
 (or its install script) may never have existed at that source at all; see the `FetchOutcome::NotFound`
 arms in `plugin.rs`. Any other fetch failure aborts the discovery run to avoid a partial snapshot.
 Install-script URLs are derived from the matched source via `PhsSource::install_url`. When

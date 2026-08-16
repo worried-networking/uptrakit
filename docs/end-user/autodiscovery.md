@@ -117,12 +117,17 @@ create. Only CT-script URLs from four recognised repositories are matched:
   install-script fallback returns a definitive HTTP 404 at the matched source, that slug is
   skipped with a warning. A 404 does not always mean the script was deleted or renamed after
   being published -- it commonly means the slug (or its install script) never existed at that
-  source. This is the dominant cause on `tteck/Proxmox`-derived containers: those scripts predate
-  the separate install-script convention, so the install-script fallback's 404 is expected and
-  recurs on every discovery cycle for them, not a sign of a detection bug.
+  source. The install-script fallback is only reached for containers whose CT script names no
+  upstream source at all -- no GitHub or Codeberg release call, no global `npm install`, and no
+  specific `apt install` line. A `tteck/Proxmox` script that calls `check_for_gh_release` is
+  classified from its CT script alone and never fetches an install script. For the containers
+  that do fall through to the fallback, a 404 there is expected rather than a detection bug:
+  tteck-era scripts predate the separate install-script convention, so the fallback's 404 recurs
+  on every discovery cycle for them.
 
   The warning is logged by whichever Service ran discovery on that host: on hosts tracked by an
-  Agent, check its log (`journalctl -u uptrakit-agent`); on hosts tracked by Agent-SSH, check the
+  Agent, check its log (`journalctl -u uptrakit-agent`), or the Controller's journal when that
+  Agent runs embedded in the Controller (Embedded Mode); on hosts tracked by Agent-SSH, check the
   log of the Agent-SSH instance managing that host -- that is the Controller's journal only when
   the instance runs embedded in the Controller (Embedded Mode), and that instance's own separate
   log otherwise. By default the warning repeats on every discovery cycle (every 6 hours; see

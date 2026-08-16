@@ -23,9 +23,12 @@ it before any attacker-controlled repository is ever reached.
    matches one of the four compile-time-fixed source prefixes in `SOURCES`
    (`community-scripts/ProxmoxVE`, `community-scripts/ProxmoxVED`, `tteck/Proxmox`,
    `worried-networking/uptrakit`). `attacker-org/malicious` matches none of them, so
-   the line yields no `DiscoveryTarget` -- at most a diagnostic warning naming the
-   (credential-redacted) URL if it happens to be the first unrecognised token on the
-   line.
+   the line yields no `DiscoveryTarget`. If -- and only if -- the whole file yields no
+   scripts at all, `parse_phs_scripts` emits one diagnostic WARN naming the first
+   whitespace-delimited token in the entire file that contains `://`, with its
+   userinfo redacted. That token is not necessarily the attacker's line, and not
+   necessarily an unrecognised URL: it is simply the first URL-like token in the file,
+   which may well be a recognised-prefix URL that was rejected for an invalid slug.
 5. The only line an attacker can get parsed at all is one that already matches a real
    source prefix, carrying an attacker-chosen but character-restricted slug
    (`[a-z0-9-]+`; path traversal and other characters rejected). Even then, the plugin
@@ -70,12 +73,16 @@ not describe an outcome reachable through the `/usr/bin/update` injection path t
 - **Owner/repo component validation.** Extracted `owner` and `repo` values pass
   through `is_valid_gh_component()` which rejects `/` and `..`. This prevents path
   traversal in API URLs.
-- **Credential redaction in diagnostic logs.** The "no secrets in logs" invariant
-  (AGENTS.md) applies to the diagnostic WARN emitted when no source prefix matches an
-  attacker-supplied URL (step 4 above): `redact_url_userinfo_for_logging()` strips any
-  `user:token@` component from that URL before it is logged, so a credential smuggled
-  into `/usr/bin/update` cannot leak into the discovery log even in the case where
-  nothing else in this attack succeeds.
+- **Userinfo redaction in diagnostic logs.** The "no secrets in logs" invariant
+  (AGENTS.md) applies to the diagnostic WARN emitted when no source prefix matches any
+  URL in the update file (step 4 above). `redact_url_userinfo_for_logging()` replaces
+  the URL's **userinfo** component -- and only that component -- with `***`: the `@`
+  must occur after `://` and before the first following `/`, `?`, or `#`, so
+  `https://user:token@host/x` is redacted but an `@` later in the path is left alone.
+  Nothing else in the URL is touched. A secret carried elsewhere in the same URL -- in
+  the query string (`https://host/x?token=SECRET`) or in the fragment -- is logged
+  verbatim. Treat the WARN's `first_url` field as untrusted, potentially
+  secret-bearing content read off the host, not as sanitised output.
 - **Discovery results are tracked immediately.** Discovered software items are created
   with `enabled: true`. The `featured` flag controls visibility (featured items appear
   individually; non-featured items appear in aggregated host summaries).
@@ -92,16 +99,33 @@ not describe an outcome reachable through the `/usr/bin/update` injection path t
   empty strings and `..`, matching GitHub's actual naming rules.
 - **Local host compromise is prerequisite.** If the attacker can modify
   `/usr/bin/update`, they likely already have significant access to the host,
-  reducing the incremental value of this attack. However, the attack's value lies
-  in **propagation** — the compromised host's discovery results affect the
-  controller's inventory for all hosts.
+  reducing the incremental value of this attack. The source allowlist removes the
+  propagation angle: every script body the plugin fetches comes from one of the four
+  fixed repositories, so a poisoned host cannot put an attacker-controlled repository
+  into the controller's inventory — neither for itself nor for any other host.
+- **Slug selection remains attacker-chosen.** What a poisoned `/usr/bin/update` still
+  controls is _which_ allowlisted slugs get fetched and analysed. By listing CT-script
+  URLs for slugs the container does not actually run, an attacker can make discovery
+  fetch those upstream scripts and — for any whose version file or package happens to
+  be present on the host — create software items and auto-create the matching
+  release-source or package-manager plugin configs, which the controller then polls on
+  every version check. The result is inventory noise and unwanted outbound polling of
+  legitimate repositories, not an attacker-controlled update source.
 - **Auto-discovery may skip approval.** When auto-discovery runs with an existing
   plugin config for the same plugin type, new items may be auto-approved without
   operator review.
-- **Version extraction from install scripts.** The PHS plugin fetches and parses
-  install scripts to extract version information. While no code from these scripts
-  is executed, complex parsing logic could be tricked into extracting incorrect
-  versions.
+- **Script analysis stays heuristic.** The `owner`/`repo` pair, npm package, and APT
+  package written into auto-created targets are pattern-matched out of the fetched CT
+  script — or, for containers whose CT script names no upstream source at all, out of
+  the install script fetched from the same allowlisted source. The attacker cannot
+  craft that input, only choose which published script gets parsed; a mis-parse
+  therefore yields a wrong package name or a wrong (but real) upstream repository for
+  an otherwise legitimate-looking item. No code from these scripts is executed.
+- **Reported versions are host-supplied.** The installed version attached to each
+  discovered item comes from commands run on the managed host (the PHS version file
+  under `/root/`, `dpkg-query`, `npm list -g`), so a compromised host can report any
+  version it likes and thereby fabricate or suppress an "update available" state for
+  its own items.
 
 ## Recommended improvements
 
