@@ -58,6 +58,7 @@ impl FromStr for JournalStream {
     type Err = ParseJournalStreamError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim();
         let (dev, ino) = s
             .split_once(':')
             .ok_or_else(|| ParseJournalStreamError::MissingColon(s.to_string()))?;
@@ -110,15 +111,23 @@ pub(crate) fn stdout_is_journal() -> bool {
     }
 }
 
-/// Resolve the requested format from `UPTRAKIT_LOG_FORMAT` (default: auto).
-pub(crate) fn env_log_format() -> LogFormat {
-    match std::env::var("UPTRAKIT_LOG_FORMAT") {
-        Ok(value) => value.parse().unwrap_or_else(|e| {
+/// Resolve the requested format from a `UPTRAKIT_LOG_FORMAT` value.
+///
+/// An unparseable value warns on stderr and degrades to [`LogFormat::Auto`] rather than
+/// aborting startup — a typo in a unit file must not take the service down.
+pub(crate) fn resolve_format(env_value: Option<&str>) -> LogFormat {
+    match env_value {
+        Some(value) => value.parse().unwrap_or_else(|e| {
             eprintln!("warning: ignoring UPTRAKIT_LOG_FORMAT: {e}");
             LogFormat::Auto
         }),
-        Err(_) => LogFormat::Auto,
+        None => LogFormat::Auto,
     }
+}
+
+/// Resolve the requested format from `UPTRAKIT_LOG_FORMAT` (default: auto).
+pub(crate) fn env_log_format() -> LogFormat {
+    resolve_format(std::env::var("UPTRAKIT_LOG_FORMAT").ok().as_deref())
 }
 
 /// Whether the journald layer should be installed for `format`.
@@ -173,6 +182,14 @@ mod tests {
     }
 
     #[test]
+    fn journal_stream_trims_surrounding_whitespace() {
+        assert_eq!(
+            " 10:352799757 ".parse::<JournalStream>().unwrap(),
+            "10:352799757".parse::<JournalStream>().unwrap()
+        );
+    }
+
+    #[test]
     fn journal_stream_rejects_non_numeric() {
         "a:1".parse::<JournalStream>().unwrap_err();
         "1:b".parse::<JournalStream>().unwrap_err();
@@ -201,5 +218,13 @@ mod tests {
         assert!(use_journald(LogFormat::Auto, true));
         assert!(!use_journald(LogFormat::Text, true));
         assert!(use_journald(LogFormat::Journald, false));
+    }
+
+    #[test]
+    fn resolve_format_matrix() {
+        assert_eq!(resolve_format(None), LogFormat::Auto);
+        assert_eq!(resolve_format(Some("journald")), LogFormat::Journald);
+        assert_eq!(resolve_format(Some("  TEXT  ")), LogFormat::Text);
+        assert_eq!(resolve_format(Some("syslog")), LogFormat::Auto);
     }
 }

@@ -543,8 +543,6 @@ mod tests {
     /// denied while `uptrakit_audit_log` and other targets pass.
     #[test]
     fn journald_exclusion_is_exact_match() {
-        use tracing_subscriber::filter::FilterExt;
-
         let builder = TracingBuilder::new().journald_exclude_exact("uptrakit_audit");
         let filter = EnvFilter::new("trace").and(tracing_subscriber::filter::filter_fn(
             builder.exclusion_predicate(),
