@@ -361,8 +361,12 @@ mod tests {
 
     /// Install a thread-local subscriber with the given filter, run `f`, and
     /// return the captured output.  Uses `set_default` so tests can run in
-    /// parallel without global-subscriber conflicts.
-    fn capture(filter: EnvFilter, f: impl FnOnce()) -> String {
+    /// parallel without global-subscriber conflicts.  Generic over the filter
+    /// so combinators (`EnvFilter::and(filter_fn(..))`) share this harness.
+    fn capture<F>(filter: F, f: impl FnOnce()) -> String
+    where
+        F: tracing_subscriber::layer::Filter<tracing_subscriber::Registry> + Send + Sync + 'static,
+    {
         let buf = Arc::new(Mutex::new(Vec::new()));
         let writer = BufWriter(buf.clone());
         let subscriber = tracing_subscriber::registry().with(
@@ -547,20 +551,11 @@ mod tests {
         let filter = EnvFilter::new("trace").and(tracing_subscriber::filter::filter_fn(
             builder.exclusion_predicate(),
         ));
-        let buf = Arc::new(Mutex::new(Vec::new()));
-        let writer = BufWriter(buf.clone());
-        let subscriber = tracing_subscriber::registry().with(
-            tracing_subscriber::fmt::layer()
-                .with_writer(writer)
-                .with_filter(filter),
-        );
-        let _guard = tracing::subscriber::set_default(subscriber);
-
-        tracing::info!(target: "uptrakit_audit", "excluded-target event");
-        tracing::info!(target: "uptrakit_audit_log", "audit-crate event");
-        tracing::info!(target: "uptrakit_foo", "ordinary event");
-
-        let out = String::from_utf8(buf.lock().unwrap().clone()).unwrap();
+        let out = capture(filter, || {
+            tracing::info!(target: "uptrakit_audit", "excluded-target event");
+            tracing::info!(target: "uptrakit_audit_log", "audit-crate event");
+            tracing::info!(target: "uptrakit_foo", "ordinary event");
+        });
         assert!(
             !out.contains("excluded-target event"),
             "exact-match target should be excluded"
