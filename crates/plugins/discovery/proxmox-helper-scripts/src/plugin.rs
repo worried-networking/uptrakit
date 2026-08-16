@@ -101,6 +101,18 @@ pub struct ProxmoxHelperScriptsPlugin {
     client: reqwest::Client,
 }
 
+/// Outcome of fetching a URL, distinguishing a definitive 404 (the script
+/// does not exist at its source — skippable, spec D5/D6) from every other
+/// failure (abort discovery to avoid a partial snapshot).
+enum FetchOutcome {
+    /// 2xx response with body.
+    Ok(String),
+    /// Definitive HTTP 404.
+    NotFound,
+    /// Network error, non-404 HTTP error, or body read error.
+    Err(String),
+}
+
 impl ProxmoxHelperScriptsPlugin {
     /// Create a new Proxmox Helper Scripts plugin.
     ///
@@ -129,14 +141,27 @@ impl ProxmoxHelperScriptsPlugin {
         })
     }
 
-    /// Fetch the body of a URL as text, returning `None` on any error.
-    async fn fetch_text(&self, url: &str) -> Option<String> {
-        let response = self.client.get(url).send().await.ok()?;
-        if !response.status().is_success() {
-            tracing::warn!(url, status = %response.status(), "HTTP fetch failed");
-            return None;
+    /// Fetch the body of a URL as text.
+    async fn fetch_text(&self, url: &str) -> FetchOutcome {
+        let response = match self.client.get(url).send().await {
+            Ok(r) => r,
+            Err(e) => return FetchOutcome::Err(format!("request failed: {e}")),
+        };
+        let status = response.status();
+        if status == reqwest::StatusCode::NOT_FOUND {
+            // debug, not warn: the call sites own the user-facing WARN (they
+            // have the slug); a warn here would double-log every 404.
+            tracing::debug!(url, "HTTP 404 from source");
+            return FetchOutcome::NotFound;
         }
-        response.text().await.ok()
+        if !status.is_success() {
+            tracing::warn!(url, status = %status, "HTTP fetch failed");
+            return FetchOutcome::Err(format!("HTTP status {status}"));
+        }
+        match response.text().await {
+            Ok(body) => FetchOutcome::Ok(body),
+            Err(e) => FetchOutcome::Err(format!("body read failed: {e}")),
+        }
     }
 
     /// Run the PHS version helper script with `version_file_basename`.
@@ -470,12 +495,24 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for ProxmoxHelperScriptsPlu
         let mut discovered = Vec::new();
 
         for script in &scripts {
-            // Fetch CT script body.
-            let Some(body) = self.fetch_text(&script.script_url).await else {
-                bail!(PluginError::PluginInternal(format!(
-                    "failed to fetch CT script {}; aborting discovery to avoid partial snapshot",
-                    script.script_url
-                )))
+            // Fetch CT script body. A definitive 404 means the slug vanished
+            // upstream (script churn) — skip it; anything else aborts the run
+            // to avoid a partial snapshot.
+            let body = match self.fetch_text(&script.script_url).await {
+                FetchOutcome::Ok(body) => body,
+                FetchOutcome::NotFound => {
+                    // "not found", not "gone": the slug may never have existed
+                    // at this source (e.g. /usr/bin/update reverted upstream).
+                    tracing::warn!(slug = %script.slug, url = %script.script_url,
+                        "CT script not found at source; skipping");
+                    continue;
+                }
+                FetchOutcome::Err(e) => {
+                    bail!(PluginError::PluginInternal(format!(
+                        "failed to fetch CT script {}: {e}; aborting discovery to avoid partial snapshot",
+                        script.script_url
+                    )))
+                }
             };
 
             let analysis = analyze_phs_script(&script.slug, &body);
@@ -617,13 +654,22 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for ProxmoxHelperScriptsPlu
                 });
             } else {
                 // Neither -- try install-script fallback.
-                use crate::discovery::PHS_INSTALL_URL_PREFIX;
-                let install_url = format!("{PHS_INSTALL_URL_PREFIX}{}-install.sh", script.slug);
-                let Some(install_body) = self.fetch_text(&install_url).await else {
-                    bail!(PluginError::PluginInternal(format!(
-                        "install-script fetch failed for {}; aborting discovery to avoid partial snapshot",
-                        script.slug
-                    )))
+                let install_url = script.source.install_url(&script.slug);
+                let install_body = match self.fetch_text(&install_url).await {
+                    FetchOutcome::Ok(body) => body,
+                    FetchOutcome::NotFound => {
+                        // tteck-era scripts have no install sibling (spec D6):
+                        // a permanent 404, not an error.
+                        tracing::warn!(slug = %script.slug, url = %install_url,
+                            "install script not present at source; skipping");
+                        continue;
+                    }
+                    FetchOutcome::Err(e) => {
+                        bail!(PluginError::PluginInternal(format!(
+                            "install-script fetch failed for {}: {e}; aborting discovery to avoid partial snapshot",
+                            script.slug
+                        )))
+                    }
                 };
 
                 // Some apps (e.g. n8n) do not reference npm in their CT script
@@ -1146,7 +1192,7 @@ mod tests {
     #[tokio::test]
     async fn discovery_ct_script_fetch_failure_returns_error() {
         // sh exit 0 with CT content → parse_phs_scripts finds 1 script →
-        // fetch_text("raw.githubusercontent.com/...sonarr.sh") → connect refused → None →
+        // fetch_text("raw.githubusercontent.com/...sonarr.sh") → connect refused → FetchOutcome::Err →
         // must now return Err (not Ok with partial snapshot)
         let executor = RoutedOutputExecutor::new([("sh", UPDATE_SCRIPT_WITH_ONE_CT, 0)]);
         let client = reqwest::Client::builder()
@@ -1158,5 +1204,80 @@ mod tests {
             .expect("client");
         let plugin = test_plugin_with(executor, client);
         plugin.discover_software().await.unwrap_err();
+    }
+
+    // ── fetch_text status mapping ────────────────────────────────────────
+
+    /// Spawn a minimal HTTP responder returning `status_line` with an empty
+    /// body for every request; returns its bound address. Plain HTTP only —
+    /// the plugin's real URLs are https, so these tests exercise `fetch_text`
+    /// directly rather than the full discovery flow.
+    async fn spawn_static_responder(status_line: &'static str) -> std::net::SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
+                tokio::spawn(async move {
+                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                    // `let _ =` is denied (clippy::let_underscore_must_use);
+                    // expect() is fine here (allow-expect-in-tests) and a
+                    // panic in this detached task cannot fail the test. The
+                    // read amount must be handled (clippy::unused_io_amount).
+                    let mut buf = [0u8; 1024];
+                    let n = socket.read(&mut buf).await.expect("read request");
+                    if n == 0 {
+                        return; // client closed without sending a request
+                    }
+                    let response = format!(
+                        "HTTP/1.1 {status_line}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+                    );
+                    socket
+                        .write_all(response.as_bytes())
+                        .await
+                        .expect("write response");
+                });
+            }
+        });
+        addr
+    }
+
+    #[tokio::test]
+    async fn fetch_text_maps_404_to_not_found() {
+        let addr = spawn_static_responder("404 Not Found").await;
+        let executor = RoutedOutputExecutor::new([("sh", "", 0)]);
+        let plugin = test_plugin_with(executor, reqwest::Client::new());
+        let outcome = plugin.fetch_text(&format!("http://{addr}/gone.sh")).await;
+        assert!(matches!(outcome, FetchOutcome::NotFound));
+    }
+
+    #[tokio::test]
+    async fn fetch_text_maps_500_to_err() {
+        let addr = spawn_static_responder("500 Internal Server Error").await;
+        let executor = RoutedOutputExecutor::new([("sh", "", 0)]);
+        let plugin = test_plugin_with(executor, reqwest::Client::new());
+        let outcome = plugin.fetch_text(&format!("http://{addr}/x.sh")).await;
+        assert!(matches!(outcome, FetchOutcome::Err(_)));
+    }
+
+    #[tokio::test]
+    async fn fetch_text_maps_200_to_ok() {
+        let addr = spawn_static_responder("200 OK").await;
+        let executor = RoutedOutputExecutor::new([("sh", "", 0)]);
+        let plugin = test_plugin_with(executor, reqwest::Client::new());
+        let outcome = plugin.fetch_text(&format!("http://{addr}/x.sh")).await;
+        assert!(matches!(outcome, FetchOutcome::Ok(body) if body.is_empty()));
+    }
+
+    #[tokio::test]
+    async fn fetch_text_maps_connect_refused_to_err() {
+        let executor = RoutedOutputExecutor::new([("sh", "", 0)]);
+        let plugin = test_plugin_with(executor, reqwest::Client::new());
+        let outcome = plugin.fetch_text("http://127.0.0.1:1/x.sh").await;
+        assert!(matches!(outcome, FetchOutcome::Err(_)));
     }
 }

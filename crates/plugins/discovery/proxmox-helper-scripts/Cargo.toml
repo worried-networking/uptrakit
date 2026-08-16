@@ -20,7 +20,7 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "rt", "net", "io-util"] }
 uptrakit-plugin-infrastructure-core = { workspace = true, features = ["testing"] }
 
 [lints]

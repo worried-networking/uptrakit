@@ -10,10 +10,6 @@ use uptrakit_plugin_infrastructure_core::PluginError;
 /// Well-known path where PHS containers store their update script.
 pub const UPDATE_SCRIPT_PATH: &str = "/usr/bin/update";
 
-/// Base URL prefix for PHS community-scripts install scripts.
-pub const PHS_INSTALL_URL_PREFIX: &str =
-    "https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/install/";
-
 /// A known Proxmox-helper-scripts hosting repository.
 #[derive(Debug, PartialEq, Eq)]
 pub struct PhsSource {
