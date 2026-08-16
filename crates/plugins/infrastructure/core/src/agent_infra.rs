@@ -264,6 +264,29 @@ pub struct PluginConfigReport {
     pub config: serde_json::Value,
 }
 
+/// Result of the read-only infrastructure probe during the bootstrap
+/// connect phase. The probe must not mutate the remote host in any way.
+#[non_exhaustive]
+#[derive(Debug, Default)]
+pub struct InfraProbeResult {
+    /// Whether this plugin's infrastructure was detected on the host.
+    pub detected: bool,
+    /// Human-readable actions the execute phase will perform, for the
+    /// bootstrap review step.
+    pub planned_actions: Vec<String>,
+}
+
+impl InfraProbeResult {
+    /// Construct a probe result (`#[non_exhaustive]` blocks cross-crate
+    /// literal construction, so implementors use this).
+    pub fn new(detected: bool, planned_actions: Vec<String>) -> Self {
+        Self {
+            detected,
+            planned_actions,
+        }
+    }
+}
+
 /// Result of infrastructure detection during host bootstrap.
 #[derive(Debug, Default)]
 pub struct BootstrapInfraResult {

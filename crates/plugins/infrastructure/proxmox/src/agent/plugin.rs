@@ -18,7 +18,7 @@ use serde_json::json;
 use uptrakit_command::RemoteExecutor;
 use uptrakit_plugin_infrastructure_core::agent_infra::{
     BootstrapInfraResult, GuestExecProvider, InfraActionInvoker, InfraPluginContext,
-    InfraResolvedSudo, PluginConfigReport, SyncInfraResult,
+    InfraProbeResult, InfraResolvedSudo, PluginConfigReport, SyncInfraResult,
 };
 use uptrakit_plugin_infrastructure_core::error::{PluginError, Result};
 use uptrakit_plugin_infrastructure_core::{
@@ -66,6 +66,29 @@ impl HostLifecycle for crate::ProxmoxPlugin {
     fn sync_security_impact(&self) -> uptrakit_shared_types::Severity {
         // Creates PVE users and grants ACLs on the cluster.
         uptrakit_shared_types::Severity::High
+    }
+
+    async fn probe_host(
+        &self,
+        _ctx: &InfraPluginContext<'_>,
+        executor: &dyn RemoteExecutor,
+        _host_id: uuid::Uuid,
+        _host_name: &str,
+    ) -> Result<InfraProbeResult> {
+        // Unlike `on_host_bootstrapped` (which propagates loudly — Task 4),
+        // a probe failure degrades to "not detected": the connect phase is
+        // an advisory preview and must never fail the bootstrap review.
+        let detected = pve_setup::detect_pve_node(executor).await.unwrap_or(false);
+        if !detected {
+            return Ok(InfraProbeResult::new(false, Vec::new()));
+        }
+        Ok(InfraProbeResult::new(
+            true,
+            vec![
+                "Create or reuse Proxmox API credentials for this tenant".to_string(),
+                "Grant pct/qm sudoers entries for guest management".to_string(),
+            ],
+        ))
     }
 
     async fn on_host_bootstrapped(
@@ -1006,6 +1029,121 @@ mod tests {
             result.is_err(),
             "a transport error during PVE detection must propagate loudly, \
              not silently degrade to a false-negative detection result"
+        );
+    }
+
+    #[tokio::test]
+    async fn probe_phase_is_read_only() {
+        let db = setup_agent_db().await;
+        let invoker = RecordingActionInvoker::new();
+        let guest_bootstrap = UnusedGuestBootstrap;
+        let ctx = InfraPluginContext {
+            db: &db,
+            tenant_id: None,
+            service_id: None,
+            state_dir: std::path::Path::new("."),
+            private_key_der: None,
+            action_invoker: &invoker,
+            guest_bootstrap: &guest_bootstrap,
+            provision_credentials: false,
+        };
+
+        let plugin = crate::ProxmoxPlugin::new_agent();
+        let executor = pve_positive_script();
+        let host_id = uuid::Uuid::now_v7();
+
+        let result = plugin
+            .probe_host(&ctx, &executor, host_id, "test-host")
+            .await
+            .expect("probe_host succeeds against a PVE-positive script");
+
+        // Load-bearing: without this, the not-detected early return would
+        // satisfy every assertion below vacuously.
+        assert!(result.detected, "PVE-positive script must be detected");
+        assert!(
+            !result.planned_actions.is_empty(),
+            "a detected node must report planned actions for the review step"
+        );
+        assert_eq!(
+            executor.recorded_calls(),
+            vec!["command -v pveversion"],
+            "the probe must issue exactly one read-only detection command and nothing else \
+             (no pveum, no useradd, no write of any kind)"
+        );
+    }
+
+    #[tokio::test]
+    async fn probe_not_detected_on_clean_negative() {
+        let db = setup_agent_db().await;
+        let invoker = RecordingActionInvoker::new();
+        let guest_bootstrap = UnusedGuestBootstrap;
+        let ctx = InfraPluginContext {
+            db: &db,
+            tenant_id: None,
+            service_id: None,
+            state_dir: std::path::Path::new("."),
+            private_key_der: None,
+            action_invoker: &invoker,
+            guest_bootstrap: &guest_bootstrap,
+            provision_credentials: false,
+        };
+
+        let plugin = crate::ProxmoxPlugin::new_agent();
+        let executor = ScriptedRemoteExecutor::with_matcher(vec![(
+            "command -v pveversion",
+            RemoteCommandResult {
+                stdout: String::new(),
+                stderr: String::new(),
+                exit_code: 1,
+            },
+        )]);
+        let host_id = uuid::Uuid::now_v7();
+
+        let result = plugin
+            .probe_host(&ctx, &executor, host_id, "test-host")
+            .await
+            .expect("probe_host succeeds against a clean-negative script");
+
+        assert!(!result.detected, "exit-1 script must not be detected");
+        assert!(
+            result.planned_actions.is_empty(),
+            "no planned actions when nothing was detected"
+        );
+    }
+
+    #[tokio::test]
+    async fn probe_transport_error_degrades_to_not_detected() {
+        // Deliberate counterpart to `bootstrap_detection_transport_error_is_loud`:
+        // the connect-phase probe is a read-only advisory preview, so a
+        // transport error degrades silently to "not detected" instead of
+        // propagating. Do not "fix" one of these tests to match the other.
+        let db = setup_agent_db().await;
+        let invoker = RecordingActionInvoker::new();
+        let guest_bootstrap = UnusedGuestBootstrap;
+        let ctx = InfraPluginContext {
+            db: &db,
+            tenant_id: None,
+            service_id: None,
+            state_dir: std::path::Path::new("."),
+            private_key_der: None,
+            action_invoker: &invoker,
+            guest_bootstrap: &guest_bootstrap,
+            provision_credentials: false,
+        };
+
+        let plugin = crate::ProxmoxPlugin::new_agent();
+        let executor = FailingExecutor;
+        let host_id = uuid::Uuid::now_v7();
+
+        let result = plugin
+            .probe_host(&ctx, &executor, host_id, "test-host")
+            .await
+            .expect("probe_host degrades to Ok on transport error");
+
+        assert!(
+            !result.detected,
+            "a transport error during the read-only probe must degrade to not-detected, \
+             not fail the bootstrap review"
         );
     }
 }

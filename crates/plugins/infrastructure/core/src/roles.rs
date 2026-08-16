@@ -815,6 +815,21 @@ pub trait SoftwareItemLifecycle: PluginMeta {
 #[cfg(feature = "agent-infra")]
 #[async_trait]
 pub trait HostLifecycle: PluginMeta {
+    /// Read-only infrastructure probe for the bootstrap connect phase.
+    ///
+    /// MUST NOT mutate the remote host — detection commands only. The execute
+    /// phase re-runs detection itself; this result feeds the review step.
+    /// Required (no default): a plugin that provisions in
+    /// `on_host_bootstrapped` but is invisible at probe time would recreate
+    /// the connect/execute disagreement this hook exists to prevent.
+    async fn probe_host(
+        &self,
+        ctx: &crate::agent_infra::InfraPluginContext<'_>,
+        executor: &dyn uptrakit_command::RemoteExecutor,
+        host_id: uuid::Uuid,
+        host_name: &str,
+    ) -> Result<crate::agent_infra::InfraProbeResult>;
+
     /// Detect infrastructure during host bootstrap.
     async fn on_host_bootstrapped(
         &self,

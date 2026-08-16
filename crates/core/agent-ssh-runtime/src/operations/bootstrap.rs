@@ -307,6 +307,7 @@ struct RemoteHostInfo {
     docker_group_exists: bool,
     stale_keys_found: bool,
     pve_detected: bool,
+    pve_planned_actions: Vec<String>,
 }
 
 /// Gather host information via SSH: user existence, OS, docker group,
@@ -360,7 +361,8 @@ async fn gather_remote_host_info(
         false
     };
 
-    let pve_detected = detect_infra_plugins(executor, params, state_dir, db).await;
+    let (pve_detected, pve_planned_actions) =
+        detect_infra_plugins(executor, params, state_dir, db).await;
 
     Ok(RemoteHostInfo {
         target_user_exists,
@@ -368,6 +370,7 @@ async fn gather_remote_host_info(
         docker_group_exists,
         stale_keys_found,
         pve_detected,
+        pve_planned_actions,
     })
 }
 
@@ -377,13 +380,13 @@ async fn detect_infra_plugins(
     params: &BootstrapParams,
     state_dir: &Path,
     db: &DatabaseConnection,
-) -> bool {
+) -> (bool, Vec<String>) {
     let catalog_config = CatalogConfig::default();
     let Ok(catalog) = build_catalog(
         &catalog_config,
         uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
     ) else {
-        return false;
+        return (false, Vec::new());
     };
     let infra_bundles = catalog.create_infra_bundles(&catalog_config);
     let noop_invoker = NoopInfraActionInvoker;
@@ -397,21 +400,24 @@ async fn detect_infra_plugins(
         private_key_der: None,
         action_invoker: &noop_invoker,
         guest_bootstrap: &noop_bootstrap,
-        provision_credentials: true,
+        // The connect phase never provisions — probe_host ignores this flag
+        // today, but leaving it `true` here would be a live trap for the
+        // next implementor that adds a provisioning probe.
+        provision_credentials: false,
     };
     let mut detected = false;
+    let mut planned = Vec::new();
     for bundle in &infra_bundles {
         let Some(lifecycle) = bundle.lifecycle.as_ref() else {
             continue;
         };
         match lifecycle
-            .on_host_bootstrapped(&infra_ctx, executor, params.host_id, &params.name)
+            .probe_host(&infra_ctx, executor, params.host_id, &params.name)
             .await
         {
             Ok(result) => {
-                if result.detected {
-                    detected = true;
-                }
+                detected |= result.detected;
+                planned.extend(result.planned_actions);
             }
             Err(e) => {
                 tracing::debug!(
@@ -422,7 +428,7 @@ async fn detect_infra_plugins(
             }
         }
     }
-    detected
+    (detected, planned)
 }
 
 /// Build the list of planned bootstrap actions from gathered host info.
@@ -508,9 +514,14 @@ fn build_bootstrap_actions(
         actions.push(PlannedAction {
             id: "pve_setup".to_string(),
             label: "Proxmox VE setup".to_string(),
-            description:
-                "Configure Proxmox VE infrastructure integration (API credentials, sudoers for pct/qm)."
-                    .to_string(),
+            description: if info.pve_planned_actions.is_empty() {
+                "Configure Proxmox VE infrastructure integration.".to_string()
+            } else {
+                format!(
+                    "Configure Proxmox VE infrastructure integration: {}.",
+                    info.pve_planned_actions.join("; ")
+                )
+            },
             security_impact: uptrakit_shared_types::Severity::Medium,
             default_enabled: true,
             skippable: true,
