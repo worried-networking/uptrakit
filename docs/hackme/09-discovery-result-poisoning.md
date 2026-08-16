@@ -9,24 +9,38 @@
 
 ## Attack description
 
+This is an attempted attack: the source allowlist described under Current mitigations defeats
+it before any attacker-controlled repository is ever reached.
+
 1. The attacker modifies the `/usr/bin/update` script on a managed host (requires
    local access or prior compromise of the host).
 2. The Proxmox Helper Scripts (PHS) discovery plugin reads this file via
    `cat -- /usr/bin/update` and parses it for script references.
-3. The attacker injects lines containing GitHub URLs pointing to attacker-controlled
-   repositories. For example:
+3. The attacker injects a line pointing at an attacker-controlled repository, hoping
+   discovery will fetch and trust it -- for example:
    `https://raw.githubusercontent.com/attacker-org/malicious/main/ct/backdoor.sh`
-4. The PHS parser extracts the slug (`backdoor`) and fetches the script from the
-   canonical GitHub URL. If the script contains version extraction logic and
-   `owner/repo` references, the discovery plugin creates `DiscoveryTarget` entries
-   with attacker-controlled plugin config values.
-5. The controller auto-creates software items and plugin configs from the discovery
-   results, potentially linking them to the attacker's GitHub repository.
-6. On subsequent version checks and updates, the controller fetches releases from
-   the attacker's repository and may execute update commands derived from the
-   attacker's plugin config.
+4. This does not work: `parse_phs_scripts` only extracts a slug when the line already
+   matches one of the four compile-time-fixed source prefixes in `SOURCES`
+   (`community-scripts/ProxmoxVE`, `community-scripts/ProxmoxVED`, `tteck/Proxmox`,
+   `worried-networking/uptrakit`). `attacker-org/malicious` matches none of them, so
+   the line yields no `DiscoveryTarget` -- at most a diagnostic warning naming the
+   (credential-redacted) URL if it happens to be the first unrecognised token on the
+   line.
+5. The only line an attacker can get parsed at all is one that already matches a real
+   source prefix, carrying an attacker-chosen but character-restricted slug
+   (`[a-z0-9-]+`; path traversal and other characters rejected). Even then, the plugin
+   never fetches the attacker-supplied URL text: it reconstructs the fetch URL from
+   the validated slug and the matched source's own canonical template, so the script
+   it fetches -- and any `owner`/`repo` values extracted from it -- always come from
+   one of the four real upstream repositories, never from attacker-controlled content.
+6. Consequently, this path cannot make the controller auto-create software items or
+   plugin configs that point at an attacker's repository. The impact below describes
+   what this design prevents, not an outcome that occurs today.
 
 ## Worst-case impact
+
+The scenario below is what the mitigations under Current mitigations exist to prevent -- it does
+not describe an outcome reachable through the `/usr/bin/update` injection path today.
 
 - **Attacker-controlled update source.** Software items created from poisoned
   discovery results point to the attacker's GitHub repository. Version checks fetch
@@ -56,6 +70,12 @@
 - **Owner/repo component validation.** Extracted `owner` and `repo` values pass
   through `is_valid_gh_component()` which rejects `/` and `..`. This prevents path
   traversal in API URLs.
+- **Credential redaction in diagnostic logs.** The "no secrets in logs" invariant
+  (AGENTS.md) applies to the diagnostic WARN emitted when no source prefix matches an
+  attacker-supplied URL (step 4 above): `redact_url_userinfo_for_logging()` strips any
+  `user:token@` component from that URL before it is logged, so a credential smuggled
+  into `/usr/bin/update` cannot leak into the discovery log even in the case where
+  nothing else in this attack succeeds.
 - **Discovery results are tracked immediately.** Discovered software items are created
   with `enabled: true`. The `featured` flag controls visibility (featured items appear
   individually; non-featured items appear in aggregated host summaries).

@@ -113,20 +113,32 @@ create. Only CT-script URLs from four recognised repositories are matched:
   `package_identifier` is the Debian package name. Version information comes from APT, but
   updates always use the PHS update script.
 
-- **Script removed upstream**: If a container's CT or install script has been deleted or renamed
-  at its source (a definitive HTTP 404), that app is skipped with a warning in the discovery
-  service's log -- the controller journal in embedded/standalone deployments. The warning repeats
-  on every discovery cycle (roughly every 6 hours) for as long as the script stays absent.
+- **Script not found at the matched source**: If a fetch for a container's CT script or its
+  install-script fallback returns a definitive HTTP 404 at the matched source, that slug is
+  skipped with a warning. A 404 does not always mean the script was deleted or renamed after
+  being published -- it commonly means the slug (or its install script) never existed at that
+  source. This is the dominant cause on `tteck/Proxmox`-derived containers: those scripts predate
+  the separate install-script convention, so the install-script fallback's 404 is expected and
+  recurs on every discovery cycle for them, not a sign of a detection bug.
+
+  The warning is logged by whichever Service ran discovery on that host: on hosts tracked by an
+  Agent, check its log (`journalctl -u uptrakit-agent`); on hosts tracked by Agent-SSH, check the
+  log of the Agent-SSH instance managing that host -- that is the Controller's journal only when
+  the instance runs embedded in the Controller (Embedded Mode), and that instance's own separate
+  log otherwise. By default the warning repeats on every discovery cycle (every 6 hours; see
+  [Periodic Software Rediscovery](#periodic-software-rediscovery) for the configurable interval)
+  for as long as the script stays absent.
 
 - **Undetectable apps**: Apps whose scripts contain neither a GitHub release source nor a
-  specific `apt install` line are skipped. A warning is logged in the discovery service's log --
-  the controller journal in embedded/standalone deployments -- if you expect to see an app but it
-  does not appear.
+  specific `apt install` line are skipped. A warning is logged the same way as above -- by the
+  Agent or Agent-SSH instance that ran discovery on that host -- if you expect to see an app but
+  it does not appear.
 
 - **Unrecognised update script**: If `/usr/bin/update` contains URLs but none of them match a
   known PHS source -- for example, on a host where `/usr/bin/update` has been customized to point
   elsewhere -- a warning naming the first such URL is logged, so you can see why nothing was
-  discovered.
+  discovered. Any credentials embedded in that URL (e.g. `user:token@host`) are redacted before
+  logging.
 
 After discovery, version checking is handled by the target plugin configs (`releases.github`,
 `NPM`, or `APT`), while updates are always handled by the PHS Shell config (which runs
