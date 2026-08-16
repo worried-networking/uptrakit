@@ -20,6 +20,7 @@ This folder contains user-facing guides for operating Uptrakit, including update
 | [Update Workflow](update-workflow.md)                   | Manual update process, scheduling behavior, and history/reporting expectations.                                 |
 | [Update History](update-history.md)                     | Viewing update history, status reference, and triggering updates from the web UI.                               |
 | [Notifications](notifications.md)                       | Notification channels, rules, event types, and delivery log.                                                    |
+| [Logs and Journald](logging.md)                         | Reading logs under systemd, priority/field filtering, and the log-format override.                              |
 | [Profile and API Tokens](profile-tokens.md)             | Account info, API token lifecycle, and security best practices.                                                 |
 | [Home Assistant and MQTT](home-assistant-mqtt.md)       | MQTT setup and Home Assistant update entity integration.                                                        |
 | [Deployment Map](deployment-map.md)                     | Navigation guide for deployment-related docs and configuration entry points.                                    |
