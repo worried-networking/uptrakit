@@ -1097,6 +1097,7 @@ fn spawn_infra_plugin_action(request: SurfaceActionRequest, ctx: &SurfaceRuntime
             private_key_der: private_key_der.as_deref(),
             action_invoker: &action_invoker,
             guest_bootstrap: &guest_bootstrap,
+            provision_credentials: true,
         };
 
         let resp = resolve_surface_task_with_timeout(

@@ -130,6 +130,7 @@ impl AgentSshRuntimeSupport {
                 private_key_der: session_state.private_key_der.as_deref(),
                 action_invoker: &action_invoker,
                 guest_bootstrap: &operations::bootstrap_proxmox::NoopGuestBootstrapExecutor,
+                provision_credentials: true,
             };
 
             for bundle in infra_bundles.iter() {

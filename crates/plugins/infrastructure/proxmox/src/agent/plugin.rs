@@ -75,19 +75,15 @@ impl HostLifecycle for crate::ProxmoxPlugin {
         host_id: uuid::Uuid,
         _host_name: &str,
     ) -> Result<BootstrapInfraResult> {
-        // Detect PVE node.
-        let is_pve_node = match pve_setup::detect_pve_node(executor).await {
-            Ok(detected) => {
-                if detected {
-                    tracing::info!("detected Proxmox VE node");
-                }
-                detected
-            }
-            Err(e) => {
-                tracing::debug!(error = %e, "PVE detection failed, treating as non-PVE host");
-                false
-            }
-        };
+        // Detect PVE node. A transport error here must propagate loudly
+        // rather than being conflated with a verified "not PVE" result
+        // (`Ok(false)`), which alone may take the silent-skip path below.
+        let is_pve_node = pve_setup::detect_pve_node(executor)
+            .await
+            .context_to::<PluginError>()?;
+        if is_pve_node {
+            tracing::info!("detected Proxmox VE node");
+        }
 
         if !is_pve_node {
             return Ok(BootstrapInfraResult::default());
@@ -105,9 +101,15 @@ impl HostLifecycle for crate::ProxmoxPlugin {
             }
         };
 
-        // Create or reuse PVE credentials.
-        let (pve_credentials, existing_config_id) =
-            create_or_reuse_pve_credentials(executor, ctx.db, ctx.tenant_id).await;
+        // Create or reuse PVE credentials, unless credential provisioning was
+        // explicitly skipped (`pve_setup` skip) — detection, host-state
+        // persistence, and sudo-command collection still run below.
+        let (pve_credentials, existing_config_id) = if ctx.provision_credentials {
+            create_or_reuse_pve_credentials(executor, ctx.db, ctx.tenant_id).await
+        } else {
+            tracing::info!("pve_setup skipped: not provisioning API credentials");
+            (None, None)
+        };
 
         // Persist PVE state.
         let host_id_str = host_id.to_string();
@@ -674,11 +676,20 @@ fn bootstrap_proxmox_guest_interaction() -> AgentInteraction {
 
 #[cfg(test)]
 mod tests {
+    use async_trait::async_trait;
+    use uptrakit_command::test_support::ScriptedRemoteExecutor;
+    use uptrakit_command::{RemoteCommandResult, RemoteExecutor};
+
     use super::bootstrap_proxmox_guest_interaction;
     use super::build_pve_config_report;
     use super::drain_pending_matches_cycle;
     use crate::agent::db_ops;
     use crate::pve_setup;
+    use uptrakit_plugin_infrastructure_core::HostLifecycle;
+    use uptrakit_plugin_infrastructure_core::agent_infra::{
+        GuestBootstrapError, GuestBootstrapExecutor, GuestBootstrapParams, GuestBootstrapResult,
+        InfraPluginContext,
+    };
     use uptrakit_plugin_infrastructure_core::surfaces::SurfaceActionResponse;
     use uptrakit_plugin_infrastructure_core::testing::RecordingActionInvoker;
 
@@ -849,5 +860,152 @@ mod tests {
         assert_eq!(invoker.calls().len(), 50);
         let remaining = db_ops::drain_pending_matches(&db).await.expect("drain");
         assert_eq!(remaining.len(), 1);
+    }
+
+    /// [`GuestBootstrapExecutor`] stub for `on_host_bootstrapped` tests, which
+    /// never reach guest-bootstrap dispatch.
+    struct UnusedGuestBootstrap;
+
+    #[async_trait]
+    impl GuestBootstrapExecutor for UnusedGuestBootstrap {
+        async fn bootstrap_guest(
+            &self,
+            _params: GuestBootstrapParams,
+        ) -> std::result::Result<GuestBootstrapResult, GuestBootstrapError> {
+            Err(GuestBootstrapError::from(
+                "GuestBootstrapExecutor not used by on_host_bootstrapped tests",
+            ))
+        }
+    }
+
+    fn pve_positive_script() -> ScriptedRemoteExecutor {
+        ScriptedRemoteExecutor::with_matcher(vec![
+            (
+                "command -v pveversion",
+                RemoteCommandResult {
+                    stdout: "/usr/bin/pveversion".to_string(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                },
+            ),
+            (
+                "hostname -s",
+                RemoteCommandResult {
+                    stdout: "pve1".to_string(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                },
+            ),
+            (
+                "test -f /usr/sbin/pct",
+                RemoteCommandResult {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                },
+            ),
+            (
+                "test -f /usr/sbin/qm",
+                RemoteCommandResult {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    exit_code: 1,
+                },
+            ),
+        ])
+    }
+
+    #[tokio::test]
+    async fn skip_pve_skips_only_credentials() {
+        let db = setup_agent_db().await;
+        let executor = pve_positive_script();
+        let invoker = RecordingActionInvoker::new();
+        let guest_bootstrap = UnusedGuestBootstrap;
+        // A valid tenant_id is deliberately set (unlike the short-circuit
+        // fixture in bootstrap.rs's composed-level test) so this test proves
+        // `provision_credentials` itself is the gate, not the tenant_id
+        // short-circuit inside `create_or_reuse_pve_credentials`.
+        let ctx = InfraPluginContext {
+            db: &db,
+            tenant_id: Some("0193aaaa-bbbb-cccc-dddd-eeeeffff0000"),
+            service_id: None,
+            state_dir: std::path::Path::new("."),
+            private_key_der: None,
+            action_invoker: &invoker,
+            guest_bootstrap: &guest_bootstrap,
+            provision_credentials: false,
+        };
+
+        let plugin = crate::ProxmoxPlugin::new_agent();
+        let host_id = uuid::Uuid::now_v7();
+        let result = plugin
+            .on_host_bootstrapped(&ctx, &executor, host_id, "test-host")
+            .await
+            .expect("on_host_bootstrapped succeeds against a PVE-positive script");
+
+        assert!(result.detected, "PVE-positive script must be detected");
+        assert!(
+            !result.sudo_commands.is_empty(),
+            "pct sudo command must still be collected when credentials are skipped"
+        );
+
+        let calls = executor.recorded_calls();
+        assert!(
+            !calls.iter().any(|c| c.contains("pveum")),
+            "credential provisioning must be skipped when provision_credentials is false: {calls:?}"
+        );
+
+        let state = db_ops::find_host_state(&db, &host_id.to_string())
+            .await
+            .expect("find_host_state")
+            .expect("host state persisted even though credentials were skipped");
+        assert!(state.is_pve_node);
+    }
+
+    /// [`RemoteExecutor`] whose every command fails with a transport error —
+    /// unlike [`ScriptedRemoteExecutor`], which always returns `Ok`.
+    struct FailingExecutor;
+
+    #[async_trait]
+    impl RemoteExecutor for FailingExecutor {
+        async fn exec_command(
+            &self,
+            _command: &str,
+        ) -> uptrakit_command::Result<RemoteCommandResult> {
+            Err(rootcause::report!(
+                uptrakit_command::CommandError::CommandFailed(1)
+            ))
+        }
+    }
+
+    #[tokio::test]
+    async fn bootstrap_detection_transport_error_is_loud() {
+        let db = setup_agent_db().await;
+        let invoker = RecordingActionInvoker::new();
+        let guest_bootstrap = UnusedGuestBootstrap;
+        let ctx = InfraPluginContext {
+            db: &db,
+            tenant_id: None,
+            service_id: None,
+            state_dir: std::path::Path::new("."),
+            private_key_der: None,
+            action_invoker: &invoker,
+            guest_bootstrap: &guest_bootstrap,
+            provision_credentials: true,
+        };
+
+        let plugin = crate::ProxmoxPlugin::new_agent();
+        let executor = FailingExecutor;
+        let host_id = uuid::Uuid::now_v7();
+
+        let result = plugin
+            .on_host_bootstrapped(&ctx, &executor, host_id, "test-host")
+            .await;
+
+        assert!(
+            result.is_err(),
+            "a transport error during PVE detection must propagate loudly, \
+             not silently degrade to a false-negative detection result"
+        );
     }
 }

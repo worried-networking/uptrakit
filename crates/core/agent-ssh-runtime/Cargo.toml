@@ -59,6 +59,7 @@ rcgen = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "test-util"] }
+uptrakit-command = { workspace = true, features = ["test-support"] }
 uptrakit-service-sdk = { workspace = true, features = ["test-support"] }
 uptrakit-shared-types = { workspace = true }
 

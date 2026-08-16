@@ -552,6 +552,7 @@ pub(crate) async fn sync_execute(
                 private_key_der: None,
                 action_invoker: &noop_invoker,
                 guest_bootstrap: &noop_bootstrap,
+                provision_credentials: true,
             };
 
             // We need to collect infra sudo commands into the sudoers set that

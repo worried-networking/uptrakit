@@ -397,6 +397,7 @@ async fn detect_infra_plugins(
         private_key_der: None,
         action_invoker: &noop_invoker,
         guest_bootstrap: &noop_bootstrap,
+        provision_credentials: true,
     };
     let mut detected = false;
     for bundle in &infra_bundles {
@@ -641,17 +642,39 @@ pub(crate) async fn bootstrap_execute(
         .await?;
     }
 
-    // Set up sudoers and run infra plugin detection (if not skipped).
-    let skip_sudoers = skip_actions.contains("configure_sudoers");
-    let skip_pve = skip_actions.contains("pve_setup");
-    let (sudoers_content, infra_results) = if skip_sudoers && skip_pve {
-        (None, Vec::new())
+    // Set up sudoers and run infra plugin detection. `setup_sudoers_and_plugins`
+    // derives the pve_setup/configure_sudoers skip semantics internally from
+    // `skip_actions`; infra detection always runs (credential provisioning is
+    // gated inside), and the sudoers write happens exactly once, after
+    // infra-contributed entries are merged in.
+    //
+    // Skip the (remote, multi-command) compatibility probe when its result
+    // would be discarded by the fn's skip_sudoers early return.
+    let plugin_sudo_cmds = if skip_actions.contains("configure_sudoers") {
+        Vec::new()
     } else {
-        let (sc, ir) =
-            setup_sudoers_and_plugins(&session, &executor, &params, db, state_dir, use_sudo)
-                .await?;
-        if skip_sudoers { (None, ir) } else { (sc, ir) }
+        let ssh_executor = Arc::new(PosixSshCommandExecutor::new(Arc::clone(&session)))
+            as Arc<dyn uptrakit_command::CommandExecutor>;
+        compatible_sudo_commands_for_host(ssh_executor).await
     };
+    let (sudoers_content, infra_results) = setup_sudoers_and_plugins(
+        &executor,
+        &params,
+        db,
+        state_dir,
+        use_sudo,
+        skip_actions,
+        plugin_sudo_cmds,
+    )
+    .await
+    .map_err(|e| {
+        report!(Error::BootstrapVerification(format!(
+            "failed to configure sudoers/infrastructure for host '{}': {e}. \
+             The remote host has been partially configured (user created, \
+             key deployed). Manual cleanup may be required.",
+            params.name
+        )))
+    })?;
 
     // Disconnect auth session.
     drop(executor);
@@ -1167,7 +1190,7 @@ async fn deploy_authorized_keys(
 /// install path is used directly; regular commands are resolved via
 /// `command -v` and appended with optional argument suffix.
 async fn resolve_plugin_sudo_commands(
-    executor: &SshRemoteExecutor,
+    executor: &dyn uptrakit_command::RemoteExecutor,
     plugin_sudo_cmds: &[(uptrakit_shared_types::PluginTypeId, Vec<SudoCommandEntry>)],
     use_sudo: bool,
 ) -> Result<Vec<ResolvedSudoCommand>> {
@@ -1211,18 +1234,25 @@ async fn resolve_plugin_sudo_commands(
 }
 
 /// Run all infra plugins' `on_host_bootstrapped` and collect the results.
+///
+/// `provision_credentials` is forwarded to each plugin via
+/// [`InfraPluginContext::provision_credentials`] — `false` when `pve_setup`
+/// is in the caller's `skip_actions`.
 async fn collect_infra_results(
-    executor: &SshRemoteExecutor,
+    executor: &dyn uptrakit_command::RemoteExecutor,
     params: &BootstrapParams,
     db: &sea_orm::DatabaseConnection,
     state_dir: &std::path::Path,
-) -> Vec<BootstrapInfraResult> {
+    provision_credentials: bool,
+) -> Result<Vec<BootstrapInfraResult>> {
     let catalog_config = CatalogConfig::default();
     let Ok(catalog) = build_catalog(
         &catalog_config,
         uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
     ) else {
-        return Vec::new();
+        // Static config error, not a per-host transport failure — keep the
+        // silent-empty semantics.
+        return Ok(Vec::new());
     };
     let infra_bundles = catalog.create_infra_bundles(&catalog_config);
     let noop_invoker = NoopInfraActionInvoker;
@@ -1236,6 +1266,7 @@ async fn collect_infra_results(
         private_key_der: None,
         action_invoker: &noop_invoker,
         guest_bootstrap: &noop_bootstrap,
+        provision_credentials,
     };
     let mut infra_results = Vec::new();
     for bundle in &infra_bundles {
@@ -1253,72 +1284,74 @@ async fn collect_infra_results(
                 infra_results.push(result);
             }
             Err(e) => {
-                tracing::debug!(
+                // Proxmox is currently the sole `HostLifecycle` implementor, and
+                // the spec mandates loud failure over the previous best-effort
+                // (silently-skip) semantics: a genuine transport error must not
+                // be conflated with a verified "not this infra" result. If a
+                // second implementor lands, revisit whether one plugin's
+                // failure should still abort the whole infra pass.
+                tracing::warn!(
                     error = %e,
                     plugin = %lifecycle.plugin_type_id(),
-                    "infrastructure detection failed, skipping"
+                    "infrastructure detection failed"
                 );
+                Err(e).context_to::<Error>()?;
             }
         }
     }
-    infra_results
+    Ok(infra_results)
 }
 
-/// Append infra-plugin sudo commands to the existing sudoers content and
-/// rewrite the file if any new entries were added.
-async fn merge_infra_sudo_commands(
-    executor: &SshRemoteExecutor,
-    params: &BootstrapParams,
-    sudoers_content: Option<SudoersContent>,
-    infra_results: &[BootstrapInfraResult],
-    use_sudo: bool,
-) -> Result<Option<SudoersContent>> {
-    let infra_sudo_cmds: Vec<_> = infra_results
-        .iter()
-        .flat_map(|r| r.sudo_commands.iter())
-        .map(|c| ResolvedSudoCommand {
-            command_path: c.command_path.clone(),
-            explanation: c.explanation.clone(),
-            needs_setenv: c.needs_setenv,
-        })
-        .collect();
-
-    if infra_sudo_cmds.is_empty() {
-        return Ok(sudoers_content);
-    }
-
-    let mut base_cmds = match sudoers_content {
-        Some(SudoersContent::SpecificCommands(cmds)) => cmds,
-        _ => Vec::new(),
-    };
-    base_cmds.extend(infra_sudo_cmds);
-    let updated = SudoersContent::SpecificCommands(base_cmds);
-    write_sudoers_file(executor, &params.target_username, &updated, use_sudo).await?;
-    tracing::info!("updated sudoers with infra-plugin entries (e.g. pct exec, qm guest exec)");
-    Ok(Some(updated))
-}
-
-/// Resolve plugin sudo commands, write the sudoers file, run infra plugin
-/// detection, and append any infra-discovered sudo entries.
+/// Resolve plugin sudo commands, run infra plugin detection, merge any
+/// infra-discovered sudo entries into the plugin-resolved set, and write the
+/// sudoers file exactly once.
 ///
-/// Returns `(sudoers_content, infra_results)` so the caller can verify
-/// sudo grants and report infrastructure detections.
+/// Returns `(sudoers_content, infra_results)` so the caller can verify sudo
+/// grants and report infrastructure detections.
+///
+/// `skip_actions` drives two independent skips: `configure_sudoers` skips
+/// sudo-command resolution and the sudoers write (infra detection still
+/// runs, since sudo-command collection and host-state persistence must not
+/// depend on it); `pve_setup` is forwarded to infra detection as
+/// `!skip_pve`, gating only credential provisioning inside the plugin.
 async fn setup_sudoers_and_plugins(
-    session: &Arc<SshSession>,
-    executor: &SshRemoteExecutor,
+    executor: &dyn uptrakit_command::RemoteExecutor,
     params: &BootstrapParams,
     db: &DatabaseConnection,
     state_dir: &Path,
     use_sudo: bool,
+    skip_actions: &HashSet<String>,
+    plugin_sudo_cmds: Vec<(uptrakit_shared_types::PluginTypeId, Vec<SudoCommandEntry>)>,
 ) -> Result<(Option<SudoersContent>, Vec<BootstrapInfraResult>)> {
-    // Run host-compatibility checks via an SSH executor so that only the
-    // commands applicable to *this* host are included.
-    tracing::info!("configuring sudoers");
-    let ssh_executor = Arc::new(PosixSshCommandExecutor::new(Arc::clone(session)))
-        as Arc<dyn uptrakit_command::CommandExecutor>;
-    let plugin_sudo_cmds = compatible_sudo_commands_for_host(ssh_executor).await;
+    // 7 params — below the too_many_arguments deny threshold; the two skip
+    // flags travel inside skip_actions, derived here.
+    let skip_sudoers = skip_actions.contains("configure_sudoers");
+    let skip_pve = skip_actions.contains("pve_setup");
 
-    let resolved = resolve_plugin_sudo_commands(executor, &plugin_sudo_cmds, use_sudo).await?;
+    // Infra first: detection + sudo collection always run; credentials
+    // gated by skip_pve inside the plugin (InfraPluginContext flag).
+    let infra_results = collect_infra_results(executor, params, db, state_dir, !skip_pve).await?;
+
+    if skip_sudoers {
+        return Ok((None, infra_results));
+    }
+
+    tracing::info!("configuring sudoers");
+    let mut resolved = resolve_plugin_sudo_commands(executor, &plugin_sudo_cmds, use_sudo).await?;
+
+    // Merge infra-contributed entries (pct exec / qm guest exec) BEFORE the
+    // single write — a split that writes first and merges later (or never)
+    // silently drops these grants.
+    resolved.extend(
+        infra_results
+            .iter()
+            .flat_map(|r| r.sudo_commands.iter())
+            .map(|c| ResolvedSudoCommand {
+                command_path: c.command_path.clone(),
+                explanation: c.explanation.clone(),
+                needs_setenv: c.needs_setenv,
+            }),
+    );
 
     let sudoers_content: Option<SudoersContent> = if !resolved.is_empty() {
         Some(SudoersContent::SpecificCommands(resolved))
@@ -1335,12 +1368,6 @@ async fn setup_sudoers_and_plugins(
     if let Some(ref content) = sudoers_content {
         write_sudoers_file(executor, &params.target_username, content, use_sudo).await?;
     }
-
-    let infra_results = collect_infra_results(executor, params, db, state_dir).await;
-
-    let sudoers_content =
-        merge_infra_sudo_commands(executor, params, sudoers_content, &infra_results, use_sudo)
-            .await?;
 
     Ok((sudoers_content, infra_results))
 }
@@ -1666,11 +1693,8 @@ pub(crate) fn parse_existing_authorized_keys(content: &str) -> ExistingAuthorize
 
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
-    use std::sync::Mutex;
-
-    use async_trait::async_trait;
-    use uptrakit_command::{RemoteCommandResult, RemoteExecutor};
+    use uptrakit_command::RemoteCommandResult;
+    use uptrakit_command::test_support::ScriptedRemoteExecutor;
 
     use super::*;
 
@@ -1683,48 +1707,11 @@ mod tests {
     }
 
     // ── POSIX sudo gate tests ────────────────────────────────────────
-
-    /// Scripted mock executor: returns pre-programmed
-    /// [`RemoteCommandResult`] values in FIFO order for each call to
-    /// `exec_command`. Mirrors the helper in `sudoers.rs::tests`.
-    struct ScriptedRemoteExecutor {
-        results: Mutex<VecDeque<RemoteCommandResult>>,
-        calls: Mutex<Vec<String>>,
-    }
-
-    impl ScriptedRemoteExecutor {
-        fn new(results: impl IntoIterator<Item = RemoteCommandResult>) -> Self {
-            Self {
-                results: Mutex::new(results.into_iter().collect()),
-                calls: Mutex::new(Vec::new()),
-            }
-        }
-
-        fn recorded_calls(&self) -> Vec<String> {
-            self.calls.lock().unwrap().clone()
-        }
-    }
-
-    #[async_trait]
-    impl RemoteExecutor for ScriptedRemoteExecutor {
-        async fn exec_command(
-            &self,
-            command: &str,
-        ) -> uptrakit_command::Result<RemoteCommandResult> {
-            self.calls.lock().unwrap().push(command.to_string());
-            let result =
-                self.results
-                    .lock()
-                    .unwrap()
-                    .pop_front()
-                    .unwrap_or_else(|| RemoteCommandResult {
-                        stdout: String::new(),
-                        stderr: String::new(),
-                        exit_code: 0,
-                    });
-            Ok(result)
-        }
-    }
+    //
+    // `ScriptedRemoteExecutor` here is the shared FIFO/matcher double from
+    // `uptrakit_command::test_support` (feature `test-support`) — the
+    // module-local duplicate that used to live here has been retired in
+    // favor of it.
 
     fn script_result(stdout: &str, exit_code: u32) -> RemoteCommandResult {
         RemoteCommandResult {
@@ -1797,6 +1784,194 @@ mod tests {
         assert_eq!(
             executor.recorded_calls(),
             vec!["id -u".to_string(), "sudo -n -l".to_string()]
+        );
+    }
+
+    // ── setup_sudoers_and_plugins: skip semantics + single merged write ──
+
+    /// PVE-positive script shared by `setup_sudoers_and_plugins` flow tests.
+    ///
+    /// `detect_pve_node` requires exit 0 AND non-empty stdout, so
+    /// `command -v pveversion` must answer with a non-empty path — an
+    /// empty-stdout exit-0 default would read as NOT detected and green
+    /// every downstream assertion vacuously.
+    fn pve_positive_script() -> ScriptedRemoteExecutor {
+        ScriptedRemoteExecutor::with_matcher(vec![
+            (
+                "command -v pveversion",
+                script_result("/usr/bin/pveversion", 0),
+            ),
+            ("hostname -s", script_result("pve1", 0)),
+            ("test -f /usr/sbin/pct", script_result("", 0)),
+            ("test -f /usr/sbin/qm", script_result("", 1)),
+            ("command -v echo", script_result("/bin/echo", 0)),
+            ("sudoers.d/uptrakit-", script_result("", 0)),
+            ("visudo -cf", script_result("", 0)),
+        ])
+    }
+
+    async fn test_db() -> DatabaseConnection {
+        let db = sea_orm::Database::connect("sqlite::memory:")
+            .await
+            .expect("connect in-memory sqlite");
+        crate::db::migration::run_migrations(&db)
+            .await
+            .expect("run migrations");
+        db
+    }
+
+    fn test_bootstrap_params() -> BootstrapParams {
+        BootstrapParams {
+            name: "test-host".to_string(),
+            hostname: "10.0.0.5".to_string(),
+            port: 22,
+            auth_username: "root".to_string(),
+            auth_password: None,
+            auth_private_key_pem: None,
+            use_ssh_agent: false,
+            target_username: "uptrakit".to_string(),
+            target_private_key_pem: None,
+            host_key_fingerprint: None,
+            strict_host_key_checking: false,
+            allow_all: false,
+            host_id: uuid::Uuid::now_v7(),
+            service_id: None,
+            // Deliberately `None`: `create_or_reuse_pve_credentials`
+            // short-circuits without a tenant_id, so these
+            // `setup_sudoers_and_plugins`-level tests never need to script
+            // `pveum` calls. `provision_credentials` itself is exercised
+            // directly by the proxmox crate's `skip_pve_skips_only_credentials`.
+            tenant_id: None,
+            remove_stale_keys: false,
+            allow_reboot: false,
+        }
+    }
+
+    fn one_plugin_sudo_cmd() -> Vec<(uptrakit_shared_types::PluginTypeId, Vec<SudoCommandEntry>)> {
+        vec![(
+            uptrakit_shared_types::PluginTypeId::new("test.plugin"),
+            vec![SudoCommandEntry::new("echo", "test command")],
+        )]
+    }
+
+    #[tokio::test]
+    async fn neither_skipped_merges_infra_sudo_entries() {
+        let db = test_db().await;
+        let executor = pve_positive_script();
+        let params = test_bootstrap_params();
+        let skip_actions: HashSet<String> = HashSet::new();
+
+        let (sudoers_content, infra_results) = setup_sudoers_and_plugins(
+            &executor,
+            &params,
+            &db,
+            Path::new("."),
+            true,
+            &skip_actions,
+            one_plugin_sudo_cmd(),
+        )
+        .await
+        .expect("setup_sudoers_and_plugins succeeds against a PVE-positive script");
+
+        let content =
+            sudoers_content.expect("sudoers content must be written when entries resolve");
+        let SudoersContent::SpecificCommands(entries) = content else {
+            panic!("expected SpecificCommands sudoers content");
+        };
+        assert!(
+            entries
+                .iter()
+                .any(|e| e.command_path == "/usr/sbin/pct exec *"),
+            "infra-contributed pct entry must be merged into the single write: {:?}",
+            entries.iter().map(|e| &e.command_path).collect::<Vec<_>>()
+        );
+        assert!(
+            infra_results.iter().any(|r| r.detected),
+            "PVE detection result must be present"
+        );
+
+        let calls = executor.recorded_calls();
+        assert!(
+            calls.iter().any(|c| c.contains("sudoers.d/uptrakit-")),
+            "sudoers write command must be recorded: {calls:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn skip_pve_still_writes_merged_sudoers() {
+        let db = test_db().await;
+        let executor = pve_positive_script();
+        let params = test_bootstrap_params();
+        let skip_actions: HashSet<String> = ["pve_setup".to_string()].into_iter().collect();
+
+        let (sudoers_content, _infra_results) = setup_sudoers_and_plugins(
+            &executor,
+            &params,
+            &db,
+            Path::new("."),
+            true,
+            &skip_actions,
+            one_plugin_sudo_cmd(),
+        )
+        .await
+        .expect("setup_sudoers_and_plugins succeeds with pve_setup skipped");
+
+        let calls = executor.recorded_calls();
+        assert!(
+            !calls.iter().any(|c| c.contains("pveum")),
+            "credential provisioning must be skipped: {calls:?}"
+        );
+        assert!(
+            calls.iter().any(|c| c.contains("sudoers.d/uptrakit-")),
+            "sudoers write command must still be recorded when only pve_setup is skipped: {calls:?}"
+        );
+
+        let content = sudoers_content
+            .expect("sudoers content must still be written when only pve_setup is skipped");
+        let SudoersContent::SpecificCommands(entries) = content else {
+            panic!("expected SpecificCommands sudoers content");
+        };
+        assert!(
+            entries
+                .iter()
+                .any(|e| e.command_path == "/usr/sbin/pct exec *"),
+            "infra-contributed pct entry must still be merged in: {:?}",
+            entries.iter().map(|e| &e.command_path).collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test]
+    async fn skip_sudoers_writes_no_file() {
+        let db = test_db().await;
+        let executor = pve_positive_script();
+        let params = test_bootstrap_params();
+        let skip_actions: HashSet<String> = ["configure_sudoers".to_string()].into_iter().collect();
+
+        let (sudoers_content, infra_results) = setup_sudoers_and_plugins(
+            &executor,
+            &params,
+            &db,
+            Path::new("."),
+            true,
+            &skip_actions,
+            one_plugin_sudo_cmd(),
+        )
+        .await
+        .expect("setup_sudoers_and_plugins succeeds with configure_sudoers skipped");
+
+        assert!(
+            sudoers_content.is_none(),
+            "no sudoers content must be returned when configure_sudoers is skipped"
+        );
+        assert!(
+            !infra_results.is_empty(),
+            "infra detection must still run when only configure_sudoers is skipped"
+        );
+
+        let calls = executor.recorded_calls();
+        assert!(
+            !calls.iter().any(|c| c.contains("/etc/sudoers.d/")),
+            "no sudoers file write command must be recorded: {calls:?}"
         );
     }
 

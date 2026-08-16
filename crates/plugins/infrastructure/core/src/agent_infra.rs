@@ -245,6 +245,10 @@ pub struct InfraPluginContext<'a> {
     pub action_invoker: &'a dyn InfraActionInvoker,
     /// Executor for bootstrapping guests (SSH agent implements this).
     pub guest_bootstrap: &'a dyn GuestBootstrapExecutor,
+    /// When false, `on_host_bootstrapped` must skip credential provisioning
+    /// (`pve_setup` skip) while still performing detection, host-state
+    /// persistence, and sudo-command collection.
+    pub provision_credentials: bool,
 }
 
 // ── Return types ─────────────────────────────────────────────────────────────

@@ -74,3 +74,12 @@ impl_report_conversion!(russh::AgentAuthError => Error, |e| Error::SshAuth(e.to_
 
 // CommandError from uptrakit-command (used by SSH remote command execution).
 impl_report_conversion!(uptrakit_command::CommandError => Error, |e| Error::SshCommand(e.to_string()));
+
+// PluginError from infra plugin `HostLifecycle` hooks (e.g. Proxmox PVE node
+// detection) — surfaced through `collect_infra_results` so a transport error
+// during infra detection propagates loudly instead of being conflated with a
+// verified "not this infra" result.
+impl_report_conversion!(
+    uptrakit_plugin_infrastructure_registry::PluginError => Error,
+    |e| Error::BootstrapVerification(e.to_string())
+);
