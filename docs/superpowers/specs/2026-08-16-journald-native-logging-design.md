@@ -18,6 +18,10 @@ Defects:
 - **No priority mapping** — every line lands at journald's default priority, so `journalctl -p err` / `-p warning` filtering is useless.
 - **No structured fields** — `host_id=…` pairs are flat text; journald field filtering (`journalctl FIELD=value`) is unavailable.
 - **Level/target as prose** — `DEBUG uptrakit_agent_ssh_runtime::ssh_pool:` prefixes every message.
+- **ANSI escapes stored in the journal** — `fmt::layer()` defaults `with_ansi(true)` with no tty check, so every stored
+  `MESSAGE` embeds color codes (live-verified on the deployment:
+  `'\x1b[2m2026-08-16T08:42:35.855792Z\x1b[0m \x1b[34mDEBUG\x1b[0m …'`; journalctl JSON output degrades such messages to
+  byte arrays, and `-o cat`/`-o json` consumers see raw escapes).
 
 Interactive terminal runs are fine as-is and must keep the current format.
 
@@ -68,8 +72,12 @@ resolved format == journald:
         Ok(layer)  -> install journald layer (with EnvFilter + exclusions, below)
         Err(e)     -> eprintln! warning, fall back to fmt text layer
 resolved format == text:
-    fmt layer exactly as today
+    fmt layer as today, plus .with_ansi(std::io::stdout().is_terminal())
 ```
+
+Text-mode addition (post-grilling, motivated by the live ANSI finding above): gate ANSI on `std::io::IsTerminal`
+(stable since 1.70; workspace `rust-version = "1.91"`). Interactive terminals keep colors byte-identically; redirected
+stdout (docker logs, files, journald-with-detection-overridden-to-text) gets clean plain text.
 
 - `Layer::new()` probes the socket and fails with `NotFound` when journald is absent or on non-unix
   (`tracing-journald-0.3.2/src/lib.rs:98+`) — covers forced `journald` on hosts without systemd. Logging setup must never
@@ -127,6 +135,22 @@ Aug 14 22:31:41 uptrakit uptrakit-controller-standalone[1007]: host configuratio
 
 Interactive runs (`./uptrakit-controller -v` in a terminal): byte-identical to today.
 
+### Live verification (2026-08-16, `root@uptrakit`, Debian 13, systemd 257)
+
+Read-only checks against the single live deployment (`uptrakit.service` → `/usr/local/bin/uptrakit-controller-standalone
+-vvv`, `StandardOutput=journal`, `StandardError=inherit`):
+
+- Detection contract holds exactly: `JOURNAL_STREAM=10:352799757` in `/proc/1007/environ`; `stat -L /proc/1007/fd/1` ⇒
+  `dev=10 ino=352799757` (fd/1 and fd/2 are the same journal stream socket). Decimal, colon-separated, equality on both
+  halves.
+- `/run/systemd/journal/socket` is `srw-rw-rw-` — the unprivileged `uptrakit` user can open it, so `Layer::new()`
+  succeeds without privilege changes.
+- Priority flatness confirmed: 2000 most recent unit entries = 1999× priority 6, 1× priority 5 — and the priority-5
+  entries are sudo's own syslog lines, not daemon tracing. Daemon tracing is 100% priority 6 today despite `-vvv`
+  (trace-level) output.
+- Installer token scrape observed working against the live journal: `journalctl -o cat | grep -A1 "one-time registration
+token"` returns the `eprintln!`-origin prompt plus token line.
+
 ### Compatibility notes (verified)
 
 - PVEHS installer token scrape (`scripts/pvehs/install/uptrakit-install.sh:144`) parses lines printed via `eprintln!`
@@ -155,8 +179,8 @@ mapping/encoding is not ours to pin):
    (`lib.rs` tests) and assert target `uptrakit_audit` is denied while `uptrakit_audit_log`-prefixed targets and ordinary
    `uptrakit_*` targets pass. This pins our combinator wiring without needing a journald socket.
 
-Not unit-tested (thin glue, environment-dependent): the `stdout_is_journal()` wrapper's live `fstat`, and the actual
-journald socket handshake. Manual verification on the live deployment: `systemctl restart`, then the four `journalctl`
+Not unit-tested (thin glue, environment-dependent): the `stdout_is_journal()` wrapper's live `fstat`, the
+`is_terminal()` ANSI gate, and the actual journald socket handshake. Manual verification on the live deployment: `systemctl restart`, then the four `journalctl`
 invocations above.
 
 ## Documentation deliverables (grep-derived sweep of `journald|journalctl|JOURNAL_STREAM|LOG_FORMAT`)
