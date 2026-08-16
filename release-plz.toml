@@ -144,10 +144,6 @@ publish = false
 name = "uptrakit-tenant-db"
 release = false
 
-[[package]]
-name = "uptrakit-tracing-init"
-release = false
-
 # ===== Public-API library crates (ship to crates.io) =====
 # Transitive deps of uptrakit-service-sdk and uptrakit-openapi-client
 # (post wire dev-dep cut; see
@@ -197,6 +193,11 @@ publish = true
 
 [[package]]
 name = "uptrakit-build-info"
+git_release_enable = false
+publish = true
+
+[[package]]
+name = "uptrakit-tracing-init"
 git_release_enable = false
 publish = true
 

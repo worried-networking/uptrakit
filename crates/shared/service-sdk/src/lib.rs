@@ -74,7 +74,6 @@ pub mod surface_proxy;
 pub mod test_support;
 pub mod tls;
 pub mod tofu;
-pub mod tracing_init;
 pub(crate) mod ws;
 
 pub(crate) mod wire_api {
@@ -86,10 +85,10 @@ pub(crate) mod shared_types_api {
 }
 
 #[cfg(feature = "cli")]
-pub use tracing_init::init_cli_tracing;
+pub use uptrakit_tracing_init::init_cli_tracing;
 #[cfg(feature = "test-support")]
-pub use tracing_init::init_test_tracing;
-pub use tracing_init::{BoxedLayer, TracingBuilder};
+pub use uptrakit_tracing_init::init_test_tracing;
+pub use uptrakit_tracing_init::{BoxedLayer, TracingBuilder};
 
 pub use cert_handler::{
     CertificateRenewalHandler, FAR_FUTURE, compute_renewal_delay, create_renewal_sleep,

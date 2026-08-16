@@ -29,8 +29,9 @@ All tracing initialisation lives in `crates/shared/tracing-init/src/lib.rs`
 (`uptrakit-tracing-init`). Do not add per-binary `init_tracing()` helpers — every binary
 calls into this crate instead:
 
-- **`uptrakit-service-sdk`** re-exports the full public surface (`TracingBuilder`,
-  `init_cli_tracing`, `init_test_tracing`, `BoxedLayer`), so service daemons use the
+- **`uptrakit-service-sdk`** depends on `uptrakit-tracing-init` and re-exports its public
+  surface via `pub use` (`TracingBuilder`, `BoxedLayer`, and the feature-gated
+  `init_cli_tracing` / `init_test_tracing`), so service daemons use the
   `uptrakit_service_sdk::` path.
 - **Controller, CLI, and integration-tests** depend on `uptrakit-tracing-init` directly
   (to avoid pulling in the full service SDK) and use `uptrakit_tracing_init::` paths.
