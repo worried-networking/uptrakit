@@ -1901,7 +1901,15 @@ mod tests {
     async fn skip_pve_still_writes_merged_sudoers() {
         let db = test_db().await;
         let executor = pve_positive_script();
-        let params = test_bootstrap_params();
+        // Unlike the shared fixture's `None`, this test overrides
+        // `tenant_id` to a real value so the `pveum`-absence assertion below
+        // is genuinely red-able: with `tenant_id: None`,
+        // `create_or_reuse_pve_credentials` short-circuits before issuing
+        // any `pveum` command regardless of `provision_credentials`, which
+        // would leave the assertion green even if `!skip_pve` regressed to
+        // a hardcoded `true` at the `collect_infra_results` call site.
+        let mut params = test_bootstrap_params();
+        params.tenant_id = Some(uuid::Uuid::now_v7());
         let skip_actions: HashSet<String> = ["pve_setup".to_string()].into_iter().collect();
 
         let (sudoers_content, _infra_results) = setup_sudoers_and_plugins(
