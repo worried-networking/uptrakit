@@ -41,20 +41,20 @@ several verified defects:
 
 ## Decisions (settled with owner, 2026-08-16)
 
-| #   | Decision                                                                                                                                                                                                                                                                                                                                     |
-| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D1  | Single cluster-wide PVE user **`uptrakit@pve`**, always. No `@pam` registration, no per-tenant users. The originally proposed pam/pve split was dropped: PVE users are cluster-wide while bootstrap is per-node, and API tokens never authenticate via PAM, so pam registration buys nothing and creates a mixed-cluster identity ambiguity. |
-| D2  | **Per-tenant API tokens** on that user: token id `tenant-{tenant_uuid}`, created with explicit `--privsep=1`, ACLs granted **per token** (`pveum acl modify <path> --tokens 'uptrakit@pve!tenant-{uuid}' --roles <role>`). The user itself gets zero ACLs and no password (token-only identity).                                             |
-| D3  | **Multi-tenant coexistence**: tenants share a cluster, each with its own token + ACL grants. `OwnedByOtherTenant` blocking and the first-match ownership scan are removed.                                                                                                                                                                   |
-| D4  | **Connect phase becomes read-only.** New read-only probe hook on `HostLifecycle`; provisioning moves exclusively to the execute phase (single `on_host_bootstrapped` call per bootstrap).                                                                                                                                                    |
-| D5  | **`pve_setup` becomes an independently skippable execute action.**                                                                                                                                                                                                                                                                           |
-| D6  | **Two-phase migration** from the legacy per-tenant-user scheme, driven by sync.                                                                                                                                                                                                                                                              |
-| D7  | **Per-cluster plugin-config naming**: `pve-{cluster_name}`, standalone fallback `pve-{node_name}`.                                                                                                                                                                                                                                           |
-| D8  | `verify_ssl` → `verify_tls` emit fix absorbed into the rewritten emit sites.                                                                                                                                                                                                                                                                 |
-| D9  | Delete dead `verify_pve_privileges`; idempotent `ensure_*` repair (rewritten for per-token grants) is the sync-time mechanism; docs updated from "verifies" to "ensures/repairs".                                                                                                                                                            |
-| D10 | **Deprovisioning: documentation only.** No teardown code.                                                                                                                                                                                                                                                                                    |
-| D11 | Test coverage per § Testing. Guest bootstrap (`bootstrap_proxmox.rs`) tests are out of scope.                                                                                                                                                                                                                                                |
-| D12 | Bootstrap path emits a user-visible summary line when PVE setup is skipped for lack of `tenant_id` (parity with the sync path's summary).                                                                                                                                                                                                    |
+| #   | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| D1  | Single cluster-wide PVE user **`uptrakit@pve`**, always. No `@pam` registration, no per-tenant users. The originally proposed pam/pve split was dropped: PVE users are cluster-wide while bootstrap is per-node, and API tokens never authenticate via PAM, so pam registration buys nothing and creates a mixed-cluster identity ambiguity.                                                                                                                                                                                                                                                                       |
+| D2  | **Per-tenant API tokens** on that user: token id `tenant-{tenant_uuid}`, created with explicit `--privsep=1`. ACLs granted at **two levels**: the four `(path, role)` pairs to the **user** (a fixed ceiling — PVE computes a privsep token's effective privileges as the **intersection** of user and token grants, so a user with zero ACLs would zero out every token) and the same pairs to **each token** (`pveum acl modify <path> --tokens 'uptrakit@pve!tenant-{uuid}' --roles <role>`). The user gets no password (token-only identity). Amended 2026-08-16 after source-verifying the intersection rule. |
+| D3  | **Multi-tenant coexistence**: tenants share a cluster, each with its own token + ACL grants. `OwnedByOtherTenant` blocking and the first-match ownership scan are removed.                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| D4  | **Connect phase becomes read-only.** New read-only probe hook on `HostLifecycle`; provisioning moves exclusively to the execute phase (single `on_host_bootstrapped` call per bootstrap).                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| D5  | **`pve_setup` becomes an independently skippable execute action.**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| D6  | **Two-phase migration** from the legacy per-tenant-user scheme, driven by sync.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| D7  | **Per-cluster plugin-config naming**: `pve-{cluster_name}`, standalone fallback `pve-{node_name}`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| D8  | `verify_ssl` → `verify_tls` emit fix absorbed into the rewritten emit sites.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| D9  | Delete dead `verify_pve_privileges`; idempotent `ensure_*` repair (rewritten for per-token grants) is the sync-time mechanism; docs updated from "verifies" to "ensures/repairs".                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| D10 | **Deprovisioning: documentation only.** No teardown code.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| D11 | Test coverage per § Testing. Guest bootstrap (`bootstrap_proxmox.rs`) tests are out of scope.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| D12 | Bootstrap path emits a user-visible summary line when PVE setup is skipped for lack of `tenant_id` (parity with the sync path's summary).                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
 Alternatives rejected during grilling: pam/pve split by bootstrap mode (mixed-cluster ambiguity, no functional
 gain — D1); keeping tenant exclusivity (perpetuates order-dependent ownership, blocks legitimate coexistence —
@@ -75,6 +75,12 @@ handling is its own project — D10).
 - `pveum user delete` prunes the deleted user's ACL entries (`delete_user_acl`, `PVE/AccessControl.pm:1020-1031`)
   and its tokens (tokens live inside the user's `user.cfg` entry). Migration therefore needs no separate ACL/token
   cleanup for the legacy user.
+- **Privsep tokens cannot exceed their owning user.** `PVE/RPCEnvironment.pm` `permissions()` doc comment
+  (:133-135): "priv-separated: permissions for owning user are calculated and **intersected** with those of
+  token"; implementation at :98-107 filters token privs to those the user also holds, per path.
+  (`AccessControl.pm::roles()` :1792-1794 explicitly does NOT filter — only the `$rpcenv->permissions()` check
+  does.) Consequence: the shared user must carry the four `(path, role)` grants as a ceiling; per-token grants
+  select within it.
 
 ## Live verification (owner cluster `uk-home1`, PVE 9.2.10, 2026-08-16 — read-only)
 
@@ -123,8 +129,15 @@ Provisioning sequence (execute phase, idempotent):
    set; a PVE-realm user without a password cannot authenticate interactively, tokens are the only credential.
 3. `pveum user token add 'uptrakit@pve' 'tenant-{uuid}' --privsep=1 --output-format json` — secret parsed by
    the existing `parse_token_value`.
-4. `ensure_pve_acls` rewritten to grant **to the token**: the same four `(path, role)` pairs as today, each via
-   `pveum acl modify {path} --tokens 'uptrakit@pve!tenant-{uuid}' --roles {role}`.
+4. `ensure_pve_acls` rewritten to grant at **both levels** (idempotent, both re-runnable):
+   - **user ceiling** (tenant-independent, same four `(path, role)` pairs as today):
+     `pveum acl modify {path} --users 'uptrakit@pve' --roles {role}`;
+   - **per-token** (selects within the ceiling): `pveum acl modify {path} --tokens
+'uptrakit@pve!tenant-{uuid}' --roles {role}`.
+
+   Effective token privileges = intersection(user grants, token grants) = exactly the four pairs (see
+   Verified PVE facts). Widening any role's privileges later requires only the role definition change —
+   both grant levels reference roles by name.
 
 `regenerate_pve_api_token` targets `uptrakit@pve!tenant-{uuid}` (`token remove … || true` then `token add`)
 and **re-runs `ensure_pve_acls` afterwards** — token deletion may prune that token's ACL entries, so re-granting
@@ -235,7 +248,8 @@ node_filter: vec![] })`) instead of hand-built `json!` maps — the struct is th
 ## Security notes
 
 - Per-token ACLs (`--privsep=1`) mean a leaked tenant token grants only Uptrakit's three custom roles on the
-  four granted paths — never another tenant's token or the shared user's (empty) grants.
+  four granted paths — the intersection of its own grants and the user ceiling; it can never be widened beyond
+  the ceiling by a token-level grant alone, and it never exposes another tenant's token.
 - `uptrakit@pve` never gets a password; the only authentication paths to it are the per-tenant tokens.
 - Token secrets continue to flow only through the existing `PluginConfigReport` → encrypted `plugin_configs`
   path (`api_token` is `.sensitive()`, `config.rs:97`); no new logging of secrets (existing tracing rules
@@ -250,7 +264,9 @@ satisfy `is_valid_pve_token` (`USER@REALM!TOKENID=SECRET` — e.g.
 `uptrakit@pve!tenant-0193…=secret`), per the recorded fixture-validity mistake.
 
 1. **Command-builder tests** (`pve_setup.rs`): scripted-executor coverage for `ensure_pve_roles`,
-   `ensure_pve_acls` (asserts `--tokens 'uptrakit@pve!tenant-{uuid}'` form), user + token creation with
+   `ensure_pve_acls` (asserts BOTH grant levels: `--users 'uptrakit@pve'` ceiling AND `--tokens
+'uptrakit@pve!tenant-{uuid}'` per-token form — dropping either level must fail the test, since a missing
+   ceiling zeroes every token via the intersection rule), user + token creation with
    `--privsep=1`, `regenerate_pve_api_token` (asserts ACL re-grant runs after token re-add), `check_pve_state`
    (field matrix: fresh cluster, user-no-token, token present, legacy user present alongside token,
    non-zero-exit degradation), cluster-name extraction (cluster row present / standalone).
@@ -291,8 +307,10 @@ file and per clause:
 5. `docs/end-user/proxmox.md` — auto-provisioning section (new user/token naming, coexistence), manual-setup
    section reviewed for consistency (manual `root@pam!uptrakit` examples remain valid — manual tokens are
    user-supplied), **new Deprovisioning section** (D10): per-tenant token removal
-   (`pveum user token remove 'uptrakit@pve' 'tenant-{uuid}'`), last-tenant cleanup (`pveum user delete
-'uptrakit@pve'`, `pveum role delete` × 3), legacy-scheme cleanup (`pveum user delete
+   (`pveum user token remove 'uptrakit@pve' 'tenant-{uuid}'` — the user-level ceiling grants remain, inert,
+   until last-tenant cleanup), last-tenant cleanup (`pveum user delete
+'uptrakit@pve'` — removes the ceiling grants and any remaining tokens, `pveum role delete` × 3),
+   legacy-scheme cleanup (`pveum user delete
 'uptrakit-{tenant}@pve'` — also removes pre-custom-roles residue grants like a stale `PVEAuditor`),
    host-side cleanup (`userdel -r`, `/etc/sudoers.d/uptrakit-{user}`, installed
    helper scripts, `authorized_keys` entries), controller-side plugin-config deletion. Cross-linked from
