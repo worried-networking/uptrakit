@@ -621,9 +621,10 @@ changes ⇒ no `regen-api.sh`. No controller-DB migration (agent-local only).
 - Renaming existing `pve-{host_id}` plugin-config rows.
 - Any change to the three custom role definitions' privilege sets.
 - Multi-controller/cluster-wide coordination beyond the existing `reconcile_pve_config` mechanism.
-- Migrating the two existing private scripted-executor copies (`bootstrap.rs`/`sudoers.rs` test modules) onto
-  the new shared `uptrakit-command` test-support double (this spec creates the shared double and uses it for
-  all NEW tests; rewriting existing green tests is a follow-up).
+- Migrating the `sudoers.rs` test module's private scripted-executor copy onto the new shared
+  `uptrakit-command` test-support double (the `bootstrap.rs` copy migrates with Plan 1 — its test module
+  gains new shared-double tests and the same-named local struct would collide; the `sudoers.rs` copy
+  collides with nothing and stays a follow-up).
 - A failover endpoints list on `ProxmoxConfig` (cluster-scoped config keeps a single `api_url` pinned to the
   provisioning node; manual URL edit is the documented remedy — § 5).
 
