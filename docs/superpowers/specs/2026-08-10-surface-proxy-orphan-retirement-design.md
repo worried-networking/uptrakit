@@ -2,9 +2,10 @@
 
 **Date:** 2026-08-10
 **Status:** Design (pending plan)
-**Supersedes:** `docs/superpowers/specs/2026-07-12-surface-proxy-orphaned-files-removal-design.md` and
-`docs/superpowers/plans/2026-07-13-surface-proxy-orphaned-files-removal.md` (both deleted by this spec — see
-[Supersession](#supersession-of-the-2026-07-12-spec)).
+**Supersedes:** `docs/superpowers/specs/2026-07-12-surface-proxy-orphaned-files-removal-design.md` and its plan
+(retired into this spec's own bead epic `uptrakit-spec-2026-08-10-surface-proxy-orphan-retirement-design` at the
+beads migration 2026-08-16; full text at `pre-beads-archive`) — both removed by this spec, see
+[Supersession](#supersession-of-the-2026-07-12-spec).
 
 ## Problem
 
@@ -278,10 +279,14 @@ bodies.
 ## Supersession of the 2026-07-12 spec
 
 - `git rm docs/superpowers/specs/2026-07-12-surface-proxy-orphaned-files-removal-design.md`; delete
-  `docs/superpowers/plans/2026-07-13-surface-proxy-orphaned-files-removal.md` (plan files are untracked local
-  artifacts — plain `rm`). Both executed 2026-08-10 alongside this spec's review.
+  the stale-named plan (retired into this spec's own bead epic
+  `uptrakit-spec-2026-08-10-surface-proxy-orphan-retirement-design`; plan files were untracked local
+  artifacts — plain `rm`; full text at `pre-beads-archive`). Both executed 2026-08-10 alongside this
+  spec's review.
 - Rewrite inbound references to point here: `.superpowers/pending-specs.md:615, 702, 704` (tracker entry replaced per
-  tracker procedure) and `docs/superpowers/plans/2026-07-16-interaction-unification-c-cutover-guard-docs.md:22`.
+  tracker procedure) and the plan retired into bead epic
+  `uptrakit-spec-2026-07-16-interaction-system-unification-design` (beads migration 2026-08-16; full
+  text at `pre-beads-archive`), formerly at line 22 of that plan.
   Tracker row 704 carries an open question ("`prepared.rs` denial may contradict documented `provider_invocable`
   opt-in") — close it as **resolved, no contradiction**: the live predicate ends with
   `&& !resolved.interaction.provider_invocable` (`proxy.rs:315`), so the opt-in is honored; verified 2026-08-10.

@@ -148,9 +148,10 @@ script's `ALLOWLIST_FILE` constant and every `verify_no_security_audit:` message
 - `ci/verify_no_new_cfg_not_feature.sh` line 39 — a comment citing the script as its allowlist-parsing precedent;
   update the name in the comment
 
-Historical mentions under `docs/superpowers/specs/*.md` **and** `docs/superpowers/plans/*.md` are
-immutable records and stay untouched (same convention M1.9 applied to its own doc sweep). Note for verifiers: a
-machine-local global gitignore may exclude `docs/superpowers/plans/` from `rg`'s default walk — use `--no-ignore` when
+Historical mentions under `docs/superpowers/specs/*.md` are immutable records and stay untouched (same
+convention M1.9 applied to its own doc sweep); historical plan text now lives at the `pre-beads-archive`
+git ref, since that plans directory no longer exists. Note for verifiers: a machine-local global
+gitignore may still exclude `docs/superpowers/specs/` from `rg`'s default walk — use `--no-ignore` when
 sweeping.
 
 ### Enforcement surfaces
@@ -181,11 +182,13 @@ role-mapping table) passes clean — that class is only catchable by human/agent
    fails the gate. Evidence: temporary `use x::Permission;` line in `bootstrap.rs` → gate exits 1; revert.
 4. Old name fully retired:
    `rg --no-ignore --hidden --glob '!.git/**' --glob '!.superpowers/**' verify_no_security_audit` over the repo
-   returns hits only under `docs/superpowers/` (historical spec and plan records). Flag rationale: `--no-ignore`
-   because a machine-local global gitignore can hide `docs/superpowers/plans/` from the default walk; `--hidden`
-   because the two enforcement surfaces (`.husky/pre-push`, `.github/workflows/ci.yml`) live in hidden directories
-   ripgrep skips by default even with `--no-ignore`; `!.superpowers/**` because local session state (gitignored)
-   carries historical mentions; `!.git/**` because `--hidden` would otherwise walk git internals.
+   returns hits only under `docs/superpowers/` (historical spec records; plan records now live at the
+   `pre-beads-archive` git ref, not this working tree, since that plans directory no longer exists).
+   Flag rationale: `--no-ignore` guards against any machine-local global gitignore hiding
+   `docs/superpowers/specs/`; `--hidden` because the two enforcement surfaces (`.husky/pre-push`,
+   `.github/workflows/ci.yml`) live in hidden directories ripgrep skips by default even with
+   `--no-ignore`; `!.superpowers/**` because local session state (gitignored) carries historical
+   mentions; `!.git/**` because `--hidden` would otherwise walk git internals.
 5. Description strings unified: the gate's inline comment in `docs/development/quality-gates.md` and `AGENTS.md` is
    byte-identical (`grep` the line from each file, `diff` the extracted comments — empty diff).
 6. `.husky/pre-push` and CI run the renamed script (hook run + CI green on the branch).

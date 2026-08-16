@@ -2,8 +2,9 @@
 
 **Date:** 2026-08-16
 **Status:** Design (pending plan)
-**Supersedes:** `docs/superpowers/specs/2026-07-12-proxmox-verify-tls-key-fix-design.md` (and its plan
-`docs/superpowers/plans/2026-07-13-proxmox-verify-tls-key-fix.md`) — both PVE config emit sites are rewritten
+**Supersedes:** `docs/superpowers/specs/2026-07-12-proxmox-verify-tls-key-fix-design.md` (its plan retired
+into bead epic `uptrakit-spec-2026-07-12-proxmox-verify-tls-key-fix-design` at the beads migration
+2026-08-16; full text at `pre-beads-archive`) — both PVE config emit sites are rewritten
 here, absorbing that fix.
 
 ## Problem

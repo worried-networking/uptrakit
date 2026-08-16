@@ -29,9 +29,10 @@ transport-agnostic so the same handler type works with both a WebSocket and an `
 `dyn ServiceTransport` handler signatures, `EmbeddedTransport::yield_change_notifier`, and
 controller-side `ServiceSettings` injection are all in place. Work Stream 5 is now unblocked.
 
-The prerequisite spec and plan remain at:
-`docs/superpowers/specs/2026-05-07-service-sdk-embedded-transport.md` and
-`docs/superpowers/plans/2026-05-07-service-sdk-embedded-transport.md`.
+The prerequisite spec remains at
+`docs/superpowers/specs/2026-05-07-service-sdk-embedded-transport.md`; its plan was retired into bead
+epic `uptrakit-spec-2026-05-07-service-sdk-embedded-transport` at the beads migration (2026-08-16; full
+text at `pre-beads-archive`).
 
 ---
 

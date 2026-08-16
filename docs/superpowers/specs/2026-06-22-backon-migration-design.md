@@ -243,9 +243,9 @@ rebuild / `next().unwrap_or(cap)` mechanics while preserving the *why*.
 - **No new ADR.** This is a dependency swap, not an architectural-boundary decision; documented here
   and in coding-standards is sufficient. (Justification: no module boundary, wire format, or trust
   surface changes.)
-- **Do NOT rewrite** historical artifacts under `docs/superpowers/plans/` and `…/specs/`
-  (`2026-06-10-backoff-guard-api`, `2026-06-11-backoff-plain-methods`, publishing specs) — they record
-  past state.
+- **Do NOT rewrite** historical artifacts under `docs/superpowers/specs/` (retired plans now live at
+  the `pre-beads-archive` git ref, not a `plans/` dir) — `2026-06-10-backoff-guard-api`,
+  `2026-06-11-backoff-plain-methods`, publishing specs record past state.
 - **User memory** (`MEMORY.md` "Backoff" glossary entry / crate list) — update out-of-band; not a repo deliverable.
 
 ## Quality gates

@@ -84,5 +84,6 @@ to emit typed snapshots.
 ## References
 
 - Spec: `docs/superpowers/specs/2026-04-17-typed-dynamic-config-boundaries-design.md`
-- Plan: `docs/superpowers/plans/2026-04-17-typed-dynamic-config-boundaries.md`
+- Plan: `uptrakit-spec-2026-04-17-typed-dynamic-config-boundaries-design` (plan retired at beads
+  migration 2026-08-16; full text at `pre-beads-archive`)
 - Related: `0018-plugin-extension-typed-boundary.md` — typed plugin extension boundary this builds on

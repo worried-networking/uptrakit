@@ -43,8 +43,9 @@ cannot land, including duplicates produced by merges and rebases. All future ADR
    above existing prose. Prose untouched save for explicitly-listed one-sentence bridges where a
    required section has no prose at all. No rule suppression for format rules, no full rewrite.
 2. **Duplicate resolution: `0033-shared-zeroconf-crate.md` → `0035-shared-zeroconf-crate.md`.**
-   **0034 is reserved**: the in-flight plan
-   `docs/superpowers/plans/2026-07-30-plugin-provider-identity-unification.md` mints ADR-0034 and
+   **0034 is reserved**: the in-flight plan, retired into bead epic
+   `uptrakit-spec-2026-07-27-plugin-provider-identity-unification-design` at the beads migration
+   2026-08-16 (full text at `pre-beads-archive`), mints ADR-0034 and
    bakes the number into code comments across its tasks, so its renumber cost is higher — this spec
    yields (both documents now state the coordination; the plan's own re-verify clause names this
    spec). The
@@ -97,7 +98,8 @@ that one line; bumping it is a normal PR.
   steps, and re-point the sweep greps if the landscape moved. Reference sweep is derived at
   plan time by grep, not from memory, covering the site classes: exact path literal
   (`0033-shared-zeroconf-crate`), bare `ADR-0033` refs whose context means zeroconf (known: 2 in
-  `docs/superpowers/plans/2026-07-29-zeroconf-b-cli-discovery.md` /
+  bead epic `uptrakit-spec-2026-07-28-cli-zeroconf-discovery-design` (retired at beads migration
+  2026-08-16; full text at `pre-beads-archive`) /
   `docs/superpowers/specs/2026-07-28-cli-zeroconf-discovery-design.md`), and a final bare-word
   `\bADR-0033\b` + `0033-shared` sweep to confirm zero zeroconf-attributed leftovers.
 - Every ADR file gets, where missing or non-canonical:

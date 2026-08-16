@@ -6,8 +6,9 @@
 crates, `crates/ui/surface-proxy` (registry admission, catalog item accessor, `controller_local` consumers),
 `crates/ui/web-api` (`routes/surfaces.rs` visibility lookup), `crates/plugins/infrastructure/registry` (guard
 test), docs.
-**Sequencing:** Requires the plugin-type-id rename
-(`docs/superpowers/plans/2026-07-26-surfaces-id-naming-2-plugin-type-ids.md`, landed as `e10261875`) — verified
+**Sequencing:** Requires the plugin-type-id rename (bead epic
+`uptrakit-spec-2026-07-20-surfaces-id-naming-convention-design`, retired at the beads migration
+2026-08-16; full text at `pre-beads-archive`; landed as `e10261875`) — verified
 present. Intent coupling: the pending contribution-monotonicity spec
 (`2026-07-27-plugin-contribution-monotonicity-design.md`, NO_PLAN) edits the same neighborhood (proxmox
 `plugin.rs`, registry guard tests) and explicitly defers plugin identity to this spec; either landing order

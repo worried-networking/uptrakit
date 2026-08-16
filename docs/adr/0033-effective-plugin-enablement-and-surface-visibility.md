@@ -94,5 +94,6 @@ The per-tier outcome matrix above records the operative consequences.
 ## References
 
 - Spec: `docs/superpowers/specs/2026-07-27-plugin-enablement-surface-visibility-design.md`
-- Plan: `docs/superpowers/plans/2026-07-29-plugin-enablement-surface-visibility.md`
+- Plan: `uptrakit-spec-2026-07-27-plugin-enablement-surface-visibility-design` (plan retired at beads
+  migration 2026-08-16; full text at `pre-beads-archive`)
 - CONTEXT.md glossary entry: "Effective Enablement"

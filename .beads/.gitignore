@@ -59,6 +59,14 @@ dolt-pprof/
 
 # Backup data (auto-exported JSONL, local-only)
 backup/
+dolt-backup.json
+dolt-backup-state.json
+
+# Issue/interaction JSONL exports (untracked since beads migration 2026-08-16 —
+# issue bodies hold dissolved plan text that must not live in the repo tree;
+# replication is via the Dolt remote, not these files)
+issues.jsonl
+interactions.jsonl
 
 # Per-project environment file (Dolt connection config, GH#2520)
 .env

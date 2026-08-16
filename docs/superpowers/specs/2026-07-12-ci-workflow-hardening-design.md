@@ -116,7 +116,8 @@ release publish is never interrupted). Its group key: `group: docker-${{ github.
 `release-plz`/`website` already have it — do not touch those.)
 
 - **Branch-protection note:** required status checks (e.g. the `frontend` job, configured as a required check per
-  `docs/superpowers/plans/2026-04-30-decouple-frontend-ci.md`) are satisfied by the **`pull_request`-triggered**
+  bead epic `uptrakit-spec-2026-04-30-decouple-frontend-ci-design`, retired at the beads migration
+  2026-08-16; full text at `pre-beads-archive`) are satisfied by the **`pull_request`-triggered**
   run, not the `push` run — so restricting `push` to `[main]` does not affect merge gating. `push` on `main`
   still fires, so the post-merge `frontend-e2e-parity` canary (`if: github.ref == 'refs/heads/main'`) is
   unaffected.

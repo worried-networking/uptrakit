@@ -152,7 +152,8 @@ duplicated here.
 ## Cross-references
 
 - Spec: `docs/superpowers/specs/2026-07-02-discovery-uninstall-reconciliation-design.md`
-- Plan: `docs/superpowers/plans/2026-07-02-uninstall-reconciliation.md`
+- Plan: `uptrakit-spec-2026-07-02-discovery-uninstall-reconciliation-design` (plan retired at beads
+  migration 2026-08-16; full text at `pre-beads-archive`)
 - Reconciliation: `crates/ui/web-api-queries/src/queries/autodiscovery/reconcile.rs`
 - Reactivation collision rules: `crates/ui/web-api-queries/src/queries/autodiscovery/discovery_items.rs`
   (`find_or_create_software_item`)

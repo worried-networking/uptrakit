@@ -37,8 +37,9 @@ notification callback route dispatched a pseudo-action string (`"handle_callback
 legacy prefix router, reachable only because prefix routing never consulted registrations.
 
 See `docs/superpowers/specs/2026-07-16-interaction-system-unification-design.md` for the full audit,
-decision grilling, and design; `docs/superpowers/plans/2026-07-16-interaction-unification-c-cutover-guard-docs.md`
-for the implementation plan (task series A–C).
+decision grilling, and design; the implementation plan was retired into bead epic
+`uptrakit-spec-2026-07-16-interaction-system-unification-design` at the beads migration (2026-08-16;
+full text at `pre-beads-archive`), covering task series A–C.
 
 ## Decision
 
@@ -157,7 +158,8 @@ the model.
 - Spec: `docs/superpowers/specs/2026-07-16-interaction-system-unification-design.md`
 - Prior spec (origin of the `list-all-unmatched` finding):
   `docs/superpowers/specs/2026-07-15-proxmox-guest-flow-provider-invocable-design.md`
-- Plan: `docs/superpowers/plans/2026-07-16-interaction-unification-c-cutover-guard-docs.md`
+- Plan: `uptrakit-spec-2026-07-16-interaction-system-unification-design` (plan retired at beads
+  migration 2026-08-16; full text at `pre-beads-archive`)
 - Registration types: `crates/plugins/infrastructure/core/src/registration.rs`
 - Agent-side authoring: `crates/plugins/infrastructure/core/src/agent_interaction.rs`
 - Catalog admission and exact-id dispatch: `crates/plugins/infrastructure/core/src/catalog.rs`

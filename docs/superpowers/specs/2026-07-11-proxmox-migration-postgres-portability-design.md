@@ -3,8 +3,9 @@
 **Date:** 2026-07-12 (revised 2026-07-14) **Status:** Draft **Source:** `.superpowers/audit-2026-07-11.md` — HIGH "Scaling
 data migration uses SQLite-only randomblob()/hex() — fails on Postgres".
 
-> **Revision 2026-07-14.** The 2026-07-11 revision of this spec was refuted during plan review
-> (`docs/superpowers/plans/2026-07-12-proxmox-migration-postgres-portability.md`, BLOCKED banner): its
+> **Revision 2026-07-14.** The 2026-07-11 revision of this spec was refuted during plan review (that
+> plan retired into bead epic `uptrakit-spec-2026-07-11-proxmox-migration-postgres-portability-design`
+> at the beads migration 2026-08-16; full text at `pre-beads-archive`; BLOCKED banner): its
 > `Uuid::now_v7().to_string()`-into-TEXT approach produces rows that **fail to read back through SeaORM on both
 > backends**, and its "legacy randomblob ids are functional because `Uuid::parse_str` is lenient" claim is false —
 > the decode path is sqlx, not `parse_str`, and it is blob-only on SQLite. This revision reframes the root cause

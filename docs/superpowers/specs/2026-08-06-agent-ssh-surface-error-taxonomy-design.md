@@ -47,7 +47,7 @@ three coupled defects in the error path:
 | --- | --- | --- |
 | D1 | sync-execute missing-host classification | **Activate the intended arm**: typed `NotFound` maps to `denied`/`host_not_found` for `sync-execute`, matching the classification table the code already declares (and matching `hosts` DELETE). This is the single deliberate audit-classification change; everything else is preserved exactly. |
 | D2 | Wire error-code remap | **In scope.** System-side failures (storage, SSH, internal) switch from `InvalidRequest` to `InternalError`. Value-level change only; all consumers already match all 8 `SurfaceActionErrorCode` variants exhaustively, both directions wire-compatible. |
-| D3v2 | Split relationship | **One combined effort** (supersedes the initial "sequence after split" answer, revised after fact-check). Plan A performs the decomposition; Plan B lands the taxonomy into the decomposed layout. This spec's Plan A supersedes the unexecuted agent-ssh portion (Task 3) of `docs/superpowers/plans/2026-04-17-surface-runtime-decomposition.md`. |
+| D3v2 | Split relationship | **One combined effort** (supersedes the initial "sequence after split" answer, revised after fact-check). Plan A performs the decomposition; Plan B lands the taxonomy into the decomposed layout. This spec's Plan A supersedes the unexecuted agent-ssh portion (Task 3), dissolved into beads 2026-08-16 as tasks `uptrakit-plan-2026-04-17-surface-runtime-decomposition-t01..t04` under bead epic `uptrakit-spec-2026-04-17-surface-runtime-decomposition-design` (full text at `pre-beads-archive`). |
 
 ## 3. Plan A — decompose `surface_runtime.rs` (behavior-preserving, layout only)
 

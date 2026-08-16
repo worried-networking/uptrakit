@@ -144,6 +144,7 @@ The predicate covers HTTP endpoints and the surfaces registry. It does not cover
 ## References
 
 - Spec: `docs/superpowers/specs/2026-05-10-instance-scoped-plugins-design.md`
-- Plans: `docs/superpowers/plans/2026-05-10-instance-scoped-plugins-{a,b,c}.md` (Plan A merged,
-  Plan B is this work, Plan C is downstream)
+- Plans: `uptrakit-spec-2026-05-10-instance-scoped-plugins-design` (plan retired at beads migration
+  2026-08-16; full text at `pre-beads-archive`; covers former Plan A merged, Plan B this work, Plan C
+  downstream)
 - CONTEXT.md glossary entries: "Plugin Scope", "Instance-Scoped Plugin"

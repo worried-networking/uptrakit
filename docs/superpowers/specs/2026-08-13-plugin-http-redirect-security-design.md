@@ -65,8 +65,10 @@ cluster, sequenced so no intermediate state is worse than baseline.
   on the client" (`docs/development/plugin-guidelines.md:812`, `crates/plugins/AGENTS.md:130-131`)
   is already violated by the github plugin (`plugin.rs:147` puts `AUTHORIZATION` in
   `default_headers`). Its recorded rationale explicitly warned against "re-enabling redirects
-  while keeping auth in default headers"
-  (`docs/superpowers/plans/2026-07-13-plugin-guidelines-realignment.md:67`). This spec
+  while keeping auth in default headers" (dissolved into beads 2026-08-16 as tasks
+  `uptrakit-plan-2026-07-13-plugin-guidelines-realignment-t01..t02` under bead epic
+  `uptrakit-spec-2026-07-12-plugin-guidelines-realignment-design`; full text at
+  `pre-beads-archive`; formerly plan line 67). This spec
   supersedes that rule with a header-specific one (§ ADR).
 - HTTP mock idiom in this workspace is `httpmock` 0.8 (workspace `Cargo.toml:218`).
 - Private-IP classification helper exists: `uptrakit_shared_types::network::is_private_ip`
@@ -278,7 +280,10 @@ clients". Must:
   clippy gate, and the canary.
 - **Supersede by name** the per-request-auth-headers rule at
   `docs/development/plugin-guidelines.md:812` / `crates/plugins/AGENTS.md:130-131` and its
-  recorded rationale in `docs/superpowers/plans/2026-07-13-plugin-guidelines-realignment.md:67`,
+  recorded rationale (dissolved into beads 2026-08-16 as tasks
+  `uptrakit-plan-2026-07-13-plugin-guidelines-realignment-t01..t02` under bead epic
+  `uptrakit-spec-2026-07-12-plugin-guidelines-realignment-design`; formerly plan line 67; full
+  text at `pre-beads-archive`),
   replacing it with the header-specific rule: _redirect-following (`Limited`) is permitted
   only on clients whose credentials are (a) absent, (b) applied per-request, or (c) carried
   in a header reqwest strips cross-host (`Authorization`, `Cookie`, `Proxy-Authorization`)_ —
