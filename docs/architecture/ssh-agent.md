@@ -20,7 +20,7 @@ The SSH agent is feature-complete for version checks and updates. The implementa
 - A `bootstrap` wizard action (via web UI or CLI) that automates remote host setup
   with a multi-step review flow: Connect (gather plan) -> Review (approve actions) -> Execute
 - A `sync` wizard action (via web UI or CLI) that regenerates sudoers entries,
-  detects PVE node name, and verifies PVE privileges
+  detects PVE node name, and ensures PVE privileges (idempotent `pveum` role/acl modify)
 - A `bootstrap-proxmox-guest` surface interaction that bootstraps discovered Proxmox VE guests
   (LXC/QEMU) via `pct exec`/`qm guest exec` through an already-bootstrapped PVE node
 - Per-host sudo state tracking (`is_root`, `sudo_available`, `sudo_policy`) in the local database
@@ -349,7 +349,7 @@ CommandSpec { Exec { program: "sudo", args: ["apt-get", "install", ...] } }
 - **`bootstrap`** — detects and stores `is_root` and `sudo_available` during the bootstrap workflow.
 - **`sync`** — re-detects `is_root` and `sudo_available` on every run (always
   refreshes), writes or refreshes the sudoers drop-in file, detects PVE node name, and
-  verifies PVE privileges.
+  ensures PVE privileges (idempotent `pveum` role/acl modify).
 - **Regular operations** (`CheckVersions`, `ExecuteUpdate`) — read from the database without any SSH detection round-trip.
 
 ### `sync` workflow
@@ -364,7 +364,7 @@ CommandSpec { Exec { program: "sudo", args: ["apt-get", "install", ...] } }
 7. Build SudoersContent::SpecificCommands or AllCommands (with --allow-all)
 8. Write /etc/sudoers.d/uptrakit-<username>, chmod 440, validate with visudo -cf
 9. Detect PVE node name (pveversion check) and persist to pve_node_name
-10. Verify PVE privileges (if host is a PVE node)
+10. Ensure PVE privileges (idempotent `pveum` role/acl modify, if host is a PVE node)
 9. Update DB: sudo_available = true
 10. Print summary
 ```
@@ -750,7 +750,7 @@ crates/core/agent-ssh-runtime/         # Library — uptrakit-agent-ssh-runtime
     │   │                       # generate_sudoers_content, write_sudoers_file) — uses
     │   │                       # &dyn RemoteExecutor
     │   └── sync.rs             # sync operation (re-detect, resolve, write sudoers,
-    │                           # detect PVE node name, verify PVE privileges)
+    │                           # detect PVE node name, ensure PVE privileges)
     └── db/
         ├── mod.rs       # SQLite init (init_db) + tests
         ├── entity/
@@ -883,7 +883,7 @@ handler's `on_surface_action_response` method calls `proxy.complete()` to delive
 | ------------------------- | ------------------------ | ------- | -------------------------------------------------------------------------------------------------------------------- |
 | `hosts` (GET)             | data_action              | 30s     | Query local DB for all SSH hosts                                                                                     |
 | `bootstrap`               | primary_action (wizard)  | 120s    | Bootstrap a new remote host via multi-step wizard: Connect -> Review -> Execute                                      |
-| `sync`                    | row_action (wizard)      | 120s    | Sync host via multi-step wizard: update sudoers, detect PVE node name, verify PVE privileges; optional auth override |
+| `sync`                    | row_action (wizard)      | 120s    | Sync host via multi-step wizard: update sudoers, detect PVE node name, ensure PVE privileges; optional auth override |
 | `hosts` (DELETE)          | row_action (destructive) | 30s     | Remove a host from local DB                                                                                          |
 | `discovered-guests`       | select_source (action)   | 15s     | List unmatched Proxmox guests (via ServiceSurfaceProxy)                                                              |
 | `bootstrap-proxmox-guest` | primary_action (form)    | 120s    | Bootstrap a discovered Proxmox guest with auto-matching                                                              |
@@ -925,7 +925,8 @@ See [shared surface security](../security/surfaces.md) for the trust model and
   agent key. Optionally accepts custom auth credentials (password or private key, ECIES
   encrypted) to connect as a different user (e.g. `root`) — necessary when the stored
   agent user lacks privileges to write sudoers. Updates sudoers, detects the PVE node
-  name (`hostname -s`), and verifies PVE API privileges when a tenant ID is available.
+  name (`hostname -s`), and ensures PVE API privileges (idempotent `pveum` role/acl modify)
+  when a tenant ID is available.
   When custom auth is used, sudo state is not persisted (it reflects the override user,
   not the agent user).
 - **`bootstrap`**: Spawned as a background task via the `bg_tx` channel. The
