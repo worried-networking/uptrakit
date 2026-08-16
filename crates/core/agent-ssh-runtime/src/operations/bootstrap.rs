@@ -1821,14 +1821,10 @@ mod tests {
         ])
     }
 
-    async fn test_db() -> DatabaseConnection {
-        let db = sea_orm::Database::connect("sqlite::memory:")
-            .await
-            .expect("connect in-memory sqlite");
-        crate::db::migration::run_migrations(&db)
-            .await
-            .expect("run migrations");
-        db
+    async fn test_db() -> std::result::Result<DatabaseConnection, sea_orm::DbErr> {
+        let db = sea_orm::Database::connect("sqlite::memory:").await?;
+        crate::db::migration::run_migrations(&db).await?;
+        Ok(db)
     }
 
     fn test_bootstrap_params() -> BootstrapParams {
@@ -1867,7 +1863,7 @@ mod tests {
 
     #[tokio::test]
     async fn neither_skipped_merges_infra_sudo_entries() {
-        let db = test_db().await;
+        let db = test_db().await.expect("set up in-memory test db");
         let executor = pve_positive_script();
         let params = test_bootstrap_params();
         let skip_actions: HashSet<String> = HashSet::new();
@@ -1910,7 +1906,7 @@ mod tests {
 
     #[tokio::test]
     async fn skip_pve_still_writes_merged_sudoers() {
-        let db = test_db().await;
+        let db = test_db().await.expect("set up in-memory test db");
         let executor = pve_positive_script();
         // Unlike the shared fixture's `None`, this test overrides
         // `tenant_id` to a real value so the `pveum`-absence assertion below
@@ -1961,7 +1957,7 @@ mod tests {
 
     #[tokio::test]
     async fn skip_sudoers_writes_no_file() {
-        let db = test_db().await;
+        let db = test_db().await.expect("set up in-memory test db");
         let executor = pve_positive_script();
         let params = test_bootstrap_params();
         let skip_actions: HashSet<String> = ["configure_sudoers".to_string()].into_iter().collect();
