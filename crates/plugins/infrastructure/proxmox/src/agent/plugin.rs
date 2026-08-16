@@ -127,11 +127,29 @@ impl HostLifecycle for crate::ProxmoxPlugin {
         // Create or reuse PVE credentials, unless credential provisioning was
         // explicitly skipped (`pve_setup` skip) — detection, host-state
         // persistence, and sudo-command collection still run below.
-        let (pve_credentials, existing_config_id) = if ctx.provision_credentials {
-            create_or_reuse_pve_credentials(executor, ctx.db, ctx.tenant_id).await
+        let (pve_credentials, existing_config_id, summary_line) = if ctx.provision_credentials {
+            let resolution = create_or_reuse_pve_credentials(executor, ctx.db, ctx.tenant_id).await;
+            let line = match resolution.outcome {
+                PveCredentialOutcome::Provisioned => "PVE API credentials created".to_string(),
+                PveCredentialOutcome::Reused => {
+                    "PVE API credentials: reused existing plugin config".to_string()
+                }
+                PveCredentialOutcome::Regenerated => "PVE API token regenerated".to_string(),
+                PveCredentialOutcome::SkippedNoTenant => {
+                    "PVE detected; API credential setup skipped: no tenant context".to_string()
+                }
+                PveCredentialOutcome::Failed => {
+                    "PVE API credential setup failed (see agent logs)".to_string()
+                }
+            };
+            (resolution.credentials, resolution.existing_config_id, line)
         } else {
             tracing::info!("pve_setup skipped: not provisioning API credentials");
-            (None, None)
+            (
+                None,
+                None,
+                "PVE credential setup skipped by request (pve_setup)".to_string(),
+            )
         };
 
         // Persist PVE state.
@@ -154,6 +172,7 @@ impl HostLifecycle for crate::ProxmoxPlugin {
             existing_plugin_config_id: existing_config_id,
             detected: true,
             sudo_commands,
+            summary_lines: vec![summary_line],
         })
     }
 
@@ -456,22 +475,48 @@ impl GuestExec for crate::ProxmoxPlugin {
 
 /// Check for existing Uptrakit PVE tokens on the cluster and either reuse
 /// the existing config or create new credentials.
+/// Outcome of the credential create-or-reuse step, mapped to a bootstrap
+/// summary line. Distinguishes the previously warn-only branches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PveCredentialOutcome {
+    Provisioned,
+    Reused,
+    Regenerated,
+    SkippedNoTenant,
+    Failed,
+}
+
+/// What the credential step resolved to, plus the outcome that describes it.
+struct CredentialResolution {
+    credentials: Option<pve_setup::PveCredentials>,
+    existing_config_id: Option<String>,
+    outcome: PveCredentialOutcome,
+}
+
 async fn create_or_reuse_pve_credentials(
     executor: &dyn RemoteExecutor,
     db: &DatabaseConnection,
     tenant_id: Option<&str>,
-) -> (Option<pve_setup::PveCredentials>, Option<String>) {
+) -> CredentialResolution {
     let Some(tid_str) = tenant_id else {
         tracing::warn!(
             "skipping PVE API credential creation: tenant ID not yet available; \
              ensure the agent has connected to the controller at least once, then re-bootstrap"
         );
-        return (None, None);
+        return CredentialResolution {
+            credentials: None,
+            existing_config_id: None,
+            outcome: PveCredentialOutcome::SkippedNoTenant,
+        };
     };
 
     let Ok(tid) = uuid::Uuid::parse_str(tid_str) else {
         tracing::warn!("invalid tenant_id format: {tid_str}");
-        return (None, None);
+        return CredentialResolution {
+            credentials: None,
+            existing_config_id: None,
+            outcome: PveCredentialOutcome::Failed,
+        };
     };
 
     match pve_setup::check_pve_token_exists(executor, &tid).await {
@@ -484,7 +529,11 @@ async fn create_or_reuse_pve_credentials(
                         .pve_plugin_config_id
                         .expect("find_pve_host_with_config only returns hosts with config");
                     tracing::info!(host_id = %host.host_id, "reusing plugin config from existing PVE host");
-                    return (None, Some(config_id));
+                    return CredentialResolution {
+                        credentials: None,
+                        existing_config_id: Some(config_id),
+                        outcome: PveCredentialOutcome::Reused,
+                    };
                 }
                 Ok(None) => {
                     tracing::info!(
@@ -498,26 +547,42 @@ async fn create_or_reuse_pve_credentials(
                                 pve_user = %pve_setup::pve_user_realm(&tid),
                                 "PVE API token regenerated"
                             );
-                            return (Some(creds), None);
+                            return CredentialResolution {
+                                credentials: Some(creds),
+                                existing_config_id: None,
+                                outcome: PveCredentialOutcome::Regenerated,
+                            };
                         }
                         Err(e) => {
                             tracing::warn!(
                                 error = %e,
                                 "failed to regenerate PVE API token; configure the Proxmox plugin manually"
                             );
-                            return (None, None);
+                            return CredentialResolution {
+                                credentials: None,
+                                existing_config_id: None,
+                                outcome: PveCredentialOutcome::Failed,
+                            };
                         }
                     }
                 }
                 Err(e) => {
                     tracing::warn!(error = %e, "failed to look up existing PVE hosts");
-                    return (None, None);
+                    return CredentialResolution {
+                        credentials: None,
+                        existing_config_id: None,
+                        outcome: PveCredentialOutcome::Failed,
+                    };
                 }
             }
         }
         Ok(pve_setup::PveTokenStatus::OwnedByOtherTenant(user)) => {
             tracing::warn!(pve_user = %user, "PVE API user belongs to a different tenant; skipping credential creation");
-            return (None, None);
+            return CredentialResolution {
+                credentials: None,
+                existing_config_id: None,
+                outcome: PveCredentialOutcome::Failed,
+            };
         }
         Ok(pve_setup::PveTokenStatus::NotFound) => {
             // No existing token — proceed with creation below.
@@ -535,14 +600,22 @@ async fn create_or_reuse_pve_credentials(
                 pve_user = %pve_setup::pve_user_realm(&tid),
                 "PVE API token created"
             );
-            (Some(creds), None)
+            CredentialResolution {
+                credentials: Some(creds),
+                existing_config_id: None,
+                outcome: PveCredentialOutcome::Provisioned,
+            }
         }
         Err(e) => {
             tracing::warn!(
                 error = %e,
                 "failed to create PVE API credentials; configure them manually in the Proxmox plugin settings"
             );
-            (None, None)
+            CredentialResolution {
+                credentials: None,
+                existing_config_id: None,
+                outcome: PveCredentialOutcome::Failed,
+            }
         }
     }
 }
@@ -983,6 +1056,47 @@ mod tests {
             .expect("find_host_state")
             .expect("host state persisted even though credentials were skipped");
         assert!(state.is_pve_node);
+    }
+
+    #[tokio::test]
+    async fn missing_tenant_outcome_yields_summary_line() {
+        let db = setup_agent_db().await;
+        let executor = pve_positive_script();
+        let invoker = RecordingActionInvoker::new();
+        let guest_bootstrap = UnusedGuestBootstrap;
+        // `provision_credentials: true` is required — with `false` the
+        // else-branch's "skipped by request" line would satisfy this
+        // assertion for the wrong reason, staying green even if the
+        // `SkippedNoTenant` arm were deleted.
+        let ctx = InfraPluginContext {
+            db: &db,
+            tenant_id: None,
+            service_id: None,
+            state_dir: std::path::Path::new("."),
+            private_key_der: None,
+            action_invoker: &invoker,
+            guest_bootstrap: &guest_bootstrap,
+            provision_credentials: true,
+        };
+
+        let plugin = crate::ProxmoxPlugin::new_agent();
+        let host_id = uuid::Uuid::now_v7();
+        let result = plugin
+            .on_host_bootstrapped(&ctx, &executor, host_id, "test-host")
+            .await
+            .expect("on_host_bootstrapped succeeds against a PVE-positive script");
+
+        assert!(result.detected, "PVE-positive script must be detected");
+        assert_eq!(
+            result.summary_lines,
+            vec!["PVE detected; API credential setup skipped: no tenant context".to_string()]
+        );
+
+        let calls = executor.recorded_calls();
+        assert!(
+            !calls.iter().any(|c| c.contains("pveum")),
+            "credential provisioning must not run without a tenant context: {calls:?}"
+        );
     }
 
     /// [`RemoteExecutor`] whose every command fails with a transport error —

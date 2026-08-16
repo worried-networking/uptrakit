@@ -43,6 +43,20 @@
 
 	const WORKFLOW_FORM_ID = 'surface-workflow-step-form';
 
+	function completionMessage(base: string, result: unknown): string {
+		if (!result || typeof result !== 'object' || Array.isArray(result)) {
+			return base;
+		}
+		const raw = (result as Record<string, unknown>).summary;
+		const lines =
+			typeof raw === 'string'
+				? [raw]
+				: Array.isArray(raw)
+					? raw.filter((line): line is string => typeof line === 'string')
+					: [];
+		return lines.length > 0 ? `${base}: ${lines.slice(0, 3).join('; ')}` : base;
+	}
+
 	let currentStep = $state(0);
 	let loading = $state(false);
 	let showModal = $state(false);
@@ -205,7 +219,7 @@
 				stepResponses.set(stepIndex, result);
 
 				if (stepIndex === workflowSteps.length - 1) {
-					showSuccess(`${actionLabel} completed`);
+					showSuccess(completionMessage(`${actionLabel} completed`, result));
 					showModal = false;
 					await oncomplete?.(result);
 					resetWorkflowState();

@@ -16,7 +16,7 @@ vi.mock('$lib/notifications.svelte', () => ({
 }));
 
 import { invokeSurfaceInteraction, readSurfaceInteraction, sealedBoxEncrypt } from '$lib/api';
-import { showError } from '$lib/notifications.svelte';
+import { showError, showSuccess } from '$lib/notifications.svelte';
 
 describe('SurfaceWorkflow', () => {
 	beforeEach(() => {
@@ -176,6 +176,96 @@ describe('SurfaceWorkflow', () => {
 			'bootstrap-execute'
 		]);
 		expect(sealedBoxEncrypt).toHaveBeenCalledTimes(2);
+	});
+
+	it('shows the response summary lines in the completion toast', async () => {
+		vi.mocked(invokeSurfaceInteraction).mockReset();
+		vi.mocked(invokeSurfaceInteraction)
+			.mockResolvedValueOnce({
+				data: {
+					host_info: { hostname: 'example-host' },
+					actions: [{ id: 'sudoers', label: 'Install sudoers', description: 'Configure sudo', skippable: false }]
+				}
+			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>)
+			.mockResolvedValueOnce({
+				data: { host_id: 'host-1', summary: ['PVE API credentials created'] }
+			} as unknown as Awaited<ReturnType<typeof invokeSurfaceInteraction>>);
+
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'bootstrap',
+			kind: 'workflow',
+			http_method: 'post',
+			label: 'Bootstrap Host',
+			transport: { mode: 'provider_proxied' },
+			workflow_steps: [
+				{
+					step_id: 'connect',
+					label: 'Connection',
+					input_schema: 'object',
+					result_schema: 'any',
+					submit_interaction_id: 'bootstrap-connect',
+					form_ui: {
+						fields: [{ key: 'target', label: 'SSH Target', field_type: 'text', required: true }]
+					}
+				},
+				{
+					step_id: 'review',
+					label: 'Review',
+					input_schema: 'object',
+					result_schema: 'any',
+					render_previous_response: true,
+					form_ui: { fields: [] }
+				},
+				{
+					step_id: 'execute',
+					label: 'Execute',
+					input_schema: 'object',
+					result_schema: 'any',
+					submit_interaction_id: 'bootstrap-execute',
+					form_ui: { fields: [] }
+				}
+			]
+		};
+
+		const interactions: InteractionDescriptor[] = [
+			interaction,
+			{
+				interaction_id: 'bootstrap-connect',
+				kind: 'mutation_action',
+				http_method: 'post',
+				label: 'Bootstrap Connect',
+				transport: { mode: 'provider_proxied' }
+			},
+			{
+				interaction_id: 'bootstrap-execute',
+				kind: 'mutation_action',
+				http_method: 'post',
+				label: 'Bootstrap Execute',
+				transport: { mode: 'provider_proxied' }
+			}
+		];
+
+		render(SurfaceWorkflow, {
+			surfaceId: 'ssh-agent.hosts',
+			interaction,
+			interactions,
+			baseParams: { host_id: 'host-1' }
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Bootstrap Host' }));
+		await fireEvent.input(screen.getByRole('textbox', { name: /SSH Target/i }), {
+			target: { value: 'root@example:22' }
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+		await waitFor(() => {
+			expect(screen.getByRole('button', { name: 'Execute' })).toBeInTheDocument();
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Execute' }));
+
+		await waitFor(() => {
+			expect(vi.mocked(showSuccess)).toHaveBeenCalledWith(expect.stringContaining('PVE API credentials created'));
+		});
 	});
 
 	it('auto mode skips review and auto-submits execute step when execute has no fields', async () => {

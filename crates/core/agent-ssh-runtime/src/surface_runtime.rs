@@ -1802,7 +1802,15 @@ async fn run_bootstrap_execute(args: BootstrapExecuteArgs<'_>) -> SurfaceActionR
             send_infra_plugin_reports(bg_tx, host_id, &result.infra_results).await;
 
             let any_infra = result.infra_results.iter().any(|r| r.detected);
-            let mut data = json!({ "host_id": host_id.to_string() });
+            let summary: Vec<String> = result
+                .infra_results
+                .iter()
+                .flat_map(|r| r.summary_lines.iter().cloned())
+                .collect();
+            let mut data = json!({
+                "host_id": host_id.to_string(),
+                "summary": summary,
+            });
             if any_infra {
                 #[expect(
                     clippy::indexing_slicing,

@@ -301,6 +301,9 @@ pub struct BootstrapInfraResult {
     ///
     /// Returned so the bootstrap step can append these after infra detection.
     pub sudo_commands: Vec<InfraResolvedSudo>,
+    /// Human-readable summary lines for the bootstrap flow's result output
+    /// (mirrors `SyncInfraResult::summary_lines`).
+    pub summary_lines: Vec<String>,
 }
 
 /// A sudoers entry resolved by an infrastructure plugin during sync.
