@@ -804,8 +804,6 @@ fn is_valid_deb_package(pkg: &str) -> bool {
     chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '+' || c == '.' || c == '-')
 }
 
-// ── Existing helper functions (unchanged) ─────────────────────────────────────
-
 /// Parse CT-script references out of the PHS `/usr/bin/update` file.
 ///
 /// Scans every line for CT-script URLs from any [`SOURCES`] entry, in both the
@@ -862,6 +860,8 @@ pub fn parse_phs_scripts(content: &str) -> Vec<PhsScript> {
     tracing::debug!(count = scripts.len(), "parsed PHS scripts from update file");
     scripts
 }
+
+// ── Existing helper functions (unchanged) ─────────────────────────────────────
 
 /// Convert a slug to a human-readable display name.
 ///
@@ -1430,6 +1430,30 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/Proxmo
         let scripts = parse_phs_scripts(&content);
         assert_eq!(scripts.len(), 1);
         assert_eq!(scripts[0].source, &SOURCES[1], "first occurrence wins");
+    }
+
+    #[test]
+    fn parse_same_line_dedup_prefers_sources_order_over_textual_order() {
+        // Both URLs sit on the SAME line, with the later-declared source
+        // (SOURCES[1]) written first textually and the earlier-declared
+        // source (SOURCES[0]) written second. The scan loop iterates
+        // prefixes in SOURCES order and, for each prefix, walks the whole
+        // line before moving to the next — so SOURCES[0]'s URL is matched
+        // (and wins the dedup) even though it appears later in the text.
+        // Swapping the loop nesting (line-position outer, source inner)
+        // would instead pick SOURCES[1], failing this assertion.
+        let content = format!(
+            "{} {}",
+            SOURCES[1].ct_url("grafana"), // later-declared source, textually first
+            SOURCES[0].ct_url("grafana")  // earlier-declared source, textually second
+        );
+        let scripts = parse_phs_scripts(&content);
+        assert_eq!(scripts.len(), 1);
+        assert_eq!(
+            scripts[0].source, &SOURCES[0],
+            "SOURCES declaration order must win over textual order within a single line"
+        );
+        assert_eq!(scripts[0].script_url, SOURCES[0].ct_url("grafana"));
     }
 
     #[test]
