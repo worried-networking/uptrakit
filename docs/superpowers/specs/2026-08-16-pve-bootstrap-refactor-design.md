@@ -76,6 +76,29 @@ handling is its own project — D10).
   and its tokens (tokens live inside the user's `user.cfg` entry). Migration therefore needs no separate ACL/token
   cleanup for the legacy user.
 
+## Live verification (owner cluster `uk-home1`, PVE 9.2.10, 2026-08-16 — read-only)
+
+Checked over SSH against the owner's 5-node cluster (nodes thinkstation1/nuc1/optiplex1-3):
+
+- `pveum help user token add` shows `--privsep <boolean> (default=1)`; `pveum help acl modify` shows the
+  `--tokens <string>` parameter — both spec mechanisms present in the deployed CLI, and `pveum acl list`
+  already shows working `type: "token"` grants on this cluster (unrelated `root@pam!ansible` etc.).
+- A legacy managed user `uptrakit-{tenant_uuid}@pve` exists with token `uptrakit` at `privsep: 0` — the
+  migration path (§ 4) will fire on this deployment.
+- **Legacy residue grant found:** besides the four current `(path, role)` grants, the legacy user carries a
+  stale `PVEAuditor` on `/` from the pre-custom-roles scheme. Phase 2's `pveum user delete` removes all of the
+  user's grants including such residue — migration must delete the **user**, never enumerate-and-remove
+  individual grants, precisely so unknown residue cannot survive.
+- `pvesh get /cluster/status --output-format json` cluster row: `{"id":"cluster","name":"uk-home1",
+"type":"cluster"}` — the `name` extraction key for § 5 confirmed; this deployment's config name becomes
+  `pve-uk-home1`.
+- An unrelated manually-created token named `uptrakit` exists on a third-party user
+  (`…@pocket-id!uptrakit`) — the new exact-name checks (`uptrakit@pve`, `uptrakit-{our_uuid}@pve`) cannot
+  collide with it; the deleted first-match prefix scan could have been confused by adjacent naming, another
+  reason it dies.
+- `pveum acl list --output-format json` entry shape (`type`/`ugid`/`roleid`/`path`/`propagate`) recorded as
+  the fixture shape for scripted-executor tests.
+
 ## Design
 
 ### 1. Identity and naming (`pve_setup.rs`)
@@ -173,8 +196,10 @@ New agent-local migration (contributed via the plugin's `agent_migrations`,
   where the stored config references dead credentials.
 - **Phase 2** (subsequent sync, when `pve_plugin_config_id` is `Some` — i.e. the controller confirmed the
   config via the existing `on_plugin_config_reported` callback — and `legacy_pve_user` is `Some`):
-  `pveum user delete '{legacy_user}'` (prunes its token and ACLs per verified PVE behavior), clear
-  `legacy_pve_user`. Deletion failure logs a warning and retries next sync; it never blocks the sync.
+  `pveum user delete '{legacy_user}'` (prunes its token and ACLs per verified PVE behavior — including
+  pre-custom-roles residue such as the stale `PVEAuditor` on `/` observed on the live cluster; delete the
+  user, never enumerate individual grants), clear `legacy_pve_user`. Deletion failure logs a warning and
+  retries next sync; it never blocks the sync.
 
 Fresh bootstraps on clean clusters never enter migration. `reconcile_pve_config` keeps its cross-node
 convergence role; with per-cluster naming (next section) its `max()` disagreement path becomes a rare
@@ -268,7 +293,8 @@ file and per clause:
    user-supplied), **new Deprovisioning section** (D10): per-tenant token removal
    (`pveum user token remove 'uptrakit@pve' 'tenant-{uuid}'`), last-tenant cleanup (`pveum user delete
 'uptrakit@pve'`, `pveum role delete` × 3), legacy-scheme cleanup (`pveum user delete
-'uptrakit-{tenant}@pve'`), host-side cleanup (`userdel -r`, `/etc/sudoers.d/uptrakit-{user}`, installed
+'uptrakit-{tenant}@pve'` — also removes pre-custom-roles residue grants like a stale `PVEAuditor`),
+   host-side cleanup (`userdel -r`, `/etc/sudoers.d/uptrakit-{user}`, installed
    helper scripts, `authorized_keys` entries), controller-side plugin-config deletion. Cross-linked from
    `docs/end-user/ssh-agent-host-management.md` (host-removal section states what is NOT cleaned up remotely
    and points here).
