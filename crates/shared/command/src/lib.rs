@@ -5,6 +5,8 @@ pub mod executor;
 pub mod interactive;
 pub mod remote_executor;
 pub mod sudo;
+#[cfg(feature = "test-support")]
+pub mod test_support;
 pub mod types;
 
 pub use command::{
