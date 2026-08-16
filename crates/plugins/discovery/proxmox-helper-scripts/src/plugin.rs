@@ -1280,4 +1280,54 @@ mod tests {
         let outcome = plugin.fetch_text("http://127.0.0.1:1/x.sh").await;
         assert!(matches!(outcome, FetchOutcome::Err(_)));
     }
+
+    /// Spawn a minimal HTTP responder that replies `200 OK` with `body` as
+    /// its exact response body for every request; returns its bound address.
+    /// Unlike `spawn_static_responder` (which always answers with an empty
+    /// body), this proves `fetch_text` passes the response body through
+    /// unchanged rather than discarding it.
+    async fn spawn_body_responder(body: &'static str) -> std::net::SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
+                tokio::spawn(async move {
+                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                    // `let _ =` is denied (clippy::let_underscore_must_use);
+                    // expect() is fine here (allow-expect-in-tests) and a
+                    // panic in this detached task cannot fail the test. The
+                    // read amount must be handled (clippy::unused_io_amount).
+                    let mut buf = [0u8; 1024];
+                    let n = socket.read(&mut buf).await.expect("read request");
+                    if n == 0 {
+                        return; // client closed without sending a request
+                    }
+                    let content_length = body.len();
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\ncontent-length: {content_length}\r\nconnection: close\r\n\r\n{body}"
+                    );
+                    socket
+                        .write_all(response.as_bytes())
+                        .await
+                        .expect("write response");
+                });
+            }
+        });
+        addr
+    }
+
+    #[tokio::test]
+    async fn fetch_text_returns_response_body() {
+        let body = "#!/usr/bin/env bash\nAPP=\"demo\"\n";
+        let addr = spawn_body_responder(body).await;
+        let executor = RoutedOutputExecutor::new([("sh", "", 0)]);
+        let plugin = test_plugin_with(executor, reqwest::Client::new());
+        let outcome = plugin.fetch_text(&format!("http://{addr}/x.sh")).await;
+        assert!(matches!(outcome, FetchOutcome::Ok(actual) if actual == body));
+    }
 }
