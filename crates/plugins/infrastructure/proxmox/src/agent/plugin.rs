@@ -23,7 +23,7 @@ use uptrakit_plugin_infrastructure_core::agent_infra::{
 use uptrakit_plugin_infrastructure_core::error::{PluginError, Result};
 use uptrakit_plugin_infrastructure_core::{
     AgentInteraction, AgentInteractionPlacement, FormFieldDescriptor, FormFieldType,
-    FormSelectSourceDescriptor, SurfaceActionUi, SurfaceFormDescriptor,
+    FormSelectSourceDescriptor, SecretString, SurfaceActionUi, SurfaceFormDescriptor,
     surfaces::{SurfaceActionRequest, SurfaceActionResponse},
 };
 
@@ -119,15 +119,8 @@ impl HostLifecycle for crate::ProxmoxPlugin {
         }
 
         // Build the report config if new credentials were created.
-        let report = pve_credentials.map(|creds| PluginConfigReport {
-            plugin_type: "infrastructure.proxmox".to_string(),
-            name: format!("pve-{host_id}"),
-            config: json!({
-                "api_url": creds.api_url,
-                "api_token": creds.api_token,
-                "verify_ssl": true,
-            }),
-        });
+        let report = pve_credentials
+            .and_then(|creds| build_pve_config_report(format!("pve-{host_id}"), &creds));
 
         let sudo_commands = collect_pve_sudo_commands(executor).await;
 
@@ -206,15 +199,8 @@ impl HostLifecycle for crate::ProxmoxPlugin {
                                         "token: no config found on cluster, regenerating"
                                             .to_string(),
                                     );
-                                    report_plugin_config = Some(PluginConfigReport {
-                                        plugin_type: "infrastructure.proxmox".to_string(),
-                                        name: format!("pve-{host_id}"),
-                                        config: serde_json::json!({
-                                            "api_url": creds.api_url,
-                                            "api_token": creds.api_token,
-                                            "verify_ssl": true,
-                                        }),
-                                    });
+                                    report_plugin_config =
+                                        build_pve_config_report(format!("pve-{host_id}"), &creds);
                                     None
                                 }
                                 Err(e) => {
@@ -536,6 +522,32 @@ async fn create_or_reuse_pve_credentials(
     }
 }
 
+/// Build the plugin-config report by serializing a real [`ProxmoxConfig`]
+/// value, so the emitted keys derive from the struct's serde names — the
+/// `verify_ssl`/`verify_tls` key-drift class becomes unrepresentable.
+fn build_pve_config_report(
+    name: String,
+    creds: &pve_setup::PveCredentials,
+) -> Option<PluginConfigReport> {
+    let config = crate::config::ProxmoxConfig {
+        api_url: creds.api_url.clone(),
+        api_token: SecretString::new(creds.api_token.clone()),
+        verify_tls: true,
+        node_filter: Vec::new(),
+    };
+    match serde_json::to_value(&config) {
+        Ok(config) => Some(PluginConfigReport {
+            plugin_type: "infrastructure.proxmox".to_string(),
+            name,
+            config,
+        }),
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to serialize ProxmoxConfig for report");
+            None
+        }
+    }
+}
+
 // ── PVE sudo commands ────────────────────────────────────────────────────────
 
 /// Collect sudoers entries for PVE-specific management tools.
@@ -663,10 +675,33 @@ fn bootstrap_proxmox_guest_interaction() -> AgentInteraction {
 #[cfg(test)]
 mod tests {
     use super::bootstrap_proxmox_guest_interaction;
+    use super::build_pve_config_report;
     use super::drain_pending_matches_cycle;
     use crate::agent::db_ops;
+    use crate::pve_setup;
     use uptrakit_plugin_infrastructure_core::surfaces::SurfaceActionResponse;
     use uptrakit_plugin_infrastructure_core::testing::RecordingActionInvoker;
+
+    #[test]
+    fn pve_config_report_uses_struct_key_set() {
+        let creds = pve_setup::PveCredentials {
+            api_url: "https://node1.example:8006".to_string(),
+            api_token: "uptrakit-0193aaaa-bbbb-cccc-dddd-eeeeffff0000@pve!uptrakit=sekrit"
+                .to_string(),
+        };
+        let report = build_pve_config_report("pve-test".to_string(), &creds)
+            .expect("report built from valid credentials");
+        let obj = report.config.as_object().expect("config is a JSON object");
+        assert!(
+            obj.contains_key("verify_tls"),
+            "verify_tls key must be present"
+        );
+        assert!(
+            !obj.contains_key("verify_ssl"),
+            "legacy verify_ssl key must be gone"
+        );
+        assert_eq!(obj["api_url"], "https://node1.example:8006");
+    }
 
     #[test]
     fn bootstrap_proxmox_guest_action_has_boxes_icon() {

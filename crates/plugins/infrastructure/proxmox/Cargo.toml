@@ -63,6 +63,7 @@ httpmock = { workspace = true }
 uptrakit-shared-db = { workspace = true, features = ["migration", "db-sqlite"] }
 uptrakit-plugin-infrastructure-core = { workspace = true, features = ["testing", "agent-infra"] }
 uptrakit-crypto = { workspace = true }
+uptrakit-command = { workspace = true, features = ["test-support"] }
 sqlx = { workspace = true, features = ["sqlite", "runtime-tokio"] }
 tempfile = { workspace = true }
 
