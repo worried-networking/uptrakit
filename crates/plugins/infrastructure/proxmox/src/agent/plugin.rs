@@ -473,8 +473,6 @@ impl GuestExec for crate::ProxmoxPlugin {
 
 // ── PVE credential dedup ─────────────────────────────────────────────────────
 
-/// Check for existing Uptrakit PVE tokens on the cluster and either reuse
-/// the existing config or create new credentials.
 /// Outcome of the credential create-or-reuse step, mapped to a bootstrap
 /// summary line. Distinguishes the previously warn-only branches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -493,6 +491,8 @@ struct CredentialResolution {
     outcome: PveCredentialOutcome,
 }
 
+/// Check for existing Uptrakit PVE tokens on the cluster and either reuse
+/// the existing config or create new credentials.
 async fn create_or_reuse_pve_credentials(
     executor: &dyn RemoteExecutor,
     db: &DatabaseConnection,
