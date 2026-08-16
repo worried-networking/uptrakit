@@ -36,6 +36,48 @@ to avoid pulling in the full service SDK.
 
 Do not add per-binary `init_tracing()` helpers or call `tracing_subscriber` directly in binaries.
 
+## Output Formats
+
+Every daemon that calls `TracingBuilder::init()` selects one of two output formats at startup
+(ADR-0043):
+
+| Format     | When                                                   | Output                                                               |
+| ---------- | ------------------------------------------------------ | -------------------------------------------------------------------- |
+| `text`     | interactive terminals, redirected stdout, Docker       | classic `fmt` lines; ANSI colors only when stdout is a terminal      |
+| `journald` | stdout **is** the systemd journal (detected or forced) | native journald protocol via `tracing-journald` (priorities, fields) |
+
+### Detection
+
+Journald mode activates automatically when the `JOURNAL_STREAM` environment variable (set by systemd,
+see systemd.exec(5)) matches the `dev:inode` identity of stdout, checked via `fstat`. This answers
+"is stdout itself the journal", not "is journald reachable" — redirecting stdout on a systemd host
+keeps the text format.
+
+### Override
+
+`UPTRAKIT_LOG_FORMAT=auto|text|journald` (default `auto`). Invalid values print a warning on stderr
+and fall back to `auto`. For rollback on a deployed unit use a systemd drop-in — see the
+[end-user logging guide](../end-user/logging.md).
+
+### Priority mapping (journald mode)
+
+Lossless upstream default: ERROR→3 (err), WARN→4 (warning), INFO→5 (notice), DEBUG→6 (info),
+TRACE→7 (debug). `journalctl -p notice` therefore shows INFO-and-up without DEBUG.
+
+### Structured fields (journald mode)
+
+Event fields become indexed journal fields with an `F` prefix, e.g. `F_HOST_ID=…`; `MESSAGE` holds
+only the message text. Query with `journalctl -u uptrakit F_HOST_ID=<uuid>`, `-o verbose`, or
+`-o json`. Note that plain `grep key=value` over default `journalctl` output no longer matches
+fields.
+
+### Failure behavior
+
+If the journald socket is unavailable at startup (forced `journald` on a non-systemd host,
+non-unix targets), `init()` prints a stderr warning and falls back to the text layer — logging
+setup never aborts a daemon. Post-init send errors are dropped by the upstream layer (accepted
+residual, see ADR-0043).
+
 ## Log Level Guidelines
 
 | Level   | Usage                                                                                                                                                             | Example events                                                            |

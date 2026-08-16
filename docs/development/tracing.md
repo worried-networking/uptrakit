@@ -36,8 +36,14 @@ calls into this crate instead:
 - **Controller, CLI, and integration-tests** depend on `uptrakit-tracing-init` directly
   (to avoid pulling in the full service SDK) and use `uptrakit_tracing_init::` paths.
 
-The controller additionally attaches an optional `journald` layer via
-`TracingBuilder::extra_layer()` when built with the `journald` feature.
+The main output layer is selected at runtime inside `TracingBuilder::init()`: the native
+`tracing-journald` layer when stdout is the systemd journal, the classic `fmt` layer otherwise
+(see [Logging — Output Formats](logging.md#output-formats)).
+
+The controller additionally attaches a dedicated `journald` audit layer (feature `journald`) via
+`TracingBuilder::extra_layer()`, paired with `journald_exclude_exact("uptrakit_audit")` so audit
+events are single-sourced in the journal — the layer and the exclusion are installed together or
+not at all.
 
 **Pattern:**
 
