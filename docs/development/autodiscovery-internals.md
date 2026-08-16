@@ -83,8 +83,20 @@ elsewhere.
 
 ### PHS (Proxmox Helper Scripts)
 
-PHS always emits `DiscoveryTarget` values. During discovery, it fetches each container's CT
-script from `raw.githubusercontent.com` and analyzes it. The PHS shell constants live in
+PHS always emits `DiscoveryTarget` values. During discovery, it matches each container's CT-script
+URL against a fixed `SOURCES` allowlist covering `community-scripts/ProxmoxVE`,
+`community-scripts/ProxmoxVED`, `tteck/Proxmox`, and `worried-networking/uptrakit` (under
+`scripts/pvehs/`), in both the `raw.githubusercontent.com` and `github.com/…/raw/…` URL forms, then
+fetches and analyzes the matched CT script; see `SOURCES` in
+`crates/plugins/discovery/proxmox-helper-scripts/src/discovery.rs` rather than a copy here.
+Software identity is the bare slug — when the same slug appears from two sources, the first
+occurrence wins. A definitive HTTP 404 fetching a CT or install script logs a warning and skips
+that slug (the script may have vanished upstream); any other fetch failure aborts the discovery run
+to avoid a partial snapshot. Install-script URLs are derived from the matched source via
+`PhsSource::install_url`. When analyzing a CT script, shell line continuations (a trailing `\`) are
+joined before the GitHub and Codeberg release-call collectors only — every other extractor (npm,
+APT, the `GH_REPO=`/`CODEBERG_REPO=` variable forms) still sees the original, unjoined line
+structure. The PHS shell constants live in
 `crates/plugins/discovery/proxmox-helper-scripts/src/plugin.rs`.
 
 **GitHub-managed apps** emit **two** `DiscoveryTarget` values:

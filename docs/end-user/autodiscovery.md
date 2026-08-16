@@ -91,7 +91,9 @@ configuration required.
 PHS discovery works differently from other plugins. Instead of creating software items linked
 to the PHS plugin config, the PHS plugin analyses each container's CT script to identify the
 upstream source and emits **discovery targets** that tell the controller which plugin config to
-create:
+create. Only CT-script URLs from four recognised repositories are matched:
+`community-scripts/ProxmoxVE`, `community-scripts/ProxmoxVED`, `tteck/Proxmox`, and
+`worried-networking/uptrakit` (Uptrakit's own helper scripts).
 
 - **GitHub-managed apps** (e.g. Booklore, Radarr, Sonarr, Pangolin, Uptime Kuma): The PHS
   plugin emits a target for the `releases.github` plugin type, pre-configured with the
@@ -111,9 +113,20 @@ create:
   `package_identifier` is the Debian package name. Version information comes from APT, but
   updates always use the PHS update script.
 
+- **Script removed upstream**: If a container's CT or install script has been deleted or renamed
+  at its source (a definitive HTTP 404), that app is skipped with a warning in the discovery
+  service's log -- the controller journal in embedded/standalone deployments. The warning repeats
+  on every discovery cycle (roughly every 6 hours) for as long as the script stays absent.
+
 - **Undetectable apps**: Apps whose scripts contain neither a GitHub release source nor a
-  specific `apt install` line are skipped. A warning is logged on the agent. Check agent logs
-  (`journalctl -u uptrakit-agent`) if you expect to see an app but it does not appear.
+  specific `apt install` line are skipped. A warning is logged in the discovery service's log --
+  the controller journal in embedded/standalone deployments -- if you expect to see an app but it
+  does not appear.
+
+- **Unrecognised update script**: If `/usr/bin/update` contains URLs but none of them match a
+  known PHS source -- for example, on a host where `/usr/bin/update` has been customized to point
+  elsewhere -- a warning naming the first such URL is logged, so you can see why nothing was
+  discovered.
 
 After discovery, version checking is handled by the target plugin configs (`releases.github`,
 `NPM`, or `APT`), while updates are always handled by the PHS Shell config (which runs

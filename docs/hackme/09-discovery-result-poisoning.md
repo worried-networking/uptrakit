@@ -46,9 +46,13 @@
   which restricts slugs to `[a-z0-9-]+`. Path traversal (`..`) and special characters
   are rejected.
 - **Canonical URL reconstruction.** The plugin does not use the raw URL from the
-  script. Instead, it reconstructs the fetch URL from the validated slug:
-  `https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/{slug}.sh`.
-  This effectively allowlists the fetch target to a single GitHub organization.
+  script. A slug is only extracted when the line already matches one of the four
+  compile-time-fixed source prefixes in the `SOURCES` table
+  (`community-scripts/ProxmoxVE`, `community-scripts/ProxmoxVED`, `tteck/Proxmox`,
+  `worried-networking/uptrakit`); the plugin then reconstructs the fetch URL from the
+  validated slug and the matched source, never from attacker-supplied URL text. This
+  fetch allowlist is source-complete: a poisoned `/usr/bin/update` cannot direct
+  fetches to arbitrary hosts, only to slugs under one of the four known repositories.
 - **Owner/repo component validation.** Extracted `owner` and `repo` values pass
   through `is_valid_gh_component()` which rejects `/` and `..`. This prevents path
   traversal in API URLs.
