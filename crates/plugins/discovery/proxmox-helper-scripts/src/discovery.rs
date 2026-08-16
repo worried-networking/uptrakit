@@ -9,21 +9,103 @@ use uptrakit_plugin_infrastructure_core::PluginError;
 /// Well-known path where PHS containers store their update script.
 pub const UPDATE_SCRIPT_PATH: &str = "/usr/bin/update";
 
-/// Base URL prefix for PHS community-scripts CT scripts (canonical form).
-const PHS_CT_URL_PREFIX: &str =
-    "https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/";
-
-/// Alternative GitHub URL prefix for PHS community-scripts CT scripts.
-///
-/// Some `/usr/bin/update` scripts use the `github.com/…/raw/…` redirect form
-/// instead of `raw.githubusercontent.com`. Both URLs serve identical content;
-/// this prefix is recognised during detection and the resulting slug is always
-/// fetched via the canonical [`PHS_CT_URL_PREFIX`] URL.
-const PHS_CT_URL_PREFIX_ALT: &str = "https://github.com/community-scripts/ProxmoxVE/raw/main/ct/";
-
 /// Base URL prefix for PHS community-scripts install scripts.
 pub const PHS_INSTALL_URL_PREFIX: &str =
     "https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/install/";
+
+/// A known Proxmox-helper-scripts hosting repository.
+#[derive(Debug, PartialEq, Eq)]
+pub struct PhsSource {
+    pub owner: &'static str,
+    pub repo: &'static str,
+    pub branch: &'static str,
+    /// Path prefix inside the repo above `ct/` and `install/` ("" for repo root).
+    pub scripts_root: &'static str,
+}
+
+/// All repositories the plugin recognises CT-script URLs from. Fixed allowlist
+/// by design (spec D1): a general URL match would let a root-owned but
+/// attacker-influenced update file point the plugin at arbitrary hosts.
+///
+/// `static`, not `const`: a `const` is inlined per use site with no guarantee
+/// of a single address for the table; `static` guarantees exactly one.
+pub static SOURCES: &[PhsSource] = &[
+    PhsSource {
+        owner: "community-scripts",
+        repo: "ProxmoxVE",
+        branch: "main",
+        scripts_root: "",
+    },
+    PhsSource {
+        owner: "community-scripts",
+        repo: "ProxmoxVED",
+        branch: "main",
+        scripts_root: "",
+    },
+    PhsSource {
+        owner: "tteck",
+        repo: "Proxmox",
+        branch: "main",
+        scripts_root: "",
+    },
+    PhsSource {
+        owner: "worried-networking",
+        repo: "uptrakit",
+        branch: "main",
+        scripts_root: "scripts/pvehs",
+    },
+];
+
+impl PhsSource {
+    /// `""` for repo-root sources, `"{scripts_root}/"` otherwise — the `/`
+    /// separator is emitted only when a root is present so URLs never carry a
+    /// doubled slash.
+    fn path_root(&self) -> String {
+        if self.scripts_root.is_empty() {
+            String::new()
+        } else {
+            format!("{}/", self.scripts_root)
+        }
+    }
+
+    /// Canonical raw CT-script URL prefix (`raw.githubusercontent.com` form).
+    pub fn ct_prefix(&self) -> String {
+        format!(
+            "https://raw.githubusercontent.com/{}/{}/{}/{}ct/",
+            self.owner,
+            self.repo,
+            self.branch,
+            self.path_root()
+        )
+    }
+
+    /// Alternate CT-script URL prefix (`github.com/…/raw/…` form).
+    pub fn ct_prefix_alt(&self) -> String {
+        format!(
+            "https://github.com/{}/{}/raw/{}/{}ct/",
+            self.owner,
+            self.repo,
+            self.branch,
+            self.path_root()
+        )
+    }
+
+    /// Canonical raw URL of the CT script for `slug`.
+    pub fn ct_url(&self, slug: &str) -> String {
+        format!("{}{slug}.sh", self.ct_prefix())
+    }
+
+    /// Canonical raw URL of the install script for `slug`.
+    pub fn install_url(&self, slug: &str) -> String {
+        format!(
+            "https://raw.githubusercontent.com/{}/{}/{}/{}install/{slug}-install.sh",
+            self.owner,
+            self.repo,
+            self.branch,
+            self.path_root()
+        )
+    }
+}
 
 /// Common system-level APT packages that are never a PHS "main application".
 ///
@@ -163,8 +245,10 @@ impl PhsScriptAnalysis {
 pub struct PhsScript {
     /// The slug extracted from the script URL (e.g. `booklore`, `crafty-controller`).
     pub slug: String,
-    /// The full URL to the community-scripts CT script.
+    /// Canonical raw URL of the CT script at its matched source.
     pub script_url: String,
+    /// Source repository the CT-script URL matched.
+    pub source: &'static PhsSource,
 }
 
 // ── Script analysis ───────────────────────────────────────────────────────────
@@ -722,43 +806,53 @@ fn is_valid_deb_package(pkg: &str) -> bool {
 
 // ── Existing helper functions (unchanged) ─────────────────────────────────────
 
-/// Parse PHS script references from the content of `/usr/bin/update`.
+/// Parse CT-script references out of the PHS `/usr/bin/update` file.
 ///
-/// Scans each line for occurrences of the community-scripts CT URL prefix in
-/// both known forms (`raw.githubusercontent.com` and `github.com/…/raw/…`),
-/// extracts the slug from the URL path, validates it, and deduplicates by slug.
-/// The `script_url` in every returned [`PhsScript`] always uses the canonical
-/// `raw.githubusercontent.com` form regardless of which prefix was matched.
+/// Scans every line for CT-script URLs from any [`SOURCES`] entry, in both the
+/// raw (`raw.githubusercontent.com`) and `github.com/…/raw/…` forms.
+/// Deduplicates by bare slug — first occurrence wins, regardless of source
+/// (spec D4: bare-slug identity); within a single line, [`SOURCES`]
+/// declaration order decides, not textual order. Returned `script_url`s are
+/// normalised to the matched source's canonical raw form.
 pub fn parse_phs_scripts(content: &str) -> Vec<PhsScript> {
-    let mut seen = std::collections::HashSet::new();
     let mut scripts = Vec::new();
+    let mut seen = std::collections::HashSet::new();
 
-    const PREFIXES: &[&str] = &[PHS_CT_URL_PREFIX, PHS_CT_URL_PREFIX_ALT];
+    // Prefixes are loop-invariant: build them once per call (the old code
+    // hoisted them as consts; formatted Strings can't be const, so hoist here).
+    let prefixes: Vec<(String, &'static PhsSource)> = SOURCES
+        .iter()
+        .flat_map(|source| {
+            [
+                (source.ct_prefix(), source),
+                (source.ct_prefix_alt(), source),
+            ]
+        })
+        .collect();
 
     for line in content.lines() {
-        for &prefix in PREFIXES {
+        for (prefix, source) in prefixes.iter().map(|(p, s)| (p.as_str(), *s)) {
             let mut search_from = 0;
             while let Some(prefix_start) = line[search_from..].find(prefix) {
-                let abs_start = search_from + prefix_start + prefix.len();
-                search_from = abs_start;
-
-                let remaining = &line[abs_start..];
-                let Some(dot_sh_pos) = remaining.find(".sh") else {
+                let slug_start = search_from + prefix_start + prefix.len();
+                // Advance to just past the matched prefix (not past the ".sh")
+                // before any validation, so a rejected candidate cannot swallow
+                // a later URL on the same line.
+                search_from = slug_start;
+                let remaining = &line[slug_start..];
+                let Some(sh_pos) = remaining.find(".sh") else {
                     continue;
                 };
-
-                let slug = &remaining[..dot_sh_pos];
+                let slug = &remaining[..sh_pos];
                 if !is_valid_slug(slug) {
                     tracing::trace!(slug, "skipping invalid PHS slug");
                     continue;
                 }
-
                 if seen.insert(slug.to_string()) {
-                    // Always normalise to the canonical raw.githubusercontent.com URL.
-                    let script_url = format!("{PHS_CT_URL_PREFIX}{slug}.sh");
                     scripts.push(PhsScript {
                         slug: slug.to_string(),
-                        script_url,
+                        script_url: source.ct_url(slug),
+                        source,
                     });
                 }
             }
@@ -1258,6 +1352,119 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/Proxmo
             scripts[0].script_url,
             "https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/booklore.sh"
         );
+    }
+
+    // ── PhsSource URL construction ───────────────────────────────────────
+
+    #[test]
+    fn phs_source_urls_repo_root() {
+        let src = &SOURCES[0]; // community-scripts/ProxmoxVE
+        assert_eq!(
+            src.ct_prefix(),
+            "https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/"
+        );
+        assert_eq!(
+            src.ct_prefix_alt(),
+            "https://github.com/community-scripts/ProxmoxVE/raw/main/ct/"
+        );
+        assert_eq!(
+            src.ct_url("sonarr"),
+            "https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/sonarr.sh"
+        );
+        assert_eq!(
+            src.install_url("sonarr"),
+            "https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/install/sonarr-install.sh"
+        );
+    }
+
+    #[test]
+    fn phs_source_urls_nested_scripts_root_no_doubled_slash() {
+        let src = SOURCES
+            .iter()
+            .find(|s| s.repo == "uptrakit")
+            .expect("uptrakit source");
+        assert_eq!(
+            src.ct_url("uptrakit"),
+            "https://raw.githubusercontent.com/worried-networking/uptrakit/main/scripts/pvehs/ct/uptrakit.sh"
+        );
+        assert_eq!(
+            src.install_url("uptrakit"),
+            "https://raw.githubusercontent.com/worried-networking/uptrakit/main/scripts/pvehs/install/uptrakit-install.sh"
+        );
+        for s in SOURCES {
+            assert!(
+                !s.ct_url("x").contains("com//")
+                    && !s.ct_url("x")["https://".len()..].contains("//"),
+                "doubled slash in {}",
+                s.ct_url("x")
+            );
+        }
+    }
+
+    #[test]
+    fn parse_matches_every_source_in_both_url_forms() {
+        for (i, src) in SOURCES.iter().enumerate() {
+            let slug = format!("app{i}");
+            for url in [
+                src.ct_url(&slug),
+                format!("{}{slug}.sh", src.ct_prefix_alt()),
+            ] {
+                let content = format!(r#"bash -c "$(curl -fsSL {url})""#);
+                let scripts = parse_phs_scripts(&content);
+                assert_eq!(scripts.len(), 1, "no match for {url}");
+                assert_eq!(scripts[0].slug, slug);
+                // Both forms normalise to the source's canonical raw URL.
+                assert_eq!(scripts[0].script_url, src.ct_url(&slug));
+                assert_eq!(scripts[0].source, src);
+            }
+        }
+    }
+
+    #[test]
+    fn parse_dedups_same_slug_across_sources_first_wins() {
+        let content = format!(
+            "{}\n{}\n",
+            SOURCES[1].ct_url("sonarr"), // ProxmoxVED first
+            SOURCES[0].ct_url("sonarr")  // ProxmoxVE second
+        );
+        let scripts = parse_phs_scripts(&content);
+        assert_eq!(scripts.len(), 1);
+        assert_eq!(scripts[0].source, &SOURCES[1], "first occurrence wins");
+    }
+
+    #[test]
+    fn parse_recovers_second_url_after_invalid_candidate_on_same_line() {
+        // The first prefix occurrence yields an invalid slug candidate (it
+        // swallows everything up to the second URL's ".sh"); the scan must
+        // re-search from just past the first prefix and still find the
+        // second URL (parity with the pre-rewrite cursor semantics).
+        let content = format!(
+            "# see {} and {}",
+            SOURCES[0].ct_prefix(),
+            SOURCES[0].ct_url("sonarr")
+        );
+        let scripts = parse_phs_scripts(&content);
+        assert_eq!(scripts.len(), 1);
+        assert_eq!(scripts[0].slug, "sonarr");
+    }
+
+    #[test]
+    fn parse_rejects_non_allowlisted_repo_url() {
+        // Syntactically identical shape, repo outside SOURCES — no script
+        // (spec: the fetch allowlist is closed; testing rejection).
+        let content = "https://raw.githubusercontent.com/evil-org/ProxmoxVE/main/ct/sonarr.sh";
+        let scripts = parse_phs_scripts(content);
+        assert!(scripts.is_empty());
+    }
+
+    #[test]
+    fn parse_live_uptrakit_update_line() {
+        // Exact content of /usr/bin/update on the live host.
+        let content = r#"bash -c "$(curl -fsSL https://raw.githubusercontent.com/worried-networking/uptrakit/main/scripts/pvehs/ct/uptrakit.sh)""#;
+        let scripts = parse_phs_scripts(content);
+        assert_eq!(scripts.len(), 1);
+        assert_eq!(scripts[0].slug, "uptrakit");
+        assert_eq!(scripts[0].source.owner, "worried-networking");
     }
 
     // ── slug_to_display_name ────────────────────────────────────────
