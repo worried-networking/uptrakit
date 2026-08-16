@@ -123,19 +123,26 @@ pub(crate) async fn load(args: crate::cli::Args, info: &BuildInfo) -> crate::Res
         .directives_for_verbosity(2, &[("uptrakit", "debug")])
         .directives_for_verbosity(3, &[("uptrakit", "trace")]);
 
-    // When the journald audit backend is selected, add a dedicated journald
-    // tracing layer filtered to the `uptrakit_audit` target so that structured
-    // audit events reach the system journal alongside normal stdout logging.
+    // The dedicated audit layer and the main-layer `uptrakit_audit`
+    // exclusion must follow one predicate: layer constructed => both
+    // installed; construction failed => neither (exclusion without the
+    // layer would drop audit events from the journal entirely in
+    // journald mode).
     #[cfg(feature = "journald")]
-    let builder = {
-        #[expect(
-            clippy::expect_used,
-            reason = "infallible at startup: journald layer construction failures are unrecoverable for the requested audit backend and must abort initialization"
-        )]
-        let journald = tracing_journald::layer()
-            .expect("failed to connect to journald")
-            .with_filter(tracing_subscriber::EnvFilter::new("uptrakit_audit=info"));
-        builder.extra_layer(Box::new(journald))
+    let builder = match tracing_journald::layer() {
+        Ok(journald) => {
+            let journald =
+                journald.with_filter(tracing_subscriber::EnvFilter::new("uptrakit_audit=info"));
+            builder
+                .extra_layer(Box::new(journald))
+                .journald_exclude_exact("uptrakit_audit")
+        }
+        Err(error) => {
+            eprintln!(
+                "warning: journald unavailable ({error}); audit events will not be mirrored to the journal"
+            );
+            builder
+        }
     };
 
     builder.init();
