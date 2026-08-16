@@ -79,7 +79,9 @@ not describe an outcome reachable through the `/usr/bin/update` injection path t
   the URL's **userinfo** component -- and only that component -- with `***`: the `@`
   must occur after `://` and before the first following `/`, `?`, or `#`, so
   `https://user:token@host/x` is redacted but an `@` later in the path is left alone.
-  Nothing else in the URL is touched. A secret carried elsewhere in the same URL -- in
+  When the authority holds more than one `@` -- a raw `@` inside the password, as in
+  `https://user:p@ss@host/x` -- the **last** one in the authority is the delimiter, so
+  no fragment of the secret survives. Nothing else in the URL is touched. A secret carried elsewhere in the same URL -- in
   the query string (`https://host/x?token=SECRET`) or in the fragment -- is logged
   verbatim. Treat the WARN's `first_url` field as untrusted, potentially
   secret-bearing content read off the host, not as sanitised output.

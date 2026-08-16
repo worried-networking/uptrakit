@@ -289,25 +289,23 @@ fn first_url_like_token(content: &str) -> Option<&str> {
 /// via `tracing`, including the unmatched-source WARN in [`parse_phs_scripts`]:
 /// an untrusted `/usr/bin/update` file can embed a credential directly in a
 /// URL (`https://user:token@host/...`), and that credential must never reach
-/// the log verbatim. Everything between `"://"` and the first following `@`
-/// is replaced with a fixed `***` marker, but only when that `@` occurs
-/// before the first following `/`, `?`, or `#` — an `@` appearing later, in
-/// the path, is not userinfo and is left untouched. URLs with no userinfo (or
-/// no `"://"` at all) are returned unchanged, borrowed rather than allocated.
+/// the log verbatim. Everything between `"://"` and the **last** `@` inside the
+/// authority is replaced with a fixed `***` marker. The authority ends at the
+/// first following `/`, `?`, or `#`, so an `@` appearing later, in the path, is
+/// not userinfo and is left untouched; taking the last `@` rather than the
+/// first matters because the userinfo may itself contain a raw `@`
+/// (`https://user:p@ss@host/...`), where splitting on the first one would leak
+/// the tail of the password. URLs with no userinfo (or no `"://"` at all) are
+/// returned unchanged, borrowed rather than allocated.
 fn redact_url_userinfo_for_logging(url: &str) -> Cow<'_, str> {
     let Some((scheme, rest)) = url.split_once("://") else {
         return Cow::Borrowed(url);
     };
-    let authority_end = rest.find(['/', '?', '#']);
-    let Some((before_at, after_at)) = rest.split_once('@') else {
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let Some(at) = rest[..authority_end].rfind('@') else {
         return Cow::Borrowed(url);
     };
-    if let Some(boundary) = authority_end
-        && before_at.len() >= boundary
-    {
-        return Cow::Borrowed(url);
-    }
-    Cow::Owned(format!("{scheme}://***@{after_at}"))
+    Cow::Owned(format!("{scheme}://***@{}", &rest[at + 1..]))
 }
 
 /// Analyse the content of a PHS CT script to determine the upstream source type.
@@ -1320,6 +1318,28 @@ apt install -y somepackage
         // to the path (e.g. an npm scoped-package URL), not userinfo.
         let url = "https://host/@scope/pkg";
         assert_eq!(redact_url_userinfo_for_logging(url), url);
+    }
+
+    #[test]
+    fn redact_url_userinfo_at_inside_password_redacts_whole_userinfo() {
+        // A raw '@' inside the password: the last '@' in the authority is the
+        // userinfo delimiter, so no fragment of the secret survives.
+        let url = "https://user:p@ss@host/x.sh";
+        let redacted = redact_url_userinfo_for_logging(url);
+        assert_eq!(redacted, "https://***@host/x.sh");
+        assert!(
+            !redacted.contains("ss@host") && !redacted.contains("p@"),
+            "password fragment leaked into log output: {redacted}"
+        );
+    }
+
+    #[test]
+    fn redact_url_userinfo_authority_only_url_redacted() {
+        // No path, query or fragment — the authority runs to end of string.
+        assert_eq!(
+            redact_url_userinfo_for_logging("https://user:token@host"),
+            "https://***@host"
+        );
     }
 
     // ── Codeberg detection tests ─────────────────────────────────────

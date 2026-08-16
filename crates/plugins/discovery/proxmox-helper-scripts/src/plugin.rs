@@ -110,7 +110,26 @@ enum FetchOutcome {
     /// Definitive HTTP 404.
     NotFound,
     /// Network error, non-404 HTTP error, or body read error.
-    Err(String),
+    Err(FetchError),
+}
+
+/// Why a fetch failed, keeping the failure typed (and the underlying
+/// `reqwest::Error` as the error source) instead of flattening it into a
+/// message string at the point of failure. Rendered into
+/// [`PluginError::PluginInternal`] only at the `bail!` sites in
+/// `discover_software`; because that variant carries a `String`, each message
+/// restates its source so no detail is lost when the chain is collapsed.
+#[derive(Debug, thiserror::Error)]
+enum FetchError {
+    /// The request never produced a response (DNS, connect, TLS, timeout).
+    #[error("request failed: {0}")]
+    Request(#[source] reqwest::Error),
+    /// A response arrived carrying a non-success, non-404 status.
+    #[error("HTTP status {0}")]
+    Status(reqwest::StatusCode),
+    /// The response arrived but its body could not be read as text.
+    #[error("body read failed: {0}")]
+    Body(#[source] reqwest::Error),
 }
 
 impl ProxmoxHelperScriptsPlugin {
@@ -145,7 +164,7 @@ impl ProxmoxHelperScriptsPlugin {
     async fn fetch_text(&self, url: &str) -> FetchOutcome {
         let response = match self.client.get(url).send().await {
             Ok(r) => r,
-            Err(e) => return FetchOutcome::Err(format!("request failed: {e}")),
+            Err(e) => return FetchOutcome::Err(FetchError::Request(e)),
         };
         let status = response.status();
         if status == reqwest::StatusCode::NOT_FOUND {
@@ -156,11 +175,11 @@ impl ProxmoxHelperScriptsPlugin {
         }
         if !status.is_success() {
             tracing::warn!(url, status = %status, "HTTP fetch failed");
-            return FetchOutcome::Err(format!("HTTP status {status}"));
+            return FetchOutcome::Err(FetchError::Status(status));
         }
         match response.text().await {
             Ok(body) => FetchOutcome::Ok(body),
-            Err(e) => FetchOutcome::Err(format!("body read failed: {e}")),
+            Err(e) => FetchOutcome::Err(FetchError::Body(e)),
         }
     }
 
@@ -1149,6 +1168,60 @@ mod tests {
         let target = ProxmoxHelperScriptsPlugin::npm_target("@angular/cli");
         assert_eq!(target.plugin_type, plugin_ids::PACKAGE_MANAGER_NPM.clone());
         assert_eq!(target.package_identifier.as_deref(), Some("@angular/cli"));
+    }
+
+    // ── end-to-end target composition ────────────────────────────────────
+
+    #[test]
+    fn uptrakit_update_line_composes_github_and_shell_targets() {
+        // Spec end-to-end fixture: an /usr/bin/update line naming the uptrakit
+        // source, plus that source's CT script, must compose into a GitHub
+        // fetch target for worried-networking/uptrakit and a PHS shell target
+        // carrying the version-file basename. Chains the real parse → analyse →
+        // target builders; only the network fetch between them is stubbed (the
+        // plugin's URLs are https and the suite has no TLS server).
+        let update_file = r#"bash -c "$(curl -fsSL https://raw.githubusercontent.com/worried-networking/uptrakit/main/scripts/pvehs/ct/uptrakit.sh)""#;
+        let scripts = parse_phs_scripts(update_file);
+        assert_eq!(scripts.len(), 1);
+        let script = &scripts[0];
+        assert_eq!(script.slug, "uptrakit");
+        assert_eq!(script.source.owner, "worried-networking");
+
+        // Body served by the URL above at that source.
+        let ct_script = r#"
+APP="Uptrakit"
+check_for_gh_release "uptrakit-controller-standalone" "worried-networking/uptrakit"
+"#;
+        let analysis = analyze_phs_script(&script.slug, ct_script);
+        assert_eq!(analysis.github_owner.as_deref(), Some("worried-networking"));
+        assert_eq!(analysis.github_repo.as_deref(), Some("uptrakit"));
+        assert_eq!(
+            analysis.version_file_basename.as_deref(),
+            Some("uptrakit-controller-standalone")
+        );
+
+        let gh = ProxmoxHelperScriptsPlugin::github_fetch_target(
+            analysis.github_owner.as_deref().expect("owner"),
+            analysis.github_repo.as_deref().expect("repo"),
+        );
+        assert_eq!(gh.plugin_type, plugin_ids::RELEASES_GITHUB.clone());
+        assert_eq!(
+            gh.package_identifier.as_deref(),
+            Some("worried-networking/uptrakit")
+        );
+        assert_eq!(gh.roles, vec![PluginRole::FetchReleases]);
+
+        let shell =
+            ProxmoxHelperScriptsPlugin::phs_shell_target(analysis.version_file_basename.as_deref());
+        assert_eq!(shell.plugin_type, plugin_ids::GENERIC_SHELL.clone());
+        assert_eq!(
+            shell.package_identifier.as_deref(),
+            Some("uptrakit-controller-standalone")
+        );
+        assert_eq!(
+            shell.roles,
+            vec![PluginRole::DetectVersion, PluginRole::ExecuteUpdate]
+        );
     }
 
     // ── fetch-failure contract ───────────────────────────────────────────
