@@ -22,6 +22,6 @@ pub use executor::{
 };
 #[cfg(feature = "interactive")]
 pub use interactive::kill_process_group;
-pub use remote_executor::{RemoteCommandResult, RemoteExecutor};
+pub use remote_executor::{LocalRemoteExecutor, RemoteCommandResult, RemoteExecutor};
 pub use sudo::{ParseSudoPolicyError, SudoAwareCommandExecutor, SudoContext, SudoPolicy};
 pub use types::UpdateOutputLine;
