@@ -15,6 +15,13 @@ pub(crate) enum ControllerCommand {
     /// Run this while the controller is stopped. Take a backup of both
     /// databases before proceeding.
     DbMigrate(DbMigrateArgs),
+
+    /// Embedded-agent maintenance commands, run on this host and exit.
+    #[cfg(feature = "embedded-agent")]
+    Agent {
+        #[command(subcommand)]
+        command: uptrakit_agent_runtime::AgentRuntimeCommand,
+    },
 }
 
 /// Arguments for the `db-migrate` subcommand.
@@ -379,6 +386,23 @@ mod tests {
     fn migrate_and_exit_default_false() {
         let args = super::Args::try_parse_from(["uptrakit-controller"]).unwrap();
         assert!(!args.migrate_and_exit);
+    }
+
+    #[cfg(feature = "embedded-agent")]
+    #[test]
+    fn agent_bootstrap_host_parses() {
+        let args = super::Args::try_parse_from([
+            "uptrakit-controller",
+            "agent",
+            "bootstrap-host",
+            "--user",
+            "svc",
+        ])
+        .expect("should parse agent subcommand");
+        assert!(matches!(
+            args.command,
+            Some(super::ControllerCommand::Agent { .. })
+        ));
     }
 
     #[test]

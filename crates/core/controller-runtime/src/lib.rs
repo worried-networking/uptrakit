@@ -183,6 +183,17 @@ async fn async_main(info: BuildInfo) -> std::process::ExitCode {
         return std::process::ExitCode::SUCCESS;
     }
 
+    #[cfg(feature = "embedded-agent")]
+    if let Some(cli::ControllerCommand::Agent { ref command }) = args.command {
+        // Tracing is needed for provisioning progress/warnings.
+        uptrakit_tracing_init::TracingBuilder::new().init();
+        if let Err(report) = uptrakit_agent_runtime::cli::run_command(command).await {
+            eprintln!("agent command error: {report:?}");
+            return std::process::ExitCode::FAILURE;
+        }
+        return std::process::ExitCode::SUCCESS;
+    }
+
     if let Err(report) = Box::pin(boot::run_server(args, info)).await {
         eprintln!("Error:\n{report}");
         std::process::ExitCode::FAILURE

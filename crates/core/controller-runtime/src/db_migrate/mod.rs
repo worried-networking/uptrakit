@@ -200,15 +200,14 @@ mod tests {
         .expect("should parse db-migrate subcommand");
 
         let cmd = args.command.expect("command should be Some");
-        match cmd {
-            ControllerCommand::DbMigrate(ref db_args) => {
-                assert_eq!(db_args.source_db, "sqlite::memory:");
-                assert_eq!(db_args.target_db, "sqlite::memory:");
-                assert_eq!(db_args.batch_size, 500);
-                assert!(!db_args.force);
-                assert!(!db_args.yes);
-            }
-        }
+        let ControllerCommand::DbMigrate(ref db_args) = cmd else {
+            panic!("expected DbMigrate command, got {cmd:?}");
+        };
+        assert_eq!(db_args.source_db, "sqlite::memory:");
+        assert_eq!(db_args.target_db, "sqlite::memory:");
+        assert_eq!(db_args.batch_size, 500);
+        assert!(!db_args.force);
+        assert!(!db_args.yes);
     }
 
     /// Integration test: migrate all seeded rows from one in-memory SQLite
