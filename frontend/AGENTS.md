@@ -6,12 +6,13 @@ architecture invariants, Rust crate layout, and quality gates, **read the root
 
 ## Technology stack
 
-- **Framework:** SvelteKit `^2.55.0` (static adapter, see `svelte.config.js`)
-- **UI library:** Skeleton UI `^4.13.0` + Tailwind CSS `^4.2.1`
-- **Language:** TypeScript `^5.9.3`
-- **Unit tests:** Vitest `^4.1.0` (`vitest.config.ts`)
-- **E2E tests:** Playwright `^1.58.2` (`playwright.config.ts`)
-- **Linting:** ESLint `^10.0.3` (`eslint.config.js`) + Prettier `^3.8.1`
+- **Framework:** SvelteKit `^2.70.2` (static adapter, see `svelte.config.js`)
+- **UI library:** Skeleton UI `^5.0.0` + Tailwind CSS `^4.3.3`
+- **Language:** TypeScript `^6.0.3` — TypeScript 7 is blocked by peer ranges
+  (`typescript-eslint` requires `<6.1.0`, `svelte-check` and `@sveltejs/kit` accept `^5 || ^6`)
+- **Unit tests:** Vitest `^4.1.10` (`vitest.config.ts`)
+- **E2E tests:** Playwright `^1.62.1` (`playwright.config.ts`)
+- **Linting:** ESLint `^10.8.1` (`eslint.config.js`) + Prettier `^3.9.6`
 
 ## Commands
 
