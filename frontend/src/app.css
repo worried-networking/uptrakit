@@ -10,6 +10,18 @@
 
 @import 'virtual:theme/tokens.css';
 
+/* Skeleton v5 reset three Cerberus defaults that the app's visual language was
+   built against (type scale, corner radius, corner shape). Pin them to their v4
+   values so the upgrade is appearance-neutral; same selector as the theme, so
+   source order decides. */
+[data-theme='cerberus'] {
+	--text-scaling: 1.067;
+	--radius-base: 0.25rem;
+	--radius-container: 0.25rem;
+	--corner-shape-base: normal;
+	--corner-shape-container: normal;
+}
+
 /* Design token utilities — use these instead of arbitrary [Npx] values.
    See docs/development/ui/tokens.md for full reference. */
 @theme {
@@ -79,6 +91,22 @@
 
 @utility min-h-badge {
 	min-height: 14px;
+}
+
+/* Skeleton v5 removed the `code` utility with no replacement; this restores the
+   v4 definition verbatim so inline <code class="code"> keeps its look. */
+@utility code {
+	&:not(pre &, .ec-line &) {
+		background-color: var(--color-primary-100-900);
+		border-radius: var(--radius-base);
+		color: var(--color-primary-contrast-50-950);
+		font-family: var(--font-mono);
+		font-size: var(--text-xs);
+		white-space: nowrap;
+		padding-inline: --spacing(1.5);
+		padding-block: --spacing(0.75);
+		overflow-x: auto;
+	}
 }
 
 :is(button, [href], input, select, textarea, summary, [role='button'], [role='tab']) {
