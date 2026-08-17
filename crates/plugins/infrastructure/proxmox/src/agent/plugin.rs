@@ -215,8 +215,8 @@ impl HostLifecycle for crate::ProxmoxPlugin {
         let canonical_config_id: Option<String> = if let Some(tid) = ctx.tenant_id {
             let tid_uuid = uuid::Uuid::parse_str(tid).ok();
             if let Some(tid_uuid) = tid_uuid {
-                match pve_setup::check_pve_token_exists(executor, &tid_uuid).await {
-                    Ok(pve_setup::PveTokenStatus::OwnedByTenant(_)) => {
+                match pve_setup::check_pve_state(executor, &tid_uuid).await {
+                    Ok(state) if state.our_token_exists => {
                         token_owned_by_tenant = Some(tid_uuid);
                         let cluster_nodes = pve_setup::detect_pve_cluster_nodes(executor).await;
                         let peer_config_id = if cluster_nodes.is_empty() {
@@ -519,9 +519,9 @@ async fn create_or_reuse_pve_credentials(
         };
     };
 
-    match pve_setup::check_pve_token_exists(executor, &tid).await {
-        Ok(pve_setup::PveTokenStatus::OwnedByTenant(user)) => {
-            tracing::info!(pve_user = %user, "PVE API user already exists on this cluster, skipping credential creation");
+    match pve_setup::check_pve_state(executor, &tid).await {
+        Ok(state) if state.our_token_exists => {
+            tracing::info!(pve_user = %pve_setup::PVE_USER, "PVE API token already exists on this cluster, skipping credential creation");
 
             match db_ops::find_pve_host_with_config(db).await {
                 Ok(Some(host)) => {
@@ -537,14 +537,14 @@ async fn create_or_reuse_pve_credentials(
                 }
                 Ok(None) => {
                     tracing::info!(
-                        "PVE user exists for this tenant but no local plugin config found; \
+                        "PVE token exists for this tenant but no local plugin config found; \
                          regenerating API token"
                     );
                     match pve_setup::regenerate_pve_api_token(executor, &tid).await {
                         Ok(creds) => {
                             tracing::info!(
                                 api_url = %creds.api_url,
-                                pve_user = %pve_setup::pve_user_realm(&tid),
+                                pve_user = %pve_setup::PVE_USER,
                                 "PVE API token regenerated"
                             );
                             return CredentialResolution {
@@ -576,16 +576,9 @@ async fn create_or_reuse_pve_credentials(
                 }
             }
         }
-        Ok(pve_setup::PveTokenStatus::OwnedByOtherTenant(user)) => {
-            tracing::warn!(pve_user = %user, "PVE API user belongs to a different tenant; skipping credential creation");
-            return CredentialResolution {
-                credentials: None,
-                existing_config_id: None,
-                outcome: PveCredentialOutcome::Failed,
-            };
-        }
-        Ok(pve_setup::PveTokenStatus::NotFound) => {
-            // No existing token — proceed with creation below.
+        Ok(_) => {
+            // No token for this tenant yet (user may or may not exist) —
+            // proceed with creation below.
         }
         Err(e) => {
             tracing::debug!(error = %e, "PVE token check failed, proceeding with creation");
@@ -597,7 +590,7 @@ async fn create_or_reuse_pve_credentials(
         Ok(creds) => {
             tracing::info!(
                 api_url = %creds.api_url,
-                pve_user = %pve_setup::pve_user_realm(&tid),
+                pve_user = %pve_setup::PVE_USER,
                 "PVE API token created"
             );
             CredentialResolution {
