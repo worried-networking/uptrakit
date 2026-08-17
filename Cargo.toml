@@ -92,13 +92,15 @@ tokio-util = "0.7"
 toml = { version = "1", default-features = false, features = ["parse", "serde"] }
 async-stream = "0.3"
 async-trait = "0.1"
-# bollard held at 0.20 (latest: 0.21) — testcontainers 0.27.3 (latest) requires ^0.20.0, so bumping
-# the docker plugin alone would fork the graph into prod-0.21 / dev-0.20. Revisit when
-# testcontainers supports 0.21.
+# bollard held at 0.20 (latest: 0.21.1). The blocker is testcontainers-modules, not testcontainers:
+# testcontainers-modules 0.15.0 (latest) requires testcontainers ^0.27.0, and testcontainers 0.28.0
+# requires bollard ^0.21.0 — so the dev stack cannot reach bollard 0.21 until modules accepts
+# testcontainers 0.28. Bumping the docker plugin alone would fork the graph into prod-0.21/dev-0.20.
+# Revisit when testcontainers-modules ships a release accepting testcontainers 0.28.
 bollard = { version = "0.20", default-features = false, features = ["http", "pipe"] }
 tempfile = "3"
 cargo_metadata = "0.23.1"
-# tokio-tungstenite stays at 0.29 (latest: 0.30) — axum 0.8.9 (latest) depends on ^0.29.0;
+# tokio-tungstenite stays at 0.29 (latest: 0.30.0) — axum 0.8.9 (latest) requires ^0.29.0;
 # bumping would fork the graph into two incompatible tungstenite stacks. The type is also viral:
 # service-sdk's public EnrollmentError wraps tungstenite::Error, so a bump recompiles 11 crates.
 tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect"] }
@@ -185,7 +187,7 @@ uptrakit-plugin-discovery-uptrakit-self-update = { path = "crates/plugins/discov
 russh = { version = "0.62" }
 russh-sftp = { version = "2" }
 ssh-key = { version = "0.6", default-features = false }
-# tower-http stays at 0.6 (latest: 0.7) — reqwest 0.13.4 (latest) depends on ^0.6.8;
+# tower-http stays at 0.6 (latest: 0.7.0) — reqwest 0.13.4 (latest) requires tower-http ^0.6.8;
 # bumping would fork the graph into two tower-http versions for no gain
 tower-http = { version = "0.6", default-features = false }
 nix = { version = "0.31", default-features = false }
@@ -207,6 +209,8 @@ utoipa-swagger-ui = { version = "9.0", default-features = false }
 http-body-util = "0.1"
 sqlx = { version = "0.9", default-features = false, features = ["tls-rustls-aws-lc-rs"] }
 directories = "6"
+# testcontainers stays at 0.27 (latest: 0.28.0) — testcontainers-modules 0.15.0 (latest) requires
+# testcontainers ^0.27.0. This pin is what keeps bollard at 0.20; see the bollard comment above.
 testcontainers = { version = "0.27", default-features = false, features = ["aws-lc-rs"] }
 tracing-test = { version = "0.2", default-features = false }
 trybuild = "1"

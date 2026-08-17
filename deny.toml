@@ -80,7 +80,7 @@ ignore = [
     #"a-crate-that-is-yanked@0.1.1", # you can also ignore yanked crate versions if you wish
     #{ crate = "a-crate-that-is-yanked@0.1.1", reason = "you can specify why you are ignoring the yanked crate" },
     { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile is unmaintained but transitively used by rumqttc 0.25.1. Waiting for rumqttc update to migrate to rustls-pki-types." },
-    { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained, pulled transitively by utoipa-axum. No safe upgrade available; utoipa-axum hasn't migrated to pastey yet." },
+    { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained. Pulled transitively by utoipa-axum (no safe upgrade; utoipa-axum hasn't migrated to pastey) and by integration-tests dev-deps. uptrakit-plugin-infrastructure-core also declares it but never uses it — see uptrakit-yaeyn." },
     { id = "RUSTSEC-2023-0071", reason = "rsa Marvin Attack — pulled transitively by openidconnect for OIDC JWT verification. No patched rsa crate exists. openidconnect uses rsa only for ID token signature verification (public-key operation), which is not susceptible to the Marvin timing attack." },
     # rustls-webpki 0.102.8 vulnerabilities — pulled transitively by rumqttc 0.25.1. The constraint
     # requires misissuance to exploit (signature verification passes first). Waiting for rumqttc update.

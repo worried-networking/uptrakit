@@ -67,7 +67,7 @@ High-value targets in the dependency tree:
 
 ## Residual risk
 
-- **Known advisory exceptions.** Three RustSec advisories are currently ignored in
+- **Known advisory exceptions.** Six RustSec advisories are currently ignored in
   `deny.toml`:
   - `RUSTSEC-2025-0134` (`rustls-pemfile` unmaintained, via `rumqttc`) — low risk.
   - `RUSTSEC-2024-0436` (`paste` unmaintained, via `utoipa-axum`) — low risk
@@ -75,9 +75,16 @@ High-value targets in the dependency tree:
   - `RUSTSEC-2023-0071` (`rsa` Marvin Attack, via `openidconnect`) — medium risk.
     Documented as non-exploitable for public-key verification, but no patched crate
     exists and no remediation timeline is tracked.
-- **Multiple-versions policy is `warn`, not `deny`.** Duplicate crate versions produce
-  warnings only, potentially allowing conflicting versions with different security
-  properties.
+  - `RUSTSEC-2026-0049`, `RUSTSEC-2026-0098`, `RUSTSEC-2026-0099`, and
+    `RUSTSEC-2026-0104` (`rustls-webpki` 0.102.8, via `rumqttc`) — low risk. The first
+    three require certificate misissuance to exploit (signature verification passes
+    first); the fourth is a CRL parsing panic that is unreachable unless CRL validation
+    is explicitly enabled. All four clear when `rumqttc` updates its TLS stack.
+- **Duplicate versions require an explicit waiver.** `multiple-versions` is set to
+  `deny`, so any new duplicate fails CI until it is added to the `[bans] skip` list with
+  a stated reason. The skip list is long (largely the `openidconnect` and `russh` crypto
+  stacks sitting on different RustCrypto generations), and each entry is a standing
+  waiver that must be re-justified as the graph moves.
 - **Proc-macro build dependencies.** Proc-macro crates execute arbitrary code at
   compile time. A compromised proc-macro (e.g., `serde_derive`, `tokio-macros`)
   could inject code into the binary without appearing in runtime dependency audits.
@@ -88,8 +95,9 @@ High-value targets in the dependency tree:
 
 ## Recommended improvements
 
-- Promote `multiple-versions` from `warn` to `deny` in `deny.toml` to eliminate
-  duplicate crate versions that may have different security properties.
+- Shrink the `[bans] skip` list by retiring waivers as upstream crates converge, rather
+  than letting it grow monotonically. Each entry is a duplicate crate version with
+  potentially different security properties.
 - Track remediation timelines for ignored advisories and set calendar reminders to
   re-evaluate them when upstream fixes become available.
 - Consider enabling `cargo-vet` or `cargo-crev` for supply chain trust verification,
