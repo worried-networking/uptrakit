@@ -203,12 +203,7 @@ export interface DataSourceDescriptor {
 }
 
 export type InteractionKind =
-	| 'mutation_action'
-	| 'form_submit'
-	| 'workflow'
-	| 'navigate'
-	| 'data_load'
-	| 'confirmable_action';
+	'mutation_action' | 'form_submit' | 'workflow' | 'navigate' | 'data_load' | 'confirmable_action';
 
 export type InteractionTransport = { mode: 'controller_local' } | { mode: 'provider_proxied' };
 

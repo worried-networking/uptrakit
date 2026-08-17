@@ -282,16 +282,14 @@
 					}
 					return base;
 				}),
-			...surfacePageNavItems.map(
-				(item): ShellNavItem => ({
-					href: item.href,
-					label: item.label,
-					priority: item.priority,
-					origin: 'surface.page',
-					stableId: item.id,
-					icon: resolveIcon(item.icon).component
-				})
-			)
+			...surfacePageNavItems.map((item): ShellNavItem => ({
+				href: item.href,
+				label: item.label,
+				priority: item.priority,
+				origin: 'surface.page',
+				stableId: item.id,
+				icon: resolveIcon(item.icon).component
+			}))
 		].sort(compareShellNavItems);
 	});
 	const isTablet = $derived(viewportWidth >= TABLET_BREAKPOINT && viewportWidth < DESKTOP_BREAKPOINT);

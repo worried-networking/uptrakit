@@ -125,13 +125,7 @@ export interface PaginatedResponse<T> {
 // ── Update history ──────────────────────────────────────────────────────────────
 
 export type UpdateHistoryStatus =
-	| 'queued'
-	| 'pending'
-	| 'in_progress'
-	| 'awaiting_restart'
-	| 'completed'
-	| 'failed'
-	| 'interrupted';
+	'queued' | 'pending' | 'in_progress' | 'awaiting_restart' | 'completed' | 'failed' | 'interrupted';
 
 // ── Audit log (richer than the generated `AuditLogResponse`) ─────────────────────
 // The generated row types `action_kind`/`details_json`/snapshots as `string` / `unknown`;

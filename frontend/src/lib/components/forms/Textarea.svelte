@@ -70,5 +70,4 @@
 	aria-invalid={hasError ? 'true' : undefined}
 	aria-describedby={ariaDescribedby}
 	data-ui="textarea"
-	class={computedClass}
-></textarea>
+	class={computedClass}></textarea>
