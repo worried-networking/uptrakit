@@ -4,6 +4,7 @@
 //! and subtrait implementations for Proxmox VE, encapsulating all PVE-specific
 //! logic that runs inside the SSH agent.
 
+pub(crate) mod credential_flow;
 pub mod db_ops;
 pub mod entity;
 mod guest_exec_adapter;

@@ -8011,6 +8011,7 @@ dependencies = [
  "async-trait",
  "futures-util",
  "httpmock",
+ "parking_lot",
  "reqwest",
  "rootcause",
  "sea-orm",

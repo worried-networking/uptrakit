@@ -1852,11 +1852,12 @@ mod tests {
             allow_all: false,
             host_id: uuid::Uuid::now_v7(),
             service_id: None,
-            // Deliberately `None`: `create_or_reuse_pve_credentials`
-            // short-circuits without a tenant_id, so these
-            // `setup_sudoers_and_plugins`-level tests never need to script
-            // `pveum` calls. `provision_credentials` itself is exercised
-            // directly by the proxmox crate's `skip_pve_skips_only_credentials`.
+            // Deliberately `None`: the proxmox agent's credential flow
+            // (`run_credential_flow`) short-circuits without a tenant_id, so
+            // these `setup_sudoers_and_plugins`-level tests never need to
+            // script `pveum` calls. `provision_credentials` itself is
+            // exercised directly by the proxmox crate's
+            // `skip_pve_skips_only_credentials`.
             tenant_id: None,
             remove_stale_keys: false,
             allow_reboot: false,
@@ -1919,11 +1920,11 @@ mod tests {
         let executor = pve_positive_script();
         // Unlike the shared fixture's `None`, this test overrides
         // `tenant_id` to a real value so the `pveum`-absence assertion below
-        // is genuinely red-able: with `tenant_id: None`,
-        // `create_or_reuse_pve_credentials` short-circuits before issuing
-        // any `pveum` command regardless of `provision_credentials`, which
-        // would leave the assertion green even if `!skip_pve` regressed to
-        // a hardcoded `true` at the `collect_infra_results` call site.
+        // is genuinely red-able: with `tenant_id: None`, the credential flow
+        // short-circuits before issuing any `pveum` command regardless of
+        // `provision_credentials`, which would leave the assertion green
+        // even if `!skip_pve` regressed to a hardcoded `true` at the
+        // `collect_infra_results` call site.
         let mut params = test_bootstrap_params();
         params.tenant_id = Some(uuid::Uuid::now_v7());
         let skip_actions: HashSet<String> = ["pve_setup".to_string()].into_iter().collect();
