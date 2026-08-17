@@ -879,6 +879,14 @@ pub trait HostLifecycle: PluginMeta {
         plugin_config_id: uuid::Uuid,
         host_id: uuid::Uuid,
     ) -> Result<()>;
+
+    /// Called when the agent's tenant binding CHANGES to a different tenant.
+    /// Implementations must wipe tenant-derived local state — stale rows from
+    /// the previous tenant would otherwise satisfy reuse/migration checks.
+    async fn on_tenant_changed(&self, db: &sea_orm::DatabaseConnection) -> Result<()> {
+        let _ = db;
+        Ok(())
+    }
 }
 
 /// Host state reporting for infrastructure plugins.

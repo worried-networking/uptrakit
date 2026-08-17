@@ -422,6 +422,30 @@ impl SshAgentRuntimeSupport for AgentSshRuntimeSupport {
         }
     }
 
+    async fn persisted_tenant_id(&self) -> Option<uuid::Uuid> {
+        let mut identity =
+            uptrakit_service_sdk::ServiceIdentityState::new_single_dir(&self.state_dir);
+        if let Err(error) = identity.load().await {
+            tracing::warn!(error = %error, "failed to load identity for persisted tenant_id lookup");
+            return None;
+        }
+        identity.tenant_id()
+    }
+
+    async fn notify_tenant_changed(&self) {
+        for bundle in self.infra_bundles.iter() {
+            if let Some(lifecycle) = bundle.lifecycle.as_ref()
+                && let Err(error) = lifecycle.on_tenant_changed(&self.db).await
+            {
+                tracing::warn!(
+                    error = %error,
+                    plugin_type = %lifecycle.plugin_type_id(),
+                    "plugin on_tenant_changed failed"
+                );
+            }
+        }
+    }
+
     fn pending_config_reports(&self) -> PendingConfigReports {
         Arc::clone(&self.pending_config_reports)
     }

@@ -441,6 +441,20 @@ pub trait SshAgentRuntimeSupport: Send + Sync + 'static {
 
     async fn persist_tenant_id(&self, tenant_id: uuid::Uuid);
 
+    /// The tenant id persisted from a prior session, if any. Used as the
+    /// rebind-detection fallback for the in-memory `session_state.tenant_id`,
+    /// which is always `None` on process start. Returns `None` on any load
+    /// failure — a load error must never itself be mistaken for "no prior
+    /// tenant" causing a spurious wipe, so callers additionally require the
+    /// in-memory field to also be `None` before treating this as authoritative.
+    async fn persisted_tenant_id(&self) -> Option<uuid::Uuid>;
+
+    /// Notify infrastructure plugins that the agent's tenant binding just
+    /// changed to a different tenant, so they can wipe tenant-derived local
+    /// state. Must never propagate an error — a rebind must not abort the
+    /// session.
+    async fn notify_tenant_changed(&self);
+
     /// The shared pending-ack map for in-flight `ReportPluginConfig` requests.
     /// Cloning the `Arc` is cheap; callers lock, mutate, and drop the guard
     /// before any `.await`.
@@ -533,6 +547,21 @@ where
         transport: &mut dyn ServiceTransport,
     ) -> Result<(), TransportError> {
         if let Some(tenant_id) = settings.tenant_id {
+            // Fall back to the persisted tenant id when the in-memory field is
+            // still None: RuntimeSessionState::default() re-initializes
+            // tenant_id to None on every process start and nothing reloads
+            // the persisted value, so comparing the in-memory field alone
+            // would miss a rebind that happened while the agent was down (or
+            // before the first settings after a restart).
+            let old = match self.session_state.tenant_id {
+                Some(existing) => Some(existing),
+                None => self.support.persisted_tenant_id().await,
+            };
+            if let Some(old_tenant_id) = old
+                && old_tenant_id != tenant_id
+            {
+                self.support.notify_tenant_changed().await;
+            }
             self.session_state.tenant_id = Some(tenant_id);
             self.support.persist_tenant_id(tenant_id).await;
         }
@@ -1347,6 +1376,7 @@ mod tests {
         calls: Vec<&'static str>,
         fail_register_surfaces: bool,
         surface_request_tenant_ids: Vec<Option<uuid::Uuid>>,
+        persisted_tenant_id: Option<uuid::Uuid>,
     }
 
     #[derive(Default, Clone)]
@@ -1367,6 +1397,10 @@ mod tests {
 
         fn set_fail_register_surfaces(&self, fail: bool) {
             self.state.lock().fail_register_surfaces = fail;
+        }
+
+        fn set_persisted_tenant_id(&self, tenant_id: Option<uuid::Uuid>) {
+            self.state.lock().persisted_tenant_id = tenant_id;
         }
 
         fn last_surface_request_tenant_id(&self) -> Option<Option<uuid::Uuid>> {
@@ -1523,6 +1557,16 @@ mod tests {
 
         async fn persist_tenant_id(&self, _tenant_id: uuid::Uuid) {
             self.state.lock().calls.push("persist_tenant_id");
+        }
+
+        async fn persisted_tenant_id(&self) -> Option<uuid::Uuid> {
+            let mut state = self.state.lock();
+            state.calls.push("persisted_tenant_id");
+            state.persisted_tenant_id
+        }
+
+        async fn notify_tenant_changed(&self) {
+            self.state.lock().calls.push("notify_tenant_changed");
         }
 
         fn pending_config_reports(&self) -> crate::runtime_support::PendingConfigReports {
@@ -1713,6 +1757,140 @@ mod tests {
         );
         assert_eq!(support_clone.call_count("report_enrolled_hosts"), 1);
         assert_eq!(support_clone.call_count("register_surfaces"), 1);
+    }
+
+    #[tokio::test]
+    async fn apply_settings_wipes_on_tenant_rebind_but_not_on_first_assignment_or_reapply() {
+        let support = FakeSupport::default();
+        let support_clone = support.clone();
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let mut runtime = SshAgentRuntime::new(runtime_config(
+            support,
+            tempdir.path().join("update-freeze"),
+            RuntimeAuditEmitter::new(),
+        ));
+        let mut transport = MockTransport::new();
+        runtime
+            .on_connected(&mut transport, SshAgentIdentity::default())
+            .await
+            .expect("connect");
+
+        let tenant_a = uuid::Uuid::now_v7();
+        let tenant_b = uuid::Uuid::now_v7();
+
+        // First-ever assignment (in-memory None, persisted None): must NOT wipe.
+        // Red-checkable: removing the `old.is_some()` guard (unconditionally
+        // wiping whenever `tenant_id` is set) fails this.
+        runtime
+            .apply_settings(
+                SshAgentSettings {
+                    tenant_id: Some(tenant_a),
+                    ..SshAgentSettings::default()
+                },
+                &mut transport,
+            )
+            .await
+            .expect("settings tenant_a");
+        assert_eq!(support_clone.call_count("notify_tenant_changed"), 0);
+
+        // Re-applying the SAME tenant must NOT wipe. Red-checkable: removing
+        // the `old_tenant_id != tenant_id` comparison (wiping on every
+        // settings apply) fails this.
+        runtime
+            .apply_settings(
+                SshAgentSettings {
+                    tenant_id: Some(tenant_a),
+                    ..SshAgentSettings::default()
+                },
+                &mut transport,
+            )
+            .await
+            .expect("settings tenant_a again");
+        assert_eq!(support_clone.call_count("notify_tenant_changed"), 0);
+
+        // Rebinding to a DIFFERENT tenant must wipe exactly once. Red-checkable:
+        // deleting the `notify_tenant_changed().await` call fails this.
+        runtime
+            .apply_settings(
+                SshAgentSettings {
+                    tenant_id: Some(tenant_b),
+                    ..SshAgentSettings::default()
+                },
+                &mut transport,
+            )
+            .await
+            .expect("settings tenant_b");
+        assert_eq!(support_clone.call_count("notify_tenant_changed"), 1);
+    }
+
+    #[tokio::test]
+    async fn apply_settings_falls_back_to_persisted_tenant_id_after_restart() {
+        // Simulates a process restart: RuntimeSessionState::default() leaves
+        // session_state.tenant_id at None, but a prior session had already
+        // persisted a tenant id to disk. The persisted value must be used as
+        // the rebind-detection baseline instead of treating this as a
+        // first-ever assignment.
+        let tenant_a = uuid::Uuid::now_v7();
+        let tenant_b = uuid::Uuid::now_v7();
+
+        // Same tenant as persisted: must NOT wipe. Red-checkable: always
+        // wiping whenever in-memory state is None (ignoring the persisted
+        // fallback entirely) fails this.
+        let support = FakeSupport::default();
+        support.set_persisted_tenant_id(Some(tenant_a));
+        let support_clone = support.clone();
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let mut runtime = SshAgentRuntime::new(runtime_config(
+            support,
+            tempdir.path().join("update-freeze"),
+            RuntimeAuditEmitter::new(),
+        ));
+        let mut transport = MockTransport::new();
+        runtime
+            .on_connected(&mut transport, SshAgentIdentity::default())
+            .await
+            .expect("connect");
+        runtime
+            .apply_settings(
+                SshAgentSettings {
+                    tenant_id: Some(tenant_a),
+                    ..SshAgentSettings::default()
+                },
+                &mut transport,
+            )
+            .await
+            .expect("settings tenant_a");
+        assert_eq!(support_clone.call_count("notify_tenant_changed"), 0);
+
+        // Different tenant than persisted: must wipe. Red-checkable: only
+        // comparing against the in-memory field (which is None here, so a
+        // naive `old.is_some()` check would skip the wipe) fails this — the
+        // persisted fallback is what surfaces the rebind at all.
+        let support2 = FakeSupport::default();
+        support2.set_persisted_tenant_id(Some(tenant_a));
+        let support2_clone = support2.clone();
+        let tempdir2 = tempfile::tempdir().expect("tempdir");
+        let mut runtime2 = SshAgentRuntime::new(runtime_config(
+            support2,
+            tempdir2.path().join("update-freeze"),
+            RuntimeAuditEmitter::new(),
+        ));
+        let mut transport2 = MockTransport::new();
+        runtime2
+            .on_connected(&mut transport2, SshAgentIdentity::default())
+            .await
+            .expect("connect");
+        runtime2
+            .apply_settings(
+                SshAgentSettings {
+                    tenant_id: Some(tenant_b),
+                    ..SshAgentSettings::default()
+                },
+                &mut transport2,
+            )
+            .await
+            .expect("settings tenant_b");
+        assert_eq!(support2_clone.call_count("notify_tenant_changed"), 1);
     }
 
     #[tokio::test]

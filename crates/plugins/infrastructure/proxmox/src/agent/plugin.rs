@@ -291,6 +291,10 @@ impl HostLifecycle for crate::ProxmoxPlugin {
             .await
             .context_to::<PluginError>()
     }
+
+    async fn on_tenant_changed(&self, db: &DatabaseConnection) -> Result<()> {
+        db_ops::wipe_all(db).await.context_to::<PluginError>()
+    }
 }
 
 // ── Pending-match drain (poison-row protection) ─────────────────────────────

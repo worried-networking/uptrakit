@@ -256,6 +256,26 @@ pub async fn increment_match_attempts(db: &DatabaseConnection, id: i32) -> Resul
     Ok(())
 }
 
+// ── tenant-rebind wipe ───────────────────────────────────────────────────────
+
+/// Wipe all agent-local Proxmox state: every `proxmox_host_state` row and
+/// every `proxmox_pending_matches` row. Called when the agent's tenant
+/// binding changes — stale rows from the previous tenant (including
+/// `new_pve_plugin_config_id` ack markers pointing at a foreign tenant's
+/// plugin config) must not satisfy reuse/migration checks under the new
+/// tenant.
+pub async fn wipe_all(db: &DatabaseConnection) -> Result<()> {
+    proxmox_host_state::Entity::delete_many()
+        .exec(db)
+        .await
+        .context_to::<ProxmoxError>()?;
+    proxmox_pending_match::Entity::delete_many()
+        .exec(db)
+        .await
+        .context_to::<ProxmoxError>()?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -407,5 +427,57 @@ mod tests {
             .expect("h1 exists");
         assert_eq!(h1_post.pve_plugin_config_id.as_deref(), Some("new-cfg"));
         assert_eq!(h1_post.pve_node_name.as_deref(), Some("node1"));
+    }
+
+    #[tokio::test]
+    async fn tenant_rebind_wipes_local_state() {
+        let db = setup_agent_db().await;
+        upsert_host_state(
+            &db,
+            "h1",
+            true,
+            Some("legacy-cfg".to_string()),
+            Some("node1".to_string()),
+        )
+        .await
+        .expect("seed h1");
+        upsert_host_state(
+            &db,
+            "h2",
+            true,
+            Some("legacy-cfg".to_string()),
+            Some("node2".to_string()),
+        )
+        .await
+        .expect("seed h2");
+        insert_pending_match(&db, "h1", "mapping-1")
+            .await
+            .expect("seed pending match");
+
+        // Sanity: both tables are non-empty before the wipe — red-checkable:
+        // a wipe_all that's a no-op (or that deletes the wrong table) leaves
+        // these non-empty after the call below.
+        assert_eq!(find_pve_hosts(&db).await.expect("query hosts").len(), 2);
+        assert_eq!(
+            drain_pending_matches(&db)
+                .await
+                .expect("query pending")
+                .len(),
+            1
+        );
+
+        wipe_all(&db).await.expect("wipe_all");
+
+        assert!(
+            find_pve_hosts(&db).await.expect("query hosts").is_empty(),
+            "proxmox_host_state must be empty after tenant rebind wipe"
+        );
+        assert!(
+            drain_pending_matches(&db)
+                .await
+                .expect("query pending")
+                .is_empty(),
+            "proxmox_pending_matches must be empty after tenant rebind wipe"
+        );
     }
 }
