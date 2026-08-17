@@ -1554,6 +1554,14 @@ fn spawn_sync_execute(request: SurfaceActionRequest, ctx: &SurfaceRuntimeContext
                         .await
                         .is_err()
                     {
+                        // Send failed: drop the entry we just inserted (if
+                        // host_id parsed) so it doesn't strand in the
+                        // pending-ack map until the next `on_connected`
+                        // clear. A no-op if the parse-failure branch above
+                        // never inserted one.
+                        pending_config_reports
+                            .lock()
+                            .remove(&report_request_id.to_string());
                         tracing::error!("failed to send ReportPluginConfig via bg_tx during sync");
                     }
                 }
@@ -1975,6 +1983,13 @@ async fn send_infra_plugin_reports(
             );
             let msg = ServiceMessage::ReportPluginConfig(payload);
             if bg_tx.send(msg).await.is_err() {
+                // Send failed: drop the entry we just inserted so it doesn't
+                // strand in the pending-ack map until the next `on_connected`
+                // clear (no ack will ever arrive for a message that was
+                // never sent).
+                pending_config_reports
+                    .lock()
+                    .remove(&request_id.to_string());
                 tracing::error!("failed to send ReportPluginConfig via bg_tx");
             }
         } else if let Some(config_id) = &infra.existing_plugin_config_id {

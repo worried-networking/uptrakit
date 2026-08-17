@@ -449,14 +449,13 @@ mod tests {
         success: bool,
         plugin_config_id: Option<uuid::Uuid>,
         error: Option<&str>,
-    ) -> ReportPluginConfigResponsePayload {
+    ) -> serde_json::Result<ReportPluginConfigResponsePayload> {
         serde_json::from_value(serde_json::json!({
             "request_id": request_id,
             "success": success,
             "plugin_config_id": plugin_config_id,
             "error": error,
         }))
-        .expect("ReportPluginConfigResponsePayload JSON is always valid")
     }
 
     #[derive(Default)]
@@ -539,14 +538,14 @@ mod tests {
     /// Builds `infra_bundles` the same way `AgentSshHandler::new` does
     /// (`handler.rs`), so tests exercise the real proxmox `HostLifecycle`
     /// rather than a hand-rolled fake (not nameable from this crate).
-    fn real_infra_bundles() -> Arc<Vec<InfraBundle>> {
+    fn real_infra_bundles()
+    -> uptrakit_plugin_infrastructure_registry::PluginResult<Arc<Vec<InfraBundle>>> {
         let catalog_config = uptrakit_plugin_infrastructure_registry::CatalogConfig::default();
         let catalog = uptrakit_plugin_infrastructure_registry::build_catalog(
             &catalog_config,
             uptrakit_plugin_infrastructure_registry::InstancePluginStates::all_disabled(),
-        )
-        .expect("plugin catalog should build successfully in tests");
-        Arc::new(catalog.create_infra_bundles(&catalog_config))
+        )?;
+        Ok(Arc::new(catalog.create_infra_bundles(&catalog_config)))
     }
 
     #[tokio::test]
@@ -572,12 +571,15 @@ mod tests {
         );
 
         support
-            .handle_report_plugin_config_response(response_payload(
-                &request_id,
-                false,
-                None,
-                Some("controller rejected the config"),
-            ))
+            .handle_report_plugin_config_response(
+                response_payload(
+                    &request_id,
+                    false,
+                    None,
+                    Some("controller rejected the config"),
+                )
+                .expect("ReportPluginConfigResponsePayload JSON is always valid"),
+            )
             .await;
 
         assert!(
@@ -598,7 +600,8 @@ mod tests {
             .await
             .expect("migrations should run against the in-memory db");
 
-        let infra_bundles = real_infra_bundles();
+        let infra_bundles =
+            real_infra_bundles().expect("plugin catalog should build successfully in tests");
         // Precondition: the catalog must actually contain a proxmox
         // `HostLifecycle`, or this test would pass vacuously (no bundle ever
         // dispatches to, so the assertion below proves nothing).
@@ -613,6 +616,12 @@ mod tests {
 
         let host_id = uuid::Uuid::now_v7();
         let now = "2026-01-01T00:00:00Z";
+        // `uptrakit-agent-ssh-runtime` depends on
+        // `uptrakit-plugin-infrastructure-registry`, not on
+        // `uptrakit-plugin-infrastructure-proxmox` directly, and the registry
+        // does not re-export `proxmox_host_state`; its `ActiveModel` is
+        // unnameable from this crate. execute_raw with a Statement is the
+        // approved exception for raw SQL.
         db.execute_raw(Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Sqlite,
             "INSERT INTO proxmox_host_state (host_id, created_at, updated_at) VALUES ($1, $2, $2)",
@@ -642,14 +651,16 @@ mod tests {
         );
 
         support
-            .handle_report_plugin_config_response(response_payload(
-                &request_id,
-                true,
-                Some(uuid::Uuid::now_v7()),
-                None,
-            ))
+            .handle_report_plugin_config_response(
+                response_payload(&request_id, true, Some(uuid::Uuid::now_v7()), None)
+                    .expect("ReportPluginConfigResponsePayload JSON is always valid"),
+            )
             .await;
 
+        // Same crate-boundary limitation as the seed insert above:
+        // `proxmox_host_state` is unreachable from this crate, so the
+        // row is read back via raw SQL too. query_one_raw with a Statement
+        // is the approved exception for raw SQL.
         let row = db
             .query_one_raw(Statement::from_sql_and_values(
                 sea_orm::DatabaseBackend::Sqlite,
