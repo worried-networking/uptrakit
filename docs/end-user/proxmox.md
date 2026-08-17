@@ -449,9 +449,11 @@ roles.
 
 After a completed migration (see [Aftermath](#aftermath) above), the old,
 legacy-named `pve-{host_id}` plugin configuration is left behind alongside
-the new `pve-{cluster_name}` one. It holds a token for the now-deleted
-legacy user and no longer works -- delete it from the web UI once you've
-confirmed the new configuration is in place and working.
+the new one -- `pve-{cluster_name}` for a cluster, or
+`pve-{node_name}-{first 8 characters of the host ID}` for a standalone node.
+It holds a token for the now-deleted legacy user and no longer works --
+delete it from the web UI once you've confirmed the new configuration is in
+place and working.
 
 ## Security Considerations
 

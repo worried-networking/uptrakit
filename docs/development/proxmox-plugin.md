@@ -54,7 +54,7 @@ Controller
 | `plugin.rs`                   | `ProxmoxPlugin` — unified `PluginMeta` + role trait impls (controller + agent)                                                                          |
 | `agent/plugin.rs`             | Role trait impls (`HostLifecycle`, `HostReport`, `GuestExec`) on `ProxmoxPlugin`                                                                        |
 | `agent/surface_actions.rs`    | Dispatch shim over the plugin's `agent_interactions()` table (`discovered-guests`, `bootstrap-proxmox-guest`); implementation fns for both interactions |
-| `agent/credential_flow.rs`    | `run_locked()` — cluster-scoped PVE identity provisioning and the two-phase legacy-user migration state machine                                         |
+| `agent/credential_flow.rs`    | `run_credential_flow()` — cluster-scoped PVE identity provisioning and the two-phase legacy-user migration state machine                                |
 | `agent/db_ops.rs`             | Agent-local DB operations (PVE host state, pending matches)                                                                                             |
 | `agent/entity.rs`             | SeaORM entities for the agent-local `proxmox_host_state` / `proxmox_pending_matches` tables                                                             |
 | `agent/guest_exec_adapter.rs` | `GuestExecProvider` impl wrapping `guest_exec.rs` so the SSH agent can run guest commands without depending on this crate directly                      |
