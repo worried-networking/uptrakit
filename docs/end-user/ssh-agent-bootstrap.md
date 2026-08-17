@@ -420,19 +420,25 @@ agent provisions API access using a shared, cluster-wide identity model:
 tenant ID>`), created with privilege separation on so the token's effective
   access is scoped down from the user's ceiling. Multiple tenants can safely
   share the same cluster this way, each with an independent token.
-- If your tenant's token already exists on the cluster (for example, from a
-  previously bootstrapped node), it is reused rather than duplicated.
+- Reuse is gated by whether the agent already holds an acknowledgment for a
+  reported plugin configuration, not by whether a token happens to exist on
+  the cluster: if your tenant's token exists on the cluster but the agent has
+  no such acknowledgment yet, the token is regenerated rather than reused.
 - If a tenant ID is not yet available (the service has not received its
   settings from the controller yet), PVE credential creation is skipped with
   a warning and retried on the next bootstrap or sync.
 
 Existing deployments created under an earlier per-tenant-user model are
-migrated to this shared-user model automatically the next time the host is
-bootstrapped or synced; no manual action is required. See
+migrated to this shared-user model automatically, but migration completes
+over two syncs run with a privileged (root) SSH session — every `pveum` call
+needs a root-capable session, and the second phase needs the acknowledgment
+recorded by the first. See
+[Migrating to the Shared PVE Identity Model](proxmox.md#migrating-to-the-shared-pve-identity-model)
+for the full two-phase mechanics, and
 [SSH Agent Architecture](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/ssh-agent.md#pve-identity-and-credential-flow)
 and
 [ADR-0044](https://github.com/worried-networking/uptrakit/tree/main/docs/adr/0044-shared-pve-user-with-per-tenant-privilege-separated-api-tokens.md)
-for the full identity model and migration mechanics.
+for the underlying identity model.
 
 This enables the **Bootstrap via Proxmox** shared surface action, which allows
 bootstrapping LXC containers and QEMU VMs through the PVE node without direct

@@ -101,10 +101,11 @@ This requires the `VM.GuestAgent.FileRead` privilege (granted via
 `UptrakitAudit` on `/`) and the QEMU guest agent to be installed and running
 inside the VM. `VM.GuestAgent.FileRead` and `VM.GuestAgent.Audit` (used for
 guest network-interface/IP discovery) were introduced in PVE 9, replacing
-the older `VM.Monitor` privilege; the legacy per-tenant identity model
-granted the built-in `PVEAuditor` role, which never included `VM.Monitor`
-either — `machine_id`/guest-agent collection is new capability introduced by
-the shared-user roles, not something the legacy model already had.
+the older `VM.Monitor` privilege; the custom `UptrakitAudit` role has carried
+`VM.GuestAgent.*` since it was introduced (replacing the built-in `PVEAuditor`
+role, which never included `VM.Monitor` either), so `machine_id`/guest-agent
+collection predates the shared-user identity model this migration introduces
+and is not new capability added by it.
 
 LXC containers do not support the guest agent file-read API. Their
 `machine_id` is populated after bootstrap when the host reports its

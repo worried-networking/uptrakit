@@ -188,15 +188,19 @@ tenant's token, never another tenant's. See
 [ADR-0044](../adr/0044-shared-pve-user-with-per-tenant-privilege-separated-api-tokens.md)
 for the full rationale.
 
-If the cluster already has a token for the same tenant (from bootstrapping
-another node in the same cluster), the existing plugin configuration is
-reused automatically instead of creating a new one.
+Reuse is gated by whether the agent already holds an acknowledgment for a
+reported plugin configuration, not by whether a token happens to exist on
+the cluster: if the cluster already has a token for the same tenant (from
+bootstrapping another node in the same cluster) but the agent has no such
+acknowledgment yet, the token is regenerated rather than reused.
 
 > [!NOTE]
 > Deployments upgrading from an earlier release used a different identity
 > model: a separate PVE user per tenant (`uptrakit-{tenant_uuid}@pve`) with a
-> single, non-privilege-separated token and the built-in `PVEAuditor` role.
-> See [Migrating to the Shared PVE Identity Model](#migrating-to-the-shared-pve-identity-model)
+> single, non-privilege-separated token, using the same custom `Uptrakit*`
+> roles described above (or the built-in `PVEAuditor` role on deployments
+> predating those roles). See
+> [Migrating to the Shared PVE Identity Model](#migrating-to-the-shared-pve-identity-model)
 > below for how upgrades move to the model described above.
 
 ### How It Works
@@ -298,9 +302,14 @@ Each sync's summary reports one of:
 ### Aftermath
 
 Once migration completes, the cluster has: the shared `uptrakit@pve` user and
-its per-tenant token in place, the legacy `uptrakit-{tenant_uuid}@pve` user
-gone, and the plugin configuration renamed to `pve-{cluster_name}` (or
-`pve-{node_name}-{first 8 characters of the host ID}` for a standalone node).
+its per-tenant token in place, and the legacy `uptrakit-{tenant_uuid}@pve`
+user gone. Nothing renames the old plugin configuration -- migration creates
+a **new** plugin configuration named `pve-{cluster_name}` (or
+`pve-{node_name}-{first 8 characters of the host ID}` for a standalone node)
+and leaves the old, legacy-named `pve-{host_id}` configuration in place,
+still enabled, holding a token that no longer works once the legacy user is
+deleted. See [Controller-side cleanup](#controller-side-cleanup) below to
+remove it.
 
 ### Deployments with nothing to migrate
 
@@ -332,6 +341,17 @@ it does not re-verify that the configuration still exists on the controller.
 Deleting it mid-migration can leave the agent believing migration is on track
 while the controller has no matching configuration. Wait for the aftermath
 state above before deleting or renaming a `pve-*` configuration.
+
+**If you already deleted it:** re-syncing or re-bootstrapping the same host
+does not recover on its own -- the agent's local PVE token is untouched by
+the controller-side deletion, so it keeps reusing that token and never
+re-reports a plugin configuration to the controller. The confirmed recovery
+is to remove the host from Uptrakit entirely
+(`uptrakit-agent-ssh host remove`, or the equivalent web UI action -- see
+[Host Management -- Removing a host](ssh-agent-host-management.md#removing-a-host))
+and then re-bootstrap it: a removed-and-re-added host gets fresh local
+tracking state, so the next bootstrap provisions PVE credentials and reports
+a plugin configuration from a clean slate.
 
 ## Deprovisioning
 
@@ -408,6 +428,12 @@ Deleting the `pve-*` plugin configuration in the web UI removes only the
 controller's record of it -- it does **not** remove anything on the PVE node.
 Use the `pveum` commands above to remove the actual PVE-side user, token, and
 roles.
+
+After a completed migration (see [Aftermath](#aftermath) above), the old,
+legacy-named `pve-{host_id}` plugin configuration is left behind alongside
+the new `pve-{cluster_name}` one. It holds a token for the now-deleted
+legacy user and no longer works -- delete it from the web UI once you've
+confirmed the new configuration is in place and working.
 
 ## Security Considerations
 

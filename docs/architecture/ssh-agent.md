@@ -330,7 +330,8 @@ Three custom roles (`UptrakitAudit`, `UptrakitProtection`, `UptrakitScaling`) ar
 both the user level (the ceiling) and the token level (the selection within it); a privsep
 token's effective privileges are the intersection of the two. This replaced an earlier model
 where each tenant got its own dedicated user (`uptrakit-{tenant_uuid}@pve`) with a
-`--privsep=0` token named `uptrakit` and the built-in `PVEAuditor` role — see
+`--privsep=0` token named `uptrakit` and the custom `Uptrakit*` roles (or the built-in
+`PVEAuditor` role on deployments predating those roles) — see
 [ADR-0044](../adr/0044-shared-pve-user-with-per-tenant-privilege-separated-api-tokens.md) for
 the rationale.
 
@@ -349,15 +350,18 @@ its own `tenant-{tenant_uuid}` token id — it never scans for or touches other 
 1. Detects the PVE cluster (or standalone node) and its member nodes.
 2. Reads the current PVE identity state for the tenant (`pve_setup::check_pve_state`). A
    failed read degrades the run: migration bookkeeping (phases 1/2 and the recovery arm below)
-   is skipped entirely for that run, reported as `PVE state read degraded; migration paused
+   is skipped entirely for that run, and — only when this cluster has a recorded legacy user
+   on at least one row — reported as `PVE state read degraded; migration paused
 this run (…)`.
 3. Resolves the plugin-config name: `pve-{cluster_name}` when a cluster name is detected,
    otherwise the standalone fallback `pve-{node_name}-{first 8 chars of host_id}`.
-4. Creates, reuses, or regenerates the tenant's token as needed, then proves it on the node
-   via `pve_setup::prove_token_on_node` — a `curl` over the existing SSH session against
-   `https://localhost:8006/api2/json/version` with an `Authorization: PVEAPIToken=…` header,
-   requiring HTTP 200. A failed proof yields `PveCredentialOutcome::Failed` and the flow stops
-   there; it never falls through to touching a legacy user.
+4. Creates or regenerates the tenant's token as needed; a created or regenerated token is then
+   proved on the node via `pve_setup::prove_token_on_node` — a `curl` over the existing SSH
+   session against `https://localhost:8006/api2/json/version` with an
+   `Authorization: PVEAPIToken=…` header, requiring HTTP 200. A failed proof yields
+   `PveCredentialOutcome::Failed` and the flow stops there; it never falls through to touching
+   a legacy user. A reused token (the ack marker for a prior report is already present and
+   this run's read didn't confirm the token is gone) is not re-proved.
 
 ### Legacy-user migration (two-phase, cluster-scoped)
 
@@ -388,8 +392,11 @@ rows, including the ack marker, so a rebound host never reuses another tenant's 
 state.
 
 Because `pveum` is never sudo-allowlisted, this credential work can only _succeed_ in a root
-session — but `on_host_synced` is still invoked ungated on every sync of a PVE host
-(`crates/core/agent-ssh-runtime/src/operations/sync.rs`), where it simply fails without root.
+session — but `on_host_synced` is invoked on every sync that runs the `infra_sync` action
+against a host with recorded infra state (`crates/core/agent-ssh-runtime/src/operations/sync.rs`,
+gated by `!skip_actions.contains(ACTION_INFRA_SYNC)` and then per-bundle by
+`report.has_infra_state(db, host.id)`). Neither gate checks session privilege, so an ordinary
+`"stored"`-auth sync still reaches it, where it simply fails without root.
 
 This flow enables the `bootstrap-proxmox-guest` action to auto-resolve PVE nodes as gateways
 from the controller's discovered guest data.

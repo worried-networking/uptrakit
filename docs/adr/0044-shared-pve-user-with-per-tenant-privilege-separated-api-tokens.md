@@ -25,7 +25,7 @@ shape the replacement:
   token's grants alone. This intersection rule is enforced by `pve-access-control`'s `RPCEnvironment.pm`
   `permissions()` — the same routine every PVE API call runs through to compute what a caller is allowed to do.
 - Cluster membership is dynamic and self-reported: a node may join or leave a cluster, and `pvesh get
-  /cluster/status` is the only reliable source of the current cluster name and node set
+/cluster/status` is the only reliable source of the current cluster name and node set
   (`crates/plugins/infrastructure/proxmox/src/pve_setup.rs::detect_pve_cluster_nodes`,
   `detect_pve_cluster_name`).
 - Multiple agent-ssh processes can bootstrap or sync different nodes of the same cluster concurrently — the
@@ -122,7 +122,7 @@ belonging to this host's own row plus any peer sharing a detected cluster node n
   (`db_ops::promote_cluster_rows`). A delete failure does not lose the migration: it increments a per-row attempt
   counter (`migration_attempts`, capped for reporting purposes at `MAX_MIGRATION_ATTEMPTS = 5`, though retries
   continue past that cap) and the outcome is reported as `MigrationPending` (or `"migration STUCK after N
-  attempts"` in the summary line once the cap is passed), never silently dropped.
+attempts"` in the summary line once the cap is passed), never silently dropped.
 - **Recovery.** If a legacy marker is stored but a later, successful read shows the legacy user already gone
   (deleted out-of-band, or by a peer node's own flow), the flow reconciles state directly — promoting cluster rows
   if ack evidence exists, or simply clearing the stale marker otherwise — without attempting a redundant delete.
@@ -208,16 +208,18 @@ suffix specifically to avoid the collision that would otherwise be common, not r
 `pveum` never appears among the sudo commands the Proxmox plugin declares for the unprivileged agent user —
 `collect_pve_sudo_commands` (`crates/plugins/infrastructure/proxmox/src/agent/plugin.rs`) only ever contributes
 `pct exec`/`qm guest exec`/`qm guest cmd` entries for guest management, never a `pveum` entry. That means `pveum`
-mutation can only ever *succeed* in a session that is already root by construction — host bootstrap, which
+mutation can only ever _succeed_ in a session that is already root by construction — host bootstrap, which
 `docs/security/sudoers-management.md` documents as requiring a root SSH session, or a sync explicitly run with a
 root-auth override (`build_sync_auth_override` in `crates/core/agent-ssh-runtime/src/surface_runtime.rs` defaults
 its override username to `"root"`) — never via the unprivileged agent user's ordinary `NOPASSWD` sudo allowlist,
-since no allowlist entry exists to grant it. It is not gated to those sessions on the *invocation* side: an
+since no allowlist entry exists to grant it. It is not gated to those sessions on the _invocation_ side: an
 ordinary sync run with the default `auth_method` of `"stored"` (`build_sync_auth_override`, `surface_runtime.rs:1880,1883`,
 returns `None` for that case, so no override is applied) still reaches `HostLifecycle::on_host_synced`
-(`crates/plugins/infrastructure/proxmox/src/agent/plugin.rs:196`), called unconditionally for every host whose
-stored state has `is_pve_node = true` from `crates/core/agent-ssh-runtime/src/operations/sync.rs:570` with no
-auth-override check beforehand — it invokes `pveum` through the credential flow regardless of session privilege,
-and simply fails there if the session isn't root. This keeps the highest-privilege PVE operation (creating users,
-granting cluster-wide ACLs) unable to *succeed* outside sessions that are already root, rather than adding it to
+(`crates/plugins/infrastructure/proxmox/src/agent/plugin.rs:196`), invoked whenever the sync runs the
+`infra_sync` action and this host's stored state has `is_pve_node = true`
+(`crates/core/agent-ssh-runtime/src/operations/sync.rs:537-587`, gated by
+`!skip_actions.contains(ACTION_INFRA_SYNC)` and then per-bundle by `report.has_infra_state(db, host.id)`) —
+neither gate is an auth-override check, so it invokes `pveum` through the credential flow regardless of session
+privilege, and simply fails there if the session isn't root. This keeps the highest-privilege PVE operation (creating users,
+granting cluster-wide ACLs) unable to _succeed_ outside sessions that are already root, rather than adding it to
 the set of commands an unprivileged agent process can invoke via `NOPASSWD` sudo.

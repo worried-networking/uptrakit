@@ -45,22 +45,25 @@ Controller
 
 ## Module Structure
 
-| Module                     | Purpose                                                                                                                                                 |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `config.rs`                | `ProxmoxConfig` — API URL, token, TLS, node filter                                                                                                      |
-| `error.rs`                 | `ProxmoxError` enum with `impl_report_conversion!`                                                                                                      |
-| `client.rs`                | `ProxmoxClient` — HTTP client for Proxmox REST API                                                                                                      |
-| `api_types.rs`             | Serde structs for PVE API JSON responses                                                                                                                |
-| `plugin.rs`                | `ProxmoxPlugin` — unified `PluginMeta` + role trait impls (controller + agent)                                                                          |
-| `agent/plugin.rs`          | Role trait impls (`HostLifecycle`, `HostReport`, `GuestExec`) on `ProxmoxPlugin`                                                                        |
-| `agent/surface_actions.rs` | Dispatch shim over the plugin's `agent_interactions()` table (`discovered-guests`, `bootstrap-proxmox-guest`); implementation fns for both interactions |
-| `agent/db_ops.rs`          | Agent-local DB operations (PVE host state, pending matches)                                                                                             |
-| `agent/migration.rs`       | Agent-local DB migrations (`proxmox_host_state`, `proxmox_pending_matches`)                                                                             |
-| `discovery.rs`             | `discover_guests()` — queries nodes for VMs/CTs                                                                                                         |
-| `matching.rs`              | `manual_match()` / `unmatch()` — manual-only host matching                                                                                              |
-| `surfaces.rs`              | Surface action definitions + handler dispatch                                                                                                           |
-| `pve_setup.rs`             | PVE node detection and API credential creation (agent-side)                                                                                             |
-| `guest_exec.rs`            | Guest command execution via `pct exec` / `qm guest exec` (agent-side)                                                                                   |
+| Module                        | Purpose                                                                                                                                                 |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `config.rs`                   | `ProxmoxConfig` — API URL, token, TLS, node filter                                                                                                      |
+| `error.rs`                    | `ProxmoxError` enum with `impl_report_conversion!`                                                                                                      |
+| `client.rs`                   | `ProxmoxClient` — HTTP client for Proxmox REST API                                                                                                      |
+| `api_types.rs`                | Serde structs for PVE API JSON responses                                                                                                                |
+| `plugin.rs`                   | `ProxmoxPlugin` — unified `PluginMeta` + role trait impls (controller + agent)                                                                          |
+| `agent/plugin.rs`             | Role trait impls (`HostLifecycle`, `HostReport`, `GuestExec`) on `ProxmoxPlugin`                                                                        |
+| `agent/surface_actions.rs`    | Dispatch shim over the plugin's `agent_interactions()` table (`discovered-guests`, `bootstrap-proxmox-guest`); implementation fns for both interactions |
+| `agent/credential_flow.rs`    | `run_locked()` — cluster-scoped PVE identity provisioning and the two-phase legacy-user migration state machine                                         |
+| `agent/db_ops.rs`             | Agent-local DB operations (PVE host state, pending matches)                                                                                             |
+| `agent/entity.rs`             | SeaORM entities for the agent-local `proxmox_host_state` / `proxmox_pending_matches` tables                                                             |
+| `agent/guest_exec_adapter.rs` | `GuestExecProvider` impl wrapping `guest_exec.rs` so the SSH agent can run guest commands without depending on this crate directly                      |
+| `agent/migration.rs`          | Agent-local DB migrations (`proxmox_host_state`, `proxmox_pending_matches`)                                                                             |
+| `discovery.rs`                | `discover_guests()` — queries nodes for VMs/CTs                                                                                                         |
+| `matching.rs`                 | `manual_match()` / `unmatch()` — manual-only host matching                                                                                              |
+| `surfaces.rs`                 | Surface action definitions + handler dispatch                                                                                                           |
+| `pve_setup.rs`                | PVE node detection and API credential creation (agent-side)                                                                                             |
+| `guest_exec.rs`               | Guest command execution via `pct exec` / `qm guest exec` (agent-side)                                                                                   |
 
 ## Proxmox API Client
 
@@ -195,23 +198,23 @@ Proxmox REST API client — they operate via SSH commands on the PVE node.
 
 Used during SSH agent bootstrap and sync to detect PVE nodes and provision
 API credentials. Identity model: a single cluster-wide PVE user
-([`PVE_USER`], `uptrakit@pve`) owns one `--privsep=1` API token per tenant
-(id `tenant-{tenant_uuid}`, built by [`pve_token_id`]/[`pve_full_token_id`]).
+(`PVE_USER`, `uptrakit@pve`) owns one `--privsep=1` API token per tenant
+(id `tenant-{tenant_uuid}`, built by `pve_token_id`/`pve_full_token_id`).
 This replaces the earlier one-user-per-tenant (`uptrakit-{tenant_id}@pve`)
 model — see [ADR-0044](../adr/0044-shared-pve-user-with-per-tenant-privilege-separated-api-tokens.md)
 and [Proxmox Bootstrap Privileges](proxmox-bootstrap.md#pve-api-token-privileges-controller-side-discovery)
 for the role/ACL detail. `pve_user_realm(tenant_id)` (the legacy per-tenant
 username builder) no longer exists.
 
-| Function                                                   | Description                                                                          |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `detect_pve_node(executor)`                                | Runs `command -v pveversion` to detect a PVE node                                    |
-| `check_pve_state(executor, tenant_id)`                     | Reads [`PVE_USER`]'s token list and the full user list; returns `PveCredentialState` |
-| `create_pve_api_credentials(executor, tenant_id)`          | Creates [`PVE_USER`] (if absent, no password) and a fresh `--privsep=1` token        |
-| `regenerate_pve_api_token(executor, tenant_id)`            | Removes then recreates this tenant's token on [`PVE_USER`]                           |
-| `ensure_pve_privileges(executor, tenant_id)`               | Idempotently (re)creates the three custom roles and (re)grants all ACL pairs         |
-| `delete_pve_user(executor, user_realm)`                    | Deletes a PVE user (used in migration phase 2 to remove the legacy per-tenant user)  |
-| `pve_token_id(tenant_id)` / `pve_full_token_id(tenant_id)` | Build `tenant-{tenant_uuid}` / `uptrakit@pve!tenant-{tenant_uuid}`                   |
+| Function                                                   | Description                                                                         |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `detect_pve_node(executor)`                                | Runs `command -v pveversion` to detect a PVE node                                   |
+| `check_pve_state(executor, tenant_id)`                     | Reads `PVE_USER`'s token list and the full user list; returns `PveCredentialState`  |
+| `create_pve_api_credentials(executor, tenant_id)`          | Creates `PVE_USER` (if absent, no password) and a fresh `--privsep=1` token         |
+| `regenerate_pve_api_token(executor, tenant_id)`            | Removes then recreates this tenant's token on `PVE_USER`                            |
+| `ensure_pve_privileges(executor, tenant_id)`               | Idempotently (re)creates the three custom roles and (re)grants all ACL pairs        |
+| `delete_pve_user(executor, user_realm)`                    | Deletes a PVE user (used in migration phase 2 to remove the legacy per-tenant user) |
+| `pve_token_id(tenant_id)` / `pve_full_token_id(tenant_id)` | Build `tenant-{tenant_uuid}` / `uptrakit@pve!tenant-{tenant_uuid}`                  |
 
 #### PVE Cluster Deduplication and Legacy Migration
 
@@ -221,13 +224,13 @@ provisioning is cluster-scoped, not per-host: `run_credential_flow`
 single entry point both bootstrap and sync delegate to, serialized per
 cluster by a process-global lock so two nodes syncing at once never race the
 migration bookkeeping. Each run first calls `check_pve_state()`, which reads
-[`PVE_USER`]'s token list (also the user-existence probe) and the full
+`PVE_USER`'s token list (also the user-existence probe) and the full
 `pveum user list` output, returning a `PveCredentialState` — this tenant's
 token presence, whether the shared user exists, and (scoped to this tenant
 only, never a cross-tenant scan) any leftover legacy per-tenant user still on
 the cluster.
 
-The flow then decides between reuse (an `new_pve_plugin_config_id` ack
+The flow then decides between reuse (a `new_pve_plugin_config_id` ack
 marker is present across the cluster's known rows, and this run's read did
 not confirm the token absent), regenerate (token confirmed present but no
 reusable evidence), or create (no token, or another tenant's coexisting
