@@ -6,6 +6,7 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, Qu
 use super::entity::proxmox_host_state;
 use super::entity::proxmox_pending_match;
 use crate::{ProxmoxError, Result};
+use uptrakit_shared_db::begin_immediate;
 
 // ── proxmox_host_state ops ───────────────────────────────────────────────────
 
@@ -264,15 +265,21 @@ pub async fn increment_match_attempts(db: &DatabaseConnection, id: i32) -> Resul
 /// `new_pve_plugin_config_id` ack markers pointing at a foreign tenant's
 /// plugin config) must not satisfy reuse/migration checks under the new
 /// tenant.
+///
+/// Both deletes run inside a single `begin_immediate()` transaction so a
+/// failure partway through never leaves one table wiped and the other
+/// holding stale, foreign-tenant rows.
 pub async fn wipe_all(db: &DatabaseConnection) -> Result<()> {
+    let txn = begin_immediate(db).await.context_to::<ProxmoxError>()?;
     proxmox_host_state::Entity::delete_many()
-        .exec(db)
+        .exec(&txn)
         .await
         .context_to::<ProxmoxError>()?;
     proxmox_pending_match::Entity::delete_many()
-        .exec(db)
+        .exec(&txn)
         .await
         .context_to::<ProxmoxError>()?;
+    txn.commit().await.context_to::<ProxmoxError>()?;
     Ok(())
 }
 
@@ -450,6 +457,13 @@ mod tests {
         )
         .await
         .expect("seed h2");
+        // Non-PVE row: `upsert_host_state` also writes these (e.g. a host that
+        // was probed and found not to be a PVE node), and `find_pve_hosts`
+        // filters them out — a wipe scoped to `is_pve_node = true` would leave
+        // this row behind undetected without an unfiltered assertion.
+        upsert_host_state(&db, "h-non-pve", false, None, None)
+            .await
+            .expect("seed non-pve host");
         insert_pending_match(&db, "h1", "mapping-1")
             .await
             .expect("seed pending match");
@@ -457,7 +471,14 @@ mod tests {
         // Sanity: both tables are non-empty before the wipe — red-checkable:
         // a wipe_all that's a no-op (or that deletes the wrong table) leaves
         // these non-empty after the call below.
-        assert_eq!(find_pve_hosts(&db).await.expect("query hosts").len(), 2);
+        let unfiltered_host_count = || async {
+            proxmox_host_state::Entity::find()
+                .all(&db)
+                .await
+                .expect("query all host state rows")
+                .len()
+        };
+        assert_eq!(unfiltered_host_count().await, 3);
         assert_eq!(
             drain_pending_matches(&db)
                 .await
@@ -468,9 +489,14 @@ mod tests {
 
         wipe_all(&db).await.expect("wipe_all");
 
-        assert!(
-            find_pve_hosts(&db).await.expect("query hosts").is_empty(),
-            "proxmox_host_state must be empty after tenant rebind wipe"
+        // Unfiltered count, not `find_pve_hosts` (which filters
+        // `is_pve_node = true`): a wipe scoped to that filter would still
+        // pass a `find_pve_hosts`-based assertion while leaving the
+        // non-PVE row (and any is_pve_node=true row it missed) behind.
+        assert_eq!(
+            unfiltered_host_count().await,
+            0,
+            "proxmox_host_state must be empty after tenant rebind wipe, including non-PVE rows"
         );
         assert!(
             drain_pending_matches(&db)

@@ -443,10 +443,11 @@ pub trait SshAgentRuntimeSupport: Send + Sync + 'static {
 
     /// The tenant id persisted from a prior session, if any. Used as the
     /// rebind-detection fallback for the in-memory `session_state.tenant_id`,
-    /// which is always `None` on process start. Returns `None` on any load
-    /// failure — a load error must never itself be mistaken for "no prior
-    /// tenant" causing a spurious wipe, so callers additionally require the
-    /// in-memory field to also be `None` before treating this as authoritative.
+    /// which is always `None` on process start. Callers consult this only
+    /// when the in-memory field is `None`; at that point the persisted value
+    /// is treated as authoritative. Returns `None` on any load failure — a
+    /// load error must never itself be mistaken for "no prior tenant",
+    /// which would cause a spurious wipe.
     async fn persisted_tenant_id(&self) -> Option<uuid::Uuid>;
 
     /// Notify infrastructure plugins that the agent's tenant binding just
