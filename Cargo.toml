@@ -57,10 +57,10 @@ sea-orm-migration = { version = "2.0", default-features = false, features = ["ru
 url = "2"
 uuid = { version = "1" }
 # rand 0.10 is already in the graph via async-nats 0.50, russh 0.62 and sqlx-postgres 0.9, so the
-# workspace pin tracks it rather than adding a duplicate. rand 0.9 remains for bollard/totp-rs/
-# tungstenite and rand 0.8 for openidconnect; neither is reachable from first-party code.
+# workspace pin tracks it rather than adding a duplicate. rand 0.9 remains for bollard/tungstenite
+# and rand 0.8 for openidconnect; neither is reachable from first-party code.
 rand = "0.10"
-totp-rs = { version = "5", features = ["gen_secret", "otpauth"] }
+totp-rs = { version = "6", features = ["gen_secret", "otpauth"] }
 hostname = "0.4"
 sha2 = "0.11"
 hex = "0.4"

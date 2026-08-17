@@ -310,9 +310,9 @@ skip = [
     { crate = "ordered-float@2.10.1", reason = "pulled by serde-value (openidconnect); newer 4.x/5.x used by sea-query" },
     { crate = "ordered-float@4.6.0", reason = "pulled by sea-query older pin; newer 5.x used by sea-query current" },
 
-    # rand: 0.8.x via openidconnect/rsa, 0.9.x via tungstenite/uptrakit, 0.10.x via russh 0.60
+    # rand: 0.8.x via openidconnect/rsa, 0.9.x via bollard/tungstenite, 0.10.x is the workspace pin
     { crate = "rand@0.8.7", reason = "pulled by openidconnect/rsa; newer 0.9.x used by tungstenite, uptrakit" },
-    { crate = "rand@0.9.5", reason = "workspace pins rand 0.9; bollard 0.21 would use rand 0.10 but testcontainers 0.27 pins bollard ^0.20 (bollard-stubs exact-version conflict blocks bollard 0.21 upgrade)" },
+    { crate = "rand@0.9.5", reason = "pulled by bollard 0.20.2, tungstenite 0.29 and metrics-util (dev); the workspace itself pins rand 0.10. bollard 0.21 uses rand 0.10 but testcontainers-modules 0.15 requires testcontainers ^0.27, which pins bollard ^0.20" },
     { crate = "rand_chacha@0.3.1", reason = "pulled by rand 0.8; newer 0.9.x used by rand 0.9" },
     { crate = "rand_core@0.6.4", reason = "pulled by crypto crates (openidconnect); newer 0.9.x used by rand 0.9" },
 
@@ -337,8 +337,8 @@ skip = [
     # r-efi: 5.3.0 via getrandom 0.3.4 (cc/jobserver build dep), 6.0.0 via getrandom 0.4.2 (rand 0.9)
     { crate = "r-efi@5.3.0", reason = "pulled by getrandom 0.3.4 (cc/jobserver build dep); newer 6.0.0 used by getrandom 0.4.2 (rand 0.9)" },
 
-    # rand_core: 0.9 via rand 0.9, 0.10 via russh 0.62 / rand 0.10
-    { crate = "rand_core@0.9.5", reason = "pulled by rand 0.9 (uptrakit); russh 0.62 and rand 0.10 use rand_core 0.10" },
+    # rand_core: 0.9 via rand 0.9 (bollard/tungstenite), 0.10 via the workspace rand 0.10 pin
+    { crate = "rand_core@0.9.5", reason = "pulled by rand 0.9 (bollard, tungstenite); the workspace rand 0.10 pin uses rand_core 0.10" },
 
     # russh chain: ssh-key 0.7.0-rc.11 (via russh 0.62.6) coexists with the workspace direct ssh-key 0.6.x dep
     { crate = "ssh-key@0.6.7", reason = "workspace direct dep (ssh-key = '0.6'); newer 0.7.0-rc.10 pulled by russh 0.62.6" },
