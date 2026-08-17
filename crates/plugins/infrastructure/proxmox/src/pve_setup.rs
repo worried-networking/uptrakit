@@ -78,59 +78,13 @@ pub async fn detect_pve_node_name(executor: &dyn RemoteExecutor) -> Result<Strin
     Ok(name)
 }
 
-/// Detect all PVE node names in the local cluster via `pvesh get /cluster/status`.
+/// Read and parse `pvesh get /cluster/status` into its JSON array of entries.
 ///
-/// Returns the short hostnames of every **node** member (entries with
-/// `"type": "node"`) in the cluster. On a standalone node (not joined to any
-/// cluster) this returns a single-element vec containing the current node.
-///
-/// Returns an empty vec on failure so callers can treat the result as
-/// best-effort information.
-pub async fn detect_pve_cluster_nodes(executor: &dyn RemoteExecutor) -> Vec<String> {
-    let result = match executor
-        .exec_command("pvesh get /cluster/status --output-format json 2>/dev/null")
-        .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::debug!(error = %e, "pvesh get /cluster/status failed");
-            return Vec::new();
-        }
-    };
-
-    if result.exit_code != 0 || result.stdout.trim().is_empty() {
-        tracing::debug!(
-            exit_code = result.exit_code,
-            "pvesh get /cluster/status returned non-zero or empty output"
-        );
-        return Vec::new();
-    }
-
-    let entries: Vec<serde_json::Value> = match serde_json::from_str(result.stdout.trim()) {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::debug!(error = %e, "failed to parse pvesh /cluster/status output");
-            return Vec::new();
-        }
-    };
-
-    entries
-        .into_iter()
-        .filter(|e| e.get("type").and_then(|t| t.as_str()) == Some("node"))
-        .filter_map(|e| {
-            e.get("name")
-                .and_then(|n| n.as_str())
-                .map(|s| s.to_string())
-        })
-        .collect()
-}
-
-/// Detect the PVE cluster name via `pvesh get /cluster/status`.
-///
-/// Returns the `name` field of the entry with `"type": "cluster"`. Returns
-/// `None` on standalone nodes (no such entry) or any read failure — this is a
-/// naming fallback only and must never gate anything destructive.
-pub async fn detect_pve_cluster_name(executor: &dyn RemoteExecutor) -> Option<String> {
+/// Shared by [`detect_pve_cluster_nodes`] and [`detect_pve_cluster_name`],
+/// which differ only in how they filter/map the resulting entries. Returns
+/// `None` on any command or parse failure — this is best-effort information
+/// and must never gate anything destructive.
+async fn read_cluster_status(executor: &dyn RemoteExecutor) -> Option<Vec<serde_json::Value>> {
     let result = match executor
         .exec_command("pvesh get /cluster/status --output-format json 2>/dev/null")
         .await
@@ -150,13 +104,46 @@ pub async fn detect_pve_cluster_name(executor: &dyn RemoteExecutor) -> Option<St
         return None;
     }
 
-    let entries: Vec<serde_json::Value> = match serde_json::from_str(result.stdout.trim()) {
-        Ok(v) => v,
+    match serde_json::from_str(result.stdout.trim()) {
+        Ok(v) => Some(v),
         Err(e) => {
             tracing::debug!(error = %e, "failed to parse pvesh /cluster/status output");
-            return None;
+            None
         }
+    }
+}
+
+/// Detect all PVE node names in the local cluster via `pvesh get /cluster/status`.
+///
+/// Returns the short hostnames of every **node** member (entries with
+/// `"type": "node"`) in the cluster. On a standalone node (not joined to any
+/// cluster) this returns a single-element vec containing the current node.
+///
+/// Returns an empty vec on failure so callers can treat the result as
+/// best-effort information.
+pub async fn detect_pve_cluster_nodes(executor: &dyn RemoteExecutor) -> Vec<String> {
+    let Some(entries) = read_cluster_status(executor).await else {
+        return Vec::new();
     };
+
+    entries
+        .into_iter()
+        .filter(|e| e.get("type").and_then(|t| t.as_str()) == Some("node"))
+        .filter_map(|e| {
+            e.get("name")
+                .and_then(|n| n.as_str())
+                .map(|s| s.to_string())
+        })
+        .collect()
+}
+
+/// Detect the PVE cluster name via `pvesh get /cluster/status`.
+///
+/// Returns the `name` field of the entry with `"type": "cluster"`. Returns
+/// `None` on standalone nodes (no such entry) or any read failure — this is a
+/// naming fallback only and must never gate anything destructive.
+pub async fn detect_pve_cluster_name(executor: &dyn RemoteExecutor) -> Option<String> {
+    let entries = read_cluster_status(executor).await?;
 
     entries
         .into_iter()
@@ -412,7 +399,7 @@ async fn ensure_pve_acls(executor: &dyn RemoteExecutor, tenant_id: &uuid::Uuid) 
         let user_cmd = format!("pveum acl modify '{path}' --users '{PVE_USER}' --roles '{role}'");
         let token_cmd =
             format!("pveum acl modify '{path}' --tokens '{full_token}' --roles '{role}'");
-        for cmd in [user_cmd, token_cmd] {
+        for (level, cmd) in [("user", user_cmd), ("token", token_cmd)] {
             let result = executor
                 .exec_command(&cmd)
                 .await
@@ -424,6 +411,7 @@ async fn ensure_pve_acls(executor: &dyn RemoteExecutor, tenant_id: &uuid::Uuid) 
                     result.stderr.trim()
                 )));
             }
+            tracing::debug!(path, role, level, "pveum acl modify granted");
         }
     }
     Ok(())
@@ -600,7 +588,7 @@ pub async fn delete_pve_user(executor: &dyn RemoteExecutor, user_realm: &str) ->
         bail!(ProxmoxError::Plugin(format!(
             "pveum user delete '{user_realm}' failed (exit {}): {}",
             result.exit_code,
-            result.stderr.trim()
+            short_output(&result.stdout, &result.stderr)
         )));
     }
     Ok(())
@@ -647,7 +635,7 @@ mod tests {
     use super::*;
 
     fn tenant() -> uuid::Uuid {
-        uuid::Uuid::parse_str("11111111-1111-1111-1111-111111111111").expect("valid uuid")
+        uuid::Uuid::from_u128(0x11111111_1111_1111_1111_111111111111)
     }
 
     fn ok(stdout: impl Into<String>) -> RemoteCommandResult {
@@ -822,23 +810,36 @@ mod tests {
 
         let calls = executor.recorded_calls();
         let full_token = pve_full_token_id(&tid);
-        let user_grant = format!("--users '{PVE_USER}'");
-        let token_grant = format!("--tokens '{full_token}'");
-        let user_grants = calls
+        let expected = [
+            ("/", UPTRAKIT_AUDIT_ROLE, "--users"),
+            ("/", UPTRAKIT_AUDIT_ROLE, "--tokens"),
+            ("/vms", UPTRAKIT_PROTECTION_ROLE, "--users"),
+            ("/vms", UPTRAKIT_PROTECTION_ROLE, "--tokens"),
+            ("/storage", UPTRAKIT_PROTECTION_ROLE, "--users"),
+            ("/storage", UPTRAKIT_PROTECTION_ROLE, "--tokens"),
+            ("/vms", UPTRAKIT_SCALING_ROLE, "--users"),
+            ("/vms", UPTRAKIT_SCALING_ROLE, "--tokens"),
+        ];
+        let expected_cmds: Vec<String> = expected
             .iter()
-            .filter(|c| c.contains("pveum acl modify") && c.contains(&user_grant))
-            .count();
-        let token_grants = calls
+            .map(|(path, role, level)| {
+                let grantee = if *level == "--users" {
+                    format!("--users '{PVE_USER}'")
+                } else {
+                    format!("--tokens '{full_token}'")
+                };
+                format!("pveum acl modify '{path}' {grantee} --roles '{role}'")
+            })
+            .collect();
+
+        let acl_calls: Vec<&String> = calls
             .iter()
-            .filter(|c| c.contains("pveum acl modify") && c.contains(&token_grant))
-            .count();
+            .filter(|c| c.contains("pveum acl modify"))
+            .collect();
         assert_eq!(
-            user_grants, 4,
-            "expected 4 user-level ACL grants: {calls:?}"
-        );
-        assert_eq!(
-            token_grants, 4,
-            "expected 4 token-level ACL grants: {calls:?}"
+            acl_calls,
+            expected_cmds.iter().collect::<Vec<_>>(),
+            "expected exactly the 8 (path, role, level) ACL grants in order: {calls:?}"
         );
     }
 
@@ -980,13 +981,20 @@ mod tests {
 
     #[tokio::test]
     async fn delete_pve_user_nonzero_is_err() {
+        // The real command runs with `2>&1`, so the diagnostic lands in
+        // stdout with stderr EMPTY — script it that way to catch a
+        // regression to `result.stderr.trim()` (which would yield an empty
+        // diagnostic here).
         let executor = ScriptedRemoteExecutor::with_matcher(vec![(
             "pveum user delete",
-            err(1, "no such user"),
+            err(1, "totally distinctive delete failure text"),
         )]);
+        let result = delete_pve_user(&executor, "uptrakit-x@pve").await;
+        let error = result.expect_err("a non-zero delete must be an error");
+        let message = format!("{error}");
         assert!(
-            delete_pve_user(&executor, "uptrakit-x@pve").await.is_err(),
-            "a non-zero delete must be an error"
+            message.contains("totally distinctive delete failure text"),
+            "error message must contain the captured stdout diagnostic: {message}"
         );
     }
 }
