@@ -10,6 +10,7 @@ pub mod config_test;
 pub mod connection_context;
 pub mod error;
 pub mod host_info;
+pub mod sudoers;
 pub mod update;
 pub mod version_check;
 
