@@ -319,27 +319,79 @@ invocation and runs it on the PVE node via SSH.
 For a full list of commands executed inside the guest and the PVE privileges required, see
 [Proxmox Bootstrap Privileges](../development/proxmox-bootstrap.md).
 
-### PVE Detection During SSH Bootstrap
+### PVE Identity and Credential Flow
 
-When bootstrapping a host via regular SSH (the `bootstrap` action), the agent automatically
-detects whether the target is a Proxmox VE node by checking for `pveversion`. If detected,
-the agent performs a **cluster deduplication check** before creating credentials:
+Uptrakit provisions exactly one PVE identity per cluster: the shared, cluster-wide user
+`uptrakit@pve` (`pve_setup::PVE_USER`), which is token-only and never receives a password.
+Each tenant that touches the cluster gets its own API token on that shared user, with id
+`tenant-{tenant_uuid}` (`pve_setup::pve_token_id`) — full form
+`uptrakit@pve!tenant-{tenant_uuid}` — created with `--privsep=1` (privilege separation on).
+Three custom roles (`UptrakitAudit`, `UptrakitProtection`, `UptrakitScaling`) are granted at
+both the user level (the ceiling) and the token level (the selection within it); a privsep
+token's effective privileges are the intersection of the two. This replaced an earlier model
+where each tenant got its own dedicated user (`uptrakit-{tenant_uuid}@pve`) with a
+`--privsep=0` token named `uptrakit` and the built-in `PVEAuditor` role — see
+[ADR-0044](../adr/0044-shared-pve-user-with-per-tenant-privilege-separated-api-tokens.md) for
+the rationale.
 
-1. Checks for existing Uptrakit PVE tokens on the cluster via `pveum user list`
-2. If a token owned by the **same tenant** already exists: reuses the existing
-   `pve_plugin_config_id` from a previously bootstrapped host (skips credential creation
-   and `ReportPluginConfig`)
-3. If a token owned by a **different tenant** exists: fails with an error (cluster already
-   claimed by another tenant)
-4. If no token exists: creates a tenant-scoped PVE API user (`uptrakit-{tenant_id}@pve`)
-   and token via `pveum` commands, marks the host as `is_pve_node = true`, and sends
-   `ReportPluginConfig` to register a Proxmox plugin configuration
-5. If `tenant_id` is not yet available (service not enrolled): skips PVE credential creation
-   with a warning
+### Cluster-scoped credential flow
 
-The tenant ID is received via `ServiceSettingsPayload.tenant_id` from the controller.
+Both `on_host_bootstrapped` and `on_host_synced` delegate to a single entry point,
+`run_credential_flow()` (`crates/plugins/infrastructure/proxmox/src/agent/credential_flow.rs`),
+serialized per cluster by a process-global lock (keyed on the detected cluster name, or the
+fixed string `"standalone"` for a lone node) so bootstrap and sync racing — or two cluster
+nodes syncing at once — never corrupt the migration bookkeeping below.
 
-This enables the `bootstrap-proxmox-guest` action to auto-resolve PVE nodes as gateways
+Ownership is now determined by the per-tenant **token**, not the user: several tenants can
+coexist on the same `uptrakit@pve` user, each with its own token, and a run only ever matches
+its own `tenant-{tenant_uuid}` token id — it never scans for or touches other tenants' tokens.
+
+1. Detects the PVE cluster (or standalone node) and its member nodes.
+2. Reads the current PVE identity state for the tenant (`pve_setup::check_pve_state`). A
+   failed read degrades the run: migration bookkeeping (phases 1/2 and the recovery arm below)
+   is skipped entirely for that run, reported as `PVE state read degraded; migration paused
+this run (…)`.
+3. Resolves the plugin-config name: `pve-{cluster_name}` when a cluster name is detected,
+   otherwise the standalone fallback `pve-{node_name}-{first 8 chars of host_id}`.
+4. Creates, reuses, or regenerates the tenant's token as needed, then proves it on the node
+   via `pve_setup::prove_token_on_node` — a `curl` over the existing SSH session against
+   `https://localhost:8006/api2/json/version` with an `Authorization: PVEAPIToken=…` header,
+   requiring HTTP 200. A failed proof yields `PveCredentialOutcome::Failed` and the flow stops
+   there; it never falls through to touching a legacy user.
+
+### Legacy-user migration (two-phase, cluster-scoped)
+
+The row set touched by migration bookkeeping is this host's own row plus any peer rows whose
+`pve_node_name` matches a detected cluster node (the peer arm only applies in a multi-node
+cluster):
+
+- **Phase 1 — record + provision**: any detected legacy user (`uptrakit-{tenant_uuid}@pve`) is
+  recorded on every cluster row (`db_ops::set_legacy_pve_user`, non-destructive) while the new
+  token is provisioned and proved, and the resulting plugin config is reported to the
+  controller.
+- **Ack marker**: the controller acks the new plugin-config id back to the agent, which is
+  stored in a separate `new_pve_plugin_config_id` column
+  (`HostLifecycle::on_plugin_config_reported` → `db_ops::set_new_plugin_config_id`). Phase 2
+  does not fire on a bare `pve_plugin_config_id` alone — only the ack marker gates it.
+- **Phase 2 — prove, then delete**: once the ack marker is present and the token exists,
+  `pve_setup::delete_pve_user` removes the legacy identity; only on success does
+  `db_ops::promote_cluster_rows` promote every cluster row's operative `pve_plugin_config_id`
+  and clear the legacy marker. A delete failure increments `migration_attempts` (reporting cap
+  `MAX_MIGRATION_ATTEMPTS = 5`; retries continue past it) and reports `MigrationPending`, or a
+  `"migration STUCK after N attempts"` summary line once the cap is reached.
+- **Recovery arm**: if the legacy marker is stored but this run's successful read shows the
+  legacy user already gone, state is reconciled without a redundant delete call.
+
+Rebinding a host to a different tenant (`HostLifecycle::on_tenant_changed` →
+`db_ops::wipe_all`) deletes the agent-local `proxmox_host_state` and `proxmox_pending_matches`
+rows, including the ack marker, so a rebound host never reuses another tenant's migration
+state.
+
+Because `pveum` is never sudo-allowlisted, this credential work can only _succeed_ in a root
+session — but `on_host_synced` is still invoked ungated on every sync of a PVE host
+(`crates/core/agent-ssh-runtime/src/operations/sync.rs`), where it simply fails without root.
+
+This flow enables the `bootstrap-proxmox-guest` action to auto-resolve PVE nodes as gateways
 from the controller's discovered guest data.
 
 ## Sudo Context and Dynamic Execution
@@ -767,6 +819,8 @@ crates/core/agent-ssh-runtime/         # Library — uptrakit-agent-ssh-runtime
     ├── host_info.rs     # Remote host info collection over SSH (machine_id, os_type, ...)
     ├── host_ops.rs      # CRUD operations for SSH hosts
     ├── remote_exec.rs   # SshRemoteExecutor, PveGuestExecutor (RemoteExecutor impls)
+    │                    # (PVE credential flow itself lives in
+    │                    #  crates/plugins/infrastructure/proxmox/src/agent/credential_flow.rs)
     ├── routeros_executor.rs  # RouterOS-specific command executor
     ├── operations/
     │   ├── mod.rs              # Operations module declarations

@@ -212,6 +212,11 @@ this agent instance.
 > `ExecuteUpdate` messages to a host it no longer has an active agent link for, but the
 > host record itself remains until an operator deletes it via the web UI or the
 > `DELETE /api/v1/hosts/{id}` API endpoint.
+>
+> Removing a host also does not deprovision anything on the Proxmox VE side: any
+> PVE API token created for the cluster stays in place. See
+> [Proxmox VE Integration -- Deprovisioning](proxmox.md#deprovisioning) for how
+> to clean up PVE-side credentials.
 
 ## Supported Key Types
 

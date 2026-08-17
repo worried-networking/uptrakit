@@ -408,24 +408,31 @@ configured (user created, key deployed, sudoers written). You can either:
 
 The host entry is **not** saved to the database unless all steps succeed.
 
-## PVE node detection
+## PVE node detection and identity
 
 When bootstrapping a host via SSH, the agent automatically checks whether the
 target is a Proxmox VE node (by looking for `pveversion`). If detected, the
-agent checks whether Uptrakit has already been set up on the same PVE cluster:
+agent provisions API access using a shared, cluster-wide identity model:
 
-- **No existing token** -- creates a tenant-scoped PVE API user
-  (`uptrakit-{tenant_id}@pve`) with `PVEAuditor` role (read-only access),
-  marks the host as a PVE node, and reports the plugin configuration to the
-  controller.
-- **Token owned by the same tenant** -- reuses the existing plugin
-  configuration from a previously bootstrapped node in the same cluster. No
-  duplicate credentials are created.
-- **Token owned by a different tenant** -- bootstrap fails with an error
-  explaining that the cluster is already claimed by another tenant.
-- **Tenant ID not yet available** -- skips PVE credential creation with a
-  warning. This can happen if the service has not received its settings from
-  the controller yet.
+- Uptrakit creates (or reuses) a single PVE user for the whole cluster,
+  `uptrakit@pve`. This user is token-only and never receives a password.
+- Your tenant gets its own API token on that shared user (`tenant-<your
+tenant ID>`), created with privilege separation on so the token's effective
+  access is scoped down from the user's ceiling. Multiple tenants can safely
+  share the same cluster this way, each with an independent token.
+- If your tenant's token already exists on the cluster (for example, from a
+  previously bootstrapped node), it is reused rather than duplicated.
+- If a tenant ID is not yet available (the service has not received its
+  settings from the controller yet), PVE credential creation is skipped with
+  a warning and retried on the next bootstrap or sync.
+
+Existing deployments created under an earlier per-tenant-user model are
+migrated to this shared-user model automatically the next time the host is
+bootstrapped or synced; no manual action is required. See
+[SSH Agent Architecture](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/ssh-agent.md#pve-identity-and-credential-flow)
+and
+[ADR-0044](https://github.com/worried-networking/uptrakit/tree/main/docs/adr/0044-shared-pve-user-with-per-tenant-privilege-separated-api-tokens.md)
+for the full identity model and migration mechanics.
 
 This enables the **Bootstrap via Proxmox** shared surface action, which allows
 bootstrapping LXC containers and QEMU VMs through the PVE node without direct

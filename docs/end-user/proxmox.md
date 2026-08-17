@@ -42,9 +42,17 @@ implemented — a future capability.
    `USER@REALM!TOKENID=SECRET`
 
 > [!TIP]
-> For discovery-only access, the token needs `PVEAuditor` role
-> privileges on `/` (root path). This grants read-only access to all nodes,
-> VMs, and containers without allowing any modifications.
+> Uptrakit's automatic provisioning (see
+> [Automatic Credential Provisioning](#automatic-credential-provisioning) below)
+> grants only the minimum privileges each feature needs, via custom roles
+> rather than the built-in `PVEAuditor` role. If you are creating a token
+> manually instead of letting the SSH agent provision one, grant it
+> `Sys.Audit`, `VM.Audit`, `VM.GuestAgent.Audit`, and `VM.GuestAgent.FileRead`
+> on `/` for discovery-only access -- the same privilege set as the
+> `UptrakitAudit` role Uptrakit creates automatically. Update-protection
+> (snapshots/backups) and resource-scaling features need additional
+> privileges; see [Automatic Credential Provisioning](#automatic-credential-provisioning)
+> for the full list.
 
 ### Adding the Plugin Configuration
 
@@ -142,17 +150,60 @@ means all online nodes are included.
 ## Bootstrapping Guests via SSH Agent
 
 When the SSH agent bootstraps a Proxmox VE node (via regular SSH bootstrap), it
-automatically detects PVE and creates tenant-scoped API credentials
-(`uptrakit-{tenant_id}@pve`). If the cluster already has credentials for the
-same tenant (from bootstrapping another node in the same cluster), the existing
-configuration is reused automatically. This enables a second bootstrap mode:
-bootstrapping guests (LXC containers and QEMU VMs) directly through the PVE
-node without needing SSH access to the guest.
+automatically detects PVE and provisions API credentials for the tenant. This
+enables a second bootstrap mode: bootstrapping guests (LXC containers and QEMU
+VMs) directly through the PVE node without needing SSH access to the guest.
+
+### Automatic Credential Provisioning
+
+Uptrakit provisions PVE API access using a single cluster-wide user shared by
+every tenant, plus one privilege-separated token per tenant -- not a dedicated
+user per tenant:
+
+- One user, `uptrakit@pve`, shared across every tenant on the cluster. It
+  never gets a password -- it exists only to hold API tokens.
+- One API token per tenant, id `tenant-{tenant_uuid}` (full form
+  `uptrakit@pve!tenant-{tenant_uuid}`), created with `--privsep=1`. Because
+  the token is privilege-separated, its effective privileges are the
+  intersection of the grants on `uptrakit@pve` and the grants on the token
+  itself -- the user-level grants are the ceiling, the token-level grants are
+  the selection within it. A tenant's token can never exceed what
+  `uptrakit@pve` itself is granted, and revoking one tenant's token never
+  affects another tenant.
+- Three custom roles, created and kept up to date automatically:
+  - `UptrakitAudit` -- read-only access (`Sys.Audit`, `VM.Audit`,
+    `VM.GuestAgent.Audit`, `VM.GuestAgent.FileRead`), granted on `/`.
+  - `UptrakitProtection` -- pre-update snapshot/backup access (`VM.Snapshot`,
+    `VM.Backup`, `Datastore.AllocateSpace`), granted on `/vms` and `/storage`.
+  - `UptrakitScaling` -- live resource-scaling access (`VM.Audit`,
+    `VM.Config.CPU`, `VM.Config.Memory`), granted on `/vms`.
+
+  Each role is granted at both the user level (`uptrakit@pve`) and the token
+  level (`uptrakit@pve!tenant-{tenant_uuid}`) -- privilege separation requires
+  a grant at both levels before it takes effect for the token.
+
+Multiple tenants can share one `uptrakit@pve` user on the same cluster, each
+with its own token; a sync only ever creates, reads, or removes its own
+tenant's token, never another tenant's. See
+[ADR-0044](../adr/0044-shared-pve-user-with-per-tenant-privilege-separated-api-tokens.md)
+for the full rationale.
+
+If the cluster already has a token for the same tenant (from bootstrapping
+another node in the same cluster), the existing plugin configuration is
+reused automatically instead of creating a new one.
+
+> [!NOTE]
+> Deployments upgrading from an earlier release used a different identity
+> model: a separate PVE user per tenant (`uptrakit-{tenant_uuid}@pve`) with a
+> single, non-privilege-separated token and the built-in `PVEAuditor` role.
+> See [Migrating to the Shared PVE Identity Model](#migrating-to-the-shared-pve-identity-model)
+> below for how upgrades move to the model described above.
 
 ### How It Works
 
 1. **Bootstrap the PVE node** — Use the regular SSH bootstrap to set up the PVE
-   host. The agent detects PVE automatically and creates an API user/token.
+   host. The agent detects PVE automatically and provisions (or reuses) the
+   API user/token described above.
 2. **Bootstrap guests** — Use the "Bootstrap via Proxmox" action in the UI or
    CLI. The agent SSHs to the PVE node and runs commands inside the guest via
    `pct exec` (LXC) or `qm guest exec` (QEMU).
@@ -196,6 +247,167 @@ matching will fail.
 If matching fails, use the **Sync Host** row action in the web UI (or run
 `uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> sync <host-id>`)
 to populate the node name, then retry.
+
+## Migrating to the Shared PVE Identity Model
+
+Deployments upgrading from an earlier release migrate automatically from the
+legacy per-tenant-user model (`uptrakit-{tenant_uuid}@pve` plus a single
+non-privilege-separated token) to the shared-user model described in
+[Automatic Credential Provisioning](#automatic-credential-provisioning). No
+manual credential work is required -- only privileged syncs, as detailed
+below.
+
+### Privileged session requirement
+
+Credential provisioning and migration bookkeeping run on every sync of a PVE
+host, but `pveum` is never in the agent's sudo allowlist -- it can only
+succeed in an SSH session that is already root. Nothing progresses until you
+sync (or bootstrap) the PVE host using a privileged (root) SSH session;
+syncing as an unprivileged user makes no forward progress.
+
+### Sync twice
+
+Migration is a two-phase, cluster-scoped process:
+
+1. **First privileged sync** — the agent records the legacy user (without
+   touching it), creates the new per-tenant token, and proves it works by
+   presenting it to `https://localhost:8006/api2/json/version` and requiring
+   an HTTP 200 response. If the proof fails, the run reports a failure and
+   stops -- the legacy user is never deleted on an unproved token. On
+   success, the controller acknowledges the new plugin configuration back to
+   the agent.
+2. **Second privileged sync** — with that acknowledgment in hand, the agent
+   deletes the legacy `uptrakit-{tenant_uuid}@pve` user and promotes the new
+   configuration to active use.
+
+Both syncs must use a privileged session for migration to complete.
+
+### Reading the outcome
+
+Each sync's summary reports one of:
+
+- `migration pending` -- normal after the first privileged sync; migration is
+  in progress and the next privileged sync should complete it.
+- `migration STUCK after N attempts` -- legacy-user removal has failed
+  repeatedly (5 or more attempts) and needs attention; confirm the session is
+  genuinely privileged and that the legacy user hasn't been altered manually.
+- `PVE state read degraded; migration paused this run (...)` -- a transient
+  read failure. Migration bookkeeping is skipped for that run only; retry on
+  the next sync.
+
+### Aftermath
+
+Once migration completes, the cluster has: the shared `uptrakit@pve` user and
+its per-tenant token in place, the legacy `uptrakit-{tenant_uuid}@pve` user
+gone, and the plugin configuration renamed to `pve-{cluster_name}` (or
+`pve-{node_name}-{first 8 characters of the host ID}` for a standalone node).
+
+### Deployments with nothing to migrate
+
+A deployment that never synced a PVE host before this release has no legacy
+state to migrate -- its first sync provisions directly under the shared-user
+model above.
+
+### Split-agent clusters
+
+Migration is scoped to the PVE cluster, not to any single SSH agent. If
+different nodes of the same cluster are managed by different SSH agent
+instances, migration still completes per cluster: each node converges to the
+new model as its own agent instance syncs it with a privileged session.
+
+### Rollback boundary
+
+Once the legacy user has been deleted (end of the second privileged sync),
+rolling back to an older Uptrakit release is not simply reversible: an older
+agent does not recognize the shared-user/token model and expects the legacy
+user to still exist. Rolling back after migration completes means
+re-provisioning PVE credentials from scratch.
+
+### If the plugin config is deleted mid-migration
+
+Avoid deleting a `pve-*` plugin configuration while migration is still
+pending. The agent's local migration bookkeeping only tracks whether it has
+already received the controller's acknowledgment for a plugin configuration --
+it does not re-verify that the configuration still exists on the controller.
+Deleting it mid-migration can leave the agent believing migration is on track
+while the controller has no matching configuration. Wait for the aftermath
+state above before deleting or renaming a `pve-*` configuration.
+
+## Deprovisioning
+
+Use these steps when you stop using Uptrakit's Proxmox VE integration
+entirely, or when you drop a single tenant from a shared cluster.
+
+### Removing one tenant
+
+To remove a single tenant's access while leaving other tenants on the same
+cluster untouched:
+
+```bash
+pveum user token remove 'uptrakit@pve' 'tenant-{tenant_uuid}'
+```
+
+This is safe to run with other tenants still active on the cluster -- it
+removes only that tenant's token. The shared `uptrakit@pve` user, its roles,
+and every other tenant's token are unaffected.
+
+### Removing the last tenant
+
+First confirm no other tenant still has a token on the shared user:
+
+```bash
+pveum user token list 'uptrakit@pve'
+```
+
+Only once that list is empty is it safe to remove the shared user and its
+custom roles:
+
+```bash
+pveum user delete 'uptrakit@pve'
+pveum role delete 'UptrakitAudit'
+pveum role delete 'UptrakitProtection'
+pveum role delete 'UptrakitScaling'
+```
+
+> [!WARNING]
+> Deleting `uptrakit@pve` or any of the three roles while another tenant
+> still has a token on that user breaks that tenant's PVE integration --
+> always confirm the token list is empty first.
+
+### Cleaning up a never-fully-migrated legacy user
+
+If a deployment never completed the migration described in
+[Migrating to the Shared PVE Identity Model](#migrating-to-the-shared-pve-identity-model)
+(for example, PVE syncs were never run with a privileged session), a legacy
+per-tenant user may still be present:
+
+```bash
+pveum user list
+```
+
+Look for any remaining `uptrakit-*@pve` entries and remove them:
+
+```bash
+pveum user delete 'uptrakit-{tenant_uuid}@pve'
+```
+
+### Host-side cleanup
+
+Removing a host from Uptrakit (`uptrakit-agent-ssh host remove`, or deleting
+the host in the controller UI) does not remove the managed user, its SSH key,
+or its sudoers drop-in from the PVE node itself -- see
+[SSH Agent Host Management -- Removing a host](ssh-agent-host-management.md#removing-a-host).
+To clean those up on the PVE node, remove the target user's entry from
+`~<username>/.ssh/authorized_keys` (or delete the user outright), and delete
+its sudoers drop-in at `/etc/sudoers.d/uptrakit-<username>` (default target
+username `uptrakit`).
+
+### Controller-side cleanup
+
+Deleting the `pve-*` plugin configuration in the web UI removes only the
+controller's record of it -- it does **not** remove anything on the PVE node.
+Use the `pveum` commands above to remove the actual PVE-side user, token, and
+roles.
 
 ## Security Considerations
 

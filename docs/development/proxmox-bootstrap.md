@@ -19,7 +19,7 @@ All commands below run as root inside the guest via `pct exec` or
 | Command                                                                 | Purpose                                                | Security rationale                                                                                                                  |
 | ----------------------------------------------------------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `id -u {username}`                                                      | Check if user exists                                   | Avoid duplicate user creation                                                                                                       |
-| `useradd -m -s /bin/bash {username}`                                    | Create the target user                                 | Dedicated non-root user for Uptrakit SSH access                                                                                     |
+| `useradd --create-home --shell /bin/sh {username}`                      | Create the target user                                 | Dedicated non-root user for Uptrakit SSH access                                                                                     |
 | `getent passwd {username}`                                              | Resolve home directory path                            | Deploy SSH keys to the correct location                                                                                             |
 | `mkdir -p {home}/.ssh`                                                  | Create SSH directory                                   | Required for `authorized_keys`                                                                                                      |
 | `chmod 700 {home}/.ssh`                                                 | Restrict SSH directory                                 | OpenSSH requires strict permissions                                                                                                 |
@@ -35,41 +35,76 @@ All commands below run as root inside the guest via `pct exec` or
 ## PVE API token privileges (controller-side discovery)
 
 The Proxmox infrastructure plugin on the controller uses a PVE API token
-to discover VMs and containers. Required privileges:
+to discover VMs and containers, and (for update protection and scaling)
+to manage them. Identity is **cluster-wide, not per-tenant**: a single PVE
+user `uptrakit@pve` (`pve_setup::PVE_USER`) is created once per cluster and
+never gets a password — it is a token-only identity. Each tenant instead
+gets its own `--privsep=1` API token on that shared user, id
+`tenant-{tenant_uuid}` (`pve_setup::pve_token_id`), full form
+`uptrakit@pve!tenant-{tenant_uuid}` (`pve_setup::pve_full_token_id`). See
+[ADR-0044](../adr/0044-shared-pve-user-with-per-tenant-privilege-separated-api-tokens.md)
+for the rationale.
 
-| Privilege               | Scope  | Purpose                                         |
-| ----------------------- | ------ | ----------------------------------------------- |
-| `Sys.Audit`             | `/`    | List cluster nodes                              |
-| `VM.Audit`              | `/vms` | List VMs/CTs and read their configs             |
-| `VM.Monitor` (optional) | `/vms` | Query QEMU guest agent for IPs and `machine_id` |
+Bootstrap idempotently creates/updates three custom PVE roles
+(`pveum role add '<role>' -privs '<privs>' 2>/dev/null; pveum role modify
+'<role>' -privs '<privs>'`):
 
-The built-in **PVEAuditor** role covers `Sys.Audit` and `VM.Audit`. Adding
-`VM.Monitor` on `/vms` enables IP discovery and `machine_id` collection via the
-guest agent, which improves automatic match suggestions.
+| Role                 | Privileges                                                            |
+| -------------------- | --------------------------------------------------------------------- |
+| `UptrakitAudit`      | `Sys.Audit` `VM.Audit` `VM.GuestAgent.Audit` `VM.GuestAgent.FileRead` |
+| `UptrakitProtection` | `VM.Snapshot` `VM.Backup` `Datastore.AllocateSpace`                   |
+| `UptrakitScaling`    | `VM.Audit` `VM.Config.CPU` `VM.Config.Memory`                         |
+
+These are granted via four `(path, role)` ACL pairs:
+
+| Path       | Role                 |
+| ---------- | -------------------- |
+| `/`        | `UptrakitAudit`      |
+| `/vms`     | `UptrakitProtection` |
+| `/storage` | `UptrakitProtection` |
+| `/vms`     | `UptrakitScaling`    |
+
+`/storage` is required alongside `/vms` for `UptrakitProtection` because
+vzdump backups targeting PBS/directory storage need `Datastore.AllocateSpace`
+on the storage path itself, not just `/vms`.
 
 ### Assigning privileges
 
-Without privilege separation (token inherits user permissions):
+Each `(path, role)` pair is granted at **both** grant levels — user and
+token:
 
 ```sh
-pveum acl modify / --users USER@REALM --roles PVEAuditor
+pveum acl modify '<path>' --users 'uptrakit@pve' --roles '<role>'
+pveum acl modify '<path>' --tokens 'uptrakit@pve!tenant-{tenant_uuid}' --roles '<role>'
 ```
 
-With privilege separation (token has independent permissions):
+This is required because Proxmox's `--privsep=1` model computes a token's
+effective privileges as the **intersection** of the user's ACL grants and
+the token's own ACL grants (upstream `pve-access-control`,
+`RPCEnvironment.pm` `permissions()`): the user-level grant is the ceiling,
+the token-level grant is the selection within it. A user with zero ACLs
+zeroes every one of its tokens regardless of what the token itself was
+granted.
 
-```sh
-pveum acl modify / --tokens USER@REALM!TOKENID --roles PVEAuditor
-# Optional: enable guest agent queries
-pveum acl modify /vms --tokens USER@REALM!TOKENID --roles PVEAuditor
-```
+Note that `pveum` itself is never added to any sudoers allowlist — the
+Proxmox plugin's sudo contribution
+(`collect_pve_sudo_commands`, see [Sudoers Management](../security/sudoers-management.md))
+covers only `pct exec` / `qm guest exec` / `qm guest cmd`. `pveum` can only
+succeed when the bootstrap SSH session is already running as root.
 
 ## machine_id collection
 
 During discovery, the controller attempts to read `/etc/machine-id` from
 running QEMU VMs via the guest agent file-read endpoint
 (`GET /nodes/{node}/qemu/{vmid}/agent/file-read?file=/etc/machine-id`).
-This requires `VM.Monitor` privilege and the QEMU guest agent to be
-installed and running inside the VM.
+This requires the `VM.GuestAgent.FileRead` privilege (granted via
+`UptrakitAudit` on `/`) and the QEMU guest agent to be installed and running
+inside the VM. `VM.GuestAgent.FileRead` and `VM.GuestAgent.Audit` (used for
+guest network-interface/IP discovery) were introduced in PVE 9, replacing
+the older `VM.Monitor` privilege; the legacy per-tenant identity model
+granted the built-in `PVEAuditor` role, which never included `VM.Monitor`
+either — `machine_id`/guest-agent collection is new capability introduced by
+the shared-user roles, not something the legacy model already had.
 
 LXC containers do not support the guest agent file-read API. Their
 `machine_id` is populated after bootstrap when the host reports its

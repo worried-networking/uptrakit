@@ -193,48 +193,72 @@ Proxmox REST API client — they operate via SSH commands on the PVE node.
 
 ### `pve_setup.rs` — PVE Detection and Credential Creation
 
-Used during SSH agent bootstrap to detect and configure PVE nodes.
+Used during SSH agent bootstrap and sync to detect PVE nodes and provision
+API credentials. Identity model: a single cluster-wide PVE user
+([`PVE_USER`], `uptrakit@pve`) owns one `--privsep=1` API token per tenant
+(id `tenant-{tenant_uuid}`, built by [`pve_token_id`]/[`pve_full_token_id`]).
+This replaces the earlier one-user-per-tenant (`uptrakit-{tenant_id}@pve`)
+model — see [ADR-0044](../adr/0044-shared-pve-user-with-per-tenant-privilege-separated-api-tokens.md)
+and [Proxmox Bootstrap Privileges](proxmox-bootstrap.md#pve-api-token-privileges-controller-side-discovery)
+for the role/ACL detail. `pve_user_realm(tenant_id)` (the legacy per-tenant
+username builder) no longer exists.
 
-| Function                                          | Description                                                                                 |
-| ------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `detect_pve_node(executor)`                       | Runs `command -v pveversion` to detect a PVE node                                           |
-| `check_pve_token_exists(executor, tenant_id)`     | Checks whether an Uptrakit PVE token already exists on the cluster and determines ownership |
-| `create_pve_api_credentials(executor, tenant_id)` | Creates a PVE API user and token via `pveum` commands                                       |
-| `pve_user_realm(tenant_id)`                       | Returns the tenant-specific PVE username: `uptrakit-{tenant_id}@pve`                        |
+| Function                                                   | Description                                                                          |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `detect_pve_node(executor)`                                | Runs `command -v pveversion` to detect a PVE node                                    |
+| `check_pve_state(executor, tenant_id)`                     | Reads [`PVE_USER`]'s token list and the full user list; returns `PveCredentialState` |
+| `create_pve_api_credentials(executor, tenant_id)`          | Creates [`PVE_USER`] (if absent, no password) and a fresh `--privsep=1` token        |
+| `regenerate_pve_api_token(executor, tenant_id)`            | Removes then recreates this tenant's token on [`PVE_USER`]                           |
+| `ensure_pve_privileges(executor, tenant_id)`               | Idempotently (re)creates the three custom roles and (re)grants all ACL pairs         |
+| `delete_pve_user(executor, user_realm)`                    | Deletes a PVE user (used in migration phase 2 to remove the legacy per-tenant user)  |
+| `pve_token_id(tenant_id)` / `pve_full_token_id(tenant_id)` | Build `tenant-{tenant_uuid}` / `uptrakit@pve!tenant-{tenant_uuid}`                   |
 
-#### PVE Cluster Deduplication
+#### PVE Cluster Deduplication and Legacy Migration
 
-PVE clusters share a cluster-wide user and token database. If Uptrakit has
-already been installed on another node in the same cluster, creating a second
-token would fail. The agent performs a pre-flight check via
-`check_pve_token_exists()` before attempting credential creation:
+PVE clusters share a cluster-wide user and token database, so credential
+provisioning is cluster-scoped, not per-host: `run_credential_flow`
+(`crates/plugins/infrastructure/proxmox/src/agent/credential_flow.rs`) is the
+single entry point both bootstrap and sync delegate to, serialized per
+cluster by a process-global lock so two nodes syncing at once never race the
+migration bookkeeping. Each run first calls `check_pve_state()`, which reads
+[`PVE_USER`]'s token list (also the user-existence probe) and the full
+`pveum user list` output, returning a `PveCredentialState` — this tenant's
+token presence, whether the shared user exists, and (scoped to this tenant
+only, never a cross-tenant scan) any leftover legacy per-tenant user still on
+the cluster.
 
-1. Lists all PVE users via `pveum user list --output-format json`
-2. Looks for users matching the `uptrakit-*@pve` pattern
-3. Returns a `PveTokenStatus`:
-   - `NotFound` — no Uptrakit token exists; safe to create
-   - `OwnedByTenant(username)` — token belongs to the current tenant; reuse existing config
-   - `OwnedByOtherTenant(username)` — token belongs to a different tenant; bootstrap fails with error
+The flow then decides between reuse (an `new_pve_plugin_config_id` ack
+marker is present across the cluster's known rows, and this run's read did
+not confirm the token absent), regenerate (token confirmed present but no
+reusable evidence), or create (no token, or another tenant's coexisting
+token — left untouched). If a legacy per-tenant user is detected, the flow
+records it (migration phase 1), and once a token has been proven working
+under the new identity, deletes the legacy user and promotes the cluster's
+rows to the new plugin config id (phase 2, prove-then-delete, retried up to
+`MAX_MIGRATION_ATTEMPTS` before being reported stuck). Any `check_pve_state`
+read failure marks the run degraded: migration bookkeeping sits out entirely
+and credential creation falls back to a guarded add-user-then-regenerate
+shape rather than the unguarded create path.
 
-When the token is owned by the current tenant, the agent looks up the existing
-`pve_plugin_config_id` from a previously bootstrapped host and reuses it
-instead of creating duplicate credentials.
+#### Shared-User PVE Credentials
 
-#### Tenant-Scoped PVE Credentials
+The PVE API user is cluster-wide (`uptrakit@pve`), not per-tenant; per-tenant
+isolation instead comes from each tenant owning a distinct `--privsep=1` API
+token on that shared user. The tenant ID is received via
+`ServiceSettingsPayload.tenant_id` from the controller.
 
-PVE API users are named per-tenant: `uptrakit-{tenant_id}@pve`. This ensures
-that each tenant's credentials are isolated and identifiable. The tenant ID is
-received via `ServiceSettingsPayload.tenant_id` from the controller.
+`create_pve_api_credentials` performs four steps:
 
-`create_pve_api_credentials` performs three steps:
-
-1. `pveum user add uptrakit-{tenant_id}@pve` — creates the API user (ignores "already exists")
-2. `pveum user token add uptrakit-{tenant_id}@pve uptrakit --privsep=0 --output-format json` — creates a token
-3. `pveum acl modify / --users uptrakit-{tenant_id}@pve --roles PVEAuditor` — grants read-only access
+1. `ensure_pve_roles()` — idempotently creates/updates the three custom PVE roles
+2. `pveum user add 'uptrakit@pve' --comment 'Uptrakit managed user'` — creates the shared user (ignores "already exists"); never passes `--password`
+3. `pveum user token add 'uptrakit@pve' 'tenant-{tenant_uuid}' --privsep=1 --output-format json` — creates this tenant's token
+4. `ensure_pve_acls()` — grants both user- and token-level ACLs for all four `(path, role)` pairs
 
 Returns `PveCredentials { api_url, api_token }` where `api_url` is derived from
 the PVE node's hostname (`https://{hostname}:8006`). The `api_url` does **not**
 include the `/api2/json` path — that prefix is added per-request by `ProxmoxClient`.
+`prove_token_on_node()` then proves the freshly issued token works, over the
+same SSH session, before it is ever reported to the controller.
 
 ### `guest_exec.rs` — Guest Command Execution
 
