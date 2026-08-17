@@ -59,7 +59,7 @@ sea-orm-migration = { workspace = true, optional = true }
 # Interim mitigation — retire together with the dependency-policy rule when the
 # infra-core feature-switched aliases become additive (deferred restructure spec).
 uptrakit-plugin-infrastructure-proxmox = { workspace = true, features = ["agent-infra", "plugin-ops", "db-sqlite", "testing"] }
-tokio = { workspace = true, features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
 httpmock = { workspace = true }
 uptrakit-shared-db = { workspace = true, features = ["migration", "db-sqlite"] }
 uptrakit-plugin-infrastructure-core = { workspace = true, features = ["testing", "agent-infra"] }

@@ -78,18 +78,6 @@ pub async fn find_pve_hosts(db: &DatabaseConnection) -> Result<Vec<proxmox_host_
         .context_to::<ProxmoxError>()
 }
 
-/// Find a PVE host that already has a `pve_plugin_config_id` set.
-pub async fn find_pve_host_with_config(
-    db: &DatabaseConnection,
-) -> Result<Option<proxmox_host_state::Model>> {
-    proxmox_host_state::Entity::find()
-        .filter(proxmox_host_state::Column::IsPveNode.eq(true))
-        .filter(proxmox_host_state::Column::PvePluginConfigId.is_not_null())
-        .one(db)
-        .await
-        .context_to::<ProxmoxError>()
-}
-
 /// Stamp (or clear) the legacy PVE user marker on a set of cluster rows.
 pub async fn set_legacy_pve_user(
     db: &DatabaseConnection,

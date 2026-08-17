@@ -238,13 +238,18 @@ impl HostLifecycle for crate::ProxmoxPlugin {
                 .await;
         lines.extend(output.summary_lines);
 
-        // Repair ACL/role grants only when this run reused an existing token
-        // under a healthy (non-degraded) read — a degraded read cannot be
-        // trusted to gate a further round of `pveum` mutations, and every
-        // other outcome (created/regenerated/failed/pending/skipped) already
-        // ran or attempted the relevant provisioning itself.
-        if output.outcome == PveCredentialOutcome::Reused
-            && !output.degraded
+        // Repair ACL/role grants when this run reused an existing token OR
+        // is mid-migration (legacy stored, ack marker not yet returned —
+        // which can persist for an extended window), under a healthy
+        // (non-degraded) read. A degraded read cannot be trusted to gate a
+        // further round of `pveum` mutations. Every other outcome
+        // (created/regenerated/failed/skipped) already ran or attempted the
+        // relevant provisioning itself.
+        if !output.degraded
+            && matches!(
+                output.outcome,
+                PveCredentialOutcome::Reused | PveCredentialOutcome::MigrationPending
+            )
             && let Some(tid_uuid) = ctx.tenant_id.and_then(|s| uuid::Uuid::parse_str(s).ok())
         {
             match pve_setup::ensure_pve_privileges(executor, &tid_uuid).await {

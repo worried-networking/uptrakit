@@ -230,13 +230,36 @@ async fn run_locked(
     let mut existing_config_id: Option<String> = None;
 
     if let Some(id) = evidence_id.clone().filter(|_| !confirmed_token_absent) {
-        // Branch 4: reuse.
+        // Branch 4: reuse. Persist the resolved id onto THIS flow host's own
+        // row via the coalesce-based setter — it fills a NULL operative
+        // column (a fresh peer picking up a cluster-mate's marker) while
+        // leaving a legacy row's operative id untouched until phase 2
+        // promotes it. A bare `upsert_host_state` would clobber that legacy
+        // id mid-migration, so it must not be used here.
+        if let Err(e) = db_ops::set_new_plugin_config_id(ctx.db, &host_id_str, &id).await {
+            tracing::warn!(error = %e, "failed to persist reused PVE plugin config id");
+            lines.push(
+                "PVE API credentials: reused existing plugin config, but failed to \
+                persist the reused id locally (see agent logs)"
+                    .to_string(),
+            );
+        } else {
+            lines.push("PVE API credentials: reused existing plugin config".to_string());
+        }
         outcome = PveCredentialOutcome::Reused;
         existing_config_id = Some(id);
-        lines.push("PVE API credentials: reused existing plugin config".to_string());
     } else if state.our_token_exists {
         // Branch 6: token confirmed present but no reusable evidence anywhere
         // (ack marker lost) — regenerate.
+        //
+        // NOTE: `regenerate_pve_api_token` calls `ensure_pve_acls` but not
+        // `ensure_pve_roles` (see pve_setup.rs). This is the spec-mandated
+        // shape for both this branch and the degraded-create path below
+        // (which also falls through to regenerate): a token-holding node is
+        // assumed to already have its roles from an earlier provisioning
+        // run. If a genuinely fresh node ever reaches a regenerate call with
+        // roles never created, ACLs would be granted against roles that do
+        // not exist. This is a known limitation, not a bug to fix here.
         match pve_setup::regenerate_pve_api_token(executor, tenant_id).await {
             Ok(creds) => match pve_setup::prove_token_on_node(executor, &creds.api_token).await {
                 Ok(()) => {
@@ -315,10 +338,12 @@ async fn run_locked(
     } else {
         // Branch 7: phase 1 — record a freshly-detected legacy user.
         if let Some(name) = state.legacy_user.clone() {
-            if let Err(e) = db_ops::set_legacy_pve_user(ctx.db, &cluster_ids, Some(name)).await {
-                tracing::warn!(error = %e, "failed to record legacy PVE user marker");
+            match db_ops::set_legacy_pve_user(ctx.db, &cluster_ids, Some(name)).await {
+                Ok(()) => {
+                    lines.push("legacy PVE user detected; migration phase 1 recorded".to_string());
+                }
+                Err(e) => tracing::warn!(error = %e, "failed to record legacy PVE user marker"),
             }
-            lines.push("legacy PVE user detected; migration phase 1 recorded".to_string());
         }
 
         let any_legacy_stored =
@@ -332,7 +357,11 @@ async fn run_locked(
                 // run's successful read shows the legacy user is gone.
                 if let Some(id) = evidence_id.clone() {
                     match db_ops::promote_cluster_rows(ctx.db, &cluster_ids, &id).await {
-                        Ok(()) => migration_pending = false,
+                        Ok(()) => {
+                            migration_pending = false;
+                            lines
+                                .push("legacy PVE user already gone; state reconciled".to_string());
+                        }
                         Err(e) => tracing::warn!(
                             error = %e,
                             "failed to promote cluster rows during recovery"
@@ -340,14 +369,17 @@ async fn run_locked(
                     }
                 } else {
                     match db_ops::set_legacy_pve_user(ctx.db, &cluster_ids, None).await {
-                        Ok(()) => migration_pending = false,
+                        Ok(()) => {
+                            migration_pending = false;
+                            lines
+                                .push("legacy PVE user already gone; state reconciled".to_string());
+                        }
                         Err(e) => tracing::warn!(
                             error = %e,
                             "failed to clear stale legacy PVE user marker"
                         ),
                     }
                 }
-                lines.push("legacy PVE user already gone; state reconciled".to_string());
             } else if let Some(new_id) = evidence_id.clone().filter(|_| state.our_token_exists) {
                 // Branch 8: phase 2 — prove-then-delete promotion.
                 let legacy_name = state.legacy_user.clone().unwrap_or_default();
@@ -392,8 +424,10 @@ async fn run_locked(
     }
 
     // Branch 10: MigrationPending takes precedence over whatever 4-6
-    // produced when the cluster is still mid-migration after this run.
-    if migration_pending {
+    // produced when the cluster is still mid-migration after this run —
+    // except a genuine Failed outcome from 4-6, which must never be masked
+    // by a merely-pending migration.
+    if migration_pending && outcome != PveCredentialOutcome::Failed {
         outcome = PveCredentialOutcome::MigrationPending;
     }
 
@@ -612,6 +646,13 @@ mod tests {
         let calls = executor.recorded_calls();
         assert!(calls.iter().any(|c| c.contains("pveum user token add")));
         assert!(calls.iter().any(|c| c.contains("curl")));
+        assert!(
+            calls
+                .iter()
+                .any(|c| c.contains("pveum user token add") && c.contains("--privsep=1")),
+            "the API token must be created with privilege separation on, not inheriting the \
+             user's full privilege set: {calls:?}"
+        );
 
         // Variant B: standalone (no cluster) -> cfg name "pve-{node}-{short id}".
         let db2 = setup_agent_db().await;
@@ -669,7 +710,7 @@ mod tests {
         let guest = UnusedGuestBootstrap;
         let tid_str = tid.to_string();
         let ctx = make_ctx(&db, Some(&tid_str), &invoker, &guest);
-        let cluster_json = cluster_status(None, &["pve1"]);
+        let cluster_json = cluster_status(Some("COTENANTCLUSTER"), &["pve1"]);
         let token_list = ok(format!(r#"[{{"tokenid":"tenant-{other_tid}"}}]"#));
         let executor = ScriptedRemoteExecutor::with_matcher(vec![
             ("pvesh get /cluster/status", ok(cluster_json)),
@@ -719,13 +760,19 @@ mod tests {
         let guest = UnusedGuestBootstrap;
         let tid_str = tid.to_string();
         let ctx = make_ctx(&db, Some(&tid_str), &invoker, &guest);
-        let cluster_json = cluster_status(None, &["pve1"]);
+        let cluster_json = cluster_status(Some("BAREOPCLUSTER"), &["pve1"]);
+        // The token IS present (branch 6, regenerate) — a bare operative id
+        // with no ack marker must fall through to regenerate, not create.
+        // Scripting an empty token list would land on branch 5 (create)
+        // instead, which does not exercise the claimed branch.
         let executor = ScriptedRemoteExecutor::with_matcher(vec![
             ("pvesh get /cluster/status", ok(cluster_json)),
-            ("pveum user token list", token_list_empty()),
+            (
+                "pveum user token list",
+                ok(format!(r#"[{{"tokenid":"tenant-{tid}"}}]"#)),
+            ),
             ("pveum user list", user_list_empty()),
-            ("pveum role add", ok("")),
-            ("pveum user add", ok("")),
+            ("pveum user token remove", ok("")),
             ("pveum user token add", token_add_ok("secret-d")),
             ("pveum acl modify", ok("")),
             ("hostname -f", ok("pve.example.com")),
@@ -737,6 +784,16 @@ mod tests {
             out.outcome,
             PveCredentialOutcome::Reused,
             "a bare pve_plugin_config_id with no ack marker must never satisfy reuse"
+        );
+        assert_eq!(
+            out.outcome,
+            PveCredentialOutcome::Regenerated,
+            "confirmed-present token with no ack marker must regenerate, not create"
+        );
+        let calls = executor.recorded_calls();
+        assert!(
+            calls.iter().any(|c| c.contains("pveum user token remove")),
+            "expected the regenerate shape to run, not the create shape: {calls:?}"
         );
         assert!(out.existing_config_id.is_none());
     }
@@ -757,7 +814,7 @@ mod tests {
         let guest = UnusedGuestBootstrap;
         let tid_str = tid.to_string();
         let ctx = make_ctx(&db, Some(&tid_str), &invoker, &guest);
-        let cluster_json = cluster_status(None, &["pve1"]);
+        let cluster_json = cluster_status(Some("ACKREUSECLUSTER"), &["pve1"]);
         let executor = ScriptedRemoteExecutor::with_matcher(vec![
             ("pvesh get /cluster/status", ok(cluster_json)),
             (
@@ -821,6 +878,70 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn reuse_persists_peer_evidence_id_onto_flow_hosts_own_row() {
+        // Regression test for the bug where the reuse branch computed
+        // `existing_config_id` for the in-memory report but never persisted
+        // it onto the flow host's own row, silently dropping a peer-reusing
+        // cluster node out of the guest-bootstrap surface (which filters on
+        // `h.pve_plugin_config_id.is_some()`). The flow host's row starts
+        // completely NULL; only the peer carries the ack marker.
+        let db = setup_agent_db().await;
+        let flow_host = uuid::Uuid::from_u128(16);
+        let flow_host_str = flow_host.to_string();
+        let peer_host = uuid::Uuid::from_u128(17);
+        let peer_host_str = peer_host.to_string();
+        db_ops::upsert_host_state(&db, &flow_host_str, true, None, Some("pve1".to_string()))
+            .await
+            .expect("seed flow host with NULL operative id and no ack marker");
+        db_ops::upsert_host_state(&db, &peer_host_str, true, None, Some("pve2".to_string()))
+            .await
+            .expect("seed peer host");
+        db_ops::set_new_plugin_config_id(&db, &peer_host_str, "peer-cfg")
+            .await
+            .expect("seed peer ack marker");
+
+        let tid = tenant(16);
+        let invoker = RecordingActionInvoker::new();
+        let guest = UnusedGuestBootstrap;
+        let tid_str = tid.to_string();
+        let ctx = make_ctx(&db, Some(&tid_str), &invoker, &guest);
+        let cluster_json = cluster_status(Some("PEEREVIDENCECLUSTER"), &["pve1", "pve2"]);
+        let executor = ScriptedRemoteExecutor::with_matcher(vec![
+            ("pvesh get /cluster/status", ok(cluster_json)),
+            (
+                "pveum user token list",
+                ok(format!(r#"[{{"tokenid":"tenant-{tid}"}}]"#)),
+            ),
+            ("pveum user list", user_list_empty()),
+        ]);
+
+        let out = run_credential_flow(&ctx, &executor, flow_host, Some("pve1")).await;
+        assert_eq!(out.outcome, PveCredentialOutcome::Reused);
+        assert_eq!(out.existing_config_id.as_deref(), Some("peer-cfg"));
+
+        // The load-bearing assertion: deleting the B-1 fix's
+        // `set_new_plugin_config_id` call on the reuse branch would leave
+        // both of these columns NULL, since nothing else writes to the flow
+        // host's own row on this path.
+        let row = db_ops::find_host_state(&db, &flow_host_str)
+            .await
+            .expect("query")
+            .expect("flow host row exists");
+        assert_eq!(
+            row.new_pve_plugin_config_id.as_deref(),
+            Some("peer-cfg"),
+            "the ack marker must be persisted onto the flow host's own row, not just returned \
+             in the in-memory report"
+        );
+        assert_eq!(
+            row.pve_plugin_config_id.as_deref(),
+            Some("peer-cfg"),
+            "the coalesce fill must also promote the flow host's own NULL operative column so \
+             the guest-bootstrap surface's `pve_plugin_config_id.is_some()` filter picks it up"
+        );
+    }
+
+    #[tokio::test]
     async fn reuse_dead_token_evidence_falls_through_to_create() {
         let db = setup_agent_db().await;
         let host_id = uuid::Uuid::from_u128(14);
@@ -836,7 +957,7 @@ mod tests {
         let guest = UnusedGuestBootstrap;
         let tid_str = tid.to_string();
         let ctx = make_ctx(&db, Some(&tid_str), &invoker, &guest);
-        let cluster_json = cluster_status(None, &["pve1"]);
+        let cluster_json = cluster_status(Some("DEADTOKENCLUSTER"), &["pve1"]);
         let executor = ScriptedRemoteExecutor::with_matcher(vec![
             ("pvesh get /cluster/status", ok(cluster_json)),
             ("pveum user token list", token_list_empty()),
@@ -856,6 +977,15 @@ mod tests {
             "an ack marker with THIS run's read confirming token absence must not be reused"
         );
         assert_eq!(out.outcome, PveCredentialOutcome::Provisioned);
+        let report = out
+            .report
+            .as_ref()
+            .expect("provisioned run must carry a report");
+        assert_eq!(
+            report.name, "pve-DEADTOKENCLUSTER",
+            "the re-created report must carry the same Step-3 config name as the original \
+             provisioning would have used, not a fresh/mismatched one"
+        );
     }
 
     #[tokio::test]
@@ -914,7 +1044,7 @@ mod tests {
         let guest = UnusedGuestBootstrap;
         let tid_str = tid.to_string();
         let ctx = make_ctx(&db, Some(&tid_str), &invoker, &guest);
-        let cluster_json = cluster_status(None, &["pve1"]);
+        let cluster_json = cluster_status(Some("PHASE1CLUSTER"), &["pve1"]);
         let legacy_name = format!("uptrakit-{tid}@pve");
         let executor = ScriptedRemoteExecutor::with_matcher(vec![
             ("pvesh get /cluster/status", ok(cluster_json)),
@@ -951,6 +1081,91 @@ mod tests {
             .expect("query")
             .expect("row exists");
         assert_eq!(row.legacy_pve_user.as_deref(), Some(legacy_name.as_str()));
+        let calls = executor.recorded_calls();
+        assert!(
+            !calls.iter().any(|c| c.contains("pveum user delete")),
+            "phase 1 only records the legacy user; it must never delete it: {calls:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn legacy_stored_without_ack_marker_never_deletes() {
+        // Every row's bare `pve_plugin_config_id` is Some — only the ack
+        // marker (`new_pve_plugin_config_id`) is missing everywhere. Branch 8
+        // (prove-then-delete) is gated on the ack marker, not the bare
+        // operative id, so this must never delete despite a stored legacy
+        // user and a non-NULL operative column on every row.
+        let db = setup_agent_db().await;
+        let host_id = uuid::Uuid::from_u128(200);
+        let host_id_str = host_id.to_string();
+        let tid = tenant(200);
+        let legacy_name = format!("uptrakit-{tid}@pve");
+        db_ops::upsert_host_state(
+            &db,
+            &host_id_str,
+            true,
+            Some("legacy-cfg".to_string()),
+            Some("pve1".to_string()),
+        )
+        .await
+        .expect("seed host with bare operative id, no ack marker");
+        db_ops::set_legacy_pve_user(
+            &db,
+            std::slice::from_ref(&host_id_str),
+            Some(legacy_name.clone()),
+        )
+        .await
+        .expect("seed legacy marker");
+
+        let invoker = RecordingActionInvoker::new();
+        let guest = UnusedGuestBootstrap;
+        let tid_str = tid.to_string();
+        let ctx = make_ctx(&db, Some(&tid_str), &invoker, &guest);
+        let cluster_json = cluster_status(Some("NOACKCLUSTER"), &["pve1"]);
+        let executor = ScriptedRemoteExecutor::with_matcher(vec![
+            ("pvesh get /cluster/status", ok(cluster_json)),
+            (
+                "pveum user token list",
+                ok(format!(r#"[{{"tokenid":"tenant-{tid}"}}]"#)),
+            ),
+            (
+                "pveum user list",
+                ok(format!(r#"[{{"userid":"{legacy_name}"}}]"#)),
+            ),
+            ("pveum user token remove", ok("")),
+            ("pveum user token add", token_add_ok("secret-noack")),
+            ("pveum acl modify", ok("")),
+            ("hostname -f", ok("pve.example.com")),
+            ("curl", ok("200")),
+        ]);
+
+        let out = run_credential_flow(&ctx, &executor, host_id, Some("pve1")).await;
+        assert_eq!(
+            out.outcome,
+            PveCredentialOutcome::MigrationPending,
+            "legacy user still stored must gate the outcome to MigrationPending"
+        );
+        let calls = executor.recorded_calls();
+        assert!(
+            !calls.iter().any(|c| c.contains("pveum user delete")),
+            "the ack marker gate must hold even when a bare operative id is set on every row: \
+             {calls:?}"
+        );
+
+        let row = db_ops::find_host_state(&db, &host_id_str)
+            .await
+            .expect("query")
+            .expect("row exists");
+        assert_eq!(
+            row.legacy_pve_user.as_deref(),
+            Some(legacy_name.as_str()),
+            "the legacy marker must survive since nothing promoted or deleted it"
+        );
+        assert_eq!(
+            row.pve_plugin_config_id.as_deref(),
+            Some("legacy-cfg"),
+            "the bare operative id must be untouched by a phase-2 gate that never fired"
+        );
     }
 
     #[tokio::test]
@@ -960,9 +1175,21 @@ mod tests {
         let host_id_str = host_id.to_string();
         let tid = tenant(21);
         let legacy_name = format!("uptrakit-{tid}@pve");
-        db_ops::upsert_host_state(&db, &host_id_str, true, None, Some("pve1".to_string()))
-            .await
-            .expect("seed host");
+        // Operative id starts at a DIFFERENT value ("legacy-cfg") than the
+        // ack marker ("ack-cfg") so promotion must observably change the
+        // column — seeding the ack marker onto a NULL operative column (as
+        // the previous fixture did) pre-satisfies the headline assertion via
+        // `set_new_plugin_config_id`'s own coalesce fill, before
+        // `promote_cluster_rows` ever runs.
+        db_ops::upsert_host_state(
+            &db,
+            &host_id_str,
+            true,
+            Some("legacy-cfg".to_string()),
+            Some("pve1".to_string()),
+        )
+        .await
+        .expect("seed host with legacy operative id");
         db_ops::set_legacy_pve_user(
             &db,
             std::slice::from_ref(&host_id_str),
@@ -977,7 +1204,7 @@ mod tests {
         let guest = UnusedGuestBootstrap;
         let tid_str = tid.to_string();
         let ctx = make_ctx(&db, Some(&tid_str), &invoker, &guest);
-        let cluster_json = cluster_status(None, &["pve1"]);
+        let cluster_json = cluster_status(Some("PHASE2SUCCESSCLUSTER"), &["pve1"]);
         let executor = ScriptedRemoteExecutor::with_matcher(vec![
             ("pvesh get /cluster/status", ok(cluster_json)),
             (
@@ -1010,8 +1237,96 @@ mod tests {
             .expect("query")
             .expect("row exists");
         assert_eq!(row.legacy_pve_user, None);
-        assert_eq!(row.pve_plugin_config_id.as_deref(), Some("ack-cfg"));
+        assert_eq!(
+            row.pve_plugin_config_id.as_deref(),
+            Some("ack-cfg"),
+            "promotion must observably move the operative id off its pre-seeded legacy value"
+        );
         assert_eq!(row.migration_attempts, 0);
+    }
+
+    #[tokio::test]
+    async fn phase2_promotes_both_rows_in_a_multi_node_cluster() {
+        // Only single-row (above) and negative-scope (below,
+        // `phase2_excludes_peer_row_with_null_node_name` /
+        // `phase2_standalone_write_scope_isolated`) promotion tests existed;
+        // nothing asserted the positive multi-row write scope — that a real
+        // two-node cluster's peer row is ALSO promoted, not just the flow
+        // host's own row.
+        let db = setup_agent_db().await;
+        let host_a = uuid::Uuid::from_u128(23);
+        let host_a_str = host_a.to_string();
+        let host_b = uuid::Uuid::from_u128(24);
+        let host_b_str = host_b.to_string();
+        let tid = tenant(23);
+        let legacy_name = format!("uptrakit-{tid}@pve");
+
+        for (id, node) in [(&host_a_str, "pve1"), (&host_b_str, "pve2")] {
+            db_ops::upsert_host_state(
+                &db,
+                id,
+                true,
+                Some("legacy-cfg".to_string()),
+                Some(node.to_string()),
+            )
+            .await
+            .expect("seed cluster row with legacy operative id");
+            db_ops::set_legacy_pve_user(&db, std::slice::from_ref(id), Some(legacy_name.clone()))
+                .await
+                .expect("seed legacy marker");
+        }
+        db_ops::set_new_plugin_config_id(&db, &host_a_str, "ack-cfg")
+            .await
+            .expect("seed ack marker on the flow host's row");
+
+        let invoker = RecordingActionInvoker::new();
+        let guest = UnusedGuestBootstrap;
+        let tid_str = tid.to_string();
+        let ctx = make_ctx(&db, Some(&tid_str), &invoker, &guest);
+        let cluster_json = cluster_status(Some("MULTIROWPROMOTECLUSTER"), &["pve1", "pve2"]);
+        let executor = ScriptedRemoteExecutor::with_matcher(vec![
+            ("pvesh get /cluster/status", ok(cluster_json)),
+            (
+                "pveum user token list",
+                ok(format!(r#"[{{"tokenid":"tenant-{tid}"}}]"#)),
+            ),
+            (
+                "pveum user list",
+                ok(format!(r#"[{{"userid":"{legacy_name}"}}]"#)),
+            ),
+            ("pveum user delete", ok("")),
+        ]);
+
+        let out = run_credential_flow(&ctx, &executor, host_a, Some("pve1")).await;
+        assert!(
+            out.summary_lines
+                .iter()
+                .any(|l| l.contains("legacy PVE user removed; migration complete")),
+            "{:?}",
+            out.summary_lines
+        );
+
+        let row_a = db_ops::find_host_state(&db, &host_a_str)
+            .await
+            .expect("query a")
+            .expect("row a exists");
+        let row_b = db_ops::find_host_state(&db, &host_b_str)
+            .await
+            .expect("query b")
+            .expect("row b exists");
+        assert_eq!(
+            row_a.pve_plugin_config_id.as_deref(),
+            Some("ack-cfg"),
+            "the flow host's own row must be promoted"
+        );
+        assert_eq!(
+            row_b.pve_plugin_config_id.as_deref(),
+            Some("ack-cfg"),
+            "the peer row must ALSO be promoted — this is the multi-row write scope the \
+             single-row test above cannot exercise"
+        );
+        assert_eq!(row_a.legacy_pve_user, None);
+        assert_eq!(row_b.legacy_pve_user, None);
     }
 
     #[tokio::test]
@@ -1034,11 +1349,21 @@ mod tests {
         db_ops::set_new_plugin_config_id(&db, &host_id_str, "ack-cfg")
             .await
             .expect("seed ack marker");
+        // Pre-seed migration_attempts = 3 so the mandated post-increment
+        // re-read is exercised for real: on a first attempt (0 -> 1) the
+        // pre-increment-plus-one and the post-increment re-read both yield 1,
+        // so that path cannot distinguish a re-read from a locally-tracked
+        // counter. Seeding a non-trivial starting value pins the re-read.
+        for _ in 0..3 {
+            db_ops::increment_migration_attempts(&db, std::slice::from_ref(&host_id_str))
+                .await
+                .expect("pre-seed attempts");
+        }
         let invoker = RecordingActionInvoker::new();
         let guest = UnusedGuestBootstrap;
         let tid_str = tid.to_string();
         let ctx = make_ctx(&db, Some(&tid_str), &invoker, &guest);
-        let cluster_json = cluster_status(None, &["pve1"]);
+        let cluster_json = cluster_status(Some("PHASE2FAILCLUSTER"), &["pve1"]);
         let executor = ScriptedRemoteExecutor::with_matcher(vec![
             ("pvesh get /cluster/status", ok(cluster_json)),
             (
@@ -1061,8 +1386,8 @@ mod tests {
         assert!(
             out.summary_lines
                 .iter()
-                .any(|l| l.contains("migration pending: legacy user removal failed")),
-            "{:?}",
+                .any(|l| l.contains("migration pending: legacy user removal failed (attempt 4)")),
+            "expected the post-increment re-read (3 -> 4), not a locally-tracked value: {:?}",
             out.summary_lines
         );
 
@@ -1070,12 +1395,82 @@ mod tests {
             .await
             .expect("query")
             .expect("row exists");
-        assert_eq!(row.migration_attempts, 1);
+        assert_eq!(row.migration_attempts, 4);
         assert_eq!(
             row.legacy_pve_user.as_deref(),
             Some(legacy_name.as_str()),
             "marker survives a failed removal attempt"
         );
+    }
+
+    #[tokio::test]
+    async fn phase2_delete_failure_at_cap_reports_stuck() {
+        let db = setup_agent_db().await;
+        let host_id = uuid::Uuid::from_u128(220);
+        let host_id_str = host_id.to_string();
+        let tid = tenant(220);
+        let legacy_name = format!("uptrakit-{tid}@pve");
+        db_ops::upsert_host_state(&db, &host_id_str, true, None, Some("pve1".to_string()))
+            .await
+            .expect("seed host");
+        db_ops::set_legacy_pve_user(
+            &db,
+            std::slice::from_ref(&host_id_str),
+            Some(legacy_name.clone()),
+        )
+        .await
+        .expect("seed legacy marker");
+        db_ops::set_new_plugin_config_id(&db, &host_id_str, "ack-cfg")
+            .await
+            .expect("seed ack marker");
+        // MAX_MIGRATION_ATTEMPTS - 1 = 4 pre-seeded attempts: this run's
+        // failure increments to 5, exactly at the cap, so the STUCK wording
+        // must fire.
+        for _ in 0..(MAX_MIGRATION_ATTEMPTS - 1) {
+            db_ops::increment_migration_attempts(&db, std::slice::from_ref(&host_id_str))
+                .await
+                .expect("pre-seed attempts to cap - 1");
+        }
+        let invoker = RecordingActionInvoker::new();
+        let guest = UnusedGuestBootstrap;
+        let tid_str = tid.to_string();
+        let ctx = make_ctx(&db, Some(&tid_str), &invoker, &guest);
+        let cluster_json = cluster_status(Some("STUCKCLUSTER"), &["pve1"]);
+        let executor = ScriptedRemoteExecutor::with_matcher(vec![
+            ("pvesh get /cluster/status", ok(cluster_json)),
+            (
+                "pveum user token list",
+                ok(format!(r#"[{{"tokenid":"tenant-{tid}"}}]"#)),
+            ),
+            (
+                "pveum user list",
+                ok(format!(r#"[{{"userid":"{legacy_name}"}}]"#)),
+            ),
+            ("pveum user delete", err(1, "denied")),
+        ]);
+
+        let out = run_credential_flow(&ctx, &executor, host_id, Some("pve1")).await;
+        assert_eq!(out.outcome, PveCredentialOutcome::MigrationPending);
+        assert!(
+            out.summary_lines.iter().any(|l| l.contains(&format!(
+                "migration STUCK after {MAX_MIGRATION_ATTEMPTS} attempts"
+            ))),
+            "{:?}",
+            out.summary_lines
+        );
+        assert!(
+            !out.summary_lines
+                .iter()
+                .any(|l| l.contains("migration pending: legacy user removal failed")),
+            "the STUCK wording must replace, not accompany, the pending wording: {:?}",
+            out.summary_lines
+        );
+
+        let row = db_ops::find_host_state(&db, &host_id_str)
+            .await
+            .expect("query")
+            .expect("row exists");
+        assert_eq!(row.migration_attempts, MAX_MIGRATION_ATTEMPTS);
     }
 
     #[tokio::test]
@@ -1215,13 +1610,28 @@ mod tests {
         let guest = UnusedGuestBootstrap;
         let tid_str = tid.to_string();
         let ctx = make_ctx(&db, Some(&tid_str), &invoker, &guest);
-        let cluster_json = cluster_status(None, &["pve1"]);
+        let cluster_json = cluster_status(Some("DEGRADEDCLUSTER"), &["pve1"]);
+        // A real token-add response is scripted (unlike the previous fixture,
+        // which left `pveum user token add` unmatched — ScriptedRemoteExecutor
+        // then defaulted it to exit 0/empty stdout, `parse_token_value` failed,
+        // and the flow genuinely landed on `Failed`, which the buggy
+        // unconditional MigrationPending overwrite masked). With that overwrite
+        // now conditional on `outcome != Failed`, this fixture must make the
+        // guarded degraded-create shape actually succeed so MigrationPending is
+        // reached honestly (via the still-open legacy marker), not by masking
+        // a hidden Failed.
         let executor = ScriptedRemoteExecutor::with_matcher(vec![
             ("pvesh get /cluster/status", ok(cluster_json)),
             (
                 "pveum user token list",
                 err(1, "permission denied: totally unrelated"),
             ),
+            ("pveum user add", ok("")),
+            ("pveum user token remove", ok("")),
+            ("pveum user token add", token_add_ok("secret-degraded")),
+            ("pveum acl modify", ok("")),
+            ("hostname -f", ok("pve.example.com")),
+            ("curl", ok("200")),
         ]);
 
         let out = run_credential_flow(&ctx, &executor, host_id, Some("pve1")).await;
@@ -1261,9 +1671,19 @@ mod tests {
         let db = setup_agent_db().await;
         let host_id = uuid::Uuid::from_u128(31);
         let host_id_str = host_id.to_string();
-        db_ops::upsert_host_state(&db, &host_id_str, true, None, Some("pve1".to_string()))
-            .await
-            .expect("seed host");
+        // Operative id starts at a DIFFERENT value ("legacy-cfg") than the ack
+        // marker ("ack-cfg") — seeding the marker onto a NULL operative
+        // column would let `set_new_plugin_config_id`'s own coalesce fill
+        // pre-satisfy the promotion assertion before recovery ever runs.
+        db_ops::upsert_host_state(
+            &db,
+            &host_id_str,
+            true,
+            Some("legacy-cfg".to_string()),
+            Some("pve1".to_string()),
+        )
+        .await
+        .expect("seed host with legacy operative id");
         db_ops::set_legacy_pve_user(
             &db,
             std::slice::from_ref(&host_id_str),
@@ -1280,7 +1700,7 @@ mod tests {
         let guest = UnusedGuestBootstrap;
         let tid_str = tid.to_string();
         let ctx = make_ctx(&db, Some(&tid_str), &invoker, &guest);
-        let cluster_json = cluster_status(None, &["pve1"]);
+        let cluster_json = cluster_status(Some("RECOVERYCLUSTER"), &["pve1"]);
         // This run's read succeeds and shows the legacy user already gone,
         // and (deliberately) no token either -- invalidates reuse via
         // confirmed absence, so create fires alongside the recovery arm.
@@ -1321,6 +1741,12 @@ mod tests {
             "recovery promotes to the known ack marker"
         );
         assert_eq!(row.migration_attempts, 0);
+        let calls = executor.recorded_calls();
+        assert!(
+            !calls.iter().any(|c| c.contains("pveum user delete")),
+            "the recovery arm reconciles state because the user is already gone; it must \
+             never itself issue a delete: {calls:?}"
+        );
     }
 
     #[tokio::test]
@@ -1336,7 +1762,7 @@ mod tests {
         let guest = UnusedGuestBootstrap;
         let tid_str = tid.to_string();
         let ctx = make_ctx(&db, Some(&tid_str), &invoker, &guest);
-        let cluster_json = cluster_status(None, &["pve1"]);
+        let cluster_json = cluster_status(Some("ACKLOSSCLUSTER"), &["pve1"]);
         let executor = ScriptedRemoteExecutor::with_matcher(vec![
             ("pvesh get /cluster/status", ok(cluster_json)),
             (
@@ -1358,6 +1784,10 @@ mod tests {
                 .iter()
                 .any(|l| l.contains("PVE API token regenerated"))
         );
+        assert!(
+            out.report.is_some(),
+            "a regenerated token must still produce a plugin-config report to push"
+        );
         let calls = executor.recorded_calls();
         assert!(calls.iter().any(|c| c.contains("pveum user token remove")));
         assert!(
@@ -1369,6 +1799,13 @@ mod tests {
     #[tokio::test]
     async fn cluster_lock_serializes_concurrent_flows() {
         let db = setup_agent_db().await;
+        // Pause the clock only after the in-memory sqlite pool's real connect
+        // (a spawn_blocking round trip) has completed: pausing before it lets
+        // the pool's internal acquire-timeout timer auto-advance to "elapsed"
+        // before the real connect ever wakes the task, producing a spurious
+        // `PoolTimedOut`. The 20ms sleeps below are the only timers this test
+        // needs virtualized, and they run entirely after this point.
+        tokio::time::pause();
         let timeline: Arc<parking_lot::Mutex<Vec<&'static str>>> =
             Arc::new(parking_lot::Mutex::new(Vec::new()));
         let cluster_json = cluster_status(Some("SHAREDCLUSTER"), &["pve1", "pve2"]);
@@ -1461,7 +1898,7 @@ mod tests {
         let guest = UnusedGuestBootstrap;
         let tid_str = tid.to_string();
         let ctx = make_ctx(&db, Some(&tid_str), &invoker, &guest);
-        let cluster_json = cluster_status(None, &["pve1"]);
+        let cluster_json = cluster_status(Some("DEGRADEDCREATECLUSTER"), &["pve1"]);
         let executor = ScriptedRemoteExecutor::with_matcher(vec![
             ("pvesh get /cluster/status", ok(cluster_json)),
             (
