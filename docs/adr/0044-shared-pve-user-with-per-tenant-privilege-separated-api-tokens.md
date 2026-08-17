@@ -86,12 +86,14 @@ not the user layer.
 
 A stricter design would keep one PVE user per tenant so a compromised tenant's credential can never even carry
 another tenant's grants in principle, regardless of Proxmox's intersection semantics. This was rejected for this
-branch: `check_pve_state` and the credential flow's read path already scan `pveum user token list` for evidence of
-other tenants' tokens (`coexisting_tenant_tokens_untouched` test,
-`crates/plugins/infrastructure/proxmox/src/agent/credential_flow.rs`) and explicitly leave them untouched — the
-per-token grant surface, not a separate user per tenant, is treated as the isolation boundary going forward. Full
-tenant-exclusive users remain available as a future option if the per-token model proves insufficient, but nothing
-in this branch forecloses it, since PVE's user/token model composes either way.
+branch: `check_pve_state` reads `pveum user token list` but matches its entries only against this tenant's own
+token id (`crates/plugins/infrastructure/proxmox/src/pve_setup.rs:280-283`, whose own comment notes "no
+cross-tenant scanning") — other tenants' tokens are left untouched not because they are scanned for and skipped,
+but because nothing in the read or the credential flow's write path ever inspects or matches against them
+(`coexisting_tenant_tokens_untouched` test, `crates/plugins/infrastructure/proxmox/src/agent/credential_flow.rs`).
+The per-token grant surface, not a separate user per tenant, is treated as the isolation boundary going forward.
+Full tenant-exclusive users remain available as a future option if the per-token model proves insufficient, but
+nothing in this branch forecloses it, since PVE's user/token model composes either way.
 
 ## Migration
 
@@ -105,10 +107,18 @@ belonging to this host's own row plus any peer sharing a detected cluster node n
 - **Phase 1 — record.** The first run that observes the legacy user stores it on every cluster row
   (`db_ops::set_legacy_pve_user`), without touching it. This is deliberately non-destructive: recording must
   survive a crash or reconnect with no side effect beyond bookkeeping.
-- **Phase 2 — prove, then delete.** Once the new shared-user token has been created **and** the controller has
-  ack'd its plugin-config id back to the agent (`new_pve_plugin_config_id`, the ack marker — see below), the flow
-  calls `pve_setup::delete_pve_user` on the legacy identity and, only on success, promotes every cluster row's
-  operative `pve_plugin_config_id` to the new id and clears the legacy marker
+- **Phase 2 — prove, then delete.** "Prove" is two-part, not just a controller ack. First, immediately after the
+  new shared-user token is created or regenerated (`credential_flow::run_locked`'s create and regenerate branches),
+  the flow calls `pve_setup::prove_token_on_node` (`crates/plugins/infrastructure/proxmox/src/pve_setup.rs:551`)
+  over the existing SSH session: it presents the freshly issued token as an `Authorization: PVEAPIToken=…` header
+  against the node's own `https://localhost:8006/api2/json/version` endpoint and requires an HTTP 200. If that
+  proof fails — a non-200 response, a non-zero curl exit, or `curl` missing on the node entirely (exit 127, handled
+  as a distinct case) — the outcome is `PveCredentialOutcome::Failed` and the flow stops there; it does not fall
+  through to touching the legacy user (`credential_flow.rs:264` and `:303`, in the `match` arms on
+  `prove_token_on_node`'s result). Only once that on-node proof succeeds, and separately once the controller has
+  ack'd the new token's plugin-config id back to the agent (`new_pve_plugin_config_id`, the ack marker — see
+  below), does the flow call `pve_setup::delete_pve_user` on the legacy identity and, only on success, promote
+  every cluster row's operative `pve_plugin_config_id` to the new id and clear the legacy marker
   (`db_ops::promote_cluster_rows`). A delete failure does not lose the migration: it increments a per-row attempt
   counter (`migration_attempts`, capped for reporting purposes at `MAX_MIGRATION_ATTEMPTS = 5`, though retries
   continue past that cap) and the outcome is reported as `MigrationPending` (or `"migration STUCK after N
@@ -121,9 +131,13 @@ belonging to this host's own row plus any peer sharing a detected cluster node n
 
 The phase-2 gate does not fire on a bare `pve_plugin_config_id` alone. `new_pve_plugin_config_id` is a **separate**
 column, written only once the controller has confirmed receipt of the new config
-(`HostLifecycle::on_plugin_config_reported` → `db_ops::set_new_plugin_config_id`), and it is never cleared by any
-code path once set — not even by `promote_cluster_rows`, which promotes the operative id but leaves the ack marker
-in place as a permanent record that this cluster has confirmed the new identity at least once
+(`HostLifecycle::on_plugin_config_reported` → `db_ops::set_new_plugin_config_id`), and the migration flow itself
+never clears it once set — not even `promote_cluster_rows`, which promotes the operative id but leaves the ack
+marker in place as a permanent record that this cluster has confirmed the new identity at least once. The one
+exception outside the migration flow is a deliberate tenant-rebind wipe: `db_ops::wipe_all`
+(`crates/plugins/infrastructure/proxmox/src/agent/db_ops.rs:272`), called from `HostLifecycle::on_tenant_changed`,
+deletes every `proxmox_host_state` row — ack marker included — because a rebind means the row's prior migration
+history belongs to a different tenant and must not be reused
 (`legacy_stored_without_ack_marker_never_deletes`,
 `reuse_bare_operative_id_without_ack_marker_is_not_reused` in `credential_flow.rs`'s test module). This closes a
 narrow but real failure mode: a bare `pve_plugin_config_id` can be set by paths that never round-tripped through
@@ -193,10 +207,17 @@ suffix specifically to avoid the collision that would otherwise be common, not r
 
 `pveum` never appears among the sudo commands the Proxmox plugin declares for the unprivileged agent user —
 `collect_pve_sudo_commands` (`crates/plugins/infrastructure/proxmox/src/agent/plugin.rs`) only ever contributes
-`pct exec`/`qm guest exec`/`qm guest cmd` entries for guest management, never a `pveum` entry. `pveum` mutation only
-ever runs during host bootstrap, which `docs/security/sudoers-management.md` documents as requiring a root SSH
-session, or during a sync explicitly run with a root-auth override (`build_sync_auth_override` in
-`crates/core/agent-ssh-runtime/src/surface_runtime.rs` defaults its override username to `"root"`) — never through
-the unprivileged agent user's ordinary sudo allowlist. This keeps the highest-privilege PVE operation (creating
-users, granting cluster-wide ACLs) confined to sessions that are already root by construction, rather than adding
-it to the set of commands an unprivileged agent process can invoke via `NOPASSWD` sudo.
+`pct exec`/`qm guest exec`/`qm guest cmd` entries for guest management, never a `pveum` entry. That means `pveum`
+mutation can only ever *succeed* in a session that is already root by construction — host bootstrap, which
+`docs/security/sudoers-management.md` documents as requiring a root SSH session, or a sync explicitly run with a
+root-auth override (`build_sync_auth_override` in `crates/core/agent-ssh-runtime/src/surface_runtime.rs` defaults
+its override username to `"root"`) — never via the unprivileged agent user's ordinary `NOPASSWD` sudo allowlist,
+since no allowlist entry exists to grant it. It is not gated to those sessions on the *invocation* side: an
+ordinary sync run with the default `auth_method` of `"stored"` (`build_sync_auth_override`, `surface_runtime.rs:1880,1883`,
+returns `None` for that case, so no override is applied) still reaches `HostLifecycle::on_host_synced`
+(`crates/plugins/infrastructure/proxmox/src/agent/plugin.rs:196`), called unconditionally for every host whose
+stored state has `is_pve_node = true` from `crates/core/agent-ssh-runtime/src/operations/sync.rs:570` with no
+auth-override check beforehand — it invokes `pveum` through the credential flow regardless of session privilege,
+and simply fails there if the session isn't root. This keeps the highest-privilege PVE operation (creating users,
+granting cluster-wide ACLs) unable to *succeed* outside sessions that are already root, rather than adding it to
+the set of commands an unprivileged agent process can invoke via `NOPASSWD` sudo.
