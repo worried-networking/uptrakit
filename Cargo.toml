@@ -60,12 +60,12 @@ uuid = { version = "1" }
 # workspace pin tracks it rather than adding a duplicate. rand 0.9 remains for bollard/totp-rs/
 # tungstenite and rand 0.8 for openidconnect; neither is reachable from first-party code.
 rand = "0.10"
-totp-rs = { version = "5", features = ["gen_secret", "otpauth"] }
+totp-rs = { version = "6", features = ["gen_secret", "otpauth"] }
 hostname = "0.4"
 # sha2/hmac stay at 0.10/0.12 (latest: 0.11/0.13) — gated at four independent points, each already
 # at its newest release: openidconnect 4.0.1 (sha2 ^0.10.6, hmac ^0.12.1), sqlx-core 0.9,
 # ssh-key 0.6.7, totp-rs 5.7.2. Bumping would fork the graph into two incompatible Digest stacks.
-sha2 = "0.10"
+sha2 = "0.11"
 hex = "0.4"
 subtle = "2"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
@@ -200,7 +200,7 @@ rust-embed = { version = "8", default-features = false }
 mail-builder = { version = "0.4", default-features = false }
 mail-send = { version = "0.6", default-features = false }
 # hmac stays at 0.12 — see sha2 comment above; same openidconnect sha2 constraint
-hmac = "0.12"
+hmac = "0.13"
 argon2 = { version = "0.5", default-features = false }
 jsonwebtoken = { version = "11", default-features = false }
 openidconnect = { version = "4", default-features = false }
