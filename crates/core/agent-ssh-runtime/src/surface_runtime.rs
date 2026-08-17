@@ -1020,6 +1020,7 @@ pub struct SurfaceRuntimeContext<'a> {
     pub bg_tx: &'a tokio::sync::mpsc::Sender<ServiceMessage>,
     pub surface_proxy: &'a Arc<uptrakit_service_sdk::ServiceSurfaceProxy>,
     pub infra_bundles: Arc<Vec<InfraBundle>>,
+    pub pending_config_reports: crate::runtime_support::PendingConfigReports,
 }
 
 // ── InfraActionInvoker implementation ────────────────────────────────
@@ -1359,6 +1360,7 @@ fn spawn_bootstrap_execute(request: SurfaceActionRequest, ctx: &SurfaceRuntimeCo
     let service_id = ctx.service_id;
     let tenant_id = ctx.tenant_id;
     let db = ctx.db.clone();
+    let pending_config_reports = ctx.pending_config_reports.clone();
     let request_id = request.request_id;
     let params = serde_json::Value::Object(request.params);
     let sensitive_params_sealed = request
@@ -1381,6 +1383,7 @@ fn spawn_bootstrap_execute(request: SurfaceActionRequest, ctx: &SurfaceRuntimeCo
                     state_dir: &state_dir,
                     bg_tx: &bg_tx,
                     db,
+                    pending_config_reports: pending_config_reports.clone(),
                 })
                 .await
             },
@@ -1467,6 +1470,7 @@ fn spawn_sync_execute(request: SurfaceActionRequest, ctx: &SurfaceRuntimeContext
     let bg_tx = ctx.bg_tx.clone();
     let tenant_id = ctx.tenant_id;
     let private_key_der = ctx.private_key_der.map(|k| k.to_vec());
+    let pending_config_reports = ctx.pending_config_reports.clone();
     let request_id = request.request_id;
     let params = serde_json::Value::Object(request.params);
     let sensitive_params_sealed = request
@@ -1510,20 +1514,41 @@ fn spawn_sync_execute(request: SurfaceActionRequest, ctx: &SurfaceRuntimeContext
             Ok(Err(e)) => make_surface_error_response(request_id, &e),
             Ok(Ok((summary, plugin_config_reports))) => {
                 // Send any plugin config reports generated during sync (e.g.
-                // a recreated PVE API token).
+                // a recreated PVE API token). Each report gets its own
+                // request_id, recorded in the pending-ack map *before* the
+                // send so the eventual ack correlates back to this host.
                 for report in &plugin_config_reports {
+                    let report_request_id = uuid::Uuid::now_v7();
                     #[expect(
                         clippy::expect_used,
                         reason = "infallible: payload constructed from a static JSON literal whose schema matches `ReportPluginConfigPayload` exactly; deserialization cannot fail"
                     )]
                     let payload: uptrakit_wire::ReportPluginConfigPayload =
                         serde_json::from_value(serde_json::json!({
-                            "request_id": uuid::Uuid::now_v7().to_string(),
+                            "request_id": report_request_id.to_string(),
                             "plugin_type": report.plugin_type,
                             "name": report.name,
                             "config": report.config,
                         }))
                         .expect("ReportPluginConfigPayload JSON is always valid");
+                    match host_id.parse::<uuid::Uuid>() {
+                        Ok(parsed_host_id) => {
+                            pending_config_reports.lock().insert(
+                                report_request_id.to_string(),
+                                crate::runtime_support::PendingConfigReport {
+                                    host_id: parsed_host_id,
+                                    plugin_type: report.plugin_type.clone(),
+                                },
+                            );
+                        }
+                        Err(error) => {
+                            tracing::warn!(
+                                error = %error,
+                                host_id = %host_id,
+                                "sync-execute plugin config report: host_id is not a valid UUID; ack will not be correlated"
+                            );
+                        }
+                    }
                     if bg_tx
                         .send(ServiceMessage::ReportPluginConfig(payload))
                         .await
@@ -1762,6 +1787,7 @@ struct BootstrapExecuteArgs<'a> {
     state_dir: &'a Path,
     bg_tx: &'a tokio::sync::mpsc::Sender<ServiceMessage>,
     db: sea_orm::DatabaseConnection,
+    pending_config_reports: crate::runtime_support::PendingConfigReports,
 }
 
 /// The bootstrap-execute handler: execute the bootstrap with optional skip set.
@@ -1799,7 +1825,13 @@ async fn run_bootstrap_execute(args: BootstrapExecuteArgs<'_>) -> SurfaceActionR
 
             // For each infra plugin that detected infrastructure, send
             // ReportPluginConfig if new credentials were created.
-            send_infra_plugin_reports(bg_tx, host_id, &result.infra_results).await;
+            send_infra_plugin_reports(
+                bg_tx,
+                host_id,
+                &result.infra_results,
+                &args.pending_config_reports,
+            )
+            .await;
 
             let any_infra = result.infra_results.iter().any(|r| r.detected);
             let summary: Vec<String> = result
@@ -1915,20 +1947,32 @@ async fn send_infra_plugin_reports(
     bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
     host_id: uuid::Uuid,
     infra_results: &[uptrakit_plugin_infrastructure_registry::agent_infra::BootstrapInfraResult],
+    pending_config_reports: &crate::runtime_support::PendingConfigReports,
 ) {
     for infra in infra_results {
         if let Some(report) = &infra.report_plugin_config {
+            let request_id = uuid::Uuid::now_v7();
             #[expect(
                 clippy::expect_used,
                 reason = "infallible: payload constructed from a static JSON literal whose schema matches `ReportPluginConfigPayload` exactly; deserialization cannot fail"
             )]
             let payload: uptrakit_wire::ReportPluginConfigPayload = serde_json::from_value(json!({
-                "request_id": uuid::Uuid::now_v7().to_string(),
+                "request_id": request_id.to_string(),
                 "plugin_type": report.plugin_type,
                 "name": report.name,
                 "config": report.config,
             }))
             .expect("ReportPluginConfigPayload JSON is always valid");
+            // Record the pending ack before sending: correlates the eventual
+            // ReportPluginConfigResponse back to this host, never a
+            // positional scan.
+            pending_config_reports.lock().insert(
+                request_id.to_string(),
+                crate::runtime_support::PendingConfigReport {
+                    host_id,
+                    plugin_type: report.plugin_type.clone(),
+                },
+            );
             let msg = ServiceMessage::ReportPluginConfig(payload);
             if bg_tx.send(msg).await.is_err() {
                 tracing::error!("failed to send ReportPluginConfig via bg_tx");
@@ -2887,6 +2931,7 @@ mod tests {
             bg_tx: &bg_tx,
             surface_proxy: &surface_proxy,
             infra_bundles,
+            pending_config_reports: crate::runtime_support::PendingConfigReports::default(),
         };
         let request = SurfaceActionRequest {
             request_id: uuid::Uuid::now_v7(),
@@ -2990,6 +3035,7 @@ mod tests {
             bg_tx: &bg_tx,
             surface_proxy: &surface_proxy,
             infra_bundles,
+            pending_config_reports: crate::runtime_support::PendingConfigReports::default(),
         };
         let request = SurfaceActionRequest {
             request_id: uuid::Uuid::now_v7(),
@@ -3049,6 +3095,7 @@ mod tests {
             bg_tx: &bg_tx,
             surface_proxy: &surface_proxy,
             infra_bundles,
+            pending_config_reports: crate::runtime_support::PendingConfigReports::default(),
         };
         let missing_id = uuid::Uuid::now_v7();
         let request = SurfaceActionRequest {
@@ -3102,6 +3149,7 @@ mod tests {
             bg_tx: &bg_tx,
             surface_proxy: &surface_proxy,
             infra_bundles,
+            pending_config_reports: crate::runtime_support::PendingConfigReports::default(),
         };
 
         let delete_request = SurfaceActionRequest {

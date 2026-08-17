@@ -331,27 +331,11 @@ impl HostLifecycle for crate::ProxmoxPlugin {
         &self,
         db: &DatabaseConnection,
         plugin_config_id: uuid::Uuid,
-        _request_id: &str,
+        host_id: uuid::Uuid,
     ) -> Result<()> {
-        // Find the first PVE host without a config ID and update it.
-        let pve_hosts = db_ops::find_pve_hosts(db)
+        db_ops::set_new_plugin_config_id(db, &host_id.to_string(), &plugin_config_id.to_string())
             .await
-            .context_to::<PluginError>()?;
-        for host in pve_hosts {
-            if host.pve_plugin_config_id.is_none() {
-                db_ops::upsert_host_state(
-                    db,
-                    &host.host_id,
-                    true,
-                    Some(plugin_config_id.to_string()),
-                    host.pve_node_name.clone(),
-                )
-                .await
-                .context_to::<PluginError>()?;
-                break;
-            }
-        }
-        Ok(())
+            .context_to::<PluginError>()
     }
 }
 
@@ -1251,6 +1235,113 @@ mod tests {
             !result.detected,
             "a transport error during the read-only probe must degrade to not-detected, \
              not fail the bootstrap review"
+        );
+    }
+
+    #[tokio::test]
+    async fn config_ack_writes_marker_on_correlated_row() {
+        let db = setup_agent_db().await;
+
+        let host_a_id = uuid::Uuid::now_v7();
+        let host_b_id = uuid::Uuid::now_v7();
+
+        // Two migration-window rows, both already carrying a legacy
+        // `pve_plugin_config_id` — the old positional scan would find
+        // neither (both have `Some(..)`) and silently write nothing; this
+        // ack must land on host B specifically, by id, regardless of scan
+        // order.
+        db_ops::upsert_host_state(
+            &db,
+            &host_a_id.to_string(),
+            true,
+            Some("legacy-cfg-a".to_string()),
+            Some("node-a".to_string()),
+        )
+        .await
+        .expect("seed host-a");
+        db_ops::upsert_host_state(
+            &db,
+            &host_b_id.to_string(),
+            true,
+            Some("legacy-cfg-b".to_string()),
+            Some("node-b".to_string()),
+        )
+        .await
+        .expect("seed host-b");
+
+        let config_id = uuid::Uuid::now_v7();
+
+        let plugin = crate::ProxmoxPlugin::new_agent();
+        plugin
+            .on_plugin_config_reported(&db, config_id, host_b_id)
+            .await
+            .expect("ack for host-b succeeds");
+
+        let host_a = db_ops::find_host_state(&db, &host_a_id.to_string())
+            .await
+            .expect("find host-a")
+            .expect("host-a exists");
+        assert_eq!(
+            host_a.pve_plugin_config_id.as_deref(),
+            Some("legacy-cfg-a"),
+            "host-a's operative config id must be untouched by an ack targeting host-b"
+        );
+        assert_eq!(
+            host_a.new_pve_plugin_config_id, None,
+            "host-a's ack marker must stay unset — an ack for host-b must not fan out"
+        );
+
+        let host_b = db_ops::find_host_state(&db, &host_b_id.to_string())
+            .await
+            .expect("find host-b")
+            .expect("host-b exists");
+        assert_eq!(
+            host_b.new_pve_plugin_config_id.as_deref(),
+            Some(config_id.to_string()).as_deref(),
+            "host-b's ack marker must be set to the reported config id"
+        );
+        assert_eq!(
+            host_b.pve_plugin_config_id.as_deref(),
+            Some("legacy-cfg-b"),
+            "host-b's legacy operative id survives the ack (promotion is phase 2's job)"
+        );
+    }
+
+    #[tokio::test]
+    async fn config_ack_promotes_operative_id_on_fresh_row() {
+        let db = setup_agent_db().await;
+
+        let host_id = uuid::Uuid::now_v7();
+        db_ops::upsert_host_state(
+            &db,
+            &host_id.to_string(),
+            true,
+            None,
+            Some("node-c".to_string()),
+        )
+        .await
+        .expect("seed fresh host with no existing config id");
+
+        let config_id = uuid::Uuid::now_v7();
+        let plugin = crate::ProxmoxPlugin::new_agent();
+        plugin
+            .on_plugin_config_reported(&db, config_id, host_id)
+            .await
+            .expect("ack for fresh host succeeds");
+
+        let host = db_ops::find_host_state(&db, &host_id.to_string())
+            .await
+            .expect("find host")
+            .expect("host exists");
+        assert_eq!(
+            host.new_pve_plugin_config_id.as_deref(),
+            Some(config_id.to_string()).as_deref(),
+            "fresh-cluster promote-on-ack must set the ack marker"
+        );
+        assert_eq!(
+            host.pve_plugin_config_id.as_deref(),
+            Some(config_id.to_string()).as_deref(),
+            "fresh-cluster promote-on-ack must also set the operative id (NULL -> config id)"
         );
     }
 }

@@ -440,6 +440,11 @@ pub trait SshAgentRuntimeSupport: Send + Sync + 'static {
     );
 
     async fn persist_tenant_id(&self, tenant_id: uuid::Uuid);
+
+    /// The shared pending-ack map for in-flight `ReportPluginConfig` requests.
+    /// Cloning the `Arc` is cheap; callers lock, mutate, and drop the guard
+    /// before any `.await`.
+    fn pending_config_reports(&self) -> crate::runtime_support::PendingConfigReports;
 }
 
 pub struct SshAgentRuntime<S> {
@@ -514,6 +519,11 @@ where
         self.pending_initial_host_report = true;
         self.host_snapshot.clear();
         self.reload_ticker = None;
+        // Request/response for ReportPluginConfig ride a single WS connection;
+        // a reconnect strands any pending entries. Clear them rather than let
+        // them accumulate unbounded on a long-lived agent — the correlated
+        // host simply re-reports on the next sync.
+        self.support.pending_config_reports().lock().clear();
         Ok(())
     }
 
@@ -1342,6 +1352,7 @@ mod tests {
     #[derive(Default, Clone)]
     struct FakeSupport {
         state: Arc<Mutex<FakeSupportState>>,
+        pending_config_reports: crate::runtime_support::PendingConfigReports,
     }
 
     impl FakeSupport {
@@ -1512,6 +1523,10 @@ mod tests {
 
         async fn persist_tenant_id(&self, _tenant_id: uuid::Uuid) {
             self.state.lock().calls.push("persist_tenant_id");
+        }
+
+        fn pending_config_reports(&self) -> crate::runtime_support::PendingConfigReports {
+            Arc::clone(&self.pending_config_reports)
         }
     }
 

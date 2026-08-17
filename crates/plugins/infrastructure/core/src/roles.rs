@@ -869,11 +869,15 @@ pub trait HostLifecycle: PluginMeta {
     ) -> Result<()>;
 
     /// Called when the controller responds to a `ReportPluginConfig` request.
+    ///
+    /// `host_id` is the host whose report this ack confirms — correlated by
+    /// the runtime's pending-ack map; implementations write per-host state,
+    /// never scan positionally.
     async fn on_plugin_config_reported(
         &self,
         db: &sea_orm::DatabaseConnection,
         plugin_config_id: uuid::Uuid,
-        request_id: &str,
+        host_id: uuid::Uuid,
     ) -> Result<()>;
 }
 
