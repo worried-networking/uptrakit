@@ -89,18 +89,28 @@ impl ServiceHandler for AgentHandler {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> std::process::ExitCode {
     let args = Args::parse();
     let info = uptrakit_build_info::build_info!();
     if args.common.version {
         print!("{}", info.render_human());
-        return;
+        return std::process::ExitCode::SUCCESS;
     }
 
     uptrakit_service_sdk::TracingBuilder::new()
         .verbosity(args.common.verbose)
         .init();
     uptrakit_service_sdk::init_crypto();
+
+    if let Some(ref command) = args.command {
+        return match uptrakit_agent_runtime::cli::run_command(command).await {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(report) => {
+                eprintln!("agent command error: {report:?}");
+                std::process::ExitCode::FAILURE
+            }
+        };
+    }
 
     let freeze_file_path = args
         .common
@@ -122,4 +132,5 @@ async fn main() {
         &mut handler,
     )
     .await;
+    std::process::ExitCode::SUCCESS
 }

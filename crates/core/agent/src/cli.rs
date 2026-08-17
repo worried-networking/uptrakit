@@ -1,4 +1,5 @@
 use clap::Parser;
+use uptrakit_agent_runtime::AgentRuntimeCommand;
 use uptrakit_service_sdk::cli::CommonServiceArgs;
 
 #[derive(Parser, Debug)]
@@ -8,6 +9,10 @@ use uptrakit_service_sdk::cli::CommonServiceArgs;
 pub(crate) struct Args {
     #[command(flatten)]
     pub common: CommonServiceArgs,
+
+    /// Maintenance subcommands (run and exit; the daemon does not start).
+    #[command(subcommand)]
+    pub command: Option<AgentRuntimeCommand>,
 }
 
 #[cfg(test)]
@@ -193,5 +198,12 @@ mod tests {
     fn version_flag_parses_without_other_flags() {
         let args = Args::try_parse_from(["uptrakit-agent", "--version"]).expect("should parse");
         assert!(args.common.version);
+    }
+
+    #[test]
+    fn bootstrap_host_subcommand_parses_without_url() {
+        let args = Args::try_parse_from(["uptrakit-agent", "bootstrap-host", "--user", "svc"])
+            .expect("should parse subcommand");
+        assert!(args.command.is_some());
     }
 }
