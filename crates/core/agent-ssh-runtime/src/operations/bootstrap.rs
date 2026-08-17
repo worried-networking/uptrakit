@@ -25,14 +25,14 @@ use crate::host_ops::{self, AddHostParams};
 use crate::operations::bootstrap_routeros::{
     RouterOsBootstrapParams, execute_bootstrap_routeros, plan_bootstrap_routeros,
 };
-use crate::operations::sudoers::{
-    ResolvedSudoCommand, SudoersContent, detect_is_root, ensure_docker_group_membership,
-    install_helper_script, resolve_command_path, write_sudoers_file,
-};
 use crate::remote_exec::SshRemoteExecutor;
 use crate::ssh_executor::{PosixSshCommandExecutor, SshCommandExecutor};
 use crate::ssh_key;
 use crate::ssh_transport::{self, AuthMethod, SshConnectionConfig, SshSession};
+use uptrakit_agent_core::sudoers::{
+    ResolvedSudoCommand, SudoersContent, detect_is_root, ensure_docker_group_membership,
+    install_helper_script, resolve_command_path, write_sudoers_file,
+};
 
 /// Maximum length for POSIX usernames.
 const MAX_USERNAME_LEN: usize = 32;
@@ -622,7 +622,9 @@ pub(crate) async fn bootstrap_execute(
     // Configure docker group membership (if not skipped).
     if !skip_actions.contains("docker_group") {
         tracing::info!("configuring docker group membership");
-        ensure_docker_group_membership(&executor, &params.target_username, use_sudo).await?;
+        ensure_docker_group_membership(&executor, &params.target_username, use_sudo)
+            .await
+            .context_to::<Error>()?;
     }
 
     // Detect home directory (always needed for key deployment).
@@ -1017,7 +1019,7 @@ async fn evaluate_posix_sudo_gate(
     match host_os {
         HostOs::RouterOs => Ok(false),
         HostOs::Posix => {
-            let is_root = detect_is_root(executor).await?;
+            let is_root = detect_is_root(executor).await.context_to::<Error>()?;
             if is_root {
                 return Ok(false);
             }
@@ -1211,14 +1213,19 @@ async fn resolve_plugin_sudo_commands(
             if let Some(helper) = &entry.helper_script {
                 // Install the helper script then use its known path directly.
                 tracing::debug!(path = %helper.install_path, "installing helper script");
-                install_helper_script(executor, helper, use_sudo).await?;
+                install_helper_script(executor, helper, use_sudo)
+                    .await
+                    .context_to::<Error>()?;
                 resolved.push(ResolvedSudoCommand {
                     command_path: helper.install_path.to_string(),
                     explanation: entry.explanation.clone(),
                     needs_setenv: entry.needs_setenv,
                 });
             } else {
-                match resolve_command_path(executor, &entry.command).await? {
+                match resolve_command_path(executor, &entry.command)
+                    .await
+                    .context_to::<Error>()?
+                {
                     Some(path) => {
                         tracing::debug!(command = %entry.command, path = %path, "resolved command path");
                         let command_path = match &entry.args_suffix {
@@ -1377,7 +1384,9 @@ async fn setup_sudoers_and_plugins(
     };
 
     if let Some(ref content) = sudoers_content {
-        write_sudoers_file(executor, &params.target_username, content, use_sudo).await?;
+        write_sudoers_file(executor, &params.target_username, content, use_sudo)
+            .await
+            .context_to::<Error>()?;
     }
 
     Ok((sudoers_content, infra_results))

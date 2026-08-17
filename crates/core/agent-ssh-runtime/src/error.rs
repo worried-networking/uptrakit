@@ -83,3 +83,7 @@ impl_report_conversion!(
     uptrakit_plugin_infrastructure_registry::PluginError => Error,
     |e| Error::BootstrapVerification(e.to_string())
 );
+
+// SudoersError from the shared sudoers-provisioning helpers in uptrakit-agent-core
+// (moved out of this crate; used by both bootstrap and host-sync sudoers writes).
+impl_report_conversion!(uptrakit_agent_core::sudoers::SudoersError => Error, |e| Error::SshCommand(e.to_string()));

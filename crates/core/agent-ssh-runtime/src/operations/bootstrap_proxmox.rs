@@ -19,13 +19,13 @@ use crate::db::entity::ssh_host::SshKeyType;
 use crate::error::{Error, Result};
 use crate::host_ops::{self, AddHostParams};
 use crate::operations::bootstrap::{self, PlannedAction};
-use crate::operations::sudoers::{
-    ResolvedSudoCommand, SudoersContent, install_helper_script, resolve_command_path,
-    write_sudoers_file,
-};
 use crate::remote_exec::SshRemoteExecutor;
 use crate::ssh_key;
 use crate::ssh_transport::{self, AuthMethod, SshConnectionConfig, SshSession};
+use uptrakit_agent_core::sudoers::{
+    ResolvedSudoCommand, SudoersContent, install_helper_script, resolve_command_path,
+    write_sudoers_file,
+};
 
 use std::time::Duration;
 
@@ -597,14 +597,18 @@ pub(crate) async fn proxmox_bootstrap_execute(
         for (_plugin_type, entries) in &plugin_sudo_cmds {
             for entry in entries {
                 if let Some(helper) = &entry.helper_script {
-                    install_helper_script(guest_executor.as_ref(), helper, use_sudo).await?;
+                    install_helper_script(guest_executor.as_ref(), helper, use_sudo)
+                        .await
+                        .context_to::<Error>()?;
                     resolved.push(ResolvedSudoCommand {
                         command_path: helper.install_path.to_string(),
                         explanation: entry.explanation.clone(),
                         needs_setenv: entry.needs_setenv,
                     });
                 } else if let Some(path) =
-                    resolve_command_path(guest_executor.as_ref(), &entry.command).await?
+                    resolve_command_path(guest_executor.as_ref(), &entry.command)
+                        .await
+                        .context_to::<Error>()?
                 {
                     let command_path = match &entry.args_suffix {
                         Some(suffix) => format!("{path} {suffix}"),
@@ -634,7 +638,8 @@ pub(crate) async fn proxmox_bootstrap_execute(
                 content,
                 use_sudo,
             )
-            .await?;
+            .await
+            .context_to::<Error>()?;
         }
     }
 

@@ -30,14 +30,14 @@ use uptrakit_plugin_infrastructure_registry::{
 
 use crate::db::entity::ssh_host::Model as SshHostModel;
 use crate::host_ops::{self, update_host_sudo_state};
-use crate::operations::sudoers::{
+use crate::remote_exec::SshRemoteExecutor;
+use crate::ssh_executor::PosixSshCommandExecutor;
+use crate::ssh_transport::{AuthMethod, SshConnectionConfig, SshSession};
+use uptrakit_agent_core::sudoers::{
     ResolvedSudoCommand, SudoersContent, detect_is_root, detect_sudo_available,
     ensure_docker_group_membership, install_helper_script, resolve_command_path,
     write_sudoers_file,
 };
-use crate::remote_exec::SshRemoteExecutor;
-use crate::ssh_executor::PosixSshCommandExecutor;
-use crate::ssh_transport::{AuthMethod, SshConnectionConfig, SshSession};
 
 // ── Noop infra impls for sync context ────────────────────────────────
 
