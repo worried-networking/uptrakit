@@ -363,7 +363,7 @@ skip = [
     { crate = "fiat-crypto@0.2.9", reason = "pulled by p256/p384 0.13 (openidconnect); newer 0.3 used by russh 0.62 crypto" },
     { crate = "group@0.13.0", reason = "pulled by elliptic-curve 0.13 (openidconnect); newer 0.14 used by elliptic-curve 0.14-rc (russh 0.62)" },
     { crate = "hkdf@0.12.4", reason = "pulled by openidconnect crypto chain; newer 0.13 used by russh 0.62" },
-    { crate = "hmac@0.12.1", reason = "pulled by argon2/openidconnect; newer 0.13 used by russh 0.62 crypto" },
+    { crate = "hmac@0.12.1", reason = "pulled by argon2/openidconnect; newer 0.13 is the workspace pin (hmac = \"0.13\") and is also used by totp-rs 6, sqlx-postgres, russh 0.62" },
     { crate = "inout@0.1.4", reason = "pulled by cipher 0.4 (openidconnect crypto chain); newer 0.2 used by russh 0.62" },
 { crate = "p256@0.13.2", reason = "pulled by elliptic-curve 0.13 (openidconnect); newer 0.14-rc used by russh 0.62" },
     { crate = "p384@0.13.1", reason = "pulled by elliptic-curve 0.13 (openidconnect); newer 0.14-rc used by russh 0.62" },
@@ -375,7 +375,7 @@ skip = [
     { crate = "rsa@0.9.10", reason = "pulled by openidconnect; newer 0.10-rc used by russh 0.62 crypto" },
 { crate = "rustls-webpki@0.102.8", reason = "pulled by rumqttc 0.25.1 TLS stack; newer 0.103.x used by rustls 0.23" },
     { crate = "sec1@0.7.3", reason = "pulled by elliptic-curve 0.13 / pkcs8 0.10 (openidconnect); newer 0.8 used by russh 0.62" },
-    { crate = "sha2@0.10.9", reason = "pulled by digest 0.10 chain (openidconnect/argon2); newer 0.11 used by russh 0.62 crypto" },
+    { crate = "sha2@0.10.9", reason = "pulled by digest 0.10 chain (openidconnect/argon2); newer 0.11 is the workspace pin (sha2 = \"0.11\") and is also used by russh 0.62" },
     { crate = "spki@0.7.3", reason = "pulled by pkcs8 0.10 / ecdsa (openidconnect ecdsa/rsa chain); newer 0.8 used by russh 0.62 crypto" },
 
     # sha3: 0.11 via ml-kem (russh 0.62.4 post-quantum KEM), 0.12 via russh 0.62.4 direct

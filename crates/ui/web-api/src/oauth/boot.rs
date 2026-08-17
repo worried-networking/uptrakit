@@ -185,7 +185,7 @@ pub fn fingerprint(secret: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(b"uptrakit-oauth-controller-fingerprint-v1");
     hasher.update(secret);
-    format!("{:x}", hasher.finalize())
+    hex::encode(hasher.finalize())
 }
 
 /// Spawn a background task that updates `last_seen_at` for `instance_id` every 30 s.

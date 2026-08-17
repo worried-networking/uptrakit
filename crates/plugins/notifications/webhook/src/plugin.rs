@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use hmac::Mac as _;
+use hmac::{KeyInit as _, Mac as _};
 use rootcause::prelude::*;
 use sha2::Sha256;
 

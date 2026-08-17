@@ -69,7 +69,7 @@ fn verify_registration_token(client: &oauth_client::Model, bearer: &str) -> bool
     // Hash the bearer token exactly as `hash_token` does (SHA-256, hex-encoded).
     let mut hasher = Sha256::new();
     hasher.update(bearer.as_bytes());
-    let computed = format!("{:x}", hasher.finalize());
+    let computed = hex::encode(hasher.finalize());
 
     // Compare as equal-length byte slices to prevent timing attacks.
     computed.as_bytes().ct_eq(stored_hash.as_bytes()).into()

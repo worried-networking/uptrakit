@@ -705,7 +705,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for GitHubPlugin {
         let mut hasher = Sha256::new();
         hasher.update(&body_bytes);
         let digest = hasher.finalize();
-        let digest_hex = format!("{digest:x}");
+        let digest_hex = uptrakit_shared_types::hex::encode(digest);
 
         if let Some(ref expected_hex) = asset.sha256_digest {
             if digest_hex != *expected_hex {

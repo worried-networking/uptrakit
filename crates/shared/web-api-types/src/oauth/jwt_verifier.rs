@@ -135,7 +135,10 @@ mod tests {
         let mut hasher = Sha256::new();
         hasher.update(secret);
         let digest = hasher.finalize();
-        let kid: String = format!("{digest:x}").chars().take(16).collect();
+        let kid: String = uptrakit_shared_types::hex::encode(digest)
+            .chars()
+            .take(16)
+            .collect();
         let mut header = Header::new(Algorithm::HS256);
         header.typ = Some("at+jwt".to_string());
         header.kid = Some(kid);

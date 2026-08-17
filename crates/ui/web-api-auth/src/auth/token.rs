@@ -18,7 +18,7 @@ pub fn hash_token(token: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(token.as_bytes());
     let result = hasher.finalize();
-    format!("{:x}", result)
+    uptrakit_shared_types::hex::encode(result)
 }
 
 /// Generate a new UUID v7 (time-ordered)
@@ -51,6 +51,19 @@ mod tests {
                 .chars()
                 .all(|c| c.is_alphanumeric() || c == '-' || c == '_'),
             "Token should only contain base64url characters"
+        );
+    }
+
+    /// Known-answer test. `hash_token` output is persisted in `api_tokens.token_hash`,
+    /// so its encoding is a storage format, not an implementation detail: any change
+    /// silently invalidates every token already issued. The surrounding tests only
+    /// assert self-consistency and "64 hex chars", which a changed encoding would still
+    /// satisfy — this pins the exact bytes against an independently computed digest.
+    #[test]
+    fn test_hash_token_matches_known_sha256_vector() {
+        assert_eq!(
+            hash_token("test-token-123"),
+            "19b6b086eebb807f54e6327309dec0ff347a6c3c30bf3bb396f167513eba3475"
         );
     }
 

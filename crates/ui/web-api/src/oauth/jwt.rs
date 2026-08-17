@@ -30,7 +30,7 @@ impl McpOAuthJwtSigner {
         // Take the first 16 hex chars. `chars().take()` avoids the `string_slice`
         // lint; hex output is pure ASCII so no multi-byte boundary risk, but the
         // lint fires on index expressions regardless of content.
-        let kid: String = format!("{digest:x}").chars().take(16).collect();
+        let kid: String = hex::encode(digest).chars().take(16).collect();
         Self {
             key: EncodingKey::from_secret(secret),
             kid,

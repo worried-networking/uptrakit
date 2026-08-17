@@ -256,7 +256,7 @@ impl CimdFetcher {
         // -------------------------------------------------------------------
         let mut hasher = Sha256::new();
         hasher.update(&bytes);
-        let content_hash = format!("{:x}", hasher.finalize());
+        let content_hash = hex::encode(hasher.finalize());
 
         let raw_str = String::from_utf8_lossy(&bytes).into_owned();
         let now = (self.clock)();
@@ -561,7 +561,7 @@ fn compute_material_hash(value: &serde_json::Value, extra_cosmetic: &[String]) -
     };
     let mut hasher = Sha256::new();
     hasher.update(normalised.as_bytes());
-    format!("{:x}", hasher.finalize())
+    hex::encode(hasher.finalize())
 }
 
 // ---------------------------------------------------------------------------
