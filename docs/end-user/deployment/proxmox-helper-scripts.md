@@ -72,6 +72,32 @@ required — the controller approves enrollment requests through the UI.
 
 See [SSH Agent Bootstrap](../ssh-agent-bootstrap.md) for enrolling Linux hosts.
 
+## Host Provisioning
+
+A fresh install automatically provisions the CT's local host: the installer calls
+`bootstrap-host`, which writes the sudoers drop-in for the `uptrakit` user and installs
+any plugin helper scripts (e.g. `/usr/local/bin/uptrakit-phs-version`), deriving the
+grant list from the registered plugins rather than a blanket `NOPASSWD: ALL`. See
+[Sudoers Management](../../security/sudoers-management.md) for how the drop-in is
+generated and validated.
+
+Existing installations self-heal on the next `update` run — the update script re-runs
+`bootstrap-host`, so new plugin sudo grants and helper scripts appear without a
+reinstall. The command is idempotent: re-running it is always safe.
+
+Bootstrap failure is non-fatal to install or update; the script prints a retry command
+and continues. To retry manually as root:
+
+```bash
+/usr/local/bin/uptrakit-controller-standalone agent bootstrap-host --user uptrakit
+```
+
+On a standalone `uptrakit-agent` host, the equivalent command is:
+
+```bash
+uptrakit-agent bootstrap-host --user uptrakit
+```
+
 ## Updating
 
 ### Via PVEHS (recommended)
