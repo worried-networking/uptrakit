@@ -96,10 +96,12 @@ pub async fn set_legacy_pve_user(
     host_ids: &[String],
     legacy: Option<String>,
 ) -> Result<()> {
+    use sea_orm::sea_query::Expr;
+
     proxmox_host_state::Entity::update_many()
         .col_expr(
             proxmox_host_state::Column::LegacyPveUser,
-            sea_orm::sea_query::Expr::value(legacy),
+            Expr::value(legacy),
         )
         .filter(proxmox_host_state::Column::HostId.is_in(host_ids.iter().map(String::as_str)))
         .exec(db)
@@ -361,6 +363,26 @@ mod tests {
         increment_migration_attempts(&db, &ids)
             .await
             .expect("bump attempts");
+
+        // Intermediate state before promotion — red-checkable: a no-op
+        // set_legacy_pve_user leaves legacy_pve_user unset, and skipping the
+        // .add(1) leaves migration_attempts at 0, either of which fails here.
+        let h1_mid = find_host_state(&db, "h1")
+            .await
+            .expect("query")
+            .expect("h1 exists");
+        let h2_mid = find_host_state(&db, "h2")
+            .await
+            .expect("query")
+            .expect("h2 exists");
+        for row in [&h1_mid, &h2_mid] {
+            assert_eq!(
+                row.legacy_pve_user.as_deref(),
+                Some("uptrakit-t@pve"),
+                "legacy marker set pre-promotion"
+            );
+            assert_eq!(row.migration_attempts, 1, "attempt counter bumped once");
+        }
 
         promote_cluster_rows(&db, &ids, "new-cfg")
             .await
