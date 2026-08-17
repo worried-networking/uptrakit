@@ -119,6 +119,9 @@ enum ProxmoxHostState {
     PvePluginConfigId,
     CreatedAt,
     UpdatedAt,
+    LegacyPveUser,
+    NewPvePluginConfigId,
+    MigrationAttempts,
 }
 
 // ── Migration: create proxmox_pending_matches ────────────────────────────────
@@ -251,11 +254,85 @@ impl MigrationTrait for AddPendingMatchAttempts {
     }
 }
 
+// ── Migration: PVE identity-migration bookkeeping columns ───────────────────
+
+/// Adds the legacy-user marker, the never-cleared ack-confirmed new-config
+/// marker, and the phase-2 attempt counter used by the identity migration.
+pub struct AddPveMigrationColumns;
+
+impl MigrationName for AddPveMigrationColumns {
+    fn name(&self) -> &str {
+        "m20260816_000001_pve_migration_columns"
+    }
+}
+
+#[async_trait::async_trait]
+impl MigrationTrait for AddPveMigrationColumns {
+    async fn up(&self, manager: &SchemaManager) -> std::result::Result<(), DbErr> {
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(ProxmoxHostState::Table)
+                    .add_column(
+                        ColumnDef::new(ProxmoxHostState::LegacyPveUser)
+                            .string()
+                            .null(),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(ProxmoxHostState::Table)
+                    .add_column(
+                        ColumnDef::new(ProxmoxHostState::NewPvePluginConfigId)
+                            .string()
+                            .null(),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(ProxmoxHostState::Table)
+                    .add_column(
+                        ColumnDef::new(ProxmoxHostState::MigrationAttempts)
+                            .integer()
+                            .not_null()
+                            .default(0),
+                    )
+                    .to_owned(),
+            )
+            .await
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> std::result::Result<(), DbErr> {
+        for col in [
+            ProxmoxHostState::MigrationAttempts,
+            ProxmoxHostState::NewPvePluginConfigId,
+            ProxmoxHostState::LegacyPveUser,
+        ] {
+            manager
+                .alter_table(
+                    Table::alter()
+                        .table(ProxmoxHostState::Table)
+                        .drop_column(col)
+                        .to_owned(),
+                )
+                .await?;
+        }
+        Ok(())
+    }
+}
+
 /// All agent-local migrations for this plugin, in application order.
 pub fn agent_migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
     vec![
         Box::new(CreateProxmoxHostState),
         Box::new(CreateProxmoxPendingMatches),
         Box::new(AddPendingMatchAttempts),
+        Box::new(AddPveMigrationColumns),
     ]
 }
