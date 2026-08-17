@@ -49,6 +49,56 @@ const SSH_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);
 /// without a response before closing the connection.
 const SSH_KEEPALIVE_MAX: usize = 4;
 
+/// Header whose value is a bearer credential and must never reach a log line.
+const SENSITIVE_HEADER: &str = "authorization:";
+
+/// Replacement written in place of a redacted header value.
+const REDACTION: &str = " <redacted>";
+
+/// Mask credential-bearing header values before a command string is traced.
+///
+/// A remote command is handed to the peer's shell as a single string, so a
+/// caller that must present a bearer credential — the PVE on-node token proof
+/// in `uptrakit_plugin_infrastructure_proxmox::pve_setup::prove_token_on_node`
+/// — has no way to keep the secret out of `command`. Redaction therefore
+/// happens here, at the only place the string is logged, instead of relying on
+/// every present and future call site to police itself.
+///
+/// The value runs to the quote that closes the header argument (or to the end
+/// of the line when the argument is unquoted), which is what both `curl -H`
+/// forms produce.
+fn redact_for_log(command: &str) -> std::borrow::Cow<'_, str> {
+    if !command.to_ascii_lowercase().contains(SENSITIVE_HEADER) {
+        return std::borrow::Cow::Borrowed(command);
+    }
+    let header_len = SENSITIVE_HEADER.chars().count();
+    let mut out = String::with_capacity(command.len());
+    let mut tail = String::with_capacity(SENSITIVE_HEADER.len());
+    let mut skipping = false;
+    for ch in command.chars() {
+        if skipping {
+            // The closing quote (or newline) ends the header argument; it is
+            // structure, not secret, so it is kept.
+            if matches!(ch, '\'' | '"' | '\n') {
+                skipping = false;
+                out.push(ch);
+            }
+            continue;
+        }
+        out.push(ch);
+        tail.push(ch.to_ascii_lowercase());
+        while tail.chars().count() > header_len {
+            tail.remove(0);
+        }
+        if tail == SENSITIVE_HEADER {
+            out.push_str(REDACTION);
+            tail.clear();
+            skipping = true;
+        }
+    }
+    std::borrow::Cow::Owned(out)
+}
+
 // ── Configuration types ──────────────────────────────────────────────
 
 /// Builds an SSH client configuration with keepalive enabled.
@@ -271,7 +321,7 @@ impl SshSession {
         &self,
         command: &str,
     ) -> Result<russh::Channel<russh::client::Msg>> {
-        tracing::trace!(hostname = %self.hostname, command = %command, "opening SSH channel for command");
+        tracing::trace!(hostname = %self.hostname, command = %redact_for_log(command), "opening SSH channel for command");
         let channel = self.handle.channel_open_session().await.map_err(|e| {
             report!(Error::SshCommand(format!(
                 "failed to open session channel: {e}"
@@ -321,7 +371,7 @@ impl SshSession {
         command: &str,
         output_tx: Option<&mpsc::Sender<UpdateOutputLine>>,
     ) -> Result<RemoteCommandResult> {
-        tracing::trace!(hostname = %self.hostname, command = %command, "executing SSH command");
+        tracing::trace!(hostname = %self.hostname, command = %redact_for_log(command), "executing SSH command");
         let mut channel = self.handle.channel_open_session().await.map_err(|e| {
             report!(Error::SshCommand(format!(
                 "failed to open session channel: {e}"
@@ -391,7 +441,7 @@ impl SshSession {
 
         tracing::debug!(
             hostname = %self.hostname,
-            command = %command,
+            command = %redact_for_log(command),
             "executing interactive SSH command with PTY"
         );
 
@@ -1258,6 +1308,72 @@ async fn peek_ssh_server_id(hostname: &str, port: u16, timeout: Duration) -> Opt
 mod tests {
     use super::*;
     use russh::client::Handler;
+
+    /// The exact shape `pve_setup::prove_token_on_node` builds: the live PVE
+    /// token would otherwise be traced verbatim by `exec_command_streaming`.
+    #[test]
+    fn redact_for_log_masks_authorization_header_value() {
+        let secret = "uptrakit@pve!tenant-3f2b=9d1c-SECRET-VALUE";
+        let command = format!(
+            "curl -sk -o /dev/null -w '%{{http_code}}' \
+             -H 'Authorization: PVEAPIToken={secret}' \
+             https://localhost:8006/api2/json/version"
+        );
+
+        let redacted = redact_for_log(&command);
+
+        assert!(
+            !redacted.contains(secret),
+            "token must not survive redaction: {redacted}"
+        );
+        assert!(
+            !redacted.contains("PVEAPIToken="),
+            "the whole header value is masked, not just the token tail: {redacted}"
+        );
+        assert!(
+            redacted.contains("-H 'Authorization: <redacted>' "),
+            "the header argument stays structurally intact: {redacted}"
+        );
+        assert!(
+            redacted.contains("https://localhost:8006/api2/json/version"),
+            "text after the header is preserved: {redacted}"
+        );
+    }
+
+    #[test]
+    fn redact_for_log_leaves_ordinary_commands_untouched() {
+        let command = "pveum user token list 'uptrakit@pve' --output-format json 2>&1";
+
+        let redacted = redact_for_log(command);
+
+        assert_eq!(redacted, command);
+        assert!(
+            matches!(redacted, std::borrow::Cow::Borrowed(_)),
+            "a command with no sensitive header is not reallocated"
+        );
+    }
+
+    #[test]
+    fn redact_for_log_masks_every_header_and_survives_an_unterminated_value() {
+        // Mixed case (headers are case-insensitive), two occurrences, and a
+        // trailing header with no closing quote — the failure mode where a
+        // naive "mask up to the next quote" pass would emit the secret.
+        let command =
+            "sh -c \"curl -H 'authorization: Bearer AAA' host; curl -H \"Authorization: Bearer BBB";
+
+        let redacted = redact_for_log(command);
+
+        assert!(!redacted.contains("AAA"), "first secret leaked: {redacted}");
+        assert!(
+            !redacted.contains("BBB"),
+            "second secret leaked: {redacted}"
+        );
+        assert_eq!(
+            redacted.matches("<redacted>").count(),
+            2,
+            "both headers are masked: {redacted}"
+        );
+    }
 
     #[tokio::test]
     async fn handler_tofu_accepts() {

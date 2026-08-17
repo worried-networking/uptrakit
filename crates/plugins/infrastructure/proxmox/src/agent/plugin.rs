@@ -262,7 +262,10 @@ impl HostLifecycle for crate::ProxmoxPlugin {
                 )),
                 Err(e) => {
                     tracing::warn!(error = %e, "failed to ensure PVE privileges during sync");
-                    lines.push(format!("privileges: FAILED — {e}"));
+                    // The detail stays in the agent log; the summary line keeps
+                    // the same "(see agent logs)" pointer shape every other
+                    // failure line in the credential flow uses.
+                    lines.push("PVE privilege repair failed (see agent logs)".to_string());
                 }
             }
         }

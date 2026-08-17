@@ -546,8 +546,13 @@ pub async fn regenerate_pve_api_token(
 /// Prove a token works, on the node itself over the existing SSH transport.
 ///
 /// `-k` is sound: the proof targets token validity on localhost, not
-/// endpoint trust. The secret travels only inside the SSH session, never
-/// logged.
+/// endpoint trust.
+///
+/// The secret travels only inside the SSH session. A remote command is one
+/// opaque string to the executor, so the token cannot be kept out of `cmd`
+/// itself; the SSH transport redacts `Authorization:` header values before
+/// tracing a command (`redact_for_log` in `agent-ssh-runtime`'s
+/// `ssh_transport`), which is what keeps it out of agent logs.
 pub async fn prove_token_on_node(executor: &dyn RemoteExecutor, api_token: &str) -> Result<()> {
     let cmd = format!(
         "curl -sk -o /dev/null -w '%{{http_code}}' \
