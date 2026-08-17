@@ -679,6 +679,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
+name = "base64"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
+
+[[package]]
 name = "base64ct"
 version = "1.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3629,7 +3635,7 @@ version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "51e219e79014df21a225b1860a479e2dcd7cbd9130f4defd4bd0e191ea31d67d"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.21.7",
  "chrono",
  "getrandom 0.2.17",
  "http",
@@ -7160,7 +7166,7 @@ name = "uptrakit-agent-runtime"
 version = "0.0.4"
 dependencies = [
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.1",
  "serde_json",
  "tempfile",
  "tokio",
@@ -7203,7 +7209,7 @@ name = "uptrakit-agent-ssh-runtime"
 version = "0.0.5"
 dependencies = [
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.1",
  "futures-util",
  "parking_lot",
  "rcgen",
@@ -7287,7 +7293,7 @@ dependencies = [
 name = "uptrakit-cli"
 version = "0.0.5"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "clap",
  "futures-util",
  "hostname",
@@ -7489,7 +7495,7 @@ name = "uptrakit-crypto"
 version = "0.0.1"
 dependencies = [
  "aws-lc-rs",
- "base64 0.22.1",
+ "base64 0.23.1",
  "rand 0.10.2",
  "rcgen",
  "rootcause",
@@ -7592,7 +7598,7 @@ dependencies = [
  "aws-lc-rs",
  "axum",
  "axum-server",
- "base64 0.22.1",
+ "base64 0.23.1",
  "const-oid 0.9.6",
  "der 0.7.10",
  "http",
@@ -7686,7 +7692,7 @@ version = "0.0.4"
 dependencies = [
  "async-trait",
  "backon",
- "base64 0.22.1",
+ "base64 0.23.1",
  "futures-util",
  "rcgen",
  "rootcause",
@@ -8279,7 +8285,7 @@ name = "uptrakit-plugin-releases-docker"
 version = "0.0.2"
 dependencies = [
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.1",
  "bollard",
  "futures-util",
  "parking_lot",
@@ -8462,7 +8468,7 @@ dependencies = [
  "async-trait",
  "aws-lc-rs",
  "backon",
- "base64 0.22.1",
+ "base64 0.23.1",
  "cargo_metadata",
  "clap",
  "const-oid 0.9.6",
@@ -8632,7 +8638,7 @@ dependencies = [
  "axum",
  "axum-server",
  "backon",
- "base64 0.22.1",
+ "base64 0.23.1",
  "client-ip",
  "const-oid 0.9.6",
  "der 0.7.10",
@@ -8710,7 +8716,7 @@ dependencies = [
  "argon2 0.5.3",
  "async-trait",
  "axum",
- "base64 0.22.1",
+ "base64 0.23.1",
  "http",
  "jsonwebtoken",
  "openidconnect",
