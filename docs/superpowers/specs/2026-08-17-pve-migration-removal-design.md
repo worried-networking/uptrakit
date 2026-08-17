@@ -2,8 +2,11 @@
 
 - **Date:** 2026-08-17
 - **Status:** Draft (pending `/review-spec`)
-- **Scope:** `crates/plugins/infrastructure/proxmox`, one test line in
-  `crates/core/agent-ssh-runtime`, prose docs
+- **Scope:** `crates/plugins/infrastructure/proxmox`, `crates/plugins/infrastructure/core`
+  (`InfraPluginContext`), `crates/shared/wire` (one optional `ServiceSettings` field),
+  `crates/ui/web-api` (`routes/service_ws/connection.rs`),
+  `crates/core/controller-runtime` (embedded settings), `crates/core/agent-ssh-runtime`
+  (instance-host plumbing + one test line), prose docs
 - **ADR impact:** completion note in ADR-0044 § Migration; no new ADR
 
 ## Context
@@ -22,7 +25,9 @@ The single live deployment has completed this migration (owner declaration, 2026
 The machinery is now dead weight: three extra DB columns, four credential-flow branches,
 a dedicated outcome variant, and a body of tests and docs describing a flow that can
 never run again. This spec removes it and, independently, adds a `--comment` to the
-per-tenant API tokens for operator convenience.
+per-tenant API tokens for operator convenience — one naming both the managing Uptrakit
+instance (its FQDN) and the tenant, so an operator reading `pveum user token list` on a
+node shared between deployments can tell whose token it is.
 
 ## Goals
 
@@ -30,9 +35,13 @@ per-tenant API tokens for operator convenience.
    tests, and prose.
 2. Collapse the ack-marker/operative column duality into a single
    `pve_plugin_config_id` column with plain-write semantics.
-3. Add `--comment 'Uptrakit managed token (tenant {tenant_uuid})'` to both
-   `pveum user token add` sites.
-4. Update every doc that describes the migration; leave frozen historical records
+3. Add `--comment 'Uptrakit managed token ({instance_host}, tenant {tenant_uuid})'` to
+   both `pveum user token add` sites, falling back to
+   `'Uptrakit managed token (tenant {tenant_uuid})'` when the instance host is unknown.
+4. Plumb the controller's instance host (FQDN) to the SSH agent's infra-plugin call
+   sites: a new optional `ServiceSettings` field sourced from the existing global
+   `oauth.canonical_host` setting.
+5. Update every doc that describes the migration; leave frozen historical records
    untouched.
 
 ## Non-goals
@@ -41,6 +50,10 @@ per-tenant API tokens for operator convenience.
   registry, the degraded-read guarded-create shape, or `prove_token_on_node` gating.
 - No retrofit of comments onto already-created tokens in the sync path — a one-liner for
   the operator to run once covers the live install (see § Token comment).
+- No new instance-URL setting, no UI, and no change to `oauth.canonical_host` semantics
+  or validation — that work belongs to `uptrakit-spec-2026-08-11-cimd-relying-party`
+  (see § Dependencies). This spec only reads the setting and hardens the value at the
+  shell boundary.
 - No rewrite of merged agent migrations — existing migration bodies stay byte-frozen;
   removal is a new appended migration.
 - No new ADR: removing completed migration machinery executes ADR-0044's plan, it does
@@ -69,7 +82,7 @@ Post-collapse:
   ack path and a prior confirmed reuse.
 - `surface_actions.rs` keeps working unchanged.
 - **Intended behavior change** (not semantics-preserving): today's coalesce never lets
-  an ack or Branch 4 reuse-persist overwrite a *non-NULL* operative id; post-collapse a
+  an ack or Branch 4 reuse-persist overwrite a _non-NULL_ operative id; post-collapse a
   plain write does. On a duplicate-config install where cluster peers disagree, the
   Branch 4 `ids` max-arm result is written onto the local row (peers converge instead
   of staying frozen), and a controller re-report with a changed config id updates
@@ -123,12 +136,12 @@ Post-collapse:
   plugin-agent-migrations-not-running incident) then no-ops instead of failing the
   whole agent migration run; no per-statement guards needed. Otherwise:
   1. Fold with one unconditional `sea_query` UPDATE: `SET pve_plugin_config_id =
-     new_pve_plugin_config_id`. The ack column is the only trustworthy source — every
+new_pve_plugin_config_id`. The ack column is the only trustworthy source — every
      legitimate post-ADR-0044 operative write also set the ack column
      (`set_new_plugin_config_id` writes both; `promote_cluster_rows` only runs after
      an ack exists; production `upsert_host_state` callers pass `None`), while a
      pre-ADR-0044 operative value (the `m20260308_000001` backfill from `ssh_hosts`)
-     can be the *legacy* plugin-config id with `legacy_pve_user` never set. The
+     can be the _legacy_ plugin-config id with `legacy_pve_user` never set. The
      unconditional overwrite makes "stored ⇒ ack-derived" true of all pre-existing
      data. Side effect on a skewed install: a legacy-only operative id is cleared, so
      `surface_actions.rs`'s node/config→host map goes empty until the next credential
@@ -148,16 +161,108 @@ Post-collapse:
   exception, cross-crate table) — switch to `pve_plugin_config_id`; the inline
   exception comment stays.
 
-### Token comment (decision Q4)
+### Instance host on the wire (decision Q6: canonical host via `ServiceSettings`)
+
+The agent has no notion of the Uptrakit deployment's FQDN today — nothing in the
+agent-local SQLite DB, nothing in `service.json`/`ServiceIdentityState`, nothing in
+`ServiceSettingsPayload`. `<state_dir>/discovery.json` records a URL only on the mDNS
+path (never when `--url` is passed), so it is not a source. The FQDN therefore comes
+from the controller, sourced from the one setting that already means "this instance's
+public host": the global `oauth.canonical_host`
+(`SettingKey::OauthCanonicalHost`, a bare host with optional port).
+
+Wire (`crates/shared/wire/src/payloads.rs`):
+
+- `ServiceSettingsPayload` gains `#[serde(default, skip_serializing_if =
+"Option::is_none")] pub instance_host: Option<String>` plus a
+  `with_instance_host(...)` builder, matching the existing `tenant_id`/`trust_domain`
+  optional-field shape. Wire-field name is deliberately neutral — `oauth.canonical_host`
+  keeps its storage key (CIMD rejected a key rename), but nothing about this field is
+  OAuth-specific.
+- `WireValidate for ServiceSettingsPayload` (`wire_validate_impls.rs`:993) adds
+  `check_string_len(host, MAX_SHORT_STRING_LEN, "instance_host")` for the `Some` case —
+  no new limit constant.
+- Additive and backward-compatible: older services ignore the field, older controllers
+  omit it and the agent falls back to the tenant-only comment.
+
+Controller:
+
+- `crates/ui/web-api/src/routes/service_ws/connection.rs` — `send_service_settings`
+  (which holds `&AppState`) loads the raw setting via
+  `uptrakit_web_api_auth::settings_store::load_global_setting_raw(state.db(),
+SettingKey::OauthCanonicalHost.as_str())` once per WS connect and passes it into
+  `build_service_settings`, which sets the field when non-empty (same
+  `if !x.is_empty()` shape the `trust_domain` arm already uses). A read failure logs at
+  debug and yields `None` — it must never fail a service connection.
+- `crates/core/controller-runtime/src/embedded/mod.rs` — `embedded_service_settings`
+  takes the same value; the caller (`add()`, :265) has `state.db()` in scope, so the
+  embedded SSH agent gets the same host as an external one.
+
+Agent (`crates/core/agent-ssh-runtime`):
+
+- `SshAgentSettings` (lib.rs:317) gains `instance_host: Option<String>` and **loses
+  `Copy`** (keeps `Clone`, `Debug`, `Default`); `handler.rs` `on_settings` (:113) fills
+  it from `settings.instance_host`.
+- `RuntimeSessionState` (lib.rs:323) gains the same field, written in `apply_settings`
+  next to `tenant_id` — session-scoped, refreshed on every `ServiceSettings`.
+- `SurfaceRuntimeContext` (surface_runtime.rs:1014, built at runtime_support.rs:376 from
+  `session_state`) carries it, which covers the fully-populated `InfraPluginContext` at
+  surface_runtime.rs:1093 and gives the spawn helpers something to capture.
+- `BootstrapParams` (bootstrap.rs:111) gains `instance_host: Option<String>`, set in
+  `parse_bootstrap_params` (surface_runtime.rs:1717) from a new
+  `BootstrapConnectArgs`/`BootstrapExecuteArgs` field — **not** from the request-params
+  JSON: the value is a controller session fact, and reading it from the UI-supplied
+  params would let a surface caller choose the string that lands in a shell command.
+  This covers both `InfraPluginContext` sites in `bootstrap.rs` (:395, :1279), where
+  `params` is already in scope.
+- `sync_connect`/`sync_execute` (sync.rs:277, :423) receive it and set it on the
+  `InfraPluginContext` at sync.rs:547. `sync_execute` is already at six parameters, so
+  the added value goes in via a small args struct rather than a seventh parameter
+  (clippy `too_many_arguments`).
+- `spawn_post_report_hooks_impl` (runtime_support.rs:127) reads it from `session_state`
+  for the `InfraPluginContext` at :144.
+
+Plugin core (`crates/plugins/infrastructure/core/src/agent_infra.rs`:232):
+
+- `InfraPluginContext` gains `pub instance_host: Option<&'a str>`, documented as "the
+  Uptrakit instance's public host as configured on the controller; unvalidated operator
+  input — sanitize before use". Adding the field touches the four production literals
+  above plus the plugin-crate test literals (`plugin.rs`:773/820/872/903,
+  `credential_flow.rs`:548).
+
+### Token comment (decisions Q4, Q6)
 
 Both `pveum user token add` sites in `pve_setup.rs` (:462 provisioning, :519
-regenerate) gain `--comment 'Uptrakit managed token (tenant {tenant_uuid})'`. The user
-add site (:453) already carries `--comment 'Uptrakit managed user'`. No sync-path
-retrofit of existing tokens; the operator runs once on the live node:
+regenerate) gain a `--comment`; `create_pve_api_credentials` and
+`regenerate_pve_api_token` take the instance host as a new `Option<&str>` parameter,
+passed by `credential_flow.rs` from `ctx.instance_host`. The comment is built by one
+shared helper:
+
+```text
+Some("uptrakit.example.com") -> Uptrakit managed token (uptrakit.example.com, tenant <uuid>)
+None                         -> Uptrakit managed token (tenant <uuid>)
+```
+
+The user add site (:453) keeps `--comment 'Uptrakit managed user'` unchanged: that user
+is shared by all tenants, `pveum user add` runs once and is never rewritten, so an
+instance-dependent string there would only ever describe whichever deployment created
+the user first.
+
+**Sanitization is mandatory, not decorative.** The value crosses a shell boundary inside
+a single-quoted argument, and it is operator-entered free text: `CanonicalUrlConfig::new`
+accepts `user@example.com` and `example.com/app` today, and nothing rejects a `'`.
+`pve_setup.rs` gets a private `sanitize_instance_host(&str) -> Option<String>` that
+accepts only `A-Za-z0-9`, `.`, `-`, `:`, `[`, `]` (the last two for bracketed IPv6
+literals), rejects empty and anything longer than 253 characters, and returns `None`
+otherwise — an unusable value degrades to the tenant-only comment rather than
+propagating into a command string. The tenant UUID stays shell-safe by construction
+(UUID formatting), same posture as the existing `token_id` interpolation.
+
+No sync-path retrofit of existing tokens; the operator runs once on the live node:
 
 ```sh
 pveum user token modify uptrakit@pve 'tenant-<tenant_uuid>' \
-  --privsep 1 --comment 'Uptrakit managed token (tenant <tenant_uuid>)'
+  --privsep 1 --comment 'Uptrakit managed token (<instance_host>, tenant <tenant_uuid>)'
 ```
 
 `--privsep 1` is passed explicitly: whether a partial `token modify` preserves or
@@ -165,9 +270,6 @@ resets unsupplied schema-defaulted fields is PVE-version-dependent, and a reset 
 silently flip the token to inheriting the shared user's full permissions. Explicit
 `--privsep 1` is idempotent when preserved and corrective when not, matching the
 `--privsep=1` both `token add` sites already pass.
-
-The tenant UUID must be shell-safe by construction (UUID formatting) — same posture as
-the existing `token_id` interpolation.
 
 ### Test changes
 
@@ -198,12 +300,23 @@ the existing `token_id` interpolation.
   keep their create-shape assertions, drop `MigrationPending` assertions.
 - **plugin.rs tests** (:1059–:1152): `on_plugin_config_reported` assertions flip to the
   operative column (positional-scan regression coverage stays).
-- **pve_setup tests**: token-add tests additionally assert the `--comment` flag;
+- **pve_setup tests**: token-add tests assert both `--comment` forms — instance host
+  present (`Some("uptrakit.example.com")` ⇒ host and tenant in the string) and absent
+  (`None` ⇒ tenant-only); a table test on `sanitize_instance_host` covers accept (bare
+  host, `host:port`, IPv4, `[::1]:8443`) and reject (`'`, `;`, space, `user@host`,
+  `host/path`, empty, 254 chars) with the rejected cases asserted to produce the
+  tenant-only comment (failure path);
   `check_pve_state_fresh_cluster`, `check_pve_state_user_no_token`,
   `check_pve_state_read_failure_is_err`, and
   `check_pve_state_tolerates_stderr_noise_before_json` adapt — they construct the
   check-state struct with `legacy_user: None` and lose that initializer (and any
   scripted second `pveum user list` response) when the field drops.
+- **Instance-host plumbing**: `build_service_settings` sets `instance_host` when the
+  setting is non-empty and leaves it `None` when unset/empty (no serde-roundtrip test —
+  plain derive, per testing standards); `WireValidate` rejects an over-long
+  `instance_host` and accepts `None`; an agent-side test asserts `apply_settings` stores
+  the host on `RuntimeSessionState` and that a later `ServiceSettings` without the field
+  clears it (stale-value regression).
 - Success and failure paths stay covered per testing standards; scripted-executor
   harness unchanged.
 
@@ -233,7 +346,27 @@ Swept all open spec/plan epics for overlap with the in-scope files
 - `uptrakit-spec-2026-07-12-ssh-bootstrap-conflict-precheck` — bootstrap execute paths;
   no overlap. Not wired.
 
-No hard dependencies, no soft relations.
+**Soft relation (not blocking): `uptrakit-spec-2026-08-11-cimd-relying-party`**, in
+particular `uptrakit-plan-2026-08-11-cimd-a-mcp-opt-in` (Tasks A2 inversion, A3
+canonical-host shape validation, A6 Global Settings "Instance" card). The instance host
+this spec reads is `oauth.canonical_host`, and until Plan A lands:
+
+- setting it also boots the MCP OAuth authorization server (`resolve_mcp_enabled`
+  auto-enables when the canonical host is set), so an operator cannot set it _only_ to
+  stamp PVE token comments;
+- its stored shape is loosely validated (`user@example.com`, `example.com/app` pass),
+  which is why sanitization lives on the agent side of the boundary regardless;
+- there is no Global Settings home for it outside the MCP Access tab.
+
+Consequence, accepted deliberately: on a deployment with the canonical host unset the
+token comment ships in its tenant-only form and gains the FQDN with no code change once
+the host is set. That fallback is what keeps this a soft relation — this spec is
+implementable and shippable today, and neither side edits the other's files (CIMD:
+`oauth/`, `routes/settings_oauth.rs`, `web-api-types`; here:
+`routes/service_ws/connection.rs`). Implementation order does not matter; if CIMD Plan A
+lands first, nothing here changes.
+
+No hard dependencies.
 
 ## Documentation deliverables
 
@@ -248,24 +381,33 @@ Implementation must update (verified hit list):
    (decision Q5).
 2. `docs/architecture/ssh-agent.md` — § Legacy-user migration (two-phase,
    cluster-scoped), lines 366–403, replaced with a one-paragraph historical note
-   pointing at ADR-0044.
+   pointing at ADR-0044; plus one line in the settings/session description: the agent
+   caches the controller-supplied instance host per session and hands it to infra
+   plugins, never persisting it.
 3. `docs/development/proxmox-plugin.md` — migration bookkeeping rows/sections (row 57,
    row 216, and the full "PVE Cluster Deduplication and Legacy Migration" subsection at
    219–244 including its header) removed; credential-flow branch description updated to
-   the surviving branches; token-comment behavior documented.
+   the surviving branches; token-comment behavior documented, including where the
+   instance host comes from and the tenant-only fallback.
 4. `docs/end-user/proxmox.md` — legacy-identity-model note block (lines 197–204), the
    full "Migrating to the Shared PVE Identity Model" section (lines 255–373, all
    subsections), and the "Cleaning up a never-fully-migrated legacy user" subsection
    under Deprovisioning (lines 415–431, tied to the removed `delete_pve_user` /
    `LEGACY_PVE_USERNAME_PREFIX`) removed; token comment mentioned as observable
-   behavior.
+   behavior, with the note that the instance FQDN appears only when the instance's
+   canonical host is configured.
 5. `docs/end-user/ssh-agent-bootstrap.md` — migration mention (lines ~432–437)
    simplified to the shared-user model description.
 6. `docs/development/proxmox-bootstrap.md` — line ~107 rephrased (the shared-user model
    is no longer "this migration introduces").
-7. `CONTEXT.md`, `docs/development/error-handling.md` — **no change**: their "two-phase"
+7. `docs/api/wire-protocol.md` § `ServiceSettingsPayload` Fields (table at :1043) — one
+   row for `instance_host` (optional; the controller's `oauth.canonical_host`, absent
+   when unset), plus `crates/shared/wire/asyncapi.yaml` regenerated via
+   `./scripts/regen-asyncapi.sh` and committed (CI gates on the
+   `asyncapi_yaml_is_up_to_date` golden test).
+8. `CONTEXT.md`, `docs/development/error-handling.md` — **no change**: their "two-phase"
    hits are unrelated (config-reload validate-then-apply; error-decision table).
-8. In-crate rustdoc/comments on surviving code — `credential_flow.rs` module `//!` doc
+9. In-crate rustdoc/comments on surviving code — `credential_flow.rs` module `//!` doc
    (:1–:16, includes the cluster-lock rationale), the Branch 4 evidence comment
    (:201–:202, "A bare `pve_plugin_config_id` never satisfies reuse" — inverted by this
    design), the Branch 4 persist comment (:233–:238, coalesce/legacy-row semantics
@@ -275,12 +417,12 @@ Implementation must update (verified hit list):
    `ids.max()` arm — it picks the lexicographic max of UUID strings, not the newest
    (keep `sort_unstable` + `dedup` and take `ids.pop()`, or document the arm as
    arbitrary-but-deterministic).
-9. `docs/superpowers/specs/*` historical specs — bodies **untouched** (frozen records).
-   Sole exception: `2026-08-16-pve-bootstrap-refactor-design.md` still reads
-   `**Status:** Design (pending plan)` although it was implemented; correct that one
-   status line (e.g. "Implemented; migration machinery since removed — see
-   2026-08-17-pve-migration-removal-design.md") so its load-bearing rationale for the
-   ack marker is not mistaken for current design.
+10. `docs/superpowers/specs/*` historical specs — bodies **untouched** (frozen records).
+    Sole exception: `2026-08-16-pve-bootstrap-refactor-design.md` still reads
+    `**Status:** Design (pending plan)` although it was implemented; correct that one
+    status line (e.g. "Implemented; migration machinery since removed — see
+    2026-08-17-pve-migration-removal-design.md") so its load-bearing rationale for the
+    ack marker is not mistaken for current design.
 
 The standards-snapshot Binding Rule describing the two-phase migration derives from
 ADR-0044 / ssh-agent.md / proxmox-plugin.md and dissolves at the next snapshot refresh
@@ -294,8 +436,11 @@ once deliverables 1–3 land — removal is the intent of this spec, not a rule 
 Standard Rust gates (fmt, check minimal + all-features, clippy both, tests,
 `cargo deny check` not needed — no dependency changes), `markdownlint`,
 `bash ci/verify_no_new_cfg_not_feature.sh`, `python3 ci/verify_no_orphan_modules.py`,
-and `( cd website && zola check )` for the end-user doc edits. No wire, REST, OpenAPI,
-or audit-catalog surface is touched (verified: no PVE/proxmox entries in
+and `( cd website && zola check )` for the end-user doc edits. The wire change adds
+`./scripts/regen-asyncapi.sh` with `crates/shared/wire/asyncapi.yaml` committed (gated
+by the `asyncapi_yaml_is_up_to_date` golden test). No REST, OpenAPI, or audit-catalog
+surface is touched — the instance host rides an existing message and an existing
+setting, no endpoint changes (verified: no PVE/proxmox entries in
 `audit-catalog.toml`; `PveCredentialOutcome` is crate-internal).
 
 ## Alternatives considered
@@ -310,8 +455,22 @@ or audit-catalog surface is touched (verified: no PVE/proxmox entries in
   leaves the sync path untouched.
 - **New ADR for the removal** — rejected (decision Q5): executing ADR-0044's migration
   plan to completion is not a new architectural decision.
+- **FQDN from the agent's own `--url` host** (thread `CommonServiceArgs::parsed_url()`
+  through `AgentSshRuntimeSupport` → `SurfaceRuntimeContext`/`BootstrapParams`) —
+  rejected (decision Q6): it records whatever address that agent happens to dial (LAN
+  IP, VPN name, split-horizon alias), which is exactly the ambiguity the comment is
+  meant to resolve; the controller-hosted embedded SSH agent has no `--url` at all; and
+  it would fork "the instance's address" into a second, agent-local notion.
+- **A new dedicated instance-URL setting** — rejected (decision Q6): duplicates
+  `oauth.canonical_host`, which CIMD is already turning into the general instance
+  setting; two settings that must agree is worse than one that is briefly MCP-coupled.
+- **Hard-blocking this spec on CIMD Plan A** — rejected (decision Q6): the tenant-only
+  fallback makes the FQDN a pure enrichment, so the migration removal (the bulk of the
+  work, and the part with a schema change) ships independently.
 
 ## Deferred / out of scope
 
 - Any change to controller-side plugin-config handling.
 - Comment backfill automation for pre-existing tokens (manual one-liner suffices).
+- Any other consumer of the new `instance_host` wire field (notifications, MQTT,
+  agent-side link building) — added here for the token comment only.
