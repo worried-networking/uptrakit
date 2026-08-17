@@ -36,6 +36,14 @@ function update_script() {
   if ! check_for_gh_tag "uptrakit-controller-standalone" \
     "worried-networking/uptrakit" "uptrakit-controller-standalone-v"; then
     msg_ok "No update required"
+    msg_info "Provisioning host for the embedded agent"
+    if ! /usr/local/bin/uptrakit-controller-standalone agent bootstrap-host --help >/dev/null 2>&1; then
+      msg_error "Installed binary lacks 'agent bootstrap-host' (pre-rollout release) — run update again after the next release"
+    elif timeout 120 /usr/local/bin/uptrakit-controller-standalone agent bootstrap-host --user uptrakit; then
+      msg_ok "Provisioned host for the embedded agent"
+    else
+      msg_error "Host bootstrap failed — run '/usr/local/bin/uptrakit-controller-standalone agent bootstrap-host --user uptrakit' as root to retry"
+    fi
     exit 0
   fi
   msg_info "Updating uptrakit"
@@ -60,7 +68,15 @@ function update_script() {
   # Note: update_script runs inside the CT — start() detects no pveversion, skips install path.
   systemctl start uptrakit
   msg_ok "Updated uptrakit"
-  exit
+  msg_info "Provisioning host for the embedded agent"
+  if ! /usr/local/bin/uptrakit-controller-standalone agent bootstrap-host --help >/dev/null 2>&1; then
+    msg_error "Installed binary lacks 'agent bootstrap-host' (pre-rollout release) — run update again after the next release"
+  elif timeout 120 /usr/local/bin/uptrakit-controller-standalone agent bootstrap-host --user uptrakit; then
+    msg_ok "Provisioned host for the embedded agent"
+  else
+    msg_error "Host bootstrap failed — run '/usr/local/bin/uptrakit-controller-standalone agent bootstrap-host --user uptrakit' as root to retry"
+  fi
+  exit 0
 }
 
 start
