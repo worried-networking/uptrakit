@@ -538,3 +538,14 @@ admin-event regen check above. No new external dependencies ⇒ no version pins 
 - Update cancellation — out of scope by decision; revisit only on explicit request.
 - Cross-config node identity (two plugin configs → same physical cluster double-booking a node).
 - TOML key reference page (documentation gap noted during design; not created here).
+
+## 10. Dependencies
+
+- Predecessor: `uptrakit-spec-2026-08-12-network-timeout-safety-design` (Network & Timeout Safety).
+  Reason: needs landed implementation, design-contingent — this spec skips a heartbeat/lease on node
+  claims and delegates claim liveness to the update reaper (`crates/ui/web-api/src/update_reaper.rs`,
+  `crates/ui/web-api-queries/src/queries/update_reaper.rs`), whose `Pending`-row handling that spec's
+  M0.4/M1.8 rewrite; the 7500 s reaper bound (ADR-0024) is a load-bearing safety invariant here.
+  Premature stage: plan writing onward. Wired: predecessor spec epic blocks
+  `uptrakit-write-plan-2026-08-16-pve-node-queue-gate` and
+  `uptrakit-spec-2026-08-16-pve-node-queue-gate-design`.
