@@ -107,9 +107,9 @@ cargo_metadata = "0.23.1"
 tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect"] }
 zeroize = { version = "1", features = ["derive"] }
 async-nats = { version = "0.50", default-features = false, features = ["server_2_10", "server_2_11", "server_2_12", "aws-lc-rs", "jetstream"] }
-# base64 held at 0.22 (latest: 0.23) — no breaking API change, but 0.23 would add a third copy to
-# the graph (openidconnect 4.0.1 pulls 0.21 regardless) and enables a default `simd-unsafe` feature.
-base64 = "0.22"
+# base64 0.23 gains a default `simd-unsafe` feature; keep it off — first-party use is config-sized
+# payloads where the `unsafe` SIMD path buys nothing.
+base64 = { version = "0.23", default-features = false, features = ["std"] }
 rustix = { version = "1", default-features = false }
 rumqttc = { version = "0.25.1", default-features = false, features = ["use-rustls-no-provider"] }
 serde_yaml_ng = "0.10"

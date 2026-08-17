@@ -287,8 +287,9 @@ skip = [
     # flume: 0.11.x via mdns-sd 0.20 / rumqttc 0.25.1; 0.12.x via sqlx-sqlite 0.9
     { crate = "flume@0.11.1", reason = "pulled by mdns-sd 0.20, rumqttc 0.25.1; sqlx-sqlite 0.9 uses flume 0.12" },
 
-    # base64: 0.21.7 via openidconnect, 0.22.1 via axum/reqwest/sqlx
+    # base64: 0.21.7 via openidconnect, 0.22.1 via axum/reqwest/sqlx, 0.23.1 via ureq 3.4 (bollard test stack)
     { crate = "base64@0.21.7", reason = "pulled by openidconnect; newer 0.22.x used by axum, reqwest, sqlx" },
+    { crate = "base64@0.22.1", reason = "pulled by axum, reqwest, sqlx; newer 0.23.x used by ureq 3.4 (bollard-buildkit-proto)" },
 
     # darling: 0.20.x via sea-query-derive, 0.23.x via serde_with (openidconnect)
     { crate = "darling@0.20.11", reason = "pulled by sea-query-derive; newer 0.23.x used by serde_with" },
