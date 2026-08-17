@@ -3,6 +3,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+pub mod cli;
+pub use cli::AgentRuntimeCommand;
+
 use uptrakit_agent_core::{
     ConnectionContext, InFlightUpdate, UpdateEvent, handle_graceful_shutdown,
     send_background_result, send_update_output, send_update_result, spawn_background,
