@@ -1799,13 +1799,10 @@ mod tests {
     #[tokio::test]
     async fn cluster_lock_serializes_concurrent_flows() {
         let db = setup_agent_db().await;
-        // Pause the clock only after the in-memory sqlite pool's real connect
-        // (a spawn_blocking round trip) has completed: pausing before it lets
-        // the pool's internal acquire-timeout timer auto-advance to "elapsed"
-        // before the real connect ever wakes the task, producing a spurious
-        // `PoolTimedOut`. The 20ms sleeps below are the only timers this test
-        // needs virtualized, and they run entirely after this point.
-        tokio::time::pause();
+        // DB-backed test: stays on real time per the SQLx/SeaORM exception in
+        // docs/development/testing.md (a paused clock auto-advances the
+        // pool's acquire/idle timers and produces a spurious timeout); the
+        // 20ms sleeps below are real and well under the 200ms bound.
         let timeline: Arc<parking_lot::Mutex<Vec<&'static str>>> =
             Arc::new(parking_lot::Mutex::new(Vec::new()));
         let cluster_json = cluster_status(Some("SHAREDCLUSTER"), &["pve1", "pve2"]);
@@ -1968,5 +1965,55 @@ mod tests {
             "only the two best-effort cluster-detection reads, nothing else: {:?}",
             executor.recorded_calls()
         );
+    }
+
+    #[tokio::test]
+    async fn failed_creation_outranks_a_pending_migration() {
+        // A stored legacy user makes `migration_pending` true, but this run's
+        // token creation genuinely fails. Branch 10's `outcome != Failed`
+        // guard must keep the real Failed outcome instead of letting the
+        // merely-pending migration mask it as MigrationPending.
+        let db = setup_agent_db().await;
+        let host_id = uuid::Uuid::from_u128(70);
+        let host_id_str = host_id.to_string();
+        let tid = tenant(70);
+        let legacy_name = format!("uptrakit-{tid}@pve");
+        db_ops::upsert_host_state(&db, &host_id_str, true, None, Some("pve1".to_string()))
+            .await
+            .expect("seed host");
+        db_ops::set_legacy_pve_user(
+            &db,
+            std::slice::from_ref(&host_id_str),
+            Some(legacy_name.clone()),
+        )
+        .await
+        .expect("seed legacy marker");
+
+        let invoker = RecordingActionInvoker::new();
+        let guest = UnusedGuestBootstrap;
+        let tid_str = tid.to_string();
+        let ctx = make_ctx(&db, Some(&tid_str), &invoker, &guest);
+        let cluster_json = cluster_status(Some("FAILEDCREATECLUSTER"), &["pve1"]);
+        let executor = ScriptedRemoteExecutor::with_matcher(vec![
+            ("pvesh get /cluster/status", ok(cluster_json)),
+            ("pveum user token list", token_list_empty()),
+            (
+                "pveum user list",
+                ok(format!(r#"[{{"userid":"{legacy_name}"}}]"#)),
+            ),
+            (
+                "pveum user token add",
+                err(1, "permission denied: token add failed"),
+            ),
+        ]);
+
+        let out = run_credential_flow(&ctx, &executor, host_id, Some("pve1")).await;
+
+        assert_eq!(
+            out.outcome,
+            PveCredentialOutcome::Failed,
+            "a genuine creation failure must not be masked by the pending migration"
+        );
+        assert!(!out.degraded);
     }
 }
