@@ -1,7 +1,6 @@
 use crate::AppState;
 use crate::error_response::error_response;
 use crate::extract::{Unvalidated, Validated};
-use crate::extractors::{IfMatch, SettingsVersion};
 use crate::middleware::action::{
     AccessAuthority, CanManageCommands, CanReadSoftware, authorize_any,
 };
@@ -214,7 +213,6 @@ pub async fn list_plugin_types(
 #[tracing::instrument(skip_all)]
 pub async fn create_plugin_config(
     State(state): State<Arc<AppState>>,
-    _if_match: IfMatch<SettingsVersion>,
     tenant_db: TenantDb,
     CanManageCommands(user): CanManageCommands,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
@@ -407,12 +405,17 @@ impl From<&ListPluginConfigsParams> for PaginationParams {
 }
 
 /// List all non-deactivated plugin configurations.
+///
+/// The response includes an `ETag` header. Pass this value as `If-Match` when
+/// calling `PUT /api/v1/plugin-configs/{id}`.
 #[utoipa::path(
     get,
     path = "/api/v1/plugin-configs",
     params(ListPluginConfigsParams),
     responses(
-        (status = 200, description = "Paginated list of plugin configs", body = PaginatedResponse<PluginConfigResponse>),
+        (status = 200, description = "Paginated list of plugin configs", body = PaginatedResponse<PluginConfigResponse>,
+            headers(("ETag" = String, description = "Current tenant settings version for optimistic locking"))
+        ),
     ),
     tag = "Plugin Configs",
     security(("oauth2" = ["software:read"]), ("developer_token" = []))
@@ -442,12 +445,17 @@ pub async fn list_plugin_configs(
 }
 
 /// Get a specific plugin configuration.
+///
+/// The response includes an `ETag` header. Pass this value as `If-Match` when
+/// calling `PUT /api/v1/plugin-configs/{id}`.
 #[utoipa::path(
     get,
     path = "/api/v1/plugin-configs/{id}",
     params(("id" = Uuid, Path, description = "Plugin config ID")),
     responses(
-        (status = 200, description = "Plugin config details", body = PluginConfigResponse),
+        (status = 200, description = "Plugin config details", body = PluginConfigResponse,
+            headers(("ETag" = String, description = "Current tenant settings version for optimistic locking"))
+        ),
         (status = 404, description = "Plugin config not found")
     ),
     tag = "Plugin Configs",
@@ -476,6 +484,9 @@ pub async fn get_plugin_config(
 ///
 /// Requires `manage_commands` permission because plugin configs can contain
 /// arbitrary shell commands executed on managed hosts.
+///
+/// Requires the `If-Match` header with the ETag from
+/// `GET /api/v1/plugin-configs/{id}`.
 #[utoipa::path(
     put,
     path = "/api/v1/plugin-configs/{id}",
@@ -484,7 +495,9 @@ pub async fn get_plugin_config(
     responses(
         (status = 200, description = "Plugin config updated", body = PluginConfigResponse),
         (status = 400, description = "Invalid request body"),
-        (status = 404, description = "Plugin config not found")
+        (status = 404, description = "Plugin config not found"),
+        (status = 409, description = "ETag mismatch — stale settings version"),
+        (status = 428, description = "If-Match header missing")
     ),
     tag = "Plugin Configs",
     security(("oauth2" = ["commands:manage"]), ("developer_token" = []))
@@ -496,7 +509,6 @@ pub async fn get_plugin_config(
 )]
 pub async fn update_plugin_config(
     State(state): State<Arc<AppState>>,
-    _if_match: IfMatch<SettingsVersion>,
     tenant_db: TenantDb,
     Path(config_id): Path<Uuid>,
     CanManageCommands(user): CanManageCommands,
@@ -733,7 +745,6 @@ pub async fn update_plugin_config(
 #[tracing::instrument(skip_all)]
 pub async fn delete_plugin_config(
     State(state): State<Arc<AppState>>,
-    _if_match: IfMatch<SettingsVersion>,
     tenant_db: TenantDb,
     Path(config_id): Path<Uuid>,
     CanManageCommands(user): CanManageCommands,

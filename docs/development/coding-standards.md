@@ -1247,10 +1247,14 @@ New settings routes **must** be covered by `etag_middleware`.
 
 ### How to add a new settings route
 
-1. Decide scope: `SettingsVersion` for `/api/v1/settings/*`, `GlobalSettingsVersion` for `/api/v1/global-settings/*`.
-2. In `router.rs`, add the route to the appropriate sub-router (`tenant_settings` or `global_settings`). Do not add it to the outer `auth_routes`
-   chain.
+1. Decide scope: `SettingsVersion` for `/api/v1/settings/*` and `/api/v1/plugin-configs/*`, `GlobalSettingsVersion` for `/api/v1/global-settings/*`.
+2. In `router.rs`, add the route to the appropriate sub-router (`tenant_settings`, `global_settings`, or `plugin_configs`). Do not add it to the outer
+   `auth_routes` chain.
 3. Handler bodies contain no ETag code — no `If-Match` parameter, no `settings_version_cache` lookup, no ETag header construction.
+
+The middleware validates `If-Match` on `PUT`/`PATCH` only. Routes in a sub-router whose side effects are asynchronous or that never bump the version
+counter during the HTTP transaction must stay outside it — for plugin configs that means `list_plugin_types`, `test_plugin_config`, and
+`discover_plugin_config`.
 
 ### POST endpoints
 
@@ -1259,7 +1263,7 @@ POST routes included in an ETag sub-router receive an ETag on success if they mu
 
 ### `IfMatch<S>` extractor
 
-Retained for `plugin_configs.rs` handlers that use it directly. Do not add it to new handlers — use the layer pattern instead.
+No route uses it — `plugin_configs.rs`, its last holdout, moved to the layer pattern. Do not add it to new handlers.
 
 ## Typed Path Extractors
 

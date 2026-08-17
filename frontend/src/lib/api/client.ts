@@ -64,10 +64,17 @@ export const ORIGIN: string = (() => {
 export const DEFAULT_TIMEOUT_MS = 30_000;
 const REFRESH_TIMEOUT_MS = 10_000;
 
-// ── Settings ETag auto-cache ──────────────────────────────────────────────────
-// The backend `etag_middleware` requires `If-Match` on every PUT/PATCH for
-// `/global-settings/*` and `/settings/*`. We cache the most recently observed
-// ETag per scope and auto-attach it so callers don't have to plumb the value.
+// ── Version-scoped ETag auto-cache (settings + plugin configs) ────────────────
+// The backend `etag_middleware` requires `If-Match` on every PUT/PATCH under
+// `/global-settings/*` (global scope) and under `/settings/*` and `/plugin-configs*`
+// (tenant scope). The tenant routes share ONE `settings_version` counter server-side,
+// so a single cached tenant ETag (`W/"settings-v{n}"`) is valid for both families.
+// We cache the most recently observed ETag per scope and auto-attach it so callers
+// don't have to plumb the value.
+// The sibling plugin-config endpoints `/plugin-configs/test`, `/plugin-configs/batch`
+// and `/plugin-configs/{id}/discover` also match the prefix, but they are POSTs and the
+// middleware guards PUT/PATCH only — they neither send nor need an `If-Match`, so the
+// prefix match is a harmless no-op for them.
 // The cache is wiped when the authenticated subject (JWT `sub` claim) changes —
 // silent token refreshes preserve it; cross-user sessions do not.
 
@@ -81,6 +88,7 @@ const settingsEtagCache: Record<SettingsScope, string | null> = {
 function settingsScope(path: string): SettingsScope | null {
 	if (path.startsWith('/global-settings/')) return 'global';
 	if (path.startsWith('/settings/')) return 'tenant';
+	if (path.startsWith('/plugin-configs')) return 'tenant';
 	return null;
 }
 

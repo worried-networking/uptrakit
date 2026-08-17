@@ -651,15 +651,11 @@ pub fn build_router_with_openapi(state: Arc<AppState>) -> (Router, utoipa::opena
         .routes(routes!(crate::routes::hosts::update_host))
         .routes(routes!(crate::routes::hosts::deactivate_host))
         .routes(routes!(crate::routes::hosts::batch_hosts))
+        // Plugin-config CRUD lives in its own ETag sub-router (see below).
+        // list_plugin_types and test_plugin_config stay here: static registry metadata
+        // and an async agent round-trip that never bumps settings_version during the
+        // HTTP transaction (ADR-0017).
         .routes(routes!(crate::routes::plugin_configs::list_plugin_types))
-        .routes(routes!(
-            crate::routes::plugin_configs::create_plugin_config,
-            crate::routes::plugin_configs::list_plugin_configs
-        ))
-        .routes(routes!(crate::routes::plugin_configs::get_plugin_config))
-        .routes(routes!(crate::routes::plugin_configs::update_plugin_config))
-        .routes(routes!(crate::routes::plugin_configs::delete_plugin_config))
-        .routes(routes!(crate::routes::plugin_configs::batch_plugin_configs))
         .routes(routes!(crate::routes::plugin_configs::test_plugin_config))
         // Plugin type settings
         .routes(routes!(
@@ -959,6 +955,25 @@ pub fn build_router_with_openapi(state: Arc<AppState>) -> (Router, utoipa::opena
         ));
 
     let auth_routes = auth_routes.merge(tenant_settings);
+
+    // Plugin-config CRUD is tenant-settings-scoped for optimistic locking (ADR-0017).
+    // Merged before the require_auth layer so unauthenticated requests still get 401
+    // ahead of the If-Match precondition check.
+    let plugin_configs = OpenApiRouter::new()
+        .routes(routes!(
+            crate::routes::plugin_configs::create_plugin_config,
+            crate::routes::plugin_configs::list_plugin_configs
+        ))
+        .routes(routes!(crate::routes::plugin_configs::get_plugin_config))
+        .routes(routes!(crate::routes::plugin_configs::update_plugin_config))
+        .routes(routes!(crate::routes::plugin_configs::delete_plugin_config))
+        .routes(routes!(crate::routes::plugin_configs::batch_plugin_configs))
+        .route_layer(axum_mw::from_fn_with_state(
+            Arc::clone(&state),
+            crate::middleware::etag::etag_middleware::<SettingsVersion>,
+        ));
+
+    let auth_routes = auth_routes.merge(plugin_configs);
 
     let auth_routes = auth_routes.route_layer(axum_mw::from_fn_with_state(
         Arc::clone(&state),

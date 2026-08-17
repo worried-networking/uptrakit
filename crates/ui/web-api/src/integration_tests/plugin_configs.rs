@@ -231,7 +231,6 @@ async fn create_config_returns_201() {
             }),
         )
         .bearer(&token)
-        .header("if-match", "W/\"settings-v0\"")
         .send_json()
         .await;
 
@@ -280,7 +279,6 @@ async fn update_config_returns_200_and_writes_audit_event() {
             }),
         )
         .bearer(&token)
-        .header("if-match", "W/\"settings-v0\"")
         .send_json()
         .await;
 
@@ -294,7 +292,7 @@ async fn update_config_returns_200_and_writes_audit_event() {
             }),
         )
         .bearer(&token)
-        .header("if-match", "W/\"settings-v0\"")
+        .header("if-match", &current_tenant_etag(&client, &token).await)
         .send_json()
         .await;
 
@@ -354,7 +352,6 @@ async fn docker_basic_to_bearer_switch_drops_stale_password() {
             }),
         )
         .bearer(&token)
-        .header("if-match", "W/\"settings-v0\"")
         .send_json()
         .await;
     assert_eq!(create_status, http::StatusCode::CREATED);
@@ -375,7 +372,7 @@ async fn docker_basic_to_bearer_switch_drops_stale_password() {
             }),
         )
         .bearer(&token)
-        .header("if-match", "W/\"settings-v0\"")
+        .header("if-match", &current_tenant_etag(&client, &token).await)
         .send_json()
         .await;
     assert_eq!(update_status, http::StatusCode::OK);
@@ -419,7 +416,6 @@ async fn github_update_stays_sparse_no_materialized_defaults() {
             }),
         )
         .bearer(&token)
-        .header("if-match", "W/\"settings-v0\"")
         .send_json()
         .await;
     assert_eq!(create_status, http::StatusCode::CREATED);
@@ -433,7 +429,7 @@ async fn github_update_stays_sparse_no_materialized_defaults() {
             }),
         )
         .bearer(&token)
-        .header("if-match", "W/\"settings-v0\"")
+        .header("if-match", &current_tenant_etag(&client, &token).await)
         .send_json()
         .await;
     assert_eq!(update_status, http::StatusCode::OK);
@@ -479,7 +475,6 @@ async fn create_with_sentinel_at_sensitive_path_is_400() {
             }),
         )
         .bearer(&token)
-        .header("if-match", "W/\"settings-v0\"")
         .send_json()
         .await;
 
@@ -512,7 +507,6 @@ async fn update_echoing_sentinel_preserves_stored_secret() {
             }),
         )
         .bearer(&token)
-        .header("if-match", "W/\"settings-v0\"")
         .send_json()
         .await;
     assert_eq!(create_status, http::StatusCode::CREATED);
@@ -534,7 +528,7 @@ async fn update_echoing_sentinel_preserves_stored_secret() {
             }),
         )
         .bearer(&token)
-        .header("if-match", "W/\"settings-v0\"")
+        .header("if-match", &current_tenant_etag(&client, &token).await)
         .send_json()
         .await;
     assert_eq!(update_status, http::StatusCode::OK);
@@ -570,7 +564,6 @@ async fn update_sentinel_without_stored_value_is_400() {
             }),
         )
         .bearer(&token)
-        .header("if-match", "W/\"settings-v0\"")
         .send_json()
         .await;
     assert_eq!(create_status, http::StatusCode::CREATED);
@@ -584,7 +577,7 @@ async fn update_sentinel_without_stored_value_is_400() {
             }),
         )
         .bearer(&token)
-        .header("if-match", "W/\"settings-v0\"")
+        .header("if-match", &current_tenant_etag(&client, &token).await)
         .send_json()
         .await;
 
@@ -618,7 +611,6 @@ async fn credential_updated_at_stamped_on_secret_create() {
             }),
         )
         .bearer(&token)
-        .header("if-match", "W/\"settings-v0\"")
         .send_json()
         .await;
     assert_eq!(create_status, http::StatusCode::CREATED);
@@ -655,7 +647,6 @@ async fn credential_updated_at_not_stamped_on_secretless_create() {
             }),
         )
         .bearer(&token)
-        .header("if-match", "W/\"settings-v0\"")
         .send_json()
         .await;
     assert_eq!(create_status, http::StatusCode::CREATED);
@@ -692,7 +683,6 @@ async fn credential_updated_at_untouched_on_nonsecret_update() {
             }),
         )
         .bearer(&token)
-        .header("if-match", "W/\"settings-v0\"")
         .send_json()
         .await;
     assert_eq!(create_status, http::StatusCode::CREATED);
@@ -716,7 +706,7 @@ async fn credential_updated_at_untouched_on_nonsecret_update() {
             }),
         )
         .bearer(&token)
-        .header("if-match", "W/\"settings-v0\"")
+        .header("if-match", &current_tenant_etag(&client, &token).await)
         .send_json()
         .await;
     assert_eq!(update_status, http::StatusCode::OK);
@@ -755,7 +745,6 @@ async fn credential_updated_at_stamped_on_secret_change_and_removal() {
             }),
         )
         .bearer(&token)
-        .header("if-match", "W/\"settings-v0\"")
         .send_json()
         .await;
     assert_eq!(create_status, http::StatusCode::CREATED);
@@ -779,7 +768,7 @@ async fn credential_updated_at_stamped_on_secret_change_and_removal() {
             }),
         )
         .bearer(&token)
-        .header("if-match", "W/\"settings-v0\"")
+        .header("if-match", &current_tenant_etag(&client, &token).await)
         .send_json()
         .await;
     assert_eq!(change_status, http::StatusCode::OK);
@@ -810,7 +799,7 @@ async fn credential_updated_at_stamped_on_secret_change_and_removal() {
             }),
         )
         .bearer(&token)
-        .header("if-match", "W/\"settings-v0\"")
+        .header("if-match", &current_tenant_etag(&client, &token).await)
         .send_json()
         .await;
     assert_eq!(removal_status, http::StatusCode::OK);
@@ -861,7 +850,6 @@ async fn credential_updated_at_stamped_on_prune_removal() {
             }),
         )
         .bearer(&token)
-        .header("if-match", "W/\"settings-v0\"")
         .send_json()
         .await;
     assert_eq!(create_status, http::StatusCode::CREATED);
@@ -894,7 +882,7 @@ async fn credential_updated_at_stamped_on_prune_removal() {
             }),
         )
         .bearer(&token)
-        .header("if-match", "W/\"settings-v0\"")
+        .header("if-match", &current_tenant_etag(&client, &token).await)
         .send_json()
         .await;
     assert_eq!(update_status, http::StatusCode::OK);
@@ -972,7 +960,6 @@ async fn delete_config_returns_204() {
             }),
         )
         .bearer(&token)
-        .header("if-match", "W/\"settings-v0\"")
         .send_json()
         .await;
 
@@ -981,7 +968,6 @@ async fn delete_config_returns_204() {
     let status = client
         .delete(&format!("/api/v1/plugin-configs/{id}"))
         .bearer(&token)
-        .header("if-match", "W/\"settings-v0\"")
         .send_status()
         .await;
 
@@ -1287,7 +1273,6 @@ async fn create_config_rejects_config_model_none_plugin_type() {
             }),
         )
         .bearer(&token)
-        .header("if-match", "W/\"settings-v0\"")
         .send_json()
         .await;
 
@@ -1316,7 +1301,7 @@ async fn update_config_rejects_existing_config_model_none_plugin_type() {
             }),
         )
         .bearer(&token)
-        .header("if-match", "W/\"settings-v0\"")
+        .header("if-match", &current_tenant_etag(&client, &token).await)
         .send_json()
         .await;
 
@@ -1413,7 +1398,10 @@ async fn register_admin_and_tenant_user(app: &TestApp) -> (String, String) {
             &serde_json::json!({ "mode": "open" }),
         )
         .bearer(&admin_token)
-        .header("if-match", "W/\"settings-v0\"")
+        .header(
+            "if-match",
+            &current_tenant_etag(&client, &admin_token).await,
+        )
         .send_status()
         .await;
     assert_eq!(
@@ -1515,4 +1503,250 @@ async fn insert_plugin_config_for_dashboard_icons(app: &TestApp) -> Uuid {
     .expect("insert plugin config");
 
     id
+}
+
+// ── ETag / If-Match route-layer regression tests (ADR-0017) ──────────────────
+//
+// Plugin-config CRUD sits behind `etag_middleware::<SettingsVersion>`. The layer
+// guards PUT/PATCH only and injects an `ETag` on every 2xx, so POST/DELETE/batch
+// must succeed without an `If-Match` header while PUT still requires a fresh one.
+
+/// Read the current tenant ETag the way a real client does — GET before PUT.
+///
+/// The tenant `settings_version` is not necessarily 0: the layer refreshes the
+/// version cache from the DB after every 2xx, so a hardcoded `W/"settings-v0"`
+/// goes stale as soon as anything bumps the counter. Always fetch it.
+async fn current_tenant_etag(
+    client: &crate::test_harness::http_client::TestClient,
+    token: &str,
+) -> String {
+    let resp = client
+        .get("/api/v1/plugin-configs")
+        .bearer(token)
+        .send()
+        .await;
+    assert_eq!(
+        resp.status(),
+        http::StatusCode::OK,
+        "ETag probe GET must succeed"
+    );
+    resp.headers()
+        .get("etag")
+        .expect("ETag on plugin-config list")
+        .to_str()
+        .expect("ASCII ETag")
+        .to_string()
+}
+
+/// Create a plugin config and return its id. Deliberately sends no `If-Match`.
+async fn create_config_without_if_match(
+    client: &crate::test_harness::http_client::TestClient,
+    token: &str,
+    name: &str,
+) -> String {
+    let (status, body): (_, serde_json::Value) = client
+        .post_json(
+            "/api/v1/plugin-configs",
+            &serde_json::json!({
+                "name": name,
+                "plugin_type": "releases.github",
+                "config": {}
+            }),
+        )
+        .bearer(token)
+        .send_json()
+        .await;
+
+    assert_eq!(
+        status,
+        http::StatusCode::CREATED,
+        "POST must not require If-Match, got body: {body:?}"
+    );
+    // `.get()` rather than `body["id"]`: clippy's indexing_slicing test allowance
+    // only covers `#[test]`-attributed fns, and this is a plain helper.
+    body.get("id")
+        .and_then(serde_json::Value::as_str)
+        .expect("id")
+        .to_string()
+}
+
+#[tokio::test]
+async fn get_plugin_config_returns_etag_header() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+    let id = create_config_without_if_match(&client, &token, "ETag Read Config").await;
+
+    let resp = client
+        .get(&format!("/api/v1/plugin-configs/{id}"))
+        .bearer(&token)
+        .send()
+        .await;
+
+    assert_eq!(resp.status(), http::StatusCode::OK);
+    let etag = resp
+        .headers()
+        .get("etag")
+        .expect("ETag header present on GET")
+        .to_str()
+        .expect("ETag is ASCII")
+        .to_string();
+    assert!(
+        etag.starts_with("W/\"settings-v") && etag.ends_with('"'),
+        "expected a weak settings-scoped ETag, got {etag:?}"
+    );
+}
+
+#[tokio::test]
+async fn list_plugin_configs_returns_etag_header() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let resp = client
+        .get("/api/v1/plugin-configs")
+        .bearer(&token)
+        .send()
+        .await;
+
+    assert_eq!(resp.status(), http::StatusCode::OK);
+    let etag = resp
+        .headers()
+        .get("etag")
+        .expect("ETag header present on list")
+        .to_str()
+        .expect("ETag is ASCII")
+        .to_string();
+    assert!(
+        etag.starts_with("W/\"settings-v"),
+        "expected a weak settings-scoped ETag, got {etag:?}"
+    );
+}
+
+#[tokio::test]
+async fn put_plugin_config_with_etag_returns_200_and_fresh_etag() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+    let id = create_config_without_if_match(&client, &token, "ETag Round Trip Config").await;
+
+    // GET → capture the ETag the client is expected to echo back.
+    let get_resp = client
+        .get(&format!("/api/v1/plugin-configs/{id}"))
+        .bearer(&token)
+        .send()
+        .await;
+    assert_eq!(get_resp.status(), http::StatusCode::OK);
+    let etag = get_resp
+        .headers()
+        .get("etag")
+        .expect("ETag on GET")
+        .to_str()
+        .expect("ASCII")
+        .to_string();
+
+    // PUT with that ETag → 200 and the response carries an ETag of its own
+    // (produced by the layer's post-write refresh_etag DB re-read).
+    let put_resp = client
+        .put_json(
+            &format!("/api/v1/plugin-configs/{id}"),
+            &serde_json::json!({ "name": "ETag Round Trip Renamed" }),
+        )
+        .bearer(&token)
+        .header("if-match", &etag)
+        .send()
+        .await;
+
+    assert_eq!(put_resp.status(), http::StatusCode::OK);
+    let put_etag = put_resp
+        .headers()
+        .get("etag")
+        .expect("PUT response must carry an ETag")
+        .to_str()
+        .expect("ASCII")
+        .to_string();
+    assert!(
+        put_etag.starts_with("W/\"settings-v"),
+        "expected a weak settings-scoped ETag on PUT, got {put_etag:?}"
+    );
+}
+
+#[tokio::test]
+async fn put_plugin_config_without_if_match_returns_428() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+    let id = create_config_without_if_match(&client, &token, "Missing If-Match Config").await;
+
+    let (status, body): (_, serde_json::Value) = client
+        .put_json(
+            &format!("/api/v1/plugin-configs/{id}"),
+            &serde_json::json!({ "name": "Never Applied" }),
+        )
+        .bearer(&token)
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::PRECONDITION_REQUIRED);
+    assert_eq!(body["code"], "if_match.required");
+}
+
+#[tokio::test]
+async fn put_plugin_config_with_stale_etag_returns_409() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+    let id = create_config_without_if_match(&client, &token, "Stale If-Match Config").await;
+
+    let (status, body): (_, serde_json::Value) = client
+        .put_json(
+            &format!("/api/v1/plugin-configs/{id}"),
+            &serde_json::json!({ "name": "Never Applied" }),
+        )
+        .bearer(&token)
+        .header("if-match", "W/\"settings-v999\"")
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::CONFLICT);
+    assert_eq!(body["code"], "if_match.stale");
+}
+
+#[tokio::test]
+async fn plugin_config_create_delete_and_batch_need_no_if_match() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    // POST create → 201 without If-Match.
+    let delete_target = create_config_without_if_match(&client, &token, "No If-Match Delete").await;
+
+    // DELETE → 204 without If-Match.
+    let delete_status = client
+        .delete(&format!("/api/v1/plugin-configs/{delete_target}"))
+        .bearer(&token)
+        .send_status()
+        .await;
+    assert_eq!(delete_status, http::StatusCode::NO_CONTENT);
+
+    // POST /batch → 200 without If-Match.
+    let batch_target = create_config_without_if_match(&client, &token, "No If-Match Batch").await;
+    let (batch_status, batch_body): (_, serde_json::Value) = client
+        .post_json(
+            "/api/v1/plugin-configs/batch",
+            &serde_json::json!({ "action": "delete", "ids": [batch_target] }),
+        )
+        .bearer(&token)
+        .send_json()
+        .await;
+
+    assert_eq!(batch_status, http::StatusCode::OK);
+    assert_eq!(
+        batch_body["succeeded"]
+            .as_array()
+            .expect("succeeded array")
+            .len(),
+        1,
+        "batch delete should report one success, got {batch_body:?}"
+    );
 }

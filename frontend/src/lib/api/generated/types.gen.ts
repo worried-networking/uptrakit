@@ -7115,6 +7115,14 @@ export type UpdatePluginConfigErrors = {
      * Plugin config not found
      */
     404: unknown;
+    /**
+     * ETag mismatch — stale settings version
+     */
+    409: unknown;
+    /**
+     * If-Match header missing
+     */
+    428: unknown;
 };
 
 export type UpdatePluginConfigResponses = {

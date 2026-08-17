@@ -4925,6 +4925,7 @@
           "Plugin Configs"
         ],
         "summary": "List all non-deactivated plugin configurations.",
+        "description": "The response includes an `ETag` header. Pass this value as `If-Match` when\ncalling `PUT /api/v1/plugin-configs/{id}`.",
         "operationId": "list_plugin_configs",
         "parameters": [
           {
@@ -4971,6 +4972,14 @@
         "responses": {
           "200": {
             "description": "Paginated list of plugin configs",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Current tenant settings version for optimistic locking"
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -5146,6 +5155,7 @@
           "Plugin Configs"
         ],
         "summary": "Get a specific plugin configuration.",
+        "description": "The response includes an `ETag` header. Pass this value as `If-Match` when\ncalling `PUT /api/v1/plugin-configs/{id}`.",
         "operationId": "get_plugin_config",
         "parameters": [
           {
@@ -5162,6 +5172,14 @@
         "responses": {
           "200": {
             "description": "Plugin config details",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Current tenant settings version for optimistic locking"
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -5190,7 +5208,7 @@
           "Plugin Configs"
         ],
         "summary": "Update a plugin configuration (partial update).",
-        "description": "Requires `manage_commands` permission because plugin configs can contain\narbitrary shell commands executed on managed hosts.",
+        "description": "Requires `manage_commands` permission because plugin configs can contain\narbitrary shell commands executed on managed hosts.\n\nRequires the `If-Match` header with the ETag from\n`GET /api/v1/plugin-configs/{id}`.",
         "operationId": "update_plugin_config",
         "parameters": [
           {
@@ -5230,6 +5248,12 @@
           },
           "404": {
             "description": "Plugin config not found"
+          },
+          "409": {
+            "description": "ETag mismatch — stale settings version"
+          },
+          "428": {
+            "description": "If-Match header missing"
           }
         },
         "security": [

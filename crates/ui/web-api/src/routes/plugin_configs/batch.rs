@@ -1,7 +1,6 @@
 use crate::app_state::AuditEmitterState;
 use crate::error_response::error_response;
 use crate::extract::Validated;
-use crate::extractors::{IfMatch, SettingsVersion};
 use crate::middleware::action::CanManageCommands;
 use crate::middleware::require_auth::AuthenticatedApiTokenId;
 use crate::queries::plugin_configs as pc_queries;
@@ -38,7 +37,6 @@ use super::audit::{AuditContext, emit_plugin_config_semantic_audit};
 #[tracing::instrument(skip_all)]
 pub async fn batch_plugin_configs(
     State(audit_emitter_state): State<AuditEmitterState>,
-    _if_match: IfMatch<SettingsVersion>,
     tenant_db: TenantDb,
     CanManageCommands(user): CanManageCommands,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,

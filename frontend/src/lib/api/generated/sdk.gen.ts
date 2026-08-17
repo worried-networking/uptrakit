@@ -1873,6 +1873,9 @@ export const token = <ThrowOnError extends boolean = true>(options: Options<Toke
 
 /**
  * List all non-deactivated plugin configurations.
+ *
+ * The response includes an `ETag` header. Pass this value as `If-Match` when
+ * calling `PUT /api/v1/plugin-configs/{id}`.
  */
 export const listPluginConfigs = <ThrowOnError extends boolean = true>(options?: Options<ListPluginConfigsData, ThrowOnError>): RequestResult<ListPluginConfigsResponses, unknown, ThrowOnError> => (options?.client ?? client).get<ListPluginConfigsResponses, unknown, ThrowOnError>({
     security: [{
@@ -1985,6 +1988,9 @@ export const deletePluginConfig = <ThrowOnError extends boolean = true>(options:
 
 /**
  * Get a specific plugin configuration.
+ *
+ * The response includes an `ETag` header. Pass this value as `If-Match` when
+ * calling `PUT /api/v1/plugin-configs/{id}`.
  */
 export const getPluginConfig = <ThrowOnError extends boolean = true>(options: Options<GetPluginConfigData, ThrowOnError>): RequestResult<GetPluginConfigResponses, GetPluginConfigErrors, ThrowOnError> => (options.client ?? client).get<GetPluginConfigResponses, GetPluginConfigErrors, ThrowOnError>({
     security: [{
@@ -2005,6 +2011,9 @@ export const getPluginConfig = <ThrowOnError extends boolean = true>(options: Op
  *
  * Requires `manage_commands` permission because plugin configs can contain
  * arbitrary shell commands executed on managed hosts.
+ *
+ * Requires the `If-Match` header with the ETag from
+ * `GET /api/v1/plugin-configs/{id}`.
  */
 export const updatePluginConfig = <ThrowOnError extends boolean = true>(options: Options<UpdatePluginConfigData, ThrowOnError>): RequestResult<UpdatePluginConfigResponses, UpdatePluginConfigErrors, ThrowOnError> => (options.client ?? client).put<UpdatePluginConfigResponses, UpdatePluginConfigErrors, ThrowOnError>({
     security: [{

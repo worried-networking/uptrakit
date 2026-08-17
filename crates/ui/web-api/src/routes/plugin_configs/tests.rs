@@ -680,7 +680,6 @@ async fn create_plugin_config_denied_dangerous_commands_writes_denied_audit_even
     let actor_token_id = uuid::Uuid::now_v7();
     let response = create_plugin_config(
         State(Arc::clone(&state)),
-        crate::extractors::IfMatch::for_test(),
         TenantDb::new_for_test(db.clone(), tenant_id),
         CanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
@@ -727,7 +726,6 @@ async fn create_plugin_config_success_persists_command_risk_details() {
     let actor_user_id = uuid::Uuid::now_v7();
     let response = create_plugin_config(
         State(Arc::clone(&state)),
-        crate::extractors::IfMatch::for_test(),
         TenantDb::new_for_test(db.clone(), tenant_id),
         CanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
@@ -789,7 +787,6 @@ async fn update_plugin_config_success_persists_command_risk_details() {
     let actor_user_id = uuid::Uuid::now_v7();
     let create_response = create_plugin_config(
         State(Arc::clone(&state)),
-        crate::extractors::IfMatch::for_test(),
         TenantDb::new_for_test(db.clone(), tenant_id),
         CanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
@@ -819,7 +816,6 @@ async fn update_plugin_config_success_persists_command_risk_details() {
 
     let update_response = update_plugin_config(
         State(Arc::clone(&state)),
-        crate::extractors::IfMatch::for_test(),
         TenantDb::new_for_test(db.clone(), tenant_id),
         Path(created.id),
         CanManageCommands::new(AuthenticatedUser::new(
@@ -870,7 +866,6 @@ async fn delete_plugin_config_success_persists_command_risk_details() {
     let actor_user_id = uuid::Uuid::now_v7();
     let create_response = create_plugin_config(
         State(Arc::clone(&state)),
-        crate::extractors::IfMatch::for_test(),
         TenantDb::new_for_test(db.clone(), tenant_id),
         CanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
@@ -902,7 +897,6 @@ async fn delete_plugin_config_success_persists_command_risk_details() {
 
     let delete_response = delete_plugin_config(
         State(Arc::clone(&state)),
-        crate::extractors::IfMatch::for_test(),
         TenantDb::new_for_test(db.clone(), tenant_id),
         Path(created.id),
         CanManageCommands::new(AuthenticatedUser::new(
@@ -947,7 +941,6 @@ async fn delete_plugin_config_not_found_writes_denied_audit_event() {
     let missing_id = uuid::Uuid::now_v7();
     let response = delete_plugin_config(
         State(Arc::clone(&state)),
-        crate::extractors::IfMatch::for_test(),
         TenantDb::new_for_test(db.clone(), tenant_id),
         Path(missing_id),
         CanManageCommands::new(AuthenticatedUser::new(
@@ -990,7 +983,6 @@ async fn delete_plugin_config_load_db_failure_writes_failed_audit_event() {
     let actor_user_id = uuid::Uuid::now_v7();
     let response = delete_plugin_config(
         State(Arc::clone(&state)),
-        crate::extractors::IfMatch::for_test(),
         TenantDb::new_for_test(db.clone(), tenant_id),
         Path(uuid::Uuid::now_v7()),
         CanManageCommands::new(AuthenticatedUser::new(
@@ -1029,7 +1021,6 @@ async fn delete_plugin_config_delete_db_failure_writes_failed_audit_event() {
     let actor_user_id = uuid::Uuid::now_v7();
     let create_response = create_plugin_config(
         State(Arc::clone(&state)),
-        crate::extractors::IfMatch::for_test(),
         TenantDb::new_for_test(db.clone(), tenant_id),
         CanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
@@ -1065,7 +1056,6 @@ async fn delete_plugin_config_delete_db_failure_writes_failed_audit_event() {
 
     let delete_response = delete_plugin_config(
         State(Arc::clone(&state)),
-        crate::extractors::IfMatch::for_test(),
         TenantDb::new_for_test(db.clone(), tenant_id),
         Path(created.id),
         CanManageCommands::new(AuthenticatedUser::new(
@@ -1104,7 +1094,6 @@ async fn batch_plugin_configs_unknown_action_writes_validation_failed_audit_even
     let actor_user_id = uuid::Uuid::now_v7();
     let response = batch_plugin_configs(
         State(AuditEmitterState(state.audit_emitter.clone())),
-        crate::extractors::IfMatch::for_test(),
         TenantDb::new_for_test(db.clone(), tenant_id),
         CanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
@@ -1148,7 +1137,6 @@ async fn batch_plugin_configs_delete_backend_failure_writes_failed_audit_event()
     let actor_user_id = uuid::Uuid::now_v7();
     let response = batch_plugin_configs(
         State(AuditEmitterState(state.audit_emitter.clone())),
-        crate::extractors::IfMatch::for_test(),
         TenantDb::new_for_test(db.clone(), tenant_id),
         CanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
@@ -1191,7 +1179,6 @@ async fn create_seed_plugin_config(
     let actor_user_id = uuid::Uuid::now_v7();
     let create_response = create_plugin_config(
         State(state),
-        crate::extractors::IfMatch::for_test(),
         TenantDb::new_for_test(db.clone(), tenant_id),
         CanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
@@ -1246,7 +1233,6 @@ async fn batch_plugin_configs_delete_summary_success_writes_success_outcome() {
     let actor_user_id = uuid::Uuid::now_v7();
     let response = batch_plugin_configs(
         State(AuditEmitterState(state.audit_emitter.clone())),
-        crate::extractors::IfMatch::for_test(),
         TenantDb::new_for_test(db.clone(), tenant_id),
         CanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
@@ -1296,7 +1282,6 @@ async fn batch_plugin_configs_delete_summary_partial_writes_partial_outcome() {
     let actor_user_id = uuid::Uuid::now_v7();
     let response = batch_plugin_configs(
         State(AuditEmitterState(state.audit_emitter.clone())),
-        crate::extractors::IfMatch::for_test(),
         TenantDb::new_for_test(db.clone(), tenant_id),
         CanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
@@ -1337,7 +1322,6 @@ async fn batch_plugin_configs_delete_summary_denied_writes_denied_outcome() {
     let actor_user_id = uuid::Uuid::now_v7();
     let response = batch_plugin_configs(
         State(AuditEmitterState(state.audit_emitter.clone())),
-        crate::extractors::IfMatch::for_test(),
         TenantDb::new_for_test(db.clone(), tenant_id),
         CanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,
@@ -1379,7 +1363,6 @@ async fn create_plugin_config_config_json_absent_from_audit_snapshots() {
     let secret_config_value = "my-very-secret-api-key-for-snapshot-test";
     let response = create_plugin_config(
         State(Arc::clone(&state)),
-        crate::extractors::IfMatch::for_test(),
         TenantDb::new_for_test(db.clone(), tenant_id),
         CanManageCommands::new(AuthenticatedUser::new(
             actor_user_id,

@@ -39,7 +39,7 @@ function ifMatchOf(spy: ReturnType<typeof vi.spyOn>, callIndex: number): string 
 	return req.headers.get('if-match');
 }
 
-describe('settings ETag auto-injection (via configured client interceptors)', () => {
+describe('tenant/global version ETag auto-injection (via configured client interceptors)', () => {
 	beforeEach(() => {
 		_resetSettingsEtagCacheForTests();
 		setAccessToken(null);
@@ -254,5 +254,39 @@ describe('settings ETag auto-injection (via configured client interceptors)', ()
 
 		expect(ifMatchOf(spy, 2)).toBeNull();
 		expect(ifMatchOf(spy, 3)).toBeNull();
+	});
+
+	// `/plugin-configs*` is guarded by the same tenant `settings_version` counter as
+	// `/settings/*`, so the list GET primes the cache the edit PUT then replays.
+	it('auto-injects If-Match on a plugin-config PUT after the list GET captures the ETag', async () => {
+		const spy = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValueOnce(jsonResponse({ items: [] }, { etag: 'W/"settings-v7"' })) // GET list
+			.mockResolvedValueOnce(jsonResponse({ ok: true })); // PUT one config
+
+		await apiClient.get({ url: '/plugin-configs' });
+		await apiClient.put({
+			url: '/plugin-configs/11111111-1111-1111-1111-111111111111',
+			body: { name: 'renamed' }
+		});
+
+		expect(spy).toHaveBeenCalledTimes(2);
+		expect(ifMatchOf(spy, 1)).toBe('W/"settings-v7"');
+	});
+
+	// Regression guard: the backend middleware guards PUT/PATCH only, so a create must
+	// stay bare. Widening `applyIfMatch` past PUT/PATCH would send a precondition the
+	// POST route never validates and reintroduce a 428 on create.
+	it('does not attach If-Match to a plugin-config POST even with a cached ETag', async () => {
+		const spy = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValueOnce(jsonResponse({ items: [] }, { etag: 'W/"settings-v7"' })) // GET list
+			.mockResolvedValueOnce(jsonResponse({ id: 'new' }, { status: 201 })); // POST create
+
+		await apiClient.get({ url: '/plugin-configs' });
+		await apiClient.post({ url: '/plugin-configs', body: { name: 'created' } });
+
+		expect(spy).toHaveBeenCalledTimes(2);
+		expect(ifMatchOf(spy, 1)).toBeNull();
 	});
 });

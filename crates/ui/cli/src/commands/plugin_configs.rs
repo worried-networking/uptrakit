@@ -398,7 +398,8 @@ pub async fn show(params: ShowParams<'_>) -> Result<PluginConfigResponse> {
         params.insecure,
         params.request_timeout,
     )?;
-    client.get_plugin_config(params.id).await.context_to()
+    let (resp, _etag) = client.get_plugin_config(params.id).await.context_to()?;
+    Ok(resp)
 }
 
 pub async fn create(params: CreateParams<'_>) -> Result<PluginConfigResponse> {
@@ -424,15 +425,17 @@ pub async fn update(params: UpdateParams<'_>) -> Result<PluginConfigResponse> {
         params.insecure,
         params.request_timeout,
     )?;
+    let (_current, etag) = client.get_plugin_config(params.id).await.context_to()?;
     let req = UpdatePluginConfigRequest {
         name: params.name,
         config: params.config,
         enabled: params.enabled,
     };
-    client
-        .update_plugin_config(params.id, &req)
+    let (resp, _new_etag) = client
+        .update_plugin_config(params.id, &req, &etag)
         .await
-        .context_to()
+        .context_to()?;
+    Ok(resp)
 }
 
 pub async fn delete(params: DeleteParams<'_>) -> Result<DeletedOutput> {

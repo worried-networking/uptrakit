@@ -51,17 +51,21 @@ impl UptrakitClient {
     }
 
     /// Get a single plugin configuration by ID.
-    pub async fn get_plugin_config(&self, id: &Uuid) -> Result<PluginConfigResponse> {
-        self.get(&crate::paths::plugin_configs::by_id(id)).await
+    /// Returns the response body and the raw `ETag` header value.
+    pub async fn get_plugin_config(&self, id: &Uuid) -> Result<(PluginConfigResponse, String)> {
+        self.get_with_etag(&crate::paths::plugin_configs::by_id(id))
+            .await
     }
 
-    /// Update an existing plugin configuration.
+    /// Update an existing plugin configuration.  `etag` must be the value returned by a prior
+    /// `get_plugin_config` call — the server requires `If-Match` for optimistic locking.
     pub async fn update_plugin_config(
         &self,
         id: &Uuid,
         req: &UpdatePluginConfigRequest,
-    ) -> Result<PluginConfigResponse> {
-        self.put_json(&crate::paths::plugin_configs::by_id(id), req)
+        etag: &str,
+    ) -> Result<(PluginConfigResponse, String)> {
+        self.put_json_with_etag(&crate::paths::plugin_configs::by_id(id), req, etag)
             .await
     }
 
