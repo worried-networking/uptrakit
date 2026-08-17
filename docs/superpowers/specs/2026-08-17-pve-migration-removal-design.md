@@ -68,6 +68,13 @@ Post-collapse:
   the ack marker. A stored operative id **is** reuse evidence — its only writers are the
   ack path and a prior confirmed reuse.
 - `surface_actions.rs` keeps working unchanged.
+- **Intended behavior change** (not semantics-preserving): today's coalesce never lets
+  an ack or Branch 4 reuse-persist overwrite a *non-NULL* operative id; post-collapse a
+  plain write does. On a duplicate-config install where cluster peers disagree, the
+  Branch 4 `ids` max-arm result is written onto the local row (peers converge instead
+  of staying frozen), and a controller re-report with a changed config id updates
+  `surface_actions.rs`'s map instead of leaving it stale. Both are improvements and are
+  covered by the renamed multi-id reuse test (see § Test changes).
 
 ### Code removal inventory (verified against source, 2026-08-17)
 
@@ -81,27 +88,59 @@ Post-collapse:
   degraded guarded create stay.
 - **`agent/db_ops.rs`** — remove `set_legacy_pve_user` (:83), `promote_cluster_rows`
   (:137), `increment_migration_attempts` (:165); collapse `set_new_plugin_config_id`
-  (:107) into `set_plugin_config_id` (plain write to `PvePluginConfigId`). Keep
-  `wipe_all`, `find_pve_hosts`, `upsert_host_state`, pending-match functions.
+  (:107) into `set_plugin_config_id` (plain write to `PvePluginConfigId`). Edit
+  `upsert_host_state`: its insert-branch `ActiveModel` literal (:63–:65) sets the three
+  dropped fields (`legacy_pve_user`, `new_pve_plugin_config_id`, `migration_attempts`)
+  and loses those initializers; the stale doc comment above the collapsed setter
+  (~:101–:105, referencing `set_new_plugin_config_id`/`promote_cluster_rows`) is
+  rewritten, as is the preserve-on-None comment inside `upsert_host_state` (:41–:46) —
+  it names both dead setters and its "must not wipe an already-migrated row's operative
+  config id" justification dissolves once the parameter is dropped (below). Additionally drop the `pve_plugin_config_id` parameter from
+  `upsert_host_state` entirely — every production caller passes `None`, and removing
+  the parameter makes "only the ack path and Branch 4 reuse-persist write the operative
+  column" structural instead of conventional (test callers adapt). Keep `wipe_all`,
+  `find_pve_hosts`, `upsert_host_state` (edited as above), pending-match functions.
 - **`agent/entity.rs`** — drop fields `legacy_pve_user`, `new_pve_plugin_config_id`,
   `migration_attempts`.
-- **`agent/plugin.rs`** — remove the preview action line "Migrate legacy per-tenant PVE
-  user to the shared uptrakit@pve scheme" (:98); simplify the outcome mapping
-  `Reused | MigrationPending` → `Reused` (:251); `on_plugin_config_reported` (:287)
-  calls the renamed plain setter.
+- **`agent/plugin.rs`** — remove the `sync_step_previews` migration step line
+  "Advance legacy-user migration when pending" (:55); remove the whole
+  `if state.legacy_user.is_some()` preview-action block in `probe_host` (:96–:101,
+  guard included — the `legacy_user` field it reads is deleted); simplify the outcome
+  mapping `Reused | MigrationPending` → `Reused` (:251); `on_plugin_config_reported`
+  (:287) calls the renamed plain setter.
 - **`pve_setup.rs`** — remove `LEGACY_PVE_USERNAME_PREFIX` (:36), the `legacy_user`
-  field on the check-state struct (:60) and its matching logic (:326–:336), and
+  field on the check-state struct (:60), the legacy-user probe in `check_pve_state`
+  (~:298–:336: the second `pveum user list` remote call, its JSON parse, and the
+  matching logic — removes one remote round-trip per sync/bootstrap), and
   `delete_pve_user` (:587). Decision Q2: no vestigial legacy-user detection or warning
   remains.
 - **`agent/migration.rs`** — bodies of the four existing migrations stay byte-frozen
   (ledger rule: merged migrations are append-only). Append
-  `m20260817_000001_drop_pve_migration_columns`: first fill the operative column via a
-  `sea_query` UPDATE setting `pve_plugin_config_id =
-COALESCE(pve_plugin_config_id, new_pve_plugin_config_id)` (`Func::coalesce` — no raw
-  SQL needed), then drop `migration_attempts`, `new_pve_plugin_config_id`,
-  `legacy_pve_user`. The existing `ProxmoxHostState` iden enum already carries the
-  needed variants. `down()` re-adds the three columns (data not restored — acceptable
-  for an agent-local forward-only store, same posture as existing `down()` bodies).
+  `m20260817_000001_drop_pve_migration_columns`. `up()` opens with a single
+  `manager.has_column("proxmox_host_state", "new_pve_plugin_config_id")` check
+  (same helper already used in this crate's `controller_migration.rs`, no raw SQL) and
+  early-returns `Ok(())` when absent — a ledger/schema skew state (cf. the
+  plugin-agent-migrations-not-running incident) then no-ops instead of failing the
+  whole agent migration run; no per-statement guards needed. Otherwise:
+  1. Fold with one unconditional `sea_query` UPDATE: `SET pve_plugin_config_id =
+     new_pve_plugin_config_id`. The ack column is the only trustworthy source — every
+     legitimate post-ADR-0044 operative write also set the ack column
+     (`set_new_plugin_config_id` writes both; `promote_cluster_rows` only runs after
+     an ack exists; production `upsert_host_state` callers pass `None`), while a
+     pre-ADR-0044 operative value (the `m20260308_000001` backfill from `ssh_hosts`)
+     can be the *legacy* plugin-config id with `legacy_pve_user` never set. The
+     unconditional overwrite makes "stored ⇒ ack-derived" true of all pre-existing
+     data. Side effect on a skewed install: a legacy-only operative id is cleared, so
+     `surface_actions.rs`'s node/config→host map goes empty until the next credential
+     flow repopulates it and the flow falls through to create/regenerate — the safe
+     direction. No-op on the live deployment (promotion completed) and fresh installs.
+  2. Drop `migration_attempts`, `new_pve_plugin_config_id`, `legacy_pve_user` — as
+     three separate `alter_table` calls (SQLite single-alteration limit), matching the
+     existing `AddPveMigrationColumns::down()` loop.
+
+  The existing `ProxmoxHostState` iden enum already carries the needed variants.
+  `down()` re-adds the three columns (data not restored — acceptable for an agent-local
+  forward-only store, same posture as existing `down()` bodies).
 
 `crates/core/agent-ssh-runtime/src/runtime_support.rs`:
 
@@ -118,8 +157,14 @@ retrofit of existing tokens; the operator runs once on the live node:
 
 ```sh
 pveum user token modify uptrakit@pve 'tenant-<tenant_uuid>' \
-  --comment 'Uptrakit managed token (tenant <tenant_uuid>)'
+  --privsep 1 --comment 'Uptrakit managed token (tenant <tenant_uuid>)'
 ```
+
+`--privsep 1` is passed explicitly: whether a partial `token modify` preserves or
+resets unsupplied schema-defaulted fields is PVE-version-dependent, and a reset would
+silently flip the token to inheriting the shared user's full permissions. Explicit
+`--privsep 1` is idempotent when preserved and corrective when not, matching the
+`--privsep=1` both `token add` sites already pass.
 
 The tenant UUID must be shell-safe by construction (UUID formatting) — same posture as
 the existing `token_id` interpolation.
@@ -127,7 +172,13 @@ the existing `token_id` interpolation.
 ### Test changes
 
 - **Delete** (migration-only): `phase1_records_legacy_and_keeps_it_alive`,
-  `legacy_stored_without_ack_marker_never_deletes`, the five `phase2_*` tests,
+  `legacy_stored_without_ack_marker_never_deletes`, the six `phase2_*` tests
+  (`phase2_prove_then_delete_promotes_on_success`,
+  `phase2_promotes_both_rows_in_a_multi_node_cluster`,
+  `phase2_delete_failure_increments_attempts_and_pends`,
+  `phase2_delete_failure_at_cap_reports_stuck`,
+  `phase2_excludes_peer_row_with_null_node_name`,
+  `phase2_standalone_write_scope_isolated`),
   `recovery_arm_promotes_when_marker_known`,
   `failed_creation_outranks_a_pending_migration` (credential_flow);
   `migration_setters_roundtrip_and_promotion_retains_ack_marker` (db_ops, replaced by a
@@ -135,7 +186,10 @@ the existing `token_id` interpolation.
 - **Adapt** to single-column semantics: `reuse_bare_operative_id_without_ack_marker_is_not_reused`
   inverts — a bare operative id is now valid reuse evidence (rename accordingly);
   `reuse_with_ack_marker_and_confirmed_token_reuses`,
-  `reuse_multiple_ack_markers_uses_max`, `reuse_standalone_peer_isolation`,
+  `reuse_multiple_ack_markers_uses_max` (also renamed — it no longer reads ack
+  markers; its rewrite additionally asserts the peers-disagree result is written back
+  over the local row's differing pre-existing operative id, pinning the intended
+  plain-write overwrite from § Column collapse), `reuse_standalone_peer_isolation`,
   `reuse_persists_peer_evidence_id_onto_flow_hosts_own_row`,
   `reuse_dead_token_evidence_falls_through_to_create` — rewritten against
   `pve_plugin_config_id`. `regenerate_on_ack_loss` survives as the
@@ -144,16 +198,26 @@ the existing `token_id` interpolation.
   keep their create-shape assertions, drop `MigrationPending` assertions.
 - **plugin.rs tests** (:1059–:1152): `on_plugin_config_reported` assertions flip to the
   operative column (positional-scan regression coverage stays).
-- **pve_setup tests**: token-add tests additionally assert the `--comment` flag.
+- **pve_setup tests**: token-add tests additionally assert the `--comment` flag;
+  `check_pve_state_fresh_cluster`, `check_pve_state_user_no_token`,
+  `check_pve_state_read_failure_is_err`, and
+  `check_pve_state_tolerates_stderr_noise_before_json` adapt — they construct the
+  check-state struct with `legacy_user: None` and lose that initializer (and any
+  scripted second `pveum user list` response) when the field drops.
 - Success and failure paths stay covered per testing standards; scripted-executor
   harness unchanged.
 
 ### Data-migration correctness
 
 On the live deployment the migration completed, so `promote_cluster_rows` already copied
-the ack marker into the operative column — the COALESCE fill is a no-op there. It exists
-for defense in depth: any row where only the ack marker was ever written (ack received,
-promotion never ran) keeps its evidence. Fresh installs never had the columns populated.
+the ack marker into the operative column (and the ack marker is never cleared) — the
+unconditional fold is a no-op there, and fresh installs never had the columns populated.
+The fold exists for defense in depth on any skewed install: the ack column is the only
+trustworthy source, because a pre-ADR-0044 operative value can be the legacy
+plugin-config id — any COALESCE-style preservation of the operative value would turn a
+legacy id into false reuse evidence, and a `legacy_pve_user`-based predicate misses
+rows backfilled before that column existed. Post-collapse a stored
+`pve_plugin_config_id` always means "ack-derived", including for pre-existing data.
 
 ## Dependencies (cross-cycle sweep, 2026-08-17)
 
@@ -177,22 +241,50 @@ Implementation must update (verified hit list):
 
 1. `docs/adr/0044-shared-pve-user-with-per-tenant-privilege-separated-api-tokens.md` —
    short completion note in § Migration ("completed on the single live deployment;
-   machinery removed", dated, pointing at this spec). History stays intact — no
-   rewrite (decision Q5).
-2. `docs/architecture/ssh-agent.md` — § Legacy-user migration (~lines 344–391) replaced
-   with a one-paragraph historical note pointing at ADR-0044.
-3. `docs/development/proxmox-plugin.md` — migration bookkeeping rows/sections (rows 57,
-   216, 226–242) removed; credential-flow branch description updated to the surviving
-   branches; token-comment behavior documented.
-4. `docs/end-user/proxmox.md` — legacy-model + two-phase migration section
-   (~lines 199–280) removed; token comment mentioned as observable behavior.
+   machinery removed", dated, pointing at this spec). The note keeps the manual
+   cleanup one-liner (`pveum user delete 'uptrakit-<tenant_uuid>@pve'`) so an operator
+   with a straggler legacy user retains written instructions after `delete_pve_user`
+   and the end-user cleanup subsection are gone. History stays intact — no rewrite
+   (decision Q5).
+2. `docs/architecture/ssh-agent.md` — § Legacy-user migration (two-phase,
+   cluster-scoped), lines 366–403, replaced with a one-paragraph historical note
+   pointing at ADR-0044.
+3. `docs/development/proxmox-plugin.md` — migration bookkeeping rows/sections (row 57,
+   row 216, and the full "PVE Cluster Deduplication and Legacy Migration" subsection at
+   219–244 including its header) removed; credential-flow branch description updated to
+   the surviving branches; token-comment behavior documented.
+4. `docs/end-user/proxmox.md` — legacy-identity-model note block (lines 197–204), the
+   full "Migrating to the Shared PVE Identity Model" section (lines 255–373, all
+   subsections), and the "Cleaning up a never-fully-migrated legacy user" subsection
+   under Deprovisioning (lines 415–431, tied to the removed `delete_pve_user` /
+   `LEGACY_PVE_USERNAME_PREFIX`) removed; token comment mentioned as observable
+   behavior.
 5. `docs/end-user/ssh-agent-bootstrap.md` — migration mention (lines ~432–437)
    simplified to the shared-user model description.
 6. `docs/development/proxmox-bootstrap.md` — line ~107 rephrased (the shared-user model
    is no longer "this migration introduces").
 7. `CONTEXT.md`, `docs/development/error-handling.md` — **no change**: their "two-phase"
    hits are unrelated (config-reload validate-then-apply; error-decision table).
-8. `docs/superpowers/specs/*` historical specs — **untouched** (frozen records).
+8. In-crate rustdoc/comments on surviving code — `credential_flow.rs` module `//!` doc
+   (:1–:16, includes the cluster-lock rationale), the Branch 4 evidence comment
+   (:201–:202, "A bare `pve_plugin_config_id` never satisfies reuse" — inverted by this
+   design), the Branch 4 persist comment (:233–:238, coalesce/legacy-row semantics
+   being removed), `CredentialFlowOutput::degraded`'s doc, and `wipe_all`'s doc all
+   describe two-phase mechanics; rewrite to the post-removal flow. While editing
+   Branch 4, also fix the misleading "using newest" wording on the peers-disagree
+   `ids.max()` arm — it picks the lexicographic max of UUID strings, not the newest
+   (keep `sort_unstable` + `dedup` and take `ids.pop()`, or document the arm as
+   arbitrary-but-deterministic).
+9. `docs/superpowers/specs/*` historical specs — bodies **untouched** (frozen records).
+   Sole exception: `2026-08-16-pve-bootstrap-refactor-design.md` still reads
+   `**Status:** Design (pending plan)` although it was implemented; correct that one
+   status line (e.g. "Implemented; migration machinery since removed — see
+   2026-08-17-pve-migration-removal-design.md") so its load-bearing rationale for the
+   ack marker is not mistaken for current design.
+
+The standards-snapshot Binding Rule describing the two-phase migration derives from
+ADR-0044 / ssh-agent.md / proxmox-plugin.md and dissolves at the next snapshot refresh
+once deliverables 1–3 land — removal is the intent of this spec, not a rule violation.
 
 `docs/end-user/` edits trigger the `( cd website && zola check )` gate (AGENTS.md,
 2026-08-17).
