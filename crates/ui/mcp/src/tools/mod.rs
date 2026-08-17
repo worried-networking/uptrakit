@@ -111,6 +111,17 @@ impl McpHandler {
 
 #[tool_handler]
 impl ServerHandler for McpHandler {
+    // Protocol version: deliberately left at rmcp's default
+    // (`ProtocolVersion::LATEST`, which is `2025-11-25` in rmcp 3.1). That value
+    // is only the *fallback* used when a client asks for a version the server
+    // does not know — `negotiate_protocol_version` honours any client-requested
+    // version present in `supported_protocol_versions()`, which defaults to
+    // `ProtocolVersion::KNOWN_VERSIONS` and already includes `V_2026_07_28`.
+    // So a 2026-07-28 client negotiates 2026-07-28 without an override here,
+    // while older clients keep working. Pinning `with_protocol_version` would
+    // only narrow that, and opting the *fallback* up to 2026-07-28 would make
+    // SEP-2243 standard headers mandatory for clients that never asked for
+    // them. Revisit if the fallback needs to move.
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("uptrakit", env!("CARGO_PKG_VERSION")))

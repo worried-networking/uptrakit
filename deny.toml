@@ -292,10 +292,14 @@ skip = [
     { crate = "base64@0.21.7", reason = "pulled by openidconnect; newer 0.22.x used by axum, reqwest, sqlx" },
     { crate = "base64@0.22.1", reason = "pulled by axum, reqwest, sqlx; newer 0.23.x used by ureq 3.4 (bollard-buildkit-proto)" },
 
-    # darling: 0.20.x via sea-query-derive, 0.23.x via serde_with (openidconnect)
-    { crate = "darling@0.20.11", reason = "pulled by sea-query-derive; newer 0.23.x used by serde_with" },
-    { crate = "darling_core@0.20.11", reason = "pulled by darling 0.20; newer 0.23.x used by darling 0.23" },
-    { crate = "darling_macro@0.20.11", reason = "pulled by darling 0.20; newer 0.23.x used by darling 0.23" },
+    # darling: 0.20.x via sea-query-derive, 0.23.x via serde_with_macros, 0.24.x via rmcp-macros.
+    # All three are proc-macro build dependencies with no runtime binary impact.
+    { crate = "darling@0.20.11", reason = "pulled by sea-query-derive 1.0 (proc-macro); newer 0.24.x used by rmcp-macros" },
+    { crate = "darling_core@0.20.11", reason = "pulled by darling 0.20 (sea-query-derive); newer 0.24.x used by darling 0.24" },
+    { crate = "darling_macro@0.20.11", reason = "pulled by darling 0.20 (sea-query-derive); newer 0.24.x used by darling 0.24" },
+    { crate = "darling@0.23.0", reason = "pulled by serde_with_macros 3.22 (proc-macro); newer 0.24.x used by rmcp-macros 3.1.2" },
+    { crate = "darling_core@0.23.0", reason = "pulled by darling 0.23 (serde_with_macros); newer 0.24.x used by darling 0.24" },
+    { crate = "darling_macro@0.23.0", reason = "pulled by darling 0.23 (serde_with_macros); newer 0.24.x used by darling 0.24" },
 
     # hashbrown: 0.14.x via dashmap (russh-sftp), 0.16.x via indexmap/rootcause, 0.17.x via newer crates
     { crate = "hashbrown@0.14.5", reason = "pulled by dashmap 6.x (russh-sftp); newer 0.16.x used by indexmap, rootcause" },

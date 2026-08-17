@@ -963,6 +963,45 @@ async fn trigger_update_proceeds_past_gate_for_viewer_and_operator() {
     );
 }
 
+/// Scope-leg discriminator over the wire: the user holds viewer + operator, so
+/// the engine check for `updates:trigger` would pass, but the OAuth access
+/// token carries only `mcp:read` while `TRIGGER_UPDATE_AUTH` requires
+/// `McpScope::Write`. `require_tool_auth` runs the scope check first, so the
+/// call must be rejected as `insufficient_scope` and never reach the engine.
+#[tokio::test]
+async fn trigger_update_denied_for_missing_write_scope_over_oauth() {
+    let app = McpTestApp::new_with_oauth().await;
+    let user_id = insert_user(&app.db, "read-scope-only@mcp.test").await;
+    link_user_to_access_mcp_role(&app.db, app.tenant_id, user_id).await;
+    link_user_to_operator_role(&app.db, app.tenant_id, user_id).await;
+    // mint_test_jwt grants only "mcp:read".
+    let token = mint_test_jwt(user_id, app.tenant_id);
+
+    let session = McpSession::initialize(app.addr, &token).await;
+    let result = session
+        .call_tool(
+            "trigger_update",
+            json!({
+                "host_id": Uuid::nil().to_string(),
+                "software_item_id": Uuid::nil().to_string(),
+                "to_version": "1.0.0",
+            }),
+        )
+        .await;
+
+    let message = result["error"]["message"]
+        .as_str()
+        .expect("error.message must be a string for a scope-denied tool call");
+    assert!(
+        message.contains("insufficient_scope"),
+        "expected an insufficient_scope rejection, got: {message}"
+    );
+    assert!(
+        !message.contains("permission denied"),
+        "scope must be checked before the engine, got: {message}"
+    );
+}
+
 /// Viewer's `*:read` grant covers `software:read`, so `list_update_history`
 /// (a read-only tool) is allowed for a viewer-only user.
 #[tokio::test]
