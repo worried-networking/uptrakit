@@ -259,33 +259,34 @@ skip = [
     # windows-sys 0.52.0 via windows-targets@0.52.6 (older toolchain deps); newer 0.61.x used by tokio/clap
     { crate = "windows-sys@0.52.0", reason = "pulled by windows-targets@0.52.6 (older toolchain deps); newer 0.61.x used by tokio, clap" },
 
-    # windows-sys 0.60.2 via socket-pktinfo (mdns-sd dep); newer 0.61.x used by tokio/clap
-    { crate = "windows-sys@0.60.2", reason = "pulled by socket-pktinfo (mdns-sd); newer 0.61.x used by tokio, clap" },
-    { crate = "windows-targets@0.53.5", reason = "pulled by windows-sys@0.60.2 (socket-pktinfo → mdns-sd)" },
+    # windows-sys 0.60.2 via file-id / notify 8.2 (notify-debouncer-full → uptrakit-config-reload);
+    # newer 0.61.x used by tokio/clap
+    { crate = "windows-sys@0.60.2", reason = "pulled by file-id and notify 8.2 (notify-debouncer-full → uptrakit-config-reload); newer 0.61.x used by tokio, clap" },
+    { crate = "windows-targets@0.53.5", reason = "pulled by windows-sys@0.60.2 (file-id, notify 8.2)" },
 
     # windows-targets 0.52.6 via older toolchain deps
     { crate = "windows-targets@0.52.6", reason = "pulled by windows-sys@0.52.0 (older toolchain deps); newer 0.53.5+ used by clap, tokio" },
 
     # windows arch crates 0.52.6 via windows-targets@0.52.6
     { crate = "windows_aarch64_gnullvm@0.52.6", reason = "pulled by windows-targets@0.52.6 (older toolchain deps)" },
-    { crate = "windows_aarch64_gnullvm@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd)" },
+    { crate = "windows_aarch64_gnullvm@0.53.1", reason = "pulled by windows-targets@0.53.5 (file-id, notify 8.2)" },
     { crate = "windows_aarch64_msvc@0.52.6", reason = "pulled by windows-targets@0.52.6 (older toolchain deps)" },
-    { crate = "windows_aarch64_msvc@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd)" },
+    { crate = "windows_aarch64_msvc@0.53.1", reason = "pulled by windows-targets@0.53.5 (file-id, notify 8.2)" },
     { crate = "windows_i686_gnu@0.52.6", reason = "pulled by windows-targets@0.52.6 (older toolchain deps)" },
-    { crate = "windows_i686_gnu@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd)" },
+    { crate = "windows_i686_gnu@0.53.1", reason = "pulled by windows-targets@0.53.5 (file-id, notify 8.2)" },
     { crate = "windows_i686_gnullvm@0.52.6", reason = "pulled by windows-targets@0.52.6 (older toolchain deps)" },
-    { crate = "windows_i686_gnullvm@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd)" },
+    { crate = "windows_i686_gnullvm@0.53.1", reason = "pulled by windows-targets@0.53.5 (file-id, notify 8.2)" },
     { crate = "windows_i686_msvc@0.52.6", reason = "pulled by windows-targets@0.52.6 (older toolchain deps)" },
-    { crate = "windows_i686_msvc@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd)" },
+    { crate = "windows_i686_msvc@0.53.1", reason = "pulled by windows-targets@0.53.5 (file-id, notify 8.2)" },
     { crate = "windows_x86_64_gnu@0.52.6", reason = "pulled by windows-targets@0.52.6 (older toolchain deps)" },
-    { crate = "windows_x86_64_gnu@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd)" },
+    { crate = "windows_x86_64_gnu@0.53.1", reason = "pulled by windows-targets@0.53.5 (file-id, notify 8.2)" },
     { crate = "windows_x86_64_gnullvm@0.52.6", reason = "pulled by windows-targets@0.52.6 (older toolchain deps)" },
-    { crate = "windows_x86_64_gnullvm@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd)" },
+    { crate = "windows_x86_64_gnullvm@0.53.1", reason = "pulled by windows-targets@0.53.5 (file-id, notify 8.2)" },
     { crate = "windows_x86_64_msvc@0.52.6", reason = "pulled by windows-targets@0.52.6 (older toolchain deps)" },
-    { crate = "windows_x86_64_msvc@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd)" },
+    { crate = "windows_x86_64_msvc@0.53.1", reason = "pulled by windows-targets@0.53.5 (file-id, notify 8.2)" },
 
-    # flume: 0.11.x via mdns-sd 0.20 / rumqttc 0.25.1; 0.12.x via sqlx-sqlite 0.9
-    { crate = "flume@0.11.1", reason = "pulled by mdns-sd 0.20, rumqttc 0.25.1; sqlx-sqlite 0.9 uses flume 0.12" },
+    # flume: 0.11.x via rumqttc 0.25.1; 0.12.x via mdns-sd 0.21 and sqlx-sqlite 0.9
+    { crate = "flume@0.11.1", reason = "pulled by rumqttc 0.25.1; newer 0.12 used by mdns-sd 0.21 and sqlx-sqlite 0.9" },
 
     # base64: 0.21.7 via openidconnect, 0.22.1 via axum/reqwest/sqlx, 0.23.1 via ureq 3.4 (bollard test stack)
     { crate = "base64@0.21.7", reason = "pulled by openidconnect; newer 0.22.x used by axum, reqwest, sqlx" },
