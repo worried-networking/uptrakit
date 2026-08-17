@@ -35,7 +35,7 @@ uptrakit-audit-log-derive = { path = "../audit-log-derive", version = "0.0.1" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
-trybuild = "1"
+trybuild = { workspace = true }
 
 [lints]
 workspace = true
