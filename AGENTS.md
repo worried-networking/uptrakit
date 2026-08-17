@@ -69,16 +69,19 @@ npm run check         # Svelte type-check via svelte-check
 npm run build         # SvelteKit build — required for release-profile controller builds
 ```
 
-### Markdown and integration tests (Docker)
+### Markdown, website, and integration tests (Docker)
 
 ```sh
 markdownlint --config .markdownlint.json '**/*.md'                       # Lint Markdown
+( cd website && zola check )                                             # Website templates + internal/external links
 cargo test -p uptrakit-integration-tests --test reverse_proxy -- --ignored # Reverse-proxy changes
 cargo test -p uptrakit-integration-tests --test database -- --ignored   # DB/migration/REST changes
 docker build -f docker/Dockerfile.test -t uptrakit-test:latest .        # Build image, then:
 cargo test -p uptrakit-integration-tests -- --ignored                   # Enrollment/wire/lifecycle changes
 ```
 
+Run `zola check` when a change touches `website/`, `docs/end-user/`, or `docs/security/` — the latter two are
+symlinked into `website/content/docs/`, so a broken link there fails the site build.
 Run integration tests only when changes touch the triggering areas. After any backend route or REST-contract change,
 run `./scripts/regen-api.sh` and commit `crates/ui/web-api/openapi.json` + `frontend/src/lib/api/generated/` — CI gates
 on staleness of both. After any wire-type change, run `./scripts/regen-asyncapi.sh` and commit

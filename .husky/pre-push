@@ -49,6 +49,16 @@ if (( ${#EXISTING_MARKDOWN[@]} > 0 )); then
   markdownlint --config .markdownlint.json -- "${EXISTING_MARKDOWN[@]}"
 fi
 
+echo "[pre-push] Running zola check..."
+if command -v zola >/dev/null 2>&1; then
+  # Identical to the `Validate site` step in .github/workflows/website.yml — external
+  # links included. pre-commit skips them to stay offline-safe; this is the parity gate.
+  ( cd website && zola check )
+else
+  printf '[pre-push] WARNING: zola not installed — skipping website check (CI enforces).\n' >&2
+  printf '[pre-push] Install: cargo install zola --version 0.23.3\n' >&2
+fi
+
 echo "[pre-push] Running cargo check (db-sqlite)..."
 cargo check --no-default-features --features db-sqlite
 

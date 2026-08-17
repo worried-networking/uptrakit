@@ -15,11 +15,11 @@ See `docs/superpowers/specs/2026-04-27-website-phase-1-design.md` for the design
 ## Local development
 
 Install Zola once. The version must match the CI pin in `.github/workflows/website.yml`
-(currently `0.23.2`); the templates use Tera 2 components and `get_env`, so anything below
+(currently `0.23.3`); the templates use Tera 2 components and `get_env`, so anything below
 `0.23.2` fails at `zola check`:
 
 ```bash
-cargo install zola --version 0.23.2
+cargo install zola --version 0.23.3
 # or, on macOS (version may lag):
 brew install zola
 ```
@@ -33,11 +33,16 @@ zola serve --port 1111
 
 Browse `http://127.0.0.1:1111/`.
 
-Validate templates and internal links:
+Validate templates and links:
 
 ```bash
 zola check
 ```
+
+The git hooks split this in two: `pre-commit` runs `zola check --skip-external-links` (fast,
+offline-safe) when a staged path touches `website/` or a directory symlinked into
+`website/content/docs/`; `pre-push` runs the full `zola check` — the exact command the
+`website` workflow runs — so external-link breakage is caught before it reaches CI.
 
 Produce a production-shaped artifact (emits to `website/public/`):
 

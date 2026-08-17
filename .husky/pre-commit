@@ -164,7 +164,7 @@ if (( WEBSITE_DOCS_TOUCHED )); then
     printf '[pre-commit] Install: https://www.getzola.org/documentation/getting-started/installation/\n' >&2
   else
     echo '[pre-commit] Running zola check...'
-    # --skip-external-links: external link verification runs in CI; avoid network I/O in pre-commit.
+    # --skip-external-links: external links are verified by pre-push and CI; avoid network I/O here.
     # zola check validates the whole site — pre-existing broken links in unrelated docs will also fail.
     ( cd website && zola check --skip-external-links )
   fi

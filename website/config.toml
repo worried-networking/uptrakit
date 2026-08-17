@@ -24,4 +24,8 @@ skip_prefixes = [
 ]
 skip_anchor_prefixes = [
     "https://docs.github.com/",
+    # GitHub renders Markdown headings as id="user-content-<slug>", so an anchor
+    # assertion can never match a #<slug> fragment on a github.com file page.
+    # URL reachability is still checked; only the anchor lookup is skipped.
+    "https://github.com/",
 ]

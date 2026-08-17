@@ -10,23 +10,25 @@ Quality gates are automatically enforced locally via git hooks managed by
 
 **`pre-commit`** (fast, ~30 s) — checks only staged files:
 
-| Condition                   | Command                                                             |
-| --------------------------- | ------------------------------------------------------------------- |
-| Any `.rs` file staged       | `cargo fmt --all -- --check`                                        |
-| Any `.md` file staged       | `markdownlint --config .markdownlint.json '**/*.md'`                |
-| Any `frontend/` file staged | `npm run lint` + `npm run format:check` (if `node_modules` present) |
+| Condition                                                                                      | Command                                                                                                                       |
+| ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Any `.rs` file staged                                                                          | `cargo fmt --all -- --check`                                                                                                  |
+| Any `.md` file staged                                                                          | `markdownlint --config .markdownlint.json '**/*.md'`                                                                          |
+| Any `frontend/` file staged                                                                    | `npm run lint` + `npm run format:check` (if `node_modules` present)                                                           |
+| Any `website/` file staged, or a file under a directory symlinked into `website/content/docs/` | `zola check --skip-external-links` (cwd: `website/`) — external links are left to `pre-push`/CI to keep the hook offline-safe |
 
 **`pre-push`** (thorough) — always runs on every push:
 
-| Command                                                                       | Notes                                                                                        |
-| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `cargo check --no-default-features --features db-sqlite`                      |                                                                                              |
-| `cargo clippy --all-targets --no-default-features --features db-sqlite`       |                                                                                              |
-| `cargo deny check`                                                            | Fast (~3 s)                                                                                  |
-| `python3 ci/check_plugin_semantic_boundary.py`                                | Blocks production-code semantic leaks; `docs/**`, tests, examples, and migrations are exempt |
-| `cargo test --no-default-features --features db-sqlite`                       |                                                                                              |
-| `cargo test --workspace --all-features --doc --exclude uptrakit-mqtt-runtime` | Doctests at CI parity; `cargo test` (not nextest — nextest skips doctests)                   |
-| `npm run check` + `npm run test` + `npm run build` (cwd: `frontend/`)         | Guarded by `node_modules`                                                                    |
+| Command                                                                       | Notes                                                                                                                                         |
+| ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cargo check --no-default-features --features db-sqlite`                      |                                                                                                                                               |
+| `cargo clippy --all-targets --no-default-features --features db-sqlite`       |                                                                                                                                               |
+| `cargo deny check`                                                            | Fast (~3 s)                                                                                                                                   |
+| `zola check` (cwd: `website/`)                                                | Full check incl. external links (~12 s); identical to the `Validate site` step in `website.yml`. Skipped with a warning when `zola` is absent |
+| `python3 ci/check_plugin_semantic_boundary.py`                                | Blocks production-code semantic leaks; `docs/**`, tests, examples, and migrations are exempt                                                  |
+| `cargo test --no-default-features --features db-sqlite`                       |                                                                                                                                               |
+| `cargo test --workspace --all-features --doc --exclude uptrakit-mqtt-runtime` | Doctests at CI parity; `cargo test` (not nextest — nextest skips doctests)                                                                    |
+| `npm run check` + `npm run test` + `npm run build` (cwd: `frontend/`)         | Guarded by `node_modules`                                                                                                                     |
 
 ### Bypass methods
 
@@ -229,6 +231,24 @@ All warnings and errors must be resolved; do not silence them by adding exceptio
 The `.markdownlintignore` file excludes `node_modules/`, `target/`, `.claude/`, and `CODEREVIEW.md`.
 
 CI runs markdownlint on every PR. A PR that fails any quality gate will not merge.
+
+### Website
+
+The `website/` Zola site embeds `docs/end-user/` and `docs/security/` via symlinks under
+`website/content/docs/`, so edits to those directories can break the site build:
+
+```sh
+cd website && zola check --skip-external-links  # templates + internal links only (~40 ms) — pre-commit
+cd website && zola check                        # adds external-link + anchor checks (~12 s) — pre-push and CI
+```
+
+The two invocations are deliberately split: `pre-commit` stays offline-safe, while `pre-push` runs
+byte-identical to the `Validate site` step in `.github/workflows/website.yml` so nothing reaches CI unchecked.
+Both hooks skip the gate with a warning when `zola` is not installed; CI always enforces it.
+
+The Zola version is pinned to `0.23.3` in `.github/workflows/website.yml`. Keep the local binary on the same
+version — a skew makes the pre-commit check fail on files the commit never touched. See
+[`website/README.md`](../../website/README.md) for the install and bump procedure.
 
 ### ADR corpus
 
