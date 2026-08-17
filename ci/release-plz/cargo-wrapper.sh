@@ -46,6 +46,32 @@ if ! $saw_package || ! $saw_workspace; then
   exec "$real_cargo" "$@"
 fi
 
+# Normalize manifests in the worktree before packaging. release-plz git_only
+# mode checks out each package's LAST RELEASE TAG commit into the worktree, so
+# fixes committed at HEAD never reach it — historical tag commits (e.g.
+# uptrakit-*-v0.0.5 -> 39aca547f) permanently carry two packaging blockers:
+#
+# 1. `publish = false` crates are excluded from cargo's package-workspace
+#    overlay (src/ops/cargo_package/mod.rs guards the overlay add with
+#    `pkg.publish() != &Some(Vec::new())`, rust-lang/cargo#10948), so their
+#    dependents resolve against the real crates.io index and fail with
+#    "no matching package named `uptrakit-crypto` found". Rewrite them to the
+#    fake-registry lock, matching what HEAD now declares.
+# 2. The proxmox plugin's versioned self dev-dependency survives into the
+#    packaged manifest and cannot resolve (the package is not in the overlay
+#    while being packaged). Drop the line; dev-deps never affect the packaged
+#    dep graph and --no-verify skips tests. HEAD instead uses a versionless
+#    `path = "."` dev-dep, which cargo strips automatically.
+#
+# perl -pi/-ni instead of sed -i for GNU/BSD portability.
+# Interim mitigation — proper fix tracked in bead uptrakit-o5uht.
+find crates xtask -name Cargo.toml -exec \
+  perl -pi -e 's/^publish = false\s*$/publish = ["uptrakit-private"]\n/' {} + 2>/dev/null || true
+proxmox_manifest=crates/plugins/infrastructure/proxmox/Cargo.toml
+if [ -f "$proxmox_manifest" ]; then
+  perl -ni -e 'print unless /^uptrakit-plugin-infrastructure-proxmox = \{ workspace = true/' "$proxmox_manifest"
+fi
+
 extra_args=()
 $already_no_verify || extra_args+=(--no-verify)
 # Always specify the registry explicitly. release-plz conditionally passes

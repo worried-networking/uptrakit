@@ -6,7 +6,7 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 version = "0.0.1"
-publish = false
+publish = ["uptrakit-private"] # fake-registry lock, NOT false: publish = false crates are excluded from cargo package --workspace overlay resolution, breaking release-plz git_only packaging
 
 [features]
 default = []

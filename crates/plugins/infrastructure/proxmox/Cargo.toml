@@ -58,7 +58,11 @@ sea-orm-migration = { workspace = true, optional = true }
 # unaffected: resolver v3 does not unify dev-dep features for them.
 # Interim mitigation — retire together with the dependency-policy rule when the
 # infra-core feature-switched aliases become additive (deferred restructure spec).
-uptrakit-plugin-infrastructure-proxmox = { workspace = true, features = ["agent-infra", "plugin-ops", "db-sqlite", "testing"] }
+# Deliberately `path`-only (no `workspace = true`/version): a versionless dev-dep
+# is stripped from the packaged manifest, so `cargo package --workspace` never
+# tries to resolve this crate against itself (which fails — the package is not
+# in the registry overlay while being packaged).
+uptrakit-plugin-infrastructure-proxmox = { path = ".", features = ["agent-infra", "plugin-ops", "db-sqlite", "testing"] }
 tokio = { workspace = true, features = ["macros", "rt"] }
 httpmock = { workspace = true }
 uptrakit-shared-db = { workspace = true, features = ["migration", "db-sqlite"] }
