@@ -345,13 +345,31 @@ state above before deleting or renaming a `pve-*` configuration.
 **If you already deleted it:** re-syncing or re-bootstrapping the same host
 does not recover on its own -- the agent's local PVE token is untouched by
 the controller-side deletion, so it keeps reusing that token and never
-re-reports a plugin configuration to the controller. The confirmed recovery
-is to remove the host from Uptrakit entirely
+re-reports a plugin configuration to the controller.
+
+The reliable recovery is to delete this tenant's token on the PVE node
+itself, as root:
+
+```bash
+pveum user token remove 'uptrakit@pve' 'tenant-{tenant_uuid}'
+```
+
+This is the same command as [Removing one tenant](#removing-one-tenant)
+below. With the token gone, the next privileged sync observes it missing and
+stops reusing the acknowledged plugin configuration id -- it takes the
+create branch instead, issuing a fresh token and reporting a new plugin
+configuration.
+
+Removing the host from Uptrakit and re-bootstrapping it
 (`uptrakit-agent-ssh host remove`, or the equivalent web UI action -- see
 [Host Management -- Removing a host](ssh-agent-host-management.md#removing-a-host))
-and then re-bootstrap it: a removed-and-re-added host gets fresh local
-tracking state, so the next bootstrap provisions PVE credentials and reports
-a plugin configuration from a clean slate.
+recovers only on a **standalone** PVE node: the re-added host gets a fresh
+host ID with no local tracking state, so the next bootstrap provisions PVE
+credentials and reports a plugin configuration from a clean slate. It does
+not work on a multi-node cluster -- the removed host's local Proxmox state
+row is not cleaned up by host removal, so it keeps the same node name and
+still matches the cluster on the next sync, feeding the same acknowledged
+configuration id right back in.
 
 ## Deprovisioning
 
