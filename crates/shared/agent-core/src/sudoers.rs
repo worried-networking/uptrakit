@@ -1,8 +1,10 @@
-//! Sudoers management helpers for the SSH agent.
+//! Sudoers management helpers shared by every writer of the drop-in file.
 //!
-//! This module handles sudo detection, sudoers file generation, and writing
-//! the sudoers drop-in file on remote hosts. It is used by both the bootstrap
-//! command and the `sync` command.
+//! This module handles sudo detection, sudoers file generation, and writing the
+//! sudoers drop-in file through a [`RemoteExecutor`], so it serves both writers:
+//! the SSH host sync flow (`uptrakit-agent-ssh` bootstrap and `sync`) over an SSH
+//! executor, and the local `bootstrap-host` subcommand over a local executor. See
+//! `docs/security/sudoers-management.md`.
 
 use rootcause::prelude::*;
 use uptrakit_command::{RemoteExecutor, shell_escape};
@@ -179,10 +181,6 @@ pub async fn resolve_command_path(
 /// sudoers matching semantics are preserved, including wildcard tokens that
 /// appear in the middle of the argument list.
 fn escape_sudoers_arg_token(token: &str) -> String {
-    if token == "*" {
-        return token.to_string();
-    }
-
     let mut out = String::with_capacity(token.len());
     for (idx, ch) in token.chars().enumerate() {
         let needs_escape = matches!(ch, ',' | ':' | '=' | '\\') || (idx == 0 && ch == '^');
@@ -445,8 +443,7 @@ mod tests {
         let text = generate_sudoers_content("alice", &content);
 
         assert!(
-            text.contains("bob ALL=(root) NOPASSWD: SETENV: /usr/bin/apt-get update *")
-                || text.contains("alice ALL=(root) NOPASSWD: SETENV: /usr/bin/apt-get update *"),
+            text.contains("alice ALL=(root) NOPASSWD: SETENV: /usr/bin/apt-get update *"),
             "expected full sudoers line with args suffix: {text}"
         );
         assert!(text.contains("/usr/bin/apt-get update *"));
@@ -519,6 +516,13 @@ mod tests {
         );
         assert_eq!(escape_sudoers_arg_token("^caret"), "\\^caret");
         assert_eq!(escape_sudoers_arg_token(r"foo\bar"), r"foo\\bar");
+    }
+
+    #[test]
+    fn escape_sudoers_arg_token_leaves_wildcards_untouched() {
+        assert_eq!(escape_sudoers_arg_token("*"), "*");
+        assert_eq!(escape_sudoers_arg_token("stop"), "stop");
+        assert_eq!(escape_sudoers_arg_token("/etc/*.conf"), "/etc/*.conf");
     }
 
     #[test]
