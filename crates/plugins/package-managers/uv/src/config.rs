@@ -24,8 +24,8 @@ pub struct UvConfig {
     /// `None` (the default) uses `https://pypi.org/simple`; set this to the
     /// Simple-API root of a self-hosted mirror (devpi, Artifactory, Nexus,
     /// GitLab) to override it. `http` is allowed and private/LAN addresses
-    /// are admitted — SSRF protection is relaxed to permissive for custom
-    /// indexes.
+    /// are admitted — SSRF protection is relaxed to permissive for all
+    /// requests this plugin makes, including redirect targets.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub index_url: Option<String>,
 }
@@ -60,6 +60,13 @@ impl PluginConfig for UvConfig {
                 return Err(PluginConfigValidationError::invalid_field(
                     "index_url",
                     "must not embed credentials in the URL",
+                ));
+            }
+            if parsed.query().is_some() || parsed.fragment().is_some() {
+                return Err(PluginConfigValidationError::invalid_field(
+                    "index_url",
+                    "must not contain a query string or fragment; the package path is \
+                     appended to this base URL",
                 ));
             }
         }
@@ -99,7 +106,8 @@ impl TypeSettings for UvConfig {
                 .with_help_text(
                     "Defaults to https://pypi.org/simple. Set for self-hosted mirrors \
                      (devpi, Artifactory, Nexus, GitLab); relaxes SSRF protection to \
-                     permissive for the configured host.",
+                     permissive for all requests this plugin makes, including redirect \
+                     targets.",
                 ),
         ]
     }
@@ -163,6 +171,48 @@ mod tests {
                 assert!(
                     message.contains("must not be empty when set"),
                     "expected the dedicated empty-string message, got: {message}"
+                );
+            }
+            other => panic!("expected InvalidField, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_rejects_index_url_with_query_string() {
+        let config = UvConfig {
+            include_prereleases: false,
+            index_url: Some("https://nexus.lan/simple?foo=1".to_string()),
+        };
+        let Err(err) = config.validate() else {
+            panic!("expected query-string index_url to be rejected");
+        };
+        match err {
+            PluginConfigValidationError::InvalidField { field, message } => {
+                assert_eq!(field, "index_url");
+                assert!(
+                    message.contains("query string"),
+                    "expected the query/fragment message, got: {message}"
+                );
+            }
+            other => panic!("expected InvalidField, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_rejects_index_url_with_fragment() {
+        let config = UvConfig {
+            include_prereleases: false,
+            index_url: Some("https://nexus.lan/simple#frag".to_string()),
+        };
+        let Err(err) = config.validate() else {
+            panic!("expected fragment index_url to be rejected");
+        };
+        match err {
+            PluginConfigValidationError::InvalidField { field, message } => {
+                assert_eq!(field, "index_url");
+                assert!(
+                    message.contains("fragment"),
+                    "expected the query/fragment message, got: {message}"
                 );
             }
             other => panic!("expected InvalidField, got {other:?}"),

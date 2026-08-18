@@ -459,6 +459,15 @@ mod tests {
         ];
         let results = plugin.batch_fetch(&items).await.expect("batch fetch");
         assert_eq!(results.len(), 2);
-        assert!(results.iter().all(|r| r.error.is_some()));
+        // Assert the validation-specific message: a plain `error.is_some()`
+        // would also pass if the pre-request validation loop were deleted
+        // (the identifiers would then reach the network and 404 instead).
+        assert!(
+            results.iter().all(|r| r
+                .error
+                .as_deref()
+                .is_some_and(|e| e.contains("invalid character"))),
+            "expected identifier-validation errors, got {results:?}"
+        );
     }
 }
